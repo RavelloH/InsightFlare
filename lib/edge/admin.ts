@@ -17,7 +17,9 @@ type UserRow = {
 type Actor = { user: UserRow; isAdmin: boolean };
 
 const HASH_PREFIX = "pbkdf2_sha256";
-const HASH_ITERS = 210000;
+const HASH_ITERS = 100000;
+const HASH_MIN_ITERS = 50000;
+const HASH_MAX_ITERS = 100000;
 const HASH_LEN = 32;
 
 const j = (payload: unknown, status = 200) =>
@@ -103,10 +105,15 @@ async function verifyPassword(password: string, stored: string | null | undefine
   const p = stored.split("$");
   if (p.length !== 4 || p[0] !== HASH_PREFIX) return false;
   const iters = Number(p[1]);
-  if (!Number.isFinite(iters) || iters < 50000) return false;
+  if (!Number.isFinite(iters) || iters < HASH_MIN_ITERS || iters > HASH_MAX_ITERS) return false;
   const salt = fromB64u(p[2]);
   const expected = fromB64u(p[3]);
-  const actual = await derive(password, salt, Math.floor(iters));
+  let actual: Uint8Array;
+  try {
+    actual = await derive(password, salt, Math.floor(iters));
+  } catch {
+    return false;
+  }
   return eq(actual, expected);
 }
 
@@ -271,7 +278,13 @@ async function teamsFor(env: Env, userId: string): Promise<Array<Record<string, 
 
 async function hAuthLogin(req: Request, env: Env): Promise<Response> {
   if (req.method !== "POST") return na();
-  await ensureBootstrapAdmin(env);
+  try {
+    await ensureBootstrapAdmin(env);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("bootstrap_admin_failed", { message });
+    return j({ ok: false, error: "bootstrap_admin_failed" }, 500);
+  }
   const body = await parseJson(req);
   const identifier = clampString(String(body.username || body.email || ""), 200);
   const password = String(body.password || "");

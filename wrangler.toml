@@ -17,6 +17,7 @@ REQUIRE_TEAM_MEMBERSHIP = "1"
 BOOTSTRAP_ADMIN_USERNAME = "admin"
 BOOTSTRAP_ADMIN_EMAIL = "admin@insightflare.local"
 BOOTSTRAP_ADMIN_NAME = "Administrator"
+INSIGHTFLARE_EDGE_URL="https://insight.ravelloh.com"
 
 [triggers]
 crons = ["0 * * * *"]
