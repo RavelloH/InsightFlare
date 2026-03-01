@@ -81,14 +81,6 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // Redirect authenticated users away from login
-  if (restPath === "/login" && authenticated) {
-    const url = request.nextUrl.clone();
-    url.pathname = `/${locale}/app`;
-    url.search = "";
-    return NextResponse.redirect(url);
-  }
-
   return NextResponse.next();
 }
 
