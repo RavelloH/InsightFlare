@@ -10,7 +10,8 @@
     "prebuild:local": "tsx scripts/prebuild.ts --config wrangler.toml --target local",
     "prebuild:remote": "tsx scripts/prebuild.ts --config wrangler.toml --target remote",
     "build": "cross-env NEXT_IGNORE_INCORRECT_LOCKFILE=1 next build --webpack",
-    "cf:build:raw": "opennextjs-cloudflare build",
+    "ensure:ast-grep": "node scripts/ensure-ast-grep-binding.mjs",
+    "cf:build:raw": "npm run ensure:ast-grep && opennextjs-cloudflare build",
     "cf:build": "npm run prebuild:local && npm run cf:build:raw",
     "cf:preview": "npm run cf:build && wrangler dev --config wrangler.toml",
     "cf:deploy:dry-run": "npm run prebuild:remote && npm run cf:build:raw && wrangler deploy --config wrangler.toml --dry-run",
@@ -56,5 +57,8 @@
     "tsx": "^4.20.5",
     "typescript": "^5.9.3",
     "wrangler": "^4.56.0"
+  },
+  "optionalDependencies": {
+    "@ast-grep/napi-linux-x64-gnu": "0.40.5"
   }
 }
