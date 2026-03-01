@@ -1,0 +1,604 @@
+import type { Env } from "./types";
+
+const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+
+export interface AeRange {
+  fromMs: number;
+  toMs: number;
+}
+
+export interface AeOverviewRow {
+  views: number;
+  sessions: number;
+  visitors: number;
+  bounces: number;
+  total_duration: number;
+}
+
+export interface AeTrendRow {
+  bucket: number;
+  views: number;
+  sessions: number;
+  total_duration: number;
+}
+
+export interface AeTopPageRow {
+  pathname: string;
+  query_string?: string;
+  hash_fragment?: string;
+  views: number;
+  sessions: number;
+}
+
+export interface AeReferrerRow {
+  ref: string;
+  views: number;
+  sessions: number;
+}
+
+export interface AeRecentEventRow {
+  event_type: string;
+  event_at: number;
+  pathname: string;
+  query_string: string;
+  hash_fragment: string;
+  hostname: string;
+  referer: string;
+  referer_host: string;
+  visitor_id: string;
+  session_id: string;
+  duration_ms: number;
+  country: string;
+  region: string;
+  city: string;
+  browser: string;
+  os: string;
+  device_type: string;
+  language: string;
+  timezone: string;
+  bot_score: number;
+  bot_verified: number;
+  bot_security_json: string;
+}
+
+export interface AeSessionRow {
+  session_id: string;
+  visitor_id: string;
+  started_at: number;
+  ended_at: number;
+  views: number;
+  total_duration: number;
+  countries: number;
+  entry_path: string;
+  exit_path: string;
+}
+
+export interface AeVisitorRow {
+  visitor_id: string;
+  first_seen_at: number;
+  last_seen_at: number;
+  views: number;
+  sessions: number;
+  countries: number;
+  latest_path: string;
+}
+
+const MAX_SQL_LIMIT = 2000;
+
+function toInt(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.floor(n);
+}
+
+function clampLimit(limit: number, fallback = 100): number {
+  const n = toInt(limit);
+  if (n <= 0) return fallback;
+  return Math.min(MAX_SQL_LIMIT, n);
+}
+
+function sqlString(value: string): string {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function parseNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+function parseString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function getAeDatasetName(env: Env): string {
+  const dataset = String(env.ANALYTICS_DATASET || "insightflare_events").trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(dataset)) {
+    throw new Error("Invalid ANALYTICS_DATASET name");
+  }
+  return dataset;
+}
+
+function getAeAccountId(env: Env): string {
+  return String(env.ANALYTICS_ACCOUNT_ID || "").trim();
+}
+
+function getAeApiToken(env: Env): string {
+  return String(env.ANALYTICS_SQL_API_TOKEN || "").trim();
+}
+
+function ensureAeConfig(env: Env): {
+  accountId: string;
+  apiToken: string;
+  dataset: string;
+} {
+  const accountId = getAeAccountId(env);
+  const apiToken = getAeApiToken(env);
+  const dataset = getAeDatasetName(env);
+  if (!accountId || !apiToken) {
+    throw new Error("Analytics Engine SQL config missing (ANALYTICS_ACCOUNT_ID / ANALYTICS_SQL_API_TOKEN)");
+  }
+  return { accountId, apiToken, dataset };
+}
+
+function hasNewBlobLayoutExpr(): string {
+  return "length(coalesce(blob14, '')) > 0";
+}
+
+function eventAtExpr(): string {
+  return "toInt64(double1)";
+}
+
+function durationExpr(): string {
+  return "toFloat64(double2)";
+}
+
+function eventTypeExpr(): string {
+  return "if(length(coalesce(blob14, '')) > 0, blob14, blob6)";
+}
+
+function sessionExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob6, '')`;
+}
+
+function visitorExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob7, '')`;
+}
+
+function pathnameExpr(): string {
+  return "blob1";
+}
+
+function queryExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob2, '')`;
+}
+
+function hashExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob3, '')`;
+}
+
+function hostnameExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob4, '')`;
+}
+
+function refererExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob5, '')`;
+}
+
+function refererHostExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob20, blob9)`;
+}
+
+function browserExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob8, blob2)`;
+}
+
+function osExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob10, blob3)`;
+}
+
+function languageExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob12, blob4)`;
+}
+
+function countryExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob15, blob7)`;
+}
+
+function regionExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob16, '')`;
+}
+
+function cityExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob17, '')`;
+}
+
+function timezoneExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob18, '')`;
+}
+
+function deviceExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob19, blob8)`;
+}
+
+function botScoreExpr(): string {
+  return "toFloat64(double3)";
+}
+
+function botVerifiedExpr(): string {
+  return "0";
+}
+
+function botSecurityExpr(): string {
+  return "''";
+}
+
+function buildAeWhere(siteId: string, range: AeRange): string {
+  const fromMs = toInt(range.fromMs);
+  const toMs = toInt(range.toMs);
+  return `index1 = ${sqlString(siteId)} AND ${eventAtExpr()} BETWEEN ${fromMs} AND ${toMs}`;
+}
+
+function ninetyDaysFloorMs(nowMs: number): number {
+  return toInt(nowMs - NINETY_DAYS_MS);
+}
+
+export function splitAeRange(
+  fromMs: number,
+  toMs: number,
+  nowMs: number,
+): AeRange | null {
+  const floorMs = ninetyDaysFloorMs(nowMs);
+  const from = Math.max(toInt(fromMs), floorMs);
+  const to = toInt(toMs);
+  if (to < from) return null;
+  return { fromMs: from, toMs: to };
+}
+
+async function runAeSql<T extends Record<string, unknown>>(env: Env, sql: string): Promise<T[]> {
+  const { accountId, apiToken } = ensureAeConfig(env);
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiToken}`,
+      "content-type": "text/plain",
+    },
+    body: sql,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Analytics Engine SQL failed (${response.status}): ${text.slice(0, 512)}`);
+  }
+
+  const payload = (await response.json()) as unknown;
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (record.success === false) {
+    const errors = Array.isArray(record.errors) ? JSON.stringify(record.errors).slice(0, 512) : "unknown";
+    throw new Error(`Analytics Engine SQL returned error: ${errors}`);
+  }
+  if (Array.isArray(record.data)) {
+    return record.data as T[];
+  }
+
+  const result = record.result;
+  if (result && typeof result === "object") {
+    const resultRecord = result as Record<string, unknown>;
+    if (Array.isArray(resultRecord.data)) {
+      return resultRecord.data as T[];
+    }
+    if (Array.isArray(resultRecord.results)) {
+      return resultRecord.results as T[];
+    }
+  }
+
+  if (Array.isArray(record.results)) {
+    return record.results as T[];
+  }
+
+  return [];
+}
+
+export async function queryAeOverview(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+): Promise<AeOverviewRow> {
+  const dataset = getAeDatasetName(env);
+  const where = buildAeWhere(siteId, range);
+  const sql = `
+SELECT
+  toInt64(coalesce(sum(_sample_interval), 0)) AS views,
+  toInt64(coalesce(count(DISTINCT nullIf(${sessionExpr()}, '')), 0)) AS sessions,
+  toInt64(coalesce(count(DISTINCT nullIf(${visitorExpr()}, '')), 0)) AS visitors,
+  toInt64(coalesce(sum(if(${durationExpr()} <= 0, _sample_interval, 0)), 0)) AS bounces,
+  toInt64(coalesce(sum(_sample_interval * ${durationExpr()}), 0)) AS total_duration
+FROM ${dataset}
+WHERE ${where}
+`;
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  const row = rows[0] || {};
+  return {
+    views: parseNumber(row.views),
+    sessions: parseNumber(row.sessions),
+    visitors: parseNumber(row.visitors),
+    bounces: parseNumber(row.bounces),
+    total_duration: parseNumber(row.total_duration),
+  };
+}
+
+export async function queryAeTrend(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  interval: "hour" | "day",
+): Promise<AeTrendRow[]> {
+  const dataset = getAeDatasetName(env);
+  const where = buildAeWhere(siteId, range);
+  const bucketDivisor = interval === "hour" ? 3600000 : 86400000;
+  const sql = `
+SELECT
+  toInt64(floor(${eventAtExpr()} / ${bucketDivisor})) AS bucket,
+  toInt64(coalesce(sum(_sample_interval), 0)) AS views,
+  toInt64(coalesce(count(DISTINCT nullIf(${sessionExpr()}, '')), 0)) AS sessions,
+  toInt64(coalesce(sum(_sample_interval * ${durationExpr()}), 0)) AS total_duration
+FROM ${dataset}
+WHERE ${where}
+GROUP BY bucket
+ORDER BY bucket
+`;
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => ({
+    bucket: parseNumber(row.bucket),
+    views: parseNumber(row.views),
+    sessions: parseNumber(row.sessions),
+    total_duration: parseNumber(row.total_duration),
+  }));
+}
+
+export async function queryAeTopPages(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  includeQueryHashDetails: boolean,
+): Promise<AeTopPageRow[]> {
+  const dataset = getAeDatasetName(env);
+  const where = buildAeWhere(siteId, range);
+  const n = clampLimit(limit, 30);
+
+  const sql = includeQueryHashDetails
+    ? `
+SELECT
+  ${pathnameExpr()} AS pathname,
+  ${queryExpr()} AS query_string,
+  ${hashExpr()} AS hash_fragment,
+  toInt64(coalesce(sum(_sample_interval), 0)) AS views,
+  toInt64(coalesce(count(DISTINCT nullIf(${sessionExpr()}, '')), 0)) AS sessions
+FROM ${dataset}
+WHERE ${where}
+GROUP BY pathname, query_string, hash_fragment
+ORDER BY views DESC
+LIMIT ${n}
+`
+    : `
+SELECT
+  ${pathnameExpr()} AS pathname,
+  toInt64(coalesce(sum(_sample_interval), 0)) AS views,
+  toInt64(coalesce(count(DISTINCT nullIf(${sessionExpr()}, '')), 0)) AS sessions
+FROM ${dataset}
+WHERE ${where}
+GROUP BY pathname
+ORDER BY views DESC
+LIMIT ${n}
+`;
+
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => ({
+    pathname: parseString(row.pathname),
+    query_string: parseString(row.query_string),
+    hash_fragment: parseString(row.hash_fragment),
+    views: parseNumber(row.views),
+    sessions: parseNumber(row.sessions),
+  }));
+}
+
+export async function queryAeReferrers(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  includeFullUrl: boolean,
+): Promise<AeReferrerRow[]> {
+  const dataset = getAeDatasetName(env);
+  const where = buildAeWhere(siteId, range);
+  const n = clampLimit(limit, 30);
+  const refExpr = includeFullUrl ? refererExpr() : refererHostExpr();
+  const sql = `
+SELECT
+  ${refExpr} AS ref,
+  toInt64(coalesce(sum(_sample_interval), 0)) AS views,
+  toInt64(coalesce(count(DISTINCT nullIf(${sessionExpr()}, '')), 0)) AS sessions
+FROM ${dataset}
+WHERE ${where}
+GROUP BY ref
+ORDER BY views DESC
+LIMIT ${n}
+`;
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => ({
+    ref: parseString(row.ref),
+    views: parseNumber(row.views),
+    sessions: parseNumber(row.sessions),
+  }));
+}
+
+export async function queryAeRecentEvents(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+): Promise<AeRecentEventRow[]> {
+  const dataset = getAeDatasetName(env);
+  const where = buildAeWhere(siteId, range);
+  const n = clampLimit(limit, 100);
+  const sql = `
+SELECT
+  ${eventTypeExpr()} AS event_type,
+  toInt64(${eventAtExpr()}) AS event_at,
+  ${pathnameExpr()} AS pathname,
+  ${queryExpr()} AS query_string,
+  ${hashExpr()} AS hash_fragment,
+  ${hostnameExpr()} AS hostname,
+  ${refererExpr()} AS referer,
+  ${refererHostExpr()} AS referer_host,
+  ${visitorExpr()} AS visitor_id,
+  ${sessionExpr()} AS session_id,
+  toInt64(${durationExpr()}) AS duration_ms,
+  ${countryExpr()} AS country,
+  ${regionExpr()} AS region,
+  ${cityExpr()} AS city,
+  ${browserExpr()} AS browser,
+  ${osExpr()} AS os,
+  ${deviceExpr()} AS device_type,
+  ${languageExpr()} AS language,
+  ${timezoneExpr()} AS timezone,
+  toFloat64(${botScoreExpr()}) AS bot_score,
+  toInt64(${botVerifiedExpr()}) AS bot_verified,
+  ${botSecurityExpr()} AS bot_security_json
+FROM ${dataset}
+WHERE ${where}
+ORDER BY event_at DESC
+LIMIT ${n}
+`;
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => ({
+    event_type: parseString(row.event_type),
+    event_at: parseNumber(row.event_at),
+    pathname: parseString(row.pathname),
+    query_string: parseString(row.query_string),
+    hash_fragment: parseString(row.hash_fragment),
+    hostname: parseString(row.hostname),
+    referer: parseString(row.referer),
+    referer_host: parseString(row.referer_host),
+    visitor_id: parseString(row.visitor_id),
+    session_id: parseString(row.session_id),
+    duration_ms: parseNumber(row.duration_ms),
+    country: parseString(row.country),
+    region: parseString(row.region),
+    city: parseString(row.city),
+    browser: parseString(row.browser),
+    os: parseString(row.os),
+    device_type: parseString(row.device_type),
+    language: parseString(row.language),
+    timezone: parseString(row.timezone),
+    bot_score: parseNumber(row.bot_score),
+    bot_verified: parseNumber(row.bot_verified),
+    bot_security_json: parseString(row.bot_security_json),
+  }));
+}
+
+export async function queryAeSessionDetails(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+): Promise<AeSessionRow[]> {
+  const dataset = getAeDatasetName(env);
+  const where = buildAeWhere(siteId, range);
+  const n = clampLimit(limit, 200);
+  const sql = `
+SELECT
+  session_id,
+  any(visitor_id) AS visitor_id,
+  toInt64(min(event_at)) AS started_at,
+  toInt64(max(event_at)) AS ended_at,
+  toInt64(coalesce(sum(sample_interval), 0)) AS views,
+  toInt64(coalesce(sum(sample_interval * duration_ms), 0)) AS total_duration,
+  toInt64(coalesce(count(DISTINCT nullIf(country, '')), 0)) AS countries,
+  argMin(pathname, event_at) AS entry_path,
+  argMax(pathname, event_at) AS exit_path
+FROM (
+  SELECT
+    ${sessionExpr()} AS session_id,
+    ${visitorExpr()} AS visitor_id,
+    toInt64(${eventAtExpr()}) AS event_at,
+    ${pathnameExpr()} AS pathname,
+    ${countryExpr()} AS country,
+    toFloat64(${durationExpr()}) AS duration_ms,
+    _sample_interval AS sample_interval
+  FROM ${dataset}
+  WHERE ${where}
+)
+WHERE session_id != ''
+GROUP BY session_id
+ORDER BY started_at DESC
+LIMIT ${n}
+`;
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => ({
+    session_id: parseString(row.session_id),
+    visitor_id: parseString(row.visitor_id),
+    started_at: parseNumber(row.started_at),
+    ended_at: parseNumber(row.ended_at),
+    views: parseNumber(row.views),
+    total_duration: parseNumber(row.total_duration),
+    countries: parseNumber(row.countries),
+    entry_path: parseString(row.entry_path),
+    exit_path: parseString(row.exit_path),
+  }));
+}
+
+export async function queryAeVisitorDetails(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+): Promise<AeVisitorRow[]> {
+  const dataset = getAeDatasetName(env);
+  const where = buildAeWhere(siteId, range);
+  const n = clampLimit(limit, 200);
+  const sql = `
+SELECT
+  visitor_id,
+  toInt64(min(event_at)) AS first_seen_at,
+  toInt64(max(event_at)) AS last_seen_at,
+  toInt64(coalesce(sum(sample_interval), 0)) AS views,
+  toInt64(coalesce(count(DISTINCT nullIf(session_id, '')), 0)) AS sessions,
+  toInt64(coalesce(count(DISTINCT nullIf(country, '')), 0)) AS countries,
+  argMax(pathname, event_at) AS latest_path
+FROM (
+  SELECT
+    ${visitorExpr()} AS visitor_id,
+    ${sessionExpr()} AS session_id,
+    toInt64(${eventAtExpr()}) AS event_at,
+    ${pathnameExpr()} AS pathname,
+    ${countryExpr()} AS country,
+    _sample_interval AS sample_interval
+  FROM ${dataset}
+  WHERE ${where}
+)
+WHERE visitor_id != ''
+GROUP BY visitor_id
+ORDER BY last_seen_at DESC
+LIMIT ${n}
+`;
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => ({
+    visitor_id: parseString(row.visitor_id),
+    first_seen_at: parseNumber(row.first_seen_at),
+    last_seen_at: parseNumber(row.last_seen_at),
+    views: parseNumber(row.views),
+    sessions: parseNumber(row.sessions),
+    countries: parseNumber(row.countries),
+    latest_path: parseString(row.latest_path),
+  }));
+}

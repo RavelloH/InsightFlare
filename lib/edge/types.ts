@@ -13,6 +13,9 @@ export interface Env {
   INGEST_DO: DurableObjectNamespace;
   ANALYTICS?: AnalyticsEngineBinding;
   ARCHIVE_BUCKET?: R2Bucket;
+  ANALYTICS_ACCOUNT_ID?: string;
+  ANALYTICS_SQL_API_TOKEN?: string;
+  ANALYTICS_DATASET?: string;
   DAILY_SALT_SECRET: string;
   ADMIN_WS_TOKEN?: string;
   ADMIN_API_TOKEN?: string;

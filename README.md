@@ -45,6 +45,7 @@ npm run cf:d1:create
 3. 修改根目录 `wrangler.toml`
 
 - 填入 `[[d1_databases]]` 的 `database_id`
+- 在 `[vars]` 下添加 `ANALYTICS_ACCOUNT_ID`（Cloudflare Account ID）
 - 按需开启 `[[r2_buckets]]`
 
 4. 设置 Secret（至少一个）
@@ -59,6 +60,7 @@ npm run cf:secret:daily-salt
 npm run cf:secret:admin-token
 npm run cf:secret:bootstrap-admin-password
 npm run cf:secret:session-secret
+npm run cf:secret:analytics-sql-token
 ```
 
 5. 本地构建验证
@@ -97,6 +99,8 @@ npm run cf:deploy
   - `0` 不强制成员校验（默认）
   - `1` 强制校验私有查询接口的 `x-user-id` 是否属于站点团队
 - `PARQUET_WASM_URL`：Parquet wasm 下载地址
+- `ANALYTICS_ACCOUNT_ID`：Analytics Engine SQL 查询使用的 Cloudflare 账号 ID
+- `ANALYTICS_SQL_API_TOKEN`（Secret）：用于 0-90 天 Analytics Engine 查询
 
 ## 注意事项
 

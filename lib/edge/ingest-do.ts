@@ -45,6 +45,10 @@ export class IngestDurableObject extends DurableObject {
       return this.handleIngest(request);
     }
 
+    if (url.pathname === "/snapshot" && request.method === "GET") {
+      return this.handleSnapshot(url);
+    }
+
     if (url.pathname === "/flush" && request.method === "POST") {
       await this.flushToD1();
       return new Response(JSON.stringify({ ok: true, buffered: this.buffer.length }), {
@@ -125,6 +129,63 @@ export class IngestDurableObject extends DurableObject {
       status: 101,
       webSocket: client,
     });
+  }
+
+  private handleSnapshot(url: URL): Response {
+    const fromMsRaw = Number(url.searchParams.get("from") || "0");
+    const toMsRaw = Number(url.searchParams.get("to") || String(Date.now()));
+    const limitRaw = Number(url.searchParams.get("limit") || "5000");
+
+    const fromMs = Number.isFinite(fromMsRaw) ? Math.max(0, Math.floor(fromMsRaw)) : 0;
+    const toMs = Number.isFinite(toMsRaw) ? Math.max(fromMs, Math.floor(toMsRaw)) : Date.now();
+    const limit = Number.isFinite(limitRaw) ? Math.min(20_000, Math.max(1, Math.floor(limitRaw))) : 5000;
+
+    const data: Array<Record<string, unknown>> = [];
+    for (let i = this.buffer.length - 1; i >= 0; i -= 1) {
+      if (data.length >= limit) break;
+      const event = this.buffer[i];
+      if (event.eventAt < fromMs || event.eventAt > toMs) {
+        continue;
+      }
+      data.push({
+        id: event.id,
+        eventType: event.eventType,
+        eventAt: event.eventAt,
+        pathname: event.pathname,
+        queryString: event.queryString,
+        hashFragment: event.hashFragment,
+        title: event.title,
+        hostname: event.hostname,
+        referer: event.referer,
+        refererHost: event.refererHost,
+        visitorId: event.visitorId,
+        sessionId: event.sessionId,
+        durationMs: event.durationMs,
+        country: event.country,
+        region: event.region,
+        city: event.city,
+        browser: event.browser,
+        os: event.os,
+        deviceType: event.deviceType,
+        language: event.language,
+        timezone: event.timezone,
+        botScore: event.botScore,
+        botVerified: event.botVerified,
+        botSecurityJson: event.botSecurityJson,
+      });
+    }
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        buffered: this.buffer.length,
+        data,
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json; charset=utf-8" },
+      },
+    );
   }
 
   private async normalizeEvent(envelope: IngestEnvelopePayload): Promise<NormalizedEvent> {
@@ -291,15 +352,29 @@ export class IngestDurableObject extends DurableObject {
           event.botScore ?? -1,
           event.screenWidth ?? 0,
           event.screenHeight ?? 0,
+          event.latitude ?? 0,
+          event.longitude ?? 0,
+          event.isEU ? 1 : 0,
         ],
         blobs: [
           event.pathname || "/",
+          event.queryString || "",
+          event.hashFragment || "",
+          event.hostname || "",
+          event.referer || "",
+          event.sessionId || "",
+          event.visitorId || "",
           event.browser || "",
+          event.browserVersion || "",
           event.os || "",
+          event.osVersion || "",
           event.language || "",
           event.colo || "",
           event.eventType,
           event.country || "ZZ",
+          event.region || "",
+          event.city || "",
+          event.timezone || "",
           event.deviceType || "unknown",
           event.refererHost || "direct",
         ],
