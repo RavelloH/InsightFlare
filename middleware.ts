@@ -51,17 +51,43 @@ function toLocalizedPath(pathname: string, locale: string): string {
     return `/${locale}/app`;
   }
 
-  // Preserve historical shortcuts after removing non-locale shim pages.
+  // Legacy shortcuts.
   if (normalized === "/app/config" || normalized === "/app/account") {
     return `/${locale}/app/settings`;
+  }
+  if (
+    normalized === "/app" ||
+    normalized === "/app/teams" ||
+    normalized === "/app/settings" ||
+    normalized === "/app/precision" ||
+    normalized === "/login"
+  ) {
+    return `/${locale}${normalized}`;
   }
 
   return `/${locale}${normalized}`;
 }
 
+function redirectWithPath(
+  request: NextRequest,
+  pathname: string,
+  options?: { preserveSearch?: boolean },
+): NextResponse {
+  const url = request.nextUrl.clone();
+  url.pathname = pathname;
+  if (!options?.preserveSearch) {
+    url.search = "";
+  }
+  const response = NextResponse.redirect(url);
+  response.headers.set("x-pathname", url.pathname);
+  return response;
+}
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl;
   const authenticated = await isAuthenticated(request);
+  const normalizedPathname = normalizePathname(pathname);
+  const localeFromPath = pathnameHasLocale(pathname) ? pathname.split("/")[1] : null;
 
   // API routes — no locale handling, just auth checks
   if (pathname.startsWith("/api/admin")) {
@@ -78,30 +104,35 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     return NextResponse.next();
   }
 
-  // If no locale prefix, redirect to locale-prefixed path
+  // Non-locale path: unify all redirects here.
   if (!pathnameHasLocale(pathname)) {
     const locale = getLocale(request);
-    const url = request.nextUrl.clone();
-    url.pathname = toLocalizedPath(pathname, locale);
-    return NextResponse.redirect(url);
+    return redirectWithPath(request, toLocalizedPath(pathname, locale), { preserveSearch: true });
   }
 
-  // Extract locale from pathname
-  const segments = pathname.split("/");
-  const locale = segments[1];
-  const restPath = "/" + segments.slice(2).join("/");
+  if (localeFromPath && normalizedPathname === `/${localeFromPath}`) {
+    return redirectWithPath(request, `/${localeFromPath}/app`, { preserveSearch: true });
+  }
+
+  const restPath = pathname.replace(/^\/[^/]+/, "") || "/";
 
   // Protected routes under /[locale]/app/*
   if (restPath.startsWith("/app")) {
     if (!authenticated) {
       const url = request.nextUrl.clone();
-      url.pathname = `/${locale}/login`;
+      url.pathname = `/${localeFromPath}/login`;
       url.searchParams.set("next", `${pathname}${search}`);
       return NextResponse.redirect(url);
     }
   }
 
-  return NextResponse.next();
+  if (restPath === "/login" && authenticated) {
+    return redirectWithPath(request, `/${localeFromPath}/app`, { preserveSearch: false });
+  }
+
+  const response = NextResponse.next();
+  response.headers.set("x-pathname", pathname);
+  return response;
 }
 
 export const config = {
