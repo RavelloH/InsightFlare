@@ -1,0 +1,40 @@
+{
+  "name": "insightflare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.6.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev:edge\" \"npm run dev:dashboard\"",
+    "dev:edge": "npm run --workspace=@insightflare/edge dev",
+    "dev:dashboard": "npm run --workspace=@insightflare/dashboard dev",
+    "prebuild": "tsx scripts/prebuild.ts",
+    "prebuild:mono:local": "tsx scripts/prebuild.ts --config apps/dashboard/wrangler.toml --target local",
+    "prebuild:mono:remote": "tsx scripts/prebuild.ts --config apps/dashboard/wrangler.toml --target remote",
+    "build": "npm run --workspace=@insightflare/edge build && npm run --workspace=@insightflare/dashboard build",
+    "mono:build": "npm run prebuild:mono:local && npm run --workspace=@insightflare/dashboard cf:build",
+    "mono:preview": "npm run prebuild:mono:local && npm run --workspace=@insightflare/dashboard cf:preview",
+    "mono:deploy:dry-run": "npm run prebuild:mono:remote && npm run --workspace=@insightflare/dashboard cf:deploy -- --dry-run",
+    "mono:deploy": "npm run prebuild:mono:remote && npm run --workspace=@insightflare/dashboard cf:deploy",
+    "cf:d1:create": "npm exec --workspace=@insightflare/dashboard -- wrangler d1 create insightflare",
+    "cf:secret:daily-salt": "npm exec --workspace=@insightflare/dashboard -- wrangler secret put DAILY_SALT_SECRET --config wrangler.toml",
+    "cf:secret:admin-token": "npm exec --workspace=@insightflare/dashboard -- wrangler secret put ADMIN_API_TOKEN --config wrangler.toml",
+    "cf:secret:dashboard-password": "npm exec --workspace=@insightflare/dashboard -- wrangler secret put DASHBOARD_PASSWORD --config wrangler.toml",
+    "cf:tail": "npm exec --workspace=@insightflare/dashboard -- wrangler tail --config wrangler.toml",
+    "typecheck": "npm run --workspace=@insightflare/edge typecheck && npm run --workspace=@insightflare/dashboard typecheck",
+    "d1:migrate:local": "npm run --workspace=@insightflare/edge d1:migrate:local",
+    "d1:migrate:remote": "npm run --workspace=@insightflare/edge d1:migrate:remote",
+    "d1:migration:create": "npm run --workspace=@insightflare/edge d1:migration:create"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.56.0"
+  }
+}

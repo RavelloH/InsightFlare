@@ -1,0 +1,27 @@
+{
+  "name": "@insightflare/edge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:pre": "tsx scripts/prebuild.ts",
+    "d1:migrate:local": "wrangler d1 migrations apply insightflare --config wrangler.toml --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply insightflare --config wrangler.toml --remote",
+    "d1:migration:create": "wrangler d1 migrations create insightflare"
+  },
+  "dependencies": {
+    "@insightflare/shared": "file:../../packages/shared",
+    "apache-arrow": "17.0.0",
+    "parquet-wasm": "^0.7.1",
+    "ua-parser-js": "^2.0.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260224.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.56.0"
+  }
+}
