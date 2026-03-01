@@ -21,7 +21,6 @@
     "ci:deploy": "npm run prebuild:remote && wrangler deploy --config wrangler.toml",
     "cf:d1:create": "wrangler d1 create insightflare --config wrangler.toml",
     "cf:secret:daily-salt": "wrangler secret put DAILY_SALT_SECRET --config wrangler.toml",
-    "cf:secret:admin-token": "wrangler secret put ADMIN_API_TOKEN --config wrangler.toml",
     "cf:secret:bootstrap-admin-password": "wrangler secret put BOOTSTRAP_ADMIN_PASSWORD --config wrangler.toml",
     "cf:secret:session-secret": "wrangler secret put DASHBOARD_SESSION_SECRET --config wrangler.toml",
     "cf:secret:analytics-sql-token": "wrangler secret put ANALYTICS_SQL_API_TOKEN --config wrangler.toml",

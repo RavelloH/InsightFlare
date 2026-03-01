@@ -57,7 +57,6 @@ npm run cf:secret:daily-salt
 可选：
 
 ```bash
-npm run cf:secret:admin-token
 npm run cf:secret:bootstrap-admin-password
 npm run cf:secret:session-secret
 npm run cf:secret:analytics-sql-token
@@ -95,9 +94,6 @@ npm run cf:deploy
 
 - `SESSION_WINDOW_MINUTES`：会话窗口（默认 `30`）
 - `SCRIPT_CACHE_TTL_SECONDS`：`/script.js` 缓存秒数
-- `REQUIRE_TEAM_MEMBERSHIP`：
-  - `0` 不强制成员校验（默认）
-  - `1` 强制校验私有查询接口的 `x-user-id` 是否属于站点团队
 - `PARQUET_WASM_URL`：Parquet wasm 下载地址
 - `ANALYTICS_ACCOUNT_ID`：Analytics Engine SQL 查询使用的 Cloudflare 账号 ID
 - `ANALYTICS_SQL_API_TOKEN`（Secret）：用于 0-90 天 Analytics Engine 查询

@@ -113,10 +113,10 @@ function parseString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function getAeDatasetName(env: Env): string {
-  const dataset = String(env.ANALYTICS_DATASET || "insightflare_events").trim();
+function getAeDatasetName(): string {
+  const dataset = "insightflare_events";
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(dataset)) {
-    throw new Error("Invalid ANALYTICS_DATASET name");
+    throw new Error("Invalid built-in analytics dataset name");
   }
   return dataset;
 }
@@ -136,7 +136,7 @@ function ensureAeConfig(env: Env): {
 } {
   const accountId = getAeAccountId(env);
   const apiToken = getAeApiToken(env);
-  const dataset = getAeDatasetName(env);
+  const dataset = getAeDatasetName();
   if (!accountId || !apiToken) {
     throw new Error("Analytics Engine SQL config missing (ANALYTICS_ACCOUNT_ID / ANALYTICS_SQL_API_TOKEN)");
   }
@@ -312,7 +312,7 @@ export async function queryAeOverview(
   siteId: string,
   range: AeRange,
 ): Promise<AeOverviewRow> {
-  const dataset = getAeDatasetName(env);
+  const dataset = getAeDatasetName();
   const where = buildAeWhere(siteId, range);
   const sql = `
 SELECT
@@ -341,7 +341,7 @@ export async function queryAeTrend(
   range: AeRange,
   interval: "hour" | "day",
 ): Promise<AeTrendRow[]> {
-  const dataset = getAeDatasetName(env);
+  const dataset = getAeDatasetName();
   const where = buildAeWhere(siteId, range);
   const bucketDivisor = interval === "hour" ? 3600000 : 86400000;
   const sql = `
@@ -371,7 +371,7 @@ export async function queryAeTopPages(
   limit: number,
   includeQueryHashDetails: boolean,
 ): Promise<AeTopPageRow[]> {
-  const dataset = getAeDatasetName(env);
+  const dataset = getAeDatasetName();
   const where = buildAeWhere(siteId, range);
   const n = clampLimit(limit, 30);
 
@@ -418,7 +418,7 @@ export async function queryAeReferrers(
   limit: number,
   includeFullUrl: boolean,
 ): Promise<AeReferrerRow[]> {
-  const dataset = getAeDatasetName(env);
+  const dataset = getAeDatasetName();
   const where = buildAeWhere(siteId, range);
   const n = clampLimit(limit, 30);
   const refExpr = includeFullUrl ? refererExpr() : refererHostExpr();
@@ -447,7 +447,7 @@ export async function queryAeRecentEvents(
   range: AeRange,
   limit: number,
 ): Promise<AeRecentEventRow[]> {
-  const dataset = getAeDatasetName(env);
+  const dataset = getAeDatasetName();
   const where = buildAeWhere(siteId, range);
   const n = clampLimit(limit, 100);
   const sql = `
@@ -512,7 +512,7 @@ export async function queryAeSessionDetails(
   range: AeRange,
   limit: number,
 ): Promise<AeSessionRow[]> {
-  const dataset = getAeDatasetName(env);
+  const dataset = getAeDatasetName();
   const where = buildAeWhere(siteId, range);
   const n = clampLimit(limit, 200);
   const sql = `
@@ -563,7 +563,7 @@ export async function queryAeVisitorDetails(
   range: AeRange,
   limit: number,
 ): Promise<AeVisitorRow[]> {
-  const dataset = getAeDatasetName(env);
+  const dataset = getAeDatasetName();
   const where = buildAeWhere(siteId, range);
   const n = clampLimit(limit, 200);
   const sql = `

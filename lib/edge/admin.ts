@@ -1,6 +1,7 @@
 import type { Env } from "./types";
 import { clampString } from "./utils";
 import { argon2id } from "@noble/hashes/argon2.js";
+import { requireSession } from "./session-auth";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -50,17 +51,6 @@ const una = (m = "Unauthorized") => j({ ok: false, error: m }, 401);
 const forb = (m = "Forbidden") => j({ ok: false, error: m }, 403);
 const nf = (m = "Not Found") => j({ ok: false, error: m }, 404);
 const na = () => j({ ok: false, error: "Method Not Allowed" }, 405);
-
-const tokenFrom = (r: Request) => {
-  const a = r.headers.get("authorization") || "";
-  if (a.toLowerCase().startsWith("bearer ")) return a.slice(7).trim();
-  return "";
-};
-const isPrivateAuthorized = (r: Request, env: Env) => {
-  const expected = env.ADMIN_API_TOKEN;
-  if (!expected || expected.length === 0) return true;
-  return tokenFrom(r) === expected || (r.headers.get("x-admin-token") || "") === expected;
-};
 
 const normU = (s: string) => clampString(s.trim().toLowerCase(), 80);
 const normE = (s: string) => clampString(s.trim().toLowerCase(), 200);
@@ -313,7 +303,7 @@ async function ensureBootstrapAdmin(env: Env): Promise<UserRow> {
   }
   const username = normU(env.BOOTSTRAP_ADMIN_USERNAME || "admin") || "admin";
   const email = normE(env.BOOTSTRAP_ADMIN_EMAIL || `${username}@insightflare.local`);
-  const name = clampString(env.BOOTSTRAP_ADMIN_NAME || "System Administrator", 120);
+  const name = clampString(env.BOOTSTRAP_ADMIN_NAME || "Administrator", 120);
   const passHash = await hashPassword(String(env.BOOTSTRAP_ADMIN_PASSWORD || "insightflare"));
   const found = await byIdentifier(env, username);
   if (found) {
@@ -340,8 +330,10 @@ async function ensureBootstrapAdmin(env: Env): Promise<UserRow> {
 }
 
 async function requireActor(env: Env, req: Request): Promise<Actor | Response> {
-  const uid = clampString((req.headers.get("x-user-id") || "").trim(), 120);
-  if (!uid) return una("Missing x-user-id");
+  const session = await requireSession(req, env);
+  if (!session) return una();
+  const uid = clampString(session.userId, 120);
+  if (!uid) return una();
   const user = await byId(env, uid);
   if (!user) return una("User not found");
   return { user, isAdmin: user.system_role === "admin" };
@@ -679,7 +671,6 @@ async function hScriptSnippet(req: Request, env: Env, url: URL): Promise<Respons
 
 export async function handlePrivateAdmin(request: Request, env: Env, url: URL): Promise<Response> {
   const p = url.pathname;
-  if (p !== "/api/private/admin/auth/login" && !isPrivateAuthorized(request, env)) return una();
   if (p === "/api/private/admin/auth/login") return hAuthLogin(request, env);
   if (p === "/api/private/admin/auth/me") return hAuthMe(request, env);
   if (p === "/api/private/admin/users") return hUsers(request, env);

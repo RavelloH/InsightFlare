@@ -1,5 +1,6 @@
 import type { Env } from "./types";
 import { ONE_HOUR_MS, coerceNumber } from "./utils";
+import { requireSession } from "./session-auth";
 
 function jsonResponse(payload: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
   return new Response(JSON.stringify(payload), {
@@ -53,32 +54,6 @@ function normalizeRange(
   return { start, end, length };
 }
 
-function extractBearerToken(request: Request): string {
-  const auth = request.headers.get("authorization") || "";
-  if (auth.toLowerCase().startsWith("bearer ")) {
-    return auth.slice(7).trim();
-  }
-  return "";
-}
-
-function isPrivateAuthorized(request: Request, env: Env): boolean {
-  const expected = env.ADMIN_API_TOKEN;
-  if (!expected || expected.length === 0) {
-    return true;
-  }
-  const fromBearer = extractBearerToken(request);
-  const fromHeader = request.headers.get("x-admin-token") || "";
-  return fromBearer === expected || fromHeader === expected;
-}
-
-function requiresTeamMembershipCheck(env: Env): boolean {
-  return (env.REQUIRE_TEAM_MEMBERSHIP ?? "0") === "1";
-}
-
-function extractUserIdForMembership(request: Request): string {
-  return (request.headers.get("x-user-id") || "").trim();
-}
-
 async function assertSiteMembership(env: Env, siteId: string, userId: string): Promise<boolean> {
   const row = await env.DB.prepare(
     `
@@ -117,15 +92,14 @@ async function handleManifest(request: Request, env: Env, url: URL): Promise<Res
     return badRequest("Missing siteId");
   }
 
-  if (requiresTeamMembershipCheck(env)) {
-    const userId = extractUserIdForMembership(request);
-    if (!userId) {
-      return unauthorized("Missing x-user-id for team membership check");
-    }
-    const allowed = await assertSiteMembership(env, siteId, userId);
-    if (!allowed) {
-      return unauthorized("Site access denied for current user");
-    }
+  const session = await requireSession(request, env);
+  if (!session) {
+    return unauthorized();
+  }
+
+  const allowed = session.systemRole === "admin" ? true : await assertSiteMembership(env, siteId, session.userId);
+  if (!allowed) {
+    return unauthorized("Site access denied for current user");
   }
 
   const window = parseWindowHours(url);
@@ -187,6 +161,11 @@ async function handleFile(request: Request, env: Env, url: URL): Promise<Respons
     return notFound("Archive bucket is not configured");
   }
 
+  const session = await requireSession(request, env);
+  if (!session) {
+    return unauthorized();
+  }
+
   const key = (url.searchParams.get("key") || "").trim();
   if (key.length === 0) {
     return badRequest("Missing key");
@@ -209,15 +188,9 @@ async function handleFile(request: Request, env: Env, url: URL): Promise<Respons
     return notFound("Archive object is not queryable in precise mode");
   }
 
-  if (requiresTeamMembershipCheck(env)) {
-    const userId = extractUserIdForMembership(request);
-    if (!userId) {
-      return unauthorized("Missing x-user-id for team membership check");
-    }
-    const allowed = await assertSiteMembership(env, row.siteId, userId);
-    if (!allowed) {
-      return unauthorized("Site access denied for current user");
-    }
+  const allowed = session.systemRole === "admin" ? true : await assertSiteMembership(env, row.siteId, session.userId);
+  if (!allowed) {
+    return unauthorized("Site access denied for current user");
   }
 
   const rangeHeader = request.headers.get("range");
@@ -254,10 +227,6 @@ async function handleFile(request: Request, env: Env, url: URL): Promise<Respons
 }
 
 export async function handlePrivateArchive(request: Request, env: Env, url: URL): Promise<Response> {
-  if (!isPrivateAuthorized(request, env)) {
-    return unauthorized();
-  }
-
   const pathname = url.pathname;
   if (pathname === "/api/private/archive/manifest") {
     return handleManifest(request, env, url);

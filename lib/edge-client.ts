@@ -1,5 +1,5 @@
 import { DEFAULT_EDGE_BASE_URL } from "./constants";
-import { getSession } from "./auth";
+import { getSessionToken } from "./auth";
 
 type HttpMethod = "GET" | "POST" | "PATCH";
 
@@ -34,27 +34,6 @@ async function edgeBaseUrl(): Promise<string> {
   return DEFAULT_EDGE_BASE_URL;
 }
 
-async function adminToken(): Promise<string> {
-  const fromProcess =
-    (process.env.INSIGHTFLARE_ADMIN_API_TOKEN || process.env.ADMIN_API_TOKEN || "").trim();
-  if (fromProcess.length > 0) {
-    return fromProcess;
-  }
-
-  try {
-    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-    const { env } = await getCloudflareContext({ async: true });
-    const fromBinding = String((env as Record<string, unknown>)?.ADMIN_API_TOKEN || "").trim();
-    if (fromBinding.length > 0) {
-      return fromBinding;
-    }
-  } catch {
-    // Ignore outside Cloudflare runtime.
-  }
-
-  return "";
-}
-
 function withQuery(url: URL, params?: Record<string, string | number>): URL {
   if (!params) return url;
   for (const [key, value] of Object.entries(params)) {
@@ -70,14 +49,10 @@ async function fetchEdgeJson<T>(options: FetchEdgeOptions): Promise<T> {
 
   const headers = new Headers();
   if (!options.isPublic) {
-    const token = await adminToken();
-    if (token.length > 0) {
-      headers.set("x-admin-token", token);
-    }
     try {
-      const session = await getSession();
-      if (session?.userId) {
-        headers.set("x-user-id", session.userId);
+      const sessionToken = await getSessionToken();
+      if (sessionToken) {
+        headers.set("authorization", `Bearer ${sessionToken}`);
       }
     } catch {
       // Ignore when session is unavailable outside request scope.

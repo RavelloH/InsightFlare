@@ -10,7 +10,7 @@ import { handlePrivateArchive } from "./archive-query";
 const corsHeaders = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
-  "access-control-allow-headers": "content-type, authorization, x-admin-token",
+  "access-control-allow-headers": "content-type, authorization",
   "access-control-max-age": "86400",
 };
 

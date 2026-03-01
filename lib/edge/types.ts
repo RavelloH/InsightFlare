@@ -15,13 +15,12 @@ export interface Env {
   ARCHIVE_BUCKET?: R2Bucket;
   ANALYTICS_ACCOUNT_ID?: string;
   ANALYTICS_SQL_API_TOKEN?: string;
-  ANALYTICS_DATASET?: string;
   DAILY_SALT_SECRET: string;
   ADMIN_WS_TOKEN?: string;
-  ADMIN_API_TOKEN?: string;
+  DASHBOARD_SESSION_SECRET?: string;
+  SESSION_SECRET?: string;
   EDGE_PUBLIC_BASE_URL?: string;
   PARQUET_WASM_URL?: string;
-  REQUIRE_TEAM_MEMBERSHIP?: string;
   BOOTSTRAP_ADMIN_USERNAME?: string;
   BOOTSTRAP_ADMIN_PASSWORD?: string;
   BOOTSTRAP_ADMIN_EMAIL?: string;

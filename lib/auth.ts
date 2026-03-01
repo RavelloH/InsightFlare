@@ -3,9 +3,13 @@ import { SESSION_COOKIE } from "./constants";
 import type { DashboardSession } from "./session";
 import { verifySessionToken } from "./session";
 
-export async function getSession(): Promise<DashboardSession | null> {
+export async function getSessionToken(): Promise<string> {
   const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value || "";
+  return cookieStore.get(SESSION_COOKIE)?.value || "";
+}
+
+export async function getSession(): Promise<DashboardSession | null> {
+  const token = await getSessionToken();
   return verifySessionToken(token);
 }
 

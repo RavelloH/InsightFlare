@@ -1,5 +1,6 @@
 import type { Env } from "./types";
 import { ONE_DAY_MS, ONE_HOUR_MS, coerceNumber } from "./utils";
+import { requireSession } from "./session-auth";
 import {
   queryAeOverview,
   queryAeRecentEvents,
@@ -139,34 +140,6 @@ async function resolvePublicSiteBySlug(env: Env, slug: string): Promise<PublicSi
     .bind(slug)
     .first<PublicSiteRow>();
   return row ?? null;
-}
-
-function extractBearerToken(request: Request): string {
-  const auth = request.headers.get("authorization") || "";
-  if (auth.toLowerCase().startsWith("bearer ")) {
-    return auth.slice(7).trim();
-  }
-  return "";
-}
-
-function isPrivateAuthorized(request: Request, env: Env): boolean {
-  const expected = env.ADMIN_API_TOKEN;
-  if (!expected || expected.length === 0) {
-    // Dev bootstrap mode: allow when token is not configured.
-    return true;
-  }
-
-  const fromBearer = extractBearerToken(request);
-  const fromHeader = request.headers.get("x-admin-token") || "";
-  return fromBearer === expected || fromHeader === expected;
-}
-
-function requiresTeamMembershipCheck(env: Env): boolean {
-  return (env.REQUIRE_TEAM_MEMBERSHIP ?? "0") === "1";
-}
-
-function extractUserIdForMembership(request: Request): string {
-  return (request.headers.get("x-user-id") || "").trim();
 }
 
 function isAnalyticsSqlConfigured(env: Env): boolean {
@@ -1062,7 +1035,8 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
   if (request.method !== "GET") {
     return notAllowed();
   }
-  if (!isPrivateAuthorized(request, env)) {
+  const session = await requireSession(request, env);
+  if (!session) {
     return unauthorized();
   }
 
@@ -1071,15 +1045,9 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
     return badRequest("Missing siteId");
   }
 
-  if (requiresTeamMembershipCheck(env)) {
-    const userId = extractUserIdForMembership(request);
-    if (!userId) {
-      return unauthorized("Missing x-user-id for team membership check");
-    }
-    const allowed = await assertSiteMembership(env, siteId, userId);
-    if (!allowed) {
-      return unauthorized("Site access denied for current user");
-    }
+  const allowed = session.systemRole === "admin" ? true : await assertSiteMembership(env, siteId, session.userId);
+  if (!allowed) {
+    return unauthorized("Site access denied for current user");
   }
 
   const window = parseWindow(url);
