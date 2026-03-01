@@ -1,5 +1,6 @@
 import type { Env } from "./types";
 import { clampString } from "./utils";
+import { argon2id } from "@noble/hashes/argon2.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -16,11 +17,28 @@ type UserRow = {
 
 type Actor = { user: UserRow; isAdmin: boolean };
 
-const HASH_PREFIX = "pbkdf2_sha256";
-const HASH_ITERS = 100000;
-const HASH_MIN_ITERS = 50000;
-const HASH_MAX_ITERS = 100000;
+const HASH_PREFIX_ARGON2 = "argon2id";
 const HASH_LEN = 32;
+const ARGON2_VERSION = 19;
+const ARGON2_MEMORY_KIB = 4096;
+const ARGON2_PASSES = 1;
+const ARGON2_PARALLELISM = 1;
+const ARGON2_NONCE_LEN = 16;
+const ARGON2_MIN_MEMORY_KIB = 8;
+const ARGON2_MAX_MEMORY_KIB = 262144;
+const ARGON2_MIN_PASSES = 1;
+const ARGON2_MAX_PASSES = 10;
+const ARGON2_MIN_PARALLELISM = 1;
+const ARGON2_MAX_PARALLELISM = 8;
+
+type Argon2HashParts = {
+  version: number;
+  memory: number;
+  passes: number;
+  parallelism: number;
+  nonce: Uint8Array;
+  expected: Uint8Array;
+};
 
 const j = (payload: unknown, status = 200) =>
   new Response(JSON.stringify(payload), {
@@ -84,37 +102,99 @@ const eq = (a: Uint8Array, b: Uint8Array) => {
   return d === 0;
 };
 
-async function derive(password: string, salt: Uint8Array, iters: number): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey("raw", u8(password), "PBKDF2", false, ["deriveBits"]);
-  // WebCrypto typing in worker targets expects ArrayBuffer-backed views.
-  const saltBytes = new Uint8Array(salt);
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt: saltBytes, iterations: iters },
-    key,
-    HASH_LEN * 8,
-  );
-  return new Uint8Array(bits);
+function parseArgon2Hash(stored: string): Argon2HashParts | null {
+  const parts = stored.split("$");
+  if (parts.length !== 5 || parts[0] !== HASH_PREFIX_ARGON2) return null;
+  const versionMatch = /^v=(\d+)$/.exec(parts[1]);
+  const paramsMatch = /^m=(\d+),t=(\d+),p=(\d+)$/.exec(parts[2]);
+  if (!versionMatch || !paramsMatch) return null;
+  const version = Number(versionMatch[1]);
+  const memory = Number(paramsMatch[1]);
+  const passes = Number(paramsMatch[2]);
+  const parallelism = Number(paramsMatch[3]);
+  if (!Number.isFinite(version) || (version !== 16 && version !== 19)) return null;
+  if (!Number.isFinite(memory) || memory < ARGON2_MIN_MEMORY_KIB || memory > ARGON2_MAX_MEMORY_KIB) return null;
+  if (!Number.isFinite(passes) || passes < ARGON2_MIN_PASSES || passes > ARGON2_MAX_PASSES) return null;
+  if (
+    !Number.isFinite(parallelism) ||
+    parallelism < ARGON2_MIN_PARALLELISM ||
+    parallelism > ARGON2_MAX_PARALLELISM
+  )
+    return null;
+  let nonce: Uint8Array;
+  let expected: Uint8Array;
+  try {
+    nonce = fromB64u(parts[3]);
+    expected = fromB64u(parts[4]);
+  } catch {
+    return null;
+  }
+  if (nonce.length < 8 || expected.length < 16) return null;
+  return {
+    version: Math.floor(version),
+    memory: Math.floor(memory),
+    passes: Math.floor(passes),
+    parallelism: Math.floor(parallelism),
+    nonce,
+    expected,
+  };
 }
+
+async function deriveArgon2id(
+  password: string,
+  nonce: Uint8Array,
+  options: {
+    memory: number;
+    passes: number;
+    parallelism: number;
+    version: number;
+    tagLength: number;
+  },
+): Promise<Uint8Array> {
+  return argon2id(u8(password), new Uint8Array(nonce), {
+    p: options.parallelism,
+    t: options.passes,
+    m: options.memory,
+    version: options.version,
+    dkLen: options.tagLength,
+  });
+}
+
+async function hashPasswordArgon2(password: string): Promise<string> {
+  const nonce = crypto.getRandomValues(new Uint8Array(ARGON2_NONCE_LEN));
+  const derived = await deriveArgon2id(password, nonce, {
+    memory: ARGON2_MEMORY_KIB,
+    passes: ARGON2_PASSES,
+    parallelism: ARGON2_PARALLELISM,
+    version: ARGON2_VERSION,
+    tagLength: HASH_LEN,
+  });
+  return `${HASH_PREFIX_ARGON2}$v=${ARGON2_VERSION}$m=${ARGON2_MEMORY_KIB},t=${ARGON2_PASSES},p=${ARGON2_PARALLELISM}$${b64u(nonce)}$${b64u(derived)}`;
+}
+
 async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const h = await derive(password, salt, HASH_ITERS);
-  return `${HASH_PREFIX}$${HASH_ITERS}$${b64u(salt)}$${b64u(h)}`;
+  return hashPasswordArgon2(password);
 }
+
 async function verifyPassword(password: string, stored: string | null | undefined): Promise<boolean> {
   if (!stored) return false;
-  const p = stored.split("$");
-  if (p.length !== 4 || p[0] !== HASH_PREFIX) return false;
-  const iters = Number(p[1]);
-  if (!Number.isFinite(iters) || iters < HASH_MIN_ITERS || iters > HASH_MAX_ITERS) return false;
-  const salt = fromB64u(p[2]);
-  const expected = fromB64u(p[3]);
-  let actual: Uint8Array;
-  try {
-    actual = await derive(password, salt, Math.floor(iters));
-  } catch {
-    return false;
+  if (stored.startsWith(`${HASH_PREFIX_ARGON2}$`)) {
+    const parsed = parseArgon2Hash(stored);
+    if (!parsed) return false;
+    try {
+      const actual = await deriveArgon2id(password, parsed.nonce, {
+        memory: parsed.memory,
+        passes: parsed.passes,
+        parallelism: parsed.parallelism,
+        version: parsed.version,
+        tagLength: parsed.expected.length,
+      });
+      return eq(actual, parsed.expected);
+    } catch {
+      return false;
+    }
   }
-  return eq(actual, expected);
+  return false;
 }
 
 const toPublicUser = (u: UserRow) => ({
@@ -290,7 +370,9 @@ async function hAuthLogin(req: Request, env: Env): Promise<Response> {
   const password = String(body.password || "");
   if (identifier.length < 3 || !password) return bad("username/email and password are required");
   const user = await byIdentifier(env, identifier);
-  if (!user || !(await verifyPassword(password, user.password_hash))) return una("Invalid credentials");
+  if (!user) return una("Invalid credentials");
+  const verified = await verifyPassword(password, user.password_hash);
+  if (!verified) return una("Invalid credentials");
   await ensureDefaultTeam(env, user);
   return j({ ok: true, data: { user: toPublicUser(user), teams: await teamsFor(env, user.id) } });
 }

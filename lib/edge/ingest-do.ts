@@ -284,13 +284,7 @@ export class IngestDurableObject extends DurableObject {
 
     try {
       this.doEnv.ANALYTICS.writeDataPoint({
-        indexes: [
-          event.siteId,
-          event.eventType,
-          event.country || "ZZ",
-          event.deviceType || "unknown",
-          event.refererHost || "direct",
-        ],
+        indexes: [event.siteId],
         doubles: [
           event.eventAt,
           event.durationMs,
@@ -304,6 +298,10 @@ export class IngestDurableObject extends DurableObject {
           event.os || "",
           event.language || "",
           event.colo || "",
+          event.eventType,
+          event.country || "ZZ",
+          event.deviceType || "unknown",
+          event.refererHost || "direct",
         ],
       });
     } catch (error) {

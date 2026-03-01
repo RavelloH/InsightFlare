@@ -38,6 +38,7 @@ migrations_dir = "./migrations"
 
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
+dataset = "insightflare_events"
 
 [observability]
 [observability.logs]
