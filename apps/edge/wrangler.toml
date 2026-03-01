@@ -1,13 +1,13 @@
-name = "insightflare-edge"
+name = "insightflare"
 main = "src/index.ts"
 compatibility_date = "2026-03-01"
 workers_dev = true
 
 [vars]
-SESSION_WINDOW_MINUTES = "30"
-SCRIPT_CACHE_TTL_SECONDS = "3600"
+SESSION_WINDOW_MINUTES = "30" # 会话窗口时间，单位分钟，生产部署时可适当调整
+SCRIPT_CACHE_TTL_SECONDS = "3600" # Durable Object 脚本缓存时间，单位秒，生产部署时可适当调整
 # ADMIN_API_TOKEN = "set-in-secret-or-var"
-EDGE_PUBLIC_BASE_URL = "http://127.0.0.1:8787"
+EDGE_PUBLIC_BASE_URL = "http://insight.ravelloh.com" # 你的 Worker 公共 URL，生产部署时请替换为正式域名
 PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm"
 REQUIRE_TEAM_MEMBERSHIP = "0"
 
@@ -25,7 +25,7 @@ new_sqlite_classes = ["IngestDurableObject"]
 [[d1_databases]]
 binding = "DB"
 database_name = "insightflare"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "391c1df6-dd3f-44f0-991c-63c7873b7d6a" # 改成你的 D1 数据库 ID，通过 npm run cf:d1:create 生成
 
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
