@@ -144,19 +144,19 @@ function ensureAeConfig(env: Env): {
 }
 
 function hasNewBlobLayoutExpr(): string {
-  return "length(coalesce(blob14, '')) > 0";
+  return "blob14 != ''";
 }
 
 function eventAtExpr(): string {
-  return "toInt64(double1)";
+  return "double1";
 }
 
 function durationExpr(): string {
-  return "toFloat64(double2)";
+  return "double2";
 }
 
 function eventTypeExpr(): string {
-  return "if(length(coalesce(blob14, '')) > 0, blob14, blob6)";
+  return "if(blob14 != '', blob14, blob6)";
 }
 
 function sessionExpr(): string {
@@ -224,7 +224,7 @@ function deviceExpr(): string {
 }
 
 function botScoreExpr(): string {
-  return "toFloat64(double3)";
+  return "double3";
 }
 
 function botVerifiedExpr(): string {
@@ -233,6 +233,14 @@ function botVerifiedExpr(): string {
 
 function botSecurityExpr(): string {
   return "''";
+}
+
+function nonEmptyDistinctCountExpr(expr: string): string {
+  const sentinel = "__if_empty_sentinel__";
+  return `(
+    count(DISTINCT if(${expr} != '', ${expr}, '${sentinel}'))
+    - if(max(if(${expr} = '', 1, 0)) = 1, 1, 0)
+  )`;
 }
 
 function buildAeWhere(siteId: string, range: AeRange): string {
@@ -316,11 +324,11 @@ export async function queryAeOverview(
   const where = buildAeWhere(siteId, range);
   const sql = `
 SELECT
-  toInt64(coalesce(sum(_sample_interval), 0)) AS views,
-  toInt64(coalesce(count(DISTINCT nullIf(${sessionExpr()}, '')), 0)) AS sessions,
-  toInt64(coalesce(count(DISTINCT nullIf(${visitorExpr()}, '')), 0)) AS visitors,
-  toInt64(coalesce(sum(if(${durationExpr()} <= 0, _sample_interval, 0)), 0)) AS bounces,
-  toInt64(coalesce(sum(_sample_interval * ${durationExpr()}), 0)) AS total_duration
+  sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions,
+  ${nonEmptyDistinctCountExpr(visitorExpr())} AS visitors,
+  sum(if(${durationExpr()} <= 0, _sample_interval, 0)) AS bounces,
+  sum(_sample_interval * ${durationExpr()}) AS total_duration
 FROM ${dataset}
 WHERE ${where}
 `;
@@ -346,10 +354,10 @@ export async function queryAeTrend(
   const bucketDivisor = interval === "hour" ? 3600000 : 86400000;
   const sql = `
 SELECT
-  toInt64(floor(${eventAtExpr()} / ${bucketDivisor})) AS bucket,
-  toInt64(coalesce(sum(_sample_interval), 0)) AS views,
-  toInt64(coalesce(count(DISTINCT nullIf(${sessionExpr()}, '')), 0)) AS sessions,
-  toInt64(coalesce(sum(_sample_interval * ${durationExpr()}), 0)) AS total_duration
+  floor(${eventAtExpr()} / ${bucketDivisor}) AS bucket,
+  sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions,
+  sum(_sample_interval * ${durationExpr()}) AS total_duration
 FROM ${dataset}
 WHERE ${where}
 GROUP BY bucket
@@ -381,8 +389,8 @@ SELECT
   ${pathnameExpr()} AS pathname,
   ${queryExpr()} AS query_string,
   ${hashExpr()} AS hash_fragment,
-  toInt64(coalesce(sum(_sample_interval), 0)) AS views,
-  toInt64(coalesce(count(DISTINCT nullIf(${sessionExpr()}, '')), 0)) AS sessions
+  sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions
 FROM ${dataset}
 WHERE ${where}
 GROUP BY pathname, query_string, hash_fragment
@@ -392,8 +400,8 @@ LIMIT ${n}
     : `
 SELECT
   ${pathnameExpr()} AS pathname,
-  toInt64(coalesce(sum(_sample_interval), 0)) AS views,
-  toInt64(coalesce(count(DISTINCT nullIf(${sessionExpr()}, '')), 0)) AS sessions
+  sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions
 FROM ${dataset}
 WHERE ${where}
 GROUP BY pathname
@@ -425,8 +433,8 @@ export async function queryAeReferrers(
   const sql = `
 SELECT
   ${refExpr} AS ref,
-  toInt64(coalesce(sum(_sample_interval), 0)) AS views,
-  toInt64(coalesce(count(DISTINCT nullIf(${sessionExpr()}, '')), 0)) AS sessions
+  sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions
 FROM ${dataset}
 WHERE ${where}
 GROUP BY ref
@@ -453,7 +461,7 @@ export async function queryAeRecentEvents(
   const sql = `
 SELECT
   ${eventTypeExpr()} AS event_type,
-  toInt64(${eventAtExpr()}) AS event_at,
+  ${eventAtExpr()} AS event_at,
   ${pathnameExpr()} AS pathname,
   ${queryExpr()} AS query_string,
   ${hashExpr()} AS hash_fragment,
@@ -462,7 +470,7 @@ SELECT
   ${refererHostExpr()} AS referer_host,
   ${visitorExpr()} AS visitor_id,
   ${sessionExpr()} AS session_id,
-  toInt64(${durationExpr()}) AS duration_ms,
+  ${durationExpr()} AS duration_ms,
   ${countryExpr()} AS country,
   ${regionExpr()} AS region,
   ${cityExpr()} AS city,
@@ -471,8 +479,8 @@ SELECT
   ${deviceExpr()} AS device_type,
   ${languageExpr()} AS language,
   ${timezoneExpr()} AS timezone,
-  toFloat64(${botScoreExpr()}) AS bot_score,
-  toInt64(${botVerifiedExpr()}) AS bot_verified,
+  ${botScoreExpr()} AS bot_score,
+  ${botVerifiedExpr()} AS bot_verified,
   ${botSecurityExpr()} AS bot_security_json
 FROM ${dataset}
 WHERE ${where}
@@ -518,22 +526,22 @@ export async function queryAeSessionDetails(
   const sql = `
 SELECT
   session_id,
-  any(visitor_id) AS visitor_id,
-  toInt64(min(event_at)) AS started_at,
-  toInt64(max(event_at)) AS ended_at,
-  toInt64(coalesce(sum(sample_interval), 0)) AS views,
-  toInt64(coalesce(sum(sample_interval * duration_ms), 0)) AS total_duration,
-  toInt64(coalesce(count(DISTINCT nullIf(country, '')), 0)) AS countries,
+  argMax(visitor_id, event_at) AS visitor_id,
+  min(event_at) AS started_at,
+  max(event_at) AS ended_at,
+  sum(sample_interval) AS views,
+  sum(sample_interval * duration_ms) AS total_duration,
+  ${nonEmptyDistinctCountExpr("country")} AS countries,
   argMin(pathname, event_at) AS entry_path,
   argMax(pathname, event_at) AS exit_path
 FROM (
   SELECT
     ${sessionExpr()} AS session_id,
     ${visitorExpr()} AS visitor_id,
-    toInt64(${eventAtExpr()}) AS event_at,
+    ${eventAtExpr()} AS event_at,
     ${pathnameExpr()} AS pathname,
     ${countryExpr()} AS country,
-    toFloat64(${durationExpr()}) AS duration_ms,
+    ${durationExpr()} AS duration_ms,
     _sample_interval AS sample_interval
   FROM ${dataset}
   WHERE ${where}
@@ -569,17 +577,17 @@ export async function queryAeVisitorDetails(
   const sql = `
 SELECT
   visitor_id,
-  toInt64(min(event_at)) AS first_seen_at,
-  toInt64(max(event_at)) AS last_seen_at,
-  toInt64(coalesce(sum(sample_interval), 0)) AS views,
-  toInt64(coalesce(count(DISTINCT nullIf(session_id, '')), 0)) AS sessions,
-  toInt64(coalesce(count(DISTINCT nullIf(country, '')), 0)) AS countries,
+  min(event_at) AS first_seen_at,
+  max(event_at) AS last_seen_at,
+  sum(sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr("session_id")} AS sessions,
+  ${nonEmptyDistinctCountExpr("country")} AS countries,
   argMax(pathname, event_at) AS latest_path
 FROM (
   SELECT
     ${visitorExpr()} AS visitor_id,
     ${sessionExpr()} AS session_id,
-    toInt64(${eventAtExpr()}) AS event_at,
+    ${eventAtExpr()} AS event_at,
     ${pathnameExpr()} AS pathname,
     ${countryExpr()} AS country,
     _sample_interval AS sample_interval

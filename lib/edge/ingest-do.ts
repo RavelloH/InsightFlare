@@ -20,6 +20,9 @@ import {
 
 const BUFFER_MAX_SIZE = 20_000;
 const BULK_FLUSH_THRESHOLD = 500;
+const PENDING_PREFIX = "pending:";
+const FLUSH_PAGE_LIMIT = 500;
+const D1_BATCH_CHUNK_SIZE = 100;
 
 export class IngestDurableObject extends DurableObject {
   private readonly doState: DurableObjectState;
@@ -51,7 +54,7 @@ export class IngestDurableObject extends DurableObject {
 
     if (url.pathname === "/flush" && request.method === "POST") {
       await this.flushToD1();
-      return new Response(JSON.stringify({ ok: true, buffered: this.buffer.length }), {
+      return new Response(JSON.stringify({ ok: true, hasPending: await this.hasPendingItems() }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -62,7 +65,7 @@ export class IngestDurableObject extends DurableObject {
 
   async alarm(): Promise<void> {
     await this.flushToD1();
-    if (this.buffer.length > 0) {
+    if (await this.hasPendingItems()) {
       await this.doState.storage.setAlarm(Date.now() + TEN_MINUTES_MS);
       return;
     }
@@ -140,14 +143,18 @@ export class IngestDurableObject extends DurableObject {
     const toMs = Number.isFinite(toMsRaw) ? Math.max(fromMs, Math.floor(toMsRaw)) : Date.now();
     const limit = Number.isFinite(limitRaw) ? Math.min(20_000, Math.max(1, Math.floor(limitRaw))) : 5000;
 
-    const data: Array<Record<string, unknown>> = [];
+    const payload = {
+      ok: true,
+      buffered: this.buffer.length,
+      data: [] as Array<Record<string, unknown>>,
+    };
+
+    // Snapshot is best-effort; keep fast path when memory buffer is available.
     for (let i = this.buffer.length - 1; i >= 0; i -= 1) {
-      if (data.length >= limit) break;
+      if (payload.data.length >= limit) break;
       const event = this.buffer[i];
-      if (event.eventAt < fromMs || event.eventAt > toMs) {
-        continue;
-      }
-      data.push({
+      if (event.eventAt < fromMs || event.eventAt > toMs) continue;
+      payload.data.push({
         id: event.id,
         eventType: event.eventType,
         eventAt: event.eventAt,
@@ -175,17 +182,10 @@ export class IngestDurableObject extends DurableObject {
       });
     }
 
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        buffered: this.buffer.length,
-        data,
-      }),
-      {
-        status: 200,
-        headers: { "content-type": "application/json; charset=utf-8" },
-      },
-    );
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
   }
 
   private async normalizeEvent(envelope: IngestEnvelopePayload): Promise<NormalizedEvent> {
@@ -336,6 +336,30 @@ export class IngestDurableObject extends DurableObject {
       this.buffer.shift();
     }
     this.buffer.push(event);
+    await this.doState.storage.put(this.pendingStorageKey(event), event);
+  }
+
+  private pendingStorageKey(event: NormalizedEvent): string {
+    const ts = String(event.receivedAt).padStart(13, "0");
+    return `${PENDING_PREFIX}${ts}:${event.id}`;
+  }
+
+  private async hasPendingItems(): Promise<boolean> {
+    const rows = await this.doState.storage.list({ prefix: PENDING_PREFIX, limit: 1 });
+    return rows.size > 0;
+  }
+
+  private async pullPendingEvents(limit: number): Promise<Array<{ key: string; event: NormalizedEvent }>> {
+    const rows = await this.doState.storage.list<NormalizedEvent>({
+      prefix: PENDING_PREFIX,
+      limit,
+    });
+    const out: Array<{ key: string; event: NormalizedEvent }> = [];
+    for (const [key, value] of rows.entries()) {
+      if (!value) continue;
+      out.push({ key, event: value });
+    }
+    return out;
   }
 
   private async writeToAnalyticsEngine(event: NormalizedEvent): Promise<void> {
@@ -404,12 +428,11 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private async flushToD1(): Promise<void> {
-    if (this.isFlushing || this.buffer.length === 0) {
+    if (this.isFlushing) {
       return;
     }
 
     this.isFlushing = true;
-    const snapshot = this.buffer.slice();
     const stmt = this.doEnv.DB.prepare(
       `
       INSERT OR REPLACE INTO pageviews (
@@ -468,8 +491,11 @@ export class IngestDurableObject extends DurableObject {
     );
 
     try {
-      await this.doEnv.DB.batch(
-        snapshot.map((event) =>
+      while (true) {
+        const pending = await this.pullPendingEvents(FLUSH_PAGE_LIMIT);
+        if (pending.length === 0) break;
+
+        const statements = pending.map(({ event }) =>
           stmt.bind(
             event.id,
             event.teamId,
@@ -522,10 +548,18 @@ export class IngestDurableObject extends DurableObject {
             event.extraJson,
             nowEpochSeconds(),
           ),
-        ),
-      );
+        );
 
-      this.buffer.splice(0, snapshot.length);
+        for (let i = 0; i < statements.length; i += D1_BATCH_CHUNK_SIZE) {
+          await this.doEnv.DB.batch(statements.slice(i, i + D1_BATCH_CHUNK_SIZE));
+        }
+
+        await this.doState.storage.delete(pending.map((x) => x.key));
+        const flushedIds = new Set(pending.map((x) => x.event.id));
+        this.buffer = this.buffer.filter((event) => !flushedIds.has(event.id));
+
+        if (pending.length < FLUSH_PAGE_LIMIT) break;
+      }
     } catch (error) {
       console.error("flush_d1_failed", error);
     } finally {
