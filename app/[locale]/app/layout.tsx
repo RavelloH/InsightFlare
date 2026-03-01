@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { fetchAdminMe } from "@/lib/edge-client";
 import { isValidLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import type { Locale } from "@/lib/i18n/config";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -22,6 +23,12 @@ export default async function AppLayout({
 
   if (!session) {
     redirect(`/${locale}/login`);
+  }
+
+  try {
+    await fetchAdminMe();
+  } catch {
+    redirect(`/${locale}/login?error=session_invalid`);
   }
 
   const dictionary = await getDictionary(locale);

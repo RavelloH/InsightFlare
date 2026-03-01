@@ -39,6 +39,26 @@ function pathnameHasLocale(pathname: string): boolean {
   );
 }
 
+function normalizePathname(pathname: string): string {
+  if (pathname === "/") return pathname;
+  return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
+
+function toLocalizedPath(pathname: string, locale: string): string {
+  const normalized = normalizePathname(pathname);
+
+  if (normalized === "/") {
+    return `/${locale}/app`;
+  }
+
+  // Preserve historical shortcuts after removing non-locale shim pages.
+  if (normalized === "/app/config" || normalized === "/app/account") {
+    return `/${locale}/app/settings`;
+  }
+
+  return `/${locale}${normalized}`;
+}
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl;
   const authenticated = await isAuthenticated(request);
@@ -62,7 +82,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (!pathnameHasLocale(pathname)) {
     const locale = getLocale(request);
     const url = request.nextUrl.clone();
-    url.pathname = `/${locale}${pathname === "/" ? "" : pathname}`;
+    url.pathname = toLocalizedPath(pathname, locale);
     return NextResponse.redirect(url);
   }
 
