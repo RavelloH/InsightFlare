@@ -5,7 +5,8 @@ initOpenNextCloudflareForDev();
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  typedRoutes: true,
+  // typedRoutes disabled for [locale] dynamic routes
+  // typedRoutes: true,
   experimental: {
     adapterPath: "@opennextjs/cloudflare",
   },

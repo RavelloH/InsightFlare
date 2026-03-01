@@ -5,6 +5,8 @@ import { Database, LoaderCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 type DuckDbModule = typeof import("@duckdb/duckdb-wasm");
 type AsyncDuckDB = import("@duckdb/duckdb-wasm").AsyncDuckDB;
@@ -188,22 +190,22 @@ export function PrecisionQuery({ siteId, from, to }: PrecisionQueryProps): React
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl font-[var(--font-display)]">
-            <Database className="h-5 w-5 text-accent" />
+          <CardTitle className="flex items-center gap-2">
+            <Database className="h-5 w-5 text-primary" />
             DuckDB-WASM Precision Mode
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-sm text-slate-600">Range: {rangeLabel}</p>
-          <p className="text-sm text-slate-600">Archive files in scope: {fileCount}</p>
-          <label className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.12em] text-slate-500">SQL</span>
-            <textarea
+          <p className="text-sm text-muted-foreground">Range: {rangeLabel}</p>
+          <p className="text-sm text-muted-foreground">Archive files in scope: {fileCount}</p>
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">SQL</label>
+            <Textarea
               value={sql}
               onChange={(event) => setSql(event.target.value)}
-              className="min-h-[180px] w-full rounded-xl2 border border-slate-300 bg-white p-3 text-sm font-mono text-slate-800"
+              className="min-h-[180px] font-mono text-sm"
             />
-          </label>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" onClick={() => void runQuery()} disabled={running}>
               {running ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -216,36 +218,32 @@ export function PrecisionQuery({ siteId, from, to }: PrecisionQueryProps): React
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg font-[var(--font-display)]">Result</CardTitle>
+          <CardTitle>Result</CardTitle>
         </CardHeader>
         <CardContent>
           {rows.length === 0 ? (
-            <p className="text-sm text-slate-600">No rows.</p>
+            <p className="text-sm text-muted-foreground">No rows.</p>
           ) : (
-            <div className="overflow-auto rounded-xl2 border border-slate-200">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50">
-                  <tr>
-                    {columns.map((col) => (
-                      <th key={col} className="px-3 py-2 font-medium text-slate-600">
-                        {col}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, idx) => (
-                    <tr key={idx} className="border-t border-slate-100">
-                      {columns.map((col) => (
-                        <td key={col} className="px-3 py-2 text-slate-700">
-                          {String((row as Record<string, unknown>)[col] ?? "")}
-                        </td>
-                      ))}
-                    </tr>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {columns.map((col) => (
+                    <TableHead key={col}>{col}</TableHead>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row, idx) => (
+                  <TableRow key={idx}>
+                    {columns.map((col) => (
+                      <TableCell key={col}>
+                        {String((row as Record<string, unknown>)[col] ?? "")}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>

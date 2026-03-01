@@ -2,6 +2,12 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { verifySessionToken } from "@/lib/session";
+import {
+  SUPPORTED_LOCALES,
+  DEFAULT_LOCALE,
+  LOCALE_COOKIE,
+} from "@/lib/i18n/config";
+import { isValidLocale } from "@/lib/i18n/config";
 
 async function isAuthenticated(request: NextRequest): Promise<boolean> {
   const token = request.cookies.get(SESSION_COOKIE)?.value || "";
@@ -9,34 +15,76 @@ async function isAuthenticated(request: NextRequest): Promise<boolean> {
   return Boolean(session);
 }
 
+function getLocale(request: NextRequest): string {
+  const cookieLocale = request.cookies.get(LOCALE_COOKIE)?.value;
+  if (cookieLocale && isValidLocale(cookieLocale)) {
+    return cookieLocale;
+  }
+
+  const acceptLang = request.headers.get("accept-language");
+  if (acceptLang) {
+    const preferred = acceptLang
+      .split(",")
+      .map((part) => part.trim().split(";")[0].trim().toLowerCase().slice(0, 2))
+      .find((code) => isValidLocale(code));
+    if (preferred) return preferred;
+  }
+
+  return DEFAULT_LOCALE;
+}
+
+function pathnameHasLocale(pathname: string): boolean {
+  return SUPPORTED_LOCALES.some(
+    (locale) => pathname.startsWith(`/${locale}/`) || pathname === `/${locale}`,
+  );
+}
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl;
   const authenticated = await isAuthenticated(request);
 
+  // API routes — no locale handling, just auth checks
   if (pathname.startsWith("/api/admin")) {
     if (!authenticated) {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
+    return NextResponse.next();
   }
 
   if (pathname.startsWith("/api/archive")) {
     if (!authenticated) {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
+    return NextResponse.next();
   }
 
-  if (pathname.startsWith("/app")) {
+  // If no locale prefix, redirect to locale-prefixed path
+  if (!pathnameHasLocale(pathname)) {
+    const locale = getLocale(request);
+    const url = request.nextUrl.clone();
+    url.pathname = `/${locale}${pathname === "/" ? "" : pathname}`;
+    return NextResponse.redirect(url);
+  }
+
+  // Extract locale from pathname
+  const segments = pathname.split("/");
+  const locale = segments[1];
+  const restPath = "/" + segments.slice(2).join("/");
+
+  // Protected routes under /[locale]/app/*
+  if (restPath.startsWith("/app")) {
     if (!authenticated) {
       const url = request.nextUrl.clone();
-      url.pathname = "/login";
+      url.pathname = `/${locale}/login`;
       url.searchParams.set("next", `${pathname}${search}`);
       return NextResponse.redirect(url);
     }
   }
 
-  if (pathname === "/login" && authenticated) {
+  // Redirect authenticated users away from login
+  if (restPath === "/login" && authenticated) {
     const url = request.nextUrl.clone();
-    url.pathname = "/app";
+    url.pathname = `/${locale}/app`;
     url.search = "";
     return NextResponse.redirect(url);
   }
@@ -45,5 +93,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 }
 
 export const config = {
-  matcher: ["/app/:path*", "/login", "/api/admin/:path*", "/api/archive/:path*"],
+  matcher: [
+    "/((?!api|_next/static|_next/image|collect|script\\.js|healthz|favicon\\.ico).*)",
+  ],
 };
