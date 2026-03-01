@@ -10,7 +10,7 @@ interface EdgeRuntimeContext {
 
 export async function resolveEdgeRuntime(request: Request): Promise<EdgeRuntimeContext> {
   const { env, ctx, cf } = await getCloudflareContext({ async: true });
-  const nextRequest = new Request(request);
+  const nextRequest = new Request(request.url, request);
   try {
     Object.defineProperty(nextRequest, "cf", {
       value: cf ?? null,
