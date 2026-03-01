@@ -705,9 +705,6 @@ async function queryRecentEvents(env: Env, siteId: string, window: QueryWindow, 
         device_type: row.device_type || "",
         language: row.language || "",
         timezone: row.timezone || "",
-        bot_score: row.bot_score ?? 0,
-        bot_verified: row.bot_verified ?? 0,
-        bot_security_json: row.bot_security_json || "",
       });
     }
   }
@@ -736,10 +733,7 @@ async function queryRecentEvents(env: Env, siteId: string, window: QueryWindow, 
           os,
           device_type,
           language,
-          timezone,
-          bot_score,
-          bot_verified,
-          bot_security_json
+          timezone
         FROM pageviews
         WHERE site_id = ? AND event_at BETWEEN ? AND ?
         ORDER BY event_at DESC
@@ -1213,7 +1207,6 @@ export async function handlePublicQuery(request: Request, env: Env, url: URL): P
         privacy: {
           queryHashDetails: "hidden",
           visitorTrajectories: "hidden",
-          botSecurityFeatures: "hidden",
           detailedReferrerUrl: "hidden",
         },
       },

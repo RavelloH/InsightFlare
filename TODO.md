@@ -40,7 +40,7 @@
 - [x] 添加核心索引（`site_id + event_at` 等）
 - [x] 查询 API：概览、趋势、来源、页面、国家、设备
 - [x] 查询 API：会话明细、访客明细（权限受限）
-- [x] 公开查询 API 脱敏（不返回 query/hash 详情、访客轨迹、bot 安全特征、详细 referrer URL）
+- [x] 公开查询 API 脱敏（不返回 query/hash 详情、访客轨迹、详细 referrer URL）
 - [x] 多站点过滤与 team 级权限校验
 
 验收：
@@ -121,4 +121,4 @@
 - [x] D1 明细表保留策略：固定 `0-365`
 - [x] EU 会话窗口：固定 `30min`
 - [x] R2 精确模式引擎：`duckdb-wasm`
-- [x] 公开站点脱敏范围：隐藏 query/hash 详情、访客轨迹、bot 分数与安全特征、详细 referrer URL
+- [x] 公开站点脱敏范围：隐藏 query/hash 详情、访客轨迹、详细 referrer URL

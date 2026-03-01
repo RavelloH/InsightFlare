@@ -21,7 +21,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   const privacyConfig = {
     maskQueryHashDetails: parseFormBool(formData.get("maskQueryHashDetails"), true),
     maskVisitorTrajectory: parseFormBool(formData.get("maskVisitorTrajectory"), true),
-    maskBotSecurityFeatures: parseFormBool(formData.get("maskBotSecurityFeatures"), true),
     maskDetailedReferrerUrl: parseFormBool(formData.get("maskDetailedReferrerUrl"), true),
   };
 
@@ -48,4 +47,3 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   return NextResponse.redirect(new URL(returnTo, request.url));
 }
-

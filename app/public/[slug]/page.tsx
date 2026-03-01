@@ -50,8 +50,8 @@ export default async function PublicSitePage({
         <Badge variant="signal">Public Analytics</Badge>
         <h1 className="mt-2 font-[var(--font-display)] text-4xl text-ink">InsightFlare Public Lens</h1>
         <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          This page intentionally exposes only aggregate trend data. Query/hash details, visitor trajectories, bot
-          security attributes, and full referrer URLs are masked.
+          This page intentionally exposes only aggregate trend data. Query/hash details, visitor trajectories, and full
+          referrer URLs are masked.
         </p>
       </header>
 
@@ -152,4 +152,3 @@ export default async function PublicSitePage({
     </main>
   );
 }
-

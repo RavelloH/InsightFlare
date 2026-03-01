@@ -56,9 +56,6 @@ export interface AeRecentEventRow {
   device_type: string;
   language: string;
   timezone: string;
-  bot_score: number;
-  bot_verified: number;
-  bot_security_json: string;
 }
 
 export interface AeSessionRow {
@@ -221,18 +218,6 @@ function timezoneExpr(): string {
 
 function deviceExpr(): string {
   return `if(${hasNewBlobLayoutExpr()}, blob19, blob8)`;
-}
-
-function botScoreExpr(): string {
-  return "double3";
-}
-
-function botVerifiedExpr(): string {
-  return "0";
-}
-
-function botSecurityExpr(): string {
-  return "''";
 }
 
 function nonEmptyDistinctCountExpr(expr: string): string {
@@ -478,10 +463,7 @@ SELECT
   ${osExpr()} AS os,
   ${deviceExpr()} AS device_type,
   ${languageExpr()} AS language,
-  ${timezoneExpr()} AS timezone,
-  ${botScoreExpr()} AS bot_score,
-  ${botVerifiedExpr()} AS bot_verified,
-  ${botSecurityExpr()} AS bot_security_json
+  ${timezoneExpr()} AS timezone
 FROM ${dataset}
 WHERE ${where}
 ORDER BY event_at DESC
@@ -508,9 +490,6 @@ LIMIT ${n}
     device_type: parseString(row.device_type),
     language: parseString(row.language),
     timezone: parseString(row.timezone),
-    bot_score: parseNumber(row.bot_score),
-    bot_verified: parseNumber(row.bot_verified),
-    bot_security_json: parseString(row.bot_security_json),
   }));
 }
 

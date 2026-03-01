@@ -111,9 +111,6 @@ export interface NormalizedEvent {
   timezone: string;
   colo: string;
   asOrganization: string;
-  botScore: number | null;
-  botVerified: boolean;
-  botSecurityJson: string;
   uaRaw: string;
   browser: string;
   browserVersion: string;

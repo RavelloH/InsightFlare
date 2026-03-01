@@ -13,7 +13,6 @@ import {
   coerceString,
   deriveEuVisitorId,
   deriveSessionId,
-  jsonCloneRecord,
   nowEpochSeconds,
   safeHostname,
 } from "./utils";
@@ -176,9 +175,6 @@ export class IngestDurableObject extends DurableObject {
         deviceType: event.deviceType,
         language: event.language,
         timezone: event.timezone,
-        botScore: event.botScore,
-        botVerified: event.botVerified,
-        botSecurityJson: event.botSecurityJson,
       });
     }
 
@@ -239,16 +235,6 @@ export class IngestDurableObject extends DurableObject {
       255,
     );
 
-    const botInfo = jsonCloneRecord((cf as { botManagement?: unknown }).botManagement) ?? {};
-    const botScore = coerceNumber(botInfo.score, null);
-    const botVerified = Boolean(botInfo.verifiedBot);
-
-    const securityFeatures = {
-      ja3Hash: coerceString((cf as { tlsClientAuth?: unknown }).tlsClientAuth),
-      botTags: (botInfo.tags as unknown[]) ?? [],
-      verifiedBotCategory: coerceString(botInfo.verifiedBotCategory),
-    };
-
     const event: NormalizedEvent = {
       id: clampString(coerceString(client.eventId || crypto.randomUUID()), 128),
       eventType: clampString(coerceString(client.eventType || "pageview"), 50),
@@ -285,9 +271,6 @@ export class IngestDurableObject extends DurableObject {
       timezone: clampString(coerceString(cf.timezone || client.timezone || ""), 128),
       colo: clampString(coerceString(cf.colo ?? ""), 32),
       asOrganization: clampString(coerceString(cf.asOrganization ?? ""), 255),
-      botScore,
-      botVerified,
-      botSecurityJson: JSON.stringify(securityFeatures),
       uaRaw,
       browser: clampString(coerceString(ua.browser.name ?? ""), 80),
       browserVersion: clampString(coerceString(ua.browser.version ?? ""), 80),
@@ -367,7 +350,7 @@ export class IngestDurableObject extends DurableObject {
         doubles: [
           event.eventAt,
           event.durationMs,
-          event.botScore ?? -1,
+          0,
           event.screenWidth ?? 0,
           event.screenHeight ?? 0,
           event.latitude ?? 0,
@@ -465,9 +448,6 @@ export class IngestDurableObject extends DurableObject {
         timezone,
         colo,
         as_organization,
-        bot_score,
-        bot_verified,
-        bot_security_json,
         ua_raw,
         browser,
         browser_version,
@@ -478,7 +458,7 @@ export class IngestDurableObject extends DurableObject {
         screen_height,
         language,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     );
 
@@ -524,9 +504,6 @@ export class IngestDurableObject extends DurableObject {
             event.timezone,
             event.colo,
             event.asOrganization,
-            event.botScore,
-            event.botVerified ? 1 : 0,
-            event.botSecurityJson,
             event.uaRaw,
             event.browser,
             event.browserVersion,

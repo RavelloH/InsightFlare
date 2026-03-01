@@ -43,7 +43,6 @@ export default async function ConfigPage({
   const privacy = (config.privacy && typeof config.privacy === "object" ? config.privacy : {}) as Record<string, unknown>;
   const maskQueryHashDetails = boolFromUnknown(privacy.maskQueryHashDetails, true);
   const maskVisitorTrajectory = boolFromUnknown(privacy.maskVisitorTrajectory, true);
-  const maskBotSecurityFeatures = boolFromUnknown(privacy.maskBotSecurityFeatures, true);
   const maskDetailedReferrerUrl = boolFromUnknown(privacy.maskDetailedReferrerUrl, true);
   const hasError = Boolean(params.error);
 
@@ -154,15 +153,6 @@ export default async function ConfigPage({
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
-                      name="maskBotSecurityFeatures"
-                      value="1"
-                      defaultChecked={maskBotSecurityFeatures}
-                    />
-                    Hide Bot Security Features
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
                       name="maskDetailedReferrerUrl"
                       value="1"
                       defaultChecked={maskDetailedReferrerUrl}
@@ -180,4 +170,3 @@ export default async function ConfigPage({
     </main>
   );
 }
-
