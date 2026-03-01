@@ -73,6 +73,21 @@ npm run mono:deploy
 npm run cf:tail
 ```
 
+## Cloudflare 控制台命令（Git 集成）
+
+如果你在 Cloudflare 后台使用 Git 自动构建/部署，请使用：
+
+- Build command: `npm run ci:build`
+- Deploy command: `npm run ci:deploy`
+
+不要使用 `npx wrangler deploy`（在 monorepo 根目录会触发 workspace 检测错误）。
+
+可选：部署前模拟发布
+
+```bash
+npm run ci:deploy:dry-run
+```
+
 ## 本地开发
 
 ```bash
