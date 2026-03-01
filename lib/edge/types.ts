@@ -123,6 +123,4 @@ export interface NormalizedEvent {
   screenWidth: number | null;
   screenHeight: number | null;
   language: string;
-  ip: string;
-  extraJson: string;
 }

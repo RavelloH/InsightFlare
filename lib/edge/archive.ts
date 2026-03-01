@@ -601,9 +601,7 @@ async function runColdArchive(env: Env, nowMs: number): Promise<void> {
           device_type,
           screen_width,
           screen_height,
-          language,
-          ip,
-          extra_json
+          language
         FROM pageviews
         WHERE site_id = ? AND hour_bucket BETWEEN ? AND ?
         ORDER BY event_at ASC

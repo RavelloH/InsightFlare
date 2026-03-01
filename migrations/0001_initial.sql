@@ -103,8 +103,6 @@ CREATE TABLE IF NOT EXISTS pageviews (
   screen_width INTEGER,
   screen_height INTEGER,
   language TEXT,
-  ip TEXT,
-  extra_json TEXT,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
@@ -141,4 +139,3 @@ CREATE TABLE IF NOT EXISTS pageviews_archive_hourly (
 
 CREATE INDEX IF NOT EXISTS idx_archive_hour_bucket ON pageviews_archive_hourly(hour_bucket);
 CREATE INDEX IF NOT EXISTS idx_archive_site_hour ON pageviews_archive_hourly(site_id, hour_bucket);
-

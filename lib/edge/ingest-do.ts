@@ -297,12 +297,6 @@ export class IngestDurableObject extends DurableObject {
       screenWidth: coerceNumber(client.screenWidth, null),
       screenHeight: coerceNumber(client.screenHeight, null),
       language: clampString(coerceString(client.language ?? ""), 32),
-      ip,
-      extraJson: JSON.stringify({
-        cfRequest: cf,
-        requestMethod: req.method,
-        requestUrl: req.url,
-      }),
     };
 
     return event;
@@ -483,10 +477,8 @@ export class IngestDurableObject extends DurableObject {
         screen_width,
         screen_height,
         language,
-        ip,
-        extra_json,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     );
 
@@ -544,8 +536,6 @@ export class IngestDurableObject extends DurableObject {
             event.screenWidth,
             event.screenHeight,
             event.language,
-            event.ip,
-            event.extraJson,
             nowEpochSeconds(),
           ),
         );
