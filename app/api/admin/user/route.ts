@@ -13,7 +13,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       if (!userId) {
         const url = new URL(returnTo, request.url);
         url.searchParams.set("error", "missing_user_id");
-        return NextResponse.redirect(url);
+        return NextResponse.redirect(url, { status: 303 });
       }
 
       await updateAdminUser({
@@ -27,7 +27,7 @@ export async function POST(request: Request): Promise<NextResponse> {
             ? "admin"
             : "user",
       });
-      return NextResponse.redirect(new URL(returnTo, request.url));
+      return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
     }
 
     const username = String(formData.get("username") || "").trim();
@@ -40,7 +40,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!username || !email || password.length < 8) {
       const url = new URL(returnTo, request.url);
       url.searchParams.set("error", "invalid_user_input");
-      return NextResponse.redirect(url);
+      return NextResponse.redirect(url, { status: 303 });
     }
 
     await createAdminUser({
@@ -51,11 +51,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       systemRole,
     });
 
-    return NextResponse.redirect(new URL(returnTo, request.url));
+    return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
   } catch (error) {
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "user_mutation_failed");
     url.searchParams.set("message", error instanceof Error ? error.message : String(error));
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   }
 }

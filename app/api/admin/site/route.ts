@@ -19,7 +19,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       if (siteId.length === 0) {
         const url = new URL(returnTo, request.url);
         url.searchParams.set("error", "missing_site_id");
-        return NextResponse.redirect(url);
+        return NextResponse.redirect(url, { status: 303 });
       }
       await updateAdminSite({
         siteId,
@@ -32,7 +32,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       if (teamId.length === 0 || name.length === 0 || domain.length === 0) {
         const url = new URL(returnTo, request.url);
         url.searchParams.set("error", "invalid_site_input");
-        return NextResponse.redirect(url);
+        return NextResponse.redirect(url, { status: 303 });
       }
       const created = await createAdminSite({
         teamId,
@@ -44,15 +44,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       const url = new URL(returnTo, request.url);
       url.searchParams.set("siteId", created.id);
       url.searchParams.set("teamId", created.teamId);
-      return NextResponse.redirect(url);
+      return NextResponse.redirect(url, { status: 303 });
     }
   } catch (error) {
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "site_mutation_failed");
     url.searchParams.set("message", error instanceof Error ? error.message : String(error));
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   }
 
-  return NextResponse.redirect(new URL(returnTo, request.url));
+  return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
 }
-

@@ -13,7 +13,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (teamId.length === 0 || userId.length === 0) {
       const url = new URL(returnTo, request.url);
       url.searchParams.set("error", "invalid_member_remove_input");
-      return NextResponse.redirect(url);
+      return NextResponse.redirect(url, { status: 303 });
     }
 
     try {
@@ -22,17 +22,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       const url = new URL(returnTo, request.url);
       url.searchParams.set("error", "remove_member_failed");
       url.searchParams.set("message", error instanceof Error ? error.message : String(error));
-      return NextResponse.redirect(url);
+      return NextResponse.redirect(url, { status: 303 });
     }
 
-    return NextResponse.redirect(new URL(returnTo, request.url));
+    return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
   }
 
   const identifier = String(formData.get("identifier") || "").trim();
   if (teamId.length === 0 || identifier.length < 2) {
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "invalid_member_input");
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   }
 
   try {
@@ -44,8 +44,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "add_member_failed");
     url.searchParams.set("message", error instanceof Error ? error.message : String(error));
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   }
 
-  return NextResponse.redirect(new URL(returnTo, request.url));
+  return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
 }

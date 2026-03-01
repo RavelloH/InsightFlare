@@ -14,7 +14,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const url = new URL("/login", request.url);
     url.searchParams.set("error", "invalid_credentials");
     url.searchParams.set("next", nextPath);
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   }
 
   try {
@@ -30,7 +30,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
 
     const url = new URL(nextPath, request.url);
-    const response = NextResponse.redirect(url);
+    const response = NextResponse.redirect(url, { status: 303 });
     response.cookies.set({
       name: SESSION_COOKIE,
       value: token,
@@ -45,6 +45,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     const url = new URL("/login", request.url);
     url.searchParams.set("error", "invalid_credentials");
     url.searchParams.set("next", nextPath);
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   }
 }

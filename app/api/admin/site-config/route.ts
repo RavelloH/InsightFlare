@@ -15,7 +15,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (siteId.length === 0) {
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "missing_site_id");
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   }
 
   const privacyConfig = {
@@ -42,8 +42,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "save_site_config_failed");
     url.searchParams.set("message", error instanceof Error ? error.message : String(error));
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   }
 
-  return NextResponse.redirect(new URL(returnTo, request.url));
+  return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
 }

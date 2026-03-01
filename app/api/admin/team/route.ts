@@ -12,7 +12,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (name.length < 2) {
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "invalid_team_name");
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   }
 
   try {
@@ -22,11 +22,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
     const url = new URL(returnTo, request.url);
     url.searchParams.set("teamId", created.id);
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   } catch (error) {
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "create_team_failed");
     url.searchParams.set("message", error instanceof Error ? error.message : String(error));
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, { status: 303 });
   }
 }
