@@ -38,6 +38,11 @@ migrations_dir = "./migrations"
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
 
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 # Optional: enable when archive-to-R2 is configured.
 # [[r2_buckets]]
 # binding = "ARCHIVE_BUCKET"

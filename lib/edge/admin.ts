@@ -583,8 +583,8 @@ async function hScriptSnippet(req: Request, env: Env, url: URL): Promise<Respons
 }
 
 export async function handlePrivateAdmin(request: Request, env: Env, url: URL): Promise<Response> {
-  if (!isPrivateAuthorized(request, env)) return una();
   const p = url.pathname;
+  if (p !== "/api/private/admin/auth/login" && !isPrivateAuthorized(request, env)) return una();
   if (p === "/api/private/admin/auth/login") return hAuthLogin(request, env);
   if (p === "/api/private/admin/auth/me") return hAuthMe(request, env);
   if (p === "/api/private/admin/users") return hUsers(request, env);
