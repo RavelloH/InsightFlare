@@ -13,6 +13,21 @@ InsightFlare 是运行在 Cloudflare 上的开源访问分析系统
 - Dashboard：多团队/多站点管理、公开脱敏页面、DuckDB-WASM 精确查询
 - Parquet 文件查询支持 `HTTP Range Requests`
 
+## 架构说明
+
+- 单应用：根目录 Next.js（OpenNext + Cloudflare Worker）
+- 单配置：仅使用根目录 `wrangler.toml`
+- 采集、查询、管理接口均通过 Next.js Route Handlers 提供：
+  - `/script.js`
+  - `/collect`
+  - `/api/private/*`
+  - `/api/public/*`
+  - `/healthz`
+- `cf-worker.js` 仅负责：
+  - 导出 Durable Object 类
+  - 透传 `/admin/ws`
+  - 执行定时归档任务
+
 ## 快速开始
 
 1. 安装依赖
@@ -27,7 +42,7 @@ npm ci
 npm run cf:d1:create
 ```
 
-3. 修改 `apps/dashboard/wrangler.toml`
+3. 修改根目录 `wrangler.toml`
 
 - 填入 `[[d1_databases]]` 的 `database_id`
 - 按需开启 `[[r2_buckets]]`
@@ -42,19 +57,20 @@ npm run cf:secret:daily-salt
 
 ```bash
 npm run cf:secret:admin-token
-npm run cf:secret:dashboard-password
+npm run cf:secret:bootstrap-admin-password
+npm run cf:secret:session-secret
 ```
 
 5. 本地构建验证
 
 ```bash
-npm run mono:build
+npm run cf:build
 ```
 
 6. 部署
 
 ```bash
-npm run mono:deploy
+npm run cf:deploy
 ```
 
 ## Cloudflare Git 集成（重要）
@@ -64,12 +80,12 @@ npm run mono:deploy
 - Build command: `npm run ci:build`
 - Deploy command: `npm run ci:deploy`
 
-不要在 monorepo 根目录直接用 `npx wrangler deploy`。
+不要跳过 `prebuild` 直接部署，否则 D1 迁移不会自动执行。
 
 ## 常用命令
 
 - 本地开发：`npm run dev`
-- 预部署 dry-run：`npm run mono:deploy:dry-run`
+- 预部署 dry-run：`npm run cf:deploy:dry-run`
 - CI dry-run：`npm run ci:deploy:dry-run`
 - 查看线上日志：`npm run cf:tail`
 

@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
@@ -11,6 +11,10 @@
       {
         "name": "next"
       }
+    ],
+    "types": [
+      "node",
+      "@cloudflare/workers-types"
     ],
     "allowJs": false,
     "incremental": true,
@@ -27,4 +31,3 @@
     "node_modules"
   ]
 }
-

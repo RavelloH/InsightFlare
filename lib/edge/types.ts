@@ -1,5 +1,3 @@
-import type { IngestEnvelope } from "@insightflare/shared";
-
 export interface AnalyticsEngineWriteDataPoint {
   blobs?: string[];
   doubles?: number[];
@@ -63,6 +61,11 @@ export interface TrackerClientPayload {
   utmCampaign?: string;
   utmTerm?: string;
   utmContent?: string;
+}
+
+export interface IngestEnvelope {
+  request: SerializedRequestPayload;
+  client: TrackerClientPayload;
 }
 
 export interface IngestEnvelopePayload extends IngestEnvelope {

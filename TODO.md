@@ -2,7 +2,7 @@
 
 ## Phase 0 - 项目初始化
 
-- [x] 初始化 monorepo（建议 `apps/dashboard` + `apps/edge` + `packages/shared`）
+- [x] 初始化单体应用（根目录 Next.js，单 `wrangler.toml`）
 - [x] 配置 `wrangler.toml`：Worker、Durable Object、D1、Analytics Engine、R2（可选）绑定
 - [x] 建立环境变量与 Secret 规范（`DAILY_SALT_SECRET`、JWT secret、WebSocket auth key）
 - [x] 建立 migration 流程（D1 schema versioning）

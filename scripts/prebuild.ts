@@ -62,14 +62,14 @@ async function main(): Promise<void> {
     "local"
   ).toLowerCase();
   const rootDir = process.cwd();
-  const edgeDir = path.resolve(rootDir, "apps", "edge");
   const wranglerConfigInput =
     pickArg("config") ??
     process.env.INSIGHTFLARE_WRANGLER_CONFIG ??
-    path.join(edgeDir, "wrangler.toml");
+    path.join(rootDir, "wrangler.toml");
   const wranglerConfig = path.isAbsolute(wranglerConfigInput)
     ? wranglerConfigInput
     : path.resolve(rootDir, wranglerConfigInput);
+  const wranglerDir = path.dirname(wranglerConfig);
   const d1DatabaseName =
     pickArg("database") ??
     process.env.INSIGHTFLARE_D1_DATABASE ??
@@ -78,16 +78,13 @@ async function main(): Promise<void> {
 
   log("InsightFlare prebuild started");
 
-  if (!fs.existsSync(edgeDir)) {
-    throw new Error(`Missing edge workspace directory: ${edgeDir}`);
-  }
   if (!fs.existsSync(wranglerConfig)) {
     throw new Error(`Missing wrangler config: ${wranglerConfig}`);
   }
 
   if (autoMigrate) {
     const targetFlag = migrationTarget === "remote" ? "--remote" : "--local";
-    const wranglerCli = resolveWranglerCli(rootDir, edgeDir);
+    const wranglerCli = resolveWranglerCli(rootDir, wranglerDir);
     const args = [
       wranglerCli,
       "d1",
@@ -103,7 +100,7 @@ async function main(): Promise<void> {
       args.push("--env", wranglerEnv);
     }
 
-    run(process.execPath, args, edgeDir);
+    run(process.execPath, args, wranglerDir);
     log(`D1 migrations applied (${migrationTarget})`);
   } else {
     log("INSIGHTFLARE_AUTO_MIGRATE=0, skip D1 migrations");
