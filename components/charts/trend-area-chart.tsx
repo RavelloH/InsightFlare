@@ -15,7 +15,7 @@ function formatTick(timestampMs: number): string {
 
 export function TrendAreaChart({ data }: TrendAreaChartProps) {
   return (
-    <div className="h-72 w-full">
+    <div className="h-60 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 10, right: 16, bottom: 0, left: -20 }}>
           <defs>
@@ -27,8 +27,15 @@ export function TrendAreaChart({ data }: TrendAreaChartProps) {
               <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
               <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
             </linearGradient>
+            <filter id="line-glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feComponentTransfer in="blur" result="dimmedBlur">
+                <feFuncA type="linear" slope="0.4" />
+              </feComponentTransfer>
+              <feComposite in="SourceGraphic" in2="dimmedBlur" operator="over" />
+            </filter>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+          <CartesianGrid vertical={false} className="stroke-border" />
           <XAxis
             dataKey="timestampMs"
             className="text-muted-foreground"
@@ -51,7 +58,8 @@ export function TrendAreaChart({ data }: TrendAreaChartProps) {
               border: "1px solid hsl(var(--border))",
               background: "hsl(var(--card))",
               color: "hsl(var(--card-foreground))",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              fontSize: "12px",
             }}
             formatter={(value) => compactNumber(Number(value))}
             labelFormatter={(label) => new Date(Number(label)).toLocaleString()}
@@ -63,6 +71,7 @@ export function TrendAreaChart({ data }: TrendAreaChartProps) {
             fill="url(#viewsFill)"
             strokeWidth={2}
             dot={false}
+            filter="url(#line-glow)"
           />
           <Area
             type="monotone"
@@ -71,6 +80,7 @@ export function TrendAreaChart({ data }: TrendAreaChartProps) {
             fill="url(#sessionsFill)"
             strokeWidth={2}
             dot={false}
+            filter="url(#line-glow)"
           />
         </AreaChart>
       </ResponsiveContainer>

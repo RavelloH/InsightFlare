@@ -26,11 +26,11 @@ export default async function LoginPage({
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-16">
       <div className="grid w-full max-w-5xl gap-8 md:grid-cols-[1.2fr_1fr]">
-        <section className="space-y-6 rounded-xl border bg-card/70 p-8 backdrop-blur">
+        <section className="space-y-6 rounded-md border bg-card p-8">
           <Badge variant="signal">{t("login.hero.badge")}</Badge>
           <div className="flex items-center gap-3">
             <Flame className="h-10 w-10 text-primary" />
-            <h1 className="font-[var(--font-display)] text-4xl leading-tight md:text-5xl">
+            <h1 className="text-4xl font-semibold leading-tight md:text-5xl">
               {t("login.hero.title")}
             </h1>
           </div>
@@ -38,10 +38,10 @@ export default async function LoginPage({
             {t("login.hero.description")}
           </p>
           <div className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-2">
-            <div className="rounded-lg border p-4">
+            <div className="rounded-md border bg-def-100 p-4">
               {t("login.hero.feature1")}
             </div>
-            <div className="rounded-lg border p-4">
+            <div className="rounded-md border bg-def-100 p-4">
               {t("login.hero.feature2")}
             </div>
           </div>
@@ -49,7 +49,7 @@ export default async function LoginPage({
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl font-[var(--font-display)]">{t("login.title")}</CardTitle>
+            <CardTitle className="text-2xl">{t("login.title")}</CardTitle>
             <CardDescription>{t("login.subtitle")}</CardDescription>
           </CardHeader>
           <CardContent>

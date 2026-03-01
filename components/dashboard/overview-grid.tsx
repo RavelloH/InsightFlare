@@ -45,7 +45,7 @@ function compactNum(value: number): string {
 
 export function OverviewGrid({ views, sessions, visitors, bounceRate, avgDurationMs, approximateVisitors, labels }: OverviewGridProps) {
   return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+    <section className="rounded-md border border-border bg-card overflow-hidden grid grid-cols-2 md:grid-cols-5">
       <MetricCard
         label={labels.views}
         value={views}

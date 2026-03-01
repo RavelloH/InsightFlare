@@ -45,6 +45,13 @@ const config: Config = {
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
         signal: "hsl(var(--signal))",
+        highlight: "hsl(var(--highlight))",
+        def: {
+          "100": "hsl(var(--def-100))",
+          "200": "hsl(var(--def-200))",
+          "300": "hsl(var(--def-300))",
+          "400": "hsl(var(--def-400))",
+        },
         chart: {
           "1": "hsl(var(--chart-1))",
           "2": "hsl(var(--chart-2))",
@@ -67,10 +74,7 @@ const config: Config = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
-        xl2: "1.25rem",
-      },
-      boxShadow: {
-        card: "0 12px 40px rgba(18, 34, 78, 0.12)",
+        xl: "calc(var(--radius) + 4px)",
       },
       keyframes: {
         "accordion-down": {

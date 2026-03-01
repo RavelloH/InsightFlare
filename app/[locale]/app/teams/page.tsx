@@ -42,7 +42,7 @@ export default async function TeamsPage({
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="font-[var(--font-display)] text-3xl font-semibold">{t("teams.title")}</h1>
+          <h1 className="text-2xl font-semibold">{t("teams.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("teams.description")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -98,7 +98,9 @@ export default async function TeamsPage({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Globe2 className="h-5 w-5 text-primary" />
+              <span className="bg-def-200 rounded-lg p-1 inline-flex">
+                <Globe2 className="h-4 w-4" />
+              </span>
               {t("teams.sites")}
             </CardTitle>
           </CardHeader>
@@ -141,7 +143,9 @@ export default async function TeamsPage({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Copy className="h-5 w-5 text-primary" />
+              <span className="bg-def-200 rounded-lg p-1 inline-flex">
+                <Copy className="h-4 w-4" />
+              </span>
               {t("teams.installSnippets")}
             </CardTitle>
           </CardHeader>
@@ -157,7 +161,7 @@ export default async function TeamsPage({
                       <p className="font-medium">{site.name}</p>
                       <Badge variant="outline">{site.domain}</Badge>
                     </div>
-                    <code className="block overflow-x-auto rounded-lg bg-foreground/5 p-3 text-xs font-mono dark:bg-foreground/10">
+                    <code className="block overflow-x-auto rounded-md bg-def-100 p-3 text-xs font-mono">
                       {snippet}
                     </code>
                   </div>
@@ -171,7 +175,9 @@ export default async function TeamsPage({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Shield className="h-5 w-5 text-primary" />
+            <span className="bg-def-200 rounded-lg p-1 inline-flex">
+              <Shield className="h-4 w-4" />
+            </span>
             {t("teams.teamMembers")}
           </CardTitle>
         </CardHeader>

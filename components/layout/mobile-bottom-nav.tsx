@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Users, Settings, Beaker } from "lucide-react";
+import { LayoutDashboard, Users, Settings, Beaker } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface MobileBottomNavProps {
@@ -10,7 +10,7 @@ interface MobileBottomNavProps {
 }
 
 const navItems = [
-  { id: "dashboard", icon: BarChart3, path: "/app" },
+  { id: "dashboard", icon: LayoutDashboard, path: "/app" },
   { id: "teams", icon: Users, path: "/app/teams" },
   { id: "settings", icon: Settings, path: "/app/settings" },
   { id: "precision", icon: Beaker, path: "/app/precision" },
@@ -35,7 +35,7 @@ export function MobileBottomNav({ locale }: MobileBottomNavProps) {
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:hidden h-16">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-card md:hidden h-14">
       {navItems.map((item) => {
         const active = isActive(item.path);
         const label = navLabels[item.id]?.[locale] ?? item.id;
@@ -44,11 +44,11 @@ export function MobileBottomNav({ locale }: MobileBottomNavProps) {
             key={item.id}
             href={`/${locale}${item.path}`}
             className={cn(
-              "flex flex-col items-center gap-1 px-3 py-2 text-xs transition-colors",
-              active ? "text-primary" : "text-muted-foreground",
+              "flex flex-col items-center gap-1 px-3 py-2 text-[10px] font-medium transition-colors",
+              active ? "text-foreground" : "text-muted-foreground",
             )}
           >
-            <item.icon className="h-5 w-5" />
+            <item.icon className="h-[22px] w-[22px]" />
             <span>{label}</span>
           </Link>
         );

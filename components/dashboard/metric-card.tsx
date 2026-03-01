@@ -1,6 +1,5 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AnimatedCounter } from "@/components/shared/animated-counter";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -17,41 +16,37 @@ interface MetricCardProps {
 export function MetricCard({ label, value, formatter, hint, loading }: MetricCardProps) {
   if (loading) {
     return (
-      <Card>
-        <CardHeader className="pb-2">
-          <Skeleton className="h-4 w-20" />
-        </CardHeader>
-        <CardContent>
-          <Skeleton className="h-8 w-24" />
-        </CardContent>
-      </Card>
+      <div className="shadow-[0_0_0_0.5px] shadow-border p-4 min-h-[88px] flex flex-col justify-center gap-2">
+        <Skeleton className="h-3.5 w-20" />
+        <Skeleton className="h-8 w-24" />
+      </div>
     );
   }
 
   return (
-    <Card className="transition-shadow hover:shadow-md">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+    <div className="shadow-[0_0_0_0.5px] shadow-border p-4 min-h-[88px] flex flex-col justify-center gap-1">
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm font-medium text-muted-foreground leading-[1.1]">
           {label}
-          {hint && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger>
-                  <Info className="h-3.5 w-3.5" />
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p className="text-xs">{hint}</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="text-3xl font-semibold tracking-tight">
-          <AnimatedCounter value={value} formatter={formatter} />
-        </div>
-      </CardContent>
-    </Card>
+        </span>
+        {hint && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="inline-flex text-muted-foreground/60 hover:text-muted-foreground transition-colors">
+                  <Info className="h-3 w-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">{hint}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+      </div>
+      <div className="font-mono text-3xl font-bold leading-[1.1]">
+        <AnimatedCounter value={value} formatter={formatter} />
+      </div>
+    </div>
   );
 }

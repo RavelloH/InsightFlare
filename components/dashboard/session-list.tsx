@@ -22,24 +22,26 @@ export function SessionList({ sessions, labels }: SessionListProps) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Clock className="h-5 w-5 text-chart-3" />
+          <span className="bg-def-200 rounded-lg p-1 inline-flex">
+            <Clock className="h-4 w-4" />
+          </span>
           {labels.title}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-1.5">
         {sessions.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{labels.empty}</p>
+          <p className="text-xs text-muted-foreground">{labels.empty}</p>
         ) : (
           sessions.map((session) => (
-            <div key={session.sessionId} className="rounded-lg border p-3 transition-colors hover:bg-muted/50">
+            <div key={session.sessionId} className="rounded-md border p-2 transition-colors hover:bg-muted/50">
               <div className="flex items-center justify-between">
                 <p className="font-mono text-xs text-muted-foreground">{session.sessionId.slice(0, 16)}...</p>
-                <Badge variant="outline">{session.views} views</Badge>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5">{session.views} views</Badge>
               </div>
-              <p className="mt-1 text-sm">
+              <p className="mt-0.5 text-xs">
                 {session.entryPath || "/"} → {session.exitPath || "/"}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(session.startedAt)}</p>
+              <p className="mt-0.5 text-muted-foreground text-[11px]">{formatDateTime(session.startedAt)}</p>
             </div>
           ))
         )}

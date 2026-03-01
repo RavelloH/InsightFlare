@@ -51,32 +51,32 @@ export default async function PublicSitePage({
 
   return (
     <main className="mx-auto w-full max-w-6xl space-y-6 px-4 py-8 md:px-6">
-      <header className="rounded-xl border bg-card p-6">
+      <header className="rounded-md border bg-card p-6">
         <Badge variant="signal">{t("public.badge")}</Badge>
-        <h1 className="mt-2 font-[var(--font-display)] text-3xl font-semibold md:text-4xl">{t("public.title")}</h1>
+        <h1 className="mt-2 text-3xl font-semibold md:text-4xl">{t("public.title")}</h1>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{t("public.description")}</p>
       </header>
 
-      <section className="grid gap-4 md:grid-cols-4">
+      <section className="rounded-md border border-border bg-card overflow-hidden grid grid-cols-2 md:grid-cols-4">
         {[
           { label: t("dashboard.views"), value: compactNumber(overview.data.views) },
           { label: t("dashboard.sessions"), value: compactNumber(overview.data.sessions) },
           { label: t("dashboard.visitors"), value: compactNumber(overview.data.visitors) },
           { label: t("dashboard.bounceRate"), value: formatPercent(overview.data.bounceRate) },
         ].map((metric) => (
-          <Card key={metric.label}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{metric.label}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-3xl font-semibold">{metric.value}</CardContent>
-          </Card>
+          <div key={metric.label} className="shadow-[0_0_0_0.5px] shadow-border p-4 min-h-[88px] flex flex-col justify-center gap-1">
+            <span className="text-sm font-medium text-muted-foreground">{metric.label}</span>
+            <span className="font-mono text-3xl font-bold leading-[1.1]">{metric.value}</span>
+          </div>
         ))}
       </section>
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-primary" />
+            <span className="bg-def-200 rounded-lg p-1 inline-flex">
+              <TrendingUp className="h-4 w-4" />
+            </span>
             {t("public.trend")}
           </CardTitle>
         </CardHeader>
@@ -89,7 +89,9 @@ export default async function PublicSitePage({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Globe2 className="h-5 w-5 text-primary" />
+              <span className="bg-def-200 rounded-lg p-1 inline-flex">
+                <Globe2 className="h-4 w-4" />
+              </span>
               {t("public.topReferrers")}
             </CardTitle>
           </CardHeader>
@@ -105,7 +107,9 @@ export default async function PublicSitePage({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <LockKeyhole className="h-5 w-5 text-chart-3" />
+              <span className="bg-def-200 rounded-lg p-1 inline-flex">
+                <LockKeyhole className="h-4 w-4" />
+              </span>
               {t("public.topPaths")}
             </CardTitle>
           </CardHeader>

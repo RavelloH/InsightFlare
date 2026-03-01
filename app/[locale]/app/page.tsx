@@ -134,7 +134,7 @@ export default async function DashboardPage({
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="font-[var(--font-display)] text-3xl font-semibold">{t("dashboard.title")}</h1>
+          <h1 className="text-2xl font-semibold">{t("dashboard.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("dashboard.description")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -174,7 +174,9 @@ export default async function DashboardPage({
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle className="flex items-center gap-2">
-              <BarChart3 className="h-5 w-5 text-primary" />
+              <span className="bg-def-200 rounded-lg p-1 inline-flex">
+                <BarChart3 className="h-4 w-4" />
+              </span>
               {t("dashboard.trafficTrend")}
             </CardTitle>
             <Badge variant="secondary">{t("dashboard.daily")}</Badge>
@@ -208,7 +210,9 @@ export default async function DashboardPage({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Route className="h-5 w-5 text-primary" />
+              <span className="bg-def-200 rounded-lg p-1 inline-flex">
+                <Route className="h-4 w-4" />
+              </span>
               {t("dashboard.topPages")}
             </CardTitle>
           </CardHeader>
@@ -224,7 +228,9 @@ export default async function DashboardPage({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Globe className="h-5 w-5 text-primary" />
+              <span className="bg-def-200 rounded-lg p-1 inline-flex">
+                <Globe className="h-4 w-4" />
+              </span>
               {t("dashboard.topReferrers")}
             </CardTitle>
           </CardHeader>

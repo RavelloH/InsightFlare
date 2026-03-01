@@ -191,7 +191,9 @@ export function PrecisionQuery({ siteId, from, to }: PrecisionQueryProps): React
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Database className="h-5 w-5 text-primary" />
+            <span className="bg-def-200 rounded-lg p-1 inline-flex">
+              <Database className="h-4 w-4" />
+            </span>
             DuckDB-WASM Precision Mode
           </CardTitle>
         </CardHeader>
@@ -203,7 +205,7 @@ export function PrecisionQuery({ siteId, from, to }: PrecisionQueryProps): React
             <Textarea
               value={sql}
               onChange={(event) => setSql(event.target.value)}
-              className="min-h-[180px] font-mono text-sm"
+              className="min-h-[180px] font-mono text-sm bg-def-100"
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">

@@ -63,26 +63,26 @@ export function DateRangePicker({ locale, from, to }: DateRangePickerProps) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" className="gap-2">
-          <Calendar className="h-4 w-4" />
+        <Button variant="outline" className="gap-2 h-8 text-sm">
+          <Calendar className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">{formatRangeLabel(from, to)}</span>
           <ChevronDown className="h-3 w-3 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-4" align="end">
+      <PopoverContent className="w-72 p-3" align="end">
         <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-2">
-            <Button variant="outline" size="sm" onClick={() => applyPreset(7)}>
+          <div className="grid grid-cols-3 gap-1.5">
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => applyPreset(7)}>
               7d
             </Button>
-            <Button variant="outline" size="sm" onClick={() => applyPreset(30)}>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => applyPreset(30)}>
               30d
             </Button>
-            <Button variant="outline" size="sm" onClick={() => applyPreset(90)}>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => applyPreset(90)}>
               90d
             </Button>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">
               {locale === "zh" ? "起始时间" : "From"}
             </label>
@@ -90,10 +90,10 @@ export function DateRangePicker({ locale, from, to }: DateRangePickerProps) {
               type="datetime-local"
               value={fromValue}
               onChange={(e) => setFromValue(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex h-8 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">
               {locale === "zh" ? "结束时间" : "To"}
             </label>
@@ -101,10 +101,10 @@ export function DateRangePicker({ locale, from, to }: DateRangePickerProps) {
               type="datetime-local"
               value={toValue}
               onChange={(e) => setToValue(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex h-8 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
-          <Button onClick={applyCustom} className="w-full" size="sm">
+          <Button onClick={applyCustom} className="w-full h-8 text-sm" size="sm">
             {locale === "zh" ? "应用" : "Apply"}
           </Button>
         </div>

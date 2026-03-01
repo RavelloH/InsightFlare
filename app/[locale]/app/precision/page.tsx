@@ -50,7 +50,7 @@ export default async function PrecisionPage({
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <div>
-        <h1 className="font-[var(--font-display)] text-3xl font-semibold">{t("precision.title")}</h1>
+        <h1 className="text-2xl font-semibold">{t("precision.title")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t("precision.description")}</p>
       </div>
 
@@ -67,7 +67,9 @@ export default async function PrecisionPage({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Clock4 className="h-5 w-5 text-primary" />
+              <span className="bg-def-200 rounded-lg p-1 inline-flex">
+                <Clock4 className="h-4 w-4" />
+              </span>
               {t("precision.timeRange")}
             </CardTitle>
           </CardHeader>
@@ -81,7 +83,9 @@ export default async function PrecisionPage({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Beaker className="h-5 w-5 text-chart-3" />
+              <span className="bg-def-200 rounded-lg p-1 inline-flex">
+                <Beaker className="h-4 w-4" />
+              </span>
               {t("precision.inputDataset")}
             </CardTitle>
           </CardHeader>

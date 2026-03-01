@@ -31,15 +31,15 @@ export default async function LocaleLayout({
 
   return (
     <html lang={locale} suppressHydrationWarning>
-      <body className={`${displayFont.variable} ${bodyFont.variable} font-[var(--font-body)] grain relative`}>
+      <body className={`${displayFont.variable} ${bodyFont.variable} font-[var(--font-body)]`}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
+          defaultTheme="dark"
           enableSystem
           disableTransitionOnChange
         >
           <DictionaryProvider dictionary={dictionary}>
-            <div className="relative z-10 min-h-screen">
+            <div className="min-h-screen">
               {children}
             </div>
           </DictionaryProvider>
