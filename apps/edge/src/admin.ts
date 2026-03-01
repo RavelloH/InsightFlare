@@ -1,519 +1,598 @@
 import type { Env } from "./types";
 import { clampString } from "./utils";
 
-interface JsonRecord {
-  [key: string]: unknown;
-}
+type JsonRecord = Record<string, unknown>;
 
-function jsonResponse(payload: unknown, status = 200): Response {
-  return new Response(JSON.stringify(payload), {
+type UserRow = {
+  id: string;
+  username: string;
+  email: string;
+  name: string | null;
+  password_hash: string | null;
+  system_role: string;
+  created_at: number;
+  updated_at: number;
+};
+
+type Actor = { user: UserRow; isAdmin: boolean };
+
+const HASH_PREFIX = "pbkdf2_sha256";
+const HASH_ITERS = 210000;
+const HASH_LEN = 32;
+
+const j = (payload: unknown, status = 200) =>
+  new Response(JSON.stringify(payload), {
     status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
+    headers: { "content-type": "application/json; charset=utf-8" },
   });
-}
+const bad = (m: string) => j({ ok: false, error: m }, 400);
+const una = (m = "Unauthorized") => j({ ok: false, error: m }, 401);
+const forb = (m = "Forbidden") => j({ ok: false, error: m }, 403);
+const nf = (m = "Not Found") => j({ ok: false, error: m }, 404);
+const na = () => j({ ok: false, error: "Method Not Allowed" }, 405);
 
-function badRequest(message: string): Response {
-  return jsonResponse({ ok: false, error: message }, 400);
-}
-
-function unauthorized(message = "Unauthorized"): Response {
-  return jsonResponse({ ok: false, error: message }, 401);
-}
-
-function notFound(message = "Not Found"): Response {
-  return jsonResponse({ ok: false, error: message }, 404);
-}
-
-function notAllowed(message = "Method Not Allowed"): Response {
-  return jsonResponse({ ok: false, error: message }, 405);
-}
-
-function extractBearerToken(request: Request): string {
-  const auth = request.headers.get("authorization") || "";
-  if (auth.toLowerCase().startsWith("bearer ")) {
-    return auth.slice(7).trim();
-  }
+const tokenFrom = (r: Request) => {
+  const a = r.headers.get("authorization") || "";
+  if (a.toLowerCase().startsWith("bearer ")) return a.slice(7).trim();
   return "";
-}
-
-function isPrivateAuthorized(request: Request, env: Env): boolean {
+};
+const isPrivateAuthorized = (r: Request, env: Env) => {
   const expected = env.ADMIN_API_TOKEN;
-  if (!expected || expected.length === 0) {
-    return true;
-  }
-  const fromBearer = extractBearerToken(request);
-  const fromHeader = request.headers.get("x-admin-token") || "";
-  return fromBearer === expected || fromHeader === expected;
-}
+  if (!expected || expected.length === 0) return true;
+  return tokenFrom(r) === expected || (r.headers.get("x-admin-token") || "") === expected;
+};
 
-function toSlug(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-}
+const normU = (s: string) => clampString(s.trim().toLowerCase(), 80);
+const normE = (s: string) => clampString(s.trim().toLowerCase(), 200);
+const toSlug = (v: string) =>
+  v.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+const toRole = (v: unknown): "admin" | "user" => (String(v || "user").toLowerCase() === "admin" ? "admin" : "user");
+const bool = (v: unknown, fb = false) => {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") return ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
+  return fb;
+};
 
-function boolInput(input: unknown, fallback = false): boolean {
-  if (typeof input === "boolean") return input;
-  if (typeof input === "number") return input !== 0;
-  if (typeof input === "string") {
-    const normalized = input.trim().toLowerCase();
-    return normalized === "1" || normalized === "true" || normalized === "on" || normalized === "yes";
-  }
-  return fallback;
-}
-
-async function parseJsonBody(request: Request): Promise<JsonRecord> {
+const parseJson = async (r: Request): Promise<JsonRecord> => {
   try {
-    const parsed = (await request.json()) as unknown;
-    if (parsed && typeof parsed === "object") {
-      return parsed as JsonRecord;
-    }
-  } catch {
-    // ignore invalid json body
-  }
+    const p = (await r.json()) as unknown;
+    if (p && typeof p === "object") return p as JsonRecord;
+  } catch {}
   return {};
+};
+
+const b64u = (b: Uint8Array) => {
+  let bin = "";
+  for (let i = 0; i < b.length; i += 1) bin += String.fromCharCode(b[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+};
+const u8 = (s: string) => new TextEncoder().encode(s);
+const fromB64u = (v: string) => {
+  const p = v.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((v.length + 3) % 4);
+  const bin = atob(p);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+};
+const eq = (a: Uint8Array, b: Uint8Array) => {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i += 1) d |= a[i] ^ b[i];
+  return d === 0;
+};
+
+async function derive(password: string, salt: Uint8Array, iters: number): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey("raw", u8(password), "PBKDF2", false, ["deriveBits"]);
+  // WebCrypto typing in worker targets expects ArrayBuffer-backed views.
+  const saltBytes = new Uint8Array(salt);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: saltBytes, iterations: iters },
+    key,
+    HASH_LEN * 8,
+  );
+  return new Uint8Array(bits);
+}
+async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const h = await derive(password, salt, HASH_ITERS);
+  return `${HASH_PREFIX}$${HASH_ITERS}$${b64u(salt)}$${b64u(h)}`;
+}
+async function verifyPassword(password: string, stored: string | null | undefined): Promise<boolean> {
+  if (!stored) return false;
+  const p = stored.split("$");
+  if (p.length !== 4 || p[0] !== HASH_PREFIX) return false;
+  const iters = Number(p[1]);
+  if (!Number.isFinite(iters) || iters < 50000) return false;
+  const salt = fromB64u(p[2]);
+  const expected = fromB64u(p[3]);
+  const actual = await derive(password, salt, Math.floor(iters));
+  return eq(actual, expected);
 }
 
-async function ensureUserByEmail(env: Env, email: string, name: string): Promise<string> {
-  const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ? LIMIT 1").bind(email).first<{ id: string }>();
-  if (existing?.id) {
-    if (name.length > 0) {
-      await env.DB.prepare("UPDATE users SET name = ?, updated_at = unixepoch() WHERE id = ?").bind(name, existing.id).run();
-    }
-    return existing.id;
-  }
+const toPublicUser = (u: UserRow) => ({
+  id: u.id,
+  username: u.username,
+  email: u.email,
+  name: u.name || "",
+  systemRole: u.system_role === "admin" ? "admin" : "user",
+  createdAt: u.created_at,
+  updatedAt: u.updated_at,
+});
 
-  const userId = crypto.randomUUID();
-  await env.DB.prepare(
-    "INSERT INTO users (id, email, name, created_at, updated_at) VALUES (?, ?, ?, unixepoch(), unixepoch())",
-  )
-    .bind(userId, email, name)
-    .run();
-  return userId;
-}
-
-async function ensureOwnerUser(env: Env, body: JsonRecord): Promise<string> {
-  const ownerUserId = clampString(String(body.ownerUserId || ""), 120);
-  if (ownerUserId.length > 0) {
-    return ownerUserId;
-  }
-
-  const ownerEmail = clampString(String(body.ownerEmail || "admin@insightflare.local"), 200).toLowerCase();
-  const ownerName = clampString(String(body.ownerName || "InsightFlare Admin"), 120);
-  return ensureUserByEmail(env, ownerEmail, ownerName);
-}
-
-async function handleTeams(request: Request, env: Env, url: URL): Promise<Response> {
-  if (request.method === "GET") {
-    const userId = clampString(url.searchParams.get("userId") || "", 120);
-    if (userId.length > 0) {
-      const result = await env.DB.prepare(
-        `
-          SELECT
-            t.id,
-            t.name,
-            t.slug,
-            t.owner_user_id AS ownerUserId,
-            t.created_at AS createdAt,
-            (
-              SELECT COUNT(*) FROM sites s WHERE s.team_id = t.id
-            ) AS siteCount,
-            (
-              SELECT COUNT(*) FROM team_members tm2 WHERE tm2.team_id = t.id
-            ) AS memberCount
-          FROM teams t
-          INNER JOIN team_members tm ON tm.team_id = t.id
-          WHERE tm.user_id = ?
-          ORDER BY t.created_at DESC
-        `,
-      )
-        .bind(userId)
-        .all<Record<string, unknown>>();
-      return jsonResponse({ ok: true, data: result.results });
-    }
-
-    const result = await env.DB.prepare(
-      `
-        SELECT
-          t.id,
-          t.name,
-          t.slug,
-          t.owner_user_id AS ownerUserId,
-          t.created_at AS createdAt,
-          (
-            SELECT COUNT(*) FROM sites s WHERE s.team_id = t.id
-          ) AS siteCount,
-          (
-            SELECT COUNT(*) FROM team_members tm2 WHERE tm2.team_id = t.id
-          ) AS memberCount
-        FROM teams t
-        ORDER BY t.created_at DESC
-      `,
-    ).all<Record<string, unknown>>();
-    return jsonResponse({ ok: true, data: result.results });
-  }
-
-  if (request.method === "POST") {
-    const body = await parseJsonBody(request);
-    const name = clampString(String(body.name || ""), 120);
-    if (name.length < 2) {
-      return badRequest("Team name is required");
-    }
-
-    const slug = clampString(String(body.slug || toSlug(name)), 80);
-    if (slug.length < 2) {
-      return badRequest("Invalid team slug");
-    }
-
-    const ownerUserId = await ensureOwnerUser(env, body);
-    const teamId = crypto.randomUUID();
-
-    try {
-      await env.DB.prepare(
-        `
-          INSERT INTO teams (id, name, slug, owner_user_id, created_at, updated_at)
-          VALUES (?, ?, ?, ?, unixepoch(), unixepoch())
-        `,
-      )
-        .bind(teamId, name, slug, ownerUserId)
-        .run();
-    } catch (error) {
-      return badRequest(`Failed to create team: ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    await env.DB.prepare(
-      `
-        INSERT INTO team_members (team_id, user_id, role, joined_at)
-        VALUES (?, ?, 'owner', unixepoch())
-        ON CONFLICT(team_id, user_id) DO UPDATE SET role='owner'
-      `,
+async function byId(env: Env, id: string): Promise<UserRow | null> {
+  return (
+    (await env.DB.prepare(
+      "SELECT id,username,email,name,password_hash,system_role,created_at,updated_at FROM users WHERE id=? LIMIT 1",
     )
-      .bind(teamId, ownerUserId)
-      .run();
-
-    return jsonResponse({
-      ok: true,
-      data: {
-        id: teamId,
-        name,
-        slug,
-        ownerUserId,
-      },
-    });
-  }
-
-  return notAllowed();
+      .bind(id)
+      .first<UserRow>()) ?? null
+  );
+}
+async function byIdentifier(env: Env, identifier: string): Promise<UserRow | null> {
+  const lowered = normU(identifier);
+  return (
+    (await env.DB.prepare(
+      "SELECT id,username,email,name,password_hash,system_role,created_at,updated_at FROM users WHERE lower(username)=? OR lower(email)=? LIMIT 1",
+    )
+      .bind(lowered, lowered)
+      .first<UserRow>()) ?? null
+  );
 }
 
-async function handleSites(request: Request, env: Env, url: URL): Promise<Response> {
-  if (request.method === "GET") {
-    const teamId = clampString(url.searchParams.get("teamId") || "", 120);
-    if (teamId.length === 0) {
-      return badRequest("Missing teamId");
-    }
+async function teamRole(env: Env, teamId: string, userId: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1")
+    .bind(teamId, userId)
+    .first<{ role: string }>();
+  return row?.role ?? null;
+}
+async function teamById(env: Env, teamId: string): Promise<{ id: string; ownerUserId: string } | null> {
+  const row = await env.DB.prepare("SELECT id,owner_user_id AS ownerUserId FROM teams WHERE id=? LIMIT 1")
+    .bind(teamId)
+    .first<{ id: string; ownerUserId: string }>();
+  return row ?? null;
+}
+async function siteTeam(env: Env, siteId: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT team_id FROM sites WHERE id=? LIMIT 1").bind(siteId).first<{ team_id: string }>();
+  return row?.team_id ?? null;
+}
+async function canReadTeam(env: Env, a: Actor, teamId: string): Promise<boolean> {
+  if (a.isAdmin) return true;
+  const team = await teamById(env, teamId);
+  if (team?.ownerUserId === a.user.id) return true;
+  return Boolean(await teamRole(env, teamId, a.user.id));
+}
+async function canManageTeam(env: Env, a: Actor, teamId: string): Promise<boolean> {
+  if (a.isAdmin) return true;
+  const team = await teamById(env, teamId);
+  if (team?.ownerUserId === a.user.id) return true;
+  return (await teamRole(env, teamId, a.user.id)) === "owner";
+}
+async function canReadSite(env: Env, a: Actor, siteId: string): Promise<boolean> {
+  const teamId = await siteTeam(env, siteId);
+  if (!teamId) return false;
+  return canReadTeam(env, a, teamId);
+}
+async function canManageSite(env: Env, a: Actor, siteId: string): Promise<boolean> {
+  const teamId = await siteTeam(env, siteId);
+  if (!teamId) return false;
+  return canManageTeam(env, a, teamId);
+}
 
-    const result = await env.DB.prepare(
-      `
-        SELECT
-          id,
-          team_id AS teamId,
-          name,
-          domain,
-          public_enabled AS publicEnabled,
-          public_slug AS publicSlug,
-          created_at AS createdAt,
-          updated_at AS updatedAt
-        FROM sites
-        WHERE team_id = ?
-        ORDER BY created_at DESC
-      `,
+async function uniqueTeamSlug(env: Env, raw: string): Promise<string> {
+  const base = toSlug(raw) || `team-${Date.now()}`;
+  let slug = base;
+  let i = 2;
+  while (true) {
+    const e = await env.DB.prepare("SELECT 1 AS ok FROM teams WHERE slug=? LIMIT 1").bind(slug).first<{ ok: number }>();
+    if (!e?.ok) return slug;
+    slug = `${base}-${i}`;
+    i += 1;
+  }
+}
+
+async function ensureDefaultTeam(env: Env, user: UserRow): Promise<void> {
+  const owned = await env.DB.prepare("SELECT id FROM teams WHERE owner_user_id=? LIMIT 1")
+    .bind(user.id)
+    .first<{ id: string }>();
+  if (owned?.id) {
+    await env.DB.prepare(
+      "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role='owner'",
+    )
+      .bind(owned.id, user.id)
+      .run();
+    return;
+  }
+  const teamId = crypto.randomUUID();
+  const displayName = clampString((user.name || user.username || "User").trim(), 120);
+  const slug = await uniqueTeamSlug(env, `${user.username}-team`);
+  await env.DB.prepare(
+    "INSERT INTO teams (id,name,slug,owner_user_id,created_at,updated_at) VALUES (?,?,?,?,unixepoch(),unixepoch())",
+  )
+    .bind(teamId, `${displayName}'s team`, slug, user.id)
+    .run();
+  await env.DB.prepare("INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch())")
+    .bind(teamId, user.id)
+    .run();
+}
+
+async function ensureBootstrapAdmin(env: Env): Promise<UserRow> {
+  const admin = await env.DB.prepare(
+    "SELECT id,username,email,name,password_hash,system_role,created_at,updated_at FROM users WHERE system_role='admin' ORDER BY created_at ASC LIMIT 1",
+  ).first<UserRow>();
+  if (admin) {
+    await ensureDefaultTeam(env, admin);
+    return admin;
+  }
+  const username = normU(env.BOOTSTRAP_ADMIN_USERNAME || "admin") || "admin";
+  const email = normE(env.BOOTSTRAP_ADMIN_EMAIL || `${username}@insightflare.local`);
+  const name = clampString(env.BOOTSTRAP_ADMIN_NAME || "System Administrator", 120);
+  const passHash = await hashPassword(String(env.BOOTSTRAP_ADMIN_PASSWORD || "insightflare"));
+  const found = await byIdentifier(env, username);
+  if (found) {
+    await env.DB.prepare(
+      "UPDATE users SET username=?,email=?,name=?,password_hash=?,system_role='admin',updated_at=unixepoch() WHERE id=?",
+    )
+      .bind(username, email, name, passHash, found.id)
+      .run();
+    const promoted = await byId(env, found.id);
+    if (!promoted) throw new Error("bootstrap admin promote failed");
+    await ensureDefaultTeam(env, promoted);
+    return promoted;
+  }
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,'admin',unixepoch(),unixepoch())",
+  )
+    .bind(id, username, email, name, passHash)
+    .run();
+  const created = await byId(env, id);
+  if (!created) throw new Error("bootstrap admin create failed");
+  await ensureDefaultTeam(env, created);
+  return created;
+}
+
+async function requireActor(env: Env, req: Request): Promise<Actor | Response> {
+  const uid = clampString((req.headers.get("x-user-id") || "").trim(), 120);
+  if (!uid) return una("Missing x-user-id");
+  const user = await byId(env, uid);
+  if (!user) return una("User not found");
+  return { user, isAdmin: user.system_role === "admin" };
+}
+
+async function teamsFor(env: Env, userId: string): Promise<Array<Record<string, unknown>>> {
+  const rows = await env.DB.prepare(
+    "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t INNER JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=? ORDER BY t.created_at DESC",
+  )
+    .bind(userId)
+    .all<Record<string, unknown>>();
+  return rows.results;
+}
+
+async function hAuthLogin(req: Request, env: Env): Promise<Response> {
+  if (req.method !== "POST") return na();
+  await ensureBootstrapAdmin(env);
+  const body = await parseJson(req);
+  const identifier = clampString(String(body.username || body.email || ""), 200);
+  const password = String(body.password || "");
+  if (identifier.length < 3 || !password) return bad("username/email and password are required");
+  const user = await byIdentifier(env, identifier);
+  if (!user || !(await verifyPassword(password, user.password_hash))) return una("Invalid credentials");
+  await ensureDefaultTeam(env, user);
+  return j({ ok: true, data: { user: toPublicUser(user), teams: await teamsFor(env, user.id) } });
+}
+
+async function hAuthMe(req: Request, env: Env): Promise<Response> {
+  if (req.method !== "GET") return na();
+  const a = await requireActor(env, req);
+  if (a instanceof Response) return a;
+  return j({ ok: true, data: { user: toPublicUser(a.user), teams: await teamsFor(env, a.user.id) } });
+}
+
+async function hUsers(req: Request, env: Env): Promise<Response> {
+  const a = await requireActor(env, req);
+  if (a instanceof Response) return a;
+  if (!a.isAdmin) return forb("Only system admin can manage accounts");
+  if (req.method === "GET") {
+    const rows = await env.DB.prepare(
+      "SELECT u.id,u.username,u.email,u.name,u.system_role AS systemRole,u.created_at AS createdAt,u.updated_at AS updatedAt,(SELECT COUNT(*) FROM team_members tm WHERE tm.user_id=u.id) AS teamCount,(SELECT COUNT(*) FROM teams t WHERE t.owner_user_id=u.id) AS ownedTeamCount FROM users u ORDER BY u.created_at ASC",
+    ).all<Record<string, unknown>>();
+    return j({ ok: true, data: rows.results });
+  }
+  if (req.method === "POST") {
+    const body = await parseJson(req);
+    const username = normU(String(body.username || ""));
+    const email = normE(String(body.email || ""));
+    const name = clampString(String(body.name || ""), 120);
+    const password = String(body.password || "");
+    const systemRole = toRole(body.systemRole);
+    if (username.length < 3 || !/^[a-z0-9._@-]+$/.test(username)) return bad("Invalid username");
+    if (email.length < 3 || !email.includes("@")) return bad("A valid email is required");
+    if (password.length < 8) return bad("Password must be at least 8 characters");
+    if (await env.DB.prepare("SELECT 1 AS ok FROM users WHERE lower(username)=? LIMIT 1").bind(username).first()) return bad("Username already exists");
+    if (await env.DB.prepare("SELECT 1 AS ok FROM users WHERE lower(email)=? LIMIT 1").bind(email).first()) return bad("Email already exists");
+    const id = crypto.randomUUID();
+    const pass = await hashPassword(password);
+    await env.DB.prepare(
+      "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,?,unixepoch(),unixepoch())",
+    )
+      .bind(id, username, email, name, pass, systemRole)
+      .run();
+    const created = await byId(env, id);
+    if (!created) return bad("Failed to create account");
+    await ensureDefaultTeam(env, created);
+    return j({ ok: true, data: toPublicUser(created) });
+  }
+  if (req.method === "PATCH") {
+    const body = await parseJson(req);
+    const id = clampString(String(body.userId || ""), 120);
+    if (!id) return bad("userId is required");
+    const e = await byId(env, id);
+    if (!e) return nf("User not found");
+    const username = normU(String(body.username ?? e.username));
+    const email = normE(String(body.email ?? e.email));
+    const name = clampString(String(body.name ?? e.name ?? ""), 120);
+    const role = toRole(body.systemRole ?? e.system_role);
+    const password = String(body.password || "");
+    if (username.length < 3 || !/^[a-z0-9._@-]+$/.test(username)) return bad("Invalid username");
+    if (email.length < 3 || !email.includes("@")) return bad("A valid email is required");
+    if (
+      await env.DB.prepare("SELECT 1 AS ok FROM users WHERE lower(username)=? AND id<>? LIMIT 1").bind(username, id).first()
+    )
+      return bad("Username already exists");
+    if (await env.DB.prepare("SELECT 1 AS ok FROM users WHERE lower(email)=? AND id<>? LIMIT 1").bind(email, id).first())
+      return bad("Email already exists");
+    const pass = password.length > 0 ? await hashPassword(password) : e.password_hash;
+    await env.DB.prepare(
+      "UPDATE users SET username=?,email=?,name=?,password_hash=?,system_role=?,updated_at=unixepoch() WHERE id=?",
+    )
+      .bind(username, email, name, pass, role, id)
+      .run();
+    const u = await byId(env, id);
+    if (!u) return bad("Failed to update account");
+    return j({ ok: true, data: toPublicUser(u) });
+  }
+  return na();
+}
+
+async function hProfile(req: Request, env: Env): Promise<Response> {
+  const a = await requireActor(env, req);
+  if (a instanceof Response) return a;
+  if (req.method === "GET") return j({ ok: true, data: { user: toPublicUser(a.user), teams: await teamsFor(env, a.user.id) } });
+  if (req.method === "POST" || req.method === "PATCH") {
+    const body = await parseJson(req);
+    const username = normU(String(body.username ?? a.user.username));
+    const email = normE(String(body.email ?? a.user.email));
+    const name = clampString(String(body.name ?? a.user.name ?? ""), 120);
+    const password = String(body.password || "");
+    if (username.length < 3 || !/^[a-z0-9._@-]+$/.test(username)) return bad("Invalid username");
+    if (email.length < 3 || !email.includes("@")) return bad("A valid email is required");
+    if (
+      await env.DB.prepare("SELECT 1 AS ok FROM users WHERE lower(username)=? AND id<>? LIMIT 1").bind(username, a.user.id).first()
+    )
+      return bad("Username already exists");
+    if (
+      await env.DB.prepare("SELECT 1 AS ok FROM users WHERE lower(email)=? AND id<>? LIMIT 1").bind(email, a.user.id).first()
+    )
+      return bad("Email already exists");
+    const pass = password.length > 0 ? await hashPassword(password) : a.user.password_hash;
+    await env.DB.prepare("UPDATE users SET username=?,email=?,name=?,password_hash=?,updated_at=unixepoch() WHERE id=?")
+      .bind(username, email, name, pass, a.user.id)
+      .run();
+    const u = await byId(env, a.user.id);
+    if (!u) return bad("Failed to update profile");
+    return j({ ok: true, data: toPublicUser(u) });
+  }
+  return na();
+}
+
+async function hTeams(req: Request, env: Env): Promise<Response> {
+  const a = await requireActor(env, req);
+  if (a instanceof Response) return a;
+  if (req.method === "GET") {
+    if (a.isAdmin) {
+      const rows = await env.DB.prepare(
+        "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,'owner' AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t ORDER BY t.created_at DESC",
+      ).all<Record<string, unknown>>();
+      return j({ ok: true, data: rows.results });
+    }
+    return j({ ok: true, data: await teamsFor(env, a.user.id) });
+  }
+  if (req.method === "POST") {
+    const body = await parseJson(req);
+    const name = clampString(String(body.name || ""), 120);
+    if (name.length < 2) return bad("Team name is required");
+    const slug = await uniqueTeamSlug(env, clampString(String(body.slug || toSlug(name)), 80));
+    const teamId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO teams (id,name,slug,owner_user_id,created_at,updated_at) VALUES (?,?,?,?,unixepoch(),unixepoch())",
+    )
+      .bind(teamId, name, slug, a.user.id)
+      .run();
+    await env.DB.prepare("INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch())")
+      .bind(teamId, a.user.id)
+      .run();
+    return j({ ok: true, data: { id: teamId, name, slug, ownerUserId: a.user.id, membershipRole: "owner" } });
+  }
+  return na();
+}
+
+async function hSites(req: Request, env: Env, url: URL): Promise<Response> {
+  const a = await requireActor(env, req);
+  if (a instanceof Response) return a;
+  if (req.method === "GET") {
+    const teamId = clampString(url.searchParams.get("teamId") || "", 120);
+    if (!teamId) return bad("Missing teamId");
+    if (!(await canReadTeam(env, a, teamId))) return forb("Team access denied");
+    const rows = await env.DB.prepare(
+      "SELECT id,team_id AS teamId,name,domain,public_enabled AS publicEnabled,public_slug AS publicSlug,created_at AS createdAt,updated_at AS updatedAt FROM sites WHERE team_id=? ORDER BY created_at DESC",
     )
       .bind(teamId)
       .all<Record<string, unknown>>();
-    return jsonResponse({ ok: true, data: result.results });
+    return j({ ok: true, data: rows.results });
   }
-
-  if (request.method === "POST") {
-    const body = await parseJsonBody(request);
+  if (req.method === "POST") {
+    const body = await parseJson(req);
     const teamId = clampString(String(body.teamId || ""), 120);
     const name = clampString(String(body.name || ""), 120);
     const domain = clampString(String(body.domain || ""), 255);
-    const publicEnabled = boolInput(body.publicEnabled, false);
-    const publicSlug = clampString(
-      String(body.publicSlug || toSlug(name || domain || `site-${Date.now()}`)),
-      120,
-    );
-
-    if (teamId.length === 0 || name.length === 0 || domain.length === 0) {
-      return badRequest("teamId, name and domain are required");
-    }
-
+    const pub = bool(body.publicEnabled, false);
+    const pubSlug = clampString(String(body.publicSlug || toSlug(name || domain || `site-${Date.now()}`)), 120);
+    if (!teamId || !name || !domain) return bad("teamId, name and domain are required");
+    if (!(await canManageTeam(env, a, teamId))) return forb("Only team owner can create sites");
     const siteId = crypto.randomUUID();
-    try {
-      await env.DB.prepare(
-        `
-          INSERT INTO sites (
-            id, team_id, name, domain, public_enabled, public_slug, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())
-        `,
-      )
-        .bind(siteId, teamId, name, domain, publicEnabled ? 1 : 0, publicEnabled ? publicSlug : null)
-        .run();
-    } catch (error) {
-      return badRequest(`Failed to create site: ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    return jsonResponse({
-      ok: true,
-      data: {
-        id: siteId,
-        teamId,
-        name,
-        domain,
-        publicEnabled,
-        publicSlug: publicEnabled ? publicSlug : "",
-      },
-    });
+    await env.DB.prepare(
+      "INSERT INTO sites (id,team_id,name,domain,public_enabled,public_slug,created_at,updated_at) VALUES (?,?,?,?,?,?,unixepoch(),unixepoch())",
+    )
+      .bind(siteId, teamId, name, domain, pub ? 1 : 0, pub ? pubSlug : null)
+      .run();
+    return j({ ok: true, data: { id: siteId, teamId, name, domain, publicEnabled: pub, publicSlug: pub ? pubSlug : "" } });
   }
-
-  if (request.method === "PATCH") {
-    const body = await parseJsonBody(request);
+  if (req.method === "PATCH") {
+    const body = await parseJson(req);
     const siteId = clampString(String(body.siteId || ""), 120);
-    if (siteId.length === 0) {
-      return badRequest("siteId is required");
-    }
-
-    const existing = await env.DB.prepare(
-      `
-        SELECT id, team_id AS teamId, name, domain, public_enabled AS publicEnabled, public_slug AS publicSlug
-        FROM sites WHERE id = ? LIMIT 1
-      `,
+    if (!siteId) return bad("siteId is required");
+    const e = await env.DB.prepare(
+      "SELECT id,team_id AS teamId,name,domain,public_enabled AS publicEnabled,public_slug AS publicSlug FROM sites WHERE id=? LIMIT 1",
     )
       .bind(siteId)
-      .first<{
-        id: string;
-        teamId: string;
-        name: string;
-        domain: string;
-        publicEnabled: number;
-        publicSlug: string | null;
-      }>();
-
-    if (!existing) {
-      return notFound("Site not found");
-    }
-
-    const name = clampString(String(body.name ?? existing.name), 120);
-    const domain = clampString(String(body.domain ?? existing.domain), 255);
-    const publicEnabled = boolInput(body.publicEnabled, existing.publicEnabled === 1);
-    const publicSlug = clampString(
-      String(body.publicSlug ?? existing.publicSlug ?? toSlug(name || domain)),
-      120,
-    );
-
-    try {
-      await env.DB.prepare(
-        `
-          UPDATE sites
-          SET name = ?, domain = ?, public_enabled = ?, public_slug = ?, updated_at = unixepoch()
-          WHERE id = ?
-        `,
-      )
-        .bind(name, domain, publicEnabled ? 1 : 0, publicEnabled ? publicSlug : null, siteId)
-        .run();
-    } catch (error) {
-      return badRequest(`Failed to update site: ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    return jsonResponse({
-      ok: true,
-      data: {
-        id: siteId,
-        teamId: existing.teamId,
-        name,
-        domain,
-        publicEnabled,
-        publicSlug: publicEnabled ? publicSlug : "",
-      },
-    });
+      .first<{ id: string; teamId: string; name: string; domain: string; publicEnabled: number; publicSlug: string | null }>();
+    if (!e) return nf("Site not found");
+    if (!(await canManageTeam(env, a, e.teamId))) return forb("Only team owner can update sites");
+    const name = clampString(String(body.name ?? e.name), 120);
+    const domain = clampString(String(body.domain ?? e.domain), 255);
+    const pub = bool(body.publicEnabled, e.publicEnabled === 1);
+    const pubSlug = clampString(String(body.publicSlug ?? e.publicSlug ?? toSlug(name || domain)), 120);
+    await env.DB.prepare("UPDATE sites SET name=?,domain=?,public_enabled=?,public_slug=?,updated_at=unixepoch() WHERE id=?")
+      .bind(name, domain, pub ? 1 : 0, pub ? pubSlug : null, siteId)
+      .run();
+    return j({ ok: true, data: { id: siteId, teamId: e.teamId, name, domain, publicEnabled: pub, publicSlug: pub ? pubSlug : "" } });
   }
-
-  return notAllowed();
+  return na();
 }
 
-async function handleMembers(request: Request, env: Env, url: URL): Promise<Response> {
-  if (request.method === "GET") {
+async function hMembers(req: Request, env: Env, url: URL): Promise<Response> {
+  const a = await requireActor(env, req);
+  if (a instanceof Response) return a;
+  if (req.method === "GET") {
     const teamId = clampString(url.searchParams.get("teamId") || "", 120);
-    if (teamId.length === 0) {
-      return badRequest("Missing teamId");
-    }
-
-    const result = await env.DB.prepare(
-      `
-        SELECT
-          tm.team_id AS teamId,
-          tm.user_id AS userId,
-          tm.role,
-          tm.joined_at AS joinedAt,
-          u.email,
-          u.name
-        FROM team_members tm
-        INNER JOIN users u ON u.id = tm.user_id
-        WHERE tm.team_id = ?
-        ORDER BY tm.joined_at ASC
-      `,
+    if (!teamId) return bad("Missing teamId");
+    if (!(await canReadTeam(env, a, teamId))) return forb("Team access denied");
+    const rows = await env.DB.prepare(
+      "SELECT tm.team_id AS teamId,tm.user_id AS userId,tm.role,tm.joined_at AS joinedAt,u.username,u.email,u.name FROM team_members tm INNER JOIN users u ON u.id=tm.user_id WHERE tm.team_id=? ORDER BY tm.joined_at ASC",
     )
       .bind(teamId)
       .all<Record<string, unknown>>();
-
-    return jsonResponse({ ok: true, data: result.results });
+    return j({ ok: true, data: rows.results });
   }
-
-  if (request.method === "POST") {
-    const body = await parseJsonBody(request);
+  if (req.method === "POST") {
+    const body = await parseJson(req);
     const teamId = clampString(String(body.teamId || ""), 120);
-    const email = clampString(String(body.email || ""), 200).toLowerCase();
-    const name = clampString(String(body.name || ""), 120);
-    const role = clampString(String(body.role || "member"), 30) || "member";
-
-    if (teamId.length === 0 || email.length < 3) {
-      return badRequest("teamId and email are required");
+    const userId = clampString(String(body.userId || ""), 120);
+    const identifier = clampString(String(body.identifier || body.username || body.email || ""), 200);
+    if (!teamId || (!userId && !identifier)) return bad("teamId and user identifier are required");
+    const team = await teamById(env, teamId);
+    if (!team) return nf("Team not found");
+    if (!(await canManageTeam(env, a, teamId))) return forb("Only team owner can manage members");
+    const m = userId ? await byId(env, userId) : await byIdentifier(env, identifier);
+    if (!m) return nf("User not found");
+    if (m.id === team.ownerUserId) {
+      await env.DB.prepare(
+        "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role='owner'",
+      )
+        .bind(teamId, m.id)
+        .run();
+      return j({ ok: true, data: { teamId, userId: m.id, role: "owner", username: m.username, email: m.email, name: m.name || "" } });
     }
-
-    const userId = await ensureUserByEmail(env, email, name);
+    const existingRole = await env.DB.prepare("SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1")
+      .bind(teamId, m.id)
+      .first<{ role: string }>();
+    if (existingRole?.role === "owner") return forb("Cannot change team owner membership");
     await env.DB.prepare(
-      `
-        INSERT INTO team_members (team_id, user_id, role, joined_at)
-        VALUES (?, ?, ?, unixepoch())
-        ON CONFLICT(team_id, user_id) DO UPDATE SET role = excluded.role
-      `,
+      "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'member',unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role='member'",
     )
-      .bind(teamId, userId, role)
+      .bind(teamId, m.id)
       .run();
-
-    return jsonResponse({
-      ok: true,
-      data: {
-        teamId,
-        userId,
-        role,
-        email,
-        name,
-      },
-    });
+    return j({ ok: true, data: { teamId, userId: m.id, role: "member", username: m.username, email: m.email, name: m.name || "" } });
   }
-
-  return notAllowed();
+  if (req.method === "PATCH") {
+    const body = await parseJson(req);
+    const teamId = clampString(String(body.teamId || ""), 120);
+    const userId = clampString(String(body.userId || ""), 120);
+    if (!teamId || !userId) return bad("teamId and userId are required");
+    const team = await teamById(env, teamId);
+    if (!team) return nf("Team not found");
+    if (!(await canManageTeam(env, a, teamId))) return forb("Only team owner can manage members");
+    if (userId === team.ownerUserId) return bad("Cannot remove team owner");
+    const existing = await env.DB.prepare("SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1")
+      .bind(teamId, userId)
+      .first<{ role: string }>();
+    if (!existing) return nf("Member not found");
+    if (existing.role === "owner") return bad("Cannot remove team owner");
+    await env.DB.prepare("DELETE FROM team_members WHERE team_id=? AND user_id=?").bind(teamId, userId).run();
+    return j({ ok: true, data: { teamId, userId, removed: true } });
+  }
+  return na();
 }
 
-async function handleSiteConfig(request: Request, env: Env, url: URL): Promise<Response> {
-  if (request.method === "GET") {
+async function hSiteConfig(req: Request, env: Env, url: URL): Promise<Response> {
+  const a = await requireActor(env, req);
+  if (a instanceof Response) return a;
+  if (req.method === "GET") {
     const siteId = clampString(url.searchParams.get("siteId") || "", 120);
-    if (siteId.length === 0) {
-      return badRequest("Missing siteId");
-    }
-
+    if (!siteId) return bad("Missing siteId");
+    if (!(await canReadSite(env, a, siteId))) return forb("Site access denied");
     const key = `site:${siteId}`;
-    const row = await env.DB.prepare("SELECT value_json FROM configs WHERE config_key = ? LIMIT 1")
+    const row = await env.DB.prepare("SELECT value_json FROM configs WHERE config_key=? LIMIT 1")
       .bind(key)
       .first<{ value_json: string }>();
-
-    if (!row?.value_json) {
-      return jsonResponse({ ok: true, data: {} });
-    }
-
+    if (!row?.value_json) return j({ ok: true, data: {} });
     try {
-      return jsonResponse({
-        ok: true,
-        data: JSON.parse(row.value_json) as unknown,
-      });
+      return j({ ok: true, data: JSON.parse(row.value_json) as unknown });
     } catch {
-      return jsonResponse({ ok: true, data: {} });
+      return j({ ok: true, data: {} });
     }
   }
-
-  if (request.method === "POST") {
-    const body = await parseJsonBody(request);
+  if (req.method === "POST") {
+    const body = await parseJson(req);
     const siteId = clampString(String(body.siteId || ""), 120);
-    if (siteId.length === 0) {
-      return badRequest("siteId is required");
-    }
-
-    const config = (body.config && typeof body.config === "object" ? body.config : {}) as JsonRecord;
+    if (!siteId) return bad("siteId is required");
+    if (!(await canManageSite(env, a, siteId))) return forb("Only team owner can update site config");
+    const cfg = (body.config && typeof body.config === "object" ? body.config : {}) as JsonRecord;
     const key = `site:${siteId}`;
-    const valueJson = JSON.stringify(config);
-
     await env.DB.prepare(
-      `
-        INSERT INTO configs (config_key, value_json, created_at, updated_at)
-        VALUES (?, ?, unixepoch(), unixepoch())
-        ON CONFLICT(config_key) DO UPDATE SET
-          value_json = excluded.value_json,
-          updated_at = unixepoch()
-      `,
+      "INSERT INTO configs (config_key,value_json,created_at,updated_at) VALUES (?,?,unixepoch(),unixepoch()) ON CONFLICT(config_key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()",
     )
-      .bind(key, valueJson)
+      .bind(key, JSON.stringify(cfg))
       .run();
-
-    return jsonResponse({
-      ok: true,
-      data: config,
-    });
+    return j({ ok: true, data: cfg });
   }
-
-  return notAllowed();
+  return na();
 }
 
-async function handleScriptSnippet(request: Request, env: Env, url: URL): Promise<Response> {
-  if (request.method !== "GET") {
-    return notAllowed();
-  }
-
+async function hScriptSnippet(req: Request, env: Env, url: URL): Promise<Response> {
+  if (req.method !== "GET") return na();
+  const a = await requireActor(env, req);
+  if (a instanceof Response) return a;
   const siteId = clampString(url.searchParams.get("siteId") || "", 120);
-  if (siteId.length === 0) {
-    return badRequest("Missing siteId");
-  }
-
-  const edgeBaseUrl = env.EDGE_PUBLIC_BASE_URL || `${url.protocol}//${url.host}`;
-  const src = `${edgeBaseUrl.replace(/\/$/, "")}/script.js?siteId=${encodeURIComponent(siteId)}`;
-  const snippet = `<script defer src="${src}"></script>`;
-
-  return jsonResponse({
-    ok: true,
-    data: {
-      siteId,
-      src,
-      snippet,
-    },
-  });
+  if (!siteId) return bad("Missing siteId");
+  if (!(await canReadSite(env, a, siteId))) return forb("Site access denied");
+  const edgeBase = env.EDGE_PUBLIC_BASE_URL || `${url.protocol}//${url.host}`;
+  const src = `${edgeBase.replace(/\/$/, "")}/script.js?siteId=${encodeURIComponent(siteId)}`;
+  return j({ ok: true, data: { siteId, src, snippet: `<script defer src=\"${src}\"></script>` } });
 }
 
 export async function handlePrivateAdmin(request: Request, env: Env, url: URL): Promise<Response> {
-  if (!isPrivateAuthorized(request, env)) {
-    return unauthorized();
-  }
-
-  const pathname = url.pathname;
-  if (pathname === "/api/private/admin/teams") {
-    return handleTeams(request, env, url);
-  }
-  if (pathname === "/api/private/admin/sites") {
-    return handleSites(request, env, url);
-  }
-  if (pathname === "/api/private/admin/members") {
-    return handleMembers(request, env, url);
-  }
-  if (pathname === "/api/private/admin/site-config") {
-    return handleSiteConfig(request, env, url);
-  }
-  if (pathname === "/api/private/admin/script-snippet") {
-    return handleScriptSnippet(request, env, url);
-  }
-
-  return notFound();
+  if (!isPrivateAuthorized(request, env)) return una();
+  const p = url.pathname;
+  if (p === "/api/private/admin/auth/login") return hAuthLogin(request, env);
+  if (p === "/api/private/admin/auth/me") return hAuthMe(request, env);
+  if (p === "/api/private/admin/users") return hUsers(request, env);
+  if (p === "/api/private/admin/profile") return hProfile(request, env);
+  if (p === "/api/private/admin/teams") return hTeams(request, env);
+  if (p === "/api/private/admin/sites") return hSites(request, env, url);
+  if (p === "/api/private/admin/members") return hMembers(request, env, url);
+  if (p === "/api/private/admin/site-config") return hSiteConfig(request, env, url);
+  if (p === "/api/private/admin/script-snippet") return hScriptSnippet(request, env, url);
+  return nf();
 }

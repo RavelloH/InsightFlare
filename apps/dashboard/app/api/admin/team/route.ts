@@ -8,8 +8,6 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const name = String(formData.get("name") || "").trim();
   const slug = String(formData.get("slug") || "").trim();
-  const ownerEmail = String(formData.get("ownerEmail") || "").trim();
-  const ownerName = String(formData.get("ownerName") || "").trim();
 
   if (name.length < 2) {
     const url = new URL(returnTo, request.url);
@@ -21,8 +19,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     const created = await createAdminTeam({
       name,
       slug: slug || undefined,
-      ownerEmail: ownerEmail || undefined,
-      ownerName: ownerName || undefined,
     });
     const url = new URL(returnTo, request.url);
     url.searchParams.set("teamId", created.id);
@@ -34,4 +30,3 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.redirect(url);
   }
 }
-

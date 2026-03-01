@@ -13,7 +13,10 @@ NEXTJS_ENV = "production"
 SESSION_WINDOW_MINUTES = "30"
 SCRIPT_CACHE_TTL_SECONDS = "3600"
 PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm"
-REQUIRE_TEAM_MEMBERSHIP = "0"
+REQUIRE_TEAM_MEMBERSHIP = "1"
+BOOTSTRAP_ADMIN_USERNAME = "admin"
+BOOTSTRAP_ADMIN_EMAIL = "admin@insightflare.local"
+BOOTSTRAP_ADMIN_NAME = "System Administrator"
 
 [triggers]
 crons = ["0 * * * *"]

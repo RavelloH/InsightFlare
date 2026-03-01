@@ -9,7 +9,10 @@ SCRIPT_CACHE_TTL_SECONDS = "3600" # Durable Object 脚本缓存时间，单位�
 # ADMIN_API_TOKEN = "set-in-secret-or-var"
 EDGE_PUBLIC_BASE_URL = "http://insight.ravelloh.com" # 你的 Worker 公共 URL，生产部署时请替换为正式域名
 PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm"
-REQUIRE_TEAM_MEMBERSHIP = "0"
+REQUIRE_TEAM_MEMBERSHIP = "1"
+BOOTSTRAP_ADMIN_USERNAME = "admin"
+BOOTSTRAP_ADMIN_EMAIL = "admin@insightflare.local"
+BOOTSTRAP_ADMIN_NAME = "System Administrator"
 
 [triggers]
 crons = ["0 * * * *"]

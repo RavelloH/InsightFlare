@@ -71,6 +71,29 @@ function isPrivateAuthorized(request: Request, env: Env): boolean {
   return fromBearer === expected || fromHeader === expected;
 }
 
+function requiresTeamMembershipCheck(env: Env): boolean {
+  return (env.REQUIRE_TEAM_MEMBERSHIP ?? "0") === "1";
+}
+
+function extractUserIdForMembership(request: Request): string {
+  return (request.headers.get("x-user-id") || "").trim();
+}
+
+async function assertSiteMembership(env: Env, siteId: string, userId: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `
+      SELECT 1 AS ok
+      FROM sites s
+      INNER JOIN team_members tm ON tm.team_id = s.team_id
+      WHERE s.id = ? AND tm.user_id = ?
+      LIMIT 1
+    `,
+  )
+    .bind(siteId, userId)
+    .first<{ ok: number }>();
+  return Boolean(row?.ok);
+}
+
 function parseWindowHours(url: URL): { fromHour: number; toHour: number } | null {
   const nowMs = Date.now();
   const defaultFrom = nowMs - 365 * 24 * ONE_HOUR_MS;
@@ -92,6 +115,17 @@ async function handleManifest(request: Request, env: Env, url: URL): Promise<Res
   const siteId = (url.searchParams.get("siteId") || "").trim();
   if (siteId.length === 0) {
     return badRequest("Missing siteId");
+  }
+
+  if (requiresTeamMembershipCheck(env)) {
+    const userId = extractUserIdForMembership(request);
+    if (!userId) {
+      return unauthorized("Missing x-user-id for team membership check");
+    }
+    const allowed = await assertSiteMembership(env, siteId, userId);
+    if (!allowed) {
+      return unauthorized("Site access denied for current user");
+    }
   }
 
   const window = parseWindowHours(url);
@@ -160,19 +194,30 @@ async function handleFile(request: Request, env: Env, url: URL): Promise<Respons
 
   const row = await env.DB.prepare(
     `
-      SELECT archive_key AS archiveKey, format
+      SELECT archive_key AS archiveKey, format, site_id AS siteId
       FROM archive_objects
       WHERE archive_key = ?
       LIMIT 1
     `,
   )
     .bind(key)
-    .first<{ archiveKey: string; format: string }>();
+    .first<{ archiveKey: string; format: string; siteId: string }>();
   if (!row?.archiveKey) {
     return notFound("Archive object not found");
   }
   if (row.format !== "parquet") {
     return notFound("Archive object is not queryable in precise mode");
+  }
+
+  if (requiresTeamMembershipCheck(env)) {
+    const userId = extractUserIdForMembership(request);
+    if (!userId) {
+      return unauthorized("Missing x-user-id for team membership check");
+    }
+    const allowed = await assertSiteMembership(env, row.siteId, userId);
+    if (!allowed) {
+      return unauthorized("Site access denied for current user");
+    }
   }
 
   const rangeHeader = request.headers.get("range");

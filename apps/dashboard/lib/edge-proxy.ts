@@ -1,4 +1,5 @@
 import { DEFAULT_EDGE_BASE_URL } from "./constants";
+import { getSession } from "./auth";
 
 export function resolveEdgeBaseUrl(requestUrl?: string): string {
   const configured = (process.env.INSIGHTFLARE_EDGE_URL || "").trim();
@@ -55,6 +56,14 @@ export async function fetchEdgeForServer(input: {
   const token = adminToken();
   if (token.length > 0) {
     headers.set("x-admin-token", token);
+  }
+  try {
+    const session = await getSession();
+    if (session?.userId) {
+      headers.set("x-user-id", session.userId);
+    }
+  } catch {
+    // Ignore when session is unavailable outside request scope.
   }
   if (input.headers) {
     for (const [key, value] of Object.entries(input.headers)) {

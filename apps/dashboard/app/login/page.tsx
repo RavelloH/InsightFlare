@@ -38,18 +38,22 @@ export default async function LoginPage({
         <Card className="border-slate-200/90 bg-white/95">
           <CardHeader>
             <CardTitle className="text-2xl font-[var(--font-display)]">Sign in</CardTitle>
-            <CardDescription>Use dashboard password configured in `DASHBOARD_PASSWORD`.</CardDescription>
+            <CardDescription>Use your InsightFlare account credentials.</CardDescription>
           </CardHeader>
           <CardContent>
             <form action="/api/auth/login" method="POST" className="space-y-4">
               <input type="hidden" name="next" value={nextParam} />
               <label className="space-y-1">
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Username</span>
+                <Input type="text" name="username" required placeholder="admin" />
+              </label>
+              <label className="space-y-1">
                 <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Password</span>
-                <Input type="password" name="password" required placeholder="Enter dashboard password" />
+                <Input type="password" name="password" required placeholder="Enter account password" />
               </label>
               {hasError ? (
                 <p className="rounded-xl2 border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  Invalid password. Please try again.
+                  Invalid credentials. Please try again.
                 </p>
               ) : null}
               <Button type="submit" className="w-full">
@@ -62,4 +66,3 @@ export default async function LoginPage({
     </main>
   );
 }
-

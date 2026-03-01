@@ -21,6 +21,10 @@ export interface Env {
   EDGE_PUBLIC_BASE_URL?: string;
   PARQUET_WASM_URL?: string;
   REQUIRE_TEAM_MEMBERSHIP?: string;
+  BOOTSTRAP_ADMIN_USERNAME?: string;
+  BOOTSTRAP_ADMIN_PASSWORD?: string;
+  BOOTSTRAP_ADMIN_EMAIL?: string;
+  BOOTSTRAP_ADMIN_NAME?: string;
   SESSION_WINDOW_MINUTES?: string;
   SCRIPT_CACHE_TTL_SECONDS?: string;
 }

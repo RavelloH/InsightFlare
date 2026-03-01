@@ -71,10 +71,6 @@ export default async function TeamsPage({
                 <span className="text-xs uppercase tracking-[0.12em] text-slate-500">Slug (optional)</span>
                 <Input name="slug" placeholder="growth-ops" />
               </label>
-              <label className="space-y-1">
-                <span className="text-xs uppercase tracking-[0.12em] text-slate-500">Owner Email (optional)</span>
-                <Input name="ownerEmail" placeholder="owner@example.com" />
-              </label>
               <Button type="submit">Create Team</Button>
             </form>
           </CardContent>
@@ -159,20 +155,8 @@ export default async function TeamsPage({
                 <input type="hidden" name="teamId" value={selectedTeamId} />
                 <input type="hidden" name="returnTo" value={`/app/teams?teamId=${selectedTeamId}`} />
                 <label className="space-y-1">
-                  <span className="text-xs uppercase tracking-[0.12em] text-slate-500">Email</span>
-                  <Input type="email" name="email" required placeholder="analyst@example.com" />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs uppercase tracking-[0.12em] text-slate-500">Name (optional)</span>
-                  <Input name="name" placeholder="Analyst" />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs uppercase tracking-[0.12em] text-slate-500">Role</span>
-                  <select name="role" className="h-10 w-full rounded-xl2 border border-slate-300 bg-white px-3 text-sm">
-                    <option value="member">member</option>
-                    <option value="admin">admin</option>
-                    <option value="owner">owner</option>
-                  </select>
+                  <span className="text-xs uppercase tracking-[0.12em] text-slate-500">User Identifier</span>
+                  <Input name="identifier" required placeholder="username or email" />
                 </label>
                 <Button type="submit">Add Member</Button>
               </form>
@@ -267,18 +251,36 @@ export default async function TeamsPage({
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Username</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {members.map((member) => (
                     <TableRow key={`${member.teamId}:${member.userId}`}>
+                      <TableCell>{member.username}</TableCell>
                       <TableCell>{member.email}</TableCell>
                       <TableCell>{member.name || "-"}</TableCell>
                       <TableCell>
                         <Badge variant="outline">{member.role}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        {member.role === "owner" ? (
+                          <span className="text-xs text-slate-500">Owner</span>
+                        ) : (
+                          <form action="/api/admin/member" method="POST">
+                            <input type="hidden" name="intent" value="remove" />
+                            <input type="hidden" name="teamId" value={selectedTeamId} />
+                            <input type="hidden" name="userId" value={member.userId} />
+                            <input type="hidden" name="returnTo" value={`/app/teams?teamId=${selectedTeamId}`} />
+                            <Button type="submit" variant="secondary" size="sm">
+                              Remove
+                            </Button>
+                          </form>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -291,4 +293,3 @@ export default async function TeamsPage({
     </main>
   );
 }
-

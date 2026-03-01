@@ -1,14 +1,17 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/constants";
+import { verifySessionToken } from "@/lib/session";
 
-function isAuthenticated(request: NextRequest): boolean {
-  return request.cookies.get(SESSION_COOKIE)?.value === "1";
+async function isAuthenticated(request: NextRequest): Promise<boolean> {
+  const token = request.cookies.get(SESSION_COOKIE)?.value || "";
+  const session = await verifySessionToken(token);
+  return Boolean(session);
 }
 
-export function middleware(request: NextRequest): NextResponse {
+export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl;
-  const authenticated = isAuthenticated(request);
+  const authenticated = await isAuthenticated(request);
 
   if (pathname.startsWith("/api/admin")) {
     if (!authenticated) {

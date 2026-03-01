@@ -1,8 +1,8 @@
-import { BarChart3, Cog, Users } from "lucide-react";
+import { BarChart3, Cog, UserCog, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface TopNavProps {
-  active: "dashboard" | "teams" | "config" | "precision";
+  active: "dashboard" | "teams" | "config" | "precision" | "account";
   siteId?: string;
   teamId?: string;
 }
@@ -39,6 +39,12 @@ export function TopNav({ active, siteId, teamId }: TopNavProps): React.JSX.Eleme
       label: "Precision",
       href: hrefWithState("/app/precision", { siteId, teamId }),
       icon: BarChart3,
+    },
+    {
+      id: "account" as const,
+      label: "Account",
+      href: hrefWithState("/app/account", { siteId, teamId }),
+      icon: UserCog,
     },
   ];
 
