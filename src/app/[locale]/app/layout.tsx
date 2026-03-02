@@ -5,7 +5,6 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { fetchAdminTeams } from "@/lib/edge-client";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { TopHeader } from "@/components/layout/top-header";
-import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { SidebarProvider } from "@/components/layout/sidebar-context";
 
@@ -36,11 +35,10 @@ export default async function AppLayout({
         <AppSidebar locale={locale} session={session} teams={teams} />
         <div className="w-full lg:pl-72">
           <TopHeader locale={locale} session={session} teams={teams} />
-          <main className="min-h-screen px-4 pb-20 pt-4 md:px-6 md:pb-6 md:pt-6">
+          <main className="min-h-screen px-4 pb-6 pt-4 md:px-6 md:pb-6 md:pt-6">
             {children}
           </main>
         </div>
-        <MobileBottomNav locale={locale} />
         <CommandPalette locale={locale} dictionary={dictionary} />
       </div>
     </SidebarProvider>

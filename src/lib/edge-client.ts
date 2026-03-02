@@ -511,6 +511,19 @@ export async function createAdminTeam(input: {
   return res.data;
 }
 
+export async function updateAdminTeam(input: {
+  teamId: string;
+  name?: string;
+  slug?: string;
+}): Promise<TeamData> {
+  const res = await fetchEdgeJson<{ ok: boolean; data: TeamData }>({
+    method: "PATCH",
+    path: "/api/private/admin/teams",
+    body: input,
+  });
+  return res.data;
+}
+
 export async function fetchAdminSites(teamId: string): Promise<SiteData[]> {
   const res = await fetchEdgeJson<{ ok: boolean; data: SiteData[] }>({
     path: "/api/private/admin/sites",

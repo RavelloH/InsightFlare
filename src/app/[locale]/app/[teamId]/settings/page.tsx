@@ -1,34 +1,23 @@
 import { redirect } from "next/navigation";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SiteConfigForm } from "@/components/settings/site-config-form";
-import { SiteSelector } from "@/components/dashboard/site-selector";
-import { EmptyState } from "@/components/shared/empty-state";
+import { Shield } from "lucide-react";
+import { TeamConfigForm } from "@/components/settings/team-config-form";
+import { AddMemberDialog } from "@/components/teams/add-member-dialog";
+import { MemberTable } from "@/components/teams/member-table";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { isValidLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import type { Locale } from "@/lib/i18n/config";
-import {
-  fetchAdminSites,
-  fetchAdminSiteConfig,
-  fetchAdminTeams,
-} from "@/lib/edge-client";
-
-interface TeamSettingsSearchParams {
-  siteId?: string;
-  tab?: string;
-}
+import { fetchAdminMembers, fetchAdminTeams } from "@/lib/edge-client";
 
 export default async function TeamSettingsPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ locale: string; teamId: string }>;
-  searchParams: Promise<TeamSettingsSearchParams>;
 }) {
   const { locale: rawLocale, teamId } = await params;
   const locale: Locale = isValidLocale(rawLocale) ? rawLocale : DEFAULT_LOCALE;
   const dict = await getDictionary(locale);
   const t = (key: string) => dict[key] ?? key;
-  const sp = await searchParams;
 
   const teams = await fetchAdminTeams();
   const team = teams.find((tm) => tm.id === teamId);
@@ -37,87 +26,80 @@ export default async function TeamSettingsPage({
     redirect(`/${locale}/app`);
   }
 
-  const sites = await fetchAdminSites(teamId);
-  const selectedSiteId =
-    (sp.siteId && sites.some((s) => s.id === sp.siteId)
-      ? sp.siteId
-      : undefined) || sites[0]?.id || "";
-  const site = sites.find((s) => s.id === selectedSiteId) || null;
-  const siteConfig = selectedSiteId
-    ? await fetchAdminSiteConfig(selectedSiteId)
-    : {};
+  const members = await fetchAdminMembers(teamId);
 
-  const defaultTab = sp.tab || "site";
+  const teamSettingsTitle =
+    locale === "zh" ? "团队设置" : "Team Settings";
+  const teamSettingsDescription =
+    locale === "zh"
+      ? "修改当前团队的名称和 slug。"
+      : "Update the current team's name and slug.";
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">
-          {team.name} - {t("settings.title")}
+          {team.name} - {teamSettingsTitle}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {t("settings.privacyDescription")}
+          {teamSettingsDescription}
         </p>
       </div>
+      <TeamConfigForm
+        team={team}
+        labels={{
+          teamConfiguration: teamSettingsTitle,
+          teamName: t("teams.teamName"),
+          slug: t("teams.slug"),
+          saveConfig: t("common.save"),
+        }}
+      />
 
-      {sites.length > 0 && (
-        <SiteSelector sites={sites} currentSiteId={selectedSiteId} />
-      )}
-
-      <Tabs defaultValue={defaultTab} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="site">{t("settings.siteConfig")}</TabsTrigger>
-          <TabsTrigger value="privacy">{t("settings.privacy")}</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="site" className="space-y-4">
-          {site ? (
-            <SiteConfigForm
-              site={site}
-              config={siteConfig}
-              labels={{
-                siteConfiguration: t("settings.siteConfiguration"),
-                siteName: t("teams.siteName"),
-                domain: t("teams.domain"),
-                publicVisibility: t("settings.publicVisibility"),
-                enablePublic: t("teams.enablePublic"),
-                publicSlug: t("settings.publicSlug"),
-                privacyDefaults: t("settings.privacyDefaults"),
-                maskQuery: t("settings.maskQuery"),
-                maskTrajectory: t("settings.maskTrajectory"),
-                maskReferrer: t("settings.maskReferrer"),
-                saveConfig: t("settings.saveConfig"),
-              }}
-            />
-          ) : (
-            <EmptyState title={t("settings.noSite")} />
-          )}
-        </TabsContent>
-
-        <TabsContent value="privacy" className="space-y-4">
-          {site ? (
-            <SiteConfigForm
-              site={site}
-              config={siteConfig}
-              labels={{
-                siteConfiguration: t("settings.privacyPublication"),
-                siteName: t("teams.siteName"),
-                domain: t("teams.domain"),
-                publicVisibility: t("settings.publicVisibility"),
-                enablePublic: t("teams.enablePublic"),
-                publicSlug: t("settings.publicSlug"),
-                privacyDefaults: t("settings.privacyDefaults"),
-                maskQuery: t("settings.maskQuery"),
-                maskTrajectory: t("settings.maskTrajectory"),
-                maskReferrer: t("settings.maskReferrer"),
-                saveConfig: t("settings.saveConfig"),
-              }}
-            />
-          ) : (
-            <EmptyState title={t("settings.noSite")} />
-          )}
-        </TabsContent>
-      </Tabs>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-xl font-semibold">{t("teams.teamMembers")}</h2>
+          <AddMemberDialog
+            teamId={teamId}
+            labels={{
+              addMember: t("teams.addMember"),
+              userIdentifier: t("teams.userIdentifier"),
+              identifierPlaceholder: t("teams.identifierPlaceholder"),
+              create: t("common.create"),
+            }}
+          />
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <span className="bg-def-200 rounded-lg p-1 inline-flex">
+                <Shield className="h-4 w-4" />
+              </span>
+              {t("teams.teamMembers")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {members.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {t("teams.noMembers")}
+              </p>
+            ) : (
+              <MemberTable
+                members={members}
+                teamId={teamId}
+                labels={{
+                  username: t("teams.username"),
+                  email: t("teams.email"),
+                  name: t("teams.name"),
+                  role: t("teams.role"),
+                  action: t("teams.action"),
+                  owner: t("teams.owner"),
+                  remove: t("common.remove"),
+                }}
+              />
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

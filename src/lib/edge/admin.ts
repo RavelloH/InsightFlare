@@ -256,12 +256,14 @@ async function canManageSite(env: Env, a: Actor, siteId: string): Promise<boolea
   return canManageTeam(env, a, teamId);
 }
 
-async function uniqueTeamSlug(env: Env, raw: string): Promise<string> {
+async function uniqueTeamSlug(env: Env, raw: string, excludeTeamId?: string): Promise<string> {
   const base = toSlug(raw) || `team-${Date.now()}`;
   let slug = base;
   let i = 2;
   while (true) {
-    const e = await env.DB.prepare("SELECT 1 AS ok FROM teams WHERE slug=? LIMIT 1").bind(slug).first<{ ok: number }>();
+    const e = excludeTeamId
+      ? await env.DB.prepare("SELECT 1 AS ok FROM teams WHERE slug=? AND id<>? LIMIT 1").bind(slug, excludeTeamId).first<{ ok: number }>()
+      : await env.DB.prepare("SELECT 1 AS ok FROM teams WHERE slug=? LIMIT 1").bind(slug).first<{ ok: number }>();
     if (!e?.ok) return slug;
     slug = `${base}-${i}`;
     i += 1;
@@ -500,6 +502,48 @@ async function hTeams(req: Request, env: Env): Promise<Response> {
       .bind(teamId, a.user.id)
       .run();
     return j({ ok: true, data: { id: teamId, name, slug, ownerUserId: a.user.id, membershipRole: "owner" } });
+  }
+  if (req.method === "PATCH") {
+    const body = await parseJson(req);
+    const teamId = clampString(String(body.teamId || ""), 120);
+    const nameInput = clampString(String(body.name || ""), 120);
+    const slugInput = clampString(String(body.slug || ""), 80);
+    if (!teamId) return bad("teamId is required");
+    if (!(await canManageTeam(env, a, teamId))) return forb("Only team owner can update team");
+
+    const existing = await env.DB.prepare(
+      "SELECT id,name,slug,owner_user_id AS ownerUserId,created_at AS createdAt,updated_at AS updatedAt FROM teams WHERE id=? LIMIT 1",
+    )
+      .bind(teamId)
+      .first<{
+        id: string;
+        name: string;
+        slug: string;
+        ownerUserId: string;
+        createdAt: number;
+        updatedAt: number;
+      }>();
+    if (!existing) return nf("Team not found");
+
+    const name = nameInput || existing.name;
+    if (name.length < 2) return bad("Team name is required");
+    const slug = slugInput.length > 0 ? await uniqueTeamSlug(env, slugInput, teamId) : await uniqueTeamSlug(env, name, teamId);
+
+    await env.DB.prepare("UPDATE teams SET name=?,slug=?,updated_at=unixepoch() WHERE id=?")
+      .bind(name, slug, teamId)
+      .run();
+
+    return j({
+      ok: true,
+      data: {
+        id: teamId,
+        name,
+        slug,
+        ownerUserId: existing.ownerUserId,
+        createdAt: existing.createdAt,
+        updatedAt: Math.floor(Date.now() / 1000),
+      },
+    });
   }
   return na();
 }

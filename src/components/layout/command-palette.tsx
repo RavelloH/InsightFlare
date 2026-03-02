@@ -5,7 +5,6 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
   BarChart3,
-  Users,
   Settings,
   Beaker,
   Moon,
@@ -114,6 +113,10 @@ export function CommandPalette({ locale, dictionary }: CommandPaletteProps) {
                 <Beaker className="mr-2 h-4 w-4" />
                 {t("command.goPrecision")}
               </CommandItem>
+              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/${ctx.siteId}/settings`))}>
+                <Settings className="mr-2 h-4 w-4" />
+                {t("command.goSiteSettings")}
+              </CommandItem>
             </>
           )}
           {/* Team-level navigation */}
@@ -123,10 +126,12 @@ export function CommandPalette({ locale, dictionary }: CommandPaletteProps) {
                 <Globe2 className="mr-2 h-4 w-4" />
                 {t("command.goTeams")}
               </CommandItem>
-              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/members`))}>
-                <Users className="mr-2 h-4 w-4" />
-                {locale === "zh" ? "前往成员" : "Go to Members"}
-              </CommandItem>
+              {!ctx.siteId && (
+                <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/settings`))}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  {t("command.goTeamSettings")}
+                </CommandItem>
+              )}
             </>
           )}
           {/* Always available */}

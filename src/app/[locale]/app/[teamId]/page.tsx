@@ -176,7 +176,7 @@ export default async function TeamHomePage({
               {t("teams.teamMembers")}
             </CardTitle>
             <Link
-              href={`/${locale}/app/${teamId}/members`}
+              href={`/${locale}/app/${teamId}/settings`}
               className="text-sm text-primary hover:underline"
             >
               {t("teams.viewAllMembers") ?? "View all"}

@@ -72,6 +72,7 @@ const sectionLabels: Record<string, Record<string, string>> = {
 const navLabels: Record<string, Record<string, string>> = {
   sites: { en: "Sites", zh: "站点" },
   teamSettings: { en: "Team Settings", zh: "团队设置" },
+  siteSettings: { en: "Site Settings", zh: "站点设置" },
   members: { en: "Members", zh: "成员" },
   personalSettings: { en: "Personal Settings", zh: "个人设置" },
   backToTeam: { en: "Back to workspace", zh: "返回工作区" },
@@ -133,7 +134,8 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
   const { theme, setTheme } = useTheme();
 
   const ctx = parseSidebarContext(pathname, locale);
-  const currentTeamId = ctx.teamId || teams[0]?.id || "";
+  const navTeamId = ctx.teamId ?? teams[0]?.id ?? null;
+  const currentTeamId = navTeamId ?? "";
   const currentTeam = teams.find((team) => team.id === currentTeamId);
   const userInitial = (session.displayName || session.username || "U").charAt(0).toUpperCase();
 
@@ -158,11 +160,10 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
     router.push(`/${locale}/app/${newTeamId}`);
   }
 
-  const teamNavItems: SidebarLinkItem[] = ctx.teamId
+  const teamNavItems: SidebarLinkItem[] = navTeamId
     ? [
-        { id: "sites", icon: Globe2, path: `/app/${ctx.teamId}`, exact: true },
-        { id: "teamSettings", icon: Settings, path: `/app/${ctx.teamId}/settings` },
-        { id: "members", icon: Users, path: `/app/${ctx.teamId}/members` },
+        { id: "sites", icon: Globe2, path: `/app/${navTeamId}`, exact: true },
+        { id: "teamSettings", icon: Settings, path: `/app/${navTeamId}/settings` },
         { id: "personalSettings", icon: UserCircle2, path: "/app/settings" },
       ]
     : [{ id: "personalSettings", icon: UserCircle2, path: "/app/settings" }];
@@ -183,8 +184,7 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
     ctx.teamId && ctx.siteId
       ? [
           { id: "precision", icon: BookOpen, path: `/app/${ctx.teamId}/${ctx.siteId}/precision` },
-          { id: "teamSettings", icon: Settings, path: `/app/${ctx.teamId}/settings` },
-          { id: "members", icon: Users, path: `/app/${ctx.teamId}/members` },
+          { id: "siteSettings", icon: Settings, path: `/app/${ctx.teamId}/${ctx.siteId}/settings` },
         ]
       : [];
 
