@@ -29,8 +29,8 @@ export function StickyDashboardHeader({
   wsToken,
 }: StickyDashboardHeaderProps) {
   return (
-    <div className="sticky top-12 z-[9] -mx-4 mb-4 border-b bg-background/80 px-4 py-2.5 backdrop-blur-sm md:-mx-6 md:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="sticky top-12 z-[9] -mx-4 mb-4 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:-mx-6 md:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-1.5">
         <TeamSiteSelector
           teams={teams}
           sites={sites}

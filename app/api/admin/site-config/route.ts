@@ -1,27 +1,29 @@
 import { NextResponse } from "next/server";
 import { updateAdminSite, upsertAdminSiteConfig } from "@/lib/edge-client";
-import { parseFormBool, safeRedirectPath } from "@/lib/form-helpers";
+import { parseFormBool, safeRedirectPath, parseRequestBody, bodyStr } from "@/lib/form-helpers";
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const formData = await request.formData();
-  const returnTo = safeRedirectPath(formData.get("returnTo"), "/app/config");
+  const body = await parseRequestBody(request);
+  const isJson = (request.headers.get("content-type") || "").includes("application/json");
+  const returnTo = safeRedirectPath(body.returnTo as string | undefined, "/app/config");
 
-  const siteId = String(formData.get("siteId") || "").trim();
-  const name = String(formData.get("name") || "").trim();
-  const domain = String(formData.get("domain") || "").trim();
-  const publicEnabled = parseFormBool(formData.get("publicEnabled"));
-  const publicSlug = String(formData.get("publicSlug") || "").trim();
+  const siteId = bodyStr(body, "siteId");
+  const name = bodyStr(body, "name");
+  const domain = bodyStr(body, "domain");
+  const publicEnabled = parseFormBool(body.publicEnabled);
+  const publicSlug = bodyStr(body, "publicSlug");
 
   if (siteId.length === 0) {
+    if (isJson) return NextResponse.json({ ok: false, error: "missing_site_id" }, { status: 400 });
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "missing_site_id");
     return NextResponse.redirect(url, { status: 303 });
   }
 
   const privacyConfig = {
-    maskQueryHashDetails: parseFormBool(formData.get("maskQueryHashDetails"), true),
-    maskVisitorTrajectory: parseFormBool(formData.get("maskVisitorTrajectory"), true),
-    maskDetailedReferrerUrl: parseFormBool(formData.get("maskDetailedReferrerUrl"), true),
+    maskQueryHashDetails: parseFormBool(body.maskQueryHashDetails, true),
+    maskVisitorTrajectory: parseFormBool(body.maskVisitorTrajectory, true),
+    maskDetailedReferrerUrl: parseFormBool(body.maskDetailedReferrerUrl, true),
   };
 
   try {
@@ -34,14 +36,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
     await upsertAdminSiteConfig({
       siteId,
-      config: {
-        privacy: privacyConfig,
-      },
+      config: { privacy: privacyConfig },
     });
+    if (isJson) return NextResponse.json({ ok: true });
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (isJson) return NextResponse.json({ ok: false, error: "save_site_config_failed", message: msg }, { status: 500 });
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "save_site_config_failed");
-    url.searchParams.set("message", error instanceof Error ? error.message : String(error));
+    url.searchParams.set("message", msg);
     return NextResponse.redirect(url, { status: 303 });
   }
 
