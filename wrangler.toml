@@ -1,5 +1,5 @@
 name = "insightflare"
-main = "./cf-worker.js"
+main = "./workers/cf-worker.js"
 compatibility_date = "2026-03-01"
 workers_dev = true
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]

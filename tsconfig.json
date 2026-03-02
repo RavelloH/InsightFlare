@@ -1,10 +1,10 @@
 {
-  "extends": "./tsconfig.base.json",
+  "extends": "./src/config/ts/base.json",
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
       "@/*": [
-        "./*"
+        "./src/*"
       ]
     },
     "plugins": [
@@ -31,3 +31,4 @@
     "node_modules"
   ]
 }
+

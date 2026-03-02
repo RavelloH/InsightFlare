@@ -1,6 +1,6 @@
-import { IngestDurableObject } from "./lib/edge/ingest-do";
-import { runHourlyArchive } from "./lib/edge/archive";
-import nextWorker from "./.open-next/worker.js";
+import { IngestDurableObject } from "../src/lib/edge/ingest-do";
+import { runHourlyArchive } from "../src/lib/edge/archive";
+import nextWorker from "../.open-next/worker.js";
 
 async function handleAdminWs(request, env) {
   const incomingUrl = new URL(request.url);
@@ -56,3 +56,4 @@ export default {
 };
 
 export { IngestDurableObject };
+

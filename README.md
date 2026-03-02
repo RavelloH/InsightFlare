@@ -16,14 +16,14 @@ InsightFlare 是运行在 Cloudflare 上的开源访问分析系统
 ## 架构说明
 
 - 单应用：根目录 Next.js（OpenNext + Cloudflare Worker）
-- 单配置：仅使用根目录 `wrangler.toml`
+- 单配置：使用根目录 `wrangler.toml`
 - 采集、查询、管理接口均通过 Next.js Route Handlers 提供：
   - `/script.js`
   - `/collect`
   - `/api/private/*`
   - `/api/public/*`
   - `/healthz`
-- `cf-worker.js` 仅负责：
+- `workers/cf-worker.js` 仅负责：
   - 导出 Durable Object 类
   - 透传 `/admin/ws`
   - 执行定时归档任务
@@ -101,4 +101,5 @@ npm run cf:deploy
 ## 注意事项
 
 - 生产建议使用 Linux/WSL/CI 构建（OpenNext 官方建议）
-- 当前 `Next 16 + @opennextjs/cloudflare 1.17` 组合下，鉴权需使用 `middleware.ts`（`proxy.ts` 会触发 Node middleware 限制）
+- 当前 `Next 16 + @opennextjs/cloudflare 1.17` 组合下，鉴权需使用 `src/middleware.ts`（`proxy.ts` 会触发 Node middleware 限制）
+
