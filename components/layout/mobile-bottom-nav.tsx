@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, FileText, Activity, Clock, Settings, Globe2, Users, User, ArrowLeft } from "lucide-react";
+import { LayoutDashboard, Activity, Clock, Settings, Globe2, Users, User, ArrowLeft, GanttChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface MobileBottomNavProps {
@@ -35,7 +35,7 @@ const navLabels: Record<string, Record<string, string>> = {
   members: { en: "Members", zh: "成员" },
   profile: { en: "Profile", zh: "我的" },
   overview: { en: "Overview", zh: "总览" },
-  pages: { en: "Pages", zh: "页面" },
+  events: { en: "Events", zh: "事件" },
   realtime: { en: "Realtime", zh: "实时" },
   sessions: { en: "Sessions", zh: "会话" },
   back: { en: "Team", zh: "团队" },
@@ -67,8 +67,8 @@ export function MobileBottomNav({ locale }: MobileBottomNavProps) {
   const siteItems: Array<{ id: string; icon: typeof Globe2; href: string; exact?: boolean }> = ctx.teamId && ctx.siteId
     ? [
         { id: "overview", icon: LayoutDashboard, href: `/${locale}/app/${ctx.teamId}/${ctx.siteId}`, exact: true },
-        { id: "pages", icon: FileText, href: `/${locale}/app/${ctx.teamId}/${ctx.siteId}/pages` },
         { id: "realtime", icon: Activity, href: `/${locale}/app/${ctx.teamId}/${ctx.siteId}/realtime` },
+        { id: "events", icon: GanttChart, href: `/${locale}/app/${ctx.teamId}/${ctx.siteId}/events` },
         { id: "sessions", icon: Clock, href: `/${locale}/app/${ctx.teamId}/${ctx.siteId}/sessions` },
         { id: "back", icon: ArrowLeft, href: `/${locale}/app/${ctx.teamId}` },
       ]

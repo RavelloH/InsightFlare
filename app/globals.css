@@ -5,84 +5,86 @@
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 0 0% 5%;
+    --foreground: 222 84% 5%;
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 5%;
+    --card-foreground: 222 84% 5%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 5%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 45%;
-    --accent: 0 0% 96%;
-    --accent-foreground: 0 0% 9%;
+    --popover-foreground: 222 84% 5%;
+    --primary: 222 47% 11%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
     --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 91%;
-    --input: 0 0% 91%;
-    --ring: 0 0% 64%;
+    --destructive-foreground: 0 100% 97%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 212 27% 84%;
     --radius: 0.5rem;
 
     --signal: 33 91% 65%;
-    --highlight: 221 83% 53%;
+    --highlight: 220 84% 53%;
+    --foregroundish: 226 3% 23%;
 
-    --def-100: 0 0% 96%;
-    --def-200: 0 0% 93%;
-    --def-300: 0 0% 89%;
-    --def-400: 0 0% 75%;
+    --def-100: 210 40% 98%;
+    --def-200: 210 40% 96%;
+    --def-300: 210 15% 89%;
+    --def-400: 210 9% 75%;
 
     --chart-1: 221 83% 53%;
-    --chart-2: 15 95% 55%;
-    --chart-3: 173 80% 40%;
-    --chart-4: 45 93% 47%;
-    --chart-5: 280 65% 60%;
+    --chart-2: 14 100% 67%;
+    --chart-3: 173 62% 69%;
+    --chart-4: 41 93% 60%;
+    --chart-5: 337 39% 53%;
 
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 0 0% 5%;
-    --sidebar-primary: 0 0% 9%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 0 0% 96%;
-    --sidebar-accent-foreground: 0 0% 9%;
-    --sidebar-border: 0 0% 91%;
-    --sidebar-ring: 0 0% 64%;
+    --sidebar-foreground: 222 84% 5%;
+    --sidebar-primary: 222 47% 11%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 210 40% 96%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-ring: 212 27% 84%;
   }
 
   .dark {
-    --background: 0 0% 7%;
+    --background: 0 0% 12%;
     --foreground: 0 0% 98%;
-    --card: 0 0% 9%;
+    --card: 0 0% 10%;
     --card-foreground: 0 0% 98%;
-    --popover: 0 0% 9%;
+    --popover: 0 0% 10%;
     --popover-foreground: 0 0% 98%;
     --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
+    --primary-foreground: 0 0% 11%;
     --secondary: 0 0% 15%;
     --secondary-foreground: 0 0% 98%;
     --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 64%;
+    --muted-foreground: 0 0% 65%;
     --accent: 0 0% 15%;
     --accent-foreground: 0 0% 98%;
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 100% 97%;
     --border: 0 0% 15%;
     --input: 0 0% 15%;
-    --ring: 0 0% 35%;
+    --ring: 0 0% 84%;
 
     --signal: 33 91% 55%;
-    --highlight: 217 91% 60%;
+    --highlight: 221 100% 62%;
+    --foregroundish: 0 0% 79%;
 
-    --def-100: 0 0% 5%;
+    --def-100: 0 0% 8%;
     --def-200: 0 0% 13%;
     --def-300: 0 0% 15%;
     --def-400: 0 0% 25%;
 
     --chart-1: 217 91% 60%;
-    --chart-2: 20 96% 60%;
-    --chart-3: 173 80% 40%;
-    --chart-4: 45 93% 58%;
-    --chart-5: 280 65% 60%;
+    --chart-2: 14 100% 67%;
+    --chart-3: 173 62% 69%;
+    --chart-4: 41 93% 60%;
+    --chart-5: 337 39% 53%;
 
     --sidebar-background: 0 0% 9%;
     --sidebar-foreground: 0 0% 98%;
@@ -121,6 +123,26 @@
   button {
     @apply cursor-pointer;
   }
+
+  .row {
+    @apply flex flex-row;
+  }
+
+  .col {
+    @apply flex flex-col;
+  }
+
+  .card {
+    @apply rounded-md border border-border bg-card;
+  }
+
+  .h1 {
+    @apply text-3xl font-semibold;
+  }
+
+  .h2 {
+    @apply text-xl font-semibold;
+  }
 }
 
 @layer utilities {
@@ -145,4 +167,27 @@
 .recharts-wrapper .recharts-cartesian-grid-horizontal line:first-child,
 .recharts-wrapper .recharts-cartesian-grid-horizontal line:last-child {
   stroke-opacity: 0;
+}
+
+@keyframes sticky-shadow {
+  0% {
+    box-shadow: none;
+    border-bottom-color: transparent;
+    background-color: transparent;
+  }
+  100% {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    border-bottom-color: hsl(var(--border));
+    background-color: hsl(var(--def-100) / 0.92);
+  }
+}
+
+.sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid transparent;
+  animation: sticky-shadow linear both;
+  animation-timeline: scroll();
+  animation-range: 0 1px;
 }

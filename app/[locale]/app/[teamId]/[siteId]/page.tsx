@@ -1,15 +1,16 @@
 import { DashboardClient } from "@/components/dashboard/dashboard-client";
-import { DateRangePicker } from "@/components/dashboard/date-range-picker";
-import { LiveCounter } from "@/components/shared/live-counter";
+import { StickyDashboardHeader } from "@/components/dashboard/sticky-dashboard-header";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { isValidLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import type { Locale } from "@/lib/i18n/config";
 import {
+  fetchPrivateEvents,
   fetchPrivateOverview,
   fetchPrivatePages,
   fetchPrivateReferrers,
   fetchPrivateSessions,
   fetchPrivateTrend,
+  fetchPrivateVisitors,
 } from "@/lib/edge-client";
 
 interface SearchParams {
@@ -17,6 +18,7 @@ interface SearchParams {
   to?: string;
   fromIso?: string;
   toIso?: string;
+  interval?: string;
 }
 
 function parseDateInput(value: string | undefined): number | null {
@@ -52,6 +54,7 @@ export default async function SiteDashboardPage({
 
   const sp = await searchParams;
   const { from, to } = resolveRange(sp);
+  const interval = sp.interval === "hour" ? "hour" : "day";
 
   const wsBaseUrl =
     process.env.NEXT_PUBLIC_INSIGHTFLARE_WS_URL ||
@@ -59,12 +62,14 @@ export default async function SiteDashboardPage({
     "";
   const wsToken = process.env.NEXT_PUBLIC_INSIGHTFLARE_WS_TOKEN || "";
 
-  const [overview, trend, pages, referrers, sessions] = await Promise.all([
+  const [overview, trend, pages, referrers, sessions, events, visitors] = await Promise.all([
     fetchPrivateOverview({ siteId, from, to }),
-    fetchPrivateTrend({ siteId, from, to, interval: "day" }),
+    fetchPrivateTrend({ siteId, from, to, interval }),
     fetchPrivatePages({ siteId, from, to }),
     fetchPrivateReferrers({ siteId, from, to }),
     fetchPrivateSessions({ siteId, from, to }),
+    fetchPrivateEvents({ siteId, from, to, limit: 120 }),
+    fetchPrivateVisitors({ siteId, from, to, limit: 120 }),
   ]);
 
   const labels = {
@@ -81,31 +86,38 @@ export default async function SiteDashboardPage({
     hintDuration: t("dashboard.hintDuration"),
     topPages: t("dashboard.topPages"),
     topReferrers: t("dashboard.topReferrers"),
+    topSources: t("dashboard.topSources"),
+    topDevices: t("dashboard.topDevices"),
+    topCountries: t("dashboard.topCountries"),
+    topEventsBreakdown: t("dashboard.topEventsBreakdown"),
     sessionSnapshot: t("dashboard.sessionSnapshot"),
     noSessions: t("dashboard.noSessions"),
     realtimeStream: t("dashboard.realtimeStream"),
     wsHint: t("dashboard.wsHint"),
     waitingLive: t("dashboard.waitingLive"),
     direct: t("dashboard.direct"),
+    recentEvents: t("dashboard.recentEvents"),
+    profiles: t("dashboard.profiles"),
+    noEvents: t("realtime.noEvents"),
+    noVisitors: t("profiles.noVisitors"),
     viewAllPages: t("dashboard.viewAllPages"),
     viewAllSessions: t("dashboard.viewAllSessions"),
+    viewAllEvents: t("dashboard.viewAllEvents"),
+    viewAllProfiles: t("dashboard.viewAllProfiles"),
     fullRealtimeView: t("dashboard.fullRealtimeView"),
   };
 
   return (
     <div className="mx-auto max-w-7xl">
-      <div className="sticky top-0 z-[9] -mx-4 mb-4 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:-mx-6 md:px-6">
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <DateRangePicker locale={locale} from={from} to={to} />
-          {wsBaseUrl && (
-            <LiveCounter
-              siteId={siteId}
-              wsBaseUrl={wsBaseUrl}
-              wsToken={wsToken}
-            />
-          )}
-        </div>
-      </div>
+      <StickyDashboardHeader
+        locale={locale}
+        from={from}
+        to={to}
+        interval={interval}
+        siteId={siteId}
+        wsBaseUrl={wsBaseUrl}
+        wsToken={wsToken}
+      />
 
       <DashboardClient
         overview={overview.data}
@@ -113,6 +125,9 @@ export default async function SiteDashboardPage({
         pages={pages.data}
         referrers={referrers.data}
         sessions={sessions.data}
+        events={events.data}
+        visitors={visitors.data}
+        interval={interval}
         siteId={siteId}
         teamId={teamId}
         wsBaseUrl={wsBaseUrl}

@@ -11,7 +11,7 @@ export function Logo({ className, showText = true }: LogoProps) {
     <div className={cn("flex items-center gap-2", className)}>
       <Flame className="h-6 w-6 text-primary" />
       {showText && (
-        <span className="font-[var(--font-display)] text-lg font-semibold">
+        <span className="text-lg font-semibold">
           InsightFlare
         </span>
       )}

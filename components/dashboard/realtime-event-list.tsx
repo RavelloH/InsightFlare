@@ -1,9 +1,8 @@
 "use client";
 
-import { Activity, CircleAlert, PlugZap } from "lucide-react";
+import { CircleAlert, PlugZap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useRealtime } from "@/lib/hooks/use-realtime";
-import { formatDateTime } from "@/lib/utils";
 
 interface RealtimeEventListProps {
   siteId: string;

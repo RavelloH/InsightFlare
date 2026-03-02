@@ -1,8 +1,7 @@
 import { Clock } from "lucide-react";
 import { Widget, WidgetHead, WidgetBody } from "@/components/widget/widget";
 import { SessionCompactList } from "@/components/dashboard/session-compact-list";
-import { DateRangePicker } from "@/components/dashboard/date-range-picker";
-import { LiveCounter } from "@/components/shared/live-counter";
+import { StickyDashboardHeader } from "@/components/dashboard/sticky-dashboard-header";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { isValidLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import type { Locale } from "@/lib/i18n/config";
@@ -13,6 +12,7 @@ interface SearchParams {
   to?: string;
   fromIso?: string;
   toIso?: string;
+  interval?: string;
 }
 
 function parseDateInput(value: string | undefined): number | null {
@@ -48,6 +48,7 @@ export default async function SessionsPage({
 
   const sp = await searchParams;
   const { from, to } = resolveRange(sp);
+  const interval = sp.interval === "hour" ? "hour" : "day";
 
   const wsBaseUrl =
     process.env.NEXT_PUBLIC_INSIGHTFLARE_WS_URL ||
@@ -59,18 +60,15 @@ export default async function SessionsPage({
 
   return (
     <div className="mx-auto max-w-7xl">
-      <div className="sticky top-0 z-[9] -mx-4 mb-4 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:-mx-6 md:px-6">
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <DateRangePicker locale={locale} from={from} to={to} />
-          {wsBaseUrl && (
-            <LiveCounter
-              siteId={siteId}
-              wsBaseUrl={wsBaseUrl}
-              wsToken={wsToken}
-            />
-          )}
-        </div>
-      </div>
+      <StickyDashboardHeader
+        locale={locale}
+        from={from}
+        to={to}
+        interval={interval}
+        siteId={siteId}
+        wsBaseUrl={wsBaseUrl}
+        wsToken={wsToken}
+      />
 
       <div className="space-y-4">
         <div>

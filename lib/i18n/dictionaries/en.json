@@ -70,6 +70,12 @@
   "dashboard.waitingLive": "Waiting for live events...",
   "dashboard.topPages": "Top Pages",
   "dashboard.topReferrers": "Top Referrers",
+  "dashboard.topSources": "Top Sources",
+  "dashboard.topDevices": "Top Devices",
+  "dashboard.topCountries": "Top Countries",
+  "dashboard.topEventsBreakdown": "Top Events",
+  "dashboard.recentEvents": "Recent Events",
+  "dashboard.profiles": "Profiles",
   "dashboard.path": "Path",
   "dashboard.queryHash": "Query/Hash",
   "dashboard.referrer": "Referrer",
@@ -190,6 +196,8 @@
   "command.goPages": "Go to Pages",
   "command.goRealtime": "Go to Realtime",
   "command.goSessions": "Go to Sessions",
+  "command.goEvents": "Go to Events",
+  "command.goProfiles": "Go to Profiles",
 
   "nav.overview": "Overview",
   "nav.pages": "Pages",
@@ -200,6 +208,8 @@
   "dashboard.liveVisitors": "live",
   "dashboard.viewAllPages": "View all pages",
   "dashboard.viewAllSessions": "View all sessions",
+  "dashboard.viewAllEvents": "View all events",
+  "dashboard.viewAllProfiles": "View all profiles",
   "dashboard.fullRealtimeView": "Full realtime view",
 
   "pages.title": "Pages",
@@ -209,13 +219,22 @@
   "realtime.description": "Live event stream from the selected site.",
   "realtime.noEvents": "No events received yet.",
 
+  "events.title": "Events",
+  "events.description": "Recent tracked events and request metadata.",
+
   "sessions.title": "Sessions",
   "sessions.description": "Recent sessions for the selected site.",
+
+  "profiles.title": "Profiles",
+  "profiles.description": "Visitors and latest activity for the selected site.",
+  "profiles.noVisitors": "No visitors in current range.",
 
   "nav.sites": "Sites",
   "nav.teamSettings": "Team Settings",
   "nav.members": "Members",
   "nav.personalSettings": "Personal Settings",
+  "nav.events": "Events",
+  "nav.profiles": "Profiles",
   "nav.backToTeam": "Back to team",
   "sidebar.switchTeam": "Switch team",
   "members.title": "Team Members",

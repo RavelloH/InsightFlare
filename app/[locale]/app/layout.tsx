@@ -32,11 +32,11 @@ export default async function AppLayout({
 
   return (
     <SidebarProvider>
-      <div className="flex h-screen w-full overflow-hidden">
+      <div className="min-h-screen w-full bg-background">
         <AppSidebar locale={locale} session={session} teams={teams} />
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="w-full lg:pl-72">
           <TopHeader locale={locale} session={session} teams={teams} />
-          <main className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
+          <main className="min-h-screen px-4 pb-20 pt-4 md:px-6 md:pb-6 md:pt-6">
             {children}
           </main>
         </div>

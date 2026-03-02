@@ -70,6 +70,12 @@
   "dashboard.waitingLive": "等待实时事件中...",
   "dashboard.topPages": "热门页面",
   "dashboard.topReferrers": "热门来源",
+  "dashboard.topSources": "热门来源",
+  "dashboard.topDevices": "热门设备",
+  "dashboard.topCountries": "热门国家/地区",
+  "dashboard.topEventsBreakdown": "热门事件",
+  "dashboard.recentEvents": "近期事件",
+  "dashboard.profiles": "访客概览",
   "dashboard.path": "路径",
   "dashboard.queryHash": "查询/哈希",
   "dashboard.referrer": "来源",
@@ -190,6 +196,8 @@
   "command.goPages": "前往页面",
   "command.goRealtime": "前往实时",
   "command.goSessions": "前往会话",
+  "command.goEvents": "前往事件",
+  "command.goProfiles": "前往访客",
 
   "nav.overview": "总览",
   "nav.pages": "页面",
@@ -200,6 +208,8 @@
   "dashboard.liveVisitors": "在线",
   "dashboard.viewAllPages": "查看全部页面",
   "dashboard.viewAllSessions": "查看全部会话",
+  "dashboard.viewAllEvents": "查看全部事件",
+  "dashboard.viewAllProfiles": "查看全部访客",
   "dashboard.fullRealtimeView": "完整实时视图",
 
   "pages.title": "页面",
@@ -209,13 +219,22 @@
   "realtime.description": "所选站点的实时事件流。",
   "realtime.noEvents": "尚未收到事件。",
 
+  "events.title": "事件",
+  "events.description": "最近采集到的事件与请求元数据。",
+
   "sessions.title": "会话",
   "sessions.description": "所选站点和日期范围内的近期会话。",
+
+  "profiles.title": "访客",
+  "profiles.description": "所选站点访客及最近活动。",
+  "profiles.noVisitors": "当前范围内暂无访客。",
 
   "nav.sites": "站点",
   "nav.teamSettings": "团队设置",
   "nav.members": "成员",
   "nav.personalSettings": "个人设置",
+  "nav.events": "事件",
+  "nav.profiles": "访客",
   "nav.backToTeam": "返回团队",
   "sidebar.switchTeam": "切换团队",
   "members.title": "团队成员",

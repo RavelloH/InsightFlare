@@ -31,10 +31,10 @@ export default async function LocaleLayout({
 
   return (
     <html lang={locale} suppressHydrationWarning>
-      <body className={`${displayFont.variable} ${bodyFont.variable} font-[var(--font-body)]`}>
+      <body className={`${displayFont.variable} ${bodyFont.variable} font-[var(--font-body)] text-[14px]`}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="light"
           enableSystem
           disableTransitionOnChange
         >

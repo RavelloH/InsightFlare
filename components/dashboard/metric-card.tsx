@@ -35,9 +35,9 @@ export function MetricCard({ label, value, formatter, hint, loading, active, onC
     );
   }
 
-  return (
-    <div
-      className={cn(
+    return (
+      <div
+        className={cn(
         "relative shadow-[0_0_0_0.5px] shadow-border p-4 min-h-[88px] flex flex-col justify-center gap-1 transition-colors",
         onClick && "cursor-pointer hover:bg-def-100",
         active && "bg-def-100"
@@ -48,7 +48,7 @@ export function MetricCard({ label, value, formatter, hint, loading, active, onC
       onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick(); } : undefined}
     >
       <div className="flex items-center gap-1.5">
-        <span className="text-sm font-medium text-muted-foreground leading-[1.1]">
+        <span className="text-xs font-medium text-muted-foreground leading-[1.1]">
           {label}
         </span>
         {hint && (
@@ -66,7 +66,7 @@ export function MetricCard({ label, value, formatter, hint, loading, active, onC
           </TooltipProvider>
         )}
       </div>
-      <div className="font-mono text-3xl font-bold leading-[1.1]">
+      <div className="font-mono text-2xl font-semibold leading-[1.1]">
         <AnimatedCounter value={value} formatter={formatter} />
       </div>
       {active && metricKey && (

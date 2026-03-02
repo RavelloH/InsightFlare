@@ -141,6 +141,46 @@ export interface SessionsData {
   }>;
 }
 
+export interface EventsData {
+  ok: boolean;
+  data: Array<{
+    id: string;
+    eventType: string;
+    eventAt: number;
+    pathname: string;
+    queryString: string;
+    hashFragment: string;
+    title: string;
+    hostname: string;
+    referer: string;
+    refererHost: string;
+    visitorId: string;
+    sessionId: string;
+    durationMs: number;
+    country: string;
+    region: string;
+    city: string;
+    browser: string;
+    os: string;
+    deviceType: string;
+    language: string;
+    timezone: string;
+  }>;
+}
+
+export interface VisitorsData {
+  ok: boolean;
+  data: Array<{
+    visitorId: string;
+    firstSeenAt: number;
+    lastSeenAt: number;
+    views: number;
+    sessions: number;
+    countries: number;
+    latestPath: string;
+  }>;
+}
+
 export interface TeamData {
   id: string;
   name: string;
@@ -270,6 +310,120 @@ export async function fetchPrivateSessions(params: {
       limit: 8,
     },
   });
+}
+
+export async function fetchPrivateEvents(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  limit?: number;
+}): Promise<EventsData> {
+  const res = await fetchEdgeJson<{
+    ok: boolean;
+    data: Array<{
+      id?: string;
+      event_type?: string;
+      event_at?: number;
+      pathname?: string;
+      query_string?: string;
+      hash_fragment?: string;
+      title?: string;
+      hostname?: string;
+      referer?: string;
+      referer_host?: string;
+      visitor_id?: string;
+      session_id?: string;
+      duration_ms?: number;
+      country?: string;
+      region?: string;
+      city?: string;
+      browser?: string;
+      os?: string;
+      device_type?: string;
+      language?: string;
+      timezone?: string;
+    }>;
+  }>({
+    path: "/api/private/events",
+    params: {
+      siteId: params.siteId,
+      from: params.from,
+      to: params.to,
+      limit: params.limit ?? 100,
+    },
+  });
+
+  return {
+    ok: res.ok,
+    data: res.data.map((item) => ({
+      id: String(item.id ?? ""),
+      eventType: String(item.event_type ?? ""),
+      eventAt: Number(item.event_at ?? 0),
+      pathname: String(item.pathname ?? "/"),
+      queryString: String(item.query_string ?? ""),
+      hashFragment: String(item.hash_fragment ?? ""),
+      title: String(item.title ?? ""),
+      hostname: String(item.hostname ?? ""),
+      referer: String(item.referer ?? ""),
+      refererHost: String(item.referer_host ?? ""),
+      visitorId: String(item.visitor_id ?? ""),
+      sessionId: String(item.session_id ?? ""),
+      durationMs: Number(item.duration_ms ?? 0),
+      country: String(item.country ?? ""),
+      region: String(item.region ?? ""),
+      city: String(item.city ?? ""),
+      browser: String(item.browser ?? ""),
+      os: String(item.os ?? ""),
+      deviceType: String(item.device_type ?? ""),
+      language: String(item.language ?? ""),
+      timezone: String(item.timezone ?? ""),
+    })),
+  };
+}
+
+export async function fetchPrivateVisitors(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  limit?: number;
+}): Promise<VisitorsData> {
+  const res = await fetchEdgeJson<{
+    ok: boolean;
+    data: Array<{
+      visitorId?: string;
+      visitor_id?: string;
+      firstSeenAt?: number;
+      first_seen_at?: number;
+      lastSeenAt?: number;
+      last_seen_at?: number;
+      views?: number;
+      sessions?: number;
+      countries?: number;
+      latestPath?: string;
+      latest_path?: string;
+    }>;
+  }>({
+    path: "/api/private/visitors",
+    params: {
+      siteId: params.siteId,
+      from: params.from,
+      to: params.to,
+      limit: params.limit ?? 100,
+    },
+  });
+
+  return {
+    ok: res.ok,
+    data: res.data.map((item) => ({
+      visitorId: String(item.visitorId ?? item.visitor_id ?? ""),
+      firstSeenAt: Number(item.firstSeenAt ?? item.first_seen_at ?? 0),
+      lastSeenAt: Number(item.lastSeenAt ?? item.last_seen_at ?? 0),
+      views: Number(item.views ?? 0),
+      sessions: Number(item.sessions ?? 0),
+      countries: Number(item.countries ?? 0),
+      latestPath: String(item.latestPath ?? item.latest_path ?? ""),
+    })),
+  };
 }
 
 export async function fetchPublicOverview(

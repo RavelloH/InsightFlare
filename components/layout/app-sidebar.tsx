@@ -1,21 +1,23 @@
 "use client";
 
+import { useEffect } from "react";
+import type { ComponentType } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Flame,
-  Wallpaper,
-  Beaker,
-  Users,
-  Settings,
-  Globe2,
-  Sun,
-  Moon,
-  FileText,
-  Activity,
-  Clock,
   ArrowLeft,
-  User,
+  BookOpen,
+  FileText,
+  Flame,
+  GanttChart,
+  Globe2,
+  LayoutDashboard,
+  Activity,
+  Moon,
+  Settings,
+  Sun,
+  Users,
+  UserCircle2,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -48,26 +50,23 @@ function parseSidebarContext(pathname: string, locale: string): SidebarContext {
   const rest = pathname.startsWith(appPrefix) ? pathname.slice(appPrefix.length) : "";
   const segments = rest.split("/").filter(Boolean);
 
-  // /app or /app/settings → root/personal mode
   if (segments.length === 0 || segments[0] === "settings") {
     return { mode: "root", teamId: null, siteId: null };
   }
 
   const teamId = segments[0];
 
-  // /app/[teamId] or /app/[teamId]/settings or /app/[teamId]/members → team mode
   if (segments.length === 1 || segments[1] === "settings" || segments[1] === "members") {
     return { mode: "team", teamId, siteId: null };
   }
 
-  // /app/[teamId]/[siteId]/... → site mode
-  const siteId = segments[1];
-  return { mode: "site", teamId, siteId };
+  return { mode: "site", teamId, siteId: segments[1] };
 }
 
 const sectionLabels: Record<string, Record<string, string>> = {
-  team: { en: "Team", zh: "团队" },
   analytics: { en: "Analytics", zh: "分析" },
+  manage: { en: "Manage", zh: "管理" },
+  workspace: { en: "Workspace", zh: "工作区" },
 };
 
 const navLabels: Record<string, Record<string, string>> = {
@@ -75,18 +74,56 @@ const navLabels: Record<string, Record<string, string>> = {
   teamSettings: { en: "Team Settings", zh: "团队设置" },
   members: { en: "Members", zh: "成员" },
   personalSettings: { en: "Personal Settings", zh: "个人设置" },
-  backToTeam: { en: "Back to team", zh: "返回团队" },
+  backToTeam: { en: "Back to workspace", zh: "返回工作区" },
   overview: { en: "Overview", zh: "总览" },
   pages: { en: "Pages", zh: "页面" },
   realtime: { en: "Realtime", zh: "实时" },
   sessions: { en: "Sessions", zh: "会话" },
   precision: { en: "Precision", zh: "精准查询" },
+  events: { en: "Events", zh: "事件" },
+  profiles: { en: "Profiles", zh: "访客" },
 };
 
 const localeLabels: Record<string, string> = {
   en: "EN",
   zh: "中文",
 };
+
+interface SidebarLinkItem {
+  id: string;
+  icon: ComponentType<{ className?: string }>;
+  path: string;
+  exact?: boolean;
+}
+
+function SidebarNavLink({
+  locale,
+  pathname,
+  item,
+  onNavigate,
+}: {
+  locale: string;
+  pathname: string;
+  item: SidebarLinkItem;
+  onNavigate: () => void;
+}) {
+  const fullPath = `/${locale}${item.path}`;
+  const active = item.exact ? pathname === fullPath : pathname === fullPath || pathname.startsWith(`${fullPath}/`);
+
+  return (
+    <Link
+      href={fullPath}
+      onClick={onNavigate}
+      className={cn(
+        "flex items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition-colors",
+        active ? "bg-def-200 text-foreground" : "text-muted-foreground hover:bg-def-200 hover:text-foreground",
+      )}
+    >
+      <item.icon className="h-5 w-5 shrink-0" />
+      <span className="flex-1 truncate">{navLabels[item.id]?.[locale] ?? item.id}</span>
+    </Link>
+  );
+}
 
 export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
   const pathname = usePathname();
@@ -95,16 +132,13 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
   const { theme, setTheme } = useTheme();
 
   const ctx = parseSidebarContext(pathname, locale);
-  const label = (key: string) => navLabels[key]?.[locale] ?? key;
+  const currentTeamId = ctx.teamId || teams[0]?.id || "";
+  const currentTeam = teams.find((team) => team.id === currentTeamId);
+  const userInitial = (session.displayName || session.username || "U").charAt(0).toUpperCase();
 
-  function isActive(path: string): boolean {
-    const fullPath = `/${locale}${path}`;
-    return pathname === fullPath || (path !== `/app/${ctx.teamId}` && pathname.startsWith(fullPath));
-  }
-
-  function isExactActive(path: string): boolean {
-    return pathname === `/${locale}${path}`;
-  }
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname, setMobileOpen]);
 
   function switchLocale() {
     const newLocale = locale === "en" ? "zh" : "en";
@@ -122,198 +156,186 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
     router.push(`/${locale}/app/${newTeamId}`);
   }
 
-  const userInitial = (session.displayName || session.username || "U").charAt(0).toUpperCase();
-
-  // Team-level nav items
-  const teamNavItems = ctx.teamId
+  const teamNavItems: SidebarLinkItem[] = ctx.teamId
     ? [
         { id: "sites", icon: Globe2, path: `/app/${ctx.teamId}`, exact: true },
         { id: "teamSettings", icon: Settings, path: `/app/${ctx.teamId}/settings` },
         { id: "members", icon: Users, path: `/app/${ctx.teamId}/members` },
-        { id: "personalSettings", icon: User, path: "/app/settings" },
+        { id: "personalSettings", icon: UserCircle2, path: "/app/settings" },
       ]
-    : [{ id: "personalSettings", icon: User, path: "/app/settings" }];
+    : [{ id: "personalSettings", icon: UserCircle2, path: "/app/settings" }];
 
-  // Site-level nav items
-  const siteNavItems =
+  const siteAnalyticsItems: SidebarLinkItem[] =
     ctx.teamId && ctx.siteId
       ? [
-          { id: "overview", icon: Wallpaper, path: `/app/${ctx.teamId}/${ctx.siteId}`, exact: true },
+          { id: "overview", icon: LayoutDashboard, path: `/app/${ctx.teamId}/${ctx.siteId}`, exact: true },
           { id: "pages", icon: FileText, path: `/app/${ctx.teamId}/${ctx.siteId}/pages` },
           { id: "realtime", icon: Activity, path: `/app/${ctx.teamId}/${ctx.siteId}/realtime` },
-          { id: "sessions", icon: Clock, path: `/app/${ctx.teamId}/${ctx.siteId}/sessions` },
-          { id: "precision", icon: Beaker, path: `/app/${ctx.teamId}/${ctx.siteId}/precision` },
+          { id: "events", icon: GanttChart, path: `/app/${ctx.teamId}/${ctx.siteId}/events` },
+          { id: "sessions", icon: Users, path: `/app/${ctx.teamId}/${ctx.siteId}/sessions` },
+          { id: "profiles", icon: UserCircle2, path: `/app/${ctx.teamId}/${ctx.siteId}/profiles` },
+        ]
+      : [];
+
+  const siteManageItems: SidebarLinkItem[] =
+    ctx.teamId && ctx.siteId
+      ? [
+          { id: "precision", icon: BookOpen, path: `/app/${ctx.teamId}/${ctx.siteId}/precision` },
+          { id: "teamSettings", icon: Settings, path: `/app/${ctx.teamId}/settings` },
+          { id: "members", icon: Users, path: `/app/${ctx.teamId}/members` },
         ]
       : [];
 
   const sidebarContent = (
-    <aside className="flex h-full w-64 flex-col bg-card border-r">
-      {/* Logo */}
-      <div className="flex h-16 items-center gap-2 border-b px-4">
+    <aside className="flex h-full w-72 flex-col border-r border-border bg-card">
+      <div className="flex h-16 items-center gap-2 border-b border-border px-4">
         <Flame className="h-6 w-6 text-primary shrink-0" />
-        <span className="font-[var(--font-display)] text-lg font-semibold text-foreground">
-          InsightFlare
-        </span>
+        <span className="truncate text-base font-semibold">InsightFlare</span>
       </div>
 
-      {/* Navigation - scrollable middle section */}
-      <div className="relative flex-1">
-        <nav className="overflow-auto hide-scrollbar h-full px-3 pb-10">
+      <div className="border-b border-border px-4 py-3">
+        {teams.length > 0 ? (
+          <Select value={currentTeamId} onValueChange={handleTeamSwitch}>
+            <SelectTrigger className="h-9 w-full justify-start text-left">
+              <SelectValue placeholder={locale === "zh" ? "选择团队" : "Select team"} />
+            </SelectTrigger>
+            <SelectContent>
+              {teams.map((team) => (
+                <SelectItem key={team.id} value={team.id}>
+                  {team.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <div className="text-xs text-muted-foreground">
+            {locale === "zh" ? "尚未创建团队" : "No team yet"}
+          </div>
+        )}
+      </div>
+
+      <div className="relative flex-1 overflow-hidden">
+        <nav className="hide-scrollbar h-full space-y-4 overflow-y-auto px-4 py-4 pb-10">
           {ctx.mode === "site" ? (
             <>
-              {/* Back to team link */}
               <Link
                 href={`/${locale}/app/${ctx.teamId}`}
                 onClick={() => setMobileOpen(false)}
-                className="flex items-center gap-2 rounded-md px-3 py-2 mt-3 mb-1 text-[13px] font-medium text-muted-foreground hover:bg-def-200 hover:text-foreground transition-colors"
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-def-200 hover:text-foreground"
               >
                 <ArrowLeft className="h-4 w-4 shrink-0" />
-                {label("backToTeam")}
+                {navLabels.backToTeam[locale]}
               </Link>
 
-              {/* Analytics section */}
-              <p className="text-xs font-medium text-muted-foreground mb-2 mt-3 px-3">
-                {sectionLabels.analytics[locale] ?? "Analytics"}
-              </p>
-              <div className="flex flex-col gap-0.5">
-                {siteNavItems.map((item) => {
-                  const active = item.exact ? isExactActive(item.path) : isActive(item.path);
-                  return (
-                    <Link
-                      key={item.id}
-                      href={`/${locale}${item.path}`}
-                      onClick={() => setMobileOpen(false)}
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2 text-[13px] font-medium transition-colors",
-                        active
-                          ? "bg-def-200 text-foreground"
-                          : "text-muted-foreground hover:bg-def-200 hover:text-foreground",
-                      )}
-                    >
-                      <item.icon className="h-5 w-5 shrink-0" />
-                      {label(item.id)}
-                    </Link>
-                  );
-                })}
+              <div className="space-y-1">
+                <p className="px-3 text-xs font-medium text-muted-foreground">
+                  {sectionLabels.analytics[locale] ?? "Analytics"}
+                </p>
+                {siteAnalyticsItems.map((item) => (
+                  <SidebarNavLink
+                    key={item.id}
+                    locale={locale}
+                    pathname={pathname}
+                    item={item}
+                    onNavigate={() => setMobileOpen(false)}
+                  />
+                ))}
+              </div>
+
+              <div className="space-y-1">
+                <p className="px-3 text-xs font-medium text-muted-foreground">
+                  {sectionLabels.manage[locale] ?? "Manage"}
+                </p>
+                {siteManageItems.map((item) => (
+                  <SidebarNavLink
+                    key={item.id}
+                    locale={locale}
+                    pathname={pathname}
+                    item={item}
+                    onNavigate={() => setMobileOpen(false)}
+                  />
+                ))}
               </div>
             </>
           ) : (
-            <>
-              {/* Team switcher */}
-              {teams.length > 0 && (
-                <div className="mt-3 px-1">
-                  <Select
-                    value={ctx.teamId || teams[0]?.id || ""}
-                    onValueChange={handleTeamSwitch}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder={locale === "zh" ? "选择团队" : "Select team"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {teams.map((team) => (
-                        <SelectItem key={team.id} value={team.id}>
-                          {team.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {/* Team section */}
-              <p className="text-xs font-medium text-muted-foreground mb-2 mt-4 px-3">
-                {sectionLabels.team[locale] ?? "Team"}
+            <div className="space-y-1">
+              <p className="px-3 text-xs font-medium text-muted-foreground">
+                {sectionLabels.workspace[locale] ?? "Workspace"}
               </p>
-              <div className="flex flex-col gap-0.5">
-                {teamNavItems.map((item) => {
-                  const active = item.exact ? isExactActive(item.path) : isActive(item.path);
-                  return (
-                    <Link
-                      key={item.id}
-                      href={`/${locale}${item.path}`}
-                      onClick={() => setMobileOpen(false)}
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2 text-[13px] font-medium transition-colors",
-                        active
-                          ? "bg-def-200 text-foreground"
-                          : "text-muted-foreground hover:bg-def-200 hover:text-foreground",
-                      )}
-                    >
-                      <item.icon className="h-5 w-5 shrink-0" />
-                      {label(item.id)}
-                    </Link>
-                  );
-                })}
-              </div>
-            </>
+              {teamNavItems.map((item) => (
+                <SidebarNavLink
+                  key={item.id}
+                  locale={locale}
+                  pathname={pathname}
+                  item={item}
+                  onNavigate={() => setMobileOpen(false)}
+                />
+              ))}
+            </div>
           )}
         </nav>
-
-        {/* Gradient fade at bottom of nav area */}
         <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-8 bg-gradient-to-t from-card to-card/0" />
       </div>
 
-      {/* Footer */}
-      <div className="flex border-t">
-        {/* Language switcher */}
-        <button
-          type="button"
-          onClick={switchLocale}
-          className="flex-1 h-12 flex items-center justify-center border-r text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer text-sm"
-        >
-          <Globe2 className="h-4 w-4 mr-1.5" />
-          {localeLabels[locale] ?? locale}
-        </button>
-
-        {/* Theme toggle */}
-        <button
-          type="button"
-          onClick={toggleTheme}
-          className="flex-1 h-12 flex items-center justify-center border-r text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer text-sm"
-        >
-          <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-          <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-        </button>
-
-        {/* User avatar initial */}
-        <Link
-          href={`/${locale}/app/settings`}
-          onClick={() => setMobileOpen(false)}
-          className="flex-1 h-12 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer text-sm"
-        >
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-def-200 text-xs font-semibold text-foreground">
-            {userInitial}
-          </span>
-        </Link>
+      <div className="border-t border-border bg-card">
+        <div className="flex h-12 items-center border-b border-border px-4 text-xs text-muted-foreground">
+          <span className="truncate">{currentTeam?.name || session.displayName || session.username}</span>
+        </div>
+        <div className="flex">
+          <button
+            type="button"
+            onClick={switchLocale}
+            className="flex h-12 flex-1 items-center justify-center border-r border-border text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <Globe2 className="mr-1.5 h-4 w-4" />
+            {localeLabels[locale] ?? locale}
+          </button>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="flex h-12 flex-1 items-center justify-center border-r border-border text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+            <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+          </button>
+          <Link
+            href={`/${locale}/app/settings`}
+            onClick={() => setMobileOpen(false)}
+            className="flex h-12 flex-1 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-def-200 text-xs font-semibold text-foreground">
+              {userInitial}
+            </span>
+          </Link>
+        </div>
       </div>
     </aside>
   );
 
   return (
     <>
-      {/* Desktop sidebar - always visible */}
-      <div className="hidden md:block">
-        {sidebarContent}
+      <div className="hidden lg:block">
+        <div className="fixed inset-y-0 left-0 z-40">
+          {sidebarContent}
+        </div>
       </div>
 
-      {/* Mobile sidebar - overlay pattern */}
       <div
         className={cn(
-          "fixed inset-0 z-50 md:hidden transition-opacity duration-300",
-          mobileOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+          "fixed inset-0 z-50 transition-opacity duration-200 lg:hidden",
+          mobileOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
         )}
       >
-        {/* Backdrop */}
-        <div
-          className="absolute inset-0 bg-black/50"
+        <button
+          type="button"
           onClick={() => setMobileOpen(false)}
+          className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+          aria-label="Close sidebar overlay"
         />
-
-        {/* Sliding sidebar */}
         <div
           className={cn(
-            "absolute top-0 left-0 h-full transition-transform duration-300 ease-in-out",
-            mobileOpen ? "translate-x-0" : "-translate-x-64",
+            "absolute inset-y-0 left-0 transition-transform duration-200",
+            mobileOpen ? "translate-x-0" : "-translate-x-72",
           )}
         >
           {sidebarContent}

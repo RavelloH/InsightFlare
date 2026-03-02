@@ -14,8 +14,9 @@ import {
   FileText,
   Activity,
   Clock,
+  GanttChart,
   Globe2,
-  User,
+  UserCircle2,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -96,9 +97,17 @@ export function CommandPalette({ locale, dictionary }: CommandPaletteProps) {
                 <Activity className="mr-2 h-4 w-4" />
                 {t("command.goRealtime")}
               </CommandItem>
+              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/${ctx.siteId}/events`))}>
+                <GanttChart className="mr-2 h-4 w-4" />
+                {t("command.goEvents")}
+              </CommandItem>
               <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/${ctx.siteId}/sessions`))}>
                 <Clock className="mr-2 h-4 w-4" />
                 {t("command.goSessions")}
+              </CommandItem>
+              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/${ctx.siteId}/profiles`))}>
+                <UserCircle2 className="mr-2 h-4 w-4" />
+                {t("command.goProfiles")}
               </CommandItem>
               <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/${ctx.siteId}/precision`))}>
                 <Beaker className="mr-2 h-4 w-4" />

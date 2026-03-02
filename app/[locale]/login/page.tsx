@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,30 +25,55 @@ export default async function LoginPage({
   const hasError = sp.error === "invalid_credentials";
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-16">
-      <div className="grid w-full max-w-5xl gap-8 md:grid-cols-[1.2fr_1fr]">
-        <section className="space-y-6 rounded-md border bg-card p-8">
-          <Badge variant="signal">{t("login.hero.badge")}</Badge>
-          <div className="flex items-center gap-3">
-            <Flame className="h-10 w-10 text-primary" />
-            <h1 className="text-4xl font-semibold leading-tight md:text-5xl">
-              {t("login.hero.title")}
-            </h1>
-          </div>
-          <p className="max-w-md text-muted-foreground">
-            {t("login.hero.description")}
-          </p>
-          <div className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-2">
-            <div className="rounded-md border bg-def-100 p-4">
-              {t("login.hero.feature1")}
-            </div>
-            <div className="rounded-md border bg-def-100 p-4">
-              {t("login.hero.feature2")}
-            </div>
-          </div>
-        </section>
+    <main className="relative min-h-screen bg-background md:grid md:grid-cols-2">
+      <header className="absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between px-6 md:px-8">
+        <Link href={`/${locale}/login`} className="flex items-center gap-2">
+          <Flame className="h-6 w-6 text-primary" />
+          <span className="font-medium text-sm text-muted-foreground">
+            InsightFlare
+          </span>
+        </Link>
+        <nav className="hidden items-center gap-4 text-sm text-muted-foreground md:flex">
+          <a href="https://openpanel.dev" target="_blank" rel="noopener noreferrer" className="hover:underline">
+            Openpanel
+          </a>
+          <a href="https://openpanel.dev/docs" target="_blank" rel="noopener noreferrer" className="hover:underline">
+            Docs
+          </a>
+          <a href="https://openpanel.dev/discord" target="_blank" rel="noopener noreferrer" className="hover:underline">
+            Community
+          </a>
+        </nav>
+      </header>
 
-        <Card>
+      <section className="hidden p-8 pt-24 md:block">
+        <div className="relative h-full overflow-hidden rounded-xl border border-border bg-card p-8 shadow-sm">
+          <div className="absolute -left-20 -top-16 h-64 w-64 rounded-full bg-chart-1/10 blur-3xl" />
+          <div className="absolute -right-20 -bottom-20 h-72 w-72 rounded-full bg-chart-3/10 blur-3xl" />
+          <div className="relative space-y-6">
+            <Badge variant="signal">{t("login.hero.badge")}</Badge>
+            <div className="space-y-2">
+              <h1 className="text-4xl font-semibold leading-tight">
+                {t("login.hero.title")}
+              </h1>
+              <p className="max-w-lg text-muted-foreground">
+                {t("login.hero.description")}
+              </p>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="rounded-md border border-border bg-def-100 p-4 text-sm text-muted-foreground">
+                {t("login.hero.feature1")}
+              </div>
+              <div className="rounded-md border border-border bg-def-100 p-4 text-sm text-muted-foreground">
+                {t("login.hero.feature2")}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="flex min-h-screen items-center justify-center px-4 pb-10 pt-24 md:px-8">
+        <Card className="w-full max-w-md">
           <CardHeader>
             <CardTitle className="text-2xl">{t("login.title")}</CardTitle>
             <CardDescription>{t("login.subtitle")}</CardDescription>
@@ -64,7 +90,7 @@ export default async function LoginPage({
                 <Input type="password" name="password" required placeholder="Enter account password" />
               </div>
               {hasError && (
-                <p className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+                <p className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
                   {t("login.invalidCredentials")}
                 </p>
               )}
@@ -74,7 +100,7 @@ export default async function LoginPage({
             </form>
           </CardContent>
         </Card>
-      </div>
+      </section>
     </main>
   );
 }

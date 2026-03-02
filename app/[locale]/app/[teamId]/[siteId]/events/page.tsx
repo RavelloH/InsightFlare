@@ -1,8 +1,11 @@
-import { RealtimeFullView } from "@/components/dashboard/realtime-full-view";
+import { Layers } from "lucide-react";
+import { EventsTable } from "@/components/dashboard/events-table";
 import { StickyDashboardHeader } from "@/components/dashboard/sticky-dashboard-header";
+import { Widget, WidgetBody, WidgetHead } from "@/components/widget/widget";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { isValidLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import type { Locale } from "@/lib/i18n/config";
+import { fetchPrivateEvents } from "@/lib/edge-client";
 
 interface SearchParams {
   from?: string;
@@ -31,7 +34,7 @@ function resolveRange(sp: SearchParams): { from: number; to: number } {
   return { from: Math.min(from, to), to: Math.max(from, to) };
 }
 
-export default async function RealtimePage({
+export default async function EventsPage({
   params,
   searchParams,
 }: {
@@ -42,6 +45,7 @@ export default async function RealtimePage({
   const locale: Locale = isValidLocale(rawLocale) ? rawLocale : DEFAULT_LOCALE;
   const dict = await getDictionary(locale);
   const t = (key: string) => dict[key] ?? key;
+
   const sp = await searchParams;
   const { from, to } = resolveRange(sp);
   const interval = sp.interval === "hour" ? "hour" : "day";
@@ -52,8 +56,10 @@ export default async function RealtimePage({
     "";
   const wsToken = process.env.NEXT_PUBLIC_INSIGHTFLARE_WS_TOKEN || "";
 
+  const events = await fetchPrivateEvents({ siteId, from, to, limit: 200 });
+
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
+    <div className="mx-auto max-w-7xl">
       <StickyDashboardHeader
         locale={locale}
         from={from}
@@ -64,25 +70,27 @@ export default async function RealtimePage({
         wsToken={wsToken}
       />
 
-      <div>
-        <h1 className="text-xl font-semibold">{t("realtime.title")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("realtime.description")}
-        </p>
-      </div>
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-xl font-semibold">{t("events.title")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("events.description")}
+          </p>
+        </div>
 
-      <RealtimeFullView
-        siteId={siteId}
-        wsBaseUrl={wsBaseUrl}
-        wsToken={wsToken}
-        labels={{
-          title: t("dashboard.realtimeStream"),
-          wsHint: t("dashboard.wsHint"),
-          waitingLive: t("dashboard.waitingLive"),
-          noEvents: t("realtime.noEvents"),
-          live: t("dashboard.liveVisitors"),
-        }}
-      />
+        <Widget>
+          <WidgetHead>
+            <div className="flex items-center gap-2">
+              <Layers className="h-4 w-4 text-muted-foreground" />
+              {t("dashboard.recentEvents")}
+            </div>
+          </WidgetHead>
+          <WidgetBody>
+            <EventsTable events={events.data} emptyLabel={t("realtime.noEvents")} />
+          </WidgetBody>
+        </Widget>
+      </div>
     </div>
   );
 }
+
