@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
   BarChart3,
@@ -55,6 +55,7 @@ export function CommandPalette({ locale, dictionary }: CommandPaletteProps) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { setTheme, theme } = useTheme();
 
   const t = (key: string) => dictionary[key] ?? key;
@@ -144,8 +145,10 @@ export function CommandPalette({ locale, dictionary }: CommandPaletteProps) {
             onSelect={() =>
               runCommand(() => {
                 const newLocale = locale === "en" ? "zh" : "en";
+                const newPath = pathname.replace(new RegExp(`^/${locale}(?=/|$)`), `/${newLocale}`);
+                const query = searchParams.toString();
                 document.cookie = `if_locale=${newLocale};path=/;max-age=31536000`;
-                window.location.href = window.location.pathname.replace(`/${locale}`, `/${newLocale}`);
+                router.replace(query ? `${newPath}?${query}` : newPath);
               })
             }
           >

@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import type { ComponentType } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   BookOpen,
@@ -127,6 +127,7 @@ function SidebarNavLink({
 
 export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { mobileOpen, setMobileOpen } = useSidebar();
   const { theme, setTheme } = useTheme();
@@ -142,9 +143,10 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
 
   function switchLocale() {
     const newLocale = locale === "en" ? "zh" : "en";
-    const newPath = pathname.replace(`/${locale}`, `/${newLocale}`);
+    const newPath = pathname.replace(new RegExp(`^/${locale}(?=/|$)`), `/${newLocale}`);
+    const query = searchParams.toString();
     document.cookie = `if_locale=${newLocale};path=/;max-age=31536000`;
-    window.location.href = newPath;
+    router.replace(query ? `${newPath}?${query}` : newPath);
   }
 
   function toggleTheme() {

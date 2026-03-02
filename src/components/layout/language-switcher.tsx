@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Languages } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,12 +15,15 @@ interface LanguageSwitcherProps {
 }
 
 export function LanguageSwitcher({ locale }: LanguageSwitcherProps) {
+  const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   function switchTo(newLocale: string) {
-    const newPath = pathname.replace(`/${locale}`, `/${newLocale}`);
+    const newPath = pathname.replace(new RegExp(`^/${locale}(?=/|$)`), `/${newLocale}`);
+    const query = searchParams.toString();
     document.cookie = `if_locale=${newLocale};path=/;max-age=31536000`;
-    window.location.href = newPath;
+    router.replace(query ? `${newPath}?${query}` : newPath);
   }
 
   return (

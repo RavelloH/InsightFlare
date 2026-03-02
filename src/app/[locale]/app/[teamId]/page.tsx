@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Copy, Globe2, Shield, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -106,12 +107,12 @@ export default async function TeamHomePage({
                   {sites.map((site) => (
                     <TableRow key={site.id}>
                       <TableCell>
-                        <a
+                        <Link
                           className="font-medium text-primary hover:underline"
                           href={`/${locale}/app/${teamId}/${site.id}`}
                         >
                           {site.name}
-                        </a>
+                        </Link>
                       </TableCell>
                       <TableCell>{site.domain}</TableCell>
                       <TableCell>
@@ -174,12 +175,12 @@ export default async function TeamHomePage({
               </span>
               {t("teams.teamMembers")}
             </CardTitle>
-            <a
+            <Link
               href={`/${locale}/app/${teamId}/members`}
               className="text-sm text-primary hover:underline"
             >
               {t("teams.viewAllMembers") ?? "View all"}
-            </a>
+            </Link>
           </div>
         </CardHeader>
         <CardContent>
