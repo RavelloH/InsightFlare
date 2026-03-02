@@ -34,7 +34,7 @@ export default async function LocaleLayout({
       <body className={`${displayFont.variable} ${bodyFont.variable} font-[var(--font-body)] text-[14px]`}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="light"
+          defaultTheme="system"
           enableSystem
           disableTransitionOnChange
         >

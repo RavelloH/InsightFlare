@@ -7,6 +7,7 @@ import {
   BarChart3,
   Settings,
   Beaker,
+  Monitor,
   Moon,
   Sun,
   Languages,
@@ -55,7 +56,7 @@ export function CommandPalette({ locale, dictionary }: CommandPaletteProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { setTheme, theme } = useTheme();
+  const { setTheme } = useTheme();
 
   const t = (key: string) => dictionary[key] ?? key;
   const ctx = parseContext(pathname, locale);
@@ -142,9 +143,17 @@ export function CommandPalette({ locale, dictionary }: CommandPaletteProps) {
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading={t("command.actions")}>
-          <CommandItem onSelect={() => runCommand(() => setTheme(theme === "dark" ? "light" : "dark"))}>
-            {theme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-            {t("command.toggleTheme")}
+          <CommandItem onSelect={() => runCommand(() => setTheme("system"))}>
+            <Monitor className="mr-2 h-4 w-4" />
+            {t("theme.system")}
+          </CommandItem>
+          <CommandItem onSelect={() => runCommand(() => setTheme("light"))}>
+            <Sun className="mr-2 h-4 w-4" />
+            {t("theme.light")}
+          </CommandItem>
+          <CommandItem onSelect={() => runCommand(() => setTheme("dark"))}>
+            <Moon className="mr-2 h-4 w-4" />
+            {t("theme.dark")}
           </CommandItem>
           <CommandItem
             onSelect={() =>

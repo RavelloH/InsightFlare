@@ -13,11 +13,12 @@ import {
   Globe2,
   LayoutDashboard,
   Activity,
-  Moon,
   Settings,
-  Sun,
   Users,
   UserCircle2,
+  Monitor,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -33,7 +34,12 @@ import type { TeamData } from "@/lib/edge-client";
 
 interface AppSidebarProps {
   locale: string;
-  session: { userId: string; username: string; displayName: string; systemRole: string };
+  session: {
+    userId: string;
+    username: string;
+    displayName: string;
+    systemRole: string;
+  };
   teams: TeamData[];
 }
 
@@ -45,9 +51,13 @@ interface SidebarContext {
   siteId: string | null;
 }
 
+type ThemeMode = "light" | "dark" | "system";
+
 function parseSidebarContext(pathname: string, locale: string): SidebarContext {
   const appPrefix = `/${locale}/app`;
-  const rest = pathname.startsWith(appPrefix) ? pathname.slice(appPrefix.length) : "";
+  const rest = pathname.startsWith(appPrefix)
+    ? pathname.slice(appPrefix.length)
+    : "";
   const segments = rest.split("/").filter(Boolean);
 
   if (segments.length === 0 || segments[0] === "settings") {
@@ -56,7 +66,11 @@ function parseSidebarContext(pathname: string, locale: string): SidebarContext {
 
   const teamId = segments[0];
 
-  if (segments.length === 1 || segments[1] === "settings" || segments[1] === "members") {
+  if (
+    segments.length === 1 ||
+    segments[1] === "settings" ||
+    segments[1] === "members"
+  ) {
     return { mode: "team", teamId, siteId: null };
   }
 
@@ -109,7 +123,9 @@ function SidebarNavLink({
   onNavigate: () => void;
 }) {
   const fullPath = `/${locale}${item.path}`;
-  const active = item.exact ? pathname === fullPath : pathname === fullPath || pathname.startsWith(`${fullPath}/`);
+  const active = item.exact
+    ? pathname === fullPath
+    : pathname === fullPath || pathname.startsWith(`${fullPath}/`);
 
   return (
     <Link
@@ -117,11 +133,15 @@ function SidebarNavLink({
       onClick={onNavigate}
       className={cn(
         "flex items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition-colors",
-        active ? "bg-def-200 text-foreground" : "text-muted-foreground hover:bg-def-200 hover:text-foreground",
+        active
+          ? "bg-def-200 text-foreground"
+          : "text-muted-foreground hover:bg-def-200 hover:text-foreground",
       )}
     >
       <item.icon className="h-5 w-5 shrink-0" />
-      <span className="flex-1 truncate">{navLabels[item.id]?.[locale] ?? item.id}</span>
+      <span className="flex-1 truncate">
+        {navLabels[item.id]?.[locale] ?? item.id}
+      </span>
     </Link>
   );
 }
@@ -137,7 +157,23 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
   const navTeamId = ctx.teamId ?? teams[0]?.id ?? null;
   const currentTeamId = navTeamId ?? "";
   const currentTeam = teams.find((team) => team.id === currentTeamId);
-  const userInitial = (session.displayName || session.username || "U").charAt(0).toUpperCase();
+  const userInitial = (session.displayName || session.username || "U")
+    .charAt(0)
+    .toUpperCase();
+  const themeMode: ThemeMode =
+    theme === "dark" || theme === "light" || theme === "system"
+      ? theme
+      : "system";
+  const themeLabels: Record<ThemeMode, string> =
+    locale === "zh"
+      ? { system: "跟随系统", light: "浅色", dark: "深色" }
+      : { system: "System", light: "Light", dark: "Dark" };
+  const themeIcons: Record<ThemeMode, ComponentType<{ className?: string }>> = {
+    system: Monitor,
+    light: Sun,
+    dark: Moon,
+  };
+  const CurrentThemeIcon = themeIcons[themeMode];
 
   useEffect(() => {
     setMobileOpen(false);
@@ -145,14 +181,13 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
 
   function switchLocale() {
     const newLocale = locale === "en" ? "zh" : "en";
-    const newPath = pathname.replace(new RegExp(`^/${locale}(?=/|$)`), `/${newLocale}`);
+    const newPath = pathname.replace(
+      new RegExp(`^/${locale}(?=/|$)`),
+      `/${newLocale}`,
+    );
     const query = searchParams.toString();
     document.cookie = `if_locale=${newLocale};path=/;max-age=31536000`;
     router.replace(query ? `${newPath}?${query}` : newPath);
-  }
-
-  function toggleTheme() {
-    setTheme(theme === "dark" ? "light" : "dark");
   }
 
   function handleTeamSwitch(newTeamId: string) {
@@ -163,7 +198,11 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
   const teamNavItems: SidebarLinkItem[] = navTeamId
     ? [
         { id: "sites", icon: Globe2, path: `/app/${navTeamId}`, exact: true },
-        { id: "teamSettings", icon: Settings, path: `/app/${navTeamId}/settings` },
+        {
+          id: "teamSettings",
+          icon: Settings,
+          path: `/app/${navTeamId}/settings`,
+        },
         { id: "personalSettings", icon: UserCircle2, path: "/app/settings" },
       ]
     : [{ id: "personalSettings", icon: UserCircle2, path: "/app/settings" }];
@@ -171,20 +210,53 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
   const siteAnalyticsItems: SidebarLinkItem[] =
     ctx.teamId && ctx.siteId
       ? [
-          { id: "overview", icon: LayoutDashboard, path: `/app/${ctx.teamId}/${ctx.siteId}`, exact: true },
-          { id: "pages", icon: FileText, path: `/app/${ctx.teamId}/${ctx.siteId}/pages` },
-          { id: "realtime", icon: Activity, path: `/app/${ctx.teamId}/${ctx.siteId}/realtime` },
-          { id: "events", icon: GanttChart, path: `/app/${ctx.teamId}/${ctx.siteId}/events` },
-          { id: "sessions", icon: Users, path: `/app/${ctx.teamId}/${ctx.siteId}/sessions` },
-          { id: "profiles", icon: UserCircle2, path: `/app/${ctx.teamId}/${ctx.siteId}/profiles` },
+          {
+            id: "overview",
+            icon: LayoutDashboard,
+            path: `/app/${ctx.teamId}/${ctx.siteId}`,
+            exact: true,
+          },
+          {
+            id: "pages",
+            icon: FileText,
+            path: `/app/${ctx.teamId}/${ctx.siteId}/pages`,
+          },
+          {
+            id: "realtime",
+            icon: Activity,
+            path: `/app/${ctx.teamId}/${ctx.siteId}/realtime`,
+          },
+          {
+            id: "events",
+            icon: GanttChart,
+            path: `/app/${ctx.teamId}/${ctx.siteId}/events`,
+          },
+          {
+            id: "sessions",
+            icon: Users,
+            path: `/app/${ctx.teamId}/${ctx.siteId}/sessions`,
+          },
+          {
+            id: "profiles",
+            icon: UserCircle2,
+            path: `/app/${ctx.teamId}/${ctx.siteId}/profiles`,
+          },
         ]
       : [];
 
   const siteManageItems: SidebarLinkItem[] =
     ctx.teamId && ctx.siteId
       ? [
-          { id: "precision", icon: BookOpen, path: `/app/${ctx.teamId}/${ctx.siteId}/precision` },
-          { id: "siteSettings", icon: Settings, path: `/app/${ctx.teamId}/${ctx.siteId}/settings` },
+          {
+            id: "precision",
+            icon: BookOpen,
+            path: `/app/${ctx.teamId}/${ctx.siteId}/precision`,
+          },
+          {
+            id: "siteSettings",
+            icon: Settings,
+            path: `/app/${ctx.teamId}/${ctx.siteId}/settings`,
+          },
         ]
       : [];
 
@@ -199,7 +271,9 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
         {teams.length > 0 ? (
           <Select value={currentTeamId} onValueChange={handleTeamSwitch}>
             <SelectTrigger className="h-9 w-full justify-start text-left">
-              <SelectValue placeholder={locale === "zh" ? "选择团队" : "Select team"} />
+              <SelectValue
+                placeholder={locale === "zh" ? "选择团队" : "Select team"}
+              />
             </SelectTrigger>
             <SelectContent>
               {teams.map((team) => (
@@ -281,7 +355,14 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
 
       <div className="border-t border-border bg-card">
         <div className="flex h-12 items-center border-b border-border px-4 text-xs text-muted-foreground">
-          <span className="truncate">{currentTeam?.name || session.displayName || session.username}</span>
+          <Link
+            href="https://github.com/RavelloH/InsightFlare"
+            className="truncate hover:underline"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Powered by InsightFlare
+          </Link>
         </div>
         <div className="flex">
           <button
@@ -292,14 +373,35 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
             <Globe2 className="mr-1.5 h-4 w-4" />
             {localeLabels[locale] ?? locale}
           </button>
-          <button
-            type="button"
-            onClick={toggleTheme}
-            className="flex h-12 flex-1 items-center justify-center border-r border-border text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          <Select
+            value={themeMode}
+            onValueChange={(value) => setTheme(value as ThemeMode)}
           >
-            <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-            <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-          </button>
+            <SelectTrigger
+              hideChevron
+              aria-label={themeLabels[themeMode]}
+              title={themeLabels[themeMode]}
+              className="h-12 flex-1 justify-center rounded-none border-0 border-r border-border bg-transparent px-0 text-sm text-muted-foreground focus:ring-0 focus:ring-offset-0"
+            >
+              <div className="flex w-full items-center justify-center">
+                <CurrentThemeIcon className="h-4 w-4" />
+                <span className="sr-only">{themeLabels[themeMode]}</span>
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(themeLabels) as ThemeMode[]).map((mode) => {
+                const Icon = themeIcons[mode];
+                return (
+                  <SelectItem key={mode} value={mode}>
+                    <span className="flex items-center gap-2">
+                      <Icon className="h-4 w-4" />
+                      <span>{themeLabels[mode]}</span>
+                    </span>
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
           <Link
             href={`/${locale}/app/settings`}
             onClick={() => setMobileOpen(false)}
@@ -317,15 +419,15 @@ export function AppSidebar({ locale, session, teams }: AppSidebarProps) {
   return (
     <>
       <div className="hidden lg:block">
-        <div className="fixed inset-y-0 left-0 z-40">
-          {sidebarContent}
-        </div>
+        <div className="fixed inset-y-0 left-0 z-40">{sidebarContent}</div>
       </div>
 
       <div
         className={cn(
           "fixed inset-0 z-50 transition-opacity duration-200 lg:hidden",
-          mobileOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+          mobileOpen
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0",
         )}
       >
         <button
