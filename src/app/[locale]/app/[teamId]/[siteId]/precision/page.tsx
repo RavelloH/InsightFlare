@@ -1,4 +1,4 @@
-import { Beaker, Clock4 } from "lucide-react";
+import { RiTestTubeLine as Beaker, RiTimeLine as Clock4 } from "@remixicon/react";
 import { PrecisionQuery } from "@/components/precision-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDictionary } from "@/lib/i18n/dictionaries";

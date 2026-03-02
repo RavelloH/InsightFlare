@@ -16,7 +16,7 @@ import {
   ResponsiveModalFooter,
   ResponsiveModalTrigger,
 } from "@/components/ui/responsive-modal";
-import { Globe2 } from "lucide-react";
+import { RiGlobalLine as Globe2 } from "@remixicon/react";
 
 interface CreateSiteDialogProps {
   teamId: string;

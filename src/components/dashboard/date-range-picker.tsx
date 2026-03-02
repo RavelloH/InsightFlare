@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Calendar, ChevronDown } from "lucide-react";
+import { RiCalendarLine as Calendar, RiArrowDownSLine as ChevronDown } from "@remixicon/react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 

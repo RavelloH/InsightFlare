@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { usePathname } from "next/navigation";
-import { MenuIcon } from "lucide-react";
+import { RiMenuLine as MenuIcon } from "@remixicon/react";
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "./sidebar-context";
 import type { TeamData } from "@/lib/edge-client";

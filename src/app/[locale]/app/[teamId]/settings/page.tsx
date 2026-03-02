@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { Shield } from "lucide-react";
+import { RiShieldLine as Shield } from "@remixicon/react";
 import { TeamConfigForm } from "@/components/settings/team-config-form";
 import { AddMemberDialog } from "@/components/teams/add-member-dialog";
 import { MemberTable } from "@/components/teams/member-table";

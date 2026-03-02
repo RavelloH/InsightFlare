@@ -15,7 +15,7 @@ import {
   ResponsiveModalFooter,
   ResponsiveModalTrigger,
 } from "@/components/ui/responsive-modal";
-import { Plus } from "lucide-react";
+import { RiAddLine as Plus } from "@remixicon/react";
 
 interface CreateTeamDialogProps {
   locale: string;

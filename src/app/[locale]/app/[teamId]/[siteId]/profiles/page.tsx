@@ -1,4 +1,4 @@
-import { Users } from "lucide-react";
+import { RiTeamLine as Users } from "@remixicon/react";
 import { StickyDashboardHeader } from "@/components/dashboard/sticky-dashboard-header";
 import { VisitorTable } from "@/components/dashboard/visitor-table";
 import { Widget, WidgetBody, WidgetHead } from "@/components/widget/widget";

@@ -1,4 +1,4 @@
-import { Flame } from "lucide-react";
+import { RiFireLine as Flame } from "@remixicon/react";
 import { cn } from "@/lib/utils";
 
 interface LogoProps {

@@ -3,21 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
-import {
-  BarChart3,
-  Settings,
-  Beaker,
-  Monitor,
-  Moon,
-  Sun,
-  Languages,
-  FileText,
-  Activity,
-  Clock,
-  GanttChart,
-  Globe2,
-  UserCircle2,
-} from "lucide-react";
+import { RiBarChartBoxLine as BarChart3, RiSettings3Line as Settings, RiTestTubeLine as Beaker, RiComputerLine as Monitor, RiMoonLine as Moon, RiSunLine as Sun, RiTranslate2 as Languages, RiFileTextLine as FileText, RiPulseLine as Activity, RiTimeLine as Clock, RiBarChartGroupedLine as GanttChart, RiGlobalLine as Globe2, RiAccountCircle2Line as UserCircle2 } from "@remixicon/react";
 import {
   CommandDialog,
   CommandEmpty,

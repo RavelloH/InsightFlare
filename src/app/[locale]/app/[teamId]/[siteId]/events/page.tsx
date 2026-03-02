@@ -1,4 +1,4 @@
-import { Layers } from "lucide-react";
+import { RiStackLine as Layers } from "@remixicon/react";
 import { EventsTable } from "@/components/dashboard/events-table";
 import { StickyDashboardHeader } from "@/components/dashboard/sticky-dashboard-header";
 import { Widget, WidgetBody, WidgetHead } from "@/components/widget/widget";

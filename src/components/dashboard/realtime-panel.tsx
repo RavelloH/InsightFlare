@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CircleAlert, PlugZap } from "lucide-react";
+import { RiPulseLine as Activity, RiErrorWarningLine as CircleAlert, RiPlug2Line as PlugZap } from "@remixicon/react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useRealtime } from "@/lib/hooks/use-realtime";

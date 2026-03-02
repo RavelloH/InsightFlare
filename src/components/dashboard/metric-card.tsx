@@ -3,7 +3,7 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { AnimatedCounter } from "@/components/shared/animated-counter";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Info } from "lucide-react";
+import { RiInformationLine as Info } from "@remixicon/react";
 import { cn } from "@/lib/utils";
 
 interface MetricCardProps {

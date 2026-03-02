@@ -1,4 +1,4 @@
-import { Globe2, LockKeyhole, TrendingUp } from "lucide-react";
+import { RiGlobalLine as Globe2, RiLockPasswordLine as LockKeyhole, RiLineChartLine as TrendingUp } from "@remixicon/react";
 import { TrendAreaChart } from "@/components/charts/trend-area-chart";
 import { ReferrerBarChart } from "@/components/charts/referrer-bar-chart";
 import { PagesBarChart } from "@/components/charts/pages-bar-chart";

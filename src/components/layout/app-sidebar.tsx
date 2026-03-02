@@ -4,22 +4,7 @@ import { useEffect } from "react";
 import type { ComponentType } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import {
-  ArrowLeft,
-  BookOpen,
-  FileText,
-  Flame,
-  GanttChart,
-  Globe2,
-  LayoutDashboard,
-  Activity,
-  Settings,
-  Users,
-  UserCircle2,
-  Monitor,
-  Moon,
-  Sun,
-} from "lucide-react";
+import { RiArrowLeftLine as ArrowLeft, RiBookOpenLine as BookOpen, RiFileTextLine as FileText, RiFireLine as Flame, RiBarChartGroupedLine as GanttChart, RiGlobalLine as Globe2, RiDashboardLine as LayoutDashboard, RiPulseLine as Activity, RiSettings3Line as Settings, RiTeamLine as Users, RiAccountCircle2Line as UserCircle2, RiComputerLine as Monitor, RiMoonLine as Moon, RiSunLine as Sun } from "@remixicon/react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "./sidebar-context";

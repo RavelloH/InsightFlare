@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity } from "lucide-react";
+import { RiPulseLine as Activity } from "@remixicon/react";
 import { Badge } from "@/components/ui/badge";
 import { Widget, WidgetHead, WidgetBody } from "@/components/widget/widget";
 import { useRealtime } from "@/lib/hooks/use-realtime";

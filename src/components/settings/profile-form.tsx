@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { KeyRound } from "lucide-react";
+import { RiKey2Line as KeyRound } from "@remixicon/react";
 
 interface ProfileFormProps {
   user: { username: string; email: string; name: string };

@@ -1,4 +1,4 @@
-import { Clock } from "lucide-react";
+import { RiTimeLine as Clock } from "@remixicon/react";
 import { Widget, WidgetHead, WidgetBody } from "@/components/widget/widget";
 import { SessionCompactList } from "@/components/dashboard/session-compact-list";
 import { StickyDashboardHeader } from "@/components/dashboard/sticky-dashboard-header";

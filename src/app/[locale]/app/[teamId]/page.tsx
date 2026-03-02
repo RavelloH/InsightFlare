@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Copy, Globe2, Shield, Users } from "lucide-react";
+import { RiFileCopyLine as Copy, RiGlobalLine as Globe2, RiShieldLine as Shield, RiTeamLine as Users } from "@remixicon/react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {

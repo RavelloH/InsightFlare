@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { SlidersHorizontal } from "lucide-react";
+import { RiEqualizer2Line as SlidersHorizontal } from "@remixicon/react";
 import type { SiteData } from "@/lib/edge-client";
 
 interface SiteConfigFormProps {

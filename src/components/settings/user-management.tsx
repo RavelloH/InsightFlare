@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { UserPlus, UsersRound } from "lucide-react";
+import { RiUserAddLine as UserPlus, RiGroupLine as UsersRound } from "@remixicon/react";
 import type { AccountUserData } from "@/lib/edge-client";
 
 interface UserManagementProps {

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Languages } from "lucide-react";
+import { RiTranslate2 as Languages } from "@remixicon/react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { X } from "lucide-react"
+import { RiCloseLine as X } from "@remixicon/react";
 import { cn } from "@/lib/utils"
 
 const Dialog = DialogPrimitive.Root

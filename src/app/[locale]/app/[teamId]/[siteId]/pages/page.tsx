@@ -1,4 +1,4 @@
-import { Route } from "lucide-react";
+import { RiRouteLine as Route } from "@remixicon/react";
 import { Widget, WidgetHead, WidgetBody } from "@/components/widget/widget";
 import { PagesBarChart } from "@/components/charts/pages-bar-chart";
 import { StickyDashboardHeader } from "@/components/dashboard/sticky-dashboard-header";

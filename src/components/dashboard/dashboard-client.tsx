@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Activity, BookOpen, Clock, Globe2, Layers, Route, Users } from "lucide-react";
+import { RiPulseLine as Activity, RiBookOpenLine as BookOpen, RiTimeLine as Clock, RiGlobalLine as Globe2, RiStackLine as Layers, RiRouteLine as Route, RiTeamLine as Users } from "@remixicon/react";
 import { Widget, WidgetBody, WidgetFooter, WidgetHead } from "@/components/widget/widget";
 import { OverviewGrid, type MetricKey } from "@/components/dashboard/overview-grid";
 import { TrendAreaChart } from "@/components/charts/trend-area-chart";

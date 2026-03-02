@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clock } from "lucide-react";
+import { RiTimeLine as Clock } from "@remixicon/react";
 import { formatDateTime } from "@/lib/utils";
 
 interface SessionListProps {

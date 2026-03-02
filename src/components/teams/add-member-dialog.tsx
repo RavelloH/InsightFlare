@@ -15,7 +15,7 @@ import {
   ResponsiveModalFooter,
   ResponsiveModalTrigger,
 } from "@/components/ui/responsive-modal";
-import { UserPlus } from "lucide-react";
+import { RiUserAddLine as UserPlus } from "@remixicon/react";
 
 interface AddMemberDialogProps {
   teamId: string;
