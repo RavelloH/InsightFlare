@@ -55,6 +55,16 @@ function toLocalizedPath(pathname: string, locale: string): string {
   if (normalized === "/app/config" || normalized === "/app/account") {
     return `/${locale}/app/settings`;
   }
+  // Legacy flat routes that no longer exist — redirect to /app root
+  if (
+    normalized === "/app/teams" ||
+    normalized === "/app/pages" ||
+    normalized === "/app/realtime" ||
+    normalized === "/app/sessions" ||
+    normalized === "/app/precision"
+  ) {
+    return `/${locale}/app`;
+  }
   if (
     normalized === "/app" ||
     normalized === "/app/teams" ||

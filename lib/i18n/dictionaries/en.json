@@ -210,5 +210,15 @@
   "realtime.noEvents": "No events received yet.",
 
   "sessions.title": "Sessions",
-  "sessions.description": "Recent sessions for the selected site."
+  "sessions.description": "Recent sessions for the selected site.",
+
+  "nav.sites": "Sites",
+  "nav.teamSettings": "Team Settings",
+  "nav.members": "Members",
+  "nav.personalSettings": "Personal Settings",
+  "nav.backToTeam": "Back to team",
+  "sidebar.switchTeam": "Switch team",
+  "members.title": "Team Members",
+  "members.description": "Manage who has access to this team.",
+  "command.goMembers": "Go to Members"
 }

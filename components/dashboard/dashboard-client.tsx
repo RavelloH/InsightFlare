@@ -22,6 +22,7 @@ interface DashboardClientProps {
   pages: PagesData["data"];
   referrers: ReferrersData["data"];
   sessions: SessionsData["data"];
+  teamId: string;
   siteId: string;
   wsBaseUrl: string;
   wsToken: string;
@@ -66,6 +67,7 @@ export function DashboardClient({
   pages,
   referrers,
   sessions,
+  teamId,
   siteId,
   wsBaseUrl,
   wsToken,
@@ -124,7 +126,7 @@ export function DashboardClient({
           </WidgetBody>
           {labels.viewAllPages && (
             <WidgetFooter>
-              <Link href={`/${locale}/app/pages`} className="hover:text-foreground transition-colors">
+              <Link href={`/${locale}/app/${teamId}/${siteId}/pages`} className="hover:text-foreground transition-colors">
                 {labels.viewAllPages} →
               </Link>
             </WidgetFooter>
@@ -164,7 +166,7 @@ export function DashboardClient({
           </WidgetBody>
           {labels.viewAllSessions && (
             <WidgetFooter>
-              <Link href={`/${locale}/app/sessions`} className="hover:text-foreground transition-colors">
+              <Link href={`/${locale}/app/${teamId}/${siteId}/sessions`} className="hover:text-foreground transition-colors">
                 {labels.viewAllSessions} →
               </Link>
             </WidgetFooter>
@@ -191,7 +193,7 @@ export function DashboardClient({
           </WidgetBody>
           {labels.fullRealtimeView && (
             <WidgetFooter>
-              <Link href={`/${locale}/app/realtime`} className="hover:text-foreground transition-colors">
+              <Link href={`/${locale}/app/${teamId}/${siteId}/realtime`} className="hover:text-foreground transition-colors">
                 {labels.fullRealtimeView} →
               </Link>
             </WidgetFooter>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
   BarChart3,
@@ -14,6 +14,8 @@ import {
   FileText,
   Activity,
   Clock,
+  Globe2,
+  User,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -31,12 +33,31 @@ interface CommandPaletteProps {
   dictionary: Dictionary;
 }
 
+function parseContext(pathname: string, locale: string) {
+  const appPrefix = `/${locale}/app`;
+  const rest = pathname.startsWith(appPrefix) ? pathname.slice(appPrefix.length) : "";
+  const segments = rest.split("/").filter(Boolean);
+
+  if (segments.length === 0 || segments[0] === "settings") {
+    return { teamId: null, siteId: null };
+  }
+
+  const teamId = segments[0];
+  if (segments.length === 1 || segments[1] === "settings" || segments[1] === "members") {
+    return { teamId, siteId: null };
+  }
+
+  return { teamId, siteId: segments[1] };
+}
+
 export function CommandPalette({ locale, dictionary }: CommandPaletteProps) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
   const { setTheme, theme } = useTheme();
 
   const t = (key: string) => dictionary[key] ?? key;
+  const ctx = parseContext(pathname, locale);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -60,33 +81,48 @@ export function CommandPalette({ locale, dictionary }: CommandPaletteProps) {
       <CommandList>
         <CommandEmpty>{t("common.noData")}</CommandEmpty>
         <CommandGroup heading={t("command.navigation")}>
-          <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app`))}>
-            <BarChart3 className="mr-2 h-4 w-4" />
-            {t("command.goDashboard")}
-          </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/pages`))}>
-            <FileText className="mr-2 h-4 w-4" />
-            {t("command.goPages")}
-          </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/realtime`))}>
-            <Activity className="mr-2 h-4 w-4" />
-            {t("command.goRealtime")}
-          </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/sessions`))}>
-            <Clock className="mr-2 h-4 w-4" />
-            {t("command.goSessions")}
-          </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/teams`))}>
-            <Users className="mr-2 h-4 w-4" />
-            {t("command.goTeams")}
-          </CommandItem>
+          {/* Site-level navigation (when in a site context) */}
+          {ctx.teamId && ctx.siteId && (
+            <>
+              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/${ctx.siteId}`))}>
+                <BarChart3 className="mr-2 h-4 w-4" />
+                {t("command.goDashboard")}
+              </CommandItem>
+              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/${ctx.siteId}/pages`))}>
+                <FileText className="mr-2 h-4 w-4" />
+                {t("command.goPages")}
+              </CommandItem>
+              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/${ctx.siteId}/realtime`))}>
+                <Activity className="mr-2 h-4 w-4" />
+                {t("command.goRealtime")}
+              </CommandItem>
+              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/${ctx.siteId}/sessions`))}>
+                <Clock className="mr-2 h-4 w-4" />
+                {t("command.goSessions")}
+              </CommandItem>
+              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/${ctx.siteId}/precision`))}>
+                <Beaker className="mr-2 h-4 w-4" />
+                {t("command.goPrecision")}
+              </CommandItem>
+            </>
+          )}
+          {/* Team-level navigation */}
+          {ctx.teamId && (
+            <>
+              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}`))}>
+                <Globe2 className="mr-2 h-4 w-4" />
+                {t("command.goTeams")}
+              </CommandItem>
+              <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/${ctx.teamId}/members`))}>
+                <Users className="mr-2 h-4 w-4" />
+                {locale === "zh" ? "前往成员" : "Go to Members"}
+              </CommandItem>
+            </>
+          )}
+          {/* Always available */}
           <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/settings`))}>
             <Settings className="mr-2 h-4 w-4" />
             {t("command.goSettings")}
-          </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/precision`))}>
-            <Beaker className="mr-2 h-4 w-4" />
-            {t("command.goPrecision")}
           </CommandItem>
         </CommandGroup>
         <CommandSeparator />

@@ -8,3 +8,5 @@ dist
 .env
 .env.*
 *.log
+*.vars
+next-env.d.ts

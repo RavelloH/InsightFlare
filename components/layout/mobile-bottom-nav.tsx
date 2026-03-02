@@ -2,49 +2,89 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, FileText, Activity, Clock, Settings } from "lucide-react";
+import { LayoutDashboard, FileText, Activity, Clock, Settings, Globe2, Users, User, ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface MobileBottomNavProps {
   locale: string;
 }
 
-const navItems = [
-  { id: "overview", icon: LayoutDashboard, path: "/app" },
-  { id: "pages", icon: FileText, path: "/app/pages" },
-  { id: "realtime", icon: Activity, path: "/app/realtime" },
-  { id: "sessions", icon: Clock, path: "/app/sessions" },
-  { id: "settings", icon: Settings, path: "/app/settings" },
-];
+type NavMode = "team" | "site";
+
+function parseNavContext(pathname: string, locale: string) {
+  const appPrefix = `/${locale}/app`;
+  const rest = pathname.startsWith(appPrefix) ? pathname.slice(appPrefix.length) : "";
+  const segments = rest.split("/").filter(Boolean);
+
+  if (segments.length === 0 || segments[0] === "settings") {
+    return { mode: "team" as NavMode, teamId: null, siteId: null };
+  }
+
+  const teamId = segments[0];
+
+  if (segments.length === 1 || segments[1] === "settings" || segments[1] === "members") {
+    return { mode: "team" as NavMode, teamId, siteId: null };
+  }
+
+  return { mode: "site" as NavMode, teamId, siteId: segments[1] };
+}
 
 const navLabels: Record<string, Record<string, string>> = {
+  sites: { en: "Sites", zh: "站点" },
+  settings: { en: "Settings", zh: "设置" },
+  members: { en: "Members", zh: "成员" },
+  profile: { en: "Profile", zh: "我的" },
   overview: { en: "Overview", zh: "总览" },
   pages: { en: "Pages", zh: "页面" },
   realtime: { en: "Realtime", zh: "实时" },
   sessions: { en: "Sessions", zh: "会话" },
-  settings: { en: "Settings", zh: "设置" },
+  back: { en: "Team", zh: "团队" },
 };
 
 export function MobileBottomNav({ locale }: MobileBottomNavProps) {
   const pathname = usePathname();
+  const ctx = parseNavContext(pathname, locale);
 
-  function isActive(path: string): boolean {
-    const fullPath = `/${locale}${path}`;
-    if (path === "/app") {
-      return pathname === fullPath;
-    }
+  function isActive(fullPath: string): boolean {
+    return pathname === fullPath;
+  }
+
+  function isStartsWith(fullPath: string): boolean {
     return pathname.startsWith(fullPath);
   }
 
+  const teamItems: Array<{ id: string; icon: typeof Globe2; href: string; exact?: boolean }> = ctx.teamId
+    ? [
+        { id: "sites", icon: Globe2, href: `/${locale}/app/${ctx.teamId}`, exact: true },
+        { id: "settings", icon: Settings, href: `/${locale}/app/${ctx.teamId}/settings` },
+        { id: "members", icon: Users, href: `/${locale}/app/${ctx.teamId}/members` },
+        { id: "profile", icon: User, href: `/${locale}/app/settings` },
+      ]
+    : [
+        { id: "profile", icon: User, href: `/${locale}/app/settings` },
+      ];
+
+  const siteItems: Array<{ id: string; icon: typeof Globe2; href: string; exact?: boolean }> = ctx.teamId && ctx.siteId
+    ? [
+        { id: "overview", icon: LayoutDashboard, href: `/${locale}/app/${ctx.teamId}/${ctx.siteId}`, exact: true },
+        { id: "pages", icon: FileText, href: `/${locale}/app/${ctx.teamId}/${ctx.siteId}/pages` },
+        { id: "realtime", icon: Activity, href: `/${locale}/app/${ctx.teamId}/${ctx.siteId}/realtime` },
+        { id: "sessions", icon: Clock, href: `/${locale}/app/${ctx.teamId}/${ctx.siteId}/sessions` },
+        { id: "back", icon: ArrowLeft, href: `/${locale}/app/${ctx.teamId}` },
+      ]
+    : [];
+
+  const items = ctx.mode === "site" ? siteItems : teamItems;
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-card md:hidden h-14">
-      {navItems.map((item) => {
-        const active = isActive(item.path);
+      {items.map((item) => {
+        const active = item.exact ? isActive(item.href) : isStartsWith(item.href);
         const label = navLabels[item.id]?.[locale] ?? item.id;
         return (
           <Link
             key={item.id}
-            href={`/${locale}${item.path}`}
+            href={item.href}
             className={cn(
               "flex flex-col items-center gap-1 px-3 py-2 text-[10px] font-medium transition-colors",
               active ? "text-foreground" : "text-muted-foreground",
