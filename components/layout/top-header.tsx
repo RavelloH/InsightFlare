@@ -17,6 +17,9 @@ function getBreadcrumbs(pathname: string, locale: string): Array<{ label: string
     teams: { en: "Teams", zh: "团队" },
     settings: { en: "Settings", zh: "设置" },
     precision: { en: "Precision", zh: "精准查询" },
+    pages: { en: "Pages", zh: "页面" },
+    realtime: { en: "Realtime", zh: "实时" },
+    sessions: { en: "Sessions", zh: "会话" },
   };
 
   const crumbs: Array<{ label: string; href: string }> = [];

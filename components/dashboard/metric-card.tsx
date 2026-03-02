@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AnimatedCounter } from "@/components/shared/animated-counter";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Info } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface MetricCardProps {
   label: string;
@@ -11,9 +12,20 @@ interface MetricCardProps {
   formatter?: (value: number) => string;
   hint?: string;
   loading?: boolean;
+  active?: boolean;
+  onClick?: () => void;
+  metricKey?: string;
 }
 
-export function MetricCard({ label, value, formatter, hint, loading }: MetricCardProps) {
+const metricColors: Record<string, string> = {
+  views: "bg-chart-1",
+  sessions: "bg-chart-2",
+  visitors: "bg-chart-3",
+  bounceRate: "bg-chart-4",
+  avgDuration: "bg-chart-5",
+};
+
+export function MetricCard({ label, value, formatter, hint, loading, active, onClick, metricKey }: MetricCardProps) {
   if (loading) {
     return (
       <div className="shadow-[0_0_0_0.5px] shadow-border p-4 min-h-[88px] flex flex-col justify-center gap-2">
@@ -24,7 +36,17 @@ export function MetricCard({ label, value, formatter, hint, loading }: MetricCar
   }
 
   return (
-    <div className="shadow-[0_0_0_0.5px] shadow-border p-4 min-h-[88px] flex flex-col justify-center gap-1">
+    <div
+      className={cn(
+        "relative shadow-[0_0_0_0.5px] shadow-border p-4 min-h-[88px] flex flex-col justify-center gap-1 transition-colors",
+        onClick && "cursor-pointer hover:bg-def-100",
+        active && "bg-def-100"
+      )}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick(); } : undefined}
+    >
       <div className="flex items-center gap-1.5">
         <span className="text-sm font-medium text-muted-foreground leading-[1.1]">
           {label}
@@ -47,6 +69,14 @@ export function MetricCard({ label, value, formatter, hint, loading }: MetricCar
       <div className="font-mono text-3xl font-bold leading-[1.1]">
         <AnimatedCounter value={value} formatter={formatter} />
       </div>
+      {active && metricKey && (
+        <div
+          className={cn(
+            "absolute bottom-0 left-2 right-2 h-0.5 rounded-full",
+            metricColors[metricKey] || "bg-chart-1"
+          )}
+        />
+      )}
     </div>
   );
 }

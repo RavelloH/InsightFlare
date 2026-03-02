@@ -2,6 +2,8 @@
 
 import { MetricCard } from "./metric-card";
 
+type MetricKey = "views" | "sessions" | "visitors" | "bounceRate" | "avgDuration";
+
 interface OverviewGridProps {
   views: number;
   sessions: number;
@@ -9,6 +11,8 @@ interface OverviewGridProps {
   bounceRate: number;
   avgDurationMs: number;
   approximateVisitors?: boolean;
+  activeMetric?: MetricKey;
+  onMetricClick?: (key: MetricKey) => void;
   labels: {
     views: string;
     sessions: string;
@@ -43,39 +47,41 @@ function compactNum(value: number): string {
   }).format(value);
 }
 
-export function OverviewGrid({ views, sessions, visitors, bounceRate, avgDurationMs, approximateVisitors, labels }: OverviewGridProps) {
+export function OverviewGrid({
+  views,
+  sessions,
+  visitors,
+  bounceRate,
+  avgDurationMs,
+  approximateVisitors,
+  activeMetric,
+  onMetricClick,
+  labels,
+}: OverviewGridProps) {
+  const metrics: Array<{ key: MetricKey; label: string; value: number; formatter: (v: number) => string; hint: string }> = [
+    { key: "views", label: labels.views, value: views, formatter: compactNum, hint: labels.hintViews },
+    { key: "sessions", label: labels.sessions, value: sessions, formatter: compactNum, hint: labels.hintSessions },
+    { key: "visitors", label: labels.visitors, value: visitors, formatter: compactNum, hint: approximateVisitors ? labels.hintVisitorsApprox : labels.hintVisitorsExact },
+    { key: "bounceRate", label: labels.bounceRate, value: bounceRate, formatter: formatPercent, hint: labels.hintBounce },
+    { key: "avgDuration", label: labels.avgDuration, value: avgDurationMs, formatter: formatDurationShort, hint: labels.hintDuration },
+  ];
+
   return (
     <section className="rounded-md border border-border bg-card overflow-hidden grid grid-cols-2 md:grid-cols-5">
-      <MetricCard
-        label={labels.views}
-        value={views}
-        formatter={compactNum}
-        hint={labels.hintViews}
-      />
-      <MetricCard
-        label={labels.sessions}
-        value={sessions}
-        formatter={compactNum}
-        hint={labels.hintSessions}
-      />
-      <MetricCard
-        label={labels.visitors}
-        value={visitors}
-        formatter={compactNum}
-        hint={approximateVisitors ? labels.hintVisitorsApprox : labels.hintVisitorsExact}
-      />
-      <MetricCard
-        label={labels.bounceRate}
-        value={bounceRate}
-        formatter={formatPercent}
-        hint={labels.hintBounce}
-      />
-      <MetricCard
-        label={labels.avgDuration}
-        value={avgDurationMs}
-        formatter={formatDurationShort}
-        hint={labels.hintDuration}
-      />
+      {metrics.map((m) => (
+        <MetricCard
+          key={m.key}
+          label={m.label}
+          value={m.value}
+          formatter={m.formatter}
+          hint={m.hint}
+          active={activeMetric === m.key}
+          onClick={onMetricClick ? () => onMetricClick(m.key) : undefined}
+          metricKey={m.key}
+        />
+      ))}
     </section>
   );
 }
+
+export type { MetricKey };

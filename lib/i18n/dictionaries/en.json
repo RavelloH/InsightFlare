@@ -186,5 +186,29 @@
   "command.goPrecision": "Go to Precision Lab",
   "command.toggleTheme": "Toggle Theme",
   "command.switchLanguage": "Switch Language",
-  "command.signOut": "Sign Out"
+  "command.signOut": "Sign Out",
+  "command.goPages": "Go to Pages",
+  "command.goRealtime": "Go to Realtime",
+  "command.goSessions": "Go to Sessions",
+
+  "nav.overview": "Overview",
+  "nav.pages": "Pages",
+  "nav.realtime": "Realtime",
+  "nav.sessions": "Sessions",
+
+  "dashboard.hourly": "Hourly",
+  "dashboard.liveVisitors": "live",
+  "dashboard.viewAllPages": "View all pages",
+  "dashboard.viewAllSessions": "View all sessions",
+  "dashboard.fullRealtimeView": "Full realtime view",
+
+  "pages.title": "Pages",
+  "pages.description": "Page-level analytics for the selected site.",
+
+  "realtime.title": "Realtime",
+  "realtime.description": "Live event stream from the selected site.",
+  "realtime.noEvents": "No events received yet.",
+
+  "sessions.title": "Sessions",
+  "sessions.description": "Recent sessions for the selected site."
 }

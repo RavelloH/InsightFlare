@@ -186,5 +186,29 @@
   "command.goPrecision": "前往精准查询实验室",
   "command.toggleTheme": "切换主题",
   "command.switchLanguage": "切换语言",
-  "command.signOut": "退出登录"
+  "command.signOut": "退出登录",
+  "command.goPages": "前往页面",
+  "command.goRealtime": "前往实时",
+  "command.goSessions": "前往会话",
+
+  "nav.overview": "总览",
+  "nav.pages": "页面",
+  "nav.realtime": "实时",
+  "nav.sessions": "会话",
+
+  "dashboard.hourly": "小时",
+  "dashboard.liveVisitors": "在线",
+  "dashboard.viewAllPages": "查看全部页面",
+  "dashboard.viewAllSessions": "查看全部会话",
+  "dashboard.fullRealtimeView": "完整实时视图",
+
+  "pages.title": "页面",
+  "pages.description": "所选站点的页面级分析数据。",
+
+  "realtime.title": "实时",
+  "realtime.description": "所选站点的实时事件流。",
+  "realtime.noEvents": "尚未收到事件。",
+
+  "sessions.title": "会话",
+  "sessions.description": "所选站点和日期范围内的近期会话。"
 }

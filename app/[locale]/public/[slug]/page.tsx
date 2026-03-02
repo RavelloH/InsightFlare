@@ -2,8 +2,8 @@ import { Globe2, LockKeyhole, TrendingUp } from "lucide-react";
 import { TrendAreaChart } from "@/components/charts/trend-area-chart";
 import { ReferrerBarChart } from "@/components/charts/referrer-bar-chart";
 import { PagesBarChart } from "@/components/charts/pages-bar-chart";
+import { Widget, WidgetHead, WidgetBody } from "@/components/widget/widget";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { isValidLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import type { Locale } from "@/lib/i18n/config";
@@ -71,56 +71,50 @@ export default async function PublicSitePage({
         ))}
       </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <span className="bg-def-200 rounded-lg p-1 inline-flex">
-              <TrendingUp className="h-4 w-4" />
-            </span>
+      <Widget>
+        <WidgetHead>
+          <div className="flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
             {t("public.trend")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+          </div>
+        </WidgetHead>
+        <WidgetBody className="p-4 pt-2">
           <TrendAreaChart data={trend.data} />
-        </CardContent>
-      </Card>
+        </WidgetBody>
+      </Widget>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <span className="bg-def-200 rounded-lg p-1 inline-flex">
-                <Globe2 className="h-4 w-4" />
-              </span>
+        <Widget>
+          <WidgetHead>
+            <div className="flex items-center gap-2">
+              <Globe2 className="h-4 w-4 text-muted-foreground" />
               {t("public.topReferrers")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+            </div>
+          </WidgetHead>
+          <WidgetBody>
             {referrers.data.length > 0 ? (
               <ReferrerBarChart data={referrers.data} directLabel={t("dashboard.direct")} />
             ) : (
-              <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
+              <p className="px-4 py-3 text-sm text-muted-foreground">{t("common.noData")}</p>
             )}
-          </CardContent>
-        </Card>
+          </WidgetBody>
+        </Widget>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <span className="bg-def-200 rounded-lg p-1 inline-flex">
-                <LockKeyhole className="h-4 w-4" />
-              </span>
+        <Widget>
+          <WidgetHead>
+            <div className="flex items-center gap-2">
+              <LockKeyhole className="h-4 w-4 text-muted-foreground" />
               {t("public.topPaths")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+            </div>
+          </WidgetHead>
+          <WidgetBody>
             {pages.data.length > 0 ? (
               <PagesBarChart data={pages.data} />
             ) : (
-              <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
+              <p className="px-4 py-3 text-sm text-muted-foreground">{t("common.noData")}</p>
             )}
-          </CardContent>
-        </Card>
+          </WidgetBody>
+        </Widget>
       </div>
     </main>
   );

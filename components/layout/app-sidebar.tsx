@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Flame, Wallpaper, Beaker, Users, Settings, Globe2, Sun, Moon } from "lucide-react";
+import { Flame, Wallpaper, Beaker, Users, Settings, Globe2, Sun, Moon, FileText, Activity, Clock } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "./sidebar-context";
@@ -18,7 +18,10 @@ const sectionLabels: Record<string, Record<string, string>> = {
 };
 
 const navLabels: Record<string, Record<string, string>> = {
-  dashboard: { en: "Dashboard", zh: "仪表盘" },
+  overview: { en: "Overview", zh: "总览" },
+  pages: { en: "Pages", zh: "页面" },
+  realtime: { en: "Realtime", zh: "实时" },
+  sessions: { en: "Sessions", zh: "会话" },
   precision: { en: "Precision", zh: "精准查询" },
   teams: { en: "Teams", zh: "团队" },
   settings: { en: "Settings", zh: "设置" },
@@ -30,7 +33,10 @@ const localeLabels: Record<string, string> = {
 };
 
 const analyticsItems = [
-  { id: "dashboard", icon: Wallpaper, path: "/app" },
+  { id: "overview", icon: Wallpaper, path: "/app" },
+  { id: "pages", icon: FileText, path: "/app/pages" },
+  { id: "realtime", icon: Activity, path: "/app/realtime" },
+  { id: "sessions", icon: Clock, path: "/app/sessions" },
   { id: "precision", icon: Beaker, path: "/app/precision" },
 ];
 

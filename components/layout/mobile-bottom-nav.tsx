@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Settings, Beaker } from "lucide-react";
+import { LayoutDashboard, FileText, Activity, Clock, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface MobileBottomNavProps {
@@ -10,17 +10,19 @@ interface MobileBottomNavProps {
 }
 
 const navItems = [
-  { id: "dashboard", icon: LayoutDashboard, path: "/app" },
-  { id: "teams", icon: Users, path: "/app/teams" },
+  { id: "overview", icon: LayoutDashboard, path: "/app" },
+  { id: "pages", icon: FileText, path: "/app/pages" },
+  { id: "realtime", icon: Activity, path: "/app/realtime" },
+  { id: "sessions", icon: Clock, path: "/app/sessions" },
   { id: "settings", icon: Settings, path: "/app/settings" },
-  { id: "precision", icon: Beaker, path: "/app/precision" },
 ];
 
 const navLabels: Record<string, Record<string, string>> = {
-  dashboard: { en: "Dashboard", zh: "仪表盘" },
-  teams: { en: "Teams", zh: "团队" },
+  overview: { en: "Overview", zh: "总览" },
+  pages: { en: "Pages", zh: "页面" },
+  realtime: { en: "Realtime", zh: "实时" },
+  sessions: { en: "Sessions", zh: "会话" },
   settings: { en: "Settings", zh: "设置" },
-  precision: { en: "Precision", zh: "精准" },
 };
 
 export function MobileBottomNav({ locale }: MobileBottomNavProps) {

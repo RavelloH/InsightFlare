@@ -1,16 +1,6 @@
 import { Suspense } from "react";
-import { BarChart3, Globe, Route } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { OverviewGrid } from "@/components/dashboard/overview-grid";
-import { TrendAreaChart } from "@/components/charts/trend-area-chart";
-import { ReferrerBarChart } from "@/components/charts/referrer-bar-chart";
-import { PagesBarChart } from "@/components/charts/pages-bar-chart";
-import { SessionList } from "@/components/dashboard/session-list";
-import { RealtimePanel } from "@/components/dashboard/realtime-panel";
-import { TeamSiteSelector } from "@/components/dashboard/team-site-selector";
-import { DateRangePicker } from "@/components/dashboard/date-range-picker";
+import { DashboardClient } from "@/components/dashboard/dashboard-client";
+import { StickyDashboardHeader } from "@/components/dashboard/sticky-dashboard-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { DashboardSkeleton } from "@/components/shared/loading-skeleton";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -25,7 +15,6 @@ import {
   fetchPrivateSessions,
   fetchPrivateTrend,
 } from "@/lib/edge-client";
-import { compactNumber, formatDateTime } from "@/lib/utils";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -131,30 +120,29 @@ export default async function DashboardPage({
   const wsToken = process.env.NEXT_PUBLIC_INSIGHTFLARE_WS_TOKEN || "";
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">{t("dashboard.title")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t("dashboard.description")}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <TeamSiteSelector
-            teams={teams}
-            sites={sites}
-            currentTeamId={selectedTeamId}
-            currentSiteId={selectedSiteId}
-          />
-          <DateRangePicker locale={locale} from={range.from} to={range.to} />
-        </div>
-      </div>
+    <div className="mx-auto max-w-7xl">
+      <StickyDashboardHeader
+        teams={teams}
+        sites={sites}
+        currentTeamId={selectedTeamId}
+        currentSiteId={selectedSiteId}
+        locale={locale}
+        from={range.from}
+        to={range.to}
+        wsBaseUrl={wsBaseUrl}
+        wsToken={wsToken}
+      />
 
-      <OverviewGrid
-        views={overview.data.views}
-        sessions={overview.data.sessions}
-        visitors={overview.data.visitors}
-        bounceRate={overview.data.bounceRate}
-        avgDurationMs={overview.data.avgDurationMs}
-        approximateVisitors={overview.data.approximateVisitors}
+      <DashboardClient
+        overview={overview.data}
+        trend={trend.data}
+        pages={pages.data}
+        referrers={referrers.data}
+        sessions={sessions.data}
+        siteId={selectedSiteId}
+        wsBaseUrl={wsBaseUrl}
+        wsToken={wsToken}
+        locale={locale}
         labels={{
           views: t("dashboard.views"),
           sessions: t("dashboard.sessions"),
@@ -167,82 +155,19 @@ export default async function DashboardPage({
           hintVisitorsApprox: t("dashboard.hintVisitorsApprox"),
           hintBounce: t("dashboard.hintBounce"),
           hintDuration: t("dashboard.hintDuration"),
-        }}
-      />
-
-      <div className="grid gap-4 lg:grid-cols-[1.35fr_1fr]">
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <span className="bg-def-200 rounded-lg p-1 inline-flex">
-                <BarChart3 className="h-4 w-4" />
-              </span>
-              {t("dashboard.trafficTrend")}
-            </CardTitle>
-            <Badge variant="secondary">{t("dashboard.daily")}</Badge>
-          </CardHeader>
-          <CardContent>
-            <TrendAreaChart data={trend.data} />
-          </CardContent>
-        </Card>
-
-        <SessionList
-          sessions={sessions.data}
-          labels={{
-            title: t("dashboard.sessionSnapshot"),
-            empty: t("dashboard.noSessions"),
-          }}
-        />
-      </div>
-
-      <RealtimePanel
-        siteId={range.siteId}
-        wsBaseUrl={wsBaseUrl}
-        wsToken={wsToken}
-        labels={{
-          title: t("dashboard.realtimeStream"),
+          topPages: t("dashboard.topPages"),
+          topReferrers: t("dashboard.topReferrers"),
+          sessionSnapshot: t("dashboard.sessionSnapshot"),
+          noSessions: t("dashboard.noSessions"),
+          realtimeStream: t("dashboard.realtimeStream"),
           wsHint: t("dashboard.wsHint"),
           waitingLive: t("dashboard.waitingLive"),
+          direct: t("dashboard.direct"),
+          viewAllPages: t("dashboard.viewAllPages"),
+          viewAllSessions: t("dashboard.viewAllSessions"),
+          fullRealtimeView: t("dashboard.fullRealtimeView"),
         }}
       />
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <span className="bg-def-200 rounded-lg p-1 inline-flex">
-                <Route className="h-4 w-4" />
-              </span>
-              {t("dashboard.topPages")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {pages.data.length > 0 ? (
-              <PagesBarChart data={pages.data} />
-            ) : (
-              <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <span className="bg-def-200 rounded-lg p-1 inline-flex">
-                <Globe className="h-4 w-4" />
-              </span>
-              {t("dashboard.topReferrers")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {referrers.data.length > 0 ? (
-              <ReferrerBarChart data={referrers.data} directLabel={t("dashboard.direct")} />
-            ) : (
-              <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
     </div>
   );
 }

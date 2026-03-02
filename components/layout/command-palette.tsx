@@ -11,7 +11,9 @@ import {
   Moon,
   Sun,
   Languages,
-  LogOut,
+  FileText,
+  Activity,
+  Clock,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -61,6 +63,18 @@ export function CommandPalette({ locale, dictionary }: CommandPaletteProps) {
           <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app`))}>
             <BarChart3 className="mr-2 h-4 w-4" />
             {t("command.goDashboard")}
+          </CommandItem>
+          <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/pages`))}>
+            <FileText className="mr-2 h-4 w-4" />
+            {t("command.goPages")}
+          </CommandItem>
+          <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/realtime`))}>
+            <Activity className="mr-2 h-4 w-4" />
+            {t("command.goRealtime")}
+          </CommandItem>
+          <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/sessions`))}>
+            <Clock className="mr-2 h-4 w-4" />
+            {t("command.goSessions")}
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push(`/${locale}/app/teams`))}>
             <Users className="mr-2 h-4 w-4" />

@@ -1,40 +1,31 @@
 "use client";
 
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { compactNumber } from "@/lib/utils";
+import { PercentageBar } from "@/components/widget/percentage-bar";
 
-interface ReferrerBarChartProps {
+interface ReferrersTableProps {
   data: Array<{ referrer: string; views: number; sessions: number }>;
+  sortBy?: "views" | "sessions";
   directLabel?: string;
 }
 
-export function ReferrerBarChart({ data, directLabel = "direct" }: ReferrerBarChartProps) {
-  const chartData = data.map((d) => ({
-    name: d.referrer || directLabel,
-    views: d.views,
-  }));
+export function ReferrerBarChart({ data, sortBy = "views", directLabel = "direct" }: ReferrersTableProps) {
+  const sorted = [...data].sort((a, b) => b[sortBy] - a[sortBy]);
+  const max = sorted.length > 0 ? sorted[0][sortBy] : 0;
+
+  if (sorted.length === 0) {
+    return <p className="px-4 py-3 text-sm text-muted-foreground">No data</p>;
+  }
 
   return (
-    <div className="h-52 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 16, bottom: 0, left: 80 }}>
-          <CartesianGrid horizontal={false} className="stroke-border" />
-          <XAxis type="number" tickFormatter={(v) => compactNumber(Number(v))} fontSize={11} className="text-muted-foreground" />
-          <YAxis type="category" dataKey="name" width={80} fontSize={11} className="text-muted-foreground" tickLine={false} />
-          <Tooltip
-            contentStyle={{
-              borderRadius: "8px",
-              border: "1px solid hsl(var(--border))",
-              background: "hsl(var(--card))",
-              color: "hsl(var(--card-foreground))",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-              fontSize: "12px",
-            }}
-            formatter={(value) => compactNumber(Number(value))}
-          />
-          <Bar dataKey="views" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+    <div className="divide-y divide-border">
+      {sorted.map((item) => (
+        <PercentageBar
+          key={item.referrer || "__direct__"}
+          label={item.referrer || directLabel}
+          value={item[sortBy]}
+          max={max}
+        />
+      ))}
     </div>
   );
 }
