@@ -3,17 +3,16 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
   TableCell,
   TableHead,
-  TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { RangeLinks } from "@/components/dashboard/range-links";
 import { FilterControls } from "@/components/dashboard/filter-controls";
 import { DistributionDonutChart } from "@/components/dashboard/distribution-donut-chart";
+import { ContentSwitch } from "@/components/dashboard/content-switch";
+import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { fetchBrowsers, loadFilterOptions, type FilterOptions, emptyDimensionData } from "@/lib/dashboard/client-data";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
@@ -73,7 +72,7 @@ export function BrowsersClientPage({ locale, messages, siteId, pathname }: Brows
     filters.eventType,
   ]);
 
-  const emptyText = loading ? messages.common.loading : messages.common.noData;
+  const noDataText = messages.common.noData;
 
   return (
     <div className="space-y-6">
@@ -99,16 +98,19 @@ export function BrowsersClientPage({ locale, messages, siteId, pathname }: Brows
           <CardTitle>{messages.browsers.title}</CardTitle>
         </CardHeader>
         <CardContent>
-          {browsers.data.length > 0 ? (
+          <ContentSwitch
+            loading={loading}
+            hasContent={browsers.data.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyContent={<p>{noDataText}</p>}
+          >
             <DistributionDonutChart
               items={browsers.data.map((item) => ({
                 label: item.value || messages.common.unknown,
                 value: item.views,
               }))}
             />
-          ) : (
-            <p className="text-sm text-muted-foreground">{emptyText}</p>
-          )}
+          </ContentSwitch>
         </CardContent>
       </Card>
 
@@ -117,32 +119,27 @@ export function BrowsersClientPage({ locale, messages, siteId, pathname }: Brows
           <CardTitle>{messages.browsers.title}</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
+          <DataTableSwitch
+            loading={loading}
+            hasContent={browsers.data.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyLabel={noDataText}
+            colSpan={3}
+            header={(
               <TableRow>
                 <TableHead>{messages.common.browser}</TableHead>
                 <TableHead className="text-right">{messages.common.views}</TableHead>
                 <TableHead className="text-right">{messages.common.sessions}</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {browsers.data.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground">
-                    {emptyText}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                browsers.data.map((item) => (
-                  <TableRow key={`${item.value}-${item.views}`}>
-                    <TableCell>{item.value || messages.common.unknown}</TableCell>
-                    <TableCell className="text-right">{numberFormat(locale, item.views)}</TableCell>
-                    <TableCell className="text-right">{numberFormat(locale, item.sessions)}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+            )}
+            rows={browsers.data.map((item) => (
+              <TableRow key={`${item.value}-${item.views}`}>
+                <TableCell>{item.value || messages.common.unknown}</TableCell>
+                <TableCell className="text-right">{numberFormat(locale, item.views)}</TableCell>
+                <TableCell className="text-right">{numberFormat(locale, item.sessions)}</TableCell>
+              </TableRow>
+            ))}
+          />
         </CardContent>
       </Card>
     </div>

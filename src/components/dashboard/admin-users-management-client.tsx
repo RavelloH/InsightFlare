@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import {
   Select,
   SelectContent,
@@ -18,13 +20,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
   TableCell,
   TableHead,
-  TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 
 interface AdminUsersManagementClientProps {
   locale: Locale;
@@ -141,7 +141,7 @@ export function AdminUsersManagementClient({
     }
   }
 
-  const emptyText = loading ? messages.common.loading : t.noData;
+  const noDataText = t.noData;
 
   return (
     <div className="space-y-4">
@@ -220,7 +220,16 @@ export function AdminUsersManagementClient({
             </div>
             <div className="md:col-span-2">
               <Button type="submit" disabled={submitting}>
-                {submitting ? t.creating : t.create}
+                <AutoTransition className="inline-flex items-center gap-2">
+                  {submitting ? (
+                    <span key="creating" className="inline-flex items-center gap-2">
+                      <Spinner className="size-4" />
+                      {t.creating}
+                    </span>
+                  ) : (
+                    <span key="create">{t.create}</span>
+                  )}
+                </AutoTransition>
               </Button>
             </div>
           </form>
@@ -233,9 +242,14 @@ export function AdminUsersManagementClient({
           <CardDescription>{t.listSubtitle}</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-                <TableRow>
+          <DataTableSwitch
+            loading={loading}
+            hasContent={users.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyLabel={noDataText}
+            colSpan={6}
+            header={(
+              <TableRow>
                 <TableHead>{t.columns.name}</TableHead>
                 <TableHead>{t.columns.username}</TableHead>
                 <TableHead>{t.columns.email}</TableHead>
@@ -243,32 +257,30 @@ export function AdminUsersManagementClient({
                 <TableHead className="text-right">{t.columns.teams}</TableHead>
                 <TableHead>{t.columns.created}</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    {emptyText}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                users.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.name || user.username}</TableCell>
-                    <TableCell>{user.username}</TableCell>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell>
-                      {user.systemRole === "admin"
-                        ? messages.common.admin
-                        : messages.common.user}
-                    </TableCell>
-                    <TableCell className="text-right">{user.teamCount ?? 0}</TableCell>
-                    <TableCell>{shortDateTime(locale, user.createdAt)}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+            )}
+            rows={users.map((user) => (
+              <TableRow key={user.id}>
+                <TableCell className="font-medium">{user.name || user.username}</TableCell>
+                <TableCell>{user.username}</TableCell>
+                <TableCell>{user.email}</TableCell>
+                <TableCell>
+                  {user.systemRole === "admin"
+                    ? messages.common.admin
+                    : messages.common.user}
+                </TableCell>
+                <TableCell className="text-right">
+                  {typeof user.teamCount === "number" ? (
+                    user.teamCount
+                  ) : (
+                    <span className="inline-flex justify-end">
+                      <Spinner className="size-4" />
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell>{shortDateTime(locale, user.createdAt)}</TableCell>
+              </TableRow>
+            ))}
+          />
         </CardContent>
       </Card>
     </div>

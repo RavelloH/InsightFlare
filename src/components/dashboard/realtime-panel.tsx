@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
+import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import type { Locale } from "@/lib/i18n/config";
 import { intlLocale } from "@/lib/dashboard/format";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -139,34 +142,61 @@ export function RealtimePanel({ siteId, locale, messages }: RealtimePanelProps) 
           <p className="text-xs text-muted-foreground">{messages.realtime.subtitle}</p>
         </div>
         <Badge variant={status === "connected" ? "default" : "outline"}>
-          {status === "connected" ? messages.realtime.connected : messages.realtime.disconnected}
+          <AutoTransition className="inline-flex items-center gap-2">
+            {status === "connected" ? (
+              <span key="connected">{messages.realtime.connected}</span>
+            ) : status === "connecting" ? (
+              <span key="connecting" className="inline-flex items-center gap-2">
+                <Spinner className="size-3.5" />
+                {messages.common.loading}
+              </span>
+            ) : (
+              <span key="disconnected">{messages.realtime.disconnected}</span>
+            )}
+          </AutoTransition>
         </Badge>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-baseline justify-between rounded-none border border-border p-3">
           <p className="text-sm text-muted-foreground">{messages.realtime.activeNow}</p>
-          <p className="text-2xl font-semibold">{activeNow}</p>
+          <p className="text-2xl font-semibold">
+            <AutoTransition initial className="inline-flex min-w-[2ch] justify-end">
+              {status === "connecting" ? (
+                <span key="active-loading" className="inline-flex items-center">
+                  <Spinner className="size-5" />
+                </span>
+              ) : (
+                <span key="active-value">{activeNow}</span>
+              )}
+            </AutoTransition>
+          </p>
         </div>
 
         <div className="space-y-2">
           <p className="text-sm font-medium">{messages.realtime.recentEvents}</p>
-          {events.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{messages.common.noData}</p>
-          ) : (
-            <div className="space-y-2">
-              {events.map((event) => (
-                <div key={event.id} className="flex items-center justify-between border-b pb-2 text-xs">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{event.eventType || messages.common.unknown}</p>
-                    <p className="truncate text-muted-foreground">
-                      {event.pathname || "/"} · {event.country || messages.common.unknown} · {event.browser || messages.common.unknown}
-                    </p>
-                  </div>
-                  <p className="pl-3 text-muted-foreground">{formatTime(locale, event.eventAt)}</p>
+          <AutoResizer>
+            <AutoTransition>
+              {events.length === 0 ? (
+                <p key="events-empty" className="text-sm text-muted-foreground">
+                  {messages.common.noData}
+                </p>
+              ) : (
+                <div key="events-list" className="space-y-2">
+                  {events.map((event) => (
+                    <div key={event.id} className="flex items-center justify-between border-b pb-2 text-xs">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{event.eventType || messages.common.unknown}</p>
+                        <p className="truncate text-muted-foreground">
+                          {event.pathname || "/"} · {event.country || messages.common.unknown} · {event.browser || messages.common.unknown}
+                        </p>
+                      </div>
+                      <p className="pl-3 text-muted-foreground">{formatTime(locale, event.eventAt)}</p>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
+            </AutoTransition>
+          </AutoResizer>
         </div>
       </CardContent>
     </Card>

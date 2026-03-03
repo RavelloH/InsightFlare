@@ -3,11 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
   TableCell,
   TableHead,
-  TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { PageHeading } from "@/components/dashboard/page-heading";
@@ -20,6 +17,8 @@ import { TopItemsChart } from "@/components/dashboard/top-items-chart";
 import { DistributionDonutChart } from "@/components/dashboard/distribution-donut-chart";
 import { SessionDurationChart } from "@/components/dashboard/session-duration-chart";
 import { RealtimePanel } from "@/components/dashboard/realtime-panel";
+import { ContentSwitch } from "@/components/dashboard/content-switch";
+import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { durationFormat, numberFormat, percentFormat, shortDateTime } from "@/lib/dashboard/format";
 import { loadFilterOptions, loadOverviewBundle, type FilterOptions, type OverviewBundle } from "@/lib/dashboard/client-data";
 import type { Locale } from "@/lib/i18n/config";
@@ -139,12 +138,18 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
   );
 
   const previous = data.previousOverview.data;
-  const emptyText = loading ? messages.common.loading : messages.common.noData;
+  const noDataText = messages.common.noData;
 
   const eventTypeItems = data.eventTypes.data.map((item) => ({
     label: item.value || messages.common.unknown,
     value: item.views,
   }));
+  const compositionItems = [
+    { label: messages.common.views, value: data.overview.data.views },
+    { label: messages.common.sessions, value: data.overview.data.sessions },
+    { label: messages.common.visitors, value: data.overview.data.visitors },
+    { label: messages.common.bounces, value: data.overview.data.bounces },
+  ];
 
   const metrics = [
     {
@@ -202,6 +207,7 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             value={item.value}
             delta={item.delta}
             inverted={item.inverted}
+            loading={loading}
           />
         ))}
       </section>
@@ -216,16 +222,19 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
           </span>
         </CardHeader>
         <CardContent>
-          {data.trend.data.length > 0 ? (
+          <ContentSwitch
+            loading={loading}
+            hasContent={data.trend.data.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyContent={<p>{noDataText}</p>}
+          >
             <TrendChart
               locale={locale}
               data={data.trend.data}
               viewsLabel={messages.common.views}
               sessionsLabel={messages.common.sessions}
             />
-          ) : (
-            <p className="text-sm text-muted-foreground">{emptyText}</p>
-          )}
+          </ContentSwitch>
         </CardContent>
       </Card>
 
@@ -235,16 +244,19 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.overview.engagementTitle}</CardTitle>
           </CardHeader>
           <CardContent>
-            {data.trend.data.length > 0 ? (
+            <ContentSwitch
+              loading={loading}
+              hasContent={data.trend.data.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyContent={<p>{noDataText}</p>}
+            >
               <EngagementChart
                 locale={locale}
                 data={data.trend.data}
                 viewsLabel={messages.common.views}
                 sessionsLabel={messages.common.sessions}
               />
-            ) : (
-              <p className="text-sm text-muted-foreground">{emptyText}</p>
-            )}
+            </ContentSwitch>
           </CardContent>
         </Card>
 
@@ -253,14 +265,14 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.overview.compositionTitle}</CardTitle>
           </CardHeader>
           <CardContent>
-            <DistributionDonutChart
-              items={[
-                { label: messages.common.views, value: data.overview.data.views },
-                { label: messages.common.sessions, value: data.overview.data.sessions },
-                { label: messages.common.visitors, value: data.overview.data.visitors },
-                { label: messages.common.bounces, value: data.overview.data.bounces },
-              ]}
-            />
+            <ContentSwitch
+              loading={loading}
+              hasContent={compositionItems.some((item) => item.value > 0)}
+              loadingLabel={messages.common.loading}
+              emptyContent={<p>{noDataText}</p>}
+            >
+              <DistributionDonutChart items={compositionItems} />
+            </ContentSwitch>
           </CardContent>
         </Card>
       </div>
@@ -271,11 +283,14 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.overview.eventTypesTitle}</CardTitle>
           </CardHeader>
           <CardContent>
-            {eventTypeItems.length > 0 ? (
+            <ContentSwitch
+              loading={loading}
+              hasContent={eventTypeItems.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyContent={<p>{noDataText}</p>}
+            >
               <DistributionDonutChart items={eventTypeItems} />
-            ) : (
-              <p className="text-sm text-muted-foreground">{emptyText}</p>
-            )}
+            </ContentSwitch>
           </CardContent>
         </Card>
 
@@ -284,13 +299,16 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.overview.sessionDurationTitle}</CardTitle>
           </CardHeader>
           <CardContent>
-            {data.sessions.data.length > 0 ? (
+            <ContentSwitch
+              loading={loading}
+              hasContent={data.sessions.data.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyContent={<p>{noDataText}</p>}
+            >
               <SessionDurationChart
                 durationsMs={data.sessions.data.map((item) => item.totalDurationMs)}
               />
-            ) : (
-              <p className="text-sm text-muted-foreground">{emptyText}</p>
-            )}
+            </ContentSwitch>
           </CardContent>
         </Card>
       </div>
@@ -301,7 +319,12 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.navigation.geo}</CardTitle>
           </CardHeader>
           <CardContent>
-            {data.countries.data.length > 0 ? (
+            <ContentSwitch
+              loading={loading}
+              hasContent={data.countries.data.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyContent={<p>{noDataText}</p>}
+            >
               <TopItemsChart
                 valueLabel={messages.common.views}
                 items={data.countries.data.map((item) => ({
@@ -309,9 +332,7 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
                   value: item.views,
                 }))}
               />
-            ) : (
-              <p className="text-sm text-muted-foreground">{emptyText}</p>
-            )}
+            </ContentSwitch>
           </CardContent>
         </Card>
 
@@ -320,16 +341,19 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.navigation.devices}</CardTitle>
           </CardHeader>
           <CardContent>
-            {data.devices.data.length > 0 ? (
+            <ContentSwitch
+              loading={loading}
+              hasContent={data.devices.data.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyContent={<p>{noDataText}</p>}
+            >
               <DistributionDonutChart
                 items={data.devices.data.map((item) => ({
                   label: item.value || messages.common.unknown,
                   value: item.views,
                 }))}
               />
-            ) : (
-              <p className="text-sm text-muted-foreground">{emptyText}</p>
-            )}
+            </ContentSwitch>
           </CardContent>
         </Card>
 
@@ -338,16 +362,19 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.navigation.browsers}</CardTitle>
           </CardHeader>
           <CardContent>
-            {data.browsers.data.length > 0 ? (
+            <ContentSwitch
+              loading={loading}
+              hasContent={data.browsers.data.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyContent={<p>{noDataText}</p>}
+            >
               <DistributionDonutChart
                 items={data.browsers.data.map((item) => ({
                   label: item.value || messages.common.unknown,
                   value: item.views,
                 }))}
               />
-            ) : (
-              <p className="text-sm text-muted-foreground">{emptyText}</p>
-            )}
+            </ContentSwitch>
           </CardContent>
         </Card>
       </div>
@@ -358,34 +385,29 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.overview.topPages}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
+            <DataTableSwitch
+              loading={loading}
+              hasContent={data.pages.data.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyLabel={noDataText}
+              colSpan={3}
+              header={(
                 <TableRow>
                   <TableHead>{messages.common.page}</TableHead>
                   <TableHead className="text-right">{messages.common.views}</TableHead>
                   <TableHead className="text-right">{messages.common.sessions}</TableHead>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.pages.data.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      {emptyText}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  data.pages.data.map((item) => (
-                    <TableRow key={`${item.pathname}-${item.views}`}>
-                      <TableCell className="max-w-[260px] truncate font-mono">
-                        {item.pathname || "/"}
-                      </TableCell>
-                      <TableCell className="text-right">{numberFormat(locale, item.views)}</TableCell>
-                      <TableCell className="text-right">{numberFormat(locale, item.sessions)}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+              )}
+              rows={data.pages.data.map((item) => (
+                <TableRow key={`${item.pathname}-${item.views}`}>
+                  <TableCell className="max-w-[260px] truncate font-mono">
+                    {item.pathname || "/"}
+                  </TableCell>
+                  <TableCell className="text-right">{numberFormat(locale, item.views)}</TableCell>
+                  <TableCell className="text-right">{numberFormat(locale, item.sessions)}</TableCell>
+                </TableRow>
+              ))}
+            />
           </CardContent>
         </Card>
 
@@ -394,34 +416,29 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.overview.topReferrers}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
+            <DataTableSwitch
+              loading={loading}
+              hasContent={data.referrers.data.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyLabel={noDataText}
+              colSpan={3}
+              header={(
                 <TableRow>
                   <TableHead>{messages.common.referrer}</TableHead>
                   <TableHead className="text-right">{messages.common.views}</TableHead>
                   <TableHead className="text-right">{messages.common.sessions}</TableHead>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.referrers.data.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      {emptyText}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  data.referrers.data.map((item) => (
-                    <TableRow key={`${item.referrer}-${item.views}`}>
-                      <TableCell className="max-w-[260px] truncate font-mono">
-                        {item.referrer || messages.common.unknown}
-                      </TableCell>
-                      <TableCell className="text-right">{numberFormat(locale, item.views)}</TableCell>
-                      <TableCell className="text-right">{numberFormat(locale, item.sessions)}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+              )}
+              rows={data.referrers.data.map((item) => (
+                <TableRow key={`${item.referrer}-${item.views}`}>
+                  <TableCell className="max-w-[260px] truncate font-mono">
+                    {item.referrer || messages.common.unknown}
+                  </TableCell>
+                  <TableCell className="text-right">{numberFormat(locale, item.views)}</TableCell>
+                  <TableCell className="text-right">{numberFormat(locale, item.sessions)}</TableCell>
+                </TableRow>
+              ))}
+            />
           </CardContent>
         </Card>
       </div>
@@ -432,34 +449,29 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.overview.recentSessions}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
+            <DataTableSwitch
+              loading={loading}
+              hasContent={data.sessions.data.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyLabel={noDataText}
+              colSpan={3}
+              header={(
                 <TableRow>
                   <TableHead>{messages.common.startedAt}</TableHead>
                   <TableHead className="text-right">{messages.common.views}</TableHead>
                   <TableHead className="text-right">{messages.common.duration}</TableHead>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.sessions.data.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      {emptyText}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  data.sessions.data.map((session) => (
-                    <TableRow key={session.sessionId}>
-                      <TableCell>{shortDateTime(locale, session.startedAt)}</TableCell>
-                      <TableCell className="text-right">{numberFormat(locale, session.views)}</TableCell>
-                      <TableCell className="text-right">
-                        {durationFormat(locale, session.totalDurationMs)}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+              )}
+              rows={data.sessions.data.map((session) => (
+                <TableRow key={session.sessionId}>
+                  <TableCell>{shortDateTime(locale, session.startedAt)}</TableCell>
+                  <TableCell className="text-right">{numberFormat(locale, session.views)}</TableCell>
+                  <TableCell className="text-right">
+                    {durationFormat(locale, session.totalDurationMs)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            />
           </CardContent>
         </Card>
 
@@ -468,36 +480,31 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
             <CardTitle>{messages.overview.recentEvents}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
+            <DataTableSwitch
+              loading={loading}
+              hasContent={data.events.data.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyLabel={noDataText}
+              colSpan={3}
+              header={(
                 <TableRow>
                   <TableHead>{messages.common.event}</TableHead>
                   <TableHead>{messages.common.page}</TableHead>
                   <TableHead className="text-right">{messages.common.startedAt}</TableHead>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.events.data.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      {emptyText}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  data.events.data.map((event) => (
-                    <TableRow key={event.id}>
-                      <TableCell>{event.eventType || messages.common.unknown}</TableCell>
-                      <TableCell className="max-w-[220px] truncate font-mono">
-                        {event.pathname || "/"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {shortDateTime(locale, event.eventAt)}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+              )}
+              rows={data.events.data.map((event) => (
+                <TableRow key={event.id}>
+                  <TableCell>{event.eventType || messages.common.unknown}</TableCell>
+                  <TableCell className="max-w-[220px] truncate font-mono">
+                    {event.pathname || "/"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {shortDateTime(locale, event.eventAt)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            />
           </CardContent>
         </Card>
       </div>

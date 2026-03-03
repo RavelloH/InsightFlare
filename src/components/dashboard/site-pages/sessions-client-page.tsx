@@ -3,17 +3,16 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
   TableCell,
   TableHead,
-  TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { RangeLinks } from "@/components/dashboard/range-links";
 import { FilterControls } from "@/components/dashboard/filter-controls";
 import { TopItemsChart } from "@/components/dashboard/top-items-chart";
+import { ContentSwitch } from "@/components/dashboard/content-switch";
+import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { fetchSessions, loadFilterOptions, type FilterOptions, emptySessionsData } from "@/lib/dashboard/client-data";
 import { durationFormat, numberFormat, shortDateTime } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
@@ -73,7 +72,7 @@ export function SessionsClientPage({ locale, messages, siteId, pathname }: Sessi
     filters.eventType,
   ]);
 
-  const emptyText = loading ? messages.common.loading : messages.common.noData;
+  const noDataText = messages.common.noData;
 
   return (
     <div className="space-y-6">
@@ -99,7 +98,12 @@ export function SessionsClientPage({ locale, messages, siteId, pathname }: Sessi
           <CardTitle>{messages.sessions.title}</CardTitle>
         </CardHeader>
         <CardContent>
-          {sessions.data.length > 0 ? (
+          <ContentSwitch
+            loading={loading}
+            hasContent={sessions.data.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyContent={<p>{noDataText}</p>}
+          >
             <TopItemsChart
               valueLabel={messages.common.duration}
               items={sessions.data.map((item) => ({
@@ -107,9 +111,7 @@ export function SessionsClientPage({ locale, messages, siteId, pathname }: Sessi
                 value: item.totalDurationMs,
               }))}
             />
-          ) : (
-            <p className="text-sm text-muted-foreground">{emptyText}</p>
-          )}
+          </ContentSwitch>
         </CardContent>
       </Card>
 
@@ -118,8 +120,13 @@ export function SessionsClientPage({ locale, messages, siteId, pathname }: Sessi
           <CardTitle>{messages.sessions.title}</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
+          <DataTableSwitch
+            loading={loading}
+            hasContent={sessions.data.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyLabel={noDataText}
+            colSpan={5}
+            header={(
               <TableRow>
                 <TableHead>{messages.common.startedAt}</TableHead>
                 <TableHead>{messages.common.endedAt}</TableHead>
@@ -127,29 +134,19 @@ export function SessionsClientPage({ locale, messages, siteId, pathname }: Sessi
                 <TableHead className="text-right">{messages.common.duration}</TableHead>
                 <TableHead className="text-right">{messages.common.page}</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sessions.data.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    {emptyText}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sessions.data.map((item) => (
-                  <TableRow key={item.sessionId}>
-                    <TableCell>{shortDateTime(locale, item.startedAt)}</TableCell>
-                    <TableCell>{shortDateTime(locale, item.endedAt)}</TableCell>
-                    <TableCell className="text-right">{numberFormat(locale, item.views)}</TableCell>
-                    <TableCell className="text-right">{durationFormat(locale, item.totalDurationMs)}</TableCell>
-                    <TableCell className="max-w-[220px] truncate font-mono text-right">
-                      {item.entryPath || "/"}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+            )}
+            rows={sessions.data.map((item) => (
+              <TableRow key={item.sessionId}>
+                <TableCell>{shortDateTime(locale, item.startedAt)}</TableCell>
+                <TableCell>{shortDateTime(locale, item.endedAt)}</TableCell>
+                <TableCell className="text-right">{numberFormat(locale, item.views)}</TableCell>
+                <TableCell className="text-right">{durationFormat(locale, item.totalDurationMs)}</TableCell>
+                <TableCell className="max-w-[220px] truncate font-mono text-right">
+                  {item.entryPath || "/"}
+                </TableCell>
+              </TableRow>
+            ))}
+          />
         </CardContent>
       </Card>
     </div>

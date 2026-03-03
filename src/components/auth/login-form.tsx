@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import type { Locale } from "@/lib/i18n/config";
 import { navigateWithTransition } from "@/lib/page-transition";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -109,7 +111,16 @@ export function LoginForm({
         />
       </div>
       <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? signingInLabel : signInLabel}
+        <AutoTransition className="inline-flex items-center gap-2">
+          {pending ? (
+            <span key="pending" className="inline-flex items-center gap-2">
+              <Spinner className="size-4" />
+              {signingInLabel}
+            </span>
+          ) : (
+            <span key="idle">{signInLabel}</span>
+          )}
+        </AutoTransition>
       </Button>
     </form>
   );

@@ -3,17 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
   TableCell,
   TableHead,
-  TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { RangeLinks } from "@/components/dashboard/range-links";
 import { FilterControls } from "@/components/dashboard/filter-controls";
 import { TopItemsChart } from "@/components/dashboard/top-items-chart";
+import { ContentSwitch } from "@/components/dashboard/content-switch";
+import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { fetchEvents, loadFilterOptions, type FilterOptions, emptyEventsData } from "@/lib/dashboard/client-data";
 import { durationFormat, shortDateTime } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
@@ -73,7 +72,7 @@ export function EventsClientPage({ locale, messages, siteId, pathname }: EventsC
     filters.eventType,
   ]);
 
-  const emptyText = loading ? messages.common.loading : messages.common.noData;
+  const noDataText = messages.common.noData;
 
   const eventTypeItems = useMemo(() => {
     const eventCountMap = new Map<string, number>();
@@ -108,11 +107,14 @@ export function EventsClientPage({ locale, messages, siteId, pathname }: EventsC
           <CardTitle>{messages.events.title}</CardTitle>
         </CardHeader>
         <CardContent>
-          {eventTypeItems.length > 0 ? (
+          <ContentSwitch
+            loading={loading}
+            hasContent={eventTypeItems.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyContent={<p>{noDataText}</p>}
+          >
             <TopItemsChart valueLabel={messages.common.event} items={eventTypeItems} />
-          ) : (
-            <p className="text-sm text-muted-foreground">{emptyText}</p>
-          )}
+          </ContentSwitch>
         </CardContent>
       </Card>
 
@@ -121,8 +123,13 @@ export function EventsClientPage({ locale, messages, siteId, pathname }: EventsC
           <CardTitle>{messages.events.title}</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
+          <DataTableSwitch
+            loading={loading}
+            hasContent={events.data.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyLabel={noDataText}
+            colSpan={6}
+            header={(
               <TableRow>
                 <TableHead>{messages.common.startedAt}</TableHead>
                 <TableHead>{messages.common.event}</TableHead>
@@ -131,32 +138,22 @@ export function EventsClientPage({ locale, messages, siteId, pathname }: EventsC
                 <TableHead>{messages.common.browser}</TableHead>
                 <TableHead className="text-right">{messages.common.duration}</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {events.data.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    {emptyText}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                events.data.map((event) => (
-                  <TableRow key={event.id}>
-                    <TableCell>{shortDateTime(locale, event.eventAt)}</TableCell>
-                    <TableCell>{event.eventType || messages.common.unknown}</TableCell>
-                    <TableCell className="max-w-[260px] truncate font-mono">{event.pathname || "/"}</TableCell>
-                    <TableCell>
-                      {[event.country, event.region, event.city].filter(Boolean).join(" / ") || messages.common.unknown}
-                    </TableCell>
-                    <TableCell>{event.browser || messages.common.unknown}</TableCell>
-                    <TableCell className="text-right">
-                      {durationFormat(locale, event.durationMs)}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+            )}
+            rows={events.data.map((event) => (
+              <TableRow key={event.id}>
+                <TableCell>{shortDateTime(locale, event.eventAt)}</TableCell>
+                <TableCell>{event.eventType || messages.common.unknown}</TableCell>
+                <TableCell className="max-w-[260px] truncate font-mono">{event.pathname || "/"}</TableCell>
+                <TableCell>
+                  {[event.country, event.region, event.city].filter(Boolean).join(" / ") || messages.common.unknown}
+                </TableCell>
+                <TableCell>{event.browser || messages.common.unknown}</TableCell>
+                <TableCell className="text-right">
+                  {durationFormat(locale, event.durationMs)}
+                </TableCell>
+              </TableRow>
+            ))}
+          />
         </CardContent>
       </Card>
     </div>

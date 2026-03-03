@@ -16,6 +16,8 @@ import { toast } from "sonner";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
+import { Spinner } from "@/components/ui/spinner";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -219,11 +221,16 @@ export function SidebarFooterMenus({
             }}
           >
             <RiLogoutBoxRLine />
-            <span>
-              {loggingOut
-                ? messages.sidebarFooter.loggingOut
-                : messages.actions.logout}
-            </span>
+            <AutoTransition className="inline-flex items-center gap-2">
+              {loggingOut ? (
+                <span key="logging-out" className="inline-flex items-center gap-2">
+                  <Spinner className="size-4" />
+                  {messages.sidebarFooter.loggingOut}
+                </span>
+              ) : (
+                <span key="logout">{messages.actions.logout}</span>
+              )}
+            </AutoTransition>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

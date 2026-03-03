@@ -8,6 +8,9 @@ import type { TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
+import { Spinner } from "@/components/ui/spinner";
+import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -158,7 +161,17 @@ export function TeamSelect({
               placeholder={copy.slugPlaceholder}
             />
           </div>
-          {submitError ? <p className="text-xs text-destructive">{submitError}</p> : null}
+          <AutoResizer>
+            <AutoTransition>
+              {submitError ? (
+                <p key="error" className="text-xs text-destructive">
+                  {submitError}
+                </p>
+              ) : (
+                <div key="no-error" />
+              )}
+            </AutoTransition>
+          </AutoResizer>
           <DialogFooter>
             <Button
               type="button"
@@ -169,7 +182,16 @@ export function TeamSelect({
               {copy.cancel}
             </Button>
             <Button type="submit" disabled={submitting}>
-              {submitting ? copy.creating : copy.create}
+              <AutoTransition className="inline-flex items-center gap-2">
+                {submitting ? (
+                  <span key="creating" className="inline-flex items-center gap-2">
+                    <Spinner className="size-4" />
+                    {copy.creating}
+                  </span>
+                ) : (
+                  <span key="create">{copy.create}</span>
+                )}
+              </AutoTransition>
             </Button>
           </DialogFooter>
         </form>

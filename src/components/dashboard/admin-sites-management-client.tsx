@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import {
   Select,
   SelectContent,
@@ -19,13 +21,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
   TableCell,
   TableHead,
-  TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 
 interface AdminSitesManagementClientProps {
   locale: Locale;
@@ -160,7 +160,7 @@ export function AdminSitesManagementClient({
     }
   }
 
-  const emptyText = loading ? messages.common.loading : t.noData;
+  const noDataText = t.noData;
 
   return (
     <div className="space-y-4">
@@ -228,7 +228,16 @@ export function AdminSitesManagementClient({
             </div>
             <div className="md:col-span-2">
               <Button type="submit" disabled={submitting || !selectedTeam}>
-                {submitting ? t.creating : t.create}
+                <AutoTransition className="inline-flex items-center gap-2">
+                  {submitting ? (
+                    <span key="creating" className="inline-flex items-center gap-2">
+                      <Spinner className="size-4" />
+                      {t.creating}
+                    </span>
+                  ) : (
+                    <span key="create">{t.create}</span>
+                  )}
+                </AutoTransition>
               </Button>
             </div>
           </form>
@@ -241,44 +250,39 @@ export function AdminSitesManagementClient({
           <CardDescription>{t.listSubtitle}</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-                <TableRow>
+          <DataTableSwitch
+            loading={loading}
+            hasContent={sites.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyLabel={noDataText}
+            colSpan={5}
+            header={(
+              <TableRow>
                 <TableHead>{t.columns.name}</TableHead>
                 <TableHead>{t.columns.domain}</TableHead>
                 <TableHead>{t.columns.slug}</TableHead>
                 <TableHead>{t.columns.created}</TableHead>
                 <TableHead className="text-right">{t.columns.action}</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sites.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    {emptyText}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sites.map((site) => (
-                  <TableRow key={site.id}>
-                    <TableCell className="font-medium">{site.name}</TableCell>
-                    <TableCell className="font-mono">{site.domain}</TableCell>
-                    <TableCell className="font-mono">{siteSlug(site)}</TableCell>
-                    <TableCell>{shortDateTime(locale, site.createdAt)}</TableCell>
-                    <TableCell className="text-right">
-                      {selectedTeam ? (
-                        <Button asChild size="xs">
-                          <Link href={`/${locale}/app/${selectedTeam.slug}/${siteSlug(site)}`}>
-                            {t.open}
-                          </Link>
-                        </Button>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+            )}
+            rows={sites.map((site) => (
+              <TableRow key={site.id}>
+                <TableCell className="font-medium">{site.name}</TableCell>
+                <TableCell className="font-mono">{site.domain}</TableCell>
+                <TableCell className="font-mono">{siteSlug(site)}</TableCell>
+                <TableCell>{shortDateTime(locale, site.createdAt)}</TableCell>
+                <TableCell className="text-right">
+                  {selectedTeam ? (
+                    <Button asChild size="xs">
+                      <Link href={`/${locale}/app/${selectedTeam.slug}/${siteSlug(site)}`}>
+                        {t.open}
+                      </Link>
+                    </Button>
+                  ) : null}
+                </TableCell>
+              </TableRow>
+            ))}
+          />
         </CardContent>
       </Card>
     </div>

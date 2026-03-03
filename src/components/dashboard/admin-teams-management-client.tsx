@@ -11,14 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import {
-  Table,
-  TableBody,
   TableCell,
   TableHead,
-  TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 
 interface AdminTeamsManagementClientProps {
   locale: Locale;
@@ -119,7 +119,7 @@ export function AdminTeamsManagementClient({
     }
   }
 
-  const emptyText = loading ? messages.common.loading : t.noData;
+  const noDataText = t.noData;
 
   return (
     <div className="space-y-4">
@@ -160,7 +160,16 @@ export function AdminTeamsManagementClient({
             </div>
             <div className="md:col-span-2">
               <Button type="submit" disabled={submitting}>
-                {submitting ? t.creating : t.create}
+                <AutoTransition className="inline-flex items-center gap-2">
+                  {submitting ? (
+                    <span key="creating" className="inline-flex items-center gap-2">
+                      <Spinner className="size-4" />
+                      {t.creating}
+                    </span>
+                  ) : (
+                    <span key="create">{t.create}</span>
+                  )}
+                </AutoTransition>
               </Button>
             </div>
           </form>
@@ -173,9 +182,14 @@ export function AdminTeamsManagementClient({
           <CardDescription>{t.listSubtitle}</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-                <TableRow>
+          <DataTableSwitch
+            loading={loading}
+            hasContent={teams.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyLabel={noDataText}
+            colSpan={6}
+            header={(
+              <TableRow>
                 <TableHead>{t.columns.name}</TableHead>
                 <TableHead>{t.columns.slug}</TableHead>
                 <TableHead className="text-right">{t.columns.sites}</TableHead>
@@ -183,34 +197,24 @@ export function AdminTeamsManagementClient({
                 <TableHead>{t.columns.created}</TableHead>
                 <TableHead className="text-right">{t.columns.action}</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {teams.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    {emptyText}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                teams.map((team) => (
-                  <TableRow key={team.id}>
-                    <TableCell className="font-medium">{team.name}</TableCell>
-                    <TableCell className="font-mono">{team.slug}</TableCell>
-                    <TableCell className="text-right">{team.siteCount}</TableCell>
-                    <TableCell className="text-right">{team.memberCount}</TableCell>
-                    <TableCell>{shortDateTime(locale, team.createdAt)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button asChild size="xs" variant="outline">
-                        <Link href={`/${locale}/app/${team.slug}/settings`}>
-                          {t.open}
-                        </Link>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+            )}
+            rows={teams.map((team) => (
+              <TableRow key={team.id}>
+                <TableCell className="font-medium">{team.name}</TableCell>
+                <TableCell className="font-mono">{team.slug}</TableCell>
+                <TableCell className="text-right">{team.siteCount}</TableCell>
+                <TableCell className="text-right">{team.memberCount}</TableCell>
+                <TableCell>{shortDateTime(locale, team.createdAt)}</TableCell>
+                <TableCell className="text-right">
+                  <Button asChild size="xs" variant="outline">
+                    <Link href={`/${locale}/app/${team.slug}/settings`}>
+                      {t.open}
+                    </Link>
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          />
         </CardContent>
       </Card>
     </div>

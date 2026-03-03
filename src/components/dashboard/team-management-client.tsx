@@ -15,14 +15,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import {
-  Table,
-  TableBody,
   TableCell,
   TableHead,
-  TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { MemberData, SiteData, TeamData } from "@/lib/edge-client";
@@ -279,11 +279,6 @@ export function TeamManagementClient({
         ? copy.settings.subtitle
         : copy.members.subtitle;
 
-  const tableEmptyText = loading ? messages.common.loading : copy.sites.noSites;
-  const membersEmptyText = loading
-    ? messages.common.loading
-    : copy.members.noMembers;
-
   return (
     <div className="space-y-6">
       <PageHeading
@@ -292,10 +287,32 @@ export function TeamManagementClient({
         actions={
           <>
             <Badge variant="outline">
-              {copy.stats.sites}: {sites.length}
+              <span className="inline-flex items-center gap-1.5">
+                {copy.stats.sites}:
+                <AutoTransition initial className="inline-flex items-center">
+                  {loading ? (
+                    <span key="sites-loading" className="inline-flex items-center">
+                      <Spinner className="size-3.5" />
+                    </span>
+                  ) : (
+                    <span key="sites-value">{sites.length}</span>
+                  )}
+                </AutoTransition>
+              </span>
             </Badge>
             <Badge variant="outline">
-              {copy.stats.members}: {memberCount}
+              <span className="inline-flex items-center gap-1.5">
+                {copy.stats.members}:
+                <AutoTransition initial className="inline-flex items-center">
+                  {loading ? (
+                    <span key="members-loading" className="inline-flex items-center">
+                      <Spinner className="size-3.5" />
+                    </span>
+                  ) : (
+                    <span key="members-value">{memberCount}</span>
+                  )}
+                </AutoTransition>
+              </span>
             </Badge>
           </>
         }
@@ -316,8 +333,13 @@ export function TeamManagementClient({
               <CardDescription>{copy.sites.subtitle}</CardDescription>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
+              <DataTableSwitch
+                loading={loading}
+                hasContent={sites.length > 0}
+                loadingLabel={messages.common.loading}
+                emptyLabel={copy.sites.noSites}
+                colSpan={5}
+                header={(
                   <TableRow>
                     <TableHead>{copy.sites.columns.name}</TableHead>
                     <TableHead>{copy.sites.columns.domain}</TableHead>
@@ -327,48 +349,35 @@ export function TeamManagementClient({
                       {copy.sites.columns.action}
                     </TableHead>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sites.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={5}
-                        className="text-center text-muted-foreground"
-                      >
-                        {tableEmptyText}
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    sites.map((site) => (
-                      <TableRow key={site.id}>
-                        <TableCell className="font-medium">
-                          {site.name}
-                        </TableCell>
-                        <TableCell className="font-mono">
-                          {site.domain}
-                        </TableCell>
-                        <TableCell className="font-mono">{site.slug}</TableCell>
-                        <TableCell>
-                          {shortDateTime(locale, site.createdAt)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button asChild size="xs">
-                            <Link
-                              href={buildSitePath(
-                                locale,
-                                activeTeam.slug,
-                                site.slug,
-                              )}
-                            >
-                              {copy.sites.openAnalytics}
-                            </Link>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                )}
+                rows={sites.map((site) => (
+                  <TableRow key={site.id}>
+                    <TableCell className="font-medium">
+                      {site.name}
+                    </TableCell>
+                    <TableCell className="font-mono">
+                      {site.domain}
+                    </TableCell>
+                    <TableCell className="font-mono">{site.slug}</TableCell>
+                    <TableCell>
+                      {shortDateTime(locale, site.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild size="xs">
+                        <Link
+                          href={buildSitePath(
+                            locale,
+                            activeTeam.slug,
+                            site.slug,
+                          )}
+                        >
+                          {copy.sites.openAnalytics}
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              />
             </CardContent>
           </Card>
         ) : null}
@@ -408,7 +417,16 @@ export function TeamManagementClient({
                 </div>
 
                 <Button type="submit" disabled={savingTeam}>
-                  {savingTeam ? copy.settings.saving : copy.settings.save}
+                  <AutoTransition className="inline-flex items-center gap-2">
+                    {savingTeam ? (
+                      <span key="saving" className="inline-flex items-center gap-2">
+                        <Spinner className="size-4" />
+                        {copy.settings.saving}
+                      </span>
+                    ) : (
+                      <span key="save">{copy.settings.save}</span>
+                    )}
+                  </AutoTransition>
                 </Button>
               </form>
             </CardContent>
@@ -446,7 +464,16 @@ export function TeamManagementClient({
                     />
                   </div>
                   <Button type="submit" disabled={addingMember}>
-                    {addingMember ? copy.members.adding : copy.members.add}
+                    <AutoTransition className="inline-flex items-center gap-2">
+                      {addingMember ? (
+                        <span key="adding" className="inline-flex items-center gap-2">
+                          <Spinner className="size-4" />
+                          {copy.members.adding}
+                        </span>
+                      ) : (
+                        <span key="add">{copy.members.add}</span>
+                      )}
+                    </AutoTransition>
                   </Button>
                 </form>
               </CardContent>
@@ -454,8 +481,13 @@ export function TeamManagementClient({
 
             <Card>
               <CardContent className="pt-4">
-                <Table>
-                  <TableHeader>
+                <DataTableSwitch
+                  loading={loading}
+                  hasContent={members.length > 0}
+                  loadingLabel={messages.common.loading}
+                  emptyLabel={copy.members.noMembers}
+                  colSpan={6}
+                  header={(
                     <TableRow>
                       <TableHead>{copy.members.columns.name}</TableHead>
                       <TableHead>{copy.members.columns.username}</TableHead>
@@ -466,49 +498,43 @@ export function TeamManagementClient({
                         {copy.members.columns.action}
                       </TableHead>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {members.length === 0 ? (
-                      <TableRow>
-                        <TableCell
-                          colSpan={6}
-                          className="text-center text-muted-foreground"
+                  )}
+                  rows={members.map((member) => (
+                    <TableRow key={member.userId}>
+                      <TableCell className="font-medium">
+                        {member.name || member.username}
+                      </TableCell>
+                      <TableCell>{member.username}</TableCell>
+                      <TableCell>{member.email}</TableCell>
+                      <TableCell>{member.role}</TableCell>
+                      <TableCell>
+                        {shortDateTime(locale, member.joinedAt)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="xs"
+                          onClick={() => {
+                            void handleRemoveMember(member.userId);
+                          }}
+                          disabled={removingMemberId === member.userId}
                         >
-                          {membersEmptyText}
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      members.map((member) => (
-                        <TableRow key={member.userId}>
-                          <TableCell className="font-medium">
-                            {member.name || member.username}
-                          </TableCell>
-                          <TableCell>{member.username}</TableCell>
-                          <TableCell>{member.email}</TableCell>
-                          <TableCell>{member.role}</TableCell>
-                          <TableCell>
-                            {shortDateTime(locale, member.joinedAt)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="xs"
-                              onClick={() => {
-                                void handleRemoveMember(member.userId);
-                              }}
-                              disabled={removingMemberId === member.userId}
-                            >
-                              {removingMemberId === member.userId
-                                ? copy.members.removing
-                                : copy.members.remove}
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+                          <AutoTransition className="inline-flex items-center gap-2">
+                            {removingMemberId === member.userId ? (
+                              <span key="removing" className="inline-flex items-center gap-2">
+                                <Spinner className="size-4" />
+                                {copy.members.removing}
+                              </span>
+                            ) : (
+                              <span key="remove">{copy.members.remove}</span>
+                            )}
+                          </AutoTransition>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                />
               </CardContent>
             </Card>
           </div>
