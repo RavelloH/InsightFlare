@@ -139,6 +139,8 @@ teamManagement:
   toasts:
     teamSaved: Team settings saved.
     teamSaveFailed: Failed to save team settings.
+    teamDeleted: Team deleted.
+    teamDeleteFailed: Failed to delete team.
     memberAdded: Member added.
     memberAddFailed: Failed to add member.
     memberRemoved: Member removed.
@@ -163,6 +165,9 @@ teamManagement:
     slugLabel: Team Slug
     save: Save settings
     saving: Saving...
+    delete: Delete team
+    deleting: Deleting...
+    deleteConfirm: Delete this team and all its data? This action cannot be undone.
   members:
     title: Members
     subtitle: Add members or remove existing members.
@@ -196,6 +201,11 @@ adminUsers:
   role: System Role
   create: Create User
   creating: Creating...
+  delete: Delete
+  deleting: Deleting...
+  deleteConfirm: Delete this user account?
+  deleteSuccess: User deleted.
+  deleteFailed: Failed to delete user.
   listTitle: Users
   listSubtitle: All users in the system.
   noData: No users found.
@@ -210,6 +220,7 @@ adminUsers:
     role: Role
     teams: Teams
     created: Created
+    action: Action
 adminSites:
   title: Site Management
   subtitle: Only system admins can manage sites and ownership.
@@ -252,6 +263,7 @@ adminTeams:
   createFailed: Failed to create team.
   invalidInput: Team name must be at least 2 characters.
   open: Open team
+  settings: Settings
   columns:
     name: Name
     slug: Slug

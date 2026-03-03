@@ -1,8 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { RiLineChartLine } from "@remixicon/react";
 import type { SiteData, TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -13,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { AutoTransition } from "@/components/ui/auto-transition";
+import { Clickable } from "@/components/ui/clickable";
 import {
   Select,
   SelectContent,
@@ -26,6 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
+import { navigateWithTransition } from "@/lib/page-transition";
 
 interface AdminSitesManagementClientProps {
   locale: Locale;
@@ -77,6 +80,7 @@ export function AdminSitesManagementClient({
   teams,
   defaultTeamId,
 }: AdminSitesManagementClientProps) {
+  const router = useRouter();
   const t = messages.adminSites;
   const [selectedTeamId, setSelectedTeamId] = useState(defaultTeamId);
   const [sites, setSites] = useState<SiteData[]>([]);
@@ -273,11 +277,19 @@ export function AdminSitesManagementClient({
                 <TableCell>{shortDateTime(locale, site.createdAt)}</TableCell>
                 <TableCell className="text-right">
                   {selectedTeam ? (
-                    <Button asChild size="xs">
-                      <Link href={`/${locale}/app/${selectedTeam.slug}/${siteSlug(site)}`}>
-                        {t.open}
-                      </Link>
-                    </Button>
+                    <Clickable
+                      onClick={() => {
+                        navigateWithTransition(
+                          router,
+                          `/${locale}/app/${selectedTeam.slug}/${siteSlug(site)}`,
+                        );
+                      }}
+                      className="size-6 text-muted-foreground hover:text-foreground"
+                      aria-label={t.open}
+                      title={t.open}
+                    >
+                      <RiLineChartLine className="size-4" />
+                    </Clickable>
                   ) : null}
                 </TableCell>
               </TableRow>

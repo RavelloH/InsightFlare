@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { RiDeleteBinLine } from "@remixicon/react";
 import type { AccountUserData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -12,6 +13,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { AutoTransition } from "@/components/ui/auto-transition";
+import { Clickable } from "@/components/ui/clickable";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -29,6 +41,7 @@ import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 interface AdminUsersManagementClientProps {
   locale: Locale;
   messages: AppMessages;
+  currentUserId?: string;
 }
 
 interface ApiResponse<T> {
@@ -54,6 +67,7 @@ async function getUsers(): Promise<AccountUserData[]> {
 export function AdminUsersManagementClient({
   locale,
   messages,
+  currentUserId,
 }: AdminUsersManagementClientProps) {
   const t = messages.adminUsers;
   const [users, setUsers] = useState<AccountUserData[]>([]);
@@ -64,6 +78,9 @@ export function AdminUsersManagementClient({
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [systemRole, setSystemRole] = useState<"admin" | "user">("user");
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [pendingDeleteUserId, setPendingDeleteUserId] = useState<string | null>(null);
+  const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -138,6 +155,36 @@ export function AdminUsersManagementClient({
       toast.error(message || t.createFailed);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteUser(userId: string) {
+    setDeletingUserId(userId);
+    try {
+      const response = await fetch("/api/admin/user", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          intent: "remove",
+          userId,
+        }),
+      });
+      const payload = (await response.json()) as ApiResponse<{ userId: string; removed: boolean }>;
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message || payload.error || t.deleteFailed);
+      }
+      await refreshUsers();
+      toast.success(t.deleteSuccess);
+      setDeleteUserDialogOpen(false);
+      setPendingDeleteUserId(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t.deleteFailed;
+      toast.error(message || t.deleteFailed);
+    } finally {
+      setDeletingUserId(null);
     }
   }
 
@@ -247,7 +294,7 @@ export function AdminUsersManagementClient({
             hasContent={users.length > 0}
             loadingLabel={messages.common.loading}
             emptyLabel={noDataText}
-            colSpan={6}
+            colSpan={7}
             header={(
               <TableRow>
                 <TableHead>{t.columns.name}</TableHead>
@@ -256,6 +303,7 @@ export function AdminUsersManagementClient({
                 <TableHead>{t.columns.role}</TableHead>
                 <TableHead className="text-right">{t.columns.teams}</TableHead>
                 <TableHead>{t.columns.created}</TableHead>
+                <TableHead className="text-right">{t.columns.action}</TableHead>
               </TableRow>
             )}
             rows={users.map((user) => (
@@ -278,11 +326,78 @@ export function AdminUsersManagementClient({
                   )}
                 </TableCell>
                 <TableCell>{shortDateTime(locale, user.createdAt)}</TableCell>
+                <TableCell className="text-right">
+                  <Clickable
+                    onClick={() => {
+                      setPendingDeleteUserId(user.id);
+                      setDeleteUserDialogOpen(true);
+                    }}
+                    disabled={deletingUserId !== null || user.id === currentUserId}
+                    className="size-6 text-destructive/80 hover:text-destructive"
+                    aria-label={t.delete}
+                    title={t.delete}
+                  >
+                    <AutoTransition className="inline-flex items-center justify-center">
+                      {deletingUserId === user.id ? (
+                        <span key="deleting" className="inline-flex items-center justify-center">
+                          <Spinner className="size-3.5" />
+                        </span>
+                      ) : (
+                        <span key="delete" className="inline-flex items-center justify-center">
+                          <RiDeleteBinLine className="size-4" />
+                        </span>
+                      )}
+                    </AutoTransition>
+                  </Clickable>
+                </TableCell>
               </TableRow>
             ))}
           />
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={deleteUserDialogOpen}
+        onOpenChange={(open) => {
+          if (deletingUserId) return;
+          setDeleteUserDialogOpen(open);
+          if (!open) {
+            setPendingDeleteUserId(null);
+          }
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t.delete}</AlertDialogTitle>
+            <AlertDialogDescription>{t.deleteConfirm}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingUserId !== null}>
+              {messages.teamSelect.cancel}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deletingUserId !== null || !pendingDeleteUserId}
+              onClick={(event) => {
+                event.preventDefault();
+                if (!pendingDeleteUserId) return;
+                void handleDeleteUser(pendingDeleteUserId);
+              }}
+            >
+              <AutoTransition className="inline-flex items-center gap-2">
+                {deletingUserId !== null ? (
+                  <span key="deleting-confirm" className="inline-flex items-center gap-2">
+                    <Spinner className="size-4" />
+                    {t.deleting}
+                  </span>
+                ) : (
+                  <span key="delete-confirm">{t.delete}</span>
+                )}
+              </AutoTransition>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

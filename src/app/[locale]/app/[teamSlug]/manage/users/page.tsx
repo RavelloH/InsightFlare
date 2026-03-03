@@ -45,7 +45,11 @@ export default async function ManageUsersPage({ params }: ManageUsersPageProps) 
       managementSections={buildManagementSections(resolvedLocale, activeTeam.slug, messages)}
       activeManagementSectionKey="manage-users"
     >
-      <AdminUsersManagementClient locale={resolvedLocale} messages={messages} />
+      <AdminUsersManagementClient
+        locale={resolvedLocale}
+        messages={messages}
+        currentUserId={profile.user.id}
+      />
     </DashboardShell>
   );
 }

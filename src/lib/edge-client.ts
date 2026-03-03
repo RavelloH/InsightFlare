@@ -675,6 +675,20 @@ export async function updateAdminTeam(input: {
   return res.data;
 }
 
+export async function removeAdminTeam(input: {
+  teamId: string;
+}): Promise<{ teamId: string; removed: boolean }> {
+  const res = await fetchEdgeJson<{ ok: boolean; data: { teamId: string; removed: boolean } }>({
+    method: "PATCH",
+    path: "/api/private/admin/teams",
+    body: {
+      ...input,
+      intent: "remove",
+    },
+  });
+  return res.data;
+}
+
 export async function fetchAdminSites(teamId: string): Promise<SiteData[]> {
   const res = await fetchEdgeJson<{ ok: boolean; data: SiteData[] }>({
     path: "/api/private/admin/sites",
@@ -845,6 +859,20 @@ export async function updateAdminUser(input: {
     method: "PATCH",
     path: "/api/private/admin/users",
     body: input,
+  });
+  return res.data;
+}
+
+export async function removeAdminUser(input: {
+  userId: string;
+}): Promise<{ userId: string; removed: boolean }> {
+  const res = await fetchEdgeJson<{ ok: boolean; data: { userId: string; removed: boolean } }>({
+    method: "PATCH",
+    path: "/api/private/admin/users",
+    body: {
+      ...input,
+      intent: "remove",
+    },
   });
   return res.data;
 }

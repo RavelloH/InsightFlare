@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminUser, updateAdminUser } from "@/lib/edge-client";
+import { createAdminUser, removeAdminUser, updateAdminUser } from "@/lib/edge-client";
 import { safeRedirectPath, parseRequestBody, bodyStr } from "@/lib/form-helpers";
 
 function normalizeErrorMessage(error: unknown): string {
@@ -25,6 +25,20 @@ export async function POST(request: Request): Promise<NextResponse> {
   const intent = bodyStr(body, "intent") || "create";
 
   try {
+    if (intent === "remove" || intent === "delete") {
+      const userId = bodyStr(body, "userId");
+      if (!userId) {
+        if (isJson) return NextResponse.json({ ok: false, error: "missing_user_id" }, { status: 400 });
+        const url = new URL(returnTo, request.url);
+        url.searchParams.set("error", "missing_user_id");
+        return NextResponse.redirect(url, { status: 303 });
+      }
+
+      const result = await removeAdminUser({ userId });
+      if (isJson) return NextResponse.json({ ok: true, data: result });
+      return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
+    }
+
     if (intent === "update") {
       const userId = bodyStr(body, "userId");
       if (!userId) {

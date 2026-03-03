@@ -414,8 +414,26 @@ async function hUsers(req: Request, env: Env): Promise<Response> {
   }
   if (req.method === "PATCH") {
     const body = await parseJson(req);
+    const intent = clampString(String(body.intent || ""), 24).toLowerCase();
     const id = clampString(String(body.userId || ""), 120);
     if (!id) return bad("userId is required");
+
+    if (intent === "remove" || intent === "delete") {
+      if (id === a.user.id) return bad("Cannot delete current user");
+      const target = await byId(env, id);
+      if (!target) return nf("User not found");
+
+      const ownedTeams = await env.DB.prepare("SELECT COUNT(*) AS count FROM teams WHERE owner_user_id=?")
+        .bind(id)
+        .first<{ count: number | null }>();
+      if (Number(ownedTeams?.count ?? 0) > 0) {
+        return bad("Cannot delete user that owns teams");
+      }
+
+      await env.DB.prepare("DELETE FROM users WHERE id=?").bind(id).run();
+      return j({ ok: true, data: { userId: id, removed: true } });
+    }
+
     const e = await byId(env, id);
     if (!e) return nf("User not found");
     const username = normU(String(body.username ?? e.username));
@@ -505,9 +523,8 @@ async function hTeams(req: Request, env: Env): Promise<Response> {
   }
   if (req.method === "PATCH") {
     const body = await parseJson(req);
+    const intent = clampString(String(body.intent || ""), 24).toLowerCase();
     const teamId = clampString(String(body.teamId || ""), 120);
-    const nameInput = clampString(String(body.name || ""), 120);
-    const slugInput = clampString(String(body.slug || ""), 80);
     if (!teamId) return bad("teamId is required");
     if (!(await canManageTeam(env, a, teamId))) return forb("Only team owner can update team");
 
@@ -525,6 +542,33 @@ async function hTeams(req: Request, env: Env): Promise<Response> {
       }>();
     if (!existing) return nf("Team not found");
 
+    if (intent === "remove" || intent === "delete") {
+      const siteRows = await env.DB.prepare("SELECT id FROM sites WHERE team_id=?")
+        .bind(teamId)
+        .all<{ id: string }>();
+      const siteIds = siteRows.results.map((row) => row.id);
+
+      await env.DB.prepare("DELETE FROM pageviews WHERE team_id=?").bind(teamId).run();
+
+      if (siteIds.length > 0) {
+        const sitePlaceholders = siteIds.map(() => "?").join(",");
+        await env.DB.prepare(`DELETE FROM pageviews_archive_hourly WHERE site_id IN (${sitePlaceholders})`)
+          .bind(...siteIds)
+          .run();
+
+        const configKeys = siteIds.map((id) => `site:${id}`);
+        const cfgPlaceholders = configKeys.map(() => "?").join(",");
+        await env.DB.prepare(`DELETE FROM configs WHERE config_key IN (${cfgPlaceholders})`)
+          .bind(...configKeys)
+          .run();
+      }
+
+      await env.DB.prepare("DELETE FROM teams WHERE id=?").bind(teamId).run();
+      return j({ ok: true, data: { teamId, removed: true } });
+    }
+
+    const nameInput = clampString(String(body.name || ""), 120);
+    const slugInput = clampString(String(body.slug || ""), 80);
     const name = nameInput || existing.name;
     if (name.length < 2) return bad("Team name is required");
     const slug = slugInput.length > 0 ? await uniqueTeamSlug(env, slugInput, teamId) : await uniqueTeamSlug(env, name, teamId);

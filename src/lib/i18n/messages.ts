@@ -163,6 +163,8 @@ export interface AppMessages {
     toasts: {
       teamSaved: string;
       teamSaveFailed: string;
+      teamDeleted: string;
+      teamDeleteFailed: string;
       memberAdded: string;
       memberAddFailed: string;
       memberRemoved: string;
@@ -190,6 +192,9 @@ export interface AppMessages {
       slugLabel: string;
       save: string;
       saving: string;
+      delete: string;
+      deleting: string;
+      deleteConfirm: string;
     };
     members: {
       title: string;
@@ -228,6 +233,11 @@ export interface AppMessages {
     role: string;
     create: string;
     creating: string;
+    delete: string;
+    deleting: string;
+    deleteConfirm: string;
+    deleteSuccess: string;
+    deleteFailed: string;
     listTitle: string;
     listSubtitle: string;
     noData: string;
@@ -242,6 +252,7 @@ export interface AppMessages {
       role: string;
       teams: string;
       created: string;
+      action: string;
     };
   };
   adminSites: {
@@ -288,6 +299,7 @@ export interface AppMessages {
     createFailed: string;
     invalidInput: string;
     open: string;
+    settings: string;
     columns: {
       name: string;
       slug: string;

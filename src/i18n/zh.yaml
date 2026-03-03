@@ -139,6 +139,8 @@ teamManagement:
   toasts:
     teamSaved: 团队设置已保存。
     teamSaveFailed: 团队设置保存失败。
+    teamDeleted: 团队已删除。
+    teamDeleteFailed: 删除团队失败。
     memberAdded: 成员已添加。
     memberAddFailed: 添加成员失败。
     memberRemoved: 成员已移除。
@@ -163,6 +165,9 @@ teamManagement:
     slugLabel: 团队 Slug
     save: 保存设置
     saving: 保存中...
+    delete: 删除团队
+    deleting: 删除中...
+    deleteConfirm: 确认删除该团队及其所有数据吗？此操作不可撤销。
   members:
     title: 成员管理
     subtitle: 添加成员或移除成员。
@@ -196,6 +201,11 @@ adminUsers:
   role: 系统角色
   create: 创建用户
   creating: 创建中...
+  delete: 删除
+  deleting: 删除中...
+  deleteConfirm: 确认删除该用户账号吗？
+  deleteSuccess: 用户已删除。
+  deleteFailed: 删除用户失败。
   listTitle: 用户列表
   listSubtitle: 当前系统内所有用户。
   noData: 暂无用户数据。
@@ -210,6 +220,7 @@ adminUsers:
     role: 角色
     teams: 团队数
     created: 创建时间
+    action: 操作
 adminSites:
   title: 站点管理
   subtitle: 仅系统管理员可管理站点及其归属团队。
@@ -252,6 +263,7 @@ adminTeams:
   createFailed: 团队创建失败。
   invalidInput: 团队名称至少 2 个字符。
   open: 进入团队
+  settings: 设置
   columns:
     name: 名称
     slug: Slug

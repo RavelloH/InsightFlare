@@ -1,8 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { RiArrowRightLine, RiSettings3Line } from "@remixicon/react";
 import type { TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -13,12 +14,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { AutoTransition } from "@/components/ui/auto-transition";
+import { Clickable } from "@/components/ui/clickable";
 import {
   TableCell,
   TableHead,
   TableRow,
 } from "@/components/ui/table";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
+import { navigateWithTransition } from "@/lib/page-transition";
 
 interface AdminTeamsManagementClientProps {
   locale: Locale;
@@ -49,6 +52,7 @@ export function AdminTeamsManagementClient({
   locale,
   messages,
 }: AdminTeamsManagementClientProps) {
+  const router = useRouter();
   const t = messages.adminTeams;
   const [teams, setTeams] = useState<TeamData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -206,11 +210,31 @@ export function AdminTeamsManagementClient({
                 <TableCell className="text-right">{team.memberCount}</TableCell>
                 <TableCell>{shortDateTime(locale, team.createdAt)}</TableCell>
                 <TableCell className="text-right">
-                  <Button asChild size="xs" variant="outline">
-                    <Link href={`/${locale}/app/${team.slug}/settings`}>
-                      {t.open}
-                    </Link>
-                  </Button>
+                  <div className="inline-flex items-center justify-end gap-2">
+                    <Clickable
+                      onClick={() => {
+                        navigateWithTransition(router, `/${locale}/app/${team.slug}`);
+                      }}
+                      className="size-6 text-muted-foreground hover:text-foreground"
+                      aria-label={t.open}
+                      title={t.open}
+                    >
+                      <RiArrowRightLine className="size-4" />
+                    </Clickable>
+                    <Clickable
+                      onClick={() => {
+                        navigateWithTransition(
+                          router,
+                          `/${locale}/app/${team.slug}/settings`,
+                        );
+                      }}
+                      className="size-6 text-muted-foreground hover:text-foreground"
+                      aria-label={t.settings}
+                      title={t.settings}
+                    >
+                      <RiSettings3Line className="size-4" />
+                    </Clickable>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
