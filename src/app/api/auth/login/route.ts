@@ -2,6 +2,21 @@ import { NextResponse } from "next/server";
 import { SESSION_COOKIE, SESSION_DURATION_SECONDS } from "@/lib/constants";
 import { loginAdminAccount } from "@/lib/edge-client";
 import { createSessionToken } from "@/lib/session";
+import { isValidLocale } from "@/lib/i18n/config";
+
+function localeFromPath(pathname: string): string | null {
+  const segment = pathname.split("/")[1];
+  if (isValidLocale(segment)) {
+    return segment;
+  }
+  return null;
+}
+
+function loginPathFor(nextPath: string): string {
+  const locale = localeFromPath(nextPath);
+  if (!locale) return "/login";
+  return `/${locale}/login`;
+}
 
 export async function POST(request: Request): Promise<NextResponse> {
   const formData = await request.formData();
@@ -11,7 +26,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const nextPath = nextPathRaw.startsWith("/") ? nextPathRaw : "/app";
 
   if (username.length < 2 || password.length < 1) {
-    const url = new URL("/login", request.url);
+    const url = new URL(loginPathFor(nextPath), request.url);
     url.searchParams.set("error", "invalid_credentials");
     url.searchParams.set("next", nextPath);
     return NextResponse.redirect(url, { status: 303 });
@@ -42,7 +57,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
     return response;
   } catch {
-    const url = new URL("/login", request.url);
+    const url = new URL(loginPathFor(nextPath), request.url);
     url.searchParams.set("error", "invalid_credentials");
     url.searchParams.set("next", nextPath);
     return NextResponse.redirect(url, { status: 303 });

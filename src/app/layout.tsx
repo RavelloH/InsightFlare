@@ -1,12 +1,17 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { JetBrains_Mono } from "next/font/google";
+import { ThemeProvider } from "@/components/theme-provider";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
-const jetbrainsMono = JetBrains_Mono({subsets:['latin'],variable:'--font-sans'});
+const appMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+});
 
 export const metadata: Metadata = {
-  title: "InsightFlare API",
-  description: "InsightFlare backend service",
+  title: "InsightFlare",
+  description: "InsightFlare analytics dashboard",
 };
 
 export default function RootLayout({
@@ -14,5 +19,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return children;
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${appMono.variable} antialiased font-mono`}>
+        <ThemeProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </ThemeProvider>
+      </body>
+    </html>
+  );
 }

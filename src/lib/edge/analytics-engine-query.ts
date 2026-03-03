@@ -7,6 +7,13 @@ export interface AeRange {
   toMs: number;
 }
 
+export interface AeQueryFilters {
+  country?: string;
+  device?: string;
+  browser?: string;
+  eventType?: string;
+}
+
 export interface AeOverviewRow {
   views: number;
   sessions: number;
@@ -32,6 +39,12 @@ export interface AeTopPageRow {
 
 export interface AeReferrerRow {
   ref: string;
+  views: number;
+  sessions: number;
+}
+
+export interface AeDimensionRow {
+  key: string;
   views: number;
   sessions: number;
 }
@@ -228,10 +241,39 @@ function nonEmptyDistinctCountExpr(expr: string): string {
   )`;
 }
 
-function buildAeWhere(siteId: string, range: AeRange): string {
+function normalizeFilterValue(value: string | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().slice(0, 120);
+  if (!normalized) return null;
+  return normalized;
+}
+
+function buildAeWhere(siteId: string, range: AeRange, filters?: AeQueryFilters): string {
   const fromMs = toInt(range.fromMs);
   const toMs = toInt(range.toMs);
-  return `index1 = ${sqlString(siteId)} AND ${eventAtExpr()} BETWEEN ${fromMs} AND ${toMs}`;
+  const clauses = [`index1 = ${sqlString(siteId)}`, `${eventAtExpr()} BETWEEN ${fromMs} AND ${toMs}`];
+
+  const country = normalizeFilterValue(filters?.country);
+  if (country) {
+    clauses.push(`${countryExpr()} = ${sqlString(country)}`);
+  }
+
+  const device = normalizeFilterValue(filters?.device);
+  if (device) {
+    clauses.push(`${deviceExpr()} = ${sqlString(device)}`);
+  }
+
+  const browser = normalizeFilterValue(filters?.browser);
+  if (browser) {
+    clauses.push(`${browserExpr()} = ${sqlString(browser)}`);
+  }
+
+  const eventType = normalizeFilterValue(filters?.eventType);
+  if (eventType) {
+    clauses.push(`${eventTypeExpr()} = ${sqlString(eventType)}`);
+  }
+
+  return clauses.join(" AND ");
 }
 
 function ninetyDaysFloorMs(nowMs: number): number {
@@ -304,9 +346,10 @@ export async function queryAeOverview(
   env: Env,
   siteId: string,
   range: AeRange,
+  filters?: AeQueryFilters,
 ): Promise<AeOverviewRow> {
   const dataset = getAeDatasetName();
-  const where = buildAeWhere(siteId, range);
+  const where = buildAeWhere(siteId, range, filters);
   const sql = `
 SELECT
   sum(_sample_interval) AS views,
@@ -333,9 +376,10 @@ export async function queryAeTrend(
   siteId: string,
   range: AeRange,
   interval: "hour" | "day",
+  filters?: AeQueryFilters,
 ): Promise<AeTrendRow[]> {
   const dataset = getAeDatasetName();
-  const where = buildAeWhere(siteId, range);
+  const where = buildAeWhere(siteId, range, filters);
   const bucketDivisor = interval === "hour" ? 3600000 : 86400000;
   const sql = `
 SELECT
@@ -363,9 +407,10 @@ export async function queryAeTopPages(
   range: AeRange,
   limit: number,
   includeQueryHashDetails: boolean,
+  filters?: AeQueryFilters,
 ): Promise<AeTopPageRow[]> {
   const dataset = getAeDatasetName();
-  const where = buildAeWhere(siteId, range);
+  const where = buildAeWhere(siteId, range, filters);
   const n = clampLimit(limit, 30);
 
   const sql = includeQueryHashDetails
@@ -410,9 +455,10 @@ export async function queryAeReferrers(
   range: AeRange,
   limit: number,
   includeFullUrl: boolean,
+  filters?: AeQueryFilters,
 ): Promise<AeReferrerRow[]> {
   const dataset = getAeDatasetName();
-  const where = buildAeWhere(siteId, range);
+  const where = buildAeWhere(siteId, range, filters);
   const n = clampLimit(limit, 30);
   const refExpr = includeFullUrl ? refererExpr() : refererHostExpr();
   const sql = `
@@ -434,14 +480,85 @@ LIMIT ${n}
   }));
 }
 
+async function queryAeTopDimension(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  dimensionExpr: string,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  const dataset = getAeDatasetName();
+  const where = buildAeWhere(siteId, range, filters);
+  const n = clampLimit(limit, 30);
+  const sql = `
+SELECT
+  ${dimensionExpr} AS k,
+  sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions
+FROM ${dataset}
+WHERE ${where}
+GROUP BY k
+ORDER BY views DESC
+LIMIT ${n}
+`;
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => ({
+    key: parseString(row.k),
+    views: parseNumber(row.views),
+    sessions: parseNumber(row.sessions),
+  }));
+}
+
+export async function queryAeTopCountries(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, countryExpr(), filters);
+}
+
+export async function queryAeTopDevices(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, deviceExpr(), filters);
+}
+
+export async function queryAeTopBrowsers(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, browserExpr(), filters);
+}
+
+export async function queryAeTopEventTypes(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, eventTypeExpr(), filters);
+}
+
 export async function queryAeRecentEvents(
   env: Env,
   siteId: string,
   range: AeRange,
   limit: number,
+  filters?: AeQueryFilters,
 ): Promise<AeRecentEventRow[]> {
   const dataset = getAeDatasetName();
-  const where = buildAeWhere(siteId, range);
+  const where = buildAeWhere(siteId, range, filters);
   const n = clampLimit(limit, 100);
   const sql = `
 SELECT
@@ -498,9 +615,10 @@ export async function queryAeSessionDetails(
   siteId: string,
   range: AeRange,
   limit: number,
+  filters?: AeQueryFilters,
 ): Promise<AeSessionRow[]> {
   const dataset = getAeDatasetName();
-  const where = buildAeWhere(siteId, range);
+  const where = buildAeWhere(siteId, range, filters);
   const n = clampLimit(limit, 200);
   const sql = `
 SELECT
@@ -549,9 +667,10 @@ export async function queryAeVisitorDetails(
   siteId: string,
   range: AeRange,
   limit: number,
+  filters?: AeQueryFilters,
 ): Promise<AeVisitorRow[]> {
   const dataset = getAeDatasetName();
-  const where = buildAeWhere(siteId, range);
+  const where = buildAeWhere(siteId, range, filters);
   const n = clampLimit(limit, 200);
   const sql = `
 SELECT

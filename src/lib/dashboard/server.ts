@@ -1,0 +1,438 @@
+import "server-only";
+import { cache } from "react";
+import {
+  type QueryFilters,
+  fetchAdminMe,
+  fetchPrivateBrowsers,
+  fetchPrivateCountries,
+  fetchPrivateDevices,
+  fetchPrivateEventTypes,
+  fetchAdminSites,
+  fetchPrivateEvents,
+  fetchPrivateOverview,
+  fetchPrivatePages,
+  fetchPrivateReferrers,
+  fetchPrivateSessions,
+  fetchPrivateTrend,
+  fetchPrivateVisitors,
+  type DimensionData,
+  type EventsData,
+  type OverviewData,
+  type PagesData,
+  type ReferrersData,
+  type SessionsData,
+  type SiteData,
+  type TeamData,
+  type TrendData,
+  type VisitorsData,
+} from "@/lib/edge-client";
+import type { Locale } from "@/lib/i18n/config";
+
+export type RangePreset = "24h" | "7d" | "30d" | "90d";
+
+export interface TimeWindow {
+  preset: RangePreset;
+  from: number;
+  to: number;
+  interval: "hour" | "day";
+}
+
+export type DashboardFilters = QueryFilters;
+
+export interface FilterOptions {
+  countries: string[];
+  devices: string[];
+  browsers: string[];
+  eventTypes: string[];
+}
+
+export interface SiteWithSlug extends SiteData {
+  slug: string;
+}
+
+export interface DashboardContext {
+  user: {
+    id: string;
+    username: string;
+    name: string;
+    systemRole: "admin" | "user";
+  };
+  teams: TeamData[];
+  activeTeam: TeamData;
+  sites: SiteWithSlug[];
+  activeSite: SiteWithSlug;
+}
+
+const RANGE_PRESETS: readonly RangePreset[] = ["24h", "7d", "30d", "90d"] as const;
+
+function normalizeFilterValue(value: string | string[] | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().slice(0, 120);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+export function parseDashboardFilters(
+  searchParams: Record<string, string | string[] | undefined>,
+): DashboardFilters {
+  return {
+    country: normalizeFilterValue(searchParams.country),
+    device: normalizeFilterValue(searchParams.device),
+    browser: normalizeFilterValue(searchParams.browser),
+    eventType: normalizeFilterValue(searchParams.eventType),
+  };
+}
+
+function safeSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function getSiteSlug(site: SiteData): string {
+  const primary = String(site.publicSlug || "").trim();
+  const domain = String(site.domain || "").trim();
+  const name = String(site.name || "").trim();
+  const candidate = safeSlug(primary || domain || name);
+  if (candidate.length > 0) return candidate;
+  return site.id.slice(0, 8);
+}
+
+function withSiteSlug(site: SiteData): SiteWithSlug {
+  return {
+    ...site,
+    slug: getSiteSlug(site),
+  };
+}
+
+export function resolveRangePreset(value: string | string[] | undefined): RangePreset {
+  if (typeof value !== "string") return "7d";
+  if (RANGE_PRESETS.includes(value as RangePreset)) {
+    return value as RangePreset;
+  }
+  return "7d";
+}
+
+export function resolveTimeWindow(range: string | string[] | undefined, now = Date.now()): TimeWindow {
+  const preset = resolveRangePreset(range);
+  const to = now;
+
+  if (preset === "24h") {
+    return {
+      preset,
+      from: now - 24 * 60 * 60 * 1000,
+      to,
+      interval: "hour",
+    };
+  }
+
+  if (preset === "30d") {
+    return {
+      preset,
+      from: now - 30 * 24 * 60 * 60 * 1000,
+      to,
+      interval: "day",
+    };
+  }
+
+  if (preset === "90d") {
+    return {
+      preset,
+      from: now - 90 * 24 * 60 * 60 * 1000,
+      to,
+      interval: "day",
+    };
+  }
+
+  return {
+    preset: "7d",
+    from: now - 7 * 24 * 60 * 60 * 1000,
+    to,
+    interval: "day",
+  };
+}
+
+function findSiteBySlug(sites: SiteWithSlug[], siteSlug: string): SiteWithSlug | null {
+  const bySlug = sites.find((site) => site.slug === siteSlug);
+  if (bySlug) return bySlug;
+  const byId = sites.find((site) => site.id === siteSlug);
+  return byId ?? null;
+}
+
+const getMe = cache(async () => {
+  try {
+    return await fetchAdminMe();
+  } catch {
+    return null;
+  }
+});
+
+export const getDashboardProfile = cache(async () => {
+  return getMe();
+});
+
+const getSitesForTeam = cache(async (teamId: string): Promise<SiteWithSlug[]> => {
+  try {
+    const sites = await fetchAdminSites(teamId);
+    return sites.map(withSiteSlug);
+  } catch {
+    return [];
+  }
+});
+
+export const getTeamSiteContext = cache(async (teamSlug: string, siteSlug: string): Promise<DashboardContext | null> => {
+  const me = await getMe();
+  if (!me) return null;
+
+  const activeTeam = me.teams.find((team) => team.slug === teamSlug);
+  if (!activeTeam) return null;
+
+  const sites = await getSitesForTeam(activeTeam.id);
+  const activeSite = findSiteBySlug(sites, siteSlug);
+  if (!activeSite) return null;
+
+  return {
+    user: me.user,
+    teams: me.teams,
+    activeTeam,
+    sites,
+    activeSite,
+  };
+});
+
+export const getDefaultTeamSite = cache(async (): Promise<{ teamSlug: string; siteSlug: string } | null> => {
+  const me = await getMe();
+  if (!me || me.teams.length === 0) return null;
+
+  const firstTeam = me.teams[0];
+  const sites = await getSitesForTeam(firstTeam.id);
+  if (sites.length === 0) {
+    return null;
+  }
+
+  return {
+    teamSlug: firstTeam.slug,
+    siteSlug: sites[0].slug,
+  };
+});
+
+export const getTeamDefaultSite = cache(async (teamSlug: string): Promise<{ teamSlug: string; siteSlug: string } | null> => {
+  const me = await getMe();
+  if (!me) return null;
+
+  const activeTeam = me.teams.find((team) => team.slug === teamSlug);
+  if (!activeTeam) return null;
+
+  const sites = await getSitesForTeam(activeTeam.id);
+  if (sites.length === 0) return null;
+
+  return {
+    teamSlug: activeTeam.slug,
+    siteSlug: sites[0].slug,
+  };
+});
+
+export function buildSitePath(
+  locale: Locale,
+  teamSlug: string,
+  siteSlug: string,
+  section?: "pages" | "referrers" | "sessions" | "events" | "visitors" | "geo" | "devices" | "browsers",
+): string {
+  const base = `/${locale}/app/${teamSlug}/${siteSlug}`;
+  if (!section) return base;
+  return `${base}/${section}`;
+}
+
+export function withRange(pathname: string, range: RangePreset): string {
+  return `${pathname}?range=${range}`;
+}
+
+function applyFiltersToParams(params: URLSearchParams, filters?: DashboardFilters): URLSearchParams {
+  if (!filters) return params;
+  if (filters.country) params.set("country", filters.country);
+  if (filters.device) params.set("device", filters.device);
+  if (filters.browser) params.set("browser", filters.browser);
+  if (filters.eventType) params.set("eventType", filters.eventType);
+  return params;
+}
+
+export function withRangeAndFilters(
+  pathname: string,
+  range: RangePreset,
+  filters?: DashboardFilters,
+): string {
+  const params = applyFiltersToParams(new URLSearchParams(), filters);
+  params.set("range", range);
+  return `${pathname}?${params.toString()}`;
+}
+
+function emptyOverview(): OverviewData {
+  return {
+    ok: true,
+    data: {
+      views: 0,
+      sessions: 0,
+      visitors: 0,
+      bounces: 0,
+      totalDurationMs: 0,
+      avgDurationMs: 0,
+      bounceRate: 0,
+      approximateVisitors: false,
+    },
+  };
+}
+
+function emptyTrend(interval: "hour" | "day"): TrendData {
+  return {
+    ok: true,
+    interval,
+    data: [],
+  };
+}
+
+function emptyPages(): PagesData {
+  return { ok: true, data: [] };
+}
+
+function emptyReferrers(): ReferrersData {
+  return { ok: true, data: [] };
+}
+
+function emptySessions(): SessionsData {
+  return { ok: true, data: [] };
+}
+
+function emptyEvents(): EventsData {
+  return { ok: true, data: [] };
+}
+
+function emptyVisitors(): VisitorsData {
+  return { ok: true, data: [] };
+}
+
+function emptyDimension(): DimensionData {
+  return { ok: true, data: [] };
+}
+
+export async function loadOverviewBundle(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+): Promise<{
+  overview: OverviewData;
+  previousOverview: OverviewData;
+  trend: TrendData;
+  pages: PagesData;
+  referrers: ReferrersData;
+  sessions: SessionsData;
+  events: EventsData;
+  countries: DimensionData;
+  devices: DimensionData;
+  browsers: DimensionData;
+  eventTypes: DimensionData;
+}> {
+  const previousTo = Math.max(window.from - 1, 0);
+  const previousFrom = Math.max(previousTo - (window.to - window.from), 0);
+
+  const [
+    overview,
+    previousOverview,
+    trend,
+    pages,
+    referrers,
+    sessions,
+    events,
+    countries,
+    devices,
+    browsers,
+    eventTypes,
+  ] = await Promise.all([
+    fetchPrivateOverview({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyOverview()),
+    fetchPrivateOverview({ siteId, from: previousFrom, to: previousTo, filters }).catch(() => emptyOverview()),
+    fetchPrivateTrend({
+      siteId,
+      from: window.from,
+      to: window.to,
+      interval: window.interval,
+      filters,
+    }).catch(() => emptyTrend(window.interval)),
+    fetchPrivatePages({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyPages()),
+    fetchPrivateReferrers({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyReferrers()),
+    fetchPrivateSessions({ siteId, from: window.from, to: window.to, filters }).catch(() => emptySessions()),
+    fetchPrivateEvents({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyEvents()),
+    fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
+    fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
+    fetchPrivateBrowsers({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
+    fetchPrivateEventTypes({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
+  ]);
+
+  return {
+    overview,
+    previousOverview,
+    trend,
+    pages,
+    referrers,
+    sessions,
+    events,
+    countries,
+    devices,
+    browsers,
+    eventTypes,
+  };
+}
+
+export async function loadPages(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<PagesData> {
+  return fetchPrivatePages({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyPages());
+}
+
+export async function loadReferrers(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<ReferrersData> {
+  return fetchPrivateReferrers({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyReferrers());
+}
+
+export async function loadSessions(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<SessionsData> {
+  return fetchPrivateSessions({ siteId, from: window.from, to: window.to, filters }).catch(() => emptySessions());
+}
+
+export async function loadEvents(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<EventsData> {
+  return fetchPrivateEvents({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyEvents());
+}
+
+export async function loadVisitors(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<VisitorsData> {
+  return fetchPrivateVisitors({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyVisitors());
+}
+
+export async function loadCountries(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
+  return fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyDimension());
+}
+
+export async function loadDevices(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
+  return fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyDimension());
+}
+
+export async function loadBrowsers(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
+  return fetchPrivateBrowsers({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyDimension());
+}
+
+export async function loadEventTypes(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
+  return fetchPrivateEventTypes({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyDimension());
+}
+
+export async function loadFilterOptions(siteId: string, window: TimeWindow): Promise<FilterOptions> {
+  const [countries, devices, browsers, eventTypes] = await Promise.all([
+    fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
+    fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
+    fetchPrivateBrowsers({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
+    fetchPrivateEventTypes({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
+  ]);
+
+  const uniq = (values: string[]) =>
+    Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))).sort();
+
+  return {
+    countries: uniq(countries.data.map((item) => item.value)),
+    devices: uniq(devices.data.map((item) => item.value)),
+    browsers: uniq(browsers.data.map((item) => item.value)),
+    eventTypes: uniq(eventTypes.data.map((item) => item.value)),
+  };
+}

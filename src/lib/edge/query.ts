@@ -2,10 +2,15 @@ import type { Env } from "./types";
 import { ONE_DAY_MS, ONE_HOUR_MS, coerceNumber } from "./utils";
 import { requireSession } from "./session-auth";
 import {
+  type AeDimensionRow,
   queryAeOverview,
   queryAeRecentEvents,
   queryAeReferrers,
   queryAeSessionDetails,
+  queryAeTopBrowsers,
+  queryAeTopCountries,
+  queryAeTopDevices,
+  queryAeTopEventTypes,
   queryAeTopPages,
   queryAeTrend,
   queryAeVisitorDetails,
@@ -41,6 +46,13 @@ interface PublicSiteRow {
 
 interface JsonObject {
   [key: string]: unknown;
+}
+
+interface DashboardFilters {
+  country?: string;
+  device?: string;
+  browser?: string;
+  eventType?: string;
 }
 
 function jsonResponse(payload: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
@@ -128,6 +140,60 @@ function parseInterval(url: URL): "hour" | "day" {
   return raw === "day" ? "day" : "hour";
 }
 
+function normalizeFilterValue(value: string | null): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().slice(0, 120);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function parseFilters(url: URL): DashboardFilters {
+  return {
+    country: normalizeFilterValue(url.searchParams.get("country")),
+    device: normalizeFilterValue(url.searchParams.get("device")),
+    browser: normalizeFilterValue(url.searchParams.get("browser")),
+    eventType: normalizeFilterValue(url.searchParams.get("eventType")),
+  };
+}
+
+function hasActiveFilters(filters: DashboardFilters): boolean {
+  return Boolean(filters.country || filters.device || filters.browser || filters.eventType);
+}
+
+function buildD1FilterSql(
+  filters: DashboardFilters,
+  alias?: string,
+): { clause: string; bindings: string[] } {
+  const prefix = alias ? `${alias}.` : "";
+  const clauses: string[] = [];
+  const bindings: string[] = [];
+
+  if (filters.country) {
+    clauses.push(`${prefix}country = ?`);
+    bindings.push(filters.country);
+  }
+  if (filters.device) {
+    clauses.push(`${prefix}device_type = ?`);
+    bindings.push(filters.device);
+  }
+  if (filters.browser) {
+    clauses.push(`${prefix}browser = ?`);
+    bindings.push(filters.browser);
+  }
+  if (filters.eventType) {
+    clauses.push(`${prefix}event_type = ?`);
+    bindings.push(filters.eventType);
+  }
+
+  if (clauses.length === 0) {
+    return { clause: "", bindings: [] };
+  }
+
+  return {
+    clause: ` AND ${clauses.join(" AND ")}`,
+    bindings,
+  };
+}
+
 async function resolvePublicSiteBySlug(env: Env, slug: string): Promise<PublicSiteRow | null> {
   const row = await env.DB.prepare(
     `
@@ -166,7 +232,12 @@ async function assertSiteMembership(
   return Boolean(row?.ok);
 }
 
-async function queryOverview(env: Env, siteId: string, window: QueryWindow): Promise<{
+async function queryOverview(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+): Promise<{
   views: number;
   sessions: number;
   visitors: number;
@@ -182,12 +253,14 @@ async function queryOverview(env: Env, siteId: string, window: QueryWindow): Pro
   let bounces = 0;
   let totalDurationMs = 0;
   let approximateVisitors = false;
+  const includeArchive = window.hasArchive && !hasActiveFilters(filters);
+  const d1FilterSql = buildD1FilterSql(filters);
 
   if (window.hasAnalytics) {
     const ae = await queryAeOverview(env, siteId, {
       fromMs: window.analyticsFromMs,
       toMs: window.analyticsToMs,
-    });
+    }, filters);
     views += ae.views ?? 0;
     sessions += ae.sessions ?? 0;
     visitors += ae.visitors ?? 0;
@@ -205,10 +278,10 @@ async function queryOverview(env: Env, siteId: string, window: QueryWindow): Pro
           SUM(CASE WHEN COALESCE(duration_ms, 0) <= 0 THEN 1 ELSE 0 END) AS bounces,
           SUM(COALESCE(duration_ms, 0)) AS total_duration
         FROM pageviews
-        WHERE site_id = ? AND event_at BETWEEN ? AND ?
+        WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
       `,
     )
-      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs)
+      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings)
       .first<{
         views: number | null;
         sessions: number | null;
@@ -224,7 +297,7 @@ async function queryOverview(env: Env, siteId: string, window: QueryWindow): Pro
     totalDurationMs += detailed?.total_duration ?? 0;
   }
 
-  if (window.hasArchive) {
+  if (includeArchive) {
     const archived = await env.DB.prepare(
       `
         SELECT
@@ -300,6 +373,7 @@ async function queryTrend(
   siteId: string,
   window: QueryWindow,
   interval: "hour" | "day",
+  filters: DashboardFilters,
 ): Promise<Array<{
   bucket: number;
   timestampMs: number;
@@ -310,6 +384,8 @@ async function queryTrend(
 }>> {
   const bucketDivisor = interval === "hour" ? 1 : 24;
   const bucketMs = interval === "hour" ? ONE_HOUR_MS : ONE_DAY_MS;
+  const includeArchive = window.hasArchive && !hasActiveFilters(filters);
+  const d1FilterSql = buildD1FilterSql(filters);
   const buckets = new Map<
     number,
     { views: number; sessions: number; totalDurationMs: number; detail: boolean; archive: boolean }
@@ -324,6 +400,7 @@ async function queryTrend(
         toMs: window.analyticsToMs,
       },
       interval,
+      filters,
     );
     for (const row of aeRows) {
       const entry = buckets.get(row.bucket) ?? {
@@ -351,7 +428,7 @@ async function queryTrend(
             COUNT(DISTINCT session_id) AS sessions,
             SUM(COALESCE(duration_ms, 0)) AS total_duration
           FROM pageviews
-          WHERE site_id = ? AND event_at BETWEEN ? AND ?
+          WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
           GROUP BY bucket
           ORDER BY bucket
         `
@@ -362,13 +439,13 @@ async function queryTrend(
             COUNT(DISTINCT session_id) AS sessions,
             SUM(COALESCE(duration_ms, 0)) AS total_duration
           FROM pageviews
-          WHERE site_id = ? AND event_at BETWEEN ? AND ?
+          WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
           GROUP BY bucket
           ORDER BY bucket
         `;
 
     const detailRows = await env.DB.prepare(detailSql)
-      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs)
+      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings)
       .all<{ bucket: number; views: number; sessions: number; total_duration: number }>();
 
     for (const row of detailRows.results) {
@@ -387,7 +464,7 @@ async function queryTrend(
     }
   }
 
-  if (window.hasArchive) {
+  if (includeArchive) {
     const archiveSql = `
       SELECT
         CAST(hour_bucket / ? AS INTEGER) AS bucket,
@@ -447,14 +524,124 @@ function mergeStatObject(target: Record<string, number>, jsonText: string | null
   }
 }
 
+type DimensionKey = "country" | "device_type" | "browser" | "event_type";
+type ArchiveDimensionKey = "country_stats_json" | "device_stats_json" | "browser_stats_json" | null;
+type AeDimensionQueryFn = (
+  env: Env,
+  siteId: string,
+  range: { fromMs: number; toMs: number },
+  limit: number,
+  filters?: DashboardFilters,
+) => Promise<AeDimensionRow[]>;
+
+async function queryDimensionStats(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  limit: number,
+  filters: DashboardFilters,
+  options: {
+    d1DimensionKey: DimensionKey;
+    archiveDimensionKey: ArchiveDimensionKey;
+    aeQuery: AeDimensionQueryFn;
+  },
+): Promise<Array<{ value: string; views: number; sessions: number }>> {
+  const map = new Map<string, { value: string; views: number; sessions: number }>();
+  const d1FilterSql = buildD1FilterSql(filters);
+  const includeArchive = window.hasArchive && !hasActiveFilters(filters);
+
+  if (window.hasAnalytics) {
+    const aeRows = await options.aeQuery(
+      env,
+      siteId,
+      {
+        fromMs: window.analyticsFromMs,
+        toMs: window.analyticsToMs,
+      },
+      limit,
+      filters,
+    );
+    for (const row of aeRows) {
+      const value = row.key || "";
+      const prev = map.get(value);
+      map.set(value, {
+        value,
+        views: (prev?.views ?? 0) + (row.views ?? 0),
+        sessions: (prev?.sessions ?? 0) + (row.sessions ?? 0),
+      });
+    }
+  }
+
+  if (window.hasD1Detail) {
+    const sql = `
+      SELECT
+        COALESCE(${options.d1DimensionKey}, '') AS k,
+        COUNT(*) AS views,
+        COUNT(DISTINCT session_id) AS sessions
+      FROM pageviews
+      WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
+      GROUP BY k
+      ORDER BY views DESC
+      LIMIT ?
+    `;
+
+    const rows = await env.DB.prepare(sql)
+      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
+      .all<{ k: string; views: number; sessions: number }>();
+
+    for (const row of rows.results) {
+      const value = row.k || "";
+      const prev = map.get(value);
+      map.set(value, {
+        value,
+        views: (prev?.views ?? 0) + (row.views ?? 0),
+        sessions: (prev?.sessions ?? 0) + (row.sessions ?? 0),
+      });
+    }
+  }
+
+  if (includeArchive && options.archiveDimensionKey) {
+    const archiveRows = await env.DB.prepare(
+      `
+        SELECT ${options.archiveDimensionKey} AS stats_json
+        FROM pageviews_archive_hourly
+        WHERE site_id = ? AND hour_bucket BETWEEN ? AND ?
+      `,
+    )
+      .bind(siteId, window.archiveFromHour, window.archiveToHour)
+      .all<{ stats_json: string | null }>();
+
+    const counts: Record<string, number> = {};
+    for (const row of archiveRows.results) {
+      mergeStatObject(counts, row.stats_json);
+    }
+
+    for (const [value, views] of Object.entries(counts)) {
+      const prev = map.get(value);
+      map.set(value, {
+        value,
+        views: (prev?.views ?? 0) + views,
+        sessions: prev?.sessions ?? 0,
+      });
+    }
+  }
+
+  return Array.from(map.values())
+    .sort((a, b) => b.views - a.views)
+    .slice(0, limit);
+}
+
 async function queryTopPages(
   env: Env,
   siteId: string,
   window: QueryWindow,
   limit: number,
   includeQueryHashDetails: boolean,
+  filters: DashboardFilters,
 ): Promise<Array<{ pathname: string; query?: string; hash?: string; views: number; sessions: number }>> {
   const pageMap = new Map<string, { pathname: string; query?: string; hash?: string; views: number; sessions: number }>();
+  const d1FilterSql = buildD1FilterSql(filters);
+  const includeArchive = window.hasArchive && !hasActiveFilters(filters);
 
   if (window.hasAnalytics) {
     const aeRows = await queryAeTopPages(
@@ -466,6 +653,7 @@ async function queryTopPages(
       },
       limit,
       includeQueryHashDetails,
+      filters,
     );
     for (const row of aeRows) {
       const query = row.query_string || "";
@@ -492,7 +680,7 @@ async function queryTopPages(
           COUNT(*) AS views,
           COUNT(DISTINCT session_id) AS sessions
         FROM pageviews
-        WHERE site_id = ? AND event_at BETWEEN ? AND ?
+        WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
         GROUP BY pathname, query_string, hash_fragment
         ORDER BY views DESC
         LIMIT ?
@@ -503,7 +691,7 @@ async function queryTopPages(
           COUNT(*) AS views,
           COUNT(DISTINCT session_id) AS sessions
         FROM pageviews
-        WHERE site_id = ? AND event_at BETWEEN ? AND ?
+        WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
         GROUP BY pathname
         ORDER BY views DESC
         LIMIT ?
@@ -511,7 +699,7 @@ async function queryTopPages(
 
     if (includeQueryHashDetails) {
       const rows = await env.DB.prepare(sql)
-        .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, limit)
+        .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
         .all<{ pathname: string; query_string: string; hash_fragment: string; views: number; sessions: number }>();
 
       for (const row of rows.results) {
@@ -527,7 +715,7 @@ async function queryTopPages(
       }
     } else {
       const rows = await env.DB.prepare(sql)
-        .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, limit)
+        .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
         .all<{ pathname: string; views: number; sessions: number }>();
 
       for (const row of rows.results) {
@@ -542,7 +730,7 @@ async function queryTopPages(
     }
   }
 
-  if (window.hasArchive) {
+  if (includeArchive) {
     const archiveRows = await env.DB.prepare(
       `
         SELECT path_stats_json
@@ -582,9 +770,12 @@ async function queryReferrers(
   window: QueryWindow,
   limit: number,
   includeFullUrl: boolean,
+  filters: DashboardFilters,
 ): Promise<Array<{ referrer: string; views: number; sessions: number }>> {
   const keyField = includeFullUrl ? "referer" : "referer_host";
   const map = new Map<string, { referrer: string; views: number; sessions: number }>();
+  const d1FilterSql = buildD1FilterSql(filters);
+  const includeArchive = window.hasArchive && !hasActiveFilters(filters);
 
   if (window.hasAnalytics) {
     const aeRows = await queryAeReferrers(
@@ -596,6 +787,7 @@ async function queryReferrers(
       },
       limit,
       includeFullUrl,
+      filters,
     );
     for (const row of aeRows) {
       const referrer = row.ref || "";
@@ -615,13 +807,13 @@ async function queryReferrers(
         COUNT(*) AS views,
         COUNT(DISTINCT session_id) AS sessions
       FROM pageviews
-      WHERE site_id = ? AND event_at BETWEEN ? AND ?
+      WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
       GROUP BY ref
       ORDER BY views DESC
       LIMIT ?
     `;
     const rows = await env.DB.prepare(sql)
-      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, limit)
+      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
       .all<{ ref: string; views: number; sessions: number }>();
 
     for (const row of rows.results) {
@@ -634,7 +826,7 @@ async function queryReferrers(
     }
   }
 
-  if (window.hasArchive) {
+  if (includeArchive) {
     const rows = await env.DB.prepare(
       `
         SELECT referer_stats_json
@@ -664,11 +856,18 @@ async function queryReferrers(
     .slice(0, limit);
 }
 
-async function queryRecentEvents(env: Env, siteId: string, window: QueryWindow, limit: number): Promise<unknown[]> {
+async function queryRecentEvents(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  limit: number,
+  filters: DashboardFilters,
+): Promise<unknown[]> {
   if (!window.hasD1Detail && !window.hasAnalytics) {
     return [];
   }
   const merged: Record<string, unknown>[] = [];
+  const d1FilterSql = buildD1FilterSql(filters);
 
   if (window.hasAnalytics) {
     const aeRows = await queryAeRecentEvents(
@@ -679,6 +878,7 @@ async function queryRecentEvents(env: Env, siteId: string, window: QueryWindow, 
         toMs: window.analyticsToMs,
       },
       limit,
+      filters,
     );
     for (const row of aeRows) {
       const eventAt = row.event_at ?? 0;
@@ -735,12 +935,12 @@ async function queryRecentEvents(env: Env, siteId: string, window: QueryWindow, 
           language,
           timezone
         FROM pageviews
-        WHERE site_id = ? AND event_at BETWEEN ? AND ?
+        WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
         ORDER BY event_at DESC
         LIMIT ?
       `,
     )
-      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, limit)
+      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
       .all<Record<string, unknown>>();
     merged.push(...rows.results);
   }
@@ -755,6 +955,7 @@ async function querySessionDetails(
   siteId: string,
   window: QueryWindow,
   limit: number,
+  filters: DashboardFilters,
 ): Promise<
   Array<{
     sessionId: string;
@@ -771,6 +972,7 @@ async function querySessionDetails(
   if (!window.hasD1Detail && !window.hasAnalytics) {
     return [];
   }
+  const d1FilterSql = buildD1FilterSql(filters);
 
   const merged = new Map<
     string,
@@ -796,6 +998,7 @@ async function querySessionDetails(
         toMs: window.analyticsToMs,
       },
       limit,
+      filters,
     );
     for (const row of aeRows) {
       const key = row.session_id || "";
@@ -817,6 +1020,11 @@ async function querySessionDetails(
   if (window.hasD1Detail) {
     const rows = await env.DB.prepare(
       `
+        WITH filtered AS (
+          SELECT *
+          FROM pageviews
+          WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
+        )
         SELECT
           p.session_id AS session_id,
           MIN(p.visitor_id) AS visitor_id,
@@ -827,26 +1035,25 @@ async function querySessionDetails(
           COUNT(DISTINCT p.country) AS countries,
           (
             SELECT p2.pathname
-            FROM pageviews p2
-            WHERE p2.site_id = p.site_id AND p2.session_id = p.session_id
+            FROM filtered p2
+            WHERE p2.session_id = p.session_id
             ORDER BY p2.event_at ASC
             LIMIT 1
           ) AS entry_path,
           (
             SELECT p3.pathname
-            FROM pageviews p3
-            WHERE p3.site_id = p.site_id AND p3.session_id = p.session_id
+            FROM filtered p3
+            WHERE p3.session_id = p.session_id
             ORDER BY p3.event_at DESC
             LIMIT 1
           ) AS exit_path
-        FROM pageviews p
-        WHERE p.site_id = ? AND p.event_at BETWEEN ? AND ?
+        FROM filtered p
         GROUP BY p.session_id
         ORDER BY started_at DESC
         LIMIT ?
       `,
     )
-      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, limit)
+      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
       .all<{
         session_id: string;
         visitor_id: string;
@@ -900,6 +1107,7 @@ async function queryVisitorDetails(
   siteId: string,
   window: QueryWindow,
   limit: number,
+  filters: DashboardFilters,
 ): Promise<
   Array<{
     visitorId: string;
@@ -914,6 +1122,7 @@ async function queryVisitorDetails(
   if (!window.hasD1Detail && !window.hasAnalytics) {
     return [];
   }
+  const d1FilterSql = buildD1FilterSql(filters);
 
   const merged = new Map<
     string,
@@ -937,6 +1146,7 @@ async function queryVisitorDetails(
         toMs: window.analyticsToMs,
       },
       limit,
+      filters,
     );
     for (const row of aeRows) {
       const key = row.visitor_id || "";
@@ -956,6 +1166,11 @@ async function queryVisitorDetails(
   if (window.hasD1Detail) {
     const rows = await env.DB.prepare(
       `
+        WITH filtered AS (
+          SELECT *
+          FROM pageviews
+          WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
+        )
         SELECT
           p.visitor_id AS visitor_id,
           MIN(p.event_at) AS first_seen_at,
@@ -965,19 +1180,18 @@ async function queryVisitorDetails(
           COUNT(DISTINCT p.country) AS countries,
           (
             SELECT p2.pathname
-            FROM pageviews p2
-            WHERE p2.site_id = p.site_id AND p2.visitor_id = p.visitor_id
+            FROM filtered p2
+            WHERE p2.visitor_id = p.visitor_id
             ORDER BY p2.event_at DESC
             LIMIT 1
           ) AS latest_path
-        FROM pageviews p
-        WHERE p.site_id = ? AND p.event_at BETWEEN ? AND ?
+        FROM filtered p
         GROUP BY p.visitor_id
         ORDER BY last_seen_at DESC
         LIMIT ?
       `,
     )
-      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, limit)
+      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
       .all<{
         visitor_id: string;
         first_seen_at: number;
@@ -1058,11 +1272,12 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
       500,
     );
   }
+  const filters = parseFilters(url);
 
   const pathname = url.pathname;
 
   if (pathname === "/api/private/overview") {
-    const overview = await queryOverview(env, siteId, window);
+    const overview = await queryOverview(env, siteId, window, filters);
     return jsonResponse({
       ok: true,
       siteId,
@@ -1074,7 +1289,7 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
 
   if (pathname === "/api/private/trend") {
     const interval = parseInterval(url);
-    const data = await queryTrend(env, siteId, window, interval);
+    const data = await queryTrend(env, siteId, window, interval, filters);
     return jsonResponse({
       ok: true,
       siteId,
@@ -1088,7 +1303,7 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
   if (pathname === "/api/private/pages") {
     const limit = parseLimit(url, 30, 200);
     const includeDetails = (url.searchParams.get("details") || "1") !== "0";
-    const data = await queryTopPages(env, siteId, window, limit, includeDetails);
+    const data = await queryTopPages(env, siteId, window, limit, includeDetails, filters);
     return jsonResponse({
       ok: true,
       siteId,
@@ -1101,7 +1316,7 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
   if (pathname === "/api/private/referrers") {
     const limit = parseLimit(url, 30, 200);
     const includeFullUrl = (url.searchParams.get("fullUrl") || "1") !== "0";
-    const data = await queryReferrers(env, siteId, window, limit, includeFullUrl);
+    const data = await queryReferrers(env, siteId, window, limit, includeFullUrl, filters);
     return jsonResponse({
       ok: true,
       siteId,
@@ -1113,7 +1328,7 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
 
   if (pathname === "/api/private/events") {
     const limit = parseLimit(url, 50, 500);
-    const data = await queryRecentEvents(env, siteId, window, limit);
+    const data = await queryRecentEvents(env, siteId, window, limit, filters);
     return jsonResponse({
       ok: true,
       siteId,
@@ -1125,7 +1340,7 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
 
   if (pathname === "/api/private/sessions") {
     const limit = parseLimit(url, 50, 500);
-    const data = await querySessionDetails(env, siteId, window, limit);
+    const data = await querySessionDetails(env, siteId, window, limit, filters);
     return jsonResponse({
       ok: true,
       siteId,
@@ -1137,7 +1352,71 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
 
   if (pathname === "/api/private/visitors") {
     const limit = parseLimit(url, 50, 500);
-    const data = await queryVisitorDetails(env, siteId, window, limit);
+    const data = await queryVisitorDetails(env, siteId, window, limit, filters);
+    return jsonResponse({
+      ok: true,
+      siteId,
+      fromMs: window.fromMs,
+      toMs: window.toMs,
+      data,
+    });
+  }
+
+  if (pathname === "/api/private/countries") {
+    const limit = parseLimit(url, 20, 200);
+    const data = await queryDimensionStats(env, siteId, window, limit, filters, {
+      d1DimensionKey: "country",
+      archiveDimensionKey: "country_stats_json",
+      aeQuery: queryAeTopCountries,
+    });
+    return jsonResponse({
+      ok: true,
+      siteId,
+      fromMs: window.fromMs,
+      toMs: window.toMs,
+      data,
+    });
+  }
+
+  if (pathname === "/api/private/devices") {
+    const limit = parseLimit(url, 20, 200);
+    const data = await queryDimensionStats(env, siteId, window, limit, filters, {
+      d1DimensionKey: "device_type",
+      archiveDimensionKey: "device_stats_json",
+      aeQuery: queryAeTopDevices,
+    });
+    return jsonResponse({
+      ok: true,
+      siteId,
+      fromMs: window.fromMs,
+      toMs: window.toMs,
+      data,
+    });
+  }
+
+  if (pathname === "/api/private/browsers") {
+    const limit = parseLimit(url, 20, 200);
+    const data = await queryDimensionStats(env, siteId, window, limit, filters, {
+      d1DimensionKey: "browser",
+      archiveDimensionKey: "browser_stats_json",
+      aeQuery: queryAeTopBrowsers,
+    });
+    return jsonResponse({
+      ok: true,
+      siteId,
+      fromMs: window.fromMs,
+      toMs: window.toMs,
+      data,
+    });
+  }
+
+  if (pathname === "/api/private/event-types") {
+    const limit = parseLimit(url, 20, 200);
+    const data = await queryDimensionStats(env, siteId, window, limit, filters, {
+      d1DimensionKey: "event_type",
+      archiveDimensionKey: null,
+      aeQuery: queryAeTopEventTypes,
+    });
     return jsonResponse({
       ok: true,
       siteId,
@@ -1192,7 +1471,7 @@ export async function handlePublicQuery(request: Request, env: Env, url: URL): P
   };
 
   if (resource === "overview") {
-    const overview = await queryOverview(env, site.id, window);
+    const overview = await queryOverview(env, site.id, window, {});
     return jsonResponse(
       {
         ok: true,
@@ -1217,7 +1496,7 @@ export async function handlePublicQuery(request: Request, env: Env, url: URL): P
 
   if (resource === "trend") {
     const interval = parseInterval(url);
-    const data = await queryTrend(env, site.id, window, interval);
+    const data = await queryTrend(env, site.id, window, interval, {});
     return jsonResponse(
       {
         ok: true,
@@ -1238,7 +1517,7 @@ export async function handlePublicQuery(request: Request, env: Env, url: URL): P
 
   if (resource === "pages") {
     const limit = parseLimit(url, 30, 200);
-    const data = await queryTopPages(env, site.id, window, limit, false);
+    const data = await queryTopPages(env, site.id, window, limit, false, {});
     return jsonResponse(
       {
         ok: true,
@@ -1258,7 +1537,7 @@ export async function handlePublicQuery(request: Request, env: Env, url: URL): P
 
   if (resource === "referrers") {
     const limit = parseLimit(url, 30, 200);
-    const data = await queryReferrers(env, site.id, window, limit, false);
+    const data = await queryReferrers(env, site.id, window, limit, false, {});
     return jsonResponse(
       {
         ok: true,

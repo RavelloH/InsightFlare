@@ -11,6 +11,13 @@ interface FetchEdgeOptions {
   isPublic?: boolean;
 }
 
+export interface QueryFilters {
+  country?: string;
+  device?: string;
+  browser?: string;
+  eventType?: string;
+}
+
 async function edgeBaseUrl(): Promise<string> {
   const configured = (process.env.INSIGHTFLARE_EDGE_URL || "").trim();
   if (configured.length > 0) {
@@ -40,6 +47,19 @@ function withQuery(url: URL, params?: Record<string, string | number>): URL {
     url.searchParams.set(key, String(value));
   }
   return url;
+}
+
+function withFilters(
+  params: Record<string, string | number>,
+  filters?: QueryFilters,
+): Record<string, string | number> {
+  const next = { ...params };
+  if (!filters) return next;
+  if (filters.country) next.country = filters.country;
+  if (filters.device) next.device = filters.device;
+  if (filters.browser) next.browser = filters.browser;
+  if (filters.eventType) next.eventType = filters.eventType;
+  return next;
 }
 
 async function fetchEdgeJson<T>(options: FetchEdgeOptions): Promise<T> {
@@ -181,6 +201,15 @@ export interface VisitorsData {
   }>;
 }
 
+export interface DimensionData {
+  ok: boolean;
+  data: Array<{
+    value: string;
+    views: number;
+    sessions: number;
+  }>;
+}
+
 export interface TeamData {
   id: string;
   name: string;
@@ -244,10 +273,18 @@ export async function fetchPrivateOverview(params: {
   siteId: string;
   from: number;
   to: number;
+  filters?: QueryFilters;
 }): Promise<OverviewData> {
   return fetchEdgeJson<OverviewData>({
     path: "/api/private/overview",
-    params,
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+      },
+      params.filters,
+    ),
   });
 }
 
@@ -256,15 +293,19 @@ export async function fetchPrivateTrend(params: {
   from: number;
   to: number;
   interval?: "hour" | "day";
+  filters?: QueryFilters;
 }): Promise<TrendData> {
   return fetchEdgeJson<TrendData>({
     path: "/api/private/trend",
-    params: {
-      interval: params.interval || "day",
-      siteId: params.siteId,
-      from: params.from,
-      to: params.to,
-    },
+    params: withFilters(
+      {
+        interval: params.interval || "day",
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+      },
+      params.filters,
+    ),
   });
 }
 
@@ -272,14 +313,20 @@ export async function fetchPrivatePages(params: {
   siteId: string;
   from: number;
   to: number;
+  filters?: QueryFilters;
 }): Promise<PagesData> {
   return fetchEdgeJson<PagesData>({
     path: "/api/private/pages",
-    params: {
-      ...params,
-      limit: 8,
-      details: 1,
-    },
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: 8,
+        details: 1,
+      },
+      params.filters,
+    ),
   });
 }
 
@@ -287,14 +334,20 @@ export async function fetchPrivateReferrers(params: {
   siteId: string;
   from: number;
   to: number;
+  filters?: QueryFilters;
 }): Promise<ReferrersData> {
   return fetchEdgeJson<ReferrersData>({
     path: "/api/private/referrers",
-    params: {
-      ...params,
-      limit: 8,
-      fullUrl: 1,
-    },
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: 8,
+        fullUrl: 1,
+      },
+      params.filters,
+    ),
   });
 }
 
@@ -302,13 +355,19 @@ export async function fetchPrivateSessions(params: {
   siteId: string;
   from: number;
   to: number;
+  filters?: QueryFilters;
 }): Promise<SessionsData> {
   return fetchEdgeJson<SessionsData>({
     path: "/api/private/sessions",
-    params: {
-      ...params,
-      limit: 8,
-    },
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: 8,
+      },
+      params.filters,
+    ),
   });
 }
 
@@ -317,6 +376,7 @@ export async function fetchPrivateEvents(params: {
   from: number;
   to: number;
   limit?: number;
+  filters?: QueryFilters;
 }): Promise<EventsData> {
   const res = await fetchEdgeJson<{
     ok: boolean;
@@ -345,12 +405,15 @@ export async function fetchPrivateEvents(params: {
     }>;
   }>({
     path: "/api/private/events",
-    params: {
-      siteId: params.siteId,
-      from: params.from,
-      to: params.to,
-      limit: params.limit ?? 100,
-    },
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 100,
+      },
+      params.filters,
+    ),
   });
 
   return {
@@ -386,6 +449,7 @@ export async function fetchPrivateVisitors(params: {
   from: number;
   to: number;
   limit?: number;
+  filters?: QueryFilters;
 }): Promise<VisitorsData> {
   const res = await fetchEdgeJson<{
     ok: boolean;
@@ -404,12 +468,15 @@ export async function fetchPrivateVisitors(params: {
     }>;
   }>({
     path: "/api/private/visitors",
-    params: {
-      siteId: params.siteId,
-      from: params.from,
-      to: params.to,
-      limit: params.limit ?? 100,
-    },
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 100,
+      },
+      params.filters,
+    ),
   });
 
   return {
@@ -424,6 +491,90 @@ export async function fetchPrivateVisitors(params: {
       latestPath: String(item.latestPath ?? item.latest_path ?? ""),
     })),
   };
+}
+
+export async function fetchPrivateCountries(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  limit?: number;
+  filters?: QueryFilters;
+}): Promise<DimensionData> {
+  return fetchEdgeJson<DimensionData>({
+    path: "/api/private/countries",
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 20,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateDevices(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  limit?: number;
+  filters?: QueryFilters;
+}): Promise<DimensionData> {
+  return fetchEdgeJson<DimensionData>({
+    path: "/api/private/devices",
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 20,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateBrowsers(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  limit?: number;
+  filters?: QueryFilters;
+}): Promise<DimensionData> {
+  return fetchEdgeJson<DimensionData>({
+    path: "/api/private/browsers",
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 20,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateEventTypes(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  limit?: number;
+  filters?: QueryFilters;
+}): Promise<DimensionData> {
+  return fetchEdgeJson<DimensionData>({
+    path: "/api/private/event-types",
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 20,
+      },
+      params.filters,
+    ),
+  });
 }
 
 export async function fetchPublicOverview(
