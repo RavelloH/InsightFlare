@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 import {
   RiArrowLeftLine,
@@ -44,6 +45,8 @@ interface TeamSectionNavItem {
   label: string;
   href: string;
 }
+
+const SIDEBAR_COOKIE_NAME = "sidebar_state";
 
 type AnalyticsNavKey =
   | "overview"
@@ -112,7 +115,7 @@ function normalizeLocalePath(pathname: string): string {
     : withoutLocale;
 }
 
-export function DashboardShell({
+export async function DashboardShell({
   locale,
   pathname,
   messages,
@@ -127,6 +130,10 @@ export function DashboardShell({
   activeManagementSectionKey,
   children,
 }: DashboardShellProps) {
+  const cookieStore = await cookies();
+  const defaultSidebarOpen =
+    cookieStore.get(SIDEBAR_COOKIE_NAME)?.value !== "false";
+
   const hasTeamSections = Boolean(teamSections && teamSections.length > 0);
   const hasManagementSections = Boolean(
     managementSections && managementSections.length > 0,
@@ -170,7 +177,7 @@ export function DashboardShell({
   }));
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={defaultSidebarOpen}>
       <Sidebar variant="inset" collapsible="icon">
         <SidebarHeader className="group-data-[collapsible=icon]:hidden">
           <div className="py-2">

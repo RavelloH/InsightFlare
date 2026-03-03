@@ -118,7 +118,7 @@ export function SidebarFooterMenus({
         >
           <ThemeIcon className="size-4" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="start" sideOffset={8} className="!w-44 !min-w-44">
+        <DropdownMenuContent sideOffset={8} className="!w-44 !min-w-44">
           <DropdownMenuLabel>{messages.common.theme}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuRadioGroup
@@ -159,7 +159,7 @@ export function SidebarFooterMenus({
         >
           <RiGlobalLine className="size-4" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="start" sideOffset={8} className="!w-44 !min-w-44">
+        <DropdownMenuContent sideOffset={8} className="!w-44 !min-w-44">
           <DropdownMenuLabel>{messages.common.language}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
@@ -190,7 +190,10 @@ export function SidebarFooterMenus({
             {initial}
           </span>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="end" sideOffset={8} className="!w-64 !min-w-64">
+        <DropdownMenuContent
+          sideOffset={8}
+          className="!w-64 !min-w-64"
+        >
           <DropdownMenuLabel className="space-y-1">
             <div className="text-sm font-semibold text-foreground">
               {displayName}
@@ -217,7 +220,9 @@ export function SidebarFooterMenus({
           >
             <RiLogoutBoxRLine />
             <span>
-              {loggingOut ? messages.sidebarFooter.loggingOut : messages.actions.logout}
+              {loggingOut
+                ? messages.sidebarFooter.loggingOut
+                : messages.actions.logout}
             </span>
           </DropdownMenuItem>
         </DropdownMenuContent>

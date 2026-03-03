@@ -5,7 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -56,12 +62,17 @@ function withSiteSlug(site: SiteData): SiteData & { slug: string } {
   };
 }
 
-function buildSitePath(locale: Locale, teamSlug: string, siteSlug: string): string {
+function buildSitePath(
+  locale: Locale,
+  teamSlug: string,
+  siteSlug: string,
+): string {
   return `/${locale}/app/${teamSlug}/${siteSlug}`;
 }
 
-
-async function fetchTeamSites(teamId: string): Promise<Array<SiteData & { slug: string }>> {
+async function fetchTeamSites(
+  teamId: string,
+): Promise<Array<SiteData & { slug: string }>> {
   const url = `/api/private/admin/sites?teamId=${encodeURIComponent(teamId)}`;
   const response = await fetch(url, {
     method: "GET",
@@ -82,7 +93,10 @@ async function fetchTeamMembers(teamId: string): Promise<MemberData[]> {
     cache: "no-store",
   });
   if (!response.ok) throw new Error("fetch_team_members_failed");
-  const payload = (await response.json()) as { ok: boolean; data?: MemberData[] };
+  const payload = (await response.json()) as {
+    ok: boolean;
+    data?: MemberData[];
+  };
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
@@ -93,7 +107,10 @@ interface ActionResponse<T> {
   message?: string;
 }
 
-async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
+async function postJson<T>(
+  url: string,
+  body: Record<string, unknown>,
+): Promise<T> {
   const response = await fetch(url, {
     method: "POST",
     credentials: "include",
@@ -186,13 +203,13 @@ export function TeamManagementClient({
       toast.success(copy.toasts.teamSaved);
 
       if (updated.slug !== activeTeam.slug) {
-        const tabQuery = activeTab === "settings" ? "?tab=settings" : "";
-        router.push(`/${locale}/app/${updated.slug}${tabQuery}`);
+        router.push(`/${locale}/app/${updated.slug}`);
       } else {
         router.refresh();
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : copy.toasts.teamSaveFailed;
+      const message =
+        error instanceof Error ? error.message : copy.toasts.teamSaveFailed;
       toast.error(message || copy.toasts.teamSaveFailed);
     } finally {
       setSavingTeam(false);
@@ -216,7 +233,8 @@ export function TeamManagementClient({
       await refreshMembers();
       toast.success(copy.toasts.memberAdded);
     } catch (error) {
-      const message = error instanceof Error ? error.message : copy.toasts.memberAddFailed;
+      const message =
+        error instanceof Error ? error.message : copy.toasts.memberAddFailed;
       toast.error(message || copy.toasts.memberAddFailed);
     } finally {
       setAddingMember(false);
@@ -234,7 +252,8 @@ export function TeamManagementClient({
       await refreshMembers();
       toast.success(copy.toasts.memberRemoved);
     } catch (error) {
-      const message = error instanceof Error ? error.message : copy.toasts.memberRemoveFailed;
+      const message =
+        error instanceof Error ? error.message : copy.toasts.memberRemoveFailed;
       toast.error(message || copy.toasts.memberRemoveFailed);
     } finally {
       setRemovingMemberId(null);
@@ -260,14 +279,16 @@ export function TeamManagementClient({
         : copy.members.subtitle;
 
   const tableEmptyText = loading ? messages.common.loading : copy.sites.noSites;
-  const membersEmptyText = loading ? messages.common.loading : copy.members.noMembers;
+  const membersEmptyText = loading
+    ? messages.common.loading
+    : copy.members.noMembers;
 
   return (
     <div className="space-y-6">
       <PageHeading
         title={`${copy.title} · ${currentTeamName}`}
         subtitle={copy.subtitle}
-        actions={(
+        actions={
           <>
             <Badge variant="outline">
               {copy.stats.sites}: {sites.length}
@@ -276,12 +297,14 @@ export function TeamManagementClient({
               {copy.stats.members}: {memberCount}
             </Badge>
           </>
-        )}
+        }
       />
 
       <div className="space-y-4">
         <div className="space-y-1">
-          <h2 className="text-base font-semibold tracking-tight">{panelTitle}</h2>
+          <h2 className="text-base font-semibold tracking-tight">
+            {panelTitle}
+          </h2>
           <p className="text-sm text-muted-foreground">{panelSubtitle}</p>
         </div>
 
@@ -299,26 +322,43 @@ export function TeamManagementClient({
                     <TableHead>{copy.sites.columns.domain}</TableHead>
                     <TableHead>{copy.sites.columns.slug}</TableHead>
                     <TableHead>{copy.sites.columns.createdAt}</TableHead>
-                    <TableHead className="text-right">{copy.sites.columns.action}</TableHead>
+                    <TableHead className="text-right">
+                      {copy.sites.columns.action}
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {sites.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      <TableCell
+                        colSpan={5}
+                        className="text-center text-muted-foreground"
+                      >
                         {tableEmptyText}
                       </TableCell>
                     </TableRow>
                   ) : (
                     sites.map((site) => (
                       <TableRow key={site.id}>
-                        <TableCell className="font-medium">{site.name}</TableCell>
-                        <TableCell className="font-mono">{site.domain}</TableCell>
+                        <TableCell className="font-medium">
+                          {site.name}
+                        </TableCell>
+                        <TableCell className="font-mono">
+                          {site.domain}
+                        </TableCell>
                         <TableCell className="font-mono">{site.slug}</TableCell>
-                        <TableCell>{shortDateTime(locale, site.createdAt)}</TableCell>
+                        <TableCell>
+                          {shortDateTime(locale, site.createdAt)}
+                        </TableCell>
                         <TableCell className="text-right">
                           <Button asChild size="xs">
-                            <Link href={buildSitePath(locale, activeTeam.slug, site.slug)}>
+                            <Link
+                              href={buildSitePath(
+                                locale,
+                                activeTeam.slug,
+                                site.slug,
+                              )}
+                            >
                               {copy.sites.openAnalytics}
                             </Link>
                           </Button>
@@ -390,11 +430,15 @@ export function TeamManagementClient({
                   }}
                 >
                   <div className="space-y-2">
-                    <Label htmlFor="member-identifier">{copy.members.identifierLabel}</Label>
+                    <Label htmlFor="member-identifier">
+                      {copy.members.identifierLabel}
+                    </Label>
                     <Input
                       id="member-identifier"
                       value={memberIdentifier}
-                      onChange={(event) => setMemberIdentifier(event.target.value)}
+                      onChange={(event) =>
+                        setMemberIdentifier(event.target.value)
+                      }
                       placeholder={copy.members.identifierPlaceholder}
                       minLength={2}
                       required
@@ -417,24 +461,33 @@ export function TeamManagementClient({
                       <TableHead>{copy.members.columns.email}</TableHead>
                       <TableHead>{copy.members.columns.role}</TableHead>
                       <TableHead>{copy.members.columns.joinedAt}</TableHead>
-                      <TableHead className="text-right">{copy.members.columns.action}</TableHead>
+                      <TableHead className="text-right">
+                        {copy.members.columns.action}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {members.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                        <TableCell
+                          colSpan={6}
+                          className="text-center text-muted-foreground"
+                        >
                           {membersEmptyText}
                         </TableCell>
                       </TableRow>
                     ) : (
                       members.map((member) => (
                         <TableRow key={member.userId}>
-                          <TableCell className="font-medium">{member.name || member.username}</TableCell>
+                          <TableCell className="font-medium">
+                            {member.name || member.username}
+                          </TableCell>
                           <TableCell>{member.username}</TableCell>
                           <TableCell>{member.email}</TableCell>
                           <TableCell>{member.role}</TableCell>
-                          <TableCell>{shortDateTime(locale, member.joinedAt)}</TableCell>
+                          <TableCell>
+                            {shortDateTime(locale, member.joinedAt)}
+                          </TableCell>
                           <TableCell className="text-right">
                             <Button
                               type="button"
