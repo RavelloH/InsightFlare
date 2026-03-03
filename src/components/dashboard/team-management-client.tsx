@@ -35,14 +35,46 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
+import {
+  SiteTrafficStackChart,
+  TrafficPairBarChart,
+} from "@/components/dashboard/site-traffic-charts";
 import { PageHeading } from "@/components/dashboard/page-heading";
-import { shortDateTime } from "@/lib/dashboard/format";
-import type { MemberData, SiteData, TeamData } from "@/lib/edge-client";
+import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
+import {
+  durationFormat,
+  intlLocale,
+  numberFormat,
+  percentFormat,
+  shortDateTime,
+} from "@/lib/dashboard/format";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
+import type {
+  MemberData,
+  OverviewData,
+  SiteData,
+  TeamData,
+} from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
 
 type TeamTab = "sites" | "settings" | "members";
+
+type SiteOverviewMetrics = OverviewData["data"];
+
+function emptyOverviewMetrics(): SiteOverviewMetrics {
+  return {
+    views: 0,
+    sessions: 0,
+    visitors: 0,
+    bounces: 0,
+    totalDurationMs: 0,
+    avgDurationMs: 0,
+    bounceRate: 0,
+    approximateVisitors: false,
+  };
+}
 
 interface TeamManagementClientProps {
   locale: Locale;
@@ -83,19 +115,63 @@ function buildSitePath(
   return `/${locale}/app/${teamSlug}/${siteSlug}`;
 }
 
-async function fetchTeamSites(
+function intervalStepMs(interval: TimeWindow["interval"]): number {
+  if (interval === "minute") return 60 * 1000;
+  if (interval === "hour") return 60 * 60 * 1000;
+  if (interval === "day") return 24 * 60 * 60 * 1000;
+  if (interval === "week") return 7 * 24 * 60 * 60 * 1000;
+  return 30 * 24 * 60 * 60 * 1000;
+}
+
+interface TeamDashboardTrendPoint {
+  bucket: number;
+  timestampMs: number;
+  sites: Array<{
+    siteId: string;
+    views: number;
+    visitors: number;
+  }>;
+}
+
+interface TeamDashboardSite extends SiteData {
+  overview: SiteOverviewMetrics;
+}
+
+interface TeamDashboardData {
+  sites: TeamDashboardSite[];
+  trend: TeamDashboardTrendPoint[];
+}
+
+async function fetchTeamDashboard(
   teamId: string,
-): Promise<Array<SiteData & { slug: string }>> {
-  const url = `/api/private/admin/sites?teamId=${encodeURIComponent(teamId)}`;
-  const response = await fetch(url, {
+  window: Pick<TimeWindow, "from" | "to" | "interval">,
+): Promise<TeamDashboardData> {
+  const params = new URLSearchParams({
+    teamId,
+    from: String(window.from),
+    to: String(window.to),
+    interval: window.interval,
+  });
+  const response = await fetch(`/api/private/team-dashboard?${params.toString()}`, {
     method: "GET",
     credentials: "include",
     cache: "no-store",
   });
-  if (!response.ok) throw new Error("fetch_team_sites_failed");
-  const payload = (await response.json()) as { ok: boolean; data?: SiteData[] };
-  const data = Array.isArray(payload.data) ? payload.data : [];
-  return data.map(withSiteSlug);
+  if (!response.ok) throw new Error("fetch_team_dashboard_failed");
+  const payload = (await response.json()) as {
+    ok: boolean;
+    data?: {
+      sites?: TeamDashboardSite[];
+      trend?: TeamDashboardTrendPoint[];
+    };
+  };
+  if (!payload.ok || !payload.data) {
+    throw new Error("fetch_team_dashboard_failed");
+  }
+  return {
+    sites: Array.isArray(payload.data.sites) ? payload.data.sites : [],
+    trend: Array.isArray(payload.data.trend) ? payload.data.trend : [],
+  };
 }
 
 async function fetchTeamMembers(teamId: string): Promise<MemberData[]> {
@@ -146,6 +222,7 @@ export function TeamManagementClient({
   activeTab,
 }: TeamManagementClientProps) {
   const router = useRouter();
+  const { window } = useDashboardQuery();
   const copy = messages.teamManagement;
   const [sites, setSites] = useState<Array<SiteData & { slug: string }>>([]);
   const [members, setMembers] = useState<MemberData[]>([]);
@@ -159,21 +236,23 @@ export function TeamManagementClient({
   const [deleteTeamDialogOpen, setDeleteTeamDialogOpen] = useState(false);
   const [addingMember, setAddingMember] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [siteOverviewById, setSiteOverviewById] = useState<Record<string, SiteOverviewMetrics>>({});
+  const [teamTrend, setTeamTrend] = useState<TeamDashboardTrendPoint[]>([]);
 
   useEffect(() => {
+    if (activeTab !== "members") return;
     let active = true;
     setLoading(true);
 
-    Promise.all([
-      fetchTeamSites(activeTeam.id).catch(() => []),
-      activeTab === "members"
-        ? fetchTeamMembers(activeTeam.id).catch(() => [])
-        : Promise.resolve([]),
-    ])
-      .then(([nextSites, nextMembers]) => {
+    fetchTeamMembers(activeTeam.id)
+      .then((nextMembers) => {
         if (!active) return;
-        setSites(nextSites);
         setMembers(nextMembers);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMembers([]);
       })
       .finally(() => {
         if (!active) return;
@@ -190,7 +269,52 @@ export function TeamManagementClient({
     setTeamName(activeTeam.name);
     setTeamSlug(activeTeam.slug);
     setMemberIdentifier("");
+    setSites([]);
+    setMembers([]);
+    setSiteOverviewById({});
+    setTeamTrend([]);
   }, [activeTeam.id, activeTeam.name, activeTeam.slug]);
+
+  useEffect(() => {
+    if (activeTab !== "sites") return;
+
+    let active = true;
+    setLoading(true);
+    setAnalyticsLoading(true);
+
+    fetchTeamDashboard(activeTeam.id, window)
+      .then((dashboard) => {
+        if (!active) return;
+        setSites(dashboard.sites.map(withSiteSlug));
+        setSiteOverviewById(
+          Object.fromEntries(
+            dashboard.sites.map((site) => [site.id, site.overview ?? emptyOverviewMetrics()]),
+          ),
+        );
+        setTeamTrend(dashboard.trend);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSites([]);
+        setSiteOverviewById({});
+        setTeamTrend([]);
+      })
+      .finally(() => {
+        if (!active) return;
+        setLoading(false);
+        setAnalyticsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeTeam.id, activeTab, window.from, window.to, window.interval]);
+
+  useEffect(() => {
+    if (activeTab === "sites" || activeTab === "members") return;
+    setLoading(false);
+    setAnalyticsLoading(false);
+  }, [activeTab]);
 
   async function refreshMembers() {
     const nextMembers = await fetchTeamMembers(activeTeam.id);
@@ -295,6 +419,151 @@ export function TeamManagementClient({
     }
   }
 
+  const aggregateChartRenderData = useMemo(() => {
+    const stepMs = intervalStepMs(window.interval);
+    if (!Number.isFinite(stepMs) || stepMs <= 0) return [];
+
+    const fromBucket = Math.floor(window.from / stepMs);
+    const toBucket = Math.max(fromBucket, Math.floor(window.to / stepMs));
+    const timeline = new Map<
+      number,
+      {
+        timestampMs: number;
+        sites: Map<string, { views: number; visitors: number }>;
+      }
+    >();
+
+    for (let bucket = fromBucket; bucket <= toBucket; bucket += 1) {
+      timeline.set(bucket, {
+        timestampMs: bucket * stepMs,
+        sites: new Map(),
+      });
+    }
+
+    for (const point of teamTrend) {
+      const bucket =
+        Number.isFinite(point.bucket) && point.bucket >= 0
+          ? point.bucket
+          : Math.floor(point.timestampMs / stepMs);
+      const current = timeline.get(bucket) ?? {
+        timestampMs: point.timestampMs || bucket * stepMs,
+        sites: new Map<string, { views: number; visitors: number }>(),
+      };
+
+      for (const sitePoint of point.sites) {
+        const previous = current.sites.get(sitePoint.siteId) ?? { views: 0, visitors: 0 };
+        current.sites.set(sitePoint.siteId, {
+          views: previous.views + (sitePoint.views ?? 0),
+          visitors: previous.visitors + (sitePoint.visitors ?? 0),
+        });
+      }
+      timeline.set(bucket, current);
+    }
+
+    return Array.from(timeline.entries())
+      .sort((left, right) => left[0] - right[0])
+      .map(([, value]) => ({
+        timestampMs: value.timestampMs,
+        sites: Array.from(value.sites.entries()).map(([siteId, siteValue]) => ({
+          siteId,
+          views: siteValue.views,
+          visitors: siteValue.visitors,
+        })),
+      }));
+  }, [teamTrend, window.from, window.to, window.interval]);
+
+  const siteTrendById = useMemo(() => {
+    const stepMs = intervalStepMs(window.interval);
+    if (!Number.isFinite(stepMs) || stepMs <= 0) {
+      return {} as Record<string, Array<{ timestampMs: number; views: number; visitors: number }>>;
+    }
+
+    const fromBucket = Math.floor(window.from / stepMs);
+    const toBucket = Math.max(fromBucket, Math.floor(window.to / stepMs));
+    const siteBuckets = new Map<
+      string,
+      Map<number, { timestampMs: number; views: number; visitors: number }>
+    >();
+
+    for (const site of sites) {
+      const bucketMap = new Map<number, { timestampMs: number; views: number; visitors: number }>();
+      for (let bucket = fromBucket; bucket <= toBucket; bucket += 1) {
+        bucketMap.set(bucket, {
+          timestampMs: bucket * stepMs,
+          views: 0,
+          visitors: 0,
+        });
+      }
+      siteBuckets.set(site.id, bucketMap);
+    }
+
+    for (const point of teamTrend) {
+      const bucket =
+        Number.isFinite(point.bucket) && point.bucket >= 0
+          ? point.bucket
+          : Math.floor(point.timestampMs / stepMs);
+
+      for (const sitePoint of point.sites) {
+        const bucketMap = siteBuckets.get(sitePoint.siteId);
+        if (!bucketMap) continue;
+        const existing = bucketMap.get(bucket) ?? {
+          timestampMs: point.timestampMs || bucket * stepMs,
+          views: 0,
+          visitors: 0,
+        };
+        existing.views += sitePoint.views ?? 0;
+        existing.visitors += sitePoint.visitors ?? 0;
+        bucketMap.set(bucket, existing);
+      }
+    }
+
+    return Object.fromEntries(
+      Array.from(siteBuckets.entries()).map(([siteId, bucketMap]) => [
+        siteId,
+        Array.from(bucketMap.entries())
+          .sort((left, right) => left[0] - right[0])
+          .map(([, value]) => value),
+      ]),
+    );
+  }, [sites, teamTrend, window.from, window.to, window.interval]);
+
+  const siteDashboardCards = useMemo(
+    () =>
+      sites.map((site) => {
+        const overview = siteOverviewById[site.id] ?? emptyOverviewMetrics();
+        const pagesPerSession = overview.sessions > 0
+          ? overview.views / overview.sessions
+          : 0;
+        return {
+          site,
+          overview,
+          pagesPerSession,
+          trend: siteTrendById[site.id] ?? [],
+        };
+      })
+        .sort((left, right) => {
+          const byViews = right.overview.views - left.overview.views;
+          if (byViews !== 0) return byViews;
+          const byVisitors = right.overview.visitors - left.overview.visitors;
+          if (byVisitors !== 0) return byVisitors;
+          return left.site.name.localeCompare(right.site.name);
+        }),
+    [sites, siteOverviewById, siteTrendById],
+  );
+
+  const pagesPerSessionFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(intlLocale(locale), {
+        maximumFractionDigits: 2,
+      }),
+    [locale],
+  );
+
+  const siteCount = useMemo(
+    () => (activeTab === "sites" ? sites.length : activeTeam.siteCount),
+    [activeTab, sites.length, activeTeam.siteCount],
+  );
+
   const memberCount = useMemo(
     () => (activeTab === "members" ? members.length : activeTeam.memberCount),
     [activeTab, members.length, activeTeam.memberCount],
@@ -312,12 +581,13 @@ export function TeamManagementClient({
       : activeTab === "settings"
         ? copy.settings.subtitle
         : copy.members.subtitle;
+  const isSitesChartsLoading = activeTab === "sites" && (loading || analyticsLoading);
 
   return (
     <div className="space-y-6">
       <PageHeading
-        title={`${copy.title} · ${currentTeamName}`}
-        subtitle={copy.subtitle}
+        title={`${panelTitle} · ${currentTeamName}`}
+        subtitle={panelSubtitle}
         actions={
           <>
             <Badge variant="outline">
@@ -329,7 +599,7 @@ export function TeamManagementClient({
                       <Spinner className="size-3.5" />
                     </span>
                   ) : (
-                    <span key="sites-value">{sites.length}</span>
+                    <span key="sites-value">{siteCount}</span>
                   )}
                 </AutoTransition>
               </span>
@@ -353,73 +623,131 @@ export function TeamManagementClient({
       />
 
       <div className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold tracking-tight">
-            {panelTitle}
-          </h2>
-          <p className="text-sm text-muted-foreground">{panelSubtitle}</p>
-        </div>
-
         {activeTab === "sites" ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>{copy.sites.title}</CardTitle>
-              <CardDescription>{copy.sites.subtitle}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <DataTableSwitch
-                loading={loading}
-                hasContent={sites.length > 0}
-                loadingLabel={messages.common.loading}
-                emptyLabel={copy.sites.noSites}
-                colSpan={5}
-                header={(
-                  <TableRow>
-                    <TableHead>{copy.sites.columns.name}</TableHead>
-                    <TableHead>{copy.sites.columns.domain}</TableHead>
-                    <TableHead>{copy.sites.columns.slug}</TableHead>
-                    <TableHead>{copy.sites.columns.createdAt}</TableHead>
-                    <TableHead className="text-right">
-                      {copy.sites.columns.action}
-                    </TableHead>
-                  </TableRow>
-                )}
-                rows={sites.map((site) => (
-                  <TableRow key={site.id}>
-                    <TableCell className="font-medium">
-                      {site.name}
-                    </TableCell>
-                    <TableCell className="font-mono">
-                      {site.domain}
-                    </TableCell>
-                    <TableCell className="font-mono">{site.slug}</TableCell>
-                    <TableCell>
-                      {shortDateTime(locale, site.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Clickable
-                        onClick={() => {
-                          navigateWithTransition(
-                            router,
-                            buildSitePath(
-                              locale,
-                              activeTeam.slug,
-                              site.slug,
-                            ),
-                          );
-                        }}
-                        className="size-6 text-muted-foreground hover:text-foreground"
-                        aria-label={copy.sites.openAnalytics}
-                        title={copy.sites.openAnalytics}
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>{copy.sites.aggregateTitle}</CardTitle>
+                <CardDescription>{copy.sites.aggregateSubtitle}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="space-y-3">
+                <div className="relative">
+                  <SiteTrafficStackChart
+                    data={aggregateChartRenderData}
+                    sites={sites.map((site) => ({ id: site.id, name: site.name }))}
+                    locale={locale}
+                    interval={window.interval}
+                    viewsLabel={messages.common.views}
+                    visitorsLabel={messages.common.visitors}
+                    className={isSitesChartsLoading ? "opacity-40" : undefined}
+                  />
+                  <AutoTransition
+                    type="fade"
+                    duration={0.22}
+                    className="pointer-events-none absolute inset-0"
+                  >
+                    {isSitesChartsLoading ? (
+                      <div
+                        key="aggregate-overlay-loading"
+                        className="flex h-full w-full items-center justify-center bg-background/50 text-sm text-muted-foreground"
                       >
-                        <RiLineChartLine className="size-4" />
-                      </Clickable>
-                    </TableCell>
-                  </TableRow>
+                        <span className="inline-flex items-center gap-2">
+                          <Spinner className="size-4" />
+                          {messages.common.loading}
+                        </span>
+                      </div>
+                    ) : (
+                      <div key="aggregate-overlay-idle" className="h-full w-full bg-transparent" />
+                    )}
+                  </AutoTransition>
+                </div>
+
+                {!loading && !analyticsLoading && sites.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{copy.sites.noSites}</p>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            {sites.length > 0 ? (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {siteDashboardCards.map(({ site, overview, pagesPerSession, trend }) => (
+                  <Clickable
+                    key={site.id}
+                    onClick={() => {
+                      navigateWithTransition(
+                        router,
+                        buildSitePath(locale, activeTeam.slug, site.slug),
+                      );
+                    }}
+                    className="block w-full"
+                    enableHoverScale={false}
+                    aria-label={`${copy.sites.openAnalytics}: ${site.name}`}
+                    title={copy.sites.openAnalytics}
+                  >
+                    <Card className="h-full transition-colors hover:bg-accent/20">
+                      <CardHeader className="space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1">
+                            <CardTitle className="truncate text-base">{site.name}</CardTitle>
+                            <CardDescription className="truncate font-mono text-xs">
+                              {site.domain}
+                            </CardDescription>
+                          </div>
+                          <span className="inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground">
+                            <RiLineChartLine className="size-4" />
+                          </span>
+                        </div>
+                      </CardHeader>
+
+                      <CardContent className="space-y-4">
+                        <AutoTransition type="fade" duration={0.24} className="w-full">
+                          <div key={`site-chart-${site.id}`}>
+                            <TrafficPairBarChart
+                              data={trend}
+                              locale={locale}
+                              interval={window.interval}
+                              viewsLabel={messages.common.views}
+                              visitorsLabel={messages.common.visitors}
+                            />
+                          </div>
+                        </AutoTransition>
+
+                        <div className="grid grid-cols-3 gap-x-4 gap-y-4 text-[11px]">
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">{messages.common.views}</p>
+                            <p className="font-mono text-base leading-none">{numberFormat(locale, overview.views)}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">{messages.common.visitors}</p>
+                            <p className="font-mono text-base leading-none">{numberFormat(locale, overview.visitors)}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">{messages.common.sessions}</p>
+                            <p className="font-mono text-base leading-none">{numberFormat(locale, overview.sessions)}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">{messages.common.bounceRate}</p>
+                            <p className="font-mono text-base leading-none">{percentFormat(locale, overview.bounceRate)}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">{messages.common.avgDuration}</p>
+                            <p className="font-mono text-base leading-none">{durationFormat(locale, overview.avgDurationMs)}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">{copy.sites.pagesPerSession}</p>
+                            <p className="font-mono text-base leading-none">
+                              {pagesPerSessionFormatter.format(pagesPerSession)}
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </Clickable>
                 ))}
-              />
-            </CardContent>
-          </Card>
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         {activeTab === "settings" ? (

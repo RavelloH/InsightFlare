@@ -43,10 +43,46 @@ common:
   user: 普通用户
 ranges:
   title: 时间范围
-  last24h: 24小时
-  last7d: 7天
-  last30d: 30天
-  last90d: 90天
+  last30m: 30分钟
+  last1h: 1小时
+  today: 今天
+  yesterday: 昨天
+  thisWeek: 本周
+  thisMonth: 本月
+  thisYear: 今年
+  last24h: 最近 24 小时
+  last7d: 最近 7 天
+  last30d: 最近 30 天
+  last90d: 最近 90 天
+  last6m: 最近 6 个月
+  last12m: 最近 12 个月
+  allTime: 所有时间
+  custom: 自定义时间段
+intervals:
+  title: 时间间隔
+  minute: 分钟
+  hour: 小时
+  day: 日
+  week: 周
+  month: 月
+dashboardHeader:
+  range: 时间范围
+  interval: 时间间隔
+  filters: 筛选
+  customRange: 选择自定义区间
+  customHint: 请选择开始和结束日期。
+  customPendingEnd: 已选择开始日期，请继续选择结束日期。
+  customApply: 确定
+  rangeGroupQuick: 快速范围
+  rangeGroupCalendar: 自然周期
+  rangeGroupRolling: 滚动窗口
+  rangeGroupAdvanced: 高级
+  intervalDisabledMinute: 仅在 1 小时内可选分钟间隔。
+  intervalDisabledHour: 仅在 7 天内可选小时间隔。
+  intervalDisabledDay: 仅在最近 90 天内可选日间隔。
+  intervalDisabledWeek: 仅在最近 12 个月内可选周间隔。
+  filterTitle: 筛选条件
+  filterSubtitle: 当前仅保存筛选配置，不参与数据筛选。
 filters:
   title: 筛选
   country: 国家
@@ -148,8 +184,15 @@ teamManagement:
     invalidTeamName: 团队名称至少 2 个字符。
     invalidMemberIdentifier: 请输入有效的用户名或邮箱。
   sites:
-    title: 站点列表
-    subtitle: 查看这个团队下的全部站点，并进入对应分析页面。
+    title: 仪表盘
+    subtitle: 聚合查看该团队下所有站点的访问表现。
+    aggregateTitle: 站点访问聚合
+    aggregateSubtitle: 按站点查看访问量与访客量（堆叠柱状图），可自定义时间范围。
+    fromLabel: 开始时间
+    toLabel: 结束时间
+    applyRange: 应用时间范围
+    invalidRange: 请选择有效时间范围（开始时间需早于结束时间）。
+    pagesPerSession: 每会话页面数
     noSites: 当前团队还没有站点。
     openAnalytics: 查看分析
     columns:

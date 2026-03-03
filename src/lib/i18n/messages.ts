@@ -50,10 +50,48 @@ export interface AppMessages {
   };
   ranges: {
     title: string;
+    last30m: string;
+    last1h: string;
+    today: string;
+    yesterday: string;
+    thisWeek: string;
+    thisMonth: string;
+    thisYear: string;
     last24h: string;
     last7d: string;
     last30d: string;
     last90d: string;
+    last6m: string;
+    last12m: string;
+    allTime: string;
+    custom: string;
+  };
+  intervals: {
+    title: string;
+    minute: string;
+    hour: string;
+    day: string;
+    week: string;
+    month: string;
+  };
+  dashboardHeader: {
+    range: string;
+    interval: string;
+    filters: string;
+    customRange: string;
+    customHint: string;
+    customPendingEnd: string;
+    customApply: string;
+    rangeGroupQuick: string;
+    rangeGroupCalendar: string;
+    rangeGroupRolling: string;
+    rangeGroupAdvanced: string;
+    intervalDisabledMinute: string;
+    intervalDisabledHour: string;
+    intervalDisabledDay: string;
+    intervalDisabledWeek: string;
+    filterTitle: string;
+    filterSubtitle: string;
   };
   filters: {
     title: string;
@@ -175,6 +213,13 @@ export interface AppMessages {
     sites: {
       title: string;
       subtitle: string;
+      aggregateTitle: string;
+      aggregateSubtitle: string;
+      fromLabel: string;
+      toLabel: string;
+      applyRange: string;
+      invalidRange: string;
+      pagesPerSession: string;
       noSites: string;
       openAnalytics: string;
       columns: {

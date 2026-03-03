@@ -25,6 +25,7 @@ export interface AeOverviewRow {
 export interface AeTrendRow {
   bucket: number;
   views: number;
+  visitors: number;
   sessions: number;
   total_duration: number;
 }
@@ -375,16 +376,26 @@ export async function queryAeTrend(
   env: Env,
   siteId: string,
   range: AeRange,
-  interval: "hour" | "day",
+  interval: "minute" | "hour" | "day" | "week" | "month",
   filters?: AeQueryFilters,
 ): Promise<AeTrendRow[]> {
   const dataset = getAeDatasetName();
   const where = buildAeWhere(siteId, range, filters);
-  const bucketDivisor = interval === "hour" ? 3600000 : 86400000;
+  const bucketDivisor =
+    interval === "minute"
+      ? 60000
+      : interval === "hour"
+        ? 3600000
+        : interval === "day"
+          ? 86400000
+          : interval === "week"
+            ? 604800000
+            : 2592000000;
   const sql = `
 SELECT
   floor(${eventAtExpr()} / ${bucketDivisor}) AS bucket,
   sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(visitorExpr())} AS visitors,
   ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions,
   sum(_sample_interval * ${durationExpr()}) AS total_duration
 FROM ${dataset}
@@ -396,6 +407,7 @@ ORDER BY bucket
   return rows.map((row) => ({
     bucket: parseNumber(row.bucket),
     views: parseNumber(row.views),
+    visitors: parseNumber(row.visitors),
     sessions: parseNumber(row.sessions),
     total_duration: parseNumber(row.total_duration),
   }));

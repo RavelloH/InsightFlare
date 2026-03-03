@@ -44,6 +44,17 @@ interface PublicSiteRow {
   domain: string;
 }
 
+interface TeamSiteRow {
+  id: string;
+  teamId: string;
+  name: string;
+  domain: string;
+  publicEnabled: number;
+  publicSlug: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface JsonObject {
   [key: string]: unknown;
 }
@@ -135,9 +146,13 @@ function parseLimit(url: URL, defaultValue = 20, maxValue = 500): number {
   return Math.min(maxValue, Math.floor(n));
 }
 
-function parseInterval(url: URL): "hour" | "day" {
+function parseInterval(url: URL): "minute" | "hour" | "day" | "week" | "month" {
   const raw = (url.searchParams.get("interval") || "hour").toLowerCase();
-  return raw === "day" ? "day" : "hour";
+  if (raw === "minute") return "minute";
+  if (raw === "day") return "day";
+  if (raw === "week") return "week";
+  if (raw === "month") return "month";
+  return "hour";
 }
 
 function normalizeFilterValue(value: string | null): string | undefined {
@@ -227,6 +242,25 @@ async function assertSiteMembership(
     `,
   )
     .bind(siteId, userId)
+    .first<{ ok: number }>();
+
+  return Boolean(row?.ok);
+}
+
+async function assertTeamMembership(
+  env: Env,
+  teamId: string,
+  userId: string,
+): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `
+      SELECT 1 AS ok
+      FROM team_members
+      WHERE team_id = ? AND user_id = ?
+      LIMIT 1
+    `,
+  )
+    .bind(teamId, userId)
     .first<{ ok: number }>();
 
   return Boolean(row?.ok);
@@ -372,23 +406,48 @@ async function queryTrend(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  interval: "hour" | "day",
+  interval: "minute" | "hour" | "day" | "week" | "month",
   filters: DashboardFilters,
 ): Promise<Array<{
   bucket: number;
   timestampMs: number;
   views: number;
+  visitors: number;
   sessions: number;
   totalDurationMs: number;
   source: "detail" | "archive" | "mixed";
 }>> {
-  const bucketDivisor = interval === "hour" ? 1 : 24;
-  const bucketMs = interval === "hour" ? ONE_HOUR_MS : ONE_DAY_MS;
-  const includeArchive = window.hasArchive && !hasActiveFilters(filters);
+  const bucketMs =
+    interval === "minute"
+      ? 60 * 1000
+      : interval === "hour"
+        ? ONE_HOUR_MS
+        : interval === "day"
+          ? ONE_DAY_MS
+          : interval === "week"
+            ? 7 * ONE_DAY_MS
+            : 30 * ONE_DAY_MS;
+  const bucketDivisor = interval === "hour"
+    ? 1
+    : interval === "day"
+      ? 24
+      : interval === "week"
+        ? 168
+        : interval === "month"
+          ? 720
+          : 0;
+  const includeArchive = window.hasArchive && interval !== "minute" && !hasActiveFilters(filters);
   const d1FilterSql = buildD1FilterSql(filters);
   const buckets = new Map<
     number,
-    { views: number; sessions: number; totalDurationMs: number; detail: boolean; archive: boolean }
+    {
+      views: number;
+      visitors: number;
+      sessions: number;
+      totalDurationMs: number;
+      detail: boolean;
+      archive: boolean;
+    }
   >();
 
   if (window.hasAnalytics) {
@@ -405,12 +464,14 @@ async function queryTrend(
     for (const row of aeRows) {
       const entry = buckets.get(row.bucket) ?? {
         views: 0,
+        visitors: 0,
         sessions: 0,
         totalDurationMs: 0,
         detail: false,
         archive: false,
       };
       entry.views += row.views ?? 0;
+      entry.visitors += row.visitors ?? 0;
       entry.sessions += row.sessions ?? 0;
       entry.totalDurationMs += row.total_duration ?? 0;
       entry.detail = true;
@@ -419,44 +480,34 @@ async function queryTrend(
   }
 
   if (window.hasD1Detail) {
-    const detailSql =
-      interval === "hour"
-        ? `
-          SELECT
-            CAST(event_at / 3600000 AS INTEGER) AS bucket,
-            COUNT(*) AS views,
-            COUNT(DISTINCT session_id) AS sessions,
-            SUM(COALESCE(duration_ms, 0)) AS total_duration
-          FROM pageviews
-          WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
-          GROUP BY bucket
-          ORDER BY bucket
-        `
-        : `
-          SELECT
-            CAST(event_at / 86400000 AS INTEGER) AS bucket,
-            COUNT(*) AS views,
-            COUNT(DISTINCT session_id) AS sessions,
-            SUM(COALESCE(duration_ms, 0)) AS total_duration
-          FROM pageviews
-          WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
-          GROUP BY bucket
-          ORDER BY bucket
-        `;
+    const detailSql = `
+      SELECT
+        CAST(event_at / ${bucketMs} AS INTEGER) AS bucket,
+        COUNT(*) AS views,
+        COUNT(DISTINCT visitor_id) AS visitors,
+        COUNT(DISTINCT session_id) AS sessions,
+        SUM(COALESCE(duration_ms, 0)) AS total_duration
+      FROM pageviews
+      WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
+      GROUP BY bucket
+      ORDER BY bucket
+    `;
 
     const detailRows = await env.DB.prepare(detailSql)
       .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings)
-      .all<{ bucket: number; views: number; sessions: number; total_duration: number }>();
+      .all<{ bucket: number; views: number; visitors: number; sessions: number; total_duration: number }>();
 
     for (const row of detailRows.results) {
       const entry = buckets.get(row.bucket) ?? {
         views: 0,
+        visitors: 0,
         sessions: 0,
         totalDurationMs: 0,
         detail: false,
         archive: false,
       };
       entry.views += row.views ?? 0;
+      entry.visitors += row.visitors ?? 0;
       entry.sessions += row.sessions ?? 0;
       entry.totalDurationMs += row.total_duration ?? 0;
       entry.detail = true;
@@ -484,6 +535,7 @@ async function queryTrend(
     for (const row of archiveRows.results) {
       const entry = buckets.get(row.bucket) ?? {
         views: 0,
+        visitors: 0,
         sessions: 0,
         totalDurationMs: 0,
         detail: false,
@@ -495,6 +547,55 @@ async function queryTrend(
       entry.archive = true;
       buckets.set(row.bucket, entry);
     }
+
+    const archiveVisitorRows = await env.DB.prepare(
+      `
+        SELECT hour_bucket, visitors_json
+        FROM pageviews_archive_hourly
+        WHERE site_id = ? AND hour_bucket BETWEEN ? AND ?
+      `,
+    )
+      .bind(siteId, window.archiveFromHour, window.archiveToHour)
+      .all<{ hour_bucket: number; visitors_json: string | null }>();
+
+    const visitorsByBucket = new Map<number, Set<string>>();
+    for (const row of archiveVisitorRows.results) {
+      const hourBucket = Number(row.hour_bucket ?? 0);
+      if (!Number.isFinite(hourBucket)) continue;
+      const bucket = Math.floor(hourBucket / bucketDivisor);
+      if (!Number.isFinite(bucket)) continue;
+
+      const visitorSet = visitorsByBucket.get(bucket) ?? new Set<string>();
+      if (row.visitors_json) {
+        try {
+          const ids = JSON.parse(row.visitors_json) as unknown;
+          if (Array.isArray(ids)) {
+            for (const id of ids) {
+              if (typeof id === "string" && id.length > 0) {
+                visitorSet.add(id);
+              }
+            }
+          }
+        } catch {
+          // ignore malformed archive visitors_json
+        }
+      }
+      visitorsByBucket.set(bucket, visitorSet);
+    }
+
+    for (const [bucket, visitorSet] of visitorsByBucket.entries()) {
+      const entry = buckets.get(bucket) ?? {
+        views: 0,
+        visitors: 0,
+        sessions: 0,
+        totalDurationMs: 0,
+        detail: false,
+        archive: false,
+      };
+      entry.visitors += visitorSet.size;
+      entry.archive = true;
+      buckets.set(bucket, entry);
+    }
   }
 
   return Array.from(buckets.entries())
@@ -503,6 +604,7 @@ async function queryTrend(
       bucket,
       timestampMs: bucket * bucketMs,
       views: value.views,
+      visitors: value.visitors,
       sessions: value.sessions,
       totalDurationMs: value.totalDurationMs,
       source: value.detail && value.archive ? "mixed" : value.detail ? "detail" : "archive",
@@ -1234,6 +1336,166 @@ async function queryVisitorDetails(
     .slice(0, limit);
 }
 
+function emptyOverviewMetrics(): {
+  views: number;
+  sessions: number;
+  visitors: number;
+  bounces: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  bounceRate: number;
+  approximateVisitors: boolean;
+} {
+  return {
+    views: 0,
+    sessions: 0,
+    visitors: 0,
+    bounces: 0,
+    totalDurationMs: 0,
+    avgDurationMs: 0,
+    bounceRate: 0,
+    approximateVisitors: false,
+  };
+}
+
+function intervalBucketMs(interval: "minute" | "hour" | "day" | "week" | "month"): number {
+  if (interval === "minute") return 60 * 1000;
+  if (interval === "hour") return ONE_HOUR_MS;
+  if (interval === "day") return ONE_DAY_MS;
+  if (interval === "week") return 7 * ONE_DAY_MS;
+  return 30 * ONE_DAY_MS;
+}
+
+async function queryTeamDashboard(
+  env: Env,
+  teamId: string,
+  window: QueryWindow,
+  interval: "minute" | "hour" | "day" | "week" | "month",
+): Promise<{
+  sites: Array<
+    TeamSiteRow & {
+      overview: {
+        views: number;
+        sessions: number;
+        visitors: number;
+        bounces: number;
+        totalDurationMs: number;
+        avgDurationMs: number;
+        bounceRate: number;
+        approximateVisitors: boolean;
+      };
+    }
+  >;
+  trend: Array<{
+    bucket: number;
+    timestampMs: number;
+    sites: Array<{
+      siteId: string;
+      views: number;
+      visitors: number;
+    }>;
+  }>;
+}> {
+  const sitesResult = await env.DB.prepare(
+    `
+      SELECT
+        id,
+        team_id AS teamId,
+        name,
+        domain,
+        public_enabled AS publicEnabled,
+        public_slug AS publicSlug,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+      FROM sites
+      WHERE team_id = ?
+      ORDER BY created_at DESC
+    `,
+  )
+    .bind(teamId)
+    .all<TeamSiteRow>();
+
+  const siteRows = sitesResult.results;
+  if (siteRows.length === 0) {
+    return { sites: [], trend: [] };
+  }
+
+  const siteStats = await Promise.all(
+    siteRows.map(async (site) => {
+      const [overview, trend] = await Promise.all([
+        queryOverview(env, site.id, window, {}).catch(() => emptyOverviewMetrics()),
+        queryTrend(env, site.id, window, interval, {}).catch(() => []),
+      ]);
+      return {
+        site,
+        overview,
+        trend,
+      };
+    }),
+  );
+
+  const bucketMs = intervalBucketMs(interval);
+  const fromBucket = Math.floor(window.fromMs / bucketMs);
+  const toBucket = Math.max(fromBucket, Math.floor(window.toMs / bucketMs));
+
+  const trendByBucket = new Map<
+    number,
+    {
+      bucket: number;
+      timestampMs: number;
+      sites: Map<string, { views: number; visitors: number }>;
+    }
+  >();
+
+  for (let bucket = fromBucket; bucket <= toBucket; bucket += 1) {
+    trendByBucket.set(bucket, {
+      bucket,
+      timestampMs: bucket * bucketMs,
+      sites: new Map(),
+    });
+  }
+
+  for (const siteStat of siteStats) {
+    for (const point of siteStat.trend) {
+      const bucket = Number.isFinite(point.bucket)
+        ? point.bucket
+        : Math.floor(point.timestampMs / bucketMs);
+      const entry = trendByBucket.get(bucket) ?? {
+        bucket,
+        timestampMs: point.timestampMs,
+        sites: new Map<string, { views: number; visitors: number }>(),
+      };
+      entry.sites.set(siteStat.site.id, {
+        views: point.views ?? 0,
+        visitors: point.visitors ?? 0,
+      });
+      trendByBucket.set(bucket, entry);
+    }
+  }
+
+  const trend = Array.from(trendByBucket.values())
+    .sort((a, b) => a.bucket - b.bucket)
+    .map((point) => ({
+      bucket: point.bucket,
+      timestampMs: point.timestampMs,
+      sites: Array.from(point.sites.entries()).map(([siteId, value]) => ({
+        siteId,
+        views: value.views,
+        visitors: value.visitors,
+      })),
+    }));
+
+  const sites = siteStats.map((siteStat) => ({
+    ...siteStat.site,
+    overview: siteStat.overview,
+  }));
+
+  return {
+    sites,
+    trend,
+  };
+}
+
 function requireSiteId(url: URL): string | null {
   const siteId = (url.searchParams.get("siteId") || "").trim();
   return siteId.length > 0 ? siteId : null;
@@ -1246,6 +1508,48 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
   const session = await requireSession(request, env);
   if (!session) {
     return unauthorized();
+  }
+
+  const pathname = url.pathname;
+
+  if (pathname === "/api/private/team-dashboard") {
+    const teamId = (url.searchParams.get("teamId") || "").trim();
+    if (!teamId) {
+      return badRequest("Missing teamId");
+    }
+
+    const allowed = session.systemRole === "admin"
+      ? true
+      : await assertTeamMembership(env, teamId, session.userId);
+    if (!allowed) {
+      return unauthorized("Team access denied for current user");
+    }
+
+    const window = parseWindow(url);
+    if (!window) {
+      return badRequest("Invalid time window");
+    }
+    if (window.hasAnalytics && !isAnalyticsSqlConfigured(env)) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Analytics Engine SQL not configured for 0-90 day queries",
+          required: ["ANALYTICS_ACCOUNT_ID", "ANALYTICS_SQL_API_TOKEN"],
+        },
+        500,
+      );
+    }
+
+    const interval = parseInterval(url);
+    const data = await queryTeamDashboard(env, teamId, window, interval);
+    return jsonResponse({
+      ok: true,
+      teamId,
+      fromMs: window.fromMs,
+      toMs: window.toMs,
+      interval,
+      data,
+    });
   }
 
   const siteId = requireSiteId(url);
@@ -1273,8 +1577,6 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
     );
   }
   const filters = parseFilters(url);
-
-  const pathname = url.pathname;
 
   if (pathname === "/api/private/overview") {
     const overview = await queryOverview(env, siteId, window, filters);

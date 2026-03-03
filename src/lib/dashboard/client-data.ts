@@ -47,7 +47,7 @@ function emptyOverview(): OverviewData {
   };
 }
 
-function emptyTrend(interval: "hour" | "day"): TrendData {
+function emptyTrend(interval: TimeWindow["interval"]): TrendData {
   return {
     ok: true,
     interval,

@@ -8,8 +8,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { PageHeading } from "@/components/dashboard/page-heading";
-import { RangeLinks } from "@/components/dashboard/range-links";
-import { FilterControls } from "@/components/dashboard/filter-controls";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { TrendChart } from "@/components/dashboard/trend-chart";
 import { EngagementChart } from "@/components/dashboard/engagement-chart";
@@ -21,6 +19,7 @@ import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { durationFormat, numberFormat, percentFormat, shortDateTime } from "@/lib/dashboard/format";
 import { loadFilterOptions, loadOverviewBundle, type FilterOptions, type OverviewBundle } from "@/lib/dashboard/client-data";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
@@ -38,7 +37,7 @@ function toDeltaPercent(current: number, previous: number): number | null {
   return ((current - previous) / previous) * 100;
 }
 
-function emptyOverviewBundle(interval: "hour" | "day"): OverviewBundle {
+function emptyOverviewBundle(interval: TimeWindow["interval"]): OverviewBundle {
   return {
     overview: {
       ok: true,
@@ -185,18 +184,6 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
       <PageHeading
         title={messages.overview.title}
         subtitle={messages.overview.subtitle}
-        actions={(
-          <>
-            <RangeLinks pathname={pathname} activeRange={range} messages={messages} filters={filters} />
-            <FilterControls
-              pathname={pathname}
-              range={range}
-              filters={filters}
-              options={filterOptions}
-              messages={messages}
-            />
-          </>
-        )}
       />
 
       <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">

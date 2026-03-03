@@ -115,6 +115,7 @@ export interface TrendPoint {
   bucket: number;
   timestampMs: number;
   views: number;
+  visitors: number;
   sessions: number;
   totalDurationMs: number;
   source: "detail" | "archive" | "mixed";
@@ -122,7 +123,7 @@ export interface TrendPoint {
 
 export interface TrendData {
   ok: boolean;
-  interval: "hour" | "day";
+  interval: "minute" | "hour" | "day" | "week" | "month";
   data: TrendPoint[];
 }
 
@@ -292,7 +293,7 @@ export async function fetchPrivateTrend(params: {
   siteId: string;
   from: number;
   to: number;
-  interval?: "hour" | "day";
+  interval?: "minute" | "hour" | "day" | "week" | "month";
   filters?: QueryFilters;
 }): Promise<TrendData> {
   return fetchEdgeJson<TrendData>({

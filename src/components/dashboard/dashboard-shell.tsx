@@ -24,6 +24,8 @@ import type { AppMessages } from "@/lib/i18n/messages";
 import { PageTransition } from "@/components/page-transition";
 import { SidebarFooterMenus } from "@/components/dashboard/sidebar-footer-menus";
 import { TeamSelect } from "@/components/dashboard/team-select";
+import { DashboardQueryProvider } from "@/components/dashboard/dashboard-query-provider";
+import { DashboardHeaderControls } from "@/components/dashboard/dashboard-header-controls";
 import {
   Sidebar,
   SidebarContent,
@@ -362,12 +364,24 @@ export async function DashboardShell({
       </Sidebar>
 
       <SidebarInset>
-        <div className="sticky top-0 z-20 border-b bg-background/90 p-3 backdrop-blur">
-          <SidebarTrigger />
-        </div>
-        <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
-          <PageTransition>{children}</PageTransition>
-        </div>
+        <DashboardQueryProvider>
+          <div className="sticky top-0 z-20 border-b bg-background/90 p-3 backdrop-blur">
+            <div className="flex flex-wrap items-center gap-2">
+              <SidebarTrigger />
+              <div className="ml-auto">
+                <DashboardHeaderControls
+                  locale={locale}
+                  messages={messages}
+                  showControls={hasActiveSite || activeTeamSectionKey === "sites"}
+                  showFilterSheet={hasActiveSite}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
+            <PageTransition>{children}</PageTransition>
+          </div>
+        </DashboardQueryProvider>
       </SidebarInset>
     </SidebarProvider>
   );

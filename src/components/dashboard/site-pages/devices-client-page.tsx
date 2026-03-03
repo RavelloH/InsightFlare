@@ -8,8 +8,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { PageHeading } from "@/components/dashboard/page-heading";
-import { RangeLinks } from "@/components/dashboard/range-links";
-import { FilterControls } from "@/components/dashboard/filter-controls";
 import { DistributionDonutChart } from "@/components/dashboard/distribution-donut-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
@@ -79,18 +77,6 @@ export function DevicesClientPage({ locale, messages, siteId, pathname }: Device
       <PageHeading
         title={messages.devices.title}
         subtitle={messages.devices.subtitle}
-        actions={(
-          <>
-            <RangeLinks pathname={pathname} activeRange={range} messages={messages} filters={filters} />
-            <FilterControls
-              pathname={pathname}
-              range={range}
-              filters={filters}
-              options={filterOptions}
-              messages={messages}
-            />
-          </>
-        )}
       />
 
       <Card>

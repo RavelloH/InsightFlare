@@ -8,8 +8,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { PageHeading } from "@/components/dashboard/page-heading";
-import { RangeLinks } from "@/components/dashboard/range-links";
-import { FilterControls } from "@/components/dashboard/filter-controls";
 import { TopItemsChart } from "@/components/dashboard/top-items-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
@@ -88,18 +86,6 @@ export function EventsClientPage({ locale, messages, siteId, pathname }: EventsC
       <PageHeading
         title={messages.events.title}
         subtitle={messages.events.subtitle}
-        actions={(
-          <>
-            <RangeLinks pathname={pathname} activeRange={range} messages={messages} filters={filters} />
-            <FilterControls
-              pathname={pathname}
-              range={range}
-              filters={filters}
-              options={filterOptions}
-              messages={messages}
-            />
-          </>
-        )}
       />
 
       <Card>
