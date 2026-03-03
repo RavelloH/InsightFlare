@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -27,11 +28,6 @@ interface TeamManagementClientProps {
   locale: Locale;
   activeTeam: TeamData;
   activeTab: TeamTab;
-  settingsReturnTo: string;
-  membersReturnTo: string;
-  hasError: boolean;
-  errorMessage?: string;
-  showSaved: boolean;
 }
 
 interface TeamPageCopy {
@@ -41,10 +37,15 @@ interface TeamPageCopy {
     sites: string;
     members: string;
   };
-  alerts: {
-    saved: string;
-    saveFailed: string;
-    saveFailedFallback: string;
+  toasts: {
+    teamSaved: string;
+    teamSaveFailed: string;
+    memberAdded: string;
+    memberAddFailed: string;
+    memberRemoved: string;
+    memberRemoveFailed: string;
+    invalidTeamName: string;
+    invalidMemberIdentifier: string;
   };
   sites: {
     title: string;
@@ -65,6 +66,7 @@ interface TeamPageCopy {
     nameLabel: string;
     slugLabel: string;
     save: string;
+    saving: string;
   };
   members: {
     title: string;
@@ -72,7 +74,9 @@ interface TeamPageCopy {
     identifierLabel: string;
     identifierPlaceholder: string;
     add: string;
+    adding: string;
     remove: string;
+    removing: string;
     noMembers: string;
     columns: {
       name: string;
@@ -122,10 +126,15 @@ function getTeamPageCopy(locale: Locale): TeamPageCopy {
         sites: "站点",
         members: "成员",
       },
-      alerts: {
-        saved: "团队设置已保存。",
-        saveFailed: "保存失败",
-        saveFailedFallback: "请求未完成，请稍后重试。",
+      toasts: {
+        teamSaved: "团队设置已保存。",
+        teamSaveFailed: "团队设置保存失败。",
+        memberAdded: "成员已添加。",
+        memberAddFailed: "添加成员失败。",
+        memberRemoved: "成员已移除。",
+        memberRemoveFailed: "移除成员失败。",
+        invalidTeamName: "团队名称至少 2 个字符。",
+        invalidMemberIdentifier: "请输入有效的用户名或邮箱。",
       },
       sites: {
         title: "站点列表",
@@ -146,6 +155,7 @@ function getTeamPageCopy(locale: Locale): TeamPageCopy {
         nameLabel: "团队显示名",
         slugLabel: "团队 Slug",
         save: "保存设置",
+        saving: "保存中...",
       },
       members: {
         title: "成员管理",
@@ -153,7 +163,9 @@ function getTeamPageCopy(locale: Locale): TeamPageCopy {
         identifierLabel: "用户名或邮箱",
         identifierPlaceholder: "例如：alice 或 alice@example.com",
         add: "添加成员",
+        adding: "添加中...",
         remove: "移除",
+        removing: "移除中...",
         noMembers: "当前团队暂无成员。",
         columns: {
           name: "名称",
@@ -174,10 +186,15 @@ function getTeamPageCopy(locale: Locale): TeamPageCopy {
       sites: "Sites",
       members: "Members",
     },
-    alerts: {
-      saved: "Team settings saved.",
-      saveFailed: "Save failed",
-      saveFailedFallback: "Request did not complete. Please try again.",
+    toasts: {
+      teamSaved: "Team settings saved.",
+      teamSaveFailed: "Failed to save team settings.",
+      memberAdded: "Member added.",
+      memberAddFailed: "Failed to add member.",
+      memberRemoved: "Member removed.",
+      memberRemoveFailed: "Failed to remove member.",
+      invalidTeamName: "Team name must be at least 2 characters.",
+      invalidMemberIdentifier: "Please provide a valid username or email.",
     },
     sites: {
       title: "Sites",
@@ -198,6 +215,7 @@ function getTeamPageCopy(locale: Locale): TeamPageCopy {
       nameLabel: "Team Display Name",
       slugLabel: "Team Slug",
       save: "Save settings",
+      saving: "Saving...",
     },
     members: {
       title: "Members",
@@ -205,7 +223,9 @@ function getTeamPageCopy(locale: Locale): TeamPageCopy {
       identifierLabel: "Username or Email",
       identifierPlaceholder: "For example: alice or alice@example.com",
       add: "Add member",
+      adding: "Adding...",
       remove: "Remove",
+      removing: "Removing...",
       noMembers: "No members found for this team.",
       columns: {
         name: "Name",
@@ -244,20 +264,46 @@ async function fetchTeamMembers(teamId: string): Promise<MemberData[]> {
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
+interface ActionResponse<T> {
+  ok: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+}
+
+async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json()) as ActionResponse<T>;
+  if (!response.ok || !payload.ok || payload.data === undefined) {
+    throw new Error(payload.message || payload.error || "request_failed");
+  }
+  return payload.data;
+}
+
 export function TeamManagementClient({
   locale,
   activeTeam,
   activeTab,
-  settingsReturnTo,
-  membersReturnTo,
-  hasError,
-  errorMessage,
-  showSaved,
 }: TeamManagementClientProps) {
+  const router = useRouter();
   const copy = getTeamPageCopy(locale);
   const [sites, setSites] = useState<Array<SiteData & { slug: string }>>([]);
   const [members, setMembers] = useState<MemberData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentTeamName, setCurrentTeamName] = useState(activeTeam.name);
+  const [teamName, setTeamName] = useState(activeTeam.name);
+  const [teamSlug, setTeamSlug] = useState(activeTeam.slug);
+  const [memberIdentifier, setMemberIdentifier] = useState("");
+  const [savingTeam, setSavingTeam] = useState(false);
+  const [addingMember, setAddingMember] = useState(false);
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -284,6 +330,94 @@ export function TeamManagementClient({
     };
   }, [activeTeam.id, activeTab]);
 
+  useEffect(() => {
+    setCurrentTeamName(activeTeam.name);
+    setTeamName(activeTeam.name);
+    setTeamSlug(activeTeam.slug);
+    setMemberIdentifier("");
+  }, [activeTeam.id, activeTeam.name, activeTeam.slug]);
+
+  async function refreshMembers() {
+    const nextMembers = await fetchTeamMembers(activeTeam.id);
+    setMembers(nextMembers);
+  }
+
+  async function handleSaveTeamSettings() {
+    const name = teamName.trim();
+    const slug = teamSlug.trim();
+    if (name.length < 2) {
+      toast.error(copy.toasts.invalidTeamName);
+      return;
+    }
+
+    setSavingTeam(true);
+    try {
+      const updated = await postJson<TeamData>("/api/admin/team", {
+        teamId: activeTeam.id,
+        name,
+        slug: slug || undefined,
+      });
+      setCurrentTeamName(updated.name);
+      setTeamName(updated.name);
+      setTeamSlug(updated.slug);
+      toast.success(copy.toasts.teamSaved);
+
+      if (updated.slug !== activeTeam.slug) {
+        const tabQuery = activeTab === "settings" ? "?tab=settings" : "";
+        router.push(`/${locale}/app/${updated.slug}${tabQuery}`);
+      } else {
+        router.refresh();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : copy.toasts.teamSaveFailed;
+      toast.error(message || copy.toasts.teamSaveFailed);
+    } finally {
+      setSavingTeam(false);
+    }
+  }
+
+  async function handleAddMember() {
+    const identifier = memberIdentifier.trim();
+    if (identifier.length < 2) {
+      toast.error(copy.toasts.invalidMemberIdentifier);
+      return;
+    }
+
+    setAddingMember(true);
+    try {
+      await postJson("/api/admin/member", {
+        teamId: activeTeam.id,
+        identifier,
+      });
+      setMemberIdentifier("");
+      await refreshMembers();
+      toast.success(copy.toasts.memberAdded);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : copy.toasts.memberAddFailed;
+      toast.error(message || copy.toasts.memberAddFailed);
+    } finally {
+      setAddingMember(false);
+    }
+  }
+
+  async function handleRemoveMember(userId: string) {
+    setRemovingMemberId(userId);
+    try {
+      await postJson("/api/admin/member", {
+        intent: "remove",
+        teamId: activeTeam.id,
+        userId,
+      });
+      await refreshMembers();
+      toast.success(copy.toasts.memberRemoved);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : copy.toasts.memberRemoveFailed;
+      toast.error(message || copy.toasts.memberRemoveFailed);
+    } finally {
+      setRemovingMemberId(null);
+    }
+  }
+
   const memberCount = useMemo(
     () => (activeTab === "members" ? members.length : activeTeam.memberCount),
     [activeTab, members.length, activeTeam.memberCount],
@@ -308,7 +442,7 @@ export function TeamManagementClient({
   return (
     <div className="space-y-6">
       <PageHeading
-        title={`${copy.title} · ${activeTeam.name}`}
+        title={`${copy.title} · ${currentTeamName}`}
         subtitle={copy.subtitle}
         actions={(
           <>
@@ -321,19 +455,6 @@ export function TeamManagementClient({
           </>
         )}
       />
-
-      {hasError ? (
-        <Alert variant="destructive">
-          <AlertTitle>{copy.alerts.saveFailed}</AlertTitle>
-          <AlertDescription>{errorMessage || copy.alerts.saveFailedFallback}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {showSaved ? (
-        <Alert>
-          <AlertTitle>{copy.alerts.saved}</AlertTitle>
-        </Alert>
-      ) : null}
 
       <div className="space-y-4">
         <div className="space-y-1">
@@ -395,21 +516,36 @@ export function TeamManagementClient({
               <CardDescription>{copy.settings.subtitle}</CardDescription>
             </CardHeader>
             <CardContent>
-              <form action="/api/admin/team" method="post" className="space-y-4">
-                <input type="hidden" name="returnTo" value={settingsReturnTo} />
-                <input type="hidden" name="teamId" value={activeTeam.id} />
-
+              <form
+                className="space-y-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleSaveTeamSettings();
+                }}
+              >
                 <div className="space-y-2">
                   <Label htmlFor="team-name">{copy.settings.nameLabel}</Label>
-                  <Input id="team-name" name="name" defaultValue={activeTeam.name} minLength={2} required />
+                  <Input
+                    id="team-name"
+                    value={teamName}
+                    onChange={(event) => setTeamName(event.target.value)}
+                    minLength={2}
+                    required
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="team-slug">{copy.settings.slugLabel}</Label>
-                  <Input id="team-slug" name="slug" defaultValue={activeTeam.slug} />
+                  <Input
+                    id="team-slug"
+                    value={teamSlug}
+                    onChange={(event) => setTeamSlug(event.target.value)}
+                  />
                 </div>
 
-                <Button type="submit">{copy.settings.save}</Button>
+                <Button type="submit" disabled={savingTeam}>
+                  {savingTeam ? copy.settings.saving : copy.settings.save}
+                </Button>
               </form>
             </CardContent>
           </Card>
@@ -423,20 +559,27 @@ export function TeamManagementClient({
                 <CardDescription>{copy.members.subtitle}</CardDescription>
               </CardHeader>
               <CardContent>
-                <form action="/api/admin/member" method="post" className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                  <input type="hidden" name="returnTo" value={membersReturnTo} />
-                  <input type="hidden" name="teamId" value={activeTeam.id} />
+                <form
+                  className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleAddMember();
+                  }}
+                >
                   <div className="space-y-2">
                     <Label htmlFor="member-identifier">{copy.members.identifierLabel}</Label>
                     <Input
                       id="member-identifier"
-                      name="identifier"
+                      value={memberIdentifier}
+                      onChange={(event) => setMemberIdentifier(event.target.value)}
                       placeholder={copy.members.identifierPlaceholder}
                       minLength={2}
                       required
                     />
                   </div>
-                  <Button type="submit">{copy.members.add}</Button>
+                  <Button type="submit" disabled={addingMember}>
+                    {addingMember ? copy.members.adding : copy.members.add}
+                  </Button>
                 </form>
               </CardContent>
             </Card>
@@ -470,15 +613,19 @@ export function TeamManagementClient({
                           <TableCell>{member.role}</TableCell>
                           <TableCell>{shortDateTime(locale, member.joinedAt)}</TableCell>
                           <TableCell className="text-right">
-                            <form action="/api/admin/member" method="post" className="inline-flex">
-                              <input type="hidden" name="intent" value="remove" />
-                              <input type="hidden" name="returnTo" value={membersReturnTo} />
-                              <input type="hidden" name="teamId" value={activeTeam.id} />
-                              <input type="hidden" name="userId" value={member.userId} />
-                              <Button type="submit" variant="destructive" size="xs">
-                                {copy.members.remove}
-                              </Button>
-                            </form>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="xs"
+                              onClick={() => {
+                                void handleRemoveMember(member.userId);
+                              }}
+                              disabled={removingMemberId === member.userId}
+                            >
+                              {removingMemberId === member.userId
+                                ? copy.members.removing
+                                : copy.members.remove}
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))

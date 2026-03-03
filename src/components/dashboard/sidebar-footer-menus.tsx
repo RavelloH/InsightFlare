@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import {
   RiCheckLine,
   RiComputerLine,
@@ -10,6 +12,7 @@ import {
   RiSunLine,
 } from "@remixicon/react";
 import { useTheme } from "next-themes";
+import { toast } from "sonner";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import {
@@ -47,6 +50,9 @@ function getText(locale: Locale) {
       role: "角色",
       admin: "管理员",
       member: "成员",
+      logoutSuccess: "已退出登录。",
+      logoutFailed: "退出登录失败，请稍后重试。",
+      loggingOut: "退出中...",
     };
   }
 
@@ -58,6 +64,9 @@ function getText(locale: Locale) {
     role: "Role",
     admin: "Admin",
     member: "Member",
+    logoutSuccess: "Signed out.",
+    logoutFailed: "Failed to sign out. Please try again.",
+    loggingOut: "Signing out...",
   };
 }
 
@@ -84,7 +93,9 @@ export function SidebarFooterMenus({
   user,
   messages,
 }: SidebarFooterMenusProps) {
+  const router = useRouter();
   const { theme, resolvedTheme, setTheme } = useTheme();
+  const [loggingOut, setLoggingOut] = useState(false);
   const text = getText(locale);
   const themeValue =
     theme === "light" || theme === "dark" || theme === "system"
@@ -98,6 +109,30 @@ export function SidebarFooterMenus({
   const displayName = String(user.name || user.username);
   const roleLabel = user.systemRole === "admin" ? text.admin : text.member;
 
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error(text.logoutFailed);
+      toast.success(text.logoutSuccess);
+      router.push(`/${locale}/login`);
+      router.refresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : text.logoutFailed;
+      toast.error(message || text.logoutFailed);
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   return (
     <div className="m-0 grid w-full grid-cols-3 p-0 group-data-[collapsible=icon]:grid-cols-1">
       <DropdownMenu>
@@ -110,7 +145,7 @@ export function SidebarFooterMenus({
         >
           <ThemeIcon className="size-4" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent sideOffset={8} className="!w-44 !min-w-44">
+        <DropdownMenuContent side="right" align="start" sideOffset={8} className="!w-44 !min-w-44">
           <DropdownMenuLabel>{text.theme}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuRadioGroup
@@ -151,7 +186,7 @@ export function SidebarFooterMenus({
         >
           <RiGlobalLine className="size-4" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent sideOffset={8} className="!w-44 !min-w-44">
+        <DropdownMenuContent side="right" align="start" sideOffset={8} className="!w-44 !min-w-44">
           <DropdownMenuLabel>{text.language}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
@@ -182,7 +217,7 @@ export function SidebarFooterMenus({
             {initial}
           </span>
         </DropdownMenuTrigger>
-        <DropdownMenuContent sideOffset={8} className="!w-64 !min-w-64">
+        <DropdownMenuContent side="right" align="end" sideOffset={8} className="!w-64 !min-w-64">
           <DropdownMenuLabel className="space-y-1">
             <div className="text-sm font-semibold text-foreground">
               {displayName}
@@ -199,14 +234,17 @@ export function SidebarFooterMenus({
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <form action="/api/auth/logout" method="post">
-            <DropdownMenuItem asChild variant="destructive">
-              <button type="submit" className="w-full cursor-pointer">
-                <RiLogoutBoxRLine />
-                <span>{messages.actions.logout}</span>
-              </button>
-            </DropdownMenuItem>
-          </form>
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={loggingOut}
+            onSelect={(event) => {
+              event.preventDefault();
+              void handleLogout();
+            }}
+          >
+            <RiLogoutBoxRLine />
+            <span>{loggingOut ? text.loggingOut : messages.actions.logout}</span>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

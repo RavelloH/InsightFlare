@@ -1,0 +1,129 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import type { Locale } from "@/lib/i18n/config";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+interface LoginFormProps {
+  locale: Locale;
+  nextPath: string;
+  usernameLabel: string;
+  passwordLabel: string;
+  signInLabel: string;
+  invalidCredentialsLabel: string;
+}
+
+interface LoginResponse {
+  ok: boolean;
+  data?: {
+    next: string;
+  };
+  error?: string;
+  message?: string;
+}
+
+function copy(locale: Locale) {
+  if (locale === "zh") {
+    return {
+      signingIn: "登录中...",
+      invalid: "用户名或密码错误。",
+      failed: "登录失败，请稍后重试。",
+    };
+  }
+
+  return {
+    signingIn: "Signing in...",
+    invalid: "Invalid username or password.",
+    failed: "Sign in failed. Please try again.",
+  };
+}
+
+export function LoginForm({
+  locale,
+  nextPath,
+  usernameLabel,
+  passwordLabel,
+  signInLabel,
+  invalidCredentialsLabel,
+}: LoginFormProps) {
+  const router = useRouter();
+  const t = copy(locale);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [pending, setPending] = useState(false);
+
+  async function handleLogin() {
+    if (pending) return;
+    setPending(true);
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          username,
+          password,
+          next: nextPath,
+        }),
+      });
+      const payload = (await response.json()) as LoginResponse;
+      if (!response.ok || !payload.ok || !payload.data) {
+        const message = payload.error === "invalid_credentials"
+          ? invalidCredentialsLabel
+          : payload.message || t.failed;
+        throw new Error(message);
+      }
+      router.push(payload.data.next || `/${locale}/app`);
+      router.refresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t.failed;
+      toast.error(message || t.invalid);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void handleLogin();
+      }}
+    >
+      <div className="space-y-2">
+        <Label htmlFor="username">{usernameLabel}</Label>
+        <Input
+          id="username"
+          name="username"
+          type="text"
+          autoComplete="username"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="password">{passwordLabel}</Label>
+        <Input
+          id="password"
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+        />
+      </div>
+      <Button type="submit" className="w-full" disabled={pending}>
+        {pending ? t.signingIn : signInLabel}
+      </Button>
+    </form>
+  );
+}

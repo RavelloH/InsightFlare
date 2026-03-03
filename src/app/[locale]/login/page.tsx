@@ -7,9 +7,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { LoginForm } from "@/components/auth/login-form";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
@@ -18,7 +17,6 @@ import { isAuthenticated } from "@/lib/auth";
 interface LoginPageProps {
   params: Promise<{ locale: string }>;
   searchParams: Promise<{
-    error?: string;
     next?: string;
   }>;
 }
@@ -52,7 +50,6 @@ export default async function LoginPage({
   }
 
   const nextPath = safeNextPath(search.next, resolvedLocale);
-  const showError = search.error === "invalid_credentials";
 
   return (
     <main className="grid min-h-svh place-items-center p-4">
@@ -93,37 +90,14 @@ export default async function LoginPage({
           <CardDescription>{t.login.subtitle}</CardDescription>
         </CardHeader>
         <CardContent className="pb-8">
-          <form action="/api/auth/login" method="post" className="space-y-4">
-            <input type="hidden" name="next" value={nextPath} />
-            <div className="space-y-2">
-              <Label htmlFor="username">{t.login.username}</Label>
-              <Input
-                id="username"
-                name="username"
-                type="text"
-                autoComplete="username"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">{t.login.password}</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-              />
-            </div>
-            {showError ? (
-              <p className="text-xs text-destructive">
-                {t.login.invalidCredentials}
-              </p>
-            ) : null}
-            <Button type="submit" className="w-full">
-              {t.login.signIn}
-            </Button>
-          </form>
+          <LoginForm
+            locale={resolvedLocale}
+            nextPath={nextPath}
+            usernameLabel={t.login.username}
+            passwordLabel={t.login.password}
+            signInLabel={t.login.signIn}
+            invalidCredentialsLabel={t.login.invalidCredentials}
+          />
         </CardContent>
       </Card>
     </main>

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { RiAddLine } from "@remixicon/react";
+import { toast } from "sonner";
 import type { TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import { Button } from "@/components/ui/button";
@@ -60,6 +61,7 @@ function getCopy(locale: Locale) {
       create: "创建",
       creating: "创建中...",
       invalidTeamName: "团队名称至少 2 个字符。",
+      createSuccess: "团队已创建。",
       createFailed: "创建失败，请稍后重试。",
       createHint: "新建团队",
     };
@@ -77,6 +79,7 @@ function getCopy(locale: Locale) {
     create: "Create",
     creating: "Creating...",
     invalidTeamName: "Team name must be at least 2 characters.",
+    createSuccess: "Team created.",
     createFailed: "Failed to create team. Please try again.",
     createHint: "Create team",
   };
@@ -131,11 +134,13 @@ export function TeamSelect({ locale, options, activeTeamSlug }: TeamSelectProps)
       setOpenCreateDialog(false);
       setTeamName("");
       setTeamSlug("");
+      toast.success(copy.createSuccess);
       router.push(`/${locale}/app/${payload.data.slug}`);
       router.refresh();
     } catch (error) {
       const message = error instanceof Error ? error.message : copy.createFailed;
       setSubmitError(message || copy.createFailed);
+      toast.error(message || copy.createFailed);
     } finally {
       setSubmitting(false);
     }

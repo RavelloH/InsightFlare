@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LogoutActionButton } from "@/components/auth/logout-action-button";
 import { resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 import { buildSitePath, getDashboardProfile, getDefaultTeamSite } from "@/lib/dashboard/server";
@@ -33,11 +34,7 @@ export default async function AppRootPage({ params }: AppRootPageProps) {
           <Button asChild>
             <a href={`/${resolvedLocale}/login`}>{t.login.title}</a>
           </Button>
-          <form action="/api/auth/logout" method="post">
-            <Button type="submit" variant="outline">
-              {t.actions.logout}
-            </Button>
-          </form>
+          <LogoutActionButton locale={resolvedLocale} label={t.actions.logout} />
         </CardContent>
       </Card>
     </main>

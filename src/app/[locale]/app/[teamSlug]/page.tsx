@@ -13,9 +13,6 @@ interface TeamRootPageProps {
   }>;
   searchParams: Promise<{
     tab?: string | string[];
-    teamId?: string | string[];
-    error?: string | string[];
-    message?: string | string[];
   }>;
 }
 
@@ -41,7 +38,6 @@ function buildTeamTabPath(locale: Locale, teamSlug: string, tab: TeamTab): strin
   if (tab === "sites") return base;
   return `${base}?tab=${tab}`;
 }
-
 function teamTabLabel(locale: Locale, tab: TeamTab): string {
   if (locale === "zh") {
     if (tab === "sites") return "站点";
@@ -79,11 +75,6 @@ export default async function TeamRootPage({ params, searchParams }: TeamRootPag
 
   const requestHeaders = await headers();
   const pathname = requestHeaders.get("x-pathname") || `/${resolvedLocale}/app/${activeTeam.slug}`;
-  const hasError = Boolean(pickFirst(query.error));
-  const errorMessage = pickFirst(query.message);
-  const showSaved = !hasError && pickFirst(query.teamId) === activeTeam.id;
-  const settingsReturnTo = buildTeamTabPath(resolvedLocale, activeTeam.slug, "settings");
-  const membersReturnTo = buildTeamTabPath(resolvedLocale, activeTeam.slug, "members");
 
   return (
     <DashboardShell
@@ -101,11 +92,6 @@ export default async function TeamRootPage({ params, searchParams }: TeamRootPag
         locale={resolvedLocale}
         activeTeam={activeTeam}
         activeTab={activeTab}
-        settingsReturnTo={settingsReturnTo}
-        membersReturnTo={membersReturnTo}
-        hasError={hasError}
-        errorMessage={errorMessage}
-        showSaved={showSaved}
       />
     </DashboardShell>
   );
