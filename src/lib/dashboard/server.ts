@@ -54,6 +54,7 @@ export interface DashboardContext {
   user: {
     id: string;
     username: string;
+    email: string;
     name: string;
     systemRole: "admin" | "user";
   };

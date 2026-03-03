@@ -90,6 +90,7 @@ export default async function TeamRootPage({ params, searchParams }: TeamRootPag
       locale={resolvedLocale}
       pathname={pathname}
       messages={messages}
+      user={profile.user}
       teams={profile.teams}
       activeTeamSlug={activeTeam.slug}
       sites={[]}

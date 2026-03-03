@@ -20,9 +20,8 @@ import type { SiteWithSlug } from "@/lib/dashboard/server";
 import { buildSitePath } from "@/lib/dashboard/server";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { SidebarFooterMenus } from "@/components/dashboard/sidebar-footer-menus";
 import { TeamSelect } from "@/components/dashboard/team-select";
-import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Sidebar,
   SidebarContent,
@@ -80,6 +79,12 @@ interface DashboardShellProps {
   locale: Locale;
   pathname: string;
   messages: AppMessages;
+  user: {
+    username: string;
+    name: string;
+    email: string;
+    systemRole: "admin" | "user";
+  };
   teams: TeamData[];
   activeTeamSlug: string;
   sites: SiteWithSlug[];
@@ -103,6 +108,7 @@ export function DashboardShell({
   locale,
   pathname,
   messages,
+  user,
   teams,
   activeTeamSlug,
   sites,
@@ -153,19 +159,24 @@ export function DashboardShell({
   return (
     <SidebarProvider>
       <Sidebar variant="inset" collapsible="icon">
-        <SidebarHeader>
+        <SidebarHeader className="group-data-[collapsible=icon]:hidden">
           <div className="py-2">
             <p className="text-xl text-primary flex gap-2 items-center justify-center md:justify-start">
-              <span>{messages.appName}</span>
-              <span className="text-muted-foreground">v1</span>
+              <span className="group-data-[collapsible=icon]:hidden">
+                {messages.appName}
+              </span>
+              <span className="text-muted-foreground group-data-[collapsible=icon]:hidden">
+                v1
+              </span>
             </p>
           </div>
         </SidebarHeader>
 
         <SidebarContent>
-          <SidebarGroup>
+          <SidebarGroup className="group-data-[collapsible=icon]:hidden">
             <SidebarGroupContent>
               <TeamSelect
+                locale={locale}
                 options={teamOptions}
                 activeTeamSlug={activeTeamSlug}
               />
@@ -174,7 +185,7 @@ export function DashboardShell({
 
           {hasTeamSections ? (
             <>
-              <SidebarSeparator />
+              <SidebarSeparator className="mb-2 group-data-[collapsible=icon]:hidden" />
 
               <SidebarGroup>
                 <SidebarGroupLabel>{messages.common.team}</SidebarGroupLabel>
@@ -200,19 +211,24 @@ export function DashboardShell({
             </>
           ) : (
             <>
-              <SidebarMenu className="my-2">
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild>
-                    <Link href={teamRootHref}>
-                      <RiArrowLeftLine />
-                      <span>{backToTeamLabel}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-              <SidebarSeparator />
-
               <SidebarGroup>
+                <SidebarGroupContent>
+                  <SidebarMenu className="mb-2 group-data-[collapsible=icon]:mb-0">
+                    <SidebarMenuItem>
+                      <SidebarMenuButton asChild>
+                        <Link href={teamRootHref}>
+                          <RiArrowLeftLine />
+                          <span>{backToTeamLabel}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+
+              <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
+
+              <SidebarGroup className="group-data-[collapsible=icon]:hidden">
                 <SidebarGroupLabel>{messages.common.site}</SidebarGroupLabel>
                 <SidebarGroupContent>
                   <SidebarMenu>
@@ -245,7 +261,7 @@ export function DashboardShell({
 
               {sections.length > 0 ? (
                 <>
-                  <SidebarSeparator />
+                  <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
 
                   <SidebarGroup>
                     <SidebarGroupLabel>Analytics</SidebarGroupLabel>
@@ -261,7 +277,11 @@ export function DashboardShell({
                           );
                           return (
                             <SidebarMenuItem key={item.key}>
-                              <SidebarMenuButton asChild isActive={isActive}>
+                              <SidebarMenuButton
+                                asChild
+                                isActive={isActive}
+                                tooltip={messages.navigation[item.key]}
+                              >
                                 <Link href={item.href}>
                                   <AnalyticsIcon />
                                   <span>{messages.navigation[item.key]}</span>
@@ -279,40 +299,14 @@ export function DashboardShell({
           )}
         </SidebarContent>
 
-        <SidebarFooter>
-          <div className="p-2 pb-0">
-            <ThemeToggle
-              lightLabel={messages.actions.switchToLight}
-              darkLabel={messages.actions.switchToDark}
-              className="w-full"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2 p-2">
-            <Button
-              variant={locale === "en" ? "default" : "outline"}
-              size="sm"
-              asChild
-            >
-              <Link href={switchToEn}>{messages.actions.switchToEnglish}</Link>
-            </Button>
-            <Button
-              variant={locale === "zh" ? "default" : "outline"}
-              size="sm"
-              asChild
-            >
-              <Link href={switchToZh}>{messages.actions.switchToChinese}</Link>
-            </Button>
-          </div>
-          <form action="/api/auth/logout" method="post" className="p-2 pt-0">
-            <Button
-              type="submit"
-              variant="outline"
-              size="sm"
-              className="w-full"
-            >
-              {messages.actions.logout}
-            </Button>
-          </form>
+        <SidebarFooter className="!m-0 !gap-0 !p-0">
+          <SidebarFooterMenus
+            locale={locale}
+            user={user}
+            switchToEn={switchToEn}
+            switchToZh={switchToZh}
+            messages={messages}
+          />
         </SidebarFooter>
       </Sidebar>
 

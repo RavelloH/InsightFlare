@@ -92,7 +92,7 @@ export default async function LoginPage({
 
           <CardDescription>{t.login.subtitle}</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pb-8">
           <form action="/api/auth/login" method="post" className="space-y-4">
             <input type="hidden" name="next" value={nextPath} />
             <div className="space-y-2">

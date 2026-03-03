@@ -34,6 +34,7 @@ export default async function SiteLayout({ children, params }: SiteLayoutProps) 
       locale={resolvedLocale}
       pathname={pathname}
       messages={t}
+      user={context.user}
       teams={context.teams}
       activeTeamSlug={context.activeTeam.slug}
       sites={context.sites}
