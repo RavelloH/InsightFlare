@@ -43,20 +43,62 @@ export function percentFormat(locale: Locale, value: number): string {
   }).format(value);
 }
 
-export function shortDateTime(locale: Locale, value: number): string {
-  return new Intl.DateTimeFormat(intlLocale(locale), {
+type DateValue = number | string | Date | null | undefined;
+
+function toValidDate(value: DateValue): Date | null {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value : null;
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date : null;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric)) {
+      if (numeric <= 0) return null;
+      const date = new Date(numeric);
+      return Number.isFinite(date.getTime()) ? date : null;
+    }
+
+    const date = new Date(trimmed);
+    return Number.isFinite(date.getTime()) ? date : null;
+  }
+
+  return null;
+}
+
+function formatDate(
+  locale: Locale,
+  value: DateValue,
+  options: Intl.DateTimeFormatOptions,
+): string {
+  const date = toValidDate(value);
+  if (!date) return "--";
+
+  return new Intl.DateTimeFormat(intlLocale(locale), options).format(date);
+}
+
+export function shortDateTime(locale: Locale, value: DateValue): string {
+  return formatDate(locale, value, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(value));
+  });
 }
 
-export function shortDate(locale: Locale, value: number): string {
-  return new Intl.DateTimeFormat(intlLocale(locale), {
+export function shortDate(locale: Locale, value: DateValue): string {
+  return formatDate(locale, value, {
     month: "short",
     day: "numeric",
-  }).format(new Date(value));
+  });
 }
 
 export function durationFormat(locale: Locale, ms: number): string {
