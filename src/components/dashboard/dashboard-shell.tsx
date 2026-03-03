@@ -21,6 +21,7 @@ import type { SiteWithSlug } from "@/lib/dashboard/server";
 import { buildSitePath } from "@/lib/dashboard/server";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { PageTransition } from "@/components/page-transition";
 import { SidebarFooterMenus } from "@/components/dashboard/sidebar-footer-menus";
 import { TeamSelect } from "@/components/dashboard/team-select";
 import {
@@ -365,7 +366,7 @@ export async function DashboardShell({
           <SidebarTrigger />
         </div>
         <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
-          {children}
+          <PageTransition>{children}</PageTransition>
         </div>
       </SidebarInset>
     </SidebarProvider>

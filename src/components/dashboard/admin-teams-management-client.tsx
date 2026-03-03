@@ -201,7 +201,7 @@ export function AdminTeamsManagementClient({
                     <TableCell>{shortDateTime(locale, team.createdAt)}</TableCell>
                     <TableCell className="text-right">
                       <Button asChild size="xs" variant="outline">
-                        <Link href={`/${locale}/app/${team.slug}?tab=settings`}>
+                        <Link href={`/${locale}/app/${team.slug}/settings`}>
                           {t.open}
                         </Link>
                       </Button>

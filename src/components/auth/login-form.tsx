@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { Locale } from "@/lib/i18n/config";
+import { navigateWithTransition } from "@/lib/page-transition";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,8 +67,7 @@ export function LoginForm({
           : payload.message || failedLabel;
         throw new Error(message);
       }
-      router.push(payload.data.next || `/${locale}/app`);
-      router.refresh();
+      navigateWithTransition(router, payload.data.next || `/${locale}/app`);
     } catch (error) {
       const message = error instanceof Error ? error.message : failedLabel;
       toast.error(message || failedLabel);

@@ -1,40 +1,28 @@
 import { headers } from "next/headers";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { TeamManagementClient } from "@/components/dashboard/team-management-client";
 import { getDashboardProfile } from "@/lib/dashboard/server";
-import { buildManagementSections, buildTeamSections } from "@/lib/dashboard/team-sections";
+import {
+  buildManagementSections,
+  buildTeamSections,
+} from "@/lib/dashboard/team-sections";
 import { resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 
-interface TeamRootPageProps {
+interface TeamMembersPageProps {
   params: Promise<{
     locale: string;
     teamSlug: string;
   }>;
-  searchParams: Promise<{
-    tab?: string | string[];
-  }>;
 }
 
-function pickFirst(value: string | string[] | undefined): string | undefined {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) && value.length > 0) return value[0];
-  return undefined;
-}
-
-export default async function TeamRootPage({ params, searchParams }: TeamRootPageProps) {
+export default async function TeamMembersPage({ params }: TeamMembersPageProps) {
   const { locale, teamSlug } = await params;
-  const query = await searchParams;
   const resolvedLocale = resolveLocale(locale);
   const messages = getMessages(resolvedLocale);
-  const legacyTab = pickFirst(query.tab);
-
-  if (legacyTab === "settings" || legacyTab === "members") {
-    redirect(`/${resolvedLocale}/app/${teamSlug}/${legacyTab}`);
-  }
-
   const profile = await getDashboardProfile();
+
   if (!profile) {
     notFound();
   }
@@ -51,7 +39,9 @@ export default async function TeamRootPage({ params, searchParams }: TeamRootPag
       : undefined;
 
   const requestHeaders = await headers();
-  const pathname = requestHeaders.get("x-pathname") || `/${resolvedLocale}/app/${activeTeam.slug}`;
+  const pathname =
+    requestHeaders.get("x-pathname") ||
+    `/${resolvedLocale}/app/${activeTeam.slug}/members`;
 
   return (
     <DashboardShell
@@ -63,15 +53,16 @@ export default async function TeamRootPage({ params, searchParams }: TeamRootPag
       activeTeamSlug={activeTeam.slug}
       sites={[]}
       teamSections={teamSections}
-      activeTeamSectionKey="sites"
+      activeTeamSectionKey="members"
       managementSections={managementSections}
     >
       <TeamManagementClient
         locale={resolvedLocale}
         messages={messages}
         activeTeam={activeTeam}
-        activeTab="sites"
+        activeTab="members"
       />
     </DashboardShell>
   );
 }
+

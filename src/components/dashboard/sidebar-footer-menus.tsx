@@ -15,6 +15,7 @@ import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { navigateWithTransition } from "@/lib/page-transition";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -93,8 +94,7 @@ export function SidebarFooterMenus({
       });
       if (!response.ok) throw new Error(messages.sidebarFooter.logoutFailed);
       toast.success(messages.sidebarFooter.logoutSuccess);
-      router.push(`/${locale}/login`);
-      router.refresh();
+      navigateWithTransition(router, `/${locale}/login`);
     } catch (error) {
       const message =
         error instanceof Error

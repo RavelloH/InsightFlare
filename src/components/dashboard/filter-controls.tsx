@@ -3,6 +3,7 @@
 import { useMemo, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { navigateWithTransition } from "@/lib/page-transition";
 import {
   Select,
   SelectContent,
@@ -81,7 +82,10 @@ export function FilterControls({
     else params.delete("eventType");
 
     startTransition(() => {
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      navigateWithTransition(router, `${pathname}?${params.toString()}`, {
+        replace: true,
+        scroll: false,
+      });
     });
   };
 

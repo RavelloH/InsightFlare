@@ -31,7 +31,7 @@ function managementLabel(messages: AppMessages, key: ManagementSectionKey): stri
 function buildTeamTabPath(locale: Locale, teamSlug: string, tab: TeamTab): string {
   const base = `/${locale}/app/${teamSlug}`;
   if (tab === "sites") return base;
-  return `${base}?tab=${tab}`;
+  return `${base}/${tab}`;
 }
 
 function buildManagementPath(locale: Locale, teamSlug: string, key: ManagementSectionKey): string {

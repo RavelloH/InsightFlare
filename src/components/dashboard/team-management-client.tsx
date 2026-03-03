@@ -28,6 +28,7 @@ import { shortDateTime } from "@/lib/dashboard/format";
 import type { MemberData, SiteData, TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { navigateWithTransition } from "@/lib/page-transition";
 
 type TeamTab = "sites" | "settings" | "members";
 
@@ -203,7 +204,7 @@ export function TeamManagementClient({
       toast.success(copy.toasts.teamSaved);
 
       if (updated.slug !== activeTeam.slug) {
-        router.push(`/${locale}/app/${updated.slug}`);
+        navigateWithTransition(router, `/${locale}/app/${updated.slug}`);
       } else {
         router.refresh();
       }

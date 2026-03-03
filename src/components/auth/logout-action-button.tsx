@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { Locale } from "@/lib/i18n/config";
+import { navigateWithTransition } from "@/lib/page-transition";
 import { Button } from "@/components/ui/button";
 
 interface LogoutActionButtonProps {
@@ -38,8 +39,7 @@ export function LogoutActionButton({
       });
       if (!response.ok) throw new Error(failedLabel);
       toast.success(successLabel);
-      router.push(`/${locale}/login`);
-      router.refresh();
+      navigateWithTransition(router, `/${locale}/login`);
     } catch (error) {
       const message = error instanceof Error ? error.message : failedLabel;
       toast.error(message || failedLabel);

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { navigateWithTransition } from "@/lib/page-transition";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -104,8 +105,7 @@ export function TeamSelect({
       setTeamName("");
       setTeamSlug("");
       toast.success(copy.createSuccess);
-      router.push(`/${locale}/app/${payload.data.slug}`);
-      router.refresh();
+      navigateWithTransition(router, `/${locale}/app/${payload.data.slug}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : copy.createFailed;
       setSubmitError(message || copy.createFailed);
@@ -214,7 +214,7 @@ export function TeamSelect({
           }
           const next = options.find((option) => option.slug === value);
           if (!next || next.slug === selectedSlug) return;
-          router.push(next.href);
+          navigateWithTransition(router, next.href);
         }}
       >
         <SelectTrigger className="w-full">
