@@ -13,7 +13,7 @@ SESSION_WINDOW_MINUTES = "30" # 会话窗口大小，单位：分钟
 SCRIPT_CACHE_TTL_SECONDS = "3600" # 脚本缓存时间，单位：秒
 PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm" # Parquet WASM 模块 URL
 ANALYTICS_ACCOUNT_ID = "442fe5198bff93bdf60d4223d9618033" # 你的 Cloudflare Account ID
-INSIGHTFLARE_EDGE_URL="https://insight.ravelloh.com" # InsightFlare 前端 URL
+INSIGHTFLARE_EDGE_URL="https://insight.ravelloh.com" # InsightFlare 服务基准 URL（可指向当前后端域名）
 
 [triggers]
 crons = ["0 * * * *"]
