@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { TeamManagementClient } from "@/components/dashboard/team-management-client";
 import { getDashboardProfile } from "@/lib/dashboard/server";
-import { resolveLocale, type Locale } from "@/lib/i18n/config";
+import { buildManagementSections, buildTeamSections } from "@/lib/dashboard/team-sections";
+import { resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 
 interface TeamRootPageProps {
@@ -16,38 +17,17 @@ interface TeamRootPageProps {
   }>;
 }
 
-type TeamTab = "sites" | "settings" | "members";
-
-const TEAM_TABS: readonly TeamTab[] = ["sites", "settings", "members"] as const;
-
 function pickFirst(value: string | string[] | undefined): string | undefined {
   if (typeof value === "string") return value;
   if (Array.isArray(value) && value.length > 0) return value[0];
   return undefined;
 }
 
-function resolveTeamTab(value: string | string[] | undefined): TeamTab {
+function resolveTeamTab(value: string | string[] | undefined): "sites" | "settings" | "members" {
   const first = pickFirst(value);
   if (!first) return "sites";
-  if (TEAM_TABS.includes(first as TeamTab)) return first as TeamTab;
+  if (first === "sites" || first === "settings" || first === "members") return first;
   return "sites";
-}
-
-function buildTeamTabPath(locale: Locale, teamSlug: string, tab: TeamTab): string {
-  const base = `/${locale}/app/${teamSlug}`;
-  if (tab === "sites") return base;
-  return `${base}?tab=${tab}`;
-}
-function teamTabLabel(locale: Locale, tab: TeamTab): string {
-  if (locale === "zh") {
-    if (tab === "sites") return "站点";
-    if (tab === "settings") return "设置";
-    return "成员";
-  }
-
-  if (tab === "sites") return "Sites";
-  if (tab === "settings") return "Settings";
-  return "Members";
 }
 
 export default async function TeamRootPage({ params, searchParams }: TeamRootPageProps) {
@@ -67,11 +47,11 @@ export default async function TeamRootPage({ params, searchParams }: TeamRootPag
     notFound();
   }
 
-  const teamSections = TEAM_TABS.map((tab) => ({
-    key: tab,
-    label: teamTabLabel(resolvedLocale, tab),
-    href: buildTeamTabPath(resolvedLocale, activeTeam.slug, tab),
-  }));
+  const teamSections = buildTeamSections(resolvedLocale, activeTeam.slug, messages);
+  const managementSections =
+    profile.user.systemRole === "admin"
+      ? buildManagementSections(resolvedLocale, activeTeam.slug, messages)
+      : undefined;
 
   const requestHeaders = await headers();
   const pathname = requestHeaders.get("x-pathname") || `/${resolvedLocale}/app/${activeTeam.slug}`;
@@ -87,9 +67,11 @@ export default async function TeamRootPage({ params, searchParams }: TeamRootPag
       sites={[]}
       teamSections={teamSections}
       activeTeamSectionKey={activeTab}
+      managementSections={managementSections}
     >
       <TeamManagementClient
         locale={resolvedLocale}
+        messages={messages}
         activeTeam={activeTeam}
         activeTab={activeTab}
       />

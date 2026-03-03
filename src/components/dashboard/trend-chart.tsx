@@ -3,6 +3,7 @@
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import type { Locale } from "@/lib/i18n/config";
+import { intlLocale } from "@/lib/dashboard/format";
 
 interface TrendChartPoint {
   timestampMs: number;
@@ -28,12 +29,8 @@ const config = {
   },
 } satisfies ChartConfig;
 
-function localeCode(locale: Locale): string {
-  return locale === "zh" ? "zh-CN" : "en-US";
-}
-
 export function TrendChart({ locale, data, viewsLabel, sessionsLabel }: TrendChartProps) {
-  const formatter = new Intl.DateTimeFormat(localeCode(locale), {
+  const formatter = new Intl.DateTimeFormat(intlLocale(locale), {
     month: "short",
     day: "numeric",
   });

@@ -32,6 +32,15 @@ common:
   lastUpdated: Last updated
   site: Site
   team: Team
+  management: Management
+  backToTeam: Back to Team
+  system: System
+  account: Account
+  theme: Theme
+  language: Language
+  role: Role
+  admin: Admin
+  user: User
 ranges:
   title: Time Range
   last24h: 24h
@@ -106,3 +115,161 @@ actions:
   switchToChinese: 中文
   switchToLight: Light
   switchToDark: Dark
+teamSelect:
+  groupLabel: Team
+  createHint: Create team
+  createTitle: Create Team
+  createDescription: You will be switched to the new team after creation.
+  nameLabel: Team Name
+  namePlaceholder: e.g. Growth Team
+  slugLabel: Team Slug (optional)
+  slugPlaceholder: e.g. growth-team
+  create: Create
+  creating: Creating...
+  cancel: Cancel
+  invalidName: Team name must be at least 2 characters.
+  createFailed: Failed to create team. Please try again.
+  createSuccess: Team created.
+teamManagement:
+  title: Team Management
+  subtitle: Manage sites, base settings, and member access for this team.
+  stats:
+    sites: Sites
+    members: Members
+  toasts:
+    teamSaved: Team settings saved.
+    teamSaveFailed: Failed to save team settings.
+    memberAdded: Member added.
+    memberAddFailed: Failed to add member.
+    memberRemoved: Member removed.
+    memberRemoveFailed: Failed to remove member.
+    invalidTeamName: Team name must be at least 2 characters.
+    invalidMemberIdentifier: Please provide a valid username or email.
+  sites:
+    title: Sites
+    subtitle: View every site under this team and open each analytics dashboard.
+    noSites: No site is available under this team.
+    openAnalytics: Open analytics
+    columns:
+      name: Display Name
+      domain: Domain
+      slug: Slug
+      createdAt: Created
+      action: Action
+  settings:
+    title: Settings
+    subtitle: Update this team's display name and slug.
+    nameLabel: Team Display Name
+    slugLabel: Team Slug
+    save: Save settings
+    saving: Saving...
+  members:
+    title: Members
+    subtitle: Add members or remove existing members.
+    identifierLabel: Username or Email
+    identifierPlaceholder: "For example: alice or alice@example.com"
+    add: Add member
+    adding: Adding...
+    remove: Remove
+    removing: Removing...
+    noMembers: No members found for this team.
+    columns:
+      name: Name
+      username: Username
+      email: Email
+      role: Role
+      joinedAt: Joined
+      action: Action
+managementNav:
+  users: User Management
+  sites: Site Management
+  teams: Team Management
+adminUsers:
+  title: User Management
+  subtitle: Only system admins can create and manage dashboard users.
+  createTitle: Create User
+  createSubtitle: The new account can sign in immediately.
+  username: Username
+  email: Email
+  name: Display Name (optional)
+  password: Password (min 8 chars)
+  role: System Role
+  create: Create User
+  creating: Creating...
+  listTitle: Users
+  listSubtitle: All users in the system.
+  noData: No users found.
+  loadFailed: Failed to load users.
+  createSuccess: User created.
+  createFailed: Failed to create user.
+  invalidInput: Please provide valid username, email and password.
+  columns:
+    name: Name
+    username: Username
+    email: Email
+    role: Role
+    teams: Teams
+    created: Created
+adminSites:
+  title: Site Management
+  subtitle: Only system admins can manage sites and ownership.
+  team: Team
+  createTitle: Create Site
+  createSubtitle: The new site can be opened immediately.
+  name: Site Name
+  domain: Domain
+  publicSlug: Public Slug (optional)
+  create: Create Site
+  creating: Creating...
+  listTitle: Sites
+  listSubtitle: All sites under the selected team.
+  noData: No site found.
+  loadFailed: Failed to load sites.
+  createSuccess: Site created.
+  createFailed: Failed to create site.
+  invalidInput: Please provide valid site name and domain.
+  open: Open analytics
+  columns:
+    name: Name
+    domain: Domain
+    slug: Slug
+    created: Created
+    action: Action
+adminTeams:
+  title: Team Management
+  subtitle: Only system admins can create and view all teams.
+  createTitle: Create Team
+  createSubtitle: After creation, you can manage settings and members.
+  name: Team Name
+  slug: Team Slug (optional)
+  create: Create Team
+  creating: Creating...
+  listTitle: Teams
+  listSubtitle: All teams in the system.
+  noData: No teams found.
+  loadFailed: Failed to load teams.
+  createSuccess: Team created.
+  createFailed: Failed to create team.
+  invalidInput: Team name must be at least 2 characters.
+  open: Open team
+  columns:
+    name: Name
+    slug: Slug
+    sites: Sites
+    members: Members
+    created: Created
+    action: Action
+loginForm:
+  signingIn: Signing in...
+  failed: Sign in failed. Please try again.
+logoutAction:
+  pending: Signing out...
+  success: Signed out.
+  failed: Failed to sign out. Please try again.
+sidebarFooter:
+  loggingOut: Signing out...
+  logoutSuccess: Signed out.
+  logoutFailed: Failed to sign out. Please try again.
+teamEntry:
+  title: Choose a Team
+  description: You have access to multiple teams. Choose where to continue.

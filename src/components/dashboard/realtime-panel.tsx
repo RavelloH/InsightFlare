@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { Locale } from "@/lib/i18n/config";
+import { intlLocale } from "@/lib/dashboard/format";
 import type { AppMessages } from "@/lib/i18n/messages";
 
 type ConnectionState = "connecting" | "connected" | "disconnected";
@@ -19,7 +21,7 @@ interface LiveEvent {
 
 interface RealtimePanelProps {
   siteId: string;
-  locale: "en" | "zh";
+  locale: Locale;
   messages: AppMessages;
 }
 
@@ -54,8 +56,8 @@ function normalizeLiveEvent(payload: unknown): LiveEvent | null {
   };
 }
 
-function formatTime(locale: "en" | "zh", timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString(locale === "zh" ? "zh-CN" : "en-US", {
+function formatTime(locale: Locale, timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString(intlLocale(locale), {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",

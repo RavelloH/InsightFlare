@@ -40,36 +40,6 @@ interface SidebarFooterMenusProps {
   messages: AppMessages;
 }
 
-function getText(locale: Locale) {
-  if (locale === "zh") {
-    return {
-      theme: "主题",
-      language: "语言",
-      account: "账户",
-      system: "系统",
-      role: "角色",
-      admin: "管理员",
-      member: "成员",
-      logoutSuccess: "已退出登录。",
-      logoutFailed: "退出登录失败，请稍后重试。",
-      loggingOut: "退出中...",
-    };
-  }
-
-  return {
-    theme: "Theme",
-    language: "Language",
-    account: "Account",
-    system: "System",
-    role: "Role",
-    admin: "Admin",
-    member: "Member",
-    logoutSuccess: "Signed out.",
-    logoutFailed: "Failed to sign out. Please try again.",
-    loggingOut: "Signing out...",
-  };
-}
-
 function pickThemeIcon(theme: string) {
   if (theme === "dark") return RiMoonLine;
   if (theme === "light") return RiSunLine;
@@ -96,7 +66,6 @@ export function SidebarFooterMenus({
   const router = useRouter();
   const { theme, resolvedTheme, setTheme } = useTheme();
   const [loggingOut, setLoggingOut] = useState(false);
-  const text = getText(locale);
   const themeValue =
     theme === "light" || theme === "dark" || theme === "system"
       ? theme
@@ -107,7 +76,8 @@ export function SidebarFooterMenus({
   );
   const initial = userInitial(user.name, user.username);
   const displayName = String(user.name || user.username);
-  const roleLabel = user.systemRole === "admin" ? text.admin : text.member;
+  const roleLabel =
+    user.systemRole === "admin" ? messages.common.admin : messages.common.user;
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -121,13 +91,16 @@ export function SidebarFooterMenus({
         },
         body: JSON.stringify({}),
       });
-      if (!response.ok) throw new Error(text.logoutFailed);
-      toast.success(text.logoutSuccess);
+      if (!response.ok) throw new Error(messages.sidebarFooter.logoutFailed);
+      toast.success(messages.sidebarFooter.logoutSuccess);
       router.push(`/${locale}/login`);
       router.refresh();
     } catch (error) {
-      const message = error instanceof Error ? error.message : text.logoutFailed;
-      toast.error(message || text.logoutFailed);
+      const message =
+        error instanceof Error
+          ? error.message
+          : messages.sidebarFooter.logoutFailed;
+      toast.error(message || messages.sidebarFooter.logoutFailed);
     } finally {
       setLoggingOut(false);
     }
@@ -141,12 +114,12 @@ export function SidebarFooterMenus({
             triggerBaseClass,
             "border-r border-sidebar-border group-data-[collapsible=icon]:border-r-0 group-data-[collapsible=icon]:border-b",
           )}
-          aria-label={text.theme}
+          aria-label={messages.common.theme}
         >
           <ThemeIcon className="size-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start" sideOffset={8} className="!w-44 !min-w-44">
-          <DropdownMenuLabel>{text.theme}</DropdownMenuLabel>
+          <DropdownMenuLabel>{messages.common.theme}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuRadioGroup
             value={themeValue}
@@ -170,7 +143,7 @@ export function SidebarFooterMenus({
             </DropdownMenuRadioItem>
             <DropdownMenuRadioItem value="system">
               <RiComputerLine />
-              <span>{text.system}</span>
+              <span>{messages.common.system}</span>
             </DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
@@ -182,12 +155,12 @@ export function SidebarFooterMenus({
             triggerBaseClass,
             "border-r border-sidebar-border group-data-[collapsible=icon]:border-r-0 group-data-[collapsible=icon]:border-b",
           )}
-          aria-label={text.language}
+          aria-label={messages.common.language}
         >
           <RiGlobalLine className="size-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start" sideOffset={8} className="!w-44 !min-w-44">
-          <DropdownMenuLabel>{text.language}</DropdownMenuLabel>
+          <DropdownMenuLabel>{messages.common.language}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <Link href={switchToEn}>
@@ -211,7 +184,7 @@ export function SidebarFooterMenus({
       <DropdownMenu>
         <DropdownMenuTrigger
           className={triggerBaseClass}
-          aria-label={text.account}
+          aria-label={messages.common.account}
         >
           <span className="inline-flex size-6 items-center justify-center rounded-full border border-sidebar-border bg-transparent text-xs">
             {initial}
@@ -230,7 +203,7 @@ export function SidebarFooterMenus({
           <DropdownMenuLabel className="space-y-1 font-normal">
             <div className="text-xs text-muted-foreground">{user.email}</div>
             <div className="text-xs text-muted-foreground">
-              {text.role}: {roleLabel}
+              {messages.common.role}: {roleLabel}
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -243,7 +216,9 @@ export function SidebarFooterMenus({
             }}
           >
             <RiLogoutBoxRLine />
-            <span>{loggingOut ? text.loggingOut : messages.actions.logout}</span>
+            <span>
+              {loggingOut ? messages.sidebarFooter.loggingOut : messages.actions.logout}
+            </span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

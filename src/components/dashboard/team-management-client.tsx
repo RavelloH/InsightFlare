@@ -21,72 +21,15 @@ import { PageHeading } from "@/components/dashboard/page-heading";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { MemberData, SiteData, TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
+import type { AppMessages } from "@/lib/i18n/messages";
 
 type TeamTab = "sites" | "settings" | "members";
 
 interface TeamManagementClientProps {
   locale: Locale;
+  messages: AppMessages;
   activeTeam: TeamData;
   activeTab: TeamTab;
-}
-
-interface TeamPageCopy {
-  title: string;
-  subtitle: string;
-  stats: {
-    sites: string;
-    members: string;
-  };
-  toasts: {
-    teamSaved: string;
-    teamSaveFailed: string;
-    memberAdded: string;
-    memberAddFailed: string;
-    memberRemoved: string;
-    memberRemoveFailed: string;
-    invalidTeamName: string;
-    invalidMemberIdentifier: string;
-  };
-  sites: {
-    title: string;
-    subtitle: string;
-    noSites: string;
-    openAnalytics: string;
-    columns: {
-      name: string;
-      domain: string;
-      slug: string;
-      createdAt: string;
-      action: string;
-    };
-  };
-  settings: {
-    title: string;
-    subtitle: string;
-    nameLabel: string;
-    slugLabel: string;
-    save: string;
-    saving: string;
-  };
-  members: {
-    title: string;
-    subtitle: string;
-    identifierLabel: string;
-    identifierPlaceholder: string;
-    add: string;
-    adding: string;
-    remove: string;
-    removing: string;
-    noMembers: string;
-    columns: {
-      name: string;
-      username: string;
-      email: string;
-      role: string;
-      joinedAt: string;
-      action: string;
-    };
-  };
 }
 
 function safeSlug(value: string): string {
@@ -117,127 +60,6 @@ function buildSitePath(locale: Locale, teamSlug: string, siteSlug: string): stri
   return `/${locale}/app/${teamSlug}/${siteSlug}`;
 }
 
-function getTeamPageCopy(locale: Locale): TeamPageCopy {
-  if (locale === "zh") {
-    return {
-      title: "团队管理",
-      subtitle: "管理该团队下的站点、基础设置和成员权限。",
-      stats: {
-        sites: "站点",
-        members: "成员",
-      },
-      toasts: {
-        teamSaved: "团队设置已保存。",
-        teamSaveFailed: "团队设置保存失败。",
-        memberAdded: "成员已添加。",
-        memberAddFailed: "添加成员失败。",
-        memberRemoved: "成员已移除。",
-        memberRemoveFailed: "移除成员失败。",
-        invalidTeamName: "团队名称至少 2 个字符。",
-        invalidMemberIdentifier: "请输入有效的用户名或邮箱。",
-      },
-      sites: {
-        title: "站点列表",
-        subtitle: "查看这个团队下的全部站点，并进入对应分析页面。",
-        noSites: "当前团队还没有站点。",
-        openAnalytics: "查看分析",
-        columns: {
-          name: "显示名",
-          domain: "域名",
-          slug: "Slug",
-          createdAt: "创建时间",
-          action: "操作",
-        },
-      },
-      settings: {
-        title: "团队设置",
-        subtitle: "更新团队显示名和 slug。",
-        nameLabel: "团队显示名",
-        slugLabel: "团队 Slug",
-        save: "保存设置",
-        saving: "保存中...",
-      },
-      members: {
-        title: "成员管理",
-        subtitle: "添加成员或移除成员。",
-        identifierLabel: "用户名或邮箱",
-        identifierPlaceholder: "例如：alice 或 alice@example.com",
-        add: "添加成员",
-        adding: "添加中...",
-        remove: "移除",
-        removing: "移除中...",
-        noMembers: "当前团队暂无成员。",
-        columns: {
-          name: "名称",
-          username: "用户名",
-          email: "邮箱",
-          role: "角色",
-          joinedAt: "加入时间",
-          action: "操作",
-        },
-      },
-    };
-  }
-
-  return {
-    title: "Team Management",
-    subtitle: "Manage sites, base settings, and member access for this team.",
-    stats: {
-      sites: "Sites",
-      members: "Members",
-    },
-    toasts: {
-      teamSaved: "Team settings saved.",
-      teamSaveFailed: "Failed to save team settings.",
-      memberAdded: "Member added.",
-      memberAddFailed: "Failed to add member.",
-      memberRemoved: "Member removed.",
-      memberRemoveFailed: "Failed to remove member.",
-      invalidTeamName: "Team name must be at least 2 characters.",
-      invalidMemberIdentifier: "Please provide a valid username or email.",
-    },
-    sites: {
-      title: "Sites",
-      subtitle: "View every site under this team and open each analytics dashboard.",
-      noSites: "No site is available under this team.",
-      openAnalytics: "Open analytics",
-      columns: {
-        name: "Display Name",
-        domain: "Domain",
-        slug: "Slug",
-        createdAt: "Created",
-        action: "Action",
-      },
-    },
-    settings: {
-      title: "Settings",
-      subtitle: "Update this team's display name and slug.",
-      nameLabel: "Team Display Name",
-      slugLabel: "Team Slug",
-      save: "Save settings",
-      saving: "Saving...",
-    },
-    members: {
-      title: "Members",
-      subtitle: "Add members or remove existing members.",
-      identifierLabel: "Username or Email",
-      identifierPlaceholder: "For example: alice or alice@example.com",
-      add: "Add member",
-      adding: "Adding...",
-      remove: "Remove",
-      removing: "Removing...",
-      noMembers: "No members found for this team.",
-      columns: {
-        name: "Name",
-        username: "Username",
-        email: "Email",
-        role: "Role",
-        joinedAt: "Joined",
-        action: "Action",
-      },
-    },
-  };
-}
 
 async function fetchTeamSites(teamId: string): Promise<Array<SiteData & { slug: string }>> {
   const url = `/api/private/admin/sites?teamId=${encodeURIComponent(teamId)}`;
@@ -289,11 +111,12 @@ async function postJson<T>(url: string, body: Record<string, unknown>): Promise<
 
 export function TeamManagementClient({
   locale,
+  messages,
   activeTeam,
   activeTab,
 }: TeamManagementClientProps) {
   const router = useRouter();
-  const copy = getTeamPageCopy(locale);
+  const copy = messages.teamManagement;
   const [sites, setSites] = useState<Array<SiteData & { slug: string }>>([]);
   const [members, setMembers] = useState<MemberData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -436,8 +259,8 @@ export function TeamManagementClient({
         ? copy.settings.subtitle
         : copy.members.subtitle;
 
-  const tableEmptyText = loading ? (locale === "zh" ? "加载中" : "Loading") : copy.sites.noSites;
-  const membersEmptyText = loading ? (locale === "zh" ? "加载中" : "Loading") : copy.members.noMembers;
+  const tableEmptyText = loading ? messages.common.loading : copy.sites.noSites;
+  const membersEmptyText = loading ? messages.common.loading : copy.members.noMembers;
 
   return (
     <div className="space-y-6">

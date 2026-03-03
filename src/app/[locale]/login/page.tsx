@@ -96,7 +96,9 @@ export default async function LoginPage({
             usernameLabel={t.login.username}
             passwordLabel={t.login.password}
             signInLabel={t.login.signIn}
+            signingInLabel={t.loginForm.signingIn}
             invalidCredentialsLabel={t.login.invalidCredentials}
+            failedLabel={t.loginForm.failed}
           />
         </CardContent>
       </Card>

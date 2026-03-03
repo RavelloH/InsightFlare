@@ -14,7 +14,9 @@ interface LoginFormProps {
   usernameLabel: string;
   passwordLabel: string;
   signInLabel: string;
+  signingInLabel: string;
   invalidCredentialsLabel: string;
+  failedLabel: string;
 }
 
 interface LoginResponse {
@@ -26,32 +28,17 @@ interface LoginResponse {
   message?: string;
 }
 
-function copy(locale: Locale) {
-  if (locale === "zh") {
-    return {
-      signingIn: "登录中...",
-      invalid: "用户名或密码错误。",
-      failed: "登录失败，请稍后重试。",
-    };
-  }
-
-  return {
-    signingIn: "Signing in...",
-    invalid: "Invalid username or password.",
-    failed: "Sign in failed. Please try again.",
-  };
-}
-
 export function LoginForm({
   locale,
   nextPath,
   usernameLabel,
   passwordLabel,
   signInLabel,
+  signingInLabel,
   invalidCredentialsLabel,
+  failedLabel,
 }: LoginFormProps) {
   const router = useRouter();
-  const t = copy(locale);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
@@ -76,14 +63,14 @@ export function LoginForm({
       if (!response.ok || !payload.ok || !payload.data) {
         const message = payload.error === "invalid_credentials"
           ? invalidCredentialsLabel
-          : payload.message || t.failed;
+          : payload.message || failedLabel;
         throw new Error(message);
       }
       router.push(payload.data.next || `/${locale}/app`);
       router.refresh();
     } catch (error) {
-      const message = error instanceof Error ? error.message : t.failed;
-      toast.error(message || t.invalid);
+      const message = error instanceof Error ? error.message : failedLabel;
+      toast.error(message || failedLabel);
     } finally {
       setPending(false);
     }
@@ -122,7 +109,7 @@ export function LoginForm({
         />
       </div>
       <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? t.signingIn : signInLabel}
+        {pending ? signingInLabel : signInLabel}
       </Button>
     </form>
   );

@@ -91,7 +91,15 @@ interface DashboardShellProps {
   activeSiteSlug?: string;
   teamSections?: TeamSectionNavItem[];
   activeTeamSectionKey?: string;
+  managementSections?: TeamSectionNavItem[];
+  activeManagementSectionKey?: string;
   children: ReactNode;
+}
+
+function getManagementSectionIcon(key: string) {
+  if (key === "manage-users") return RiUser3Line;
+  if (key === "manage-sites") return RiGlobalLine;
+  return RiTeamLine;
 }
 
 function normalizeLocalePath(pathname: string): string {
@@ -115,9 +123,14 @@ export function DashboardShell({
   activeSiteSlug,
   teamSections,
   activeTeamSectionKey,
+  managementSections,
+  activeManagementSectionKey,
   children,
 }: DashboardShellProps) {
   const hasTeamSections = Boolean(teamSections && teamSections.length > 0);
+  const hasManagementSections = Boolean(
+    managementSections && managementSections.length > 0,
+  );
   const resolvedActiveSiteSlug = activeSiteSlug || "";
   const hasActiveSite = resolvedActiveSiteSlug.length > 0;
   const activeSiteBase = hasActiveSite
@@ -149,7 +162,7 @@ export function DashboardShell({
   const switchToEn = `/en${localeSuffix}`;
   const switchToZh = `/zh${localeSuffix}`;
   const teamRootHref = `/${locale}/app/${activeTeamSlug}`;
-  const backToTeamLabel = locale === "zh" ? "返回团队" : "Back to Team";
+  const backToTeamLabel = messages.common.backToTeam;
   const teamOptions = teams.map((team) => ({
     slug: team.slug,
     name: team.name,
@@ -177,6 +190,7 @@ export function DashboardShell({
             <SidebarGroupContent>
               <TeamSelect
                 locale={locale}
+                messages={messages}
                 options={teamOptions}
                 activeTeamSlug={activeTeamSlug}
               />
@@ -208,6 +222,35 @@ export function DashboardShell({
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>
+
+              {hasManagementSections ? (
+                <>
+                  <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
+                  <SidebarGroup>
+                    <SidebarGroupLabel>
+                      {messages.common.management}
+                    </SidebarGroupLabel>
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {managementSections?.map((item) => {
+                          const isActive = activeManagementSectionKey === item.key;
+                          const SectionIcon = getManagementSectionIcon(item.key);
+                          return (
+                            <SidebarMenuItem key={item.key}>
+                              <SidebarMenuButton asChild isActive={isActive}>
+                                <Link href={item.href}>
+                                  <SectionIcon />
+                                  <span>{item.label}</span>
+                                </Link>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          );
+                        })}
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </SidebarGroup>
+                </>
+              ) : null}
             </>
           ) : (
             <>

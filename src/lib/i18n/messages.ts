@@ -38,6 +38,15 @@ export interface AppMessages {
     lastUpdated: string;
     site: string;
     team: string;
+    management: string;
+    backToTeam: string;
+    system: string;
+    account: string;
+    theme: string;
+    language: string;
+    role: string;
+    admin: string;
+    user: string;
   };
   ranges: {
     title: string;
@@ -127,6 +136,184 @@ export interface AppMessages {
     switchToChinese: string;
     switchToLight: string;
     switchToDark: string;
+  };
+  teamSelect: {
+    groupLabel: string;
+    createHint: string;
+    createTitle: string;
+    createDescription: string;
+    nameLabel: string;
+    namePlaceholder: string;
+    slugLabel: string;
+    slugPlaceholder: string;
+    create: string;
+    creating: string;
+    cancel: string;
+    invalidName: string;
+    createFailed: string;
+    createSuccess: string;
+  };
+  teamManagement: {
+    title: string;
+    subtitle: string;
+    stats: {
+      sites: string;
+      members: string;
+    };
+    toasts: {
+      teamSaved: string;
+      teamSaveFailed: string;
+      memberAdded: string;
+      memberAddFailed: string;
+      memberRemoved: string;
+      memberRemoveFailed: string;
+      invalidTeamName: string;
+      invalidMemberIdentifier: string;
+    };
+    sites: {
+      title: string;
+      subtitle: string;
+      noSites: string;
+      openAnalytics: string;
+      columns: {
+        name: string;
+        domain: string;
+        slug: string;
+        createdAt: string;
+        action: string;
+      };
+    };
+    settings: {
+      title: string;
+      subtitle: string;
+      nameLabel: string;
+      slugLabel: string;
+      save: string;
+      saving: string;
+    };
+    members: {
+      title: string;
+      subtitle: string;
+      identifierLabel: string;
+      identifierPlaceholder: string;
+      add: string;
+      adding: string;
+      remove: string;
+      removing: string;
+      noMembers: string;
+      columns: {
+        name: string;
+        username: string;
+        email: string;
+        role: string;
+        joinedAt: string;
+        action: string;
+      };
+    };
+  };
+  managementNav: {
+    users: string;
+    sites: string;
+    teams: string;
+  };
+  adminUsers: {
+    title: string;
+    subtitle: string;
+    createTitle: string;
+    createSubtitle: string;
+    username: string;
+    email: string;
+    name: string;
+    password: string;
+    role: string;
+    create: string;
+    creating: string;
+    listTitle: string;
+    listSubtitle: string;
+    noData: string;
+    loadFailed: string;
+    createSuccess: string;
+    createFailed: string;
+    invalidInput: string;
+    columns: {
+      name: string;
+      username: string;
+      email: string;
+      role: string;
+      teams: string;
+      created: string;
+    };
+  };
+  adminSites: {
+    title: string;
+    subtitle: string;
+    team: string;
+    createTitle: string;
+    createSubtitle: string;
+    name: string;
+    domain: string;
+    publicSlug: string;
+    create: string;
+    creating: string;
+    listTitle: string;
+    listSubtitle: string;
+    noData: string;
+    loadFailed: string;
+    createSuccess: string;
+    createFailed: string;
+    invalidInput: string;
+    open: string;
+    columns: {
+      name: string;
+      domain: string;
+      slug: string;
+      created: string;
+      action: string;
+    };
+  };
+  adminTeams: {
+    title: string;
+    subtitle: string;
+    createTitle: string;
+    createSubtitle: string;
+    name: string;
+    slug: string;
+    create: string;
+    creating: string;
+    listTitle: string;
+    listSubtitle: string;
+    noData: string;
+    loadFailed: string;
+    createSuccess: string;
+    createFailed: string;
+    invalidInput: string;
+    open: string;
+    columns: {
+      name: string;
+      slug: string;
+      sites: string;
+      members: string;
+      created: string;
+      action: string;
+    };
+  };
+  loginForm: {
+    signingIn: string;
+    failed: string;
+  };
+  logoutAction: {
+    pending: string;
+    success: string;
+    failed: string;
+  };
+  sidebarFooter: {
+    loggingOut: string;
+    logoutSuccess: string;
+    logoutFailed: string;
+  };
+  teamEntry: {
+    title: string;
+    description: string;
   };
 }
 

@@ -3,6 +3,7 @@
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import type { Locale } from "@/lib/i18n/config";
+import { intlLocale } from "@/lib/dashboard/format";
 
 interface EngagementChartProps {
   locale: Locale;
@@ -26,12 +27,8 @@ const config = {
   },
 } satisfies ChartConfig;
 
-function localeCode(locale: Locale): string {
-  return locale === "zh" ? "zh-CN" : "en-US";
-}
-
 export function EngagementChart({ locale, data, viewsLabel, sessionsLabel }: EngagementChartProps) {
-  const formatter = new Intl.DateTimeFormat(localeCode(locale), {
+  const formatter = new Intl.DateTimeFormat(intlLocale(locale), {
     month: "short",
     day: "numeric",
   });

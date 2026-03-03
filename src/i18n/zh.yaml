@@ -32,6 +32,15 @@ common:
   lastUpdated: 更新时间
   site: 站点
   team: 团队
+  management: 管理
+  backToTeam: 返回团队
+  system: 系统
+  account: 账户
+  theme: 主题
+  language: 语言
+  role: 角色
+  admin: 管理员
+  user: 普通用户
 ranges:
   title: 时间范围
   last24h: 24小时
@@ -106,3 +115,161 @@ actions:
   switchToChinese: 中文
   switchToLight: 浅色
   switchToDark: 深色
+teamSelect:
+  groupLabel: 团队
+  createHint: 新建团队
+  createTitle: 新建团队
+  createDescription: 创建后会自动切换到新团队。
+  nameLabel: 团队名称
+  namePlaceholder: 例如：增长团队
+  slugLabel: 团队 Slug（可选）
+  slugPlaceholder: 例如：growth-team
+  create: 创建
+  creating: 创建中...
+  cancel: 取消
+  invalidName: 团队名称至少 2 个字符。
+  createFailed: 创建失败，请稍后重试。
+  createSuccess: 团队已创建。
+teamManagement:
+  title: 团队管理
+  subtitle: 管理该团队下的站点、基础设置和成员权限。
+  stats:
+    sites: 站点
+    members: 成员
+  toasts:
+    teamSaved: 团队设置已保存。
+    teamSaveFailed: 团队设置保存失败。
+    memberAdded: 成员已添加。
+    memberAddFailed: 添加成员失败。
+    memberRemoved: 成员已移除。
+    memberRemoveFailed: 移除成员失败。
+    invalidTeamName: 团队名称至少 2 个字符。
+    invalidMemberIdentifier: 请输入有效的用户名或邮箱。
+  sites:
+    title: 站点列表
+    subtitle: 查看这个团队下的全部站点，并进入对应分析页面。
+    noSites: 当前团队还没有站点。
+    openAnalytics: 查看分析
+    columns:
+      name: 显示名
+      domain: 域名
+      slug: Slug
+      createdAt: 创建时间
+      action: 操作
+  settings:
+    title: 团队设置
+    subtitle: 更新团队显示名和 slug。
+    nameLabel: 团队显示名
+    slugLabel: 团队 Slug
+    save: 保存设置
+    saving: 保存中...
+  members:
+    title: 成员管理
+    subtitle: 添加成员或移除成员。
+    identifierLabel: 用户名或邮箱
+    identifierPlaceholder: 例如：alice 或 alice@example.com
+    add: 添加成员
+    adding: 添加中...
+    remove: 移除
+    removing: 移除中...
+    noMembers: 当前团队暂无成员。
+    columns:
+      name: 名称
+      username: 用户名
+      email: 邮箱
+      role: 角色
+      joinedAt: 加入时间
+      action: 操作
+managementNav:
+  users: 用户管理
+  sites: 站点管理
+  teams: 团队管理
+adminUsers:
+  title: 用户管理
+  subtitle: 仅系统管理员可创建和管理后台用户。
+  createTitle: 新建用户
+  createSubtitle: 创建后可立即用于登录后台。
+  username: 用户名
+  email: 邮箱
+  name: 名称（可选）
+  password: 密码（至少 8 位）
+  role: 系统角色
+  create: 创建用户
+  creating: 创建中...
+  listTitle: 用户列表
+  listSubtitle: 当前系统内所有用户。
+  noData: 暂无用户数据。
+  loadFailed: 加载用户列表失败。
+  createSuccess: 用户创建成功。
+  createFailed: 用户创建失败。
+  invalidInput: 请填写有效的用户名、邮箱和密码。
+  columns:
+    name: 名称
+    username: 用户名
+    email: 邮箱
+    role: 角色
+    teams: 团队数
+    created: 创建时间
+adminSites:
+  title: 站点管理
+  subtitle: 仅系统管理员可管理站点及其归属团队。
+  team: 团队
+  createTitle: 新建站点
+  createSubtitle: 新建后可直接进入分析页面。
+  name: 站点名称
+  domain: 域名
+  publicSlug: 公开 Slug（可选）
+  create: 创建站点
+  creating: 创建中...
+  listTitle: 站点列表
+  listSubtitle: 当前团队下所有站点。
+  noData: 暂无站点数据。
+  loadFailed: 加载站点失败。
+  createSuccess: 站点创建成功。
+  createFailed: 站点创建失败。
+  invalidInput: 请填写有效的站点名称和域名。
+  open: 打开分析
+  columns:
+    name: 名称
+    domain: 域名
+    slug: Slug
+    created: 创建时间
+    action: 操作
+adminTeams:
+  title: 团队管理
+  subtitle: 仅系统管理员可创建与查看所有团队。
+  createTitle: 新建团队
+  createSubtitle: 创建后可进入团队配置与成员管理。
+  name: 团队名称
+  slug: 团队 Slug（可选）
+  create: 创建团队
+  creating: 创建中...
+  listTitle: 团队列表
+  listSubtitle: 系统中所有团队。
+  noData: 暂无团队数据。
+  loadFailed: 加载团队失败。
+  createSuccess: 团队创建成功。
+  createFailed: 团队创建失败。
+  invalidInput: 团队名称至少 2 个字符。
+  open: 进入团队
+  columns:
+    name: 名称
+    slug: Slug
+    sites: 站点数
+    members: 成员数
+    created: 创建时间
+    action: 操作
+loginForm:
+  signingIn: 登录中...
+  failed: 登录失败，请稍后重试。
+logoutAction:
+  pending: 退出中...
+  success: 已退出登录。
+  failed: 退出登录失败，请稍后重试。
+sidebarFooter:
+  loggingOut: 退出中...
+  logoutSuccess: 已退出登录。
+  logoutFailed: 退出登录失败，请稍后重试。
+teamEntry:
+  title: 选择团队
+  description: 你当前可访问多个团队，请先选择要进入的团队。

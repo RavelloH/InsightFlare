@@ -6,6 +6,7 @@ import { RiAddLine } from "@remixicon/react";
 import { toast } from "sonner";
 import type { TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
+import type { AppMessages } from "@/lib/i18n/messages";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,6 +37,7 @@ interface TeamSelectOption {
 
 interface TeamSelectProps {
   locale: Locale;
+  messages: AppMessages;
   options: TeamSelectOption[];
   activeTeamSlug: string;
 }
@@ -47,49 +49,16 @@ interface CreateTeamResponse {
   message?: string;
 }
 
-function getCopy(locale: Locale) {
-  if (locale === "zh") {
-    return {
-      team: "团队",
-      createTeam: "新建团队",
-      createTeamDesc: "创建后会自动切换到新团队。",
-      teamName: "团队名称",
-      teamNamePlaceholder: "例如：增长团队",
-      teamSlug: "团队 Slug（可选）",
-      teamSlugPlaceholder: "例如：growth-team",
-      cancel: "取消",
-      create: "创建",
-      creating: "创建中...",
-      invalidTeamName: "团队名称至少 2 个字符。",
-      createSuccess: "团队已创建。",
-      createFailed: "创建失败，请稍后重试。",
-      createHint: "新建团队",
-    };
-  }
-
-  return {
-    team: "Team",
-    createTeam: "Create Team",
-    createTeamDesc: "You will be switched to the new team after creation.",
-    teamName: "Team Name",
-    teamNamePlaceholder: "e.g. Growth Team",
-    teamSlug: "Team Slug (optional)",
-    teamSlugPlaceholder: "e.g. growth-team",
-    cancel: "Cancel",
-    create: "Create",
-    creating: "Creating...",
-    invalidTeamName: "Team name must be at least 2 characters.",
-    createSuccess: "Team created.",
-    createFailed: "Failed to create team. Please try again.",
-    createHint: "Create team",
-  };
-}
-
 const CREATE_TEAM_VALUE = "__create_team__";
 
-export function TeamSelect({ locale, options, activeTeamSlug }: TeamSelectProps) {
+export function TeamSelect({
+  locale,
+  messages,
+  options,
+  activeTeamSlug,
+}: TeamSelectProps) {
   const router = useRouter();
-  const copy = getCopy(locale);
+  const copy = messages.teamSelect;
   const [openCreateDialog, setOpenCreateDialog] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [teamSlug, setTeamSlug] = useState("");
@@ -109,7 +78,7 @@ export function TeamSelect({ locale, options, activeTeamSlug }: TeamSelectProps)
     const normalizedName = teamName.trim();
     const normalizedSlug = teamSlug.trim();
     if (normalizedName.length < 2) {
-      setSubmitError(copy.invalidTeamName);
+      setSubmitError(copy.invalidName);
       return;
     }
 
@@ -159,8 +128,8 @@ export function TeamSelect({ locale, options, activeTeamSlug }: TeamSelectProps)
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{copy.createTeam}</DialogTitle>
-          <DialogDescription>{copy.createTeamDesc}</DialogDescription>
+          <DialogTitle>{copy.createTitle}</DialogTitle>
+          <DialogDescription>{copy.createDescription}</DialogDescription>
         </DialogHeader>
         <form
           className="space-y-3"
@@ -170,23 +139,23 @@ export function TeamSelect({ locale, options, activeTeamSlug }: TeamSelectProps)
           }}
         >
           <div className="space-y-1.5">
-            <Label htmlFor="create-team-name">{copy.teamName}</Label>
+            <Label htmlFor="create-team-name">{copy.nameLabel}</Label>
             <Input
               id="create-team-name"
               value={teamName}
               onChange={(event) => setTeamName(event.target.value)}
-              placeholder={copy.teamNamePlaceholder}
+              placeholder={copy.namePlaceholder}
               minLength={2}
               required
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="create-team-slug">{copy.teamSlug}</Label>
+            <Label htmlFor="create-team-slug">{copy.slugLabel}</Label>
             <Input
               id="create-team-slug"
               value={teamSlug}
               onChange={(event) => setTeamSlug(event.target.value)}
-              placeholder={copy.teamSlugPlaceholder}
+              placeholder={copy.slugPlaceholder}
             />
           </div>
           {submitError ? <p className="text-xs text-destructive">{submitError}</p> : null}
@@ -253,7 +222,7 @@ export function TeamSelect({ locale, options, activeTeamSlug }: TeamSelectProps)
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            <SelectLabel>{copy.team}</SelectLabel>
+            <SelectLabel>{copy.groupLabel}</SelectLabel>
             {options.map((option) => (
               <SelectItem key={option.slug} value={option.slug}>
                 {option.name}
