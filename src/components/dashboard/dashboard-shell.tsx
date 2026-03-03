@@ -155,7 +155,7 @@ export function DashboardShell({
       <Sidebar variant="inset" collapsible="icon">
         <SidebarHeader>
           <div className="py-2">
-            <p className="text-xl text-primary flex gap-2">
+            <p className="text-xl text-primary flex gap-2 items-center justify-center md:justify-start">
               <span>{messages.appName}</span>
               <span className="text-muted-foreground">v1</span>
             </p>

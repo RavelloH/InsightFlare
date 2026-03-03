@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import type { AppMessages } from "@/lib/i18n/messages";
-import type { DashboardFilters, RangePreset } from "@/lib/dashboard/server";
-import { withRangeAndFilters } from "@/lib/dashboard/server";
+import type { DashboardFilters, RangePreset } from "@/lib/dashboard/query-state";
+import { withRangeAndFilters } from "@/lib/dashboard/query-state";
 
 interface RangeLinksProps {
   pathname: string;

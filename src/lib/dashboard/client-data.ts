@@ -1,0 +1,300 @@
+import type {
+  DimensionData,
+  EventsData,
+  OverviewData,
+  PagesData,
+  ReferrersData,
+  SessionsData,
+  TrendData,
+  VisitorsData,
+} from "@/lib/edge-client";
+import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+
+export interface FilterOptions {
+  countries: string[];
+  devices: string[];
+  browsers: string[];
+  eventTypes: string[];
+}
+
+export interface OverviewBundle {
+  overview: OverviewData;
+  previousOverview: OverviewData;
+  trend: TrendData;
+  pages: PagesData;
+  referrers: ReferrersData;
+  sessions: SessionsData;
+  events: EventsData;
+  countries: DimensionData;
+  devices: DimensionData;
+  browsers: DimensionData;
+  eventTypes: DimensionData;
+}
+
+function emptyOverview(): OverviewData {
+  return {
+    ok: true,
+    data: {
+      views: 0,
+      sessions: 0,
+      visitors: 0,
+      bounces: 0,
+      totalDurationMs: 0,
+      avgDurationMs: 0,
+      bounceRate: 0,
+      approximateVisitors: false,
+    },
+  };
+}
+
+function emptyTrend(interval: "hour" | "day"): TrendData {
+  return {
+    ok: true,
+    interval,
+    data: [],
+  };
+}
+
+function emptyPages(): PagesData {
+  return { ok: true, data: [] };
+}
+
+function emptyReferrers(): ReferrersData {
+  return { ok: true, data: [] };
+}
+
+function emptySessions(): SessionsData {
+  return { ok: true, data: [] };
+}
+
+function emptyEvents(): EventsData {
+  return { ok: true, data: [] };
+}
+
+function emptyVisitors(): VisitorsData {
+  return { ok: true, data: [] };
+}
+
+function emptyDimension(): DimensionData {
+  return { ok: true, data: [] };
+}
+
+function withFilters(
+  params: Record<string, string | number>,
+  filters?: DashboardFilters,
+): Record<string, string | number> {
+  const next = { ...params };
+  if (!filters) return next;
+  if (filters.country) next.country = filters.country;
+  if (filters.device) next.device = filters.device;
+  if (filters.browser) next.browser = filters.browser;
+  if (filters.eventType) next.eventType = filters.eventType;
+  return next;
+}
+
+function toQueryString(params?: Record<string, string | number>): string {
+  if (!params) return "";
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    query.set(key, String(value));
+  }
+  const encoded = query.toString();
+  return encoded.length > 0 ? `?${encoded}` : "";
+}
+
+async function fetchPrivateJson<T>(path: string, params?: Record<string, string | number>): Promise<T> {
+  const res = await fetch(`${path}${toQueryString(params)}`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Request failed (${res.status} ${path}): ${text}`);
+  }
+  return (await res.json()) as T;
+}
+
+export async function fetchOverview(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<OverviewData> {
+  return fetchPrivateJson<OverviewData>("/api/private/overview", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+  }, filters));
+}
+
+export async function fetchTrend(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+): Promise<TrendData> {
+  return fetchPrivateJson<TrendData>("/api/private/trend", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    interval: window.interval,
+  }, filters));
+}
+
+export async function fetchPages(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<PagesData> {
+  return fetchPrivateJson<PagesData>("/api/private/pages", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    limit: 100,
+    details: 1,
+  }, filters));
+}
+
+export async function fetchReferrers(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<ReferrersData> {
+  return fetchPrivateJson<ReferrersData>("/api/private/referrers", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    limit: 100,
+    fullUrl: 1,
+  }, filters));
+}
+
+export async function fetchSessions(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<SessionsData> {
+  return fetchPrivateJson<SessionsData>("/api/private/sessions", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    limit: 100,
+  }, filters));
+}
+
+export async function fetchEvents(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<EventsData> {
+  return fetchPrivateJson<EventsData>("/api/private/events", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    limit: 100,
+  }, filters));
+}
+
+export async function fetchVisitors(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<VisitorsData> {
+  return fetchPrivateJson<VisitorsData>("/api/private/visitors", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    limit: 100,
+  }, filters));
+}
+
+export async function fetchCountries(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
+  return fetchPrivateJson<DimensionData>("/api/private/countries", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    limit: 100,
+  }, filters));
+}
+
+export async function fetchDevices(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
+  return fetchPrivateJson<DimensionData>("/api/private/devices", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    limit: 100,
+  }, filters));
+}
+
+export async function fetchBrowsers(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
+  return fetchPrivateJson<DimensionData>("/api/private/browsers", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    limit: 100,
+  }, filters));
+}
+
+export async function fetchEventTypes(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
+  return fetchPrivateJson<DimensionData>("/api/private/event-types", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    limit: 100,
+  }, filters));
+}
+
+export async function loadFilterOptions(siteId: string, window: TimeWindow): Promise<FilterOptions> {
+  const [countries, devices, browsers, eventTypes] = await Promise.all([
+    fetchCountries(siteId, window).catch(() => emptyDimension()),
+    fetchDevices(siteId, window).catch(() => emptyDimension()),
+    fetchBrowsers(siteId, window).catch(() => emptyDimension()),
+    fetchEventTypes(siteId, window).catch(() => emptyDimension()),
+  ]);
+
+  const uniq = (values: string[]) =>
+    Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))).sort();
+
+  return {
+    countries: uniq(countries.data.map((item) => item.value)),
+    devices: uniq(devices.data.map((item) => item.value)),
+    browsers: uniq(browsers.data.map((item) => item.value)),
+    eventTypes: uniq(eventTypes.data.map((item) => item.value)),
+  };
+}
+
+export async function loadOverviewBundle(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+): Promise<OverviewBundle> {
+  const previousTo = Math.max(window.from - 1, 0);
+  const previousFrom = Math.max(previousTo - (window.to - window.from), 0);
+  const previousWindow: TimeWindow = {
+    ...window,
+    from: previousFrom,
+    to: previousTo,
+  };
+
+  const [
+    overview,
+    previousOverview,
+    trend,
+    pages,
+    referrers,
+    sessions,
+    events,
+    countries,
+    devices,
+    browsers,
+    eventTypes,
+  ] = await Promise.all([
+    fetchOverview(siteId, window, filters).catch(() => emptyOverview()),
+    fetchOverview(siteId, previousWindow, filters).catch(() => emptyOverview()),
+    fetchTrend(siteId, window, filters).catch(() => emptyTrend(window.interval)),
+    fetchPages(siteId, window, filters).catch(() => emptyPages()),
+    fetchReferrers(siteId, window, filters).catch(() => emptyReferrers()),
+    fetchSessions(siteId, window, filters).catch(() => emptySessions()),
+    fetchEvents(siteId, window, filters).catch(() => emptyEvents()),
+    fetchCountries(siteId, window, filters).catch(() => emptyDimension()),
+    fetchDevices(siteId, window, filters).catch(() => emptyDimension()),
+    fetchBrowsers(siteId, window, filters).catch(() => emptyDimension()),
+    fetchEventTypes(siteId, window, filters).catch(() => emptyDimension()),
+  ]);
+
+  return {
+    overview,
+    previousOverview,
+    trend,
+    pages,
+    referrers,
+    sessions,
+    events,
+    countries,
+    devices,
+    browsers,
+    eventTypes,
+  };
+}
+
+export const emptyDimensionData = emptyDimension;
+export const emptyPagesData = emptyPages;
+export const emptyReferrersData = emptyReferrers;
+export const emptySessionsData = emptySessions;
+export const emptyEventsData = emptyEvents;
+export const emptyVisitorsData = emptyVisitors;
