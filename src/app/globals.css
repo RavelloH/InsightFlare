@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "overlayscrollbars/styles/overlayscrollbars.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -158,6 +159,76 @@
   animation: page-transition-exit var(--page-transition-exit-duration)
     cubic-bezier(0.4, 0, 1, 1) both;
   pointer-events: none;
+}
+
+.os-theme-insightflare {
+  --os-size: 8px;
+  --os-padding-perpendicular: 1px;
+  --os-padding-axis: 1px;
+  --os-track-border-radius: 999px;
+  --os-handle-border-radius: 999px;
+  --os-handle-bg: color-mix(in oklch, var(--scrollbar-thumb) 68%, transparent);
+  --os-handle-bg-hover: var(--scrollbar-thumb-hover);
+  --os-handle-bg-active: var(--scrollbar-thumb-hover);
+  --os-handle-perpendicular-size: 0.2rem;
+  --os-handle-perpendicular-size-hover: 0.45rem;
+  --os-handle-perpendicular-size-active: 0.45rem;
+  --os-handle-interactive-area-offset: 4px;
+  --os-track-bg: transparent;
+}
+
+.os-theme-insightflare.os-scrollbar {
+  transition:
+    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 220ms linear,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 150ms,
+    right 150ms,
+    bottom 150ms,
+    left 150ms;
+}
+
+.os-theme-insightflare.os-scrollbar-horizontal {
+  transform-origin: center bottom;
+  transform: translateY(0) scaleY(1);
+}
+
+.os-theme-insightflare.os-scrollbar-vertical {
+  transform-origin: right center;
+  transform: translateX(0) scaleX(1);
+}
+
+.os-theme-insightflare.os-scrollbar-rtl.os-scrollbar-vertical {
+  transform-origin: left center;
+}
+
+.os-theme-insightflare.os-scrollbar-horizontal.os-scrollbar-auto-hide.os-scrollbar-auto-hide-hidden {
+  transform: translateY(5px) scaleY(0.72);
+}
+
+.os-theme-insightflare.os-scrollbar-vertical.os-scrollbar-auto-hide.os-scrollbar-auto-hide-hidden {
+  transform: translateX(5px) scaleX(0.72);
+}
+
+.os-theme-insightflare.os-scrollbar-rtl.os-scrollbar-vertical.os-scrollbar-auto-hide.os-scrollbar-auto-hide-hidden {
+  transform: translateX(-5px) scaleX(0.72);
+}
+
+.os-theme-insightflare.os-scrollbar-horizontal .os-scrollbar-handle,
+.os-theme-insightflare.os-scrollbar-vertical .os-scrollbar-handle {
+  transition:
+    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 180ms ease,
+    border-color 180ms ease,
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .os-theme-insightflare.os-scrollbar,
+  .os-theme-insightflare .os-scrollbar-handle {
+    transition: none !important;
+  }
 }
 
 @keyframes page-transition-enter {

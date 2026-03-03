@@ -4,6 +4,7 @@ import { JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { GlobalScrollbars } from "@/components/global-scrollbars";
 
 const appMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -21,8 +22,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${appMono.variable} antialiased font-mono`}>
+    <html lang="en" suppressHydrationWarning data-overlayscrollbars-initialize>
+      <body
+        className={`${appMono.variable} antialiased font-mono`}
+        data-overlayscrollbars-initialize
+      >
+        <GlobalScrollbars />
         <ThemeProvider>
           <TooltipProvider>{children}</TooltipProvider>
           <Toaster />
