@@ -1,0 +1,108 @@
+appName: InsightFlare
+navigation:
+  overview: Overview
+  pages: Pages
+  referrers: Referrers
+  sessions: Sessions
+  events: Events
+  visitors: Visitors
+  geo: Geo
+  devices: Devices
+  browsers: Browsers
+common:
+  views: Views
+  sessions: Sessions
+  visitors: Visitors
+  bounces: Bounces
+  bounceRate: Bounce Rate
+  avgDuration: Avg. Duration
+  page: Page
+  referrer: Referrer
+  startedAt: Started
+  endedAt: Ended
+  event: Event
+  location: Location
+  browser: Browser
+  device: Device
+  country: Country
+  duration: Duration
+  loading: Loading
+  noData: No data
+  unknown: Unknown
+  lastUpdated: Last updated
+  site: Site
+  team: Team
+ranges:
+  title: Time Range
+  last24h: 24h
+  last7d: 7d
+  last30d: 30d
+  last90d: 90d
+filters:
+  title: Filters
+  country: Country
+  device: Device
+  browser: Browser
+  eventType: Event
+  all: All
+  clear: Clear
+realtime:
+  title: Realtime
+  subtitle: Live stream of incoming events.
+  activeNow: Active now
+  connected: Connected
+  disconnected: Disconnected
+  recentEvents: Recent live events
+overview:
+  title: Traffic Overview
+  subtitle: Monitor high-level performance and audience behavior.
+  trendTitle: Traffic Trend
+  engagementTitle: Engagement Detail
+  compositionTitle: Metric Composition
+  eventTypesTitle: Event Types
+  sessionDurationTitle: Session Duration
+  topPages: Top Pages
+  topReferrers: Top Referrers
+  recentSessions: Recent Sessions
+  recentEvents: Recent Events
+pages:
+  title: Pages
+  subtitle: Most visited paths in the selected range.
+referrers:
+  title: Referrers
+  subtitle: Where traffic comes from.
+sessions:
+  title: Sessions
+  subtitle: Session-level detail for quality analysis.
+events:
+  title: Events
+  subtitle: Raw event stream for diagnostics.
+visitors:
+  title: Visitors
+  subtitle: Visitor-level breakdown and recency.
+geo:
+  title: Geo
+  subtitle: Traffic distribution by country.
+devices:
+  title: Devices
+  subtitle: Device type distribution.
+browsers:
+  title: Browsers
+  subtitle: Browser distribution and share.
+login:
+  title: Sign in
+  subtitle: Use your InsightFlare account.
+  username: Username or Email
+  password: Password
+  signIn: Sign in
+  invalidCredentials: Invalid username or password.
+empty:
+  noTeams: No team available yet.
+  noSites: No site is available under this team.
+  siteNotFound: Team or site not found.
+actions:
+  logout: Logout
+  switchToEnglish: English
+  switchToChinese: 中文
+  switchToLight: Light
+  switchToDark: Dark
