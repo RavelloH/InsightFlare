@@ -81,11 +81,14 @@ export function LoginForm({
   return (
     <form
       className="space-y-4"
+      method="post"
+      action="/api/auth/login"
       onSubmit={(event) => {
         event.preventDefault();
         void handleLogin();
       }}
     >
+      <input type="hidden" name="next" value={nextPath} />
       <div className="space-y-2">
         <Label htmlFor="username">{usernameLabel}</Label>
         <Input
