@@ -27,6 +27,7 @@ export interface AeTrendRow {
   views: number;
   visitors: number;
   sessions: number;
+  bounces: number;
   total_duration: number;
 }
 
@@ -397,6 +398,7 @@ SELECT
   sum(_sample_interval) AS views,
   ${nonEmptyDistinctCountExpr(visitorExpr())} AS visitors,
   ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions,
+  sum(if(${durationExpr()} <= 0, _sample_interval, 0)) AS bounces,
   sum(_sample_interval * ${durationExpr()}) AS total_duration
 FROM ${dataset}
 WHERE ${where}
@@ -409,6 +411,7 @@ ORDER BY bucket
     views: parseNumber(row.views),
     visitors: parseNumber(row.visitors),
     sessions: parseNumber(row.sessions),
+    bounces: parseNumber(row.bounces),
     total_duration: parseNumber(row.total_duration),
   }));
 }

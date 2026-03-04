@@ -942,15 +942,6 @@ export function TeamManagementClient({
                             </div>
                             <div className="space-y-1">
                               <p className="text-muted-foreground">
-                                {messages.common.avgDuration}
-                              </p>
-                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
-                                {durationFormat(locale, overview.avgDurationMs)}
-                                <ChangeRateInline value={changeRates.avgDurationMs} />
-                              </p>
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-muted-foreground">
                                 {copy.sites.pagesPerSession}
                               </p>
                               <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
@@ -958,6 +949,15 @@ export function TeamManagementClient({
                                   pagesPerSession,
                                 )}
                                 <ChangeRateInline value={changeRates.pagesPerSession} />
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.avgDuration}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {durationFormat(locale, overview.avgDurationMs)}
+                                <ChangeRateInline value={changeRates.avgDurationMs} />
                               </p>
                             </div>
                           </div>

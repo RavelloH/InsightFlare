@@ -97,18 +97,49 @@ async function fetchEdgeJson<T>(options: FetchEdgeOptions): Promise<T> {
   return (await res.json()) as T;
 }
 
+export interface OverviewMetrics {
+  views: number;
+  sessions: number;
+  visitors: number;
+  bounces: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  bounceRate: number;
+  approximateVisitors?: boolean;
+}
+
+export interface OverviewChangeRates {
+  views: number | null;
+  sessions: number | null;
+  visitors: number | null;
+  bounces: number | null;
+  bounceRate: number | null;
+  avgDurationMs: number | null;
+}
+
+export interface OverviewDetailPoint {
+  bucket: number;
+  timestampMs: number;
+  views: number;
+  visitors: number;
+  sessions: number;
+  bounces: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  source: "detail" | "archive" | "mixed";
+}
+
+export interface OverviewDetailData {
+  interval: "minute" | "hour" | "day" | "week" | "month";
+  data: OverviewDetailPoint[];
+}
+
 export interface OverviewData {
   ok: boolean;
-  data: {
-    views: number;
-    sessions: number;
-    visitors: number;
-    bounces: number;
-    totalDurationMs: number;
-    avgDurationMs: number;
-    bounceRate: number;
-    approximateVisitors?: boolean;
-  };
+  data: OverviewMetrics;
+  previousData?: OverviewMetrics;
+  changeRates?: OverviewChangeRates;
+  detail?: OverviewDetailData;
 }
 
 export interface TrendPoint {
@@ -117,7 +148,9 @@ export interface TrendPoint {
   views: number;
   visitors: number;
   sessions: number;
+  bounces: number;
   totalDurationMs: number;
+  avgDurationMs: number;
   source: "detail" | "archive" | "mixed";
 }
 
@@ -275,6 +308,9 @@ export async function fetchPrivateOverview(params: {
   from: number;
   to: number;
   filters?: QueryFilters;
+  includeChange?: boolean;
+  includeDetail?: boolean;
+  interval?: "minute" | "hour" | "day" | "week" | "month";
 }): Promise<OverviewData> {
   return fetchEdgeJson<OverviewData>({
     path: "/api/private/overview",
@@ -283,6 +319,9 @@ export async function fetchPrivateOverview(params: {
         siteId: params.siteId,
         from: params.from,
         to: params.to,
+        ...(params.includeChange ? { includeChange: 1 } : {}),
+        ...(params.includeDetail ? { includeDetail: 1 } : {}),
+        ...(params.interval ? { interval: params.interval } : {}),
       },
       params.filters,
     ),

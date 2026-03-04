@@ -364,37 +364,52 @@ export async function loadOverviewBundle(
   const previousTo = Math.max(window.from - 1, 0);
   const previousFrom = Math.max(previousTo - (window.to - window.from), 0);
 
-  const [
-    overview,
-    previousOverview,
-    trend,
-    pages,
-    referrers,
-    sessions,
-    events,
-    countries,
-    devices,
-    browsers,
-    eventTypes,
-  ] = await Promise.all([
-    fetchPrivateOverview({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyOverview()),
-    fetchPrivateOverview({ siteId, from: previousFrom, to: previousTo, filters }).catch(() => emptyOverview()),
-    fetchPrivateTrend({
+  const [overview, pages, referrers, sessions, events, countries, devices, browsers, eventTypes] =
+    await Promise.all([
+      fetchPrivateOverview({
+        siteId,
+        from: window.from,
+        to: window.to,
+        filters,
+        includeChange: true,
+        includeDetail: true,
+        interval: window.interval,
+      }).catch(() => emptyOverview()),
+      fetchPrivatePages({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyPages()),
+      fetchPrivateReferrers({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyReferrers()),
+      fetchPrivateSessions({ siteId, from: window.from, to: window.to, filters }).catch(() => emptySessions()),
+      fetchPrivateEvents({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyEvents()),
+      fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
+      fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
+      fetchPrivateBrowsers({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
+      fetchPrivateEventTypes({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
+    ]);
+
+  const trend = overview.detail
+    ? {
+      ok: overview.ok,
+      interval: overview.detail.interval,
+      data: overview.detail.data,
+    }
+    : await fetchPrivateTrend({
       siteId,
       from: window.from,
       to: window.to,
       interval: window.interval,
       filters,
-    }).catch(() => emptyTrend(window.interval)),
-    fetchPrivatePages({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyPages()),
-    fetchPrivateReferrers({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyReferrers()),
-    fetchPrivateSessions({ siteId, from: window.from, to: window.to, filters }).catch(() => emptySessions()),
-    fetchPrivateEvents({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyEvents()),
-    fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
-    fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
-    fetchPrivateBrowsers({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
-    fetchPrivateEventTypes({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
-  ]);
+    }).catch(() => emptyTrend(window.interval));
+
+  const previousOverview = overview.previousData
+    ? {
+        ok: overview.ok,
+        data: overview.previousData,
+      }
+    : await fetchPrivateOverview({
+        siteId,
+        from: previousFrom,
+        to: previousTo,
+        filters,
+      }).catch(() => emptyOverview());
 
   return {
     overview,

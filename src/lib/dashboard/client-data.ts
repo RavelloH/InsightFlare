@@ -115,11 +115,21 @@ async function fetchPrivateJson<T>(path: string, params?: Record<string, string 
   return (await res.json()) as T;
 }
 
-export async function fetchOverview(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<OverviewData> {
+export async function fetchOverview(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+  options?: {
+    includeChange?: boolean;
+    includeDetail?: boolean;
+  },
+): Promise<OverviewData> {
   return fetchPrivateJson<OverviewData>("/api/private/overview", withFilters({
     siteId,
     from: window.from,
     to: window.to,
+    ...(options?.includeChange ? { includeChange: 1 } : {}),
+    ...(options?.includeDetail ? { includeDetail: 1, interval: window.interval } : {}),
   }, filters));
 }
 
@@ -251,31 +261,36 @@ export async function loadOverviewBundle(
     to: previousTo,
   };
 
-  const [
-    overview,
-    previousOverview,
-    trend,
-    pages,
-    referrers,
-    sessions,
-    events,
-    countries,
-    devices,
-    browsers,
-    eventTypes,
-  ] = await Promise.all([
-    fetchOverview(siteId, window, filters).catch(() => emptyOverview()),
-    fetchOverview(siteId, previousWindow, filters).catch(() => emptyOverview()),
-    fetchTrend(siteId, window, filters).catch(() => emptyTrend(window.interval)),
-    fetchPages(siteId, window, filters).catch(() => emptyPages()),
-    fetchReferrers(siteId, window, filters).catch(() => emptyReferrers()),
-    fetchSessions(siteId, window, filters).catch(() => emptySessions()),
-    fetchEvents(siteId, window, filters).catch(() => emptyEvents()),
-    fetchCountries(siteId, window, filters).catch(() => emptyDimension()),
-    fetchDevices(siteId, window, filters).catch(() => emptyDimension()),
-    fetchBrowsers(siteId, window, filters).catch(() => emptyDimension()),
-    fetchEventTypes(siteId, window, filters).catch(() => emptyDimension()),
-  ]);
+  const [overview, pages, referrers, sessions, events, countries, devices, browsers, eventTypes] =
+    await Promise.all([
+      fetchOverview(siteId, window, filters, {
+        includeChange: true,
+        includeDetail: true,
+      }).catch(() => emptyOverview()),
+      fetchPages(siteId, window, filters).catch(() => emptyPages()),
+      fetchReferrers(siteId, window, filters).catch(() => emptyReferrers()),
+      fetchSessions(siteId, window, filters).catch(() => emptySessions()),
+      fetchEvents(siteId, window, filters).catch(() => emptyEvents()),
+      fetchCountries(siteId, window, filters).catch(() => emptyDimension()),
+      fetchDevices(siteId, window, filters).catch(() => emptyDimension()),
+      fetchBrowsers(siteId, window, filters).catch(() => emptyDimension()),
+      fetchEventTypes(siteId, window, filters).catch(() => emptyDimension()),
+    ]);
+
+  const trend = overview.detail
+    ? {
+      ok: overview.ok,
+      interval: overview.detail.interval,
+      data: overview.detail.data,
+    }
+    : await fetchTrend(siteId, window, filters).catch(() => emptyTrend(window.interval));
+
+  const previousOverview = overview.previousData
+    ? {
+        ok: overview.ok,
+        data: overview.previousData,
+      }
+    : await fetchOverview(siteId, previousWindow, filters).catch(() => emptyOverview());
 
   return {
     overview,

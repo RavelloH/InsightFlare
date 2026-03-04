@@ -171,6 +171,11 @@ function parseInterval(url: URL): "minute" | "hour" | "day" | "week" | "month" {
   return "hour";
 }
 
+function parseBooleanSearchParam(url: URL, key: string): boolean {
+  const raw = (url.searchParams.get(key) || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
 function normalizeFilterValue(value: string | null): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim().slice(0, 120);
@@ -430,7 +435,9 @@ async function queryTrend(
   views: number;
   visitors: number;
   sessions: number;
+  bounces: number;
   totalDurationMs: number;
+  avgDurationMs: number;
   source: "detail" | "archive" | "mixed";
 }>> {
   const bucketMs =
@@ -460,6 +467,7 @@ async function queryTrend(
       views: number;
       visitors: number;
       sessions: number;
+      bounces: number;
       totalDurationMs: number;
       detail: boolean;
       archive: boolean;
@@ -482,6 +490,7 @@ async function queryTrend(
         views: 0,
         visitors: 0,
         sessions: 0,
+        bounces: 0,
         totalDurationMs: 0,
         detail: false,
         archive: false,
@@ -489,6 +498,7 @@ async function queryTrend(
       entry.views += row.views ?? 0;
       entry.visitors += row.visitors ?? 0;
       entry.sessions += row.sessions ?? 0;
+      entry.bounces += row.bounces ?? 0;
       entry.totalDurationMs += row.total_duration ?? 0;
       entry.detail = true;
       buckets.set(row.bucket, entry);
@@ -502,6 +512,7 @@ async function queryTrend(
         COUNT(*) AS views,
         COUNT(DISTINCT visitor_id) AS visitors,
         COUNT(DISTINCT session_id) AS sessions,
+        SUM(CASE WHEN COALESCE(duration_ms, 0) <= 0 THEN 1 ELSE 0 END) AS bounces,
         SUM(COALESCE(duration_ms, 0)) AS total_duration
       FROM pageviews
       WHERE site_id = ? AND event_at BETWEEN ? AND ?${d1FilterSql.clause}
@@ -511,13 +522,21 @@ async function queryTrend(
 
     const detailRows = await env.DB.prepare(detailSql)
       .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings)
-      .all<{ bucket: number; views: number; visitors: number; sessions: number; total_duration: number }>();
+      .all<{
+        bucket: number;
+        views: number;
+        visitors: number;
+        sessions: number;
+        bounces: number;
+        total_duration: number;
+      }>();
 
     for (const row of detailRows.results) {
       const entry = buckets.get(row.bucket) ?? {
         views: 0,
         visitors: 0,
         sessions: 0,
+        bounces: 0,
         totalDurationMs: 0,
         detail: false,
         archive: false,
@@ -525,6 +544,7 @@ async function queryTrend(
       entry.views += row.views ?? 0;
       entry.visitors += row.visitors ?? 0;
       entry.sessions += row.sessions ?? 0;
+      entry.bounces += row.bounces ?? 0;
       entry.totalDurationMs += row.total_duration ?? 0;
       entry.detail = true;
       buckets.set(row.bucket, entry);
@@ -537,6 +557,7 @@ async function queryTrend(
         CAST(hour_bucket / ? AS INTEGER) AS bucket,
         SUM(total_views) AS views,
         SUM(total_sessions) AS sessions,
+        SUM(bounces) AS bounces,
         SUM(total_duration) AS total_duration
       FROM pageviews_archive_hourly
       WHERE site_id = ? AND hour_bucket BETWEEN ? AND ?
@@ -546,19 +567,27 @@ async function queryTrend(
 
     const archiveRows = await env.DB.prepare(archiveSql)
       .bind(bucketDivisor, siteId, window.archiveFromHour, window.archiveToHour)
-      .all<{ bucket: number; views: number; sessions: number; total_duration: number }>();
+      .all<{
+        bucket: number;
+        views: number;
+        sessions: number;
+        bounces: number;
+        total_duration: number;
+      }>();
 
     for (const row of archiveRows.results) {
       const entry = buckets.get(row.bucket) ?? {
         views: 0,
         visitors: 0,
         sessions: 0,
+        bounces: 0,
         totalDurationMs: 0,
         detail: false,
         archive: false,
       };
       entry.views += row.views ?? 0;
       entry.sessions += row.sessions ?? 0;
+      entry.bounces += row.bounces ?? 0;
       entry.totalDurationMs += row.total_duration ?? 0;
       entry.archive = true;
       buckets.set(row.bucket, entry);
@@ -604,6 +633,7 @@ async function queryTrend(
         views: 0,
         visitors: 0,
         sessions: 0,
+        bounces: 0,
         totalDurationMs: 0,
         detail: false,
         archive: false,
@@ -622,7 +652,9 @@ async function queryTrend(
       views: value.views,
       visitors: value.visitors,
       sessions: value.sessions,
+      bounces: value.bounces,
       totalDurationMs: value.totalDurationMs,
+      avgDurationMs: value.views > 0 ? Math.round(value.totalDurationMs / value.views) : 0,
       source: value.detail && value.archive ? "mixed" : value.detail ? "detail" : "archive",
     }));
 }
@@ -1638,13 +1670,76 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
   const filters = parseFilters(url);
 
   if (pathname === "/api/private/overview") {
-    const overview = await queryOverview(env, siteId, window, filters);
+    const includeChange = parseBooleanSearchParam(url, "includeChange");
+    const includeDetail = parseBooleanSearchParam(url, "includeDetail");
+    const detailInterval = parseInterval(url);
+    if (!includeChange) {
+      const [overview, detail] = await Promise.all([
+        queryOverview(env, siteId, window, filters),
+        includeDetail
+          ? queryTrend(env, siteId, window, detailInterval, filters)
+          : Promise.resolve(null),
+      ]);
+
+      return jsonResponse({
+        ok: true,
+        siteId,
+        fromMs: window.fromMs,
+        toMs: window.toMs,
+        data: overview,
+        ...(includeDetail
+          ? {
+            detail: {
+              interval: detailInterval,
+              data: detail ?? [],
+            },
+          }
+          : {}),
+      });
+    }
+
+    const spanMs = Math.max(0, window.toMs - window.fromMs);
+    const previousToMs = Math.max(window.fromMs - 1, 0);
+    const previousFromMs = Math.max(previousToMs - spanMs, 0);
+    const previousWindow = buildWindowFromRange(
+      env,
+      previousFromMs,
+      previousToMs,
+      window.nowMs,
+    );
+    const [overview, previousOverview, detail] = await Promise.all([
+      queryOverview(env, siteId, window, filters),
+      previousWindow
+        ? queryOverview(env, siteId, previousWindow, filters)
+        : Promise.resolve(emptyOverviewMetrics()),
+      includeDetail
+        ? queryTrend(env, siteId, window, detailInterval, filters)
+        : Promise.resolve(null),
+    ]);
+
     return jsonResponse({
       ok: true,
       siteId,
       fromMs: window.fromMs,
       toMs: window.toMs,
       data: overview,
+      previousData: previousOverview,
+      ...(includeDetail
+        ? {
+          detail: {
+            interval: detailInterval,
+            data: detail ?? [],
+          },
+        }
+        : {}),
+      changeRates: {
+        views: toPercentChange(overview.views, previousOverview.views),
+        sessions: toPercentChange(overview.sessions, previousOverview.sessions),
+        visitors: toPercentChange(overview.visitors, previousOverview.visitors),
+        bounces: toPercentChange(overview.bounces, previousOverview.bounces),
+        bounceRate: toPercentChange(overview.bounceRate, previousOverview.bounceRate),
+        avgDurationMs: toPercentChange(overview.avgDurationMs, previousOverview.avgDurationMs),
+      },
     });
   }
 
