@@ -22,6 +22,8 @@ import { TeamSelect } from "@/components/dashboard/team-select";
 import { DashboardQueryProvider } from "@/components/dashboard/dashboard-query-provider";
 import { DashboardHeaderControls } from "@/components/dashboard/dashboard-header-controls";
 import { SidebarSiteDetails } from "@/components/dashboard/sidebar-site-details";
+import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -460,17 +462,28 @@ export function DashboardShell({
               </div>
             </div>
 
-            {analyticsSections.length > 0 ? (
-              <div className="px-3">
-                <AnalyticsTabs
-                  items={analyticsSections.map((item) => ({
-                    key: item.key,
-                    href: item.href,
-                    label: messages.navigation[item.key],
-                  }))}
-                />
-              </div>
-            ) : null}
+            <AutoResizer className="px-3" duration={0.24}>
+              <AutoTransition
+                type="slideDown"
+                duration={0.2}
+                initial={false}
+                presenceMode="sync"
+              >
+                {analyticsSections.length > 0 ? (
+                  <div key="analytics-tabs">
+                    <AnalyticsTabs
+                      items={analyticsSections.map((item) => ({
+                        key: item.key,
+                        href: item.href,
+                        label: messages.navigation[item.key],
+                      }))}
+                    />
+                  </div>
+                ) : (
+                  <div key="analytics-tabs-empty" className="h-0" aria-hidden />
+                )}
+              </AutoTransition>
+            </AutoResizer>
           </div>
           <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
             <PageTransition>{children}</PageTransition>
