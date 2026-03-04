@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { TrafficPairBarChart } from "@/components/dashboard/site-traffic-charts";
 import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import type { DashboardInterval, TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
-import { cn } from "@/lib/utils";
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -75,6 +75,7 @@ interface SiteIconProps {
 }
 
 const SIDEBAR_EXPAND_CHART_DELAY_MS = 220;
+const SIDEBAR_ROUTE_SETTLE_DELAY_MS = 360;
 
 function buildSitePath(locale: Locale, teamSlug: string, siteSlug: string): string {
   return `/${locale}/app/${teamSlug}/${siteSlug}`;
@@ -161,9 +162,29 @@ function intervalStepMs(interval: DashboardInterval): number {
   return 30 * 24 * 60 * 60 * 1000;
 }
 
+function buildZeroTrend(window: Pick<TimeWindow, "from" | "to" | "interval">): SiteTrendPoint[] {
+  const stepMs = intervalStepMs(window.interval);
+  if (!Number.isFinite(stepMs) || stepMs <= 0) return [];
+
+  const fromBucket = Math.floor(window.from / stepMs);
+  const toBucket = Math.max(fromBucket, Math.floor(window.to / stepMs));
+  const points: SiteTrendPoint[] = [];
+
+  for (let bucket = fromBucket; bucket <= toBucket; bucket += 1) {
+    points.push({
+      timestampMs: bucket * stepMs,
+      views: 0,
+      visitors: 0,
+    });
+  }
+
+  return points;
+}
+
 async function fetchTeamDashboard(
   teamId: string,
   window: Pick<TimeWindow, "from" | "to" | "interval">,
+  signal?: AbortSignal,
 ): Promise<TeamDashboardData> {
   const params = new URLSearchParams({
     teamId,
@@ -174,6 +195,7 @@ async function fetchTeamDashboard(
   const response = await fetch(`/api/private/team-dashboard?${params.toString()}`, {
     method: "GET",
     credentials: "include",
+    signal,
   });
   if (!response.ok) throw new Error("fetch_team_dashboard_failed");
   const payload = (await response.json()) as {
@@ -203,12 +225,15 @@ export function SidebarSiteDetails({
   sites,
   labels,
 }: SidebarSiteDetailsProps) {
+  const pathname = usePathname();
   const { state: sidebarState, isMobile } = useSidebar();
   const { window } = useDashboardQuery();
   const [teamTrend, setTeamTrend] = useState<TeamDashboardTrendPoint[]>([]);
   const [shouldRenderCharts, setShouldRenderCharts] = useState(
     isMobile || sidebarState !== "collapsed",
   );
+  const [isRouteSettled, setIsRouteSettled] = useState(true);
+  const didMountRef = useRef(false);
 
   useEffect(() => {
     if (isMobile) {
@@ -228,28 +253,53 @@ export function SidebarSiteDetails({
     return () => clearTimeout(timeout);
   }, [sidebarState, isMobile]);
 
+  useLayoutEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+
+    setTeamTrend([]);
+    setIsRouteSettled(false);
+
+    const timeout = setTimeout(() => {
+      setIsRouteSettled(true);
+    }, SIDEBAR_ROUTE_SETTLE_DELAY_MS);
+
+    return () => clearTimeout(timeout);
+  }, [pathname]);
+
+  const canFetchCharts = shouldRenderCharts && isRouteSettled;
+
   useEffect(() => {
     if (!teamId || sites.length === 0) {
       setTeamTrend([]);
       return;
     }
 
+    if (!canFetchCharts) {
+      return;
+    }
+
+    const controller = new AbortController();
     let active = true;
 
-    fetchTeamDashboard(teamId, window)
+    fetchTeamDashboard(teamId, window, controller.signal)
       .then((dashboard) => {
         if (!active) return;
         setTeamTrend(dashboard.trend);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if ((error as { name?: string } | null)?.name === "AbortError") return;
         if (!active) return;
         setTeamTrend([]);
       });
 
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [teamId, sites.length, window.from, window.to, window.interval]);
+  }, [teamId, sites.length, canFetchCharts, window.from, window.to, window.interval]);
 
   const siteTrendById = useMemo(() => {
     const stepMs = intervalStepMs(window.interval);
@@ -303,13 +353,18 @@ export function SidebarSiteDetails({
     ) as Record<string, SiteTrendPoint[]>;
   }, [sites, teamTrend, window.from, window.to, window.interval]);
 
+  const zeroTrend = useMemo(
+    () => buildZeroTrend(window),
+    [window.from, window.to, window.interval],
+  );
+
   const cards = useMemo(
     () =>
       sites.map((site) => ({
         site,
-        trend: siteTrendById[site.id] ?? [],
+        trend: siteTrendById[site.id] ?? zeroTrend,
       })),
-    [sites, siteTrendById],
+    [sites, siteTrendById, zeroTrend],
   );
 
   return (

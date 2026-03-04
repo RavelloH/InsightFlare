@@ -187,8 +187,6 @@ export function DashboardHeaderControls({
     DateRange | undefined
   >(selectedDateRange);
 
-  if (!showControls) return null;
-
   const orderedAllowedIntervals = INTERVAL_ORDER.filter((value) =>
     allowedIntervals.includes(value),
   );
@@ -229,6 +227,8 @@ export function DashboardHeaderControls({
     pendingCustomRange?.to,
     pendingNormalized,
   ]);
+
+  if (!showControls) return null;
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">

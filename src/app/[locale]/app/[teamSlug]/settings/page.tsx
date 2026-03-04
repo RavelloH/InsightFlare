@@ -1,12 +1,6 @@
-import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { TeamManagementClient } from "@/components/dashboard/team-management-client";
 import { getDashboardProfile } from "@/lib/dashboard/server";
-import {
-  buildManagementSections,
-  buildTeamSections,
-} from "@/lib/dashboard/team-sections";
 import { resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 
@@ -32,37 +26,12 @@ export default async function TeamSettingsPage({ params }: TeamSettingsPageProps
     notFound();
   }
 
-  const teamSections = buildTeamSections(resolvedLocale, activeTeam.slug, messages);
-  const managementSections =
-    profile.user.systemRole === "admin"
-      ? buildManagementSections(resolvedLocale, activeTeam.slug, messages)
-      : undefined;
-
-  const requestHeaders = await headers();
-  const pathname =
-    requestHeaders.get("x-pathname") ||
-    `/${resolvedLocale}/app/${activeTeam.slug}/settings`;
-
   return (
-    <DashboardShell
+    <TeamManagementClient
       locale={resolvedLocale}
-      pathname={pathname}
       messages={messages}
-      user={profile.user}
-      teams={profile.teams}
-      activeTeamSlug={activeTeam.slug}
-      sites={[]}
-      teamSections={teamSections}
-      activeTeamSectionKey="settings"
-      managementSections={managementSections}
-    >
-      <TeamManagementClient
-        locale={resolvedLocale}
-        messages={messages}
-        activeTeam={activeTeam}
-        activeTab="settings"
-      />
-    </DashboardShell>
+      activeTeam={activeTeam}
+      activeTab="settings"
+    />
   );
 }
-

@@ -21,10 +21,12 @@ export interface AutoTransitionProps {
   duration?: number;
   type?: TransitionType;
   initial?: boolean;
+  custom?: unknown;
+  presenceMode?: "sync" | "wait" | "popLayout";
   customVariants?: {
-    initial?: TargetAndTransition;
-    animate?: TargetAndTransition;
-    exit?: TargetAndTransition;
+    initial?: TargetAndTransition | ((custom: unknown) => TargetAndTransition);
+    animate?: TargetAndTransition | ((custom: unknown) => TargetAndTransition);
+    exit?: TargetAndTransition | ((custom: unknown) => TargetAndTransition);
   };
 }
 
@@ -69,6 +71,8 @@ export function AutoTransition({
   duration = 0.3,
   type = "fade",
   initial = true,
+  custom,
+  presenceMode = "wait",
   customVariants,
 }: AutoTransitionProps) {
   const [hasRendered, setHasRendered] = useState(false);
@@ -108,13 +112,15 @@ export function AutoTransition({
   const shouldAnimate = initial || hasRendered;
 
   return (
-    <AnimatePresence mode="wait">
+    <AnimatePresence mode={presenceMode} custom={custom}>
       <motion.div
         key={key}
         className={className}
-        initial={shouldAnimate ? selectedVariants.initial : false}
-        animate={selectedVariants.animate}
-        exit={selectedVariants.exit}
+        custom={custom}
+        variants={selectedVariants}
+        initial={shouldAnimate ? "initial" : false}
+        animate="animate"
+        exit="exit"
         transition={{ duration }}
       >
         {children}
@@ -122,4 +128,3 @@ export function AutoTransition({
     </AnimatePresence>
   );
 }
-

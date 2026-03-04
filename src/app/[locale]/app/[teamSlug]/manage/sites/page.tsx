@@ -1,9 +1,6 @@
-import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { AdminSitesManagementClient } from "@/components/dashboard/admin-sites-management-client";
 import { getDashboardProfile } from "@/lib/dashboard/server";
-import { buildManagementSections, buildTeamSections } from "@/lib/dashboard/team-sections";
 import { resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 
@@ -29,28 +26,12 @@ export default async function ManageSitesPage({ params }: ManageSitesPageProps) 
     notFound();
   }
 
-  const requestHeaders = await headers();
-  const pathname = requestHeaders.get("x-pathname") || `/${resolvedLocale}/app/${activeTeam.slug}/manage/sites`;
-
   return (
-    <DashboardShell
+    <AdminSitesManagementClient
       locale={resolvedLocale}
-      pathname={pathname}
       messages={messages}
-      user={profile.user}
       teams={profile.teams}
-      activeTeamSlug={activeTeam.slug}
-      sites={[]}
-      teamSections={buildTeamSections(resolvedLocale, activeTeam.slug, messages)}
-      managementSections={buildManagementSections(resolvedLocale, activeTeam.slug, messages)}
-      activeManagementSectionKey="manage-sites"
-    >
-      <AdminSitesManagementClient
-        locale={resolvedLocale}
-        messages={messages}
-        teams={profile.teams}
-        defaultTeamId={activeTeam.id}
-      />
-    </DashboardShell>
+      defaultTeamId={activeTeam.id}
+    />
   );
 }

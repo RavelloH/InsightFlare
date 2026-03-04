@@ -1,9 +1,6 @@
-import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { AdminTeamsManagementClient } from "@/components/dashboard/admin-teams-management-client";
 import { getDashboardProfile } from "@/lib/dashboard/server";
-import { buildManagementSections, buildTeamSections } from "@/lib/dashboard/team-sections";
 import { resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 
@@ -29,23 +26,7 @@ export default async function ManageTeamsPage({ params }: ManageTeamsPageProps) 
     notFound();
   }
 
-  const requestHeaders = await headers();
-  const pathname = requestHeaders.get("x-pathname") || `/${resolvedLocale}/app/${activeTeam.slug}/manage/teams`;
-
   return (
-    <DashboardShell
-      locale={resolvedLocale}
-      pathname={pathname}
-      messages={messages}
-      user={profile.user}
-      teams={profile.teams}
-      activeTeamSlug={activeTeam.slug}
-      sites={[]}
-      teamSections={buildTeamSections(resolvedLocale, activeTeam.slug, messages)}
-      managementSections={buildManagementSections(resolvedLocale, activeTeam.slug, messages)}
-      activeManagementSectionKey="manage-teams"
-    >
-      <AdminTeamsManagementClient locale={resolvedLocale} messages={messages} />
-    </DashboardShell>
+    <AdminTeamsManagementClient locale={resolvedLocale} messages={messages} />
   );
 }

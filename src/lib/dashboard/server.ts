@@ -64,6 +64,19 @@ export interface DashboardContext {
   activeSite: SiteWithSlug;
 }
 
+export interface DashboardTeamContext {
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    name: string;
+    systemRole: "admin" | "user";
+  };
+  teams: TeamData[];
+  activeTeam: TeamData;
+  sites: SiteWithSlug[];
+}
+
 const RANGE_PRESETS: readonly RangePreset[] = ["24h", "7d", "30d", "90d"] as const;
 
 function normalizeFilterValue(value: string | string[] | undefined): string | undefined {
@@ -182,22 +195,37 @@ const getSitesForTeam = cache(async (teamId: string): Promise<SiteWithSlug[]> =>
   }
 });
 
+export const getDashboardTeamContext = cache(
+  async (teamSlug: string): Promise<DashboardTeamContext | null> => {
+    const me = await getMe();
+    if (!me) return null;
+
+    const activeTeam = me.teams.find((team) => team.slug === teamSlug);
+    if (!activeTeam) return null;
+
+    const sites = await getSitesForTeam(activeTeam.id);
+
+    return {
+      user: me.user,
+      teams: me.teams,
+      activeTeam,
+      sites,
+    };
+  },
+);
+
 export const getTeamSiteContext = cache(async (teamSlug: string, siteSlug: string): Promise<DashboardContext | null> => {
-  const me = await getMe();
-  if (!me) return null;
+  const teamContext = await getDashboardTeamContext(teamSlug);
+  if (!teamContext) return null;
 
-  const activeTeam = me.teams.find((team) => team.slug === teamSlug);
-  if (!activeTeam) return null;
-
-  const sites = await getSitesForTeam(activeTeam.id);
-  const activeSite = findSiteBySlug(sites, siteSlug);
+  const activeSite = findSiteBySlug(teamContext.sites, siteSlug);
   if (!activeSite) return null;
 
   return {
-    user: me.user,
-    teams: me.teams,
-    activeTeam,
-    sites,
+    user: teamContext.user,
+    teams: teamContext.teams,
+    activeTeam: teamContext.activeTeam,
+    sites: teamContext.sites,
     activeSite,
   };
 });

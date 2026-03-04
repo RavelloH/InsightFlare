@@ -1,11 +1,43 @@
-import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "./constants";
 import type { DashboardSession } from "./session";
 import { verifySessionToken } from "./session";
 
+function decodeCookieValue(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function parseCookieValue(cookieHeader: string, key: string): string {
+  if (!cookieHeader) return "";
+  const parts = cookieHeader.split(";");
+  for (const part of parts) {
+    const [rawKey, ...rawValue] = part.trim().split("=");
+    if (rawKey === key) {
+      return decodeCookieValue(rawValue.join("="));
+    }
+  }
+  return "";
+}
+
+async function readServerCookieHeader(): Promise<string> {
+  try {
+    const mod = await import("next/headers");
+    const h = await mod.headers();
+    return h.get("cookie") || "";
+  } catch {
+    return "";
+  }
+}
+
 export async function getSessionToken(): Promise<string> {
-  const cookieStore = await cookies();
-  return cookieStore.get(SESSION_COOKIE)?.value || "";
+  if (typeof document !== "undefined") {
+    return parseCookieValue(document.cookie || "", SESSION_COOKIE);
+  }
+  const cookieHeader = await readServerCookieHeader();
+  return parseCookieValue(cookieHeader, SESSION_COOKIE);
 }
 
 export async function getSession(): Promise<DashboardSession | null> {
