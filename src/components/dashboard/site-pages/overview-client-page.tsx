@@ -587,7 +587,7 @@ export function OverviewClientPage({
                         </AutoResizer>
                       </div>
                     </div>
-                    <div className="w-[60%] min-w-0">
+                    <div className="w-1/2 min-w-0">
                       <MetricAreaMap
                         points={item.trend}
                         color={METRIC_AREA_COLOR}

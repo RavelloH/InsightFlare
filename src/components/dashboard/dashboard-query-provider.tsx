@@ -12,6 +12,7 @@ import {
 import {
   allowedIntervalsForRange,
   clampIntervalForRange,
+  finestIntervalForRange,
   resolveRangePreset,
   resolveTimeWindow,
   type CustomTimeRange,
@@ -160,14 +161,24 @@ export function DashboardQueryProvider({ children }: DashboardQueryProviderProps
   }, [range, windowState.interval, customRange, uiFilters]);
 
   const setRange = useCallback((next: RangePreset) => {
+    if (next === "custom" && !customRange) {
+      setRangeState(next);
+      return;
+    }
+    const nextWindow = resolveTimeWindow(next, Date.now(), {
+      customRange: customRange || undefined,
+      interval: null,
+    });
     setRangeState(next);
-  }, []);
+    setIntervalState(finestIntervalForRange(nextWindow.from, nextWindow.to));
+  }, [customRange]);
 
   const setCustomRange = useCallback((next: CustomTimeRange | null) => {
     const normalized = normalizeCustomRange(next);
     setCustomRangeState(normalized);
     if (normalized) {
       setRangeState("custom");
+      setIntervalState(finestIntervalForRange(normalized.from, normalized.to));
     }
   }, []);
 
