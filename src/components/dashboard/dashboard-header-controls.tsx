@@ -532,7 +532,7 @@ export function DashboardHeaderControls({
         </div>
 
         <div className="hidden flex-wrap items-center justify-end gap-2 md:flex">
-          <Sheet>
+          <Sheet modal={false}>
             <SheetTrigger asChild disabled={!showFilterSheet}>
               <Button variant="outline" className="gap-2">
                 <RiFilter3Line className="size-4" />
@@ -657,7 +657,7 @@ export function DashboardHeaderControls({
             </Tooltip>
           </ButtonGroup>
 
-          <DropdownMenu>
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
@@ -694,7 +694,7 @@ export function DashboardHeaderControls({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <DropdownMenu>
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
@@ -747,7 +747,11 @@ export function DashboardHeaderControls({
         </div>
       </div>
 
-      <Dialog open={customDialogOpen} onOpenChange={setCustomDialogOpen}>
+      <Dialog
+        modal={false}
+        open={customDialogOpen}
+        onOpenChange={setCustomDialogOpen}
+      >
         <DialogContent className="w-fit">
           <DialogHeader>
             <DialogTitle>{messages.ranges.custom}</DialogTitle>

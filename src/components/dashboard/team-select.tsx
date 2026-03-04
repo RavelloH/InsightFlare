@@ -120,6 +120,7 @@ export function TeamSelect({
 
   const createTeamDialog = (
     <Dialog
+      modal={false}
       open={openCreateDialog}
       onOpenChange={(next) => {
         if (!next && submitting) return;
