@@ -15,6 +15,7 @@ export interface Env {
   ARCHIVE_BUCKET?: R2Bucket;
   ANALYTICS_ACCOUNT_ID?: string;
   ANALYTICS_SQL_API_TOKEN?: string;
+  DISABLE_ANALYTICS_ENGINE?: string;
   DAILY_SALT_SECRET: string;
   ADMIN_WS_TOKEN?: string;
   DASHBOARD_SESSION_SECRET?: string;

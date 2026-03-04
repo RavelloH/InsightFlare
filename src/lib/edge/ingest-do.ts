@@ -6,6 +6,7 @@ import type {
   NormalizedEvent,
   TrackerClientPayload,
 } from "./types";
+import { isAnalyticsEngineEnabled } from "./flags";
 import {
   TEN_MINUTES_MS,
   clampString,
@@ -340,6 +341,10 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private async writeToAnalyticsEngine(event: NormalizedEvent): Promise<void> {
+    if (!isAnalyticsEngineEnabled(this.doEnv)) {
+      return;
+    }
+
     if (!this.doEnv.ANALYTICS || typeof this.doEnv.ANALYTICS.writeDataPoint !== "function") {
       return;
     }

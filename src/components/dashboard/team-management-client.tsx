@@ -155,7 +155,6 @@ async function fetchTeamDashboard(
   const response = await fetch(`/api/private/team-dashboard?${params.toString()}`, {
     method: "GET",
     credentials: "include",
-    cache: "no-store",
   });
   if (!response.ok) throw new Error("fetch_team_dashboard_failed");
   const payload = (await response.json()) as {

@@ -43,6 +43,7 @@ interface TrafficPairBarChartProps {
   interval: DashboardInterval;
   viewsLabel: string;
   visitorsLabel: string;
+  compact?: boolean;
   className?: string;
 }
 
@@ -417,6 +418,7 @@ export function TrafficPairBarChart({
   interval,
   viewsLabel,
   visitorsLabel,
+  compact = false,
   className,
 }: TrafficPairBarChartProps) {
   const chartData = [...data]
@@ -447,33 +449,56 @@ export function TrafficPairBarChart({
 
   return (
     <ChartContainer
-      className={cn("h-[180px] w-full aspect-auto", className)}
+      className={cn(
+        compact ? "h-4 w-full aspect-auto" : "h-[180px] w-full aspect-auto",
+        className,
+      )}
       config={config}
     >
-      <BarChart data={chartData} margin={{ left: 8, right: 8 }} barGap={0}>
-        <CartesianGrid vertical={false} />
-        <XAxis
-          dataKey="timestampMs"
-          tickFormatter={(value) => tickFormatter.format(new Date(Number(value ?? 0)))}
-          tickLine={false}
-          axisLine={false}
-          tickMargin={8}
-          minTickGap={14}
+      <BarChart
+        data={chartData}
+        margin={compact ? { left: 0, right: 0, top: 0, bottom: 0 } : { left: 8, right: 8 }}
+        barGap={0}
+      >
+        {compact ? null : <CartesianGrid vertical={false} />}
+        {compact ? null : (
+          <XAxis
+            dataKey="timestampMs"
+            tickFormatter={(value) => tickFormatter.format(new Date(Number(value ?? 0)))}
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            minTickGap={14}
+          />
+        )}
+        {compact ? null : (
+          <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={32} />
+        )}
+        {compact ? null : (
+          <ChartTooltip
+            content={(
+              <ChartTooltipContent
+                indicator="line"
+                labelFormatter={(value, payload) => {
+                  const timestamp = Number(payload?.[0]?.payload?.timestampMs ?? value ?? 0);
+                  return tooltipFormatter.format(new Date(timestamp));
+                }}
+              />
+            )}
+          />
+        )}
+        <Bar
+          dataKey="visitors"
+          stackId="traffic"
+          fill="var(--color-visitors)"
+          radius={0}
         />
-        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={32} />
-        <ChartTooltip
-          content={(
-            <ChartTooltipContent
-              indicator="line"
-              labelFormatter={(value, payload) => {
-                const timestamp = Number(payload?.[0]?.payload?.timestampMs ?? value ?? 0);
-                return tooltipFormatter.format(new Date(timestamp));
-              }}
-            />
-          )}
+        <Bar
+          dataKey="nonVisitorViews"
+          stackId="traffic"
+          fill="var(--color-nonVisitorViews)"
+          radius={0}
         />
-        <Bar dataKey="visitors" stackId="traffic" fill="var(--color-visitors)" radius={0} />
-        <Bar dataKey="nonVisitorViews" stackId="traffic" fill="var(--color-nonVisitorViews)" radius={0} />
       </BarChart>
     </ChartContainer>
   );

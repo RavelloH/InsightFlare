@@ -100,6 +100,7 @@ npm run cf:deploy
 - `PARQUET_WASM_URL`：Parquet wasm 下载地址
 - `ANALYTICS_ACCOUNT_ID`：Analytics Engine SQL 查询使用的 Cloudflare 账号 ID
 - `ANALYTICS_SQL_API_TOKEN`（Secret）：用于 0-90 天 Analytics Engine 查询
+- `DISABLE_ANALYTICS_ENGINE`：设为 `true/1` 可关闭 Analytics Engine 读写，查询回退到 D1/归档
 
 ## 注意事项
 

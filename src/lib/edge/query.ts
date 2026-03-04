@@ -16,6 +16,7 @@ import {
   queryAeVisitorDetails,
   splitAeRange,
 } from "./analytics-engine-query";
+import { isAnalyticsEngineEnabled } from "./flags";
 
 const RETENTION_DAYS = 365;
 const ANALYTICS_WINDOW_DAYS = 90;
@@ -92,7 +93,7 @@ function notAllowed(message = "Method Not Allowed"): Response {
   return jsonResponse({ ok: false, error: message }, 405);
 }
 
-function parseWindow(url: URL): QueryWindow | null {
+function parseWindow(url: URL, env: Env): QueryWindow | null {
   const now = Date.now();
   const defaultFrom = now - ONE_DAY_MS;
   const fromRaw = coerceNumber(url.searchParams.get("from"), defaultFrom);
@@ -105,14 +106,15 @@ function parseWindow(url: URL): QueryWindow | null {
   }
 
   const retentionCutoffMs = now - RETENTION_DAYS * ONE_DAY_MS;
+  const analyticsEnabled = isAnalyticsEngineEnabled(env);
   const analyticsCutoffMs = now - ANALYTICS_WINDOW_DAYS * ONE_DAY_MS;
-  const analyticsRange = splitAeRange(fromMs, toMs, now);
+  const analyticsRange = analyticsEnabled ? splitAeRange(fromMs, toMs, now) : null;
   const hasAnalytics = Boolean(analyticsRange);
   const analyticsFromMs = analyticsRange?.fromMs ?? 0;
   const analyticsToMs = analyticsRange?.toMs ?? -1;
 
   const d1DetailFromMs = Math.max(fromMs, retentionCutoffMs);
-  const d1DetailToMs = Math.min(toMs, analyticsCutoffMs - 1);
+  const d1DetailToMs = analyticsEnabled ? Math.min(toMs, analyticsCutoffMs - 1) : toMs;
   const hasD1Detail = d1DetailFromMs <= d1DetailToMs;
 
   const archiveToMs = Math.min(toMs, retentionCutoffMs - 1);
@@ -1525,7 +1527,7 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
       return unauthorized("Team access denied for current user");
     }
 
-    const window = parseWindow(url);
+    const window = parseWindow(url, env);
     if (!window) {
       return badRequest("Invalid time window");
     }
@@ -1542,14 +1544,21 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
 
     const interval = parseInterval(url);
     const data = await queryTeamDashboard(env, teamId, window, interval);
-    return jsonResponse({
-      ok: true,
-      teamId,
-      fromMs: window.fromMs,
-      toMs: window.toMs,
-      interval,
-      data,
-    });
+    return jsonResponse(
+      {
+        ok: true,
+        teamId,
+        fromMs: window.fromMs,
+        toMs: window.toMs,
+        interval,
+        data,
+      },
+      200,
+      {
+        "cache-control": "private, max-age=300",
+        vary: "Cookie",
+      },
+    );
   }
 
   const siteId = requireSiteId(url);
@@ -1562,7 +1571,7 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
     return unauthorized("Site access denied for current user");
   }
 
-  const window = parseWindow(url);
+  const window = parseWindow(url, env);
   if (!window) {
     return badRequest("Invalid time window");
   }
@@ -1749,7 +1758,7 @@ export async function handlePublicQuery(request: Request, env: Env, url: URL): P
     return notFound("Public site not found");
   }
 
-  const window = parseWindow(url);
+  const window = parseWindow(url, env);
   if (!window) {
     return badRequest("Invalid time window");
   }
