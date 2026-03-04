@@ -67,6 +67,57 @@ interface DashboardFilters {
   eventType?: string;
 }
 
+function buildWindowFromRange(
+  env: Env,
+  fromMs: number,
+  toMs: number,
+  nowMs: number,
+): QueryWindow | null {
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs < 0 || toMs < fromMs) {
+    return null;
+  }
+
+  const retentionCutoffMs = nowMs - RETENTION_DAYS * ONE_DAY_MS;
+  const analyticsEnabled = isAnalyticsEngineEnabled(env);
+  const analyticsCutoffMs = nowMs - ANALYTICS_WINDOW_DAYS * ONE_DAY_MS;
+  const analyticsRange = analyticsEnabled ? splitAeRange(fromMs, toMs, nowMs) : null;
+  const hasAnalytics = Boolean(analyticsRange);
+  const analyticsFromMs = analyticsRange?.fromMs ?? 0;
+  const analyticsToMs = analyticsRange?.toMs ?? -1;
+
+  const d1DetailFromMs = Math.max(fromMs, retentionCutoffMs);
+  const d1DetailToMs = analyticsEnabled ? Math.min(toMs, analyticsCutoffMs - 1) : toMs;
+  const hasD1Detail = d1DetailFromMs <= d1DetailToMs;
+
+  const archiveToMs = Math.min(toMs, retentionCutoffMs - 1);
+  const hasArchive = fromMs <= archiveToMs;
+  const archiveFromHour = Math.floor(fromMs / ONE_HOUR_MS);
+  const archiveToHour = Math.floor(archiveToMs / ONE_HOUR_MS);
+
+  return {
+    fromMs,
+    toMs,
+    nowMs,
+    retentionCutoffMs,
+    analyticsCutoffMs,
+    hasAnalytics,
+    analyticsFromMs,
+    analyticsToMs,
+    hasD1Detail,
+    d1DetailFromMs,
+    d1DetailToMs,
+    hasArchive,
+    archiveFromHour,
+    archiveToHour,
+  };
+}
+
+function toPercentChange(current: number, previous: number): number | null {
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) return null;
+  if (previous <= 0) return null;
+  return ((current - previous) / previous) * 100;
+}
+
 function jsonResponse(payload: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -100,44 +151,7 @@ function parseWindow(url: URL, env: Env): QueryWindow | null {
   const toRaw = coerceNumber(url.searchParams.get("to"), now);
   const fromMs = Math.floor(fromRaw ?? defaultFrom);
   const toMs = Math.floor(toRaw ?? now);
-
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs < 0 || toMs < fromMs) {
-    return null;
-  }
-
-  const retentionCutoffMs = now - RETENTION_DAYS * ONE_DAY_MS;
-  const analyticsEnabled = isAnalyticsEngineEnabled(env);
-  const analyticsCutoffMs = now - ANALYTICS_WINDOW_DAYS * ONE_DAY_MS;
-  const analyticsRange = analyticsEnabled ? splitAeRange(fromMs, toMs, now) : null;
-  const hasAnalytics = Boolean(analyticsRange);
-  const analyticsFromMs = analyticsRange?.fromMs ?? 0;
-  const analyticsToMs = analyticsRange?.toMs ?? -1;
-
-  const d1DetailFromMs = Math.max(fromMs, retentionCutoffMs);
-  const d1DetailToMs = analyticsEnabled ? Math.min(toMs, analyticsCutoffMs - 1) : toMs;
-  const hasD1Detail = d1DetailFromMs <= d1DetailToMs;
-
-  const archiveToMs = Math.min(toMs, retentionCutoffMs - 1);
-  const hasArchive = fromMs <= archiveToMs;
-  const archiveFromHour = Math.floor(fromMs / ONE_HOUR_MS);
-  const archiveToHour = Math.floor(archiveToMs / ONE_HOUR_MS);
-
-  return {
-    fromMs,
-    toMs,
-    nowMs: now,
-    retentionCutoffMs,
-    analyticsCutoffMs,
-    hasAnalytics,
-    analyticsFromMs,
-    analyticsToMs,
-    hasD1Detail,
-    d1DetailFromMs,
-    d1DetailToMs,
-    hasArchive,
-    archiveFromHour,
-    archiveToHour,
-  };
+  return buildWindowFromRange(env, fromMs, toMs, now);
 }
 
 function parseLimit(url: URL, defaultValue = 20, maxValue = 500): number {
@@ -1386,6 +1400,14 @@ async function queryTeamDashboard(
         bounceRate: number;
         approximateVisitors: boolean;
       };
+      changeRates: {
+        views: number | null;
+        visitors: number | null;
+        sessions: number | null;
+        bounceRate: number | null;
+        avgDurationMs: number | null;
+        pagesPerSession: number | null;
+      };
     }
   >;
   trend: Array<{
@@ -1422,16 +1444,43 @@ async function queryTeamDashboard(
     return { sites: [], trend: [] };
   }
 
+  const windowSpanMs = Math.max(0, window.toMs - window.fromMs);
+  const previousToMs = window.fromMs - 1;
+  const previousFromMs = previousToMs - windowSpanMs;
+  const previousWindow = previousToMs >= 0
+    ? buildWindowFromRange(
+      env,
+      Math.max(0, previousFromMs),
+      Math.max(0, previousToMs),
+      window.nowMs,
+    )
+    : null;
+
   const siteStats = await Promise.all(
     siteRows.map(async (site) => {
-      const [overview, trend] = await Promise.all([
+      const [overview, trend, previousOverview] = await Promise.all([
         queryOverview(env, site.id, window, {}).catch(() => emptyOverviewMetrics()),
         queryTrend(env, site.id, window, interval, {}).catch(() => []),
+        previousWindow
+          ? queryOverview(env, site.id, previousWindow, {}).catch(() => emptyOverviewMetrics())
+          : Promise.resolve(emptyOverviewMetrics()),
       ]);
+      const currentPagesPerSession = overview.sessions > 0 ? overview.views / overview.sessions : 0;
+      const previousPagesPerSession = previousOverview.sessions > 0
+        ? previousOverview.views / previousOverview.sessions
+        : 0;
       return {
         site,
         overview,
         trend,
+        changeRates: {
+          views: toPercentChange(overview.views, previousOverview.views),
+          visitors: toPercentChange(overview.visitors, previousOverview.visitors),
+          sessions: toPercentChange(overview.sessions, previousOverview.sessions),
+          bounceRate: toPercentChange(overview.bounceRate, previousOverview.bounceRate),
+          avgDurationMs: toPercentChange(overview.avgDurationMs, previousOverview.avgDurationMs),
+          pagesPerSession: toPercentChange(currentPagesPerSession, previousPagesPerSession),
+        },
       };
     }),
   );
@@ -1490,6 +1539,7 @@ async function queryTeamDashboard(
   const sites = siteStats.map((siteStat) => ({
     ...siteStat.site,
     overview: siteStat.overview,
+    changeRates: siteStat.changeRates,
   }));
 
   return {

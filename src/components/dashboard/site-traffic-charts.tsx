@@ -8,6 +8,8 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import { AutoResizer } from "@/components/ui/auto-resizer";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import { intlLocale } from "@/lib/dashboard/format";
 import type { DashboardInterval } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
@@ -45,6 +47,15 @@ interface TrafficPairBarChartProps {
   visitorsLabel: string;
   compact?: boolean;
   className?: string;
+}
+
+interface SiteTrafficSeriesItem {
+  siteId: string;
+  siteName: string;
+  visitorsKey: string;
+  viewsKey: string;
+  visitorsColor: string;
+  viewsColor: string;
 }
 
 interface RGB {
@@ -221,15 +232,6 @@ function generateComplementary(color: string): string {
   });
 }
 
-function deriveVisitorsColor(viewsHex: string): string {
-  const oklch = rgbToOklch(hexToRgb(viewsHex));
-  return rgbToHex(oklchToRgb({
-    l: clamp(oklch.l + 0.14, 0, 0.95),
-    c: clamp(oklch.c * 0.72, 0.01, 0.37),
-    h: oklch.h,
-  }));
-}
-
 function buildSiteColorPairs(
   count: number,
   baseColor = "oklch(0.85 0.13 165)",
@@ -241,7 +243,7 @@ function buildSiteColorPairs(
     const views = gradient[index] ?? gradient[gradient.length - 1] ?? "#2dd4bf";
     return {
       views,
-      visitors: deriveVisitorsColor(views),
+      visitors: views,
     };
   });
 }
@@ -290,6 +292,85 @@ function tooltipDateFormat(locale: Locale, interval: DashboardInterval): Intl.Da
   });
 }
 
+function SiteTrafficStackTooltip({
+  active,
+  payload,
+  series,
+  dateFormatter,
+  viewsLabel,
+  visitorsLabel,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload?: Record<string, unknown> }>;
+  series: SiteTrafficSeriesItem[];
+  dateFormatter: Intl.DateTimeFormat;
+  viewsLabel: string;
+  visitorsLabel: string;
+}) {
+  if (!active || !payload?.length) return null;
+
+  const row = payload[0]?.payload;
+  if (!row) return null;
+
+  const timestamp = Number(row.timestampMs ?? 0);
+  const groupCount = Math.max(1, series.length);
+  const sqrtCount = Math.sqrt(groupCount);
+  const minCandidate = Math.max(1, Math.floor(sqrtCount));
+  const maxCandidate = Math.max(1, Math.ceil(sqrtCount));
+  const candidateColumns =
+    minCandidate === maxCandidate ? [minCandidate] : [minCandidate, maxCandidate];
+  const columnCount = candidateColumns.reduce((best, current) => {
+    const bestRows = Math.ceil(groupCount / best);
+    const currentRows = Math.ceil(groupCount / current);
+    const bestDelta = Math.abs(bestRows - best);
+    const currentDelta = Math.abs(currentRows - current);
+    if (currentDelta < bestDelta) return current;
+    if (currentDelta > bestDelta) return best;
+    return current > best ? current : best;
+  }, candidateColumns[0]);
+  const tooltipWidthPx = Math.max(280, Math.min(560, columnCount * 160));
+
+  return (
+    <div
+      className="grid min-w-[280px] items-start gap-2 rounded-none border border-border/50 bg-background px-2.5 py-2 text-xs shadow-xl"
+      style={{ width: `min(68vw, ${tooltipWidthPx}px)` }}
+    >
+      <div className="font-medium">{dateFormatter.format(new Date(timestamp))}</div>
+      <div
+        className="grid gap-1.5"
+        style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+      >
+        {series.map((item) => {
+          const views = safeCount(Number(row[item.viewsKey] ?? 0));
+          const visitors = safeCount(Number(row[item.visitorsKey] ?? 0));
+          return (
+            <div
+              key={item.siteId}
+              className="flex items-stretch overflow-hidden rounded-none"
+            >
+                <span
+                  className="w-1.5 shrink-0 self-stretch rounded-none"
+                  style={{ backgroundColor: item.viewsColor }}
+                />
+              <div className="min-w-0 flex-1 space-y-1 px-2 py-1.5">
+                <div className="min-w-0 truncate font-medium">{item.siteName}</div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{viewsLabel}</span>
+                  <span className="font-mono tabular-nums">{views.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{visitorsLabel}</span>
+                  <span className="font-mono tabular-nums">{visitors.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function SiteTrafficStackChart({
   data,
   sites,
@@ -303,8 +384,8 @@ export function SiteTrafficStackChart({
     // Mirrors NeutralPress DimensionStats: start from a base color, invert to complementary,
     // then interpolate in OKLCH for evenly perceived multi-site colors.
     const pairs = buildSiteColorPairs(sites.length);
-    const nextSeries = sites.map((site, index) => {
-      const colors = pairs[index] ?? { views: "#2dd4bf", visitors: "#86efac" };
+    const nextSeries: SiteTrafficSeriesItem[] = sites.map((site, index) => {
+      const colors = pairs[index] ?? { views: "#2dd4bf", visitors: "#2dd4bf" };
       return {
         siteId: site.id,
         siteName: site.name,
@@ -361,54 +442,79 @@ export function SiteTrafficStackChart({
 
   const tickFormatter = tickDateFormat(locale, interval);
   const tooltipFormatter = tooltipDateFormat(locale, interval);
+  const legendKey = series.map((item) => item.siteId).join("|");
 
   return (
-    <ChartContainer
-      className={cn("h-[320px] w-full aspect-auto", className)}
-      config={config}
-    >
-      <BarChart data={chartData} margin={{ left: 8, right: 8 }} barCategoryGap="22%" barGap={2}>
-        <CartesianGrid vertical={false} />
-        <XAxis
-          dataKey="timestampMs"
-          tickFormatter={(value) => tickFormatter.format(new Date(Number(value ?? 0)))}
-          tickLine={false}
-          axisLine={false}
-          tickMargin={8}
-          minTickGap={14}
-        />
-        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={36} />
-        <ChartTooltip
-          content={(
-            <ChartTooltipContent
-              indicator="line"
-              labelFormatter={(value, payload) => {
-                const timestamp = Number(payload?.[0]?.payload?.timestampMs ?? value ?? 0);
-                return tooltipFormatter.format(new Date(timestamp));
-              }}
+    <div className="space-y-2">
+      <ChartContainer
+        className={cn("h-[320px] w-full aspect-auto", className)}
+        config={config}
+      >
+        <BarChart data={chartData} margin={{ left: 8, right: 8 }} barCategoryGap="22%" barGap={2}>
+          <CartesianGrid vertical={false} />
+          <XAxis
+            dataKey="timestampMs"
+            tickFormatter={(value) => tickFormatter.format(new Date(Number(value ?? 0)))}
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            minTickGap={14}
+          />
+          <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={36} />
+          <ChartTooltip
+            allowEscapeViewBox={{ x: false, y: true }}
+            wrapperStyle={{ zIndex: 20 }}
+            content={(
+              <SiteTrafficStackTooltip
+                series={series}
+                dateFormatter={tooltipFormatter}
+                viewsLabel={viewsLabel}
+                visitorsLabel={visitorsLabel}
+              />
+            )}
+          />
+          {series.map((item) => (
+            <Bar
+              key={item.visitorsKey}
+              dataKey={item.visitorsKey}
+              stackId="visitors"
+              fill={`var(--color-${item.visitorsKey})`}
+              radius={0}
             />
-          )}
-        />
-        {series.map((item) => (
-          <Bar
-            key={item.visitorsKey}
-            dataKey={item.visitorsKey}
-            stackId="visitors"
-            fill={`var(--color-${item.visitorsKey})`}
-            radius={0}
-          />
-        ))}
-        {series.map((item) => (
-          <Bar
-            key={item.viewsKey}
-            dataKey={item.viewsKey}
-            stackId="views"
-            fill={`var(--color-${item.viewsKey})`}
-            radius={0}
-          />
-        ))}
-      </BarChart>
-    </ChartContainer>
+          ))}
+          {series.map((item) => (
+            <Bar
+              key={item.viewsKey}
+              dataKey={item.viewsKey}
+              stackId="views"
+              fill={`var(--color-${item.viewsKey})`}
+              radius={0}
+            />
+          ))}
+        </BarChart>
+      </ChartContainer>
+
+      <AutoResizer initial className="min-h-5">
+        <AutoTransition initial={false} duration={0.2}>
+          <div
+            key={legendKey}
+            className="mx-auto flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs"
+          >
+            {series.map((item) => (
+              <div key={item.siteId} className="inline-flex min-w-0 items-center gap-1.5">
+                <span
+                  className="h-2.5 w-2.5 shrink-0"
+                  style={{ backgroundColor: item.viewsColor }}
+                />
+                <span className="max-w-[180px] truncate text-muted-foreground">
+                  {item.siteName}
+                </span>
+              </div>
+            ))}
+          </div>
+        </AutoTransition>
+      </AutoResizer>
+    </div>
   );
 }
 
@@ -476,6 +582,8 @@ export function TrafficPairBarChart({
         )}
         {compact ? null : (
           <ChartTooltip
+            allowEscapeViewBox={{ x: false, y: true }}
+            wrapperStyle={{ zIndex: 20 }}
             content={(
               <ChartTooltipContent
                 indicator="line"

@@ -214,7 +214,6 @@ export interface AppMessages {
       title: string;
       subtitle: string;
       aggregateTitle: string;
-      aggregateSubtitle: string;
       fromLabel: string;
       toLabel: string;
       applyRange: string;

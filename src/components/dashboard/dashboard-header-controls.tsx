@@ -3,12 +3,15 @@
 import { useMemo, useState } from "react";
 import { type DateRange } from "react-day-picker";
 import {
+  RiArrowLeftSLine,
+  RiArrowRightSLine,
   RiArrowDownSLine,
   RiCalendarLine,
   RiFilter3Line,
   RiTimeLine,
 } from "@remixicon/react";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +33,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/components/ui/drawer";
 import {
   Sheet,
   SheetContent,
@@ -115,6 +128,43 @@ function formatDateSpan(locale: Locale, from?: number, to?: number): string {
   return `${formatter.format(new Date(from as number))} - ${formatter.format(new Date(to as number))}`;
 }
 
+function shiftTimeWindow(
+  from: number,
+  to: number,
+  direction: "previous" | "next",
+  now = Date.now(),
+): { from: number; to: number } | null {
+  const normalizedFrom = Math.max(0, Math.floor(from));
+  const normalizedTo = Math.max(normalizedFrom + 1, Math.floor(to));
+  const span = Math.max(1, normalizedTo - normalizedFrom);
+
+  if (direction === "previous") {
+    const previousTo = Math.max(normalizedFrom - 1, 0);
+    const previousFrom = Math.max(previousTo - span, 0);
+    if (previousFrom >= previousTo) return null;
+    return {
+      from: previousFrom,
+      to: previousTo,
+    };
+  }
+
+  const currentNow = Math.max(1, Math.floor(now));
+  if (normalizedTo >= currentNow) return null;
+
+  const nextFromCandidate = normalizedTo + 1;
+  const nextToCandidate = nextFromCandidate + span;
+  const nextTo = Math.min(nextToCandidate, currentNow);
+  const nextFrom = Math.max(0, nextTo - span);
+
+  if (nextFrom >= nextTo) return null;
+  if (nextFrom === normalizedFrom && nextTo === normalizedTo) return null;
+
+  return {
+    from: nextFrom,
+    to: nextTo,
+  };
+}
+
 const RANGE_GROUPS: ReadonlyArray<{
   key: "quick" | "calendar" | "rolling" | "advanced";
   items: ReadonlyArray<RangePreset>;
@@ -183,6 +233,8 @@ export function DashboardHeaderControls({
     [customRange?.from, customRange?.to],
   );
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
+  const [mobileFilterDrawerOpen, setMobileFilterDrawerOpen] = useState(false);
+  const [mobileTimeDrawerOpen, setMobileTimeDrawerOpen] = useState(false);
   const [pendingCustomRange, setPendingCustomRange] = useState<
     DateRange | undefined
   >(selectedDateRange);
@@ -193,6 +245,18 @@ export function DashboardHeaderControls({
   const rangeLabelText = rangeLabel(messages, range);
   const intervalLabelText = intervalLabel(messages, window.interval);
   const pendingNormalized = normalizeCustomDateRange(pendingCustomRange);
+  const previousPeriodRange = shiftTimeWindow(
+    window.from,
+    window.to,
+    "previous",
+  );
+  const nextPeriodRange = shiftTimeWindow(window.from, window.to, "next");
+  const previousPeriodLabel =
+    locale === "zh" ? "上个周期" : "Previous period";
+  const nextPeriodLabel = locale === "zh" ? "下个周期" : "Next period";
+  const mobileTimeLabel = locale === "zh" ? "时间" : "Time";
+  const cycleLabel = locale === "zh" ? "周期" : "Cycle";
+  const closeLabel = locale === "zh" ? "关闭" : "Close";
   const naturalSelectionText = useMemo(() => {
     if (!pendingCustomRange?.from && !pendingCustomRange?.to) {
       return messages.dashboardHeader.customHint;
@@ -228,189 +292,460 @@ export function DashboardHeaderControls({
     pendingNormalized,
   ]);
 
+  const handleRangeValueChange = (
+    value: RangePreset,
+    source: "desktop" | "mobile" = "desktop",
+  ) => {
+    setRange(value);
+    if (value !== "custom") return;
+    setPendingCustomRange(selectedDateRange);
+    if (source === "mobile") {
+      setMobileTimeDrawerOpen(false);
+    }
+    setCustomDialogOpen(true);
+  };
+
+  const handleIntervalValueChange = (value: DashboardInterval) => {
+    if (!orderedAllowedIntervals.includes(value)) return;
+    setInterval(value);
+  };
+
+  const handleShiftPeriod = (nextRange: { from: number; to: number } | null) => {
+    if (!nextRange) return;
+    setCustomRange(nextRange);
+  };
+
   if (!showControls) return null;
 
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      <Sheet>
-        <SheetTrigger asChild disabled={!showFilterSheet}>
-          <Button variant="outline" className="gap-2">
-            <RiFilter3Line className="size-4" />
-            {messages.dashboardHeader.filters}
-          </Button>
-        </SheetTrigger>
-        <SheetContent side="right" className="w-full sm:max-w-md">
-          <SheetHeader>
-            <SheetTitle>{messages.dashboardHeader.filterTitle}</SheetTitle>
-            <SheetDescription>
-              {messages.dashboardHeader.filterSubtitle}
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="space-y-4 px-4">
-            <div className="space-y-2">
-              <Label htmlFor="dashboard-filter-country">
-                {messages.filters.country}
-              </Label>
-              <Input
-                id="dashboard-filter-country"
-                value={uiFilters.country || ""}
-                onChange={(event) =>
-                  setUiFilters({
-                    ...uiFilters,
-                    country: event.target.value,
-                  })
-                }
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="dashboard-filter-device">
-                {messages.filters.device}
-              </Label>
-              <Input
-                id="dashboard-filter-device"
-                value={uiFilters.device || ""}
-                onChange={(event) =>
-                  setUiFilters({
-                    ...uiFilters,
-                    device: event.target.value,
-                  })
-                }
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="dashboard-filter-browser">
-                {messages.filters.browser}
-              </Label>
-              <Input
-                id="dashboard-filter-browser"
-                value={uiFilters.browser || ""}
-                onChange={(event) =>
-                  setUiFilters({
-                    ...uiFilters,
-                    browser: event.target.value,
-                  })
-                }
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="dashboard-filter-event">
-                {messages.filters.eventType}
-              </Label>
-              <Input
-                id="dashboard-filter-event"
-                value={uiFilters.eventType || ""}
-                onChange={(event) =>
-                  setUiFilters({
-                    ...uiFilters,
-                    eventType: event.target.value,
-                  })
-                }
-              />
-            </div>
-
-            <Button variant="outline" onClick={clearUiFilters}>
-              {messages.filters.clear}
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            className="min-w-[156px] justify-between bg-background"
+    <>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-2 md:hidden">
+          <Drawer
+            open={mobileFilterDrawerOpen}
+            onOpenChange={setMobileFilterDrawerOpen}
           >
-            <span className="inline-flex items-center gap-2">
-              <RiCalendarLine className="size-4 text-muted-foreground" />
-              <span>{rangeLabelText}</span>
-            </span>
-            <RiArrowDownSLine className="size-4 text-muted-foreground" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
-          {RANGE_GROUPS.map((group, groupIndex) => (
-            <div key={group.key}>
-              {groupIndex > 0 ? <DropdownMenuSeparator /> : null}
+            <DrawerTrigger asChild disabled={!showFilterSheet}>
+              <Button variant="outline" className="gap-2">
+                <RiFilter3Line className="size-4" />
+                {messages.dashboardHeader.filters}
+              </Button>
+            </DrawerTrigger>
+            <DrawerContent>
+              <DrawerHeader>
+                <DrawerTitle>{messages.dashboardHeader.filterTitle}</DrawerTitle>
+                <DrawerDescription>
+                  {messages.dashboardHeader.filterSubtitle}
+                </DrawerDescription>
+              </DrawerHeader>
+
+              <div className="space-y-4 overflow-y-auto px-4 pb-2">
+                <div className="space-y-2">
+                  <Label htmlFor="dashboard-filter-mobile-country">
+                    {messages.filters.country}
+                  </Label>
+                  <Input
+                    id="dashboard-filter-mobile-country"
+                    value={uiFilters.country || ""}
+                    onChange={(event) =>
+                      setUiFilters({
+                        ...uiFilters,
+                        country: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dashboard-filter-mobile-device">
+                    {messages.filters.device}
+                  </Label>
+                  <Input
+                    id="dashboard-filter-mobile-device"
+                    value={uiFilters.device || ""}
+                    onChange={(event) =>
+                      setUiFilters({
+                        ...uiFilters,
+                        device: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dashboard-filter-mobile-browser">
+                    {messages.filters.browser}
+                  </Label>
+                  <Input
+                    id="dashboard-filter-mobile-browser"
+                    value={uiFilters.browser || ""}
+                    onChange={(event) =>
+                      setUiFilters({
+                        ...uiFilters,
+                        browser: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dashboard-filter-mobile-event">
+                    {messages.filters.eventType}
+                  </Label>
+                  <Input
+                    id="dashboard-filter-mobile-event"
+                    value={uiFilters.eventType || ""}
+                    onChange={(event) =>
+                      setUiFilters({
+                        ...uiFilters,
+                        eventType: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <DrawerFooter>
+                <Button variant="outline" onClick={clearUiFilters}>
+                  {messages.filters.clear}
+                </Button>
+                <DrawerClose asChild>
+                  <Button>{closeLabel}</Button>
+                </DrawerClose>
+              </DrawerFooter>
+            </DrawerContent>
+          </Drawer>
+
+          <Drawer
+            open={mobileTimeDrawerOpen}
+            onOpenChange={setMobileTimeDrawerOpen}
+          >
+            <DrawerTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <RiTimeLine className="size-4" />
+                {mobileTimeLabel}
+              </Button>
+            </DrawerTrigger>
+            <DrawerContent>
+              <DrawerHeader>
+                <DrawerTitle>{mobileTimeLabel}</DrawerTitle>
+                <DrawerDescription>
+                  {rangeLabelText} / {intervalLabelText}
+                </DrawerDescription>
+              </DrawerHeader>
+
+              <div className="space-y-4 overflow-y-auto px-4 pb-2">
+                <div className="space-y-2">
+                  <Label>{cycleLabel}</Label>
+                  <ButtonGroup className="w-full">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1 justify-center gap-1"
+                      disabled={!previousPeriodRange}
+                      onClick={() => {
+                        handleShiftPeriod(previousPeriodRange);
+                      }}
+                    >
+                      <RiArrowLeftSLine className="size-4" />
+                      <span>{previousPeriodLabel}</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1 justify-center gap-1"
+                      disabled={!nextPeriodRange}
+                      onClick={() => {
+                        handleShiftPeriod(nextPeriodRange);
+                      }}
+                    >
+                      <span>{nextPeriodLabel}</span>
+                      <RiArrowRightSLine className="size-4" />
+                    </Button>
+                  </ButtonGroup>
+                </div>
+
+                <div className="space-y-3">
+                  <Label>{messages.dashboardHeader.range}</Label>
+                  {RANGE_GROUPS.map((group) => (
+                    <div key={group.key} className="space-y-2">
+                      <p className="text-[11px] text-muted-foreground">
+                        {rangeGroupLabel(messages, group.key)}
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {group.items.map((item) => (
+                          <Button
+                            key={item}
+                            type="button"
+                            size="sm"
+                            variant={range === item ? "default" : "outline"}
+                            className="justify-start truncate px-2"
+                            onClick={() => {
+                              handleRangeValueChange(item, "mobile");
+                            }}
+                          >
+                            {rangeLabel(messages, item)}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{messages.dashboardHeader.interval}</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {INTERVAL_ORDER.map((item) => {
+                      const enabled = orderedAllowedIntervals.includes(item);
+                      return (
+                        <Button
+                          key={item}
+                          type="button"
+                          size="sm"
+                          variant={window.interval === item ? "default" : "outline"}
+                          className="justify-start px-2"
+                          disabled={!enabled}
+                          title={
+                            enabled
+                              ? undefined
+                              : intervalDisabledReason(messages, item)
+                          }
+                          onClick={() => {
+                            handleIntervalValueChange(item);
+                          }}
+                        >
+                          {intervalLabel(messages, item)}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <DrawerFooter>
+                <DrawerClose asChild>
+                  <Button>{closeLabel}</Button>
+                </DrawerClose>
+              </DrawerFooter>
+            </DrawerContent>
+          </Drawer>
+        </div>
+
+        <div className="hidden flex-wrap items-center justify-end gap-2 md:flex">
+          <Sheet>
+            <SheetTrigger asChild disabled={!showFilterSheet}>
+              <Button variant="outline" className="gap-2">
+                <RiFilter3Line className="size-4" />
+                {messages.dashboardHeader.filters}
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-full sm:max-w-md">
+              <SheetHeader>
+                <SheetTitle>{messages.dashboardHeader.filterTitle}</SheetTitle>
+                <SheetDescription>
+                  {messages.dashboardHeader.filterSubtitle}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="space-y-4 px-4">
+                <div className="space-y-2">
+                  <Label htmlFor="dashboard-filter-desktop-country">
+                    {messages.filters.country}
+                  </Label>
+                  <Input
+                    id="dashboard-filter-desktop-country"
+                    value={uiFilters.country || ""}
+                    onChange={(event) =>
+                      setUiFilters({
+                        ...uiFilters,
+                        country: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dashboard-filter-desktop-device">
+                    {messages.filters.device}
+                  </Label>
+                  <Input
+                    id="dashboard-filter-desktop-device"
+                    value={uiFilters.device || ""}
+                    onChange={(event) =>
+                      setUiFilters({
+                        ...uiFilters,
+                        device: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dashboard-filter-desktop-browser">
+                    {messages.filters.browser}
+                  </Label>
+                  <Input
+                    id="dashboard-filter-desktop-browser"
+                    value={uiFilters.browser || ""}
+                    onChange={(event) =>
+                      setUiFilters({
+                        ...uiFilters,
+                        browser: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dashboard-filter-desktop-event">
+                    {messages.filters.eventType}
+                  </Label>
+                  <Input
+                    id="dashboard-filter-desktop-event"
+                    value={uiFilters.eventType || ""}
+                    onChange={(event) =>
+                      setUiFilters({
+                        ...uiFilters,
+                        eventType: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+
+                <Button variant="outline" onClick={clearUiFilters}>
+                  {messages.filters.clear}
+                </Button>
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          <ButtonGroup>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  disabled={!previousPeriodRange}
+                  aria-label={previousPeriodLabel}
+                  onClick={() => {
+                    handleShiftPeriod(previousPeriodRange);
+                  }}
+                >
+                  <RiArrowLeftSLine className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{previousPeriodLabel}</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  disabled={!nextPeriodRange}
+                  aria-label={nextPeriodLabel}
+                  onClick={() => {
+                    handleShiftPeriod(nextPeriodRange);
+                  }}
+                >
+                  <RiArrowRightSLine className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{nextPeriodLabel}</TooltipContent>
+            </Tooltip>
+          </ButtonGroup>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className="min-w-[156px] justify-between bg-background"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <RiCalendarLine className="size-4 text-muted-foreground" />
+                  <span>{rangeLabelText}</span>
+                </span>
+                <RiArrowDownSLine className="size-4 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              {RANGE_GROUPS.map((group, groupIndex) => (
+                <div key={group.key}>
+                  {groupIndex > 0 ? <DropdownMenuSeparator /> : null}
+                  <DropdownMenuLabel>
+                    {rangeGroupLabel(messages, group.key)}
+                  </DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={range}
+                    onValueChange={(value) => {
+                      handleRangeValueChange(value as RangePreset, "desktop");
+                    }}
+                  >
+                    {group.items.map((item) => (
+                      <DropdownMenuRadioItem key={item} value={item}>
+                        {rangeLabel(messages, item)}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </div>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className="min-w-[96px] justify-between bg-background"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <RiTimeLine className="size-4 text-muted-foreground" />
+                  <span>{intervalLabelText}</span>
+                </span>
+                <RiArrowDownSLine className="size-4 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuLabel>
-                {rangeGroupLabel(messages, group.key)}
+                {messages.dashboardHeader.interval}
               </DropdownMenuLabel>
+              <DropdownMenuSeparator />
               <DropdownMenuRadioGroup
-                value={range}
+                value={window.interval}
                 onValueChange={(value) => {
-                  setRange(value as RangePreset);
-                  if (value === "custom") {
-                    setPendingCustomRange(selectedDateRange);
-                    setCustomDialogOpen(true);
-                  }
+                  handleIntervalValueChange(value as DashboardInterval);
                 }}
               >
-                {group.items.map((item) => (
-                  <DropdownMenuRadioItem key={item} value={item}>
-                    {rangeLabel(messages, item)}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </div>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            className="min-w-[118px] justify-between bg-background"
-          >
-            <span className="inline-flex items-center gap-2">
-              <RiTimeLine className="size-4 text-muted-foreground" />
-              <span>{intervalLabelText}</span>
-            </span>
-            <RiArrowDownSLine className="size-4 text-muted-foreground" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuLabel>
-            {messages.dashboardHeader.interval}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuRadioGroup
-            value={window.interval}
-            onValueChange={(value) => {
-              const next = value as DashboardInterval;
-              if (!orderedAllowedIntervals.includes(next)) return;
-              setInterval(next);
-            }}
-          >
-            {INTERVAL_ORDER.map((item) =>
-              orderedAllowedIntervals.includes(item) ? (
-                <DropdownMenuRadioItem key={item} value={item}>
-                  {intervalLabel(messages, item)}
-                </DropdownMenuRadioItem>
-              ) : (
-                <Tooltip key={item}>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuItem
-                      onSelect={(event) => {
-                        event.preventDefault();
-                      }}
-                      className="cursor-not-allowed text-muted-foreground/80 opacity-60 focus:bg-transparent focus:text-muted-foreground/80"
-                    >
+                {INTERVAL_ORDER.map((item) =>
+                  orderedAllowedIntervals.includes(item) ? (
+                    <DropdownMenuRadioItem key={item} value={item}>
                       {intervalLabel(messages, item)}
-                    </DropdownMenuItem>
-                  </TooltipTrigger>
-                  <TooltipContent side="left" sideOffset={8}>
-                    {intervalDisabledReason(messages, item)}
-                  </TooltipContent>
-                </Tooltip>
-              ),
-            )}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+                    </DropdownMenuRadioItem>
+                  ) : (
+                    <Tooltip key={item}>
+                      <TooltipTrigger asChild>
+                        <DropdownMenuItem
+                          onSelect={(event) => {
+                            event.preventDefault();
+                          }}
+                          className="cursor-not-allowed text-muted-foreground/80 opacity-60 focus:bg-transparent focus:text-muted-foreground/80"
+                        >
+                          {intervalLabel(messages, item)}
+                        </DropdownMenuItem>
+                      </TooltipTrigger>
+                      <TooltipContent side="left" sideOffset={8}>
+                        {intervalDisabledReason(messages, item)}
+                      </TooltipContent>
+                    </Tooltip>
+                  ),
+                )}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
 
       <Dialog open={customDialogOpen} onOpenChange={setCustomDialogOpen}>
         <DialogContent className="w-fit">
@@ -424,7 +759,7 @@ export function DashboardHeaderControls({
           <Calendar
             mode="range"
             captionLayout="dropdown"
-            numberOfMonths={3}
+            numberOfMonths={2}
             selected={pendingCustomRange}
             onSelect={(value) => {
               setPendingCustomRange(value);
@@ -447,6 +782,6 @@ export function DashboardHeaderControls({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

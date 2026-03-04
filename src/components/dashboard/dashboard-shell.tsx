@@ -23,6 +23,14 @@ import { DashboardQueryProvider } from "@/components/dashboard/dashboard-query-p
 import { DashboardHeaderControls } from "@/components/dashboard/dashboard-header-controls";
 import { SidebarSiteDetails } from "@/components/dashboard/sidebar-site-details";
 import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -238,6 +246,13 @@ export function DashboardShell({
   const switchToZh = `/zh${localeSuffix}`;
   const teamRootHref = `/${locale}/app/${activeTeamSlug}`;
   const backToTeamLabel = messages.common.backToTeam;
+  const activeTeamName =
+    teams.find((team) => team.slug === activeTeamSlug)?.name || activeTeamSlug;
+  const activeSiteName = hasActiveSite
+    ? sites.find((site) => site.slug === resolvedActiveSiteSlug)?.name ||
+      resolvedActiveSiteSlug
+    : "";
+  const mobileCurrentLevelName = hasActiveSite ? activeSiteName : activeTeamName;
   const teamOptions = teams.map((team) => ({
     slug: team.slug,
     name: team.name,
@@ -276,8 +291,6 @@ export function DashboardShell({
             <SidebarMenuStage mode={routeState.mode}>
               {routeState.mode === "team" ? (
                 <>
-                  <SidebarSeparator className="mb-2 group-data-[collapsible=icon]:hidden" />
-
                   <SidebarGroup>
                     <SidebarGroupLabel>{messages.common.team}</SidebarGroupLabel>
                     <SidebarGroupContent>
@@ -391,6 +404,49 @@ export function DashboardShell({
             <div className="p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <SidebarTrigger />
+                <div className="min-w-0 flex-1">
+                  <Breadcrumb className="md:hidden">
+                    <BreadcrumbList className="flex-nowrap">
+                      <BreadcrumbItem className="min-w-0">
+                        <BreadcrumbPage className="block truncate">
+                          {mobileCurrentLevelName}
+                        </BreadcrumbPage>
+                      </BreadcrumbItem>
+                    </BreadcrumbList>
+                  </Breadcrumb>
+
+                  <Breadcrumb className="hidden md:block">
+                    <BreadcrumbList className="flex-nowrap">
+                      <BreadcrumbItem className="min-w-0">
+                        {hasActiveSite ? (
+                          <BreadcrumbLink asChild>
+                            <Link
+                              href={teamRootHref}
+                              className="block max-w-[28vw] truncate"
+                            >
+                              {activeTeamName}
+                            </Link>
+                          </BreadcrumbLink>
+                        ) : (
+                          <BreadcrumbPage className="block max-w-[28vw] truncate">
+                            {activeTeamName}
+                          </BreadcrumbPage>
+                        )}
+                      </BreadcrumbItem>
+
+                      {hasActiveSite ? (
+                        <>
+                          <BreadcrumbSeparator />
+                          <BreadcrumbItem className="min-w-0">
+                            <BreadcrumbPage className="block max-w-[28vw] truncate">
+                              {activeSiteName}
+                            </BreadcrumbPage>
+                          </BreadcrumbItem>
+                        </>
+                      ) : null}
+                    </BreadcrumbList>
+                  </Breadcrumb>
+                </div>
                 <div className="ml-auto">
                   <DashboardHeaderControls
                     locale={locale}

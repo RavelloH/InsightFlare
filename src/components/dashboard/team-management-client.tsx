@@ -3,7 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { RiDeleteBinLine, RiLineChartLine } from "@remixicon/react";
+import {
+  RiArrowDownLine,
+  RiArrowDownSLine,
+  RiArrowRightSLine,
+  RiArrowUpLine,
+  RiArrowUpSLine,
+  RiDeleteBinLine,
+} from "@remixicon/react";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -29,11 +36,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import {
-  TableCell,
-  TableHead,
-  TableRow,
-} from "@/components/ui/table";
+import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import {
   SiteTrafficStackChart,
@@ -62,6 +65,14 @@ import { navigateWithTransition } from "@/lib/page-transition";
 type TeamTab = "sites" | "settings" | "members";
 
 type SiteOverviewMetrics = OverviewData["data"];
+type SiteMetricChangeRates = {
+  views: number | null;
+  visitors: number | null;
+  sessions: number | null;
+  bounceRate: number | null;
+  avgDurationMs: number | null;
+  pagesPerSession: number | null;
+};
 
 function emptyOverviewMetrics(): SiteOverviewMetrics {
   return {
@@ -74,6 +85,44 @@ function emptyOverviewMetrics(): SiteOverviewMetrics {
     bounceRate: 0,
     approximateVisitors: false,
   };
+}
+
+function emptySiteMetricChangeRates(): SiteMetricChangeRates {
+  return {
+    views: null,
+    visitors: null,
+    sessions: null,
+    bounceRate: null,
+    avgDurationMs: null,
+    pagesPerSession: null,
+  };
+}
+
+function normalizeChangeRate(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function formatChangeRate(value: number | null): string | null {
+  if (value === null) return null;
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function changeRateClass(value: number | null): string {
+  if (value === null) return "text-muted-foreground";
+  return value >= 0 ? "text-emerald-600" : "text-rose-600";
+}
+
+function ChangeRateInline({ value }: { value: number | null }) {
+  if (value === null) return null;
+  const Icon = value >= 0 ? RiArrowUpLine : RiArrowDownLine;
+  return (
+    <span
+      className={`inline-flex items-end gap-0.5 font-mono text-xs leading-none ${changeRateClass(value)}`}
+    >
+      <Icon className="size-3.5" />
+      {formatChangeRate(value)}
+    </span>
+  );
 }
 
 interface TeamManagementClientProps {
@@ -115,6 +164,81 @@ function buildSitePath(
   return `/${locale}/app/${teamSlug}/${siteSlug}`;
 }
 
+function resolveFaviconUrl(domain: string): string | null {
+  const trimmed = domain.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(
+      trimmed.includes("://") ? trimmed : `https://${trimmed}`,
+    );
+    return `${parsed.origin}/favicon.ico`;
+  } catch {
+    return null;
+  }
+}
+
+function leadingLetter(name: string): string {
+  const normalized = name.trim();
+  if (!normalized) return "?";
+  return normalized.slice(0, 1).toUpperCase();
+}
+
+function SiteCardIcon({
+  siteName,
+  domain,
+}: {
+  siteName: string;
+  domain: string;
+}) {
+  const src = useMemo(() => resolveFaviconUrl(domain), [domain]);
+  const [iconLoaded, setIconLoaded] = useState(false);
+  const [iconFailed, setIconFailed] = useState(false);
+
+  useEffect(() => {
+    setIconLoaded(false);
+    setIconFailed(false);
+    if (!src) return;
+
+    let active = true;
+    const image = new Image();
+    image.onload = () => {
+      if (!active) return;
+      setIconLoaded(true);
+    };
+    image.onerror = () => {
+      if (!active) return;
+      setIconFailed(true);
+    };
+    image.src = src;
+
+    return () => {
+      active = false;
+    };
+  }, [src]);
+
+  const showFavicon = Boolean(src) && iconLoaded && !iconFailed;
+
+  return (
+    <AutoTransition
+      type="fade"
+      duration={0.18}
+      initial={false}
+      className="inline-flex size-5 shrink-0 items-center justify-center"
+    >
+      {showFavicon ? (
+        <img key="favicon" src={src!} alt="" className="size-5 shrink-0" />
+      ) : (
+        <span
+          key="fallback"
+          className="inline-flex size-5 shrink-0 items-center justify-center bg-muted text-[10px] font-medium text-muted-foreground"
+        >
+          {leadingLetter(siteName)}
+        </span>
+      )}
+    </AutoTransition>
+  );
+}
+
 function intervalStepMs(interval: TimeWindow["interval"]): number {
   if (interval === "minute") return 60 * 1000;
   if (interval === "hour") return 60 * 60 * 1000;
@@ -135,6 +259,7 @@ interface TeamDashboardTrendPoint {
 
 interface TeamDashboardSite extends SiteData {
   overview: SiteOverviewMetrics;
+  changeRates?: SiteMetricChangeRates;
 }
 
 interface TeamDashboardData {
@@ -152,10 +277,13 @@ async function fetchTeamDashboard(
     to: String(window.to),
     interval: window.interval,
   });
-  const response = await fetch(`/api/private/team-dashboard?${params.toString()}`, {
-    method: "GET",
-    credentials: "include",
-  });
+  const response = await fetch(
+    `/api/private/team-dashboard?${params.toString()}`,
+    {
+      method: "GET",
+      credentials: "include",
+    },
+  );
   if (!response.ok) throw new Error("fetch_team_dashboard_failed");
   const payload = (await response.json()) as {
     ok: boolean;
@@ -236,7 +364,12 @@ export function TeamManagementClient({
   const [addingMember, setAddingMember] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [siteOverviewById, setSiteOverviewById] = useState<Record<string, SiteOverviewMetrics>>({});
+  const [siteOverviewById, setSiteOverviewById] = useState<
+    Record<string, SiteOverviewMetrics>
+  >({});
+  const [siteChangeRatesById, setSiteChangeRatesById] = useState<
+    Record<string, SiteMetricChangeRates>
+  >({});
   const [teamTrend, setTeamTrend] = useState<TeamDashboardTrendPoint[]>([]);
 
   useEffect(() => {
@@ -271,6 +404,7 @@ export function TeamManagementClient({
     setSites([]);
     setMembers([]);
     setSiteOverviewById({});
+    setSiteChangeRatesById({});
     setTeamTrend([]);
   }, [activeTeam.id, activeTeam.name, activeTeam.slug]);
 
@@ -287,7 +421,25 @@ export function TeamManagementClient({
         setSites(dashboard.sites.map(withSiteSlug));
         setSiteOverviewById(
           Object.fromEntries(
-            dashboard.sites.map((site) => [site.id, site.overview ?? emptyOverviewMetrics()]),
+            dashboard.sites.map((site) => [
+              site.id,
+              site.overview ?? emptyOverviewMetrics(),
+            ]),
+          ),
+        );
+        setSiteChangeRatesById(
+          Object.fromEntries(
+            dashboard.sites.map((site) => [
+              site.id,
+              {
+                views: normalizeChangeRate(site.changeRates?.views),
+                visitors: normalizeChangeRate(site.changeRates?.visitors),
+                sessions: normalizeChangeRate(site.changeRates?.sessions),
+                bounceRate: normalizeChangeRate(site.changeRates?.bounceRate),
+                avgDurationMs: normalizeChangeRate(site.changeRates?.avgDurationMs),
+                pagesPerSession: normalizeChangeRate(site.changeRates?.pagesPerSession),
+              },
+            ]),
           ),
         );
         setTeamTrend(dashboard.trend);
@@ -296,6 +448,7 @@ export function TeamManagementClient({
         if (!active) return;
         setSites([]);
         setSiteOverviewById({});
+        setSiteChangeRatesById({});
         setTeamTrend([]);
       })
       .finally(() => {
@@ -450,7 +603,10 @@ export function TeamManagementClient({
       };
 
       for (const sitePoint of point.sites) {
-        const previous = current.sites.get(sitePoint.siteId) ?? { views: 0, visitors: 0 };
+        const previous = current.sites.get(sitePoint.siteId) ?? {
+          views: 0,
+          visitors: 0,
+        };
         current.sites.set(sitePoint.siteId, {
           views: previous.views + (sitePoint.views ?? 0),
           visitors: previous.visitors + (sitePoint.visitors ?? 0),
@@ -474,7 +630,10 @@ export function TeamManagementClient({
   const siteTrendById = useMemo(() => {
     const stepMs = intervalStepMs(window.interval);
     if (!Number.isFinite(stepMs) || stepMs <= 0) {
-      return {} as Record<string, Array<{ timestampMs: number; views: number; visitors: number }>>;
+      return {} as Record<
+        string,
+        Array<{ timestampMs: number; views: number; visitors: number }>
+      >;
     }
 
     const fromBucket = Math.floor(window.from / stepMs);
@@ -485,7 +644,10 @@ export function TeamManagementClient({
     >();
 
     for (const site of sites) {
-      const bucketMap = new Map<number, { timestampMs: number; views: number; visitors: number }>();
+      const bucketMap = new Map<
+        number,
+        { timestampMs: number; views: number; visitors: number }
+      >();
       for (let bucket = fromBucket; bucket <= toBucket; bucket += 1) {
         bucketMap.set(bucket, {
           timestampMs: bucket * stepMs,
@@ -528,18 +690,20 @@ export function TeamManagementClient({
 
   const siteDashboardCards = useMemo(
     () =>
-      sites.map((site) => {
-        const overview = siteOverviewById[site.id] ?? emptyOverviewMetrics();
-        const pagesPerSession = overview.sessions > 0
-          ? overview.views / overview.sessions
-          : 0;
-        return {
-          site,
-          overview,
-          pagesPerSession,
-          trend: siteTrendById[site.id] ?? [],
-        };
-      })
+      sites
+        .map((site) => {
+          const overview = siteOverviewById[site.id] ?? emptyOverviewMetrics();
+          const pagesPerSession =
+            overview.sessions > 0 ? overview.views / overview.sessions : 0;
+          return {
+            site,
+            overview,
+            pagesPerSession,
+            changeRates:
+              siteChangeRatesById[site.id] ?? emptySiteMetricChangeRates(),
+            trend: siteTrendById[site.id] ?? [],
+          };
+        })
         .sort((left, right) => {
           const byViews = right.overview.views - left.overview.views;
           if (byViews !== 0) return byViews;
@@ -547,7 +711,7 @@ export function TeamManagementClient({
           if (byVisitors !== 0) return byVisitors;
           return left.site.name.localeCompare(right.site.name);
         }),
-    [sites, siteOverviewById, siteTrendById],
+    [sites, siteOverviewById, siteChangeRatesById, siteTrendById],
   );
 
   const pagesPerSessionFormatter = useMemo(
@@ -580,7 +744,8 @@ export function TeamManagementClient({
       : activeTab === "settings"
         ? copy.settings.subtitle
         : copy.members.subtitle;
-  const isSitesChartsLoading = activeTab === "sites" && (loading || analyticsLoading);
+  const isSitesChartsLoading =
+    activeTab === "sites" && (loading || analyticsLoading);
 
   return (
     <div className="space-y-6">
@@ -594,7 +759,10 @@ export function TeamManagementClient({
                 {copy.stats.sites}:
                 <AutoTransition initial className="inline-flex items-center">
                   {loading ? (
-                    <span key="sites-loading" className="inline-flex items-center">
+                    <span
+                      key="sites-loading"
+                      className="inline-flex items-center"
+                    >
                       <Spinner className="size-3.5" />
                     </span>
                   ) : (
@@ -608,7 +776,10 @@ export function TeamManagementClient({
                 {copy.stats.members}:
                 <AutoTransition initial className="inline-flex items-center">
                   {loading ? (
-                    <span key="members-loading" className="inline-flex items-center">
+                    <span
+                      key="members-loading"
+                      className="inline-flex items-center"
+                    >
                       <Spinner className="size-3.5" />
                     </span>
                   ) : (
@@ -624,17 +795,19 @@ export function TeamManagementClient({
       <div className="space-y-4">
         {activeTab === "sites" ? (
           <div className="space-y-4">
-            <Card>
+            <Card className="overflow-visible">
               <CardHeader>
                 <CardTitle>{copy.sites.aggregateTitle}</CardTitle>
-                <CardDescription>{copy.sites.aggregateSubtitle}</CardDescription>
               </CardHeader>
 
               <CardContent className="space-y-3">
                 <div className="relative">
                   <SiteTrafficStackChart
                     data={aggregateChartRenderData}
-                    sites={sites.map((site) => ({ id: site.id, name: site.name }))}
+                    sites={sites.map((site) => ({
+                      id: site.id,
+                      name: site.name,
+                    }))}
                     locale={locale}
                     interval={window.interval}
                     viewsLabel={messages.common.views}
@@ -657,93 +830,142 @@ export function TeamManagementClient({
                         </span>
                       </div>
                     ) : (
-                      <div key="aggregate-overlay-idle" className="h-full w-full bg-transparent" />
+                      <div
+                        key="aggregate-overlay-idle"
+                        className="h-full w-full bg-transparent"
+                      />
                     )}
                   </AutoTransition>
                 </div>
 
                 {!loading && !analyticsLoading && sites.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">{copy.sites.noSites}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {copy.sites.noSites}
+                  </p>
                 ) : null}
               </CardContent>
             </Card>
 
             {sites.length > 0 ? (
               <div className="grid gap-4 lg:grid-cols-2">
-                {siteDashboardCards.map(({ site, overview, pagesPerSession, trend }) => (
-                  <Clickable
-                    key={site.id}
-                    onClick={() => {
-                      navigateWithTransition(
-                        router,
-                        buildSitePath(locale, activeTeam.slug, site.slug),
-                      );
-                    }}
-                    className="block w-full"
-                    enableHoverScale={false}
-                    aria-label={`${copy.sites.openAnalytics}: ${site.name}`}
-                    title={copy.sites.openAnalytics}
-                  >
-                    <Card className="h-full transition-colors hover:bg-accent/20">
-                      <CardHeader className="space-y-2">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 space-y-1">
-                            <CardTitle className="truncate text-base">{site.name}</CardTitle>
-                            <CardDescription className="truncate font-mono text-xs">
-                              {site.domain}
-                            </CardDescription>
+                {siteDashboardCards.map(
+                  ({ site, overview, pagesPerSession, changeRates, trend }) => (
+                    <Clickable
+                      key={site.id}
+                      onClick={() => {
+                        navigateWithTransition(
+                          router,
+                          buildSitePath(locale, activeTeam.slug, site.slug),
+                        );
+                      }}
+                      className="block w-full"
+                      enableHoverScale={false}
+                      aria-label={`${copy.sites.openAnalytics}: ${site.name}`}
+                      title={copy.sites.openAnalytics}
+                    >
+                      <Card className="h-full transition-colors hover:bg-accent/20">
+                        <CardHeader className="space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex min-w-0 items-start gap-2.5">
+                              <div className="min-w-0 space-y-1">
+                                <CardTitle className="truncate text-base flex items-center gap-2">
+                                  <SiteCardIcon
+                                    siteName={site.name}
+                                    domain={site.domain}
+                                  />
+                                  {site.name}
+                                </CardTitle>
+                                <CardDescription className="truncate font-mono text-xs">
+                                  {site.domain}
+                                </CardDescription>
+                              </div>
+                            </div>
+                            <span className="inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground">
+                              <RiArrowRightSLine className="size-4" />
+                            </span>
                           </div>
-                          <span className="inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground">
-                            <RiLineChartLine className="size-4" />
-                          </span>
-                        </div>
-                      </CardHeader>
+                        </CardHeader>
 
-                      <CardContent className="space-y-4">
-                        <AutoTransition type="fade" duration={0.24} className="w-full">
-                          <div key={`site-chart-${site.id}`}>
-                            <TrafficPairBarChart
-                              data={trend}
-                              locale={locale}
-                              interval={window.interval}
-                              viewsLabel={messages.common.views}
-                              visitorsLabel={messages.common.visitors}
-                            />
-                          </div>
-                        </AutoTransition>
+                        <CardContent className="space-y-4">
+                          <AutoTransition
+                            type="fade"
+                            duration={0.24}
+                            className="w-full"
+                          >
+                            <div key={`site-chart-${site.id}`}>
+                              <TrafficPairBarChart
+                                data={trend}
+                                locale={locale}
+                                interval={window.interval}
+                                viewsLabel={messages.common.views}
+                                visitorsLabel={messages.common.visitors}
+                              />
+                            </div>
+                          </AutoTransition>
 
-                        <div className="grid grid-cols-3 gap-x-4 gap-y-4 text-[11px]">
-                          <div className="space-y-1">
-                            <p className="text-muted-foreground">{messages.common.views}</p>
-                            <p className="font-mono text-base leading-none">{numberFormat(locale, overview.views)}</p>
+                          <div className="grid grid-cols-3 gap-x-4 gap-y-4 text-[11px]">
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.views}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {numberFormat(locale, overview.views)}
+                                <ChangeRateInline value={changeRates.views} />
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.visitors}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {numberFormat(locale, overview.visitors)}
+                                <ChangeRateInline value={changeRates.visitors} />
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.sessions}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {numberFormat(locale, overview.sessions)}
+                                <ChangeRateInline value={changeRates.sessions} />
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.bounceRate}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {percentFormat(locale, overview.bounceRate)}
+                                <ChangeRateInline value={changeRates.bounceRate} />
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.avgDuration}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {durationFormat(locale, overview.avgDurationMs)}
+                                <ChangeRateInline value={changeRates.avgDurationMs} />
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {copy.sites.pagesPerSession}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {pagesPerSessionFormatter.format(
+                                  pagesPerSession,
+                                )}
+                                <ChangeRateInline value={changeRates.pagesPerSession} />
+                              </p>
+                            </div>
                           </div>
-                          <div className="space-y-1">
-                            <p className="text-muted-foreground">{messages.common.visitors}</p>
-                            <p className="font-mono text-base leading-none">{numberFormat(locale, overview.visitors)}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-muted-foreground">{messages.common.sessions}</p>
-                            <p className="font-mono text-base leading-none">{numberFormat(locale, overview.sessions)}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-muted-foreground">{messages.common.bounceRate}</p>
-                            <p className="font-mono text-base leading-none">{percentFormat(locale, overview.bounceRate)}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-muted-foreground">{messages.common.avgDuration}</p>
-                            <p className="font-mono text-base leading-none">{durationFormat(locale, overview.avgDurationMs)}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-muted-foreground">{copy.sites.pagesPerSession}</p>
-                            <p className="font-mono text-base leading-none">
-                              {pagesPerSessionFormatter.format(pagesPerSession)}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Clickable>
-                ))}
+                        </CardContent>
+                      </Card>
+                    </Clickable>
+                  ),
+                )}
               </div>
             ) : null}
           </div>
@@ -787,7 +1009,10 @@ export function TeamManagementClient({
                   <Button type="submit" disabled={savingTeam || deletingTeam}>
                     <AutoTransition className="inline-flex items-center gap-2">
                       {savingTeam ? (
-                        <span key="saving" className="inline-flex items-center gap-2">
+                        <span
+                          key="saving"
+                          className="inline-flex items-center gap-2"
+                        >
                           <Spinner className="size-4" />
                           {copy.settings.saving}
                         </span>
@@ -810,7 +1035,9 @@ export function TeamManagementClient({
               <Card className="h-full border-destructive/40">
                 <CardHeader>
                   <CardTitle>{copy.settings.delete}</CardTitle>
-                  <CardDescription>{copy.settings.deleteConfirm}</CardDescription>
+                  <CardDescription>
+                    {copy.settings.deleteConfirm}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="flex h-full items-end">
                   <AlertDialogTrigger asChild>
@@ -821,7 +1048,10 @@ export function TeamManagementClient({
                     >
                       <AutoTransition className="inline-flex items-center gap-2">
                         {deletingTeam ? (
-                          <span key="deleting" className="inline-flex items-center gap-2">
+                          <span
+                            key="deleting"
+                            className="inline-flex items-center gap-2"
+                          >
                             <Spinner className="size-4" />
                             {copy.settings.deleting}
                           </span>
@@ -836,7 +1066,9 @@ export function TeamManagementClient({
               <AlertDialogContent size="sm">
                 <AlertDialogHeader>
                   <AlertDialogTitle>{copy.settings.delete}</AlertDialogTitle>
-                  <AlertDialogDescription>{copy.settings.deleteConfirm}</AlertDialogDescription>
+                  <AlertDialogDescription>
+                    {copy.settings.deleteConfirm}
+                  </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel disabled={deletingTeam}>
@@ -852,12 +1084,17 @@ export function TeamManagementClient({
                   >
                     <AutoTransition className="inline-flex items-center gap-2">
                       {deletingTeam ? (
-                        <span key="deleting-dialog" className="inline-flex items-center gap-2">
+                        <span
+                          key="deleting-dialog"
+                          className="inline-flex items-center gap-2"
+                        >
                           <Spinner className="size-4" />
                           {copy.settings.deleting}
                         </span>
                       ) : (
-                        <span key="confirm-delete-dialog">{copy.settings.delete}</span>
+                        <span key="confirm-delete-dialog">
+                          {copy.settings.delete}
+                        </span>
                       )}
                     </AutoTransition>
                   </AlertDialogAction>
@@ -900,7 +1137,10 @@ export function TeamManagementClient({
                   <Button type="submit" disabled={addingMember}>
                     <AutoTransition className="inline-flex items-center gap-2">
                       {addingMember ? (
-                        <span key="adding" className="inline-flex items-center gap-2">
+                        <span
+                          key="adding"
+                          className="inline-flex items-center gap-2"
+                        >
                           <Spinner className="size-4" />
                           {copy.members.adding}
                         </span>
@@ -921,7 +1161,7 @@ export function TeamManagementClient({
                   loadingLabel={messages.common.loading}
                   emptyLabel={copy.members.noMembers}
                   colSpan={6}
-                  header={(
+                  header={
                     <TableRow>
                       <TableHead>{copy.members.columns.name}</TableHead>
                       <TableHead>{copy.members.columns.username}</TableHead>
@@ -932,7 +1172,7 @@ export function TeamManagementClient({
                         {copy.members.columns.action}
                       </TableHead>
                     </TableRow>
-                  )}
+                  }
                   rows={members.map((member) => (
                     <TableRow key={member.userId}>
                       <TableCell className="font-medium">
@@ -956,11 +1196,17 @@ export function TeamManagementClient({
                         >
                           <AutoTransition className="inline-flex items-center justify-center">
                             {removingMemberId === member.userId ? (
-                              <span key="removing" className="inline-flex items-center justify-center">
+                              <span
+                                key="removing"
+                                className="inline-flex items-center justify-center"
+                              >
                                 <Spinner className="size-3.5" />
                               </span>
                             ) : (
-                              <span key="remove" className="inline-flex items-center justify-center">
+                              <span
+                                key="remove"
+                                className="inline-flex items-center justify-center"
+                              >
                                 <RiDeleteBinLine className="size-4" />
                               </span>
                             )}

@@ -186,8 +186,7 @@ teamManagement:
   sites:
     title: Site Dashboard
     subtitle: Aggregated traffic view across all sites in this team.
-    aggregateTitle: Site Traffic Aggregate
-    aggregateSubtitle: Stacked bars of views and visitors by site with customizable time range.
+    aggregateTitle: Total Visits
     fromLabel: Start time
     toLabel: End time
     applyRange: Apply Range

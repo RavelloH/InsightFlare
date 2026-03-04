@@ -53,6 +53,8 @@ export function TrendChart({ locale, data, viewsLabel, sessionsLabel }: TrendCha
         />
         <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={36} />
         <ChartTooltip
+          allowEscapeViewBox={{ x: false, y: true }}
+          wrapperStyle={{ zIndex: 20 }}
           content={
             <ChartTooltipContent
               formatter={(value, name) => {

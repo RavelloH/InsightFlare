@@ -201,7 +201,7 @@ export function OverviewClientPage({ locale, messages, siteId, pathname }: Overv
 
       <RealtimePanel siteId={siteId} locale={locale} messages={messages} />
 
-      <Card>
+      <Card className="overflow-visible">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>{messages.overview.trendTitle}</CardTitle>
           <span className="text-xs text-muted-foreground">

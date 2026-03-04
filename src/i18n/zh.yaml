@@ -186,8 +186,7 @@ teamManagement:
   sites:
     title: 仪表盘
     subtitle: 聚合查看该团队下所有站点的访问表现。
-    aggregateTitle: 站点访问聚合
-    aggregateSubtitle: 按站点查看访问量与访客量（堆叠柱状图），可自定义时间范围。
+    aggregateTitle: 总访问量
     fromLabel: 开始时间
     toLabel: 结束时间
     applyRange: 应用时间范围
