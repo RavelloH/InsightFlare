@@ -156,6 +156,31 @@ function withSiteSlug(site: SiteData): SiteData & { slug: string } {
   };
 }
 
+function sortSitesForInitialOrder<
+  T extends { id: string; name: string; overview?: SiteOverviewMetrics | null },
+>(
+  sites: T[],
+): T[] {
+  return [...sites].sort((left, right) => {
+    const leftViews = left.overview?.views ?? 0;
+    const rightViews = right.overview?.views ?? 0;
+    const byViews = rightViews - leftViews;
+    if (byViews !== 0) return byViews;
+
+    const leftVisitors = left.overview?.visitors ?? 0;
+    const rightVisitors = right.overview?.visitors ?? 0;
+    const byVisitors = rightVisitors - leftVisitors;
+    if (byVisitors !== 0) return byVisitors;
+
+    const byName = left.name.localeCompare(right.name, undefined, {
+      sensitivity: "base",
+      numeric: true,
+    });
+    if (byName !== 0) return byName;
+    return left.id.localeCompare(right.id);
+  });
+}
+
 function buildSitePath(
   locale: Locale,
   teamSlug: string,
@@ -267,6 +292,8 @@ interface TeamDashboardData {
   trend: TeamDashboardTrendPoint[];
 }
 
+const SITE_CARD_MAX_TREND_POINTS = 120;
+
 async function fetchTeamDashboard(
   teamId: string,
   window: Pick<TimeWindow, "from" | "to" | "interval">,
@@ -352,6 +379,7 @@ export function TeamManagementClient({
   const { window } = useDashboardQuery();
   const copy = messages.teamManagement;
   const [sites, setSites] = useState<Array<SiteData & { slug: string }>>([]);
+  const [siteOrder, setSiteOrder] = useState<string[]>([]);
   const [members, setMembers] = useState<MemberData[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentTeamName, setCurrentTeamName] = useState(activeTeam.name);
@@ -371,6 +399,13 @@ export function TeamManagementClient({
     Record<string, SiteMetricChangeRates>
   >({});
   const [teamTrend, setTeamTrend] = useState<TeamDashboardTrendPoint[]>([]);
+  const [chartWindow, setChartWindow] = useState<
+    Pick<TimeWindow, "from" | "to" | "interval">
+  >(() => ({
+    from: window.from,
+    to: window.to,
+    interval: window.interval,
+  }));
 
   useEffect(() => {
     if (activeTab !== "members") return;
@@ -402,10 +437,16 @@ export function TeamManagementClient({
     setTeamSlug(activeTeam.slug);
     setMemberIdentifier("");
     setSites([]);
+    setSiteOrder([]);
     setMembers([]);
     setSiteOverviewById({});
     setSiteChangeRatesById({});
     setTeamTrend([]);
+    setChartWindow({
+      from: window.from,
+      to: window.to,
+      interval: window.interval,
+    });
   }, [activeTeam.id, activeTeam.name, activeTeam.slug]);
 
   useEffect(() => {
@@ -418,7 +459,17 @@ export function TeamManagementClient({
     fetchTeamDashboard(activeTeam.id, window)
       .then((dashboard) => {
         if (!active) return;
-        setSites(dashboard.sites.map(withSiteSlug));
+        const nextSites = dashboard.sites.map(withSiteSlug);
+        const sortedSites = sortSitesForInitialOrder(dashboard.sites);
+        setSites(nextSites);
+        setSiteOrder((currentOrder) => {
+          const nextIds = sortedSites.map((site) => site.id);
+          if (currentOrder.length === 0) return nextIds;
+          const knownIds = new Set(currentOrder);
+          const appended = nextIds.filter((id) => !knownIds.has(id));
+          if (appended.length === 0) return currentOrder;
+          return [...currentOrder, ...appended];
+        });
         setSiteOverviewById(
           Object.fromEntries(
             dashboard.sites.map((site) => [
@@ -443,6 +494,11 @@ export function TeamManagementClient({
           ),
         );
         setTeamTrend(dashboard.trend);
+        setChartWindow({
+          from: window.from,
+          to: window.to,
+          interval: window.interval,
+        });
       })
       .catch(() => {
         if (!active) return;
@@ -450,6 +506,11 @@ export function TeamManagementClient({
         setSiteOverviewById({});
         setSiteChangeRatesById({});
         setTeamTrend([]);
+        setChartWindow({
+          from: window.from,
+          to: window.to,
+          interval: window.interval,
+        });
       })
       .finally(() => {
         if (!active) return;
@@ -572,11 +633,11 @@ export function TeamManagementClient({
   }
 
   const aggregateChartRenderData = useMemo(() => {
-    const stepMs = intervalStepMs(window.interval);
+    const stepMs = intervalStepMs(chartWindow.interval);
     if (!Number.isFinite(stepMs) || stepMs <= 0) return [];
 
-    const fromBucket = Math.floor(window.from / stepMs);
-    const toBucket = Math.max(fromBucket, Math.floor(window.to / stepMs));
+    const fromBucket = Math.floor(chartWindow.from / stepMs);
+    const toBucket = Math.max(fromBucket, Math.floor(chartWindow.to / stepMs));
     const timeline = new Map<
       number,
       {
@@ -625,10 +686,15 @@ export function TeamManagementClient({
           visitors: siteValue.visitors,
         })),
       }));
-  }, [teamTrend, window.from, window.to, window.interval]);
+  }, [
+    teamTrend,
+    chartWindow.from,
+    chartWindow.to,
+    chartWindow.interval,
+  ]);
 
   const siteTrendById = useMemo(() => {
-    const stepMs = intervalStepMs(window.interval);
+    const stepMs = intervalStepMs(chartWindow.interval);
     if (!Number.isFinite(stepMs) || stepMs <= 0) {
       return {} as Record<
         string,
@@ -636,8 +702,8 @@ export function TeamManagementClient({
       >;
     }
 
-    const fromBucket = Math.floor(window.from / stepMs);
-    const toBucket = Math.max(fromBucket, Math.floor(window.to / stepMs));
+    const fromBucket = Math.floor(chartWindow.from / stepMs);
+    const toBucket = Math.max(fromBucket, Math.floor(chartWindow.to / stepMs));
     const siteBuckets = new Map<
       string,
       Map<number, { timestampMs: number; views: number; visitors: number }>
@@ -686,32 +752,56 @@ export function TeamManagementClient({
           .map(([, value]) => value),
       ]),
     );
-  }, [sites, teamTrend, window.from, window.to, window.interval]);
+  }, [
+    sites,
+    teamTrend,
+    chartWindow.from,
+    chartWindow.to,
+    chartWindow.interval,
+  ]);
 
   const siteDashboardCards = useMemo(
+    () => {
+      const cards = sites.map((site) => {
+        const overview = siteOverviewById[site.id] ?? emptyOverviewMetrics();
+        const pagesPerSession =
+          overview.sessions > 0 ? overview.views / overview.sessions : 0;
+        return {
+          site,
+          overview,
+          pagesPerSession,
+          changeRates: siteChangeRatesById[site.id] ?? emptySiteMetricChangeRates(),
+          trend: siteTrendById[site.id] ?? [],
+        };
+      });
+
+      if (siteOrder.length === 0) return cards;
+
+      const cardById = new Map(cards.map((card) => [card.site.id, card]));
+      const orderedCards = [] as typeof cards;
+
+      for (const siteId of siteOrder) {
+        const card = cardById.get(siteId);
+        if (!card) continue;
+        orderedCards.push(card);
+        cardById.delete(siteId);
+      }
+
+      if (cardById.size > 0) {
+        orderedCards.push(...Array.from(cardById.values()));
+      }
+
+      return orderedCards;
+    },
+    [sites, siteOverviewById, siteChangeRatesById, siteTrendById, siteOrder],
+  );
+  const aggregateChartSites = useMemo(
     () =>
-      sites
-        .map((site) => {
-          const overview = siteOverviewById[site.id] ?? emptyOverviewMetrics();
-          const pagesPerSession =
-            overview.sessions > 0 ? overview.views / overview.sessions : 0;
-          return {
-            site,
-            overview,
-            pagesPerSession,
-            changeRates:
-              siteChangeRatesById[site.id] ?? emptySiteMetricChangeRates(),
-            trend: siteTrendById[site.id] ?? [],
-          };
-        })
-        .sort((left, right) => {
-          const byViews = right.overview.views - left.overview.views;
-          if (byViews !== 0) return byViews;
-          const byVisitors = right.overview.visitors - left.overview.visitors;
-          if (byVisitors !== 0) return byVisitors;
-          return left.site.name.localeCompare(right.site.name);
-        }),
-    [sites, siteOverviewById, siteChangeRatesById, siteTrendById],
+      siteDashboardCards.map(({ site }) => ({
+        id: site.id,
+        name: site.name,
+      })),
+    [siteDashboardCards],
   );
 
   const pagesPerSessionFormatter = useMemo(
@@ -804,12 +894,9 @@ export function TeamManagementClient({
                 <div className="relative">
                   <SiteTrafficStackChart
                     data={aggregateChartRenderData}
-                    sites={sites.map((site) => ({
-                      id: site.id,
-                      name: site.name,
-                    }))}
+                    sites={aggregateChartSites}
                     locale={locale}
-                    interval={window.interval}
+                    interval={chartWindow.interval}
                     viewsLabel={messages.common.views}
                     visitorsLabel={messages.common.visitors}
                     className={isSitesChartsLoading ? "opacity-40" : undefined}
@@ -896,9 +983,10 @@ export function TeamManagementClient({
                               <TrafficPairBarChart
                                 data={trend}
                                 locale={locale}
-                                interval={window.interval}
+                                interval={chartWindow.interval}
                                 viewsLabel={messages.common.views}
                                 visitorsLabel={messages.common.visitors}
+                                maxPoints={SITE_CARD_MAX_TREND_POINTS}
                               />
                             </div>
                           </AutoTransition>

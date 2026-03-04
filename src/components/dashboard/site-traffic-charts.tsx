@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import {
   ChartContainer,
@@ -46,6 +46,7 @@ interface TrafficPairBarChartProps {
   viewsLabel: string;
   visitorsLabel: string;
   compact?: boolean;
+  maxPoints?: number;
   className?: string;
 }
 
@@ -107,9 +108,9 @@ function rgbToHex(rgb: RGB): string {
 }
 
 function parseOKLCh(color: string): OKLCh {
-  const match = color.trim().match(
-    /oklch\s*\(\s*([\d.]+)%?\s+([\d.]+)%?\s+([\d.]+)\s*\)/i,
-  );
+  const match = color
+    .trim()
+    .match(/oklch\s*\(\s*([\d.]+)%?\s+([\d.]+)%?\s+([\d.]+)\s*\)/i);
   if (!match || !match[1] || !match[2] || !match[3]) {
     throw new Error(`Invalid OKLCh color: ${color}`);
   }
@@ -185,7 +186,11 @@ function rgbToOklch(rgb: RGB): OKLCh {
   return { l: L, c: C, h: H };
 }
 
-function interpolateGradient(color1: string, color2: string, steps: number): string[] {
+function interpolateGradient(
+  color1: string,
+  color2: string,
+  steps: number,
+): string[] {
   if (steps < 2) return [color1];
   const toOklch = (color: string): OKLCh => {
     if (isHexColor(color)) return rgbToOklch(hexToRgb(color));
@@ -238,7 +243,11 @@ function buildSiteColorPairs(
 ): Array<{ views: string; visitors: string }> {
   if (count <= 0) return [];
   const complementary = generateComplementary(baseColor);
-  const gradient = interpolateGradient(baseColor, complementary, Math.max(count, 2));
+  const gradient = interpolateGradient(
+    baseColor,
+    complementary,
+    Math.max(count, 2),
+  );
   return Array.from({ length: count }, (_, index) => {
     const views = gradient[index] ?? gradient[gradient.length - 1] ?? "#2dd4bf";
     return {
@@ -253,7 +262,120 @@ function safeCount(value: number): number {
   return Math.max(0, Math.round(value));
 }
 
-function tickDateFormat(locale: Locale, interval: DashboardInterval): Intl.DateTimeFormat {
+function useChartVisibility(rootMargin = "120px 0px") {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const [hasMeasuredVisibility, setHasMeasuredVisibility] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    if (typeof IntersectionObserver === "undefined") {
+      setIsVisible(true);
+      setHasMeasuredVisibility(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        const nextVisible = Boolean(
+          entry?.isIntersecting || (entry?.intersectionRatio ?? 0) > 0,
+        );
+        setIsVisible(nextVisible);
+        setHasMeasuredVisibility(true);
+      },
+      {
+        root: null,
+        rootMargin,
+        threshold: 0.01,
+      },
+    );
+
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+    };
+  }, [rootMargin]);
+
+  return {
+    containerRef,
+    isVisible,
+    hasMeasuredVisibility,
+  };
+}
+
+function useAnimationOnChartSwitch({
+  switchKey,
+  hasData,
+  isVisible,
+  hasMeasuredVisibility,
+}: {
+  switchKey: string;
+  hasData: boolean;
+  isVisible: boolean;
+  hasMeasuredVisibility: boolean;
+}): boolean {
+  const appliedKeyRef = useRef<string | null>(null);
+  const animationEnabledRef = useRef(false);
+
+  if (appliedKeyRef.current !== switchKey && hasMeasuredVisibility) {
+    appliedKeyRef.current = switchKey;
+    animationEnabledRef.current = hasData && isVisible;
+  }
+
+  if (appliedKeyRef.current !== switchKey) {
+    // Before first visibility snapshot, keep this frame conservative.
+    return hasData && isVisible;
+  }
+
+  return animationEnabledRef.current;
+}
+
+function downsampleTrafficData(
+  data: Array<{ timestampMs: number; views: number; visitors: number }>,
+  maxPoints: number,
+): Array<{ timestampMs: number; views: number; visitors: number }> {
+  if (
+    !Number.isFinite(maxPoints) ||
+    maxPoints <= 0 ||
+    data.length <= maxPoints
+  ) {
+    return data;
+  }
+
+  const chunkSize = Math.ceil(data.length / maxPoints);
+  const next: Array<{ timestampMs: number; views: number; visitors: number }> =
+    [];
+
+  for (let index = 0; index < data.length; index += chunkSize) {
+    const chunk = data.slice(index, index + chunkSize);
+    if (chunk.length === 0) continue;
+
+    const timestampMs = chunk[chunk.length - 1]?.timestampMs ?? 0;
+    let views = 0;
+    let visitors = 0;
+
+    for (const point of chunk) {
+      views += safeCount(point.views);
+      visitors += safeCount(point.visitors);
+    }
+
+    next.push({
+      timestampMs,
+      views,
+      visitors: Math.min(visitors, views),
+    });
+  }
+
+  return next;
+}
+
+function tickDateFormat(
+  locale: Locale,
+  interval: DashboardInterval,
+): Intl.DateTimeFormat {
   if (interval === "minute" || interval === "hour") {
     return new Intl.DateTimeFormat(intlLocale(locale), {
       month: "numeric",
@@ -275,7 +397,10 @@ function tickDateFormat(locale: Locale, interval: DashboardInterval): Intl.DateT
   });
 }
 
-function tooltipDateFormat(locale: Locale, interval: DashboardInterval): Intl.DateTimeFormat {
+function tooltipDateFormat(
+  locale: Locale,
+  interval: DashboardInterval,
+): Intl.DateTimeFormat {
   if (interval === "minute" || interval === "hour") {
     return new Intl.DateTimeFormat(intlLocale(locale), {
       year: "numeric",
@@ -318,7 +443,9 @@ function SiteTrafficStackTooltip({
   const minCandidate = Math.max(1, Math.floor(sqrtCount));
   const maxCandidate = Math.max(1, Math.ceil(sqrtCount));
   const candidateColumns =
-    minCandidate === maxCandidate ? [minCandidate] : [minCandidate, maxCandidate];
+    minCandidate === maxCandidate
+      ? [minCandidate]
+      : [minCandidate, maxCandidate];
   const columnCount = candidateColumns.reduce((best, current) => {
     const bestRows = Math.ceil(groupCount / best);
     const currentRows = Math.ceil(groupCount / current);
@@ -335,10 +462,14 @@ function SiteTrafficStackTooltip({
       className="grid min-w-[280px] items-start gap-2 rounded-none border border-border/50 bg-background px-2.5 py-2 text-xs shadow-xl"
       style={{ width: `min(68vw, ${tooltipWidthPx}px)` }}
     >
-      <div className="font-medium">{dateFormatter.format(new Date(timestamp))}</div>
+      <div className="font-medium">
+        {dateFormatter.format(new Date(timestamp))}
+      </div>
       <div
         className="grid gap-1.5"
-        style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+        style={{
+          gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+        }}
       >
         {series.map((item) => {
           const views = safeCount(Number(row[item.viewsKey] ?? 0));
@@ -348,19 +479,25 @@ function SiteTrafficStackTooltip({
               key={item.siteId}
               className="flex items-stretch overflow-hidden rounded-none"
             >
-                <span
-                  className="w-1.5 shrink-0 self-stretch rounded-none"
-                  style={{ backgroundColor: item.viewsColor }}
-                />
+              <span
+                className="w-1.5 shrink-0 self-stretch rounded-none"
+                style={{ backgroundColor: item.viewsColor }}
+              />
               <div className="min-w-0 flex-1 space-y-1 px-2 py-1.5">
-                <div className="min-w-0 truncate font-medium">{item.siteName}</div>
+                <div className="min-w-0 truncate font-medium">
+                  {item.siteName}
+                </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">{viewsLabel}</span>
-                  <span className="font-mono tabular-nums">{views.toLocaleString()}</span>
+                  <span className="font-mono tabular-nums">
+                    {views.toLocaleString()}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">{visitorsLabel}</span>
-                  <span className="font-mono tabular-nums">{visitors.toLocaleString()}</span>
+                  <span className="font-mono tabular-nums">
+                    {visitors.toLocaleString()}
+                  </span>
                 </div>
               </div>
             </div>
@@ -371,7 +508,7 @@ function SiteTrafficStackTooltip({
   );
 }
 
-export function SiteTrafficStackChart({
+export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
   data,
   sites,
   locale,
@@ -380,11 +517,51 @@ export function SiteTrafficStackChart({
   visitorsLabel,
   className,
 }: SiteTrafficStackChartProps) {
+  const cachedSiteOrderRef = useRef<string[] | null>(null);
+  const { containerRef, isVisible, hasMeasuredVisibility } =
+    useChartVisibility();
+
+  if (!cachedSiteOrderRef.current && sites.length > 0) {
+    cachedSiteOrderRef.current = sites.map((site) => site.id);
+  } else if (cachedSiteOrderRef.current && sites.length > 0) {
+    const knownIds = new Set(cachedSiteOrderRef.current);
+    for (const site of sites) {
+      if (!knownIds.has(site.id)) {
+        cachedSiteOrderRef.current.push(site.id);
+        knownIds.add(site.id);
+      }
+    }
+  }
+
+  const orderedSites = useMemo(() => {
+    const cachedOrder = cachedSiteOrderRef.current;
+    if (!cachedOrder || sites.length < 2) {
+      return sites;
+    }
+
+    const siteById = new Map(sites.map((site) => [site.id, site]));
+    const nextSites: SiteTrafficStackChartProps["sites"] = [];
+
+    for (const siteId of cachedOrder) {
+      const site = siteById.get(siteId);
+      if (site) {
+        nextSites.push(site);
+        siteById.delete(siteId);
+      }
+    }
+
+    for (const site of siteById.values()) {
+      nextSites.push(site);
+    }
+
+    return nextSites;
+  }, [sites]);
+
   const { series, config } = useMemo(() => {
     // Mirrors NeutralPress DimensionStats: start from a base color, invert to complementary,
     // then interpolate in OKLCH for evenly perceived multi-site colors.
-    const pairs = buildSiteColorPairs(sites.length);
-    const nextSeries: SiteTrafficSeriesItem[] = sites.map((site, index) => {
+    const pairs = buildSiteColorPairs(orderedSites.length);
+    const nextSeries: SiteTrafficSeriesItem[] = orderedSites.map((site, index) => {
       const colors = pairs[index] ?? { views: "#2dd4bf", visitors: "#2dd4bf" };
       return {
         siteId: site.id,
@@ -412,40 +589,62 @@ export function SiteTrafficStackChart({
       series: nextSeries,
       config: nextConfig,
     };
-  }, [sites, viewsLabel, visitorsLabel]);
+  }, [orderedSites, viewsLabel, visitorsLabel]);
 
-  const chartData = [...data]
-    .sort((left, right) => left.timestampMs - right.timestampMs)
-    .map((point) => {
-      const bySite = new Map(
-        point.sites.map((sitePoint) => [
-          sitePoint.siteId,
-          {
-            views: safeCount(sitePoint.views),
-            visitors: safeCount(sitePoint.visitors),
-          },
-        ]),
-      );
+  const chartData = useMemo(
+    () =>
+      // Input is already sorted upstream by timestamp.
+      data.map((point) => {
+        const bySite = new Map(
+          point.sites.map((sitePoint) => [
+            sitePoint.siteId,
+            {
+              views: safeCount(sitePoint.views),
+              visitors: safeCount(sitePoint.visitors),
+            },
+          ]),
+        );
 
-      const row: Record<string, number> = {
-        timestampMs: point.timestampMs,
-      };
+        const row: Record<string, number> = {
+          timestampMs: point.timestampMs,
+        };
 
-      for (const item of series) {
-        const values = bySite.get(item.siteId);
-        row[item.visitorsKey] = values?.visitors ?? 0;
-        row[item.viewsKey] = values?.views ?? 0;
-      }
+        for (const item of series) {
+          const values = bySite.get(item.siteId);
+          row[item.visitorsKey] = values?.visitors ?? 0;
+          row[item.viewsKey] = values?.views ?? 0;
+        }
 
-      return row;
-    });
-
-  const tickFormatter = tickDateFormat(locale, interval);
-  const tooltipFormatter = tooltipDateFormat(locale, interval);
-  const legendKey = series.map((item) => item.siteId).join("|");
+        return row;
+      }),
+    [data, series],
+  );
+  const tickFormatter = useMemo(
+    () => tickDateFormat(locale, interval),
+    [locale, interval],
+  );
+  const tooltipFormatter = useMemo(
+    () => tooltipDateFormat(locale, interval),
+    [locale, interval],
+  );
+  const legendKey = useMemo(
+    () => series.map((item) => item.siteId).join("|"),
+    [series],
+  );
+  const stackChartDataKey = useMemo(() => {
+    const firstTimestamp = data[0]?.timestampMs ?? 0;
+    const lastTimestamp = data[data.length - 1]?.timestampMs ?? 0;
+    return `${interval}:${legendKey}:${data.length}:${firstTimestamp}:${lastTimestamp}`;
+  }, [interval, legendKey, data]);
+  const isAnimationActive = useAnimationOnChartSwitch({
+    switchKey: stackChartDataKey,
+    hasData: chartData.length > 0,
+    isVisible,
+    hasMeasuredVisibility,
+  });
 
   return (
-    <div className="space-y-2">
+    <div ref={containerRef} className="space-y-2">
       <ChartContainer
         className={cn("h-[320px] w-full aspect-auto", className)}
         config={config}
@@ -480,6 +679,8 @@ export function SiteTrafficStackChart({
               stackId="visitors"
               fill={`var(--color-${item.visitorsKey})`}
               radius={0}
+              isAnimationActive={isAnimationActive}
+              animationDuration={isAnimationActive ? 260 : 0}
             />
           ))}
           {series.map((item) => (
@@ -489,6 +690,8 @@ export function SiteTrafficStackChart({
               stackId="views"
               fill={`var(--color-${item.viewsKey})`}
               radius={0}
+              isAnimationActive={isAnimationActive}
+              animationDuration={isAnimationActive ? 260 : 0}
             />
           ))}
         </BarChart>
@@ -501,7 +704,10 @@ export function SiteTrafficStackChart({
             className="mx-auto flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs"
           >
             {series.map((item) => (
-              <div key={item.siteId} className="inline-flex min-w-0 items-center gap-1.5">
+              <div
+                key={item.siteId}
+                className="inline-flex min-w-0 items-center gap-1.5"
+              >
                 <span
                   className="h-2.5 w-2.5 shrink-0"
                   style={{ backgroundColor: item.viewsColor }}
@@ -516,98 +722,141 @@ export function SiteTrafficStackChart({
       </AutoResizer>
     </div>
   );
-}
+});
 
-export function TrafficPairBarChart({
+const TRAFFIC_PAIR_CHART_CONFIG = {
+  visitors: {
+    label: "visitors",
+    color: "var(--color-chart-3)",
+  },
+  nonVisitorViews: {
+    label: "views",
+    color: "var(--color-chart-1)",
+  },
+} satisfies ChartConfig;
+
+export const TrafficPairBarChart = memo(function TrafficPairBarChart({
   data,
   locale,
   interval,
   viewsLabel,
   visitorsLabel,
   compact = false,
+  maxPoints,
   className,
 }: TrafficPairBarChartProps) {
-  const chartData = [...data]
-    .sort((left, right) => left.timestampMs - right.timestampMs)
-    .map((point) => {
+  const { containerRef, isVisible, hasMeasuredVisibility } =
+    useChartVisibility();
+  const chartData = useMemo(() => {
+    const normalized = downsampleTrafficData(
+      data,
+      maxPoints ?? (compact ? 72 : data.length),
+    );
+    // Input is already sorted upstream by timestamp.
+    return normalized.map((point) => {
       const views = safeCount(point.views);
       const visitors = Math.min(safeCount(point.visitors), views);
       return {
         timestampMs: point.timestampMs,
         visitors,
         nonVisitorViews: Math.max(0, views - visitors),
-        views,
       };
     });
-
-  const config = {
-    visitors: {
-      label: visitorsLabel,
-      color: "var(--color-chart-3)",
-    },
-    nonVisitorViews: {
-      label: viewsLabel,
-      color: "var(--color-chart-1)",
-    },
-  } satisfies ChartConfig;
-  const tickFormatter = tickDateFormat(locale, interval);
-  const tooltipFormatter = tooltipDateFormat(locale, interval);
+  }, [data, maxPoints, compact]);
+  const config = useMemo(
+    () => ({
+      visitors: {
+        ...TRAFFIC_PAIR_CHART_CONFIG.visitors,
+        label: visitorsLabel,
+      },
+      nonVisitorViews: {
+        ...TRAFFIC_PAIR_CHART_CONFIG.nonVisitorViews,
+        label: viewsLabel,
+      },
+    }),
+    [viewsLabel, visitorsLabel],
+  );
+  const tickFormatter = useMemo(
+    () => tickDateFormat(locale, interval),
+    [locale, interval],
+  );
+  const tooltipFormatter = useMemo(
+    () => tooltipDateFormat(locale, interval),
+    [locale, interval],
+  );
+  const pairChartDataKey = useMemo(() => {
+    const firstTimestamp = chartData[0]?.timestampMs ?? 0;
+    const lastTimestamp = chartData[chartData.length - 1]?.timestampMs ?? 0;
+    return `${interval}:${compact ? "compact" : "regular"}:${chartData.length}:${firstTimestamp}:${lastTimestamp}`;
+  }, [interval, compact, chartData]);
+  const isAnimationActive = useAnimationOnChartSwitch({
+    switchKey: pairChartDataKey,
+    hasData: chartData.length > 0,
+    isVisible,
+    hasMeasuredVisibility,
+  });
 
   return (
-    <ChartContainer
-      className={cn(
-        compact ? "h-4 w-full aspect-auto" : "h-[180px] w-full aspect-auto",
-        className,
-      )}
-      config={config}
-    >
-      <BarChart
-        data={chartData}
-        margin={compact ? { left: 0, right: 0, top: 0, bottom: 0 } : { left: 8, right: 8 }}
-        barGap={0}
+    <div ref={containerRef} className="w-full">
+      <ChartContainer
+        className={cn(
+          compact ? "h-4 w-full aspect-auto" : "h-[180px] w-full aspect-auto",
+          className,
+        )}
+        config={config}
       >
-        {compact ? null : <CartesianGrid vertical={false} />}
-        {compact ? null : (
-          <XAxis
-            dataKey="timestampMs"
-            tickFormatter={(value) => tickFormatter.format(new Date(Number(value ?? 0)))}
-            tickLine={false}
-            axisLine={false}
-            tickMargin={8}
-            minTickGap={14}
+        <BarChart
+          data={chartData}
+          margin={compact ? { left: 0, right: 0, top: 0, bottom: 0 } : { left: 8, right: 8 }}
+          barGap={0}
+        >
+          {compact ? null : <CartesianGrid vertical={false} />}
+          {compact ? null : (
+            <XAxis
+              dataKey="timestampMs"
+              tickFormatter={(value) => tickFormatter.format(new Date(Number(value ?? 0)))}
+              tickLine={false}
+              axisLine={false}
+              tickMargin={8}
+              minTickGap={14}
+            />
+          )}
+          {compact ? null : (
+            <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={32} />
+          )}
+          {compact ? null : (
+            <ChartTooltip
+              allowEscapeViewBox={{ x: false, y: true }}
+              wrapperStyle={{ zIndex: 20 }}
+              content={(
+                <ChartTooltipContent
+                  indicator="line"
+                  labelFormatter={(value, payload) => {
+                    const timestamp = Number(payload?.[0]?.payload?.timestampMs ?? value ?? 0);
+                    return tooltipFormatter.format(new Date(timestamp));
+                  }}
+                />
+              )}
+            />
+          )}
+          <Bar
+            dataKey="visitors"
+            stackId="traffic"
+            fill="var(--color-visitors)"
+            radius={0}
+            isAnimationActive={isAnimationActive}
+            animationDuration={isAnimationActive ? 220 : 0}
           />
-        )}
-        {compact ? null : (
-          <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={32} />
-        )}
-        {compact ? null : (
-          <ChartTooltip
-            allowEscapeViewBox={{ x: false, y: true }}
-            wrapperStyle={{ zIndex: 20 }}
-            content={(
-              <ChartTooltipContent
-                indicator="line"
-                labelFormatter={(value, payload) => {
-                  const timestamp = Number(payload?.[0]?.payload?.timestampMs ?? value ?? 0);
-                  return tooltipFormatter.format(new Date(timestamp));
-                }}
-              />
-            )}
+          <Bar
+            dataKey="nonVisitorViews"
+            stackId="traffic"
+            fill="var(--color-nonVisitorViews)"
+            radius={0}
+            isAnimationActive={isAnimationActive}
+            animationDuration={isAnimationActive ? 220 : 0}
           />
-        )}
-        <Bar
-          dataKey="visitors"
-          stackId="traffic"
-          fill="var(--color-visitors)"
-          radius={0}
-        />
-        <Bar
-          dataKey="nonVisitorViews"
-          stackId="traffic"
-          fill="var(--color-nonVisitorViews)"
-          radius={0}
-        />
-      </BarChart>
-    </ChartContainer>
+        </BarChart>
+      </ChartContainer>
+    </div>
   );
-}
+});

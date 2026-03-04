@@ -229,6 +229,13 @@ export function SidebarSiteDetails({
   const { state: sidebarState, isMobile } = useSidebar();
   const { window } = useDashboardQuery();
   const [teamTrend, setTeamTrend] = useState<TeamDashboardTrendPoint[]>([]);
+  const [chartWindow, setChartWindow] = useState<
+    Pick<TimeWindow, "from" | "to" | "interval">
+  >(() => ({
+    from: window.from,
+    to: window.to,
+    interval: window.interval,
+  }));
   const [shouldRenderCharts, setShouldRenderCharts] = useState(
     isMobile || sidebarState !== "collapsed",
   );
@@ -274,6 +281,11 @@ export function SidebarSiteDetails({
   useEffect(() => {
     if (!teamId || sites.length === 0) {
       setTeamTrend([]);
+      setChartWindow({
+        from: window.from,
+        to: window.to,
+        interval: window.interval,
+      });
       return;
     }
 
@@ -288,11 +300,21 @@ export function SidebarSiteDetails({
       .then((dashboard) => {
         if (!active) return;
         setTeamTrend(dashboard.trend);
+        setChartWindow({
+          from: window.from,
+          to: window.to,
+          interval: window.interval,
+        });
       })
       .catch((error: unknown) => {
         if ((error as { name?: string } | null)?.name === "AbortError") return;
         if (!active) return;
         setTeamTrend([]);
+        setChartWindow({
+          from: window.from,
+          to: window.to,
+          interval: window.interval,
+        });
       });
 
     return () => {
@@ -302,13 +324,13 @@ export function SidebarSiteDetails({
   }, [teamId, sites.length, canFetchCharts, window.from, window.to, window.interval]);
 
   const siteTrendById = useMemo(() => {
-    const stepMs = intervalStepMs(window.interval);
+    const stepMs = intervalStepMs(chartWindow.interval);
     if (!Number.isFinite(stepMs) || stepMs <= 0) {
       return {} as Record<string, SiteTrendPoint[]>;
     }
 
-    const fromBucket = Math.floor(window.from / stepMs);
-    const toBucket = Math.max(fromBucket, Math.floor(window.to / stepMs));
+    const fromBucket = Math.floor(chartWindow.from / stepMs);
+    const toBucket = Math.max(fromBucket, Math.floor(chartWindow.to / stepMs));
     const siteBuckets = new Map<string, Map<number, SiteTrendPoint>>();
 
     for (const site of sites) {
@@ -351,11 +373,17 @@ export function SidebarSiteDetails({
           .map(([, value]) => value),
       ]),
     ) as Record<string, SiteTrendPoint[]>;
-  }, [sites, teamTrend, window.from, window.to, window.interval]);
+  }, [
+    sites,
+    teamTrend,
+    chartWindow.from,
+    chartWindow.to,
+    chartWindow.interval,
+  ]);
 
   const zeroTrend = useMemo(
-    () => buildZeroTrend(window),
-    [window.from, window.to, window.interval],
+    () => buildZeroTrend(chartWindow),
+    [chartWindow.from, chartWindow.to, chartWindow.interval],
   );
 
   const cards = useMemo(
@@ -393,7 +421,7 @@ export function SidebarSiteDetails({
                       <TrafficPairBarChart
                         data={trend}
                         locale={locale}
-                        interval={window.interval}
+                        interval={chartWindow.interval}
                         viewsLabel={labels.views}
                         visitorsLabel={labels.visitors}
                         compact

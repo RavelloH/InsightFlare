@@ -373,6 +373,13 @@ export function OverviewClientPage({
   const [filterOptions, setFilterOptions] =
     useState<FilterOptions>(EMPTY_FILTER_OPTIONS);
   const [loading, setLoading] = useState(true);
+  const [dataWindow, setDataWindow] = useState<
+    Pick<TimeWindow, "from" | "to" | "interval">
+  >(() => ({
+    from: window.from,
+    to: window.to,
+    interval: window.interval,
+  }));
 
   useEffect(() => {
     let active = true;
@@ -386,11 +393,21 @@ export function OverviewClientPage({
         if (!active) return;
         setBundle(nextBundle);
         setFilterOptions(nextFilterOptions);
+        setDataWindow({
+          from: window.from,
+          to: window.to,
+          interval: window.interval,
+        });
       })
       .catch(() => {
         if (!active) return;
         setBundle(emptyOverviewBundle(window.interval));
         setFilterOptions(EMPTY_FILTER_OPTIONS);
+        setDataWindow({
+          from: window.from,
+          to: window.to,
+          interval: window.interval,
+        });
       })
       .finally(() => {
         if (!active) return;
@@ -412,8 +429,8 @@ export function OverviewClientPage({
   ]);
 
   const data = useMemo(
-    () => bundle ?? emptyOverviewBundle(window.interval),
-    [bundle, window.interval],
+    () => bundle ?? emptyOverviewBundle(dataWindow.interval),
+    [bundle, dataWindow.interval],
   );
   const pagesPerSessionFormatter = useMemo(
     () =>
@@ -433,11 +450,18 @@ export function OverviewClientPage({
     previous.sessions > 0 ? previous.views / previous.sessions : 0;
   const detailSeries = data.overview.detail?.data ?? data.trend.data;
   const trendDisplayData = useMemo(() => {
-    if (loading) {
-      return buildEmptyTrendData(window);
+    if (!bundle && loading) {
+      return buildEmptyTrendData(dataWindow);
     }
-    return normalizeTrendData(window, data.trend.data);
-  }, [loading, window.from, window.to, window.interval, data.trend.data]);
+    return normalizeTrendData(dataWindow, data.trend.data);
+  }, [
+    bundle,
+    loading,
+    dataWindow.from,
+    dataWindow.to,
+    dataWindow.interval,
+    data.trend.data,
+  ]);
 
   const viewsSeries = detailSeries.map((point) => ({
     timestampMs: point.timestampMs,
@@ -619,7 +643,7 @@ export function OverviewClientPage({
           ) : (
             <TrendChart
               locale={locale}
-              interval={window.interval}
+              interval={dataWindow.interval}
               data={trendDisplayData}
               viewsLabel={messages.common.views}
               sessionsLabel={messages.common.sessions}
