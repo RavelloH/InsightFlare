@@ -34,6 +34,7 @@ interface TabbedScrollMaskCardProps<T extends string = string> {
   onValueChange: (value: T) => void;
   tabs: TabbedScrollMaskCardTab<T>[];
   children: ReactNode;
+  headerRight?: ReactNode;
   syncKey?: string | number | boolean | null;
   className?: string;
   tabsListClassName?: string;
@@ -46,6 +47,7 @@ export function TabbedScrollMaskCard<T extends string = string>({
   onValueChange,
   tabs,
   children,
+  headerRight,
   syncKey,
   className,
   tabsListClassName,
@@ -158,23 +160,28 @@ export function TabbedScrollMaskCard<T extends string = string>({
           onValueChange={(next) => onValueChange(next as T)}
           className="gap-0"
         >
-          <TabsList
-            variant="line"
-            className={cn(
-              "h-12 w-full justify-start gap-1 border-0 px-2 my-1",
-              tabsListClassName,
-            )}
-          >
-            {tabs.map((tab) => (
-              <TabsTrigger
-                key={tab.value}
-                value={tab.value}
-                className={cn("h-8 flex-none px-3 text-xs", tabTriggerClassName)}
-              >
-                {tab.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+          <div className="flex items-center gap-1 px-2 py-1">
+            <TabsList
+              variant="line"
+              className={cn(
+                "h-10 flex-1 justify-start gap-1 border-0 px-0",
+                tabsListClassName,
+              )}
+            >
+              {tabs.map((tab) => (
+                <TabsTrigger
+                  key={tab.value}
+                  value={tab.value}
+                  className={cn("h-8 flex-none px-3 text-xs", tabTriggerClassName)}
+                >
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {headerRight ? (
+              <div className="shrink-0">{headerRight}</div>
+            ) : null}
+          </div>
         </Tabs>
       </div>
 

@@ -4,16 +4,37 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
+  type MouseEvent,
+  type ReactNode,
 } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   RiArrowDownLine,
+  RiArrowRightUpLine,
+  RiSearchLine,
   RiArrowDownSLine,
   RiArrowUpLine,
   RiArrowUpSLine,
 } from "@remixicon/react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip } from "recharts";
+import { OverlayScrollbars } from "overlayscrollbars";
+import type { PartialOptions } from "overlayscrollbars";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
+import { Input } from "@/components/ui/input";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { TrendChart } from "@/components/dashboard/trend-chart";
@@ -28,6 +49,7 @@ import { TabbedScrollMaskCard } from "@/components/dashboard/tabbed-scroll-mask-
 import { Spinner } from "@/components/ui/spinner";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
+import { Clickable } from "@/components/ui/clickable";
 import {
   durationFormat,
   intlLocale,
@@ -45,6 +67,7 @@ import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
 interface OverviewClientPageProps {
@@ -271,6 +294,7 @@ interface MetricAreaPoint {
 
 type PageCardTab = "path" | "title" | "hostname" | "entry" | "exit";
 type PageCardSortKey = "views" | "sessions";
+type PageCardNavigableTab = "path" | "hostname" | "entry" | "exit";
 
 interface PageCardRow {
   key: string;
@@ -287,6 +311,143 @@ const PAGE_CARD_TABS: PageCardTab[] = [
   "entry",
   "exit",
 ];
+const PAGE_CARD_NAVIGABLE_TABS = new Set<PageCardNavigableTab>([
+  "path",
+  "hostname",
+  "entry",
+  "exit",
+]);
+const ABSOLUTE_URL_PATTERN = /^[a-z][a-z\d+\-.]*:\/\//i;
+const PAGE_CARD_QUERY_PARAM_BY_TAB: Record<PageCardTab, string> = {
+  path: "path",
+  title: "title",
+  hostname: "hostname",
+  entry: "entry",
+  exit: "exit",
+};
+const PANEL_SCROLLBAR_OPTIONS = {
+  overflow: {
+    x: "hidden",
+    y: "scroll",
+  },
+  scrollbars: {
+    theme: "os-theme-insightflare",
+    autoHide: "move",
+    autoHideDelay: 420,
+    autoHideSuspend: false,
+  },
+} satisfies PartialOptions;
+
+function isPageCardNavigableTab(tab: PageCardTab): tab is PageCardNavigableTab {
+  return PAGE_CARD_NAVIGABLE_TABS.has(tab as PageCardNavigableTab);
+}
+
+function sanitizeHostname(value: string): string {
+  return value
+    .trim()
+    .replace(/^[a-z][a-z\d+\-.]*:\/\//i, "")
+    .replace(/\/+.*$/, "");
+}
+
+function toAbsoluteHttpsUrl(value: string): string | null {
+  const raw = value.trim();
+  if (raw.length === 0) return null;
+  try {
+    if (ABSOLUTE_URL_PATTERN.test(raw)) {
+      return new URL(raw).toString();
+    }
+    if (raw.startsWith("//")) {
+      return new URL(`https:${raw}`).toString();
+    }
+    return new URL(`https://${raw}`).toString();
+  } catch {
+    return null;
+  }
+}
+
+function resolvePageCardTargetUrl(params: {
+  tab: PageCardTab;
+  value: string;
+  unknownLabel: string;
+  fallbackHostname: string;
+}): string | null {
+  const { tab, value, unknownLabel, fallbackHostname } = params;
+  const raw = value.trim();
+  if (raw.length === 0 || raw === unknownLabel) {
+    return null;
+  }
+
+  if (tab === "hostname") {
+    return toAbsoluteHttpsUrl(raw);
+  }
+
+  if (tab === "path" || tab === "entry" || tab === "exit") {
+    if (raw.startsWith("/")) {
+      const host = sanitizeHostname(fallbackHostname);
+      if (host.length === 0) return null;
+      try {
+        return new URL(raw, `https://${host}`).toString();
+      } catch {
+        return null;
+      }
+    }
+    return toAbsoluteHttpsUrl(raw);
+  }
+
+  return null;
+}
+
+function PanelScrollbar({
+  children,
+  className,
+  syncKey,
+}: {
+  children: ReactNode;
+  className?: string;
+  syncKey?: string | number | boolean | null;
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+
+    const existing = OverlayScrollbars(host);
+    const instance =
+      existing ?? OverlayScrollbars(host, PANEL_SCROLLBAR_OPTIONS);
+    if (existing) {
+      existing.options(PANEL_SCROLLBAR_OPTIONS);
+    }
+    scrollbarRef.current = instance;
+    instance.update(true);
+
+    return () => {
+      if (!existing) {
+        instance.destroy();
+      }
+      if (scrollbarRef.current === instance) {
+        scrollbarRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    scrollbarRef.current?.update(true);
+  }, [syncKey]);
+
+  return (
+    <div
+      ref={hostRef}
+      className={cn("overflow-hidden", className)}
+      data-overlayscrollbars-initialize
+    >
+      {children}
+    </div>
+  );
+}
 
 function MetricAreaMap({
   points,
@@ -398,6 +559,10 @@ export function OverviewClientPage({
   siteId,
   pathname,
 }: OverviewClientPageProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const livePathname = usePathname() || pathname;
+  const isMobile = useIsMobile();
   const { range, filters, window } = useDashboardQuery();
   const [bundle, setBundle] = useState<OverviewBundle | null>(null);
   const [filterOptions, setFilterOptions] =
@@ -411,6 +576,8 @@ export function OverviewClientPage({
     key: "views",
     direction: "desc",
   });
+  const [pageCardSearchOpen, setPageCardSearchOpen] = useState(false);
+  const [pageCardSearchTerm, setPageCardSearchTerm] = useState("");
   const [dataWindow, setDataWindow] = useState<
     Pick<TimeWindow, "from" | "to" | "interval">
   >(() => ({
@@ -465,6 +632,11 @@ export function OverviewClientPage({
     filters.browser,
     filters.eventType,
   ]);
+  useEffect(() => {
+    if (!pageCardSearchOpen) {
+      setPageCardSearchTerm("");
+    }
+  }, [pageCardSearchOpen]);
 
   const data = useMemo(
     () => bundle ?? emptyOverviewBundle(dataWindow.interval),
@@ -732,6 +904,41 @@ export function OverviewClientPage({
       ),
     [sortedPageCardRows, pageCardSort.key],
   );
+  const activePageCardQueryValue = useMemo(() => {
+    const queryParamKey = PAGE_CARD_QUERY_PARAM_BY_TAB[pageCardTab];
+    const raw = searchParams.get(queryParamKey);
+    if (!raw) return null;
+    const normalized = raw.trim();
+    return normalized.length > 0 ? normalized : null;
+  }, [pageCardTab, searchParams]);
+  const visiblePageCardRows = useMemo(
+    () =>
+      activePageCardQueryValue
+        ? sortedPageCardRows.filter(
+            (row) => row.label === activePageCardQueryValue,
+          )
+        : sortedPageCardRows,
+    [activePageCardQueryValue, sortedPageCardRows],
+  );
+  const normalizedPageCardSearchTerm = pageCardSearchTerm
+    .trim()
+    .toLocaleLowerCase();
+  const searchedPageCardRows = useMemo(() => {
+    if (!normalizedPageCardSearchTerm) return sortedPageCardRows;
+    return sortedPageCardRows.filter((row) =>
+      row.label.toLocaleLowerCase().includes(normalizedPageCardSearchTerm),
+    );
+  }, [normalizedPageCardSearchTerm, sortedPageCardRows]);
+  const pageCardDefaultHostname = useMemo(() => {
+    for (const event of data.events.data) {
+      const hostname = sanitizeHostname(String(event.hostname ?? ""));
+      if (hostname.length > 0) return hostname;
+    }
+    if (typeof globalThis.window !== "undefined") {
+      return sanitizeHostname(globalThis.window.location.hostname);
+    }
+    return "";
+  }, [data.events.data]);
 
   const togglePageCardSort = (key: PageCardSortKey) => {
     setPageCardSort((prev) =>
@@ -739,6 +946,45 @@ export function OverviewClientPage({
         ? { key, direction: prev.direction === "desc" ? "asc" : "desc" }
         : { key, direction: "desc" },
     );
+  };
+  const setPageCardQueryFilter = (
+    next: { tab: PageCardTab; value: string } | null,
+  ) => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const queryKey of Object.values(PAGE_CARD_QUERY_PARAM_BY_TAB)) {
+      params.delete(queryKey);
+    }
+    if (next) {
+      const queryKey = PAGE_CARD_QUERY_PARAM_BY_TAB[next.tab];
+      const normalized = next.value.trim();
+      if (normalized.length > 0) {
+        params.set(queryKey, normalized);
+      }
+    }
+    const current = searchParams.toString();
+    const updated = params.toString();
+    if (updated === current) return;
+    const target = updated ? `${livePathname}?${updated}` : livePathname;
+    router.replace(target, { scroll: false });
+  };
+  const handlePageCardTabChange = (tab: PageCardTab) => {
+    if (tab !== pageCardTab) {
+      setPageCardTab(tab);
+    }
+  };
+  const togglePageCardRowFilter = (rowKey: string) => {
+    const normalized = rowKey.trim();
+    const isActive = activePageCardQueryValue === normalized;
+    setPageCardQueryFilter(
+      isActive ? null : { tab: pageCardTab, value: normalized },
+    );
+  };
+  const openPageCardRowTarget = (
+    targetUrl: string,
+    event: MouseEvent<HTMLElement>,
+  ) => {
+    event.stopPropagation();
+    globalThis.window.open(targetUrl, "_blank", "noopener,noreferrer");
   };
   const renderSortIndicator = (key: PageCardSortKey) => {
     if (pageCardSort.key === key) {
@@ -756,6 +1002,179 @@ export function OverviewClientPage({
       </span>
     );
   };
+  const pageCardSearchLabel = locale === "zh" ? "搜索" : "Search";
+  const pageCardSearchPlaceholder =
+    locale === "zh"
+      ? `搜索${activePageTabMeta.label}`
+      : `Search ${activePageTabMeta.label}`;
+  const pageCardSearchTitle =
+    locale === "zh"
+      ? `搜索${activePageTabMeta.label}`
+      : `Search ${activePageTabMeta.label}`;
+  const pageCardTableHeader = (
+    <TableRow className="hover:bg-transparent">
+      <TableHead className="h-8 p-0">
+        <div className="px-4">{activePageTabMeta.columnLabel}</div>
+      </TableHead>
+      <TableHead className="h-8 p-0 w-20">
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              pageCardSort.key === "views"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => togglePageCardSort("views")}
+          >
+            {messages.common.views}
+            {renderSortIndicator("views")}
+          </button>
+        </div>
+      </TableHead>
+      <TableHead className="h-8 p-0 w-20">
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              pageCardSort.key === "sessions"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => togglePageCardSort("sessions")}
+          >
+            {messages.common.sessions}
+            {renderSortIndicator("sessions")}
+          </button>
+        </div>
+      </TableHead>
+    </TableRow>
+  );
+  const renderPageCardRows = (rows: PageCardRow[]) =>
+    rows.map((item) => {
+      const rowValue = Math.max(0, Number(item[pageCardSort.key] ?? 0));
+      const progressPercent =
+        pageCardProgressTotal > 0
+          ? Math.min(100, (rowValue / pageCardProgressTotal) * 100)
+          : 0;
+      const progressWidth = `${progressPercent.toFixed(2)}%`;
+      const rowTargetUrl = isPageCardNavigableTab(pageCardTab)
+        ? resolvePageCardTargetUrl({
+            tab: pageCardTab,
+            value: item.label,
+            unknownLabel: messages.common.unknown,
+            fallbackHostname: pageCardDefaultHostname,
+          })
+        : null;
+      const rowFilterActive = activePageCardQueryValue === item.label;
+
+      return (
+        <TableRow
+          key={`${pageCardTab}-${item.key}`}
+          className={cn(
+            "group/row cursor-pointer bg-no-repeat transition-[background-size,filter] duration-300 ease-out hover:brightness-95",
+            rowFilterActive && "brightness-95",
+          )}
+          style={{
+            backgroundImage:
+              "linear-gradient(90deg, var(--muted) 0%, var(--muted) 100%)",
+            backgroundSize: `${progressWidth} 100%`,
+            backgroundPosition: "left top",
+          }}
+          onClick={() => togglePageCardRowFilter(item.label)}
+        >
+          <TableCell className="p-0 whitespace-normal align-top">
+            <div
+              className={cn(
+                "px-4 py-2 leading-5 whitespace-normal break-words",
+                activePageTabMeta.mono && "font-mono",
+              )}
+            >
+              <span className="inline break-words">
+                {item.label}
+                {rowTargetUrl ? (
+                  <Clickable
+                    className="ml-1 inline-flex h-[1em] w-[1em] [vertical-align:-0.125em] text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                    onClick={(event) =>
+                      openPageCardRowTarget(rowTargetUrl, event)
+                    }
+                    aria-label={item.label}
+                    title={item.label}
+                  >
+                    <RiArrowRightUpLine className="size-full" />
+                  </Clickable>
+                ) : null}
+              </span>
+            </div>
+          </TableCell>
+          <TableCell className="p-0">
+            <div className="px-2 py-2 text-right">
+              {numberFormat(locale, item.views)}
+            </div>
+          </TableCell>
+          <TableCell className="p-0">
+            <div className="px-4 py-2 text-right">
+              {numberFormat(locale, item.sessions)}
+            </div>
+          </TableCell>
+        </TableRow>
+      );
+    });
+  const pageCardSearchContent = (
+    <div className="space-y-3">
+      <Input
+        value={pageCardSearchTerm}
+        onChange={(event) => setPageCardSearchTerm(event.target.value)}
+        placeholder={pageCardSearchPlaceholder}
+      />
+      <PanelScrollbar
+        className="max-h-[60vh] pr-1"
+        syncKey={`${pageCardTab}-${pageCardSearchTerm}-${searchedPageCardRows.length}-${loading}`}
+      >
+        <DataTableSwitch
+          loading={loading}
+          hasContent={searchedPageCardRows.length > 0}
+          loadingLabel={messages.common.loading}
+          emptyLabel={noDataText}
+          colSpan={3}
+          contentKey={`search-${pageCardTab}-${pageCardSearchTerm}-${activePageCardQueryValue ?? "all"}`}
+          header={pageCardTableHeader}
+          rows={renderPageCardRows(searchedPageCardRows)}
+        />
+      </PanelScrollbar>
+    </div>
+  );
+  const pageCardSearchPanel = isMobile ? (
+    <Drawer open={pageCardSearchOpen} onOpenChange={setPageCardSearchOpen}>
+      <DrawerContent className="max-h-[90vh]">
+        <DrawerHeader>
+          <DrawerTitle>{pageCardSearchTitle}</DrawerTitle>
+        </DrawerHeader>
+        <div className="px-4 pb-4">{pageCardSearchContent}</div>
+      </DrawerContent>
+    </Drawer>
+  ) : (
+    <Dialog open={pageCardSearchOpen} onOpenChange={setPageCardSearchOpen}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{pageCardSearchTitle}</DialogTitle>
+        </DialogHeader>
+        {pageCardSearchContent}
+      </DialogContent>
+    </Dialog>
+  );
+  const pageCardSearchAction = (
+    <Clickable
+      className="size-6 text-muted-foreground hover:text-foreground"
+      onClick={() => setPageCardSearchOpen(true)}
+      aria-label={pageCardSearchLabel}
+      title={pageCardSearchLabel}
+    >
+      <RiSearchLine className="size-4" />
+    </Clickable>
+  );
 
   const metrics = [
     {
@@ -907,106 +1326,23 @@ export function OverviewClientPage({
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <TabbedScrollMaskCard
           value={pageCardTab}
-          onValueChange={(value) => setPageCardTab(value)}
+          onValueChange={(value) => handlePageCardTabChange(value)}
           tabs={PAGE_CARD_TABS.map((tab) => ({
             value: tab,
             label: pageCardTabMeta[tab].label,
           }))}
-          syncKey={`${loading}-${pageCardTab}-${pageCardSort.key}-${pageCardSort.direction}-${sortedPageCardRows.length}`}
+          headerRight={pageCardSearchAction}
+          syncKey={`${loading}-${pageCardTab}-${pageCardSort.key}-${pageCardSort.direction}-${sortedPageCardRows.length}-${activePageCardQueryValue ?? "all"}-${visiblePageCardRows.length}`}
         >
           <DataTableSwitch
             loading={loading}
-            hasContent={sortedPageCardRows.length > 0}
+            hasContent={visiblePageCardRows.length > 0}
             loadingLabel={messages.common.loading}
             emptyLabel={noDataText}
             colSpan={3}
-            contentKey={pageCardTab}
-            header={
-              <TableRow>
-                <TableHead className="h-8 p-0">
-                  <div className="px-4">{activePageTabMeta.columnLabel}</div>
-                </TableHead>
-                <TableHead className="h-8 p-0 w-20">
-                  <div className="flex justify-end px-2">
-                    <button
-                      type="button"
-                      className={cn(
-                        "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
-                        pageCardSort.key === "views"
-                          ? "text-foreground"
-                          : "text-muted-foreground",
-                      )}
-                      onClick={() => togglePageCardSort("views")}
-                    >
-                      {messages.common.views}
-                      {renderSortIndicator("views")}
-                    </button>
-                  </div>
-                </TableHead>
-                <TableHead className="h-8 p-0 w-20">
-                  <div className="flex justify-end px-2">
-                    <button
-                      type="button"
-                      className={cn(
-                        "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
-                        pageCardSort.key === "sessions"
-                          ? "text-foreground"
-                          : "text-muted-foreground",
-                      )}
-                      onClick={() => togglePageCardSort("sessions")}
-                    >
-                      {messages.common.sessions}
-                      {renderSortIndicator("sessions")}
-                    </button>
-                  </div>
-                </TableHead>
-              </TableRow>
-            }
-            rows={sortedPageCardRows.map((item) => {
-              const rowValue = Math.max(
-                0,
-                Number(item[pageCardSort.key] ?? 0),
-              );
-              const progressPercent =
-                pageCardProgressTotal > 0
-                  ? Math.min(100, (rowValue / pageCardProgressTotal) * 100)
-                  : 0;
-              const progressWidth = `${progressPercent.toFixed(2)}%`;
-
-              return (
-                <TableRow
-                  key={`${pageCardTab}-${item.key}`}
-                  className="bg-no-repeat transition-[background-size] duration-300 ease-out"
-                  style={{
-                    backgroundImage:
-                      "linear-gradient(90deg, var(--muted) 0%, var(--muted) 100%)",
-                    backgroundSize: `${progressWidth} 100%`,
-                    backgroundPosition: "left top",
-                  }}
-                >
-                  <TableCell className="p-0 whitespace-normal align-top">
-                    <div
-                      className={cn(
-                        "px-4 py-2 leading-5 whitespace-normal break-words",
-                        activePageTabMeta.mono && "font-mono",
-                      )}
-                    >
-                      {item.label}
-                    </div>
-                  </TableCell>
-                  <TableCell className="p-0">
-                    <div className="px-2 py-2 text-right">
-                      {numberFormat(locale, item.views)}
-                    </div>
-                  </TableCell>
-                  <TableCell className="p-0">
-                    <div className="px-4 py-2 text-right">
-                      {numberFormat(locale, item.sessions)}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+            contentKey={`${pageCardTab}-${activePageCardQueryValue ?? "all"}`}
+            header={pageCardTableHeader}
+            rows={renderPageCardRows(visiblePageCardRows)}
           />
         </TabbedScrollMaskCard>
 
@@ -1050,6 +1386,7 @@ export function OverviewClientPage({
           </CardContent>
         </Card>
       </div>
+      {pageCardSearchPanel}
 
       <RealtimePanel siteId={siteId} locale={locale} messages={messages} />
 
