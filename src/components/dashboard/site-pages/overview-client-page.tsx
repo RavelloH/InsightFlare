@@ -1062,18 +1062,18 @@ function OverviewPagesSection({
                 activePageTabMeta.mono && "font-mono",
               )}
             >
-              <span className="inline break-words">
+              <span className="inline-flex items-center gap-2 break-words">
                 {item.label}
                 {rowTargetUrl ? (
                   <Clickable
-                    className="ml-1 inline-flex h-[1em] w-[1em] [vertical-align:-0.125em] text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                    className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
                     onClick={(event) =>
                       openPageCardRowTarget(rowTargetUrl, event)
                     }
                     aria-label={item.label}
                     title={item.label}
                   >
-                    <RiArrowRightUpLine className="size-full" />
+                    <RiArrowRightUpLine size="1.4em" />
                   </Clickable>
                 ) : null}
               </span>
@@ -1269,7 +1269,9 @@ function OverviewMetricsSection({
   );
   const previous = previousOverview.data;
   const currentPagesPerSession =
-    overview.data.sessions > 0 ? overview.data.views / overview.data.sessions : 0;
+    overview.data.sessions > 0
+      ? overview.data.views / overview.data.sessions
+      : 0;
   const previousPagesPerSession =
     previous.sessions > 0 ? previous.views / previous.sessions : 0;
 
@@ -1348,7 +1350,10 @@ function OverviewMetricsSection({
     {
       label: messages.common.avgDuration,
       value: durationFormat(locale, overview.data.avgDurationMs),
-      delta: toDeltaPercent(overview.data.avgDurationMs, previous.avgDurationMs),
+      delta: toDeltaPercent(
+        overview.data.avgDurationMs,
+        previous.avgDurationMs,
+      ),
       trend: avgDurationSeries,
       formatTrendValue: (value: number) =>
         durationFormat(locale, Math.max(0, Math.round(value))),
@@ -1369,10 +1374,7 @@ function OverviewMetricsSection({
               : null;
 
             return (
-              <div
-                key={item.label}
-                className={metricCellBorderClasses(index)}
-              >
+              <div key={item.label} className={metricCellBorderClasses(index)}>
                 <div className="relative min-h-[74px]">
                   <div className="absolute inset-y-0 right-0 w-1/2 min-w-0">
                     <MetricAreaMap
