@@ -1254,8 +1254,17 @@ export function OverviewClientPage({
                   key={item.label}
                   className={metricCellBorderClasses(index)}
                 >
-                  <div className="flex min-h-[74px] items-stretch gap-3">
-                    <div className="flex min-w-0 flex-1 flex-col justify-between px-3 py-2.5">
+                  <div className="relative min-h-[74px]">
+                    <div className="absolute inset-y-0 right-0 w-1/2 min-w-0">
+                      <MetricAreaMap
+                        points={item.trend}
+                        color={METRIC_AREA_COLOR}
+                        locale={locale}
+                        label={item.label}
+                        formatValue={item.formatTrendValue}
+                      />
+                    </div>
+                    <div className="pointer-events-none relative z-10 flex min-h-[74px] min-w-0 flex-col justify-between px-3 py-2.5">
                       <p className="truncate text-xs text-muted-foreground mb-4">
                         {item.label}
                       </p>
@@ -1281,15 +1290,6 @@ export function OverviewClientPage({
                           </AutoTransition>
                         </AutoResizer>
                       </div>
-                    </div>
-                    <div className="w-1/2 min-w-0">
-                      <MetricAreaMap
-                        points={item.trend}
-                        color={METRIC_AREA_COLOR}
-                        locale={locale}
-                        label={item.label}
-                        formatValue={item.formatTrendValue}
-                      />
                     </div>
                   </div>
                 </div>
