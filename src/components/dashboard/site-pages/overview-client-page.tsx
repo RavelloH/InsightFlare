@@ -52,13 +52,15 @@ import {
   shortDateTime,
 } from "@/lib/dashboard/format";
 import {
+  emptyReferrersData,
   emptyPageCardTabsData,
   fetchPageCardTabs,
   fetchOverview,
+  fetchReferrers,
   fetchTrend,
   type PageCardTabsData,
 } from "@/lib/dashboard/client-data";
-import type { OverviewData, TrendData } from "@/lib/edge-client";
+import type { OverviewData, ReferrersData, TrendData } from "@/lib/edge-client";
 import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -265,10 +267,20 @@ interface MetricAreaPoint {
 type PageCardTab = "path" | "title" | "hostname" | "entry" | "exit";
 type PageCardSortKey = "views" | "sessions";
 type PageCardNavigableTab = "path" | "hostname" | "entry" | "exit";
+type SourceCardTab = "domain" | "link";
 
 interface PageCardRow {
   key: string;
   label: string;
+  views: number;
+  sessions: number;
+  mono: boolean;
+}
+
+interface SourceCardRow {
+  key: string;
+  label: string;
+  targetUrl: string | null;
   views: number;
   sessions: number;
   mono: boolean;
@@ -294,6 +306,10 @@ const PAGE_CARD_QUERY_PARAM_BY_TAB: Record<PageCardTab, string> = {
   hostname: "hostname",
   entry: "entry",
   exit: "exit",
+};
+const SOURCE_CARD_QUERY_PARAM_BY_TAB: Record<SourceCardTab, string> = {
+  domain: "sourceDomain",
+  link: "sourceLink",
 };
 const PANEL_SCROLLBAR_OPTIONS = {
   overflow: {
@@ -333,6 +349,118 @@ function toAbsoluteHttpsUrl(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function resolveFaviconUrlForLabel(value: string): string | null {
+  const raw = value.trim();
+  if (raw.length === 0 || raw.startsWith("/")) return null;
+  try {
+    if (ABSOLUTE_URL_PATTERN.test(raw)) {
+      const parsed = new URL(raw);
+      return `${parsed.origin}/favicon.ico`;
+    }
+    if (raw.startsWith("//")) {
+      const parsed = new URL(`https:${raw}`);
+      return `${parsed.origin}/favicon.ico`;
+    }
+    const hostname = sanitizeHostname(raw);
+    if (!hostname) return null;
+    const parsed = new URL(`https://${hostname}`);
+    return `${parsed.origin}/favicon.ico`;
+  } catch {
+    return null;
+  }
+}
+
+function leadingLabelLetter(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) return "?";
+  return normalized.slice(0, 1).toUpperCase();
+}
+
+function DomainOrUrlIcon({
+  label,
+  unknownLabel,
+}: {
+  label: string;
+  unknownLabel: string;
+}) {
+  const src = useMemo(() => {
+    const normalized = label.trim();
+    if (normalized.length === 0 || normalized === unknownLabel) return null;
+    return resolveFaviconUrlForLabel(normalized);
+  }, [label, unknownLabel]);
+  const [iconLoaded, setIconLoaded] = useState(false);
+  const [iconFailed, setIconFailed] = useState(false);
+
+  useEffect(() => {
+    setIconLoaded(false);
+    setIconFailed(false);
+
+    if (!src) return;
+
+    let active = true;
+    const image = new Image();
+    image.onload = () => {
+      if (!active) return;
+      setIconLoaded(true);
+    };
+    image.onerror = () => {
+      if (!active) return;
+      setIconFailed(true);
+    };
+    image.src = src;
+
+    return () => {
+      active = false;
+    };
+  }, [src]);
+
+  const showFavicon = Boolean(src) && iconLoaded && !iconFailed;
+  const fallbackValue = label === unknownLabel ? "" : label;
+
+  return (
+    <AutoTransition
+      type="fade"
+      duration={0.18}
+      initial={false}
+      className="inline-flex size-3.5 shrink-0 items-center justify-center"
+    >
+      {showFavicon ? (
+        <img key="favicon" src={src!} alt="" className="size-3.5 shrink-0 -translate-y-0.25" />
+      ) : (
+        <span
+          key="fallback"
+          className="inline-flex size-3.5 shrink-0 items-center justify-center bg-card leading-none font-medium text-muted-foreground -translate-y-1"
+        >
+          {leadingLabelLetter(fallbackValue)}
+        </span>
+      )}
+    </AutoTransition>
+  );
+}
+
+function LabelWithOptionalIcon({
+  label,
+  showIcon,
+  unknownLabel,
+}: {
+  label: string;
+  showIcon: boolean;
+  unknownLabel: string;
+}) {
+  if (!showIcon) {
+    return <span className="break-words">{label}</span>;
+  }
+
+  return (
+    <span className="relative inline-block max-w-full break-words pl-6">
+      <span className="pointer-events-none absolute left-0 top-1">
+        <DomainOrUrlIcon label={label} unknownLabel={unknownLabel} />
+      </span>
+      <span className="break-words">{label}</span>
+    </span>
+  );
 }
 
 function resolvePageCardTargetUrl(params: {
@@ -538,8 +666,19 @@ function OverviewPagesSection({
     emptyPageCardTabsData(),
   );
   const [pageCardLoading, setPageCardLoading] = useState(true);
+  const [sourceCardData, setSourceCardData] =
+    useState<ReferrersData>(emptyReferrersData());
+  const [sourceCardLoading, setSourceCardLoading] = useState(true);
   const [pageCardTab, setPageCardTab] = useState<PageCardTab>("path");
+  const [sourceCardTab, setSourceCardTab] = useState<SourceCardTab>("domain");
   const [pageCardSort, setPageCardSort] = useState<{
+    key: PageCardSortKey;
+    direction: "asc" | "desc";
+  }>({
+    key: "views",
+    direction: "desc",
+  });
+  const [sourceCardSort, setSourceCardSort] = useState<{
     key: PageCardSortKey;
     direction: "asc" | "desc";
   }>({
@@ -548,21 +687,34 @@ function OverviewPagesSection({
   });
   const [pageCardSearchOpen, setPageCardSearchOpen] = useState(false);
   const [pageCardSearchTerm, setPageCardSearchTerm] = useState("");
+  const [sourceCardSearchOpen, setSourceCardSearchOpen] = useState(false);
+  const [sourceCardSearchTerm, setSourceCardSearchTerm] = useState("");
 
   useEffect(() => {
     let active = true;
     setPageCardLoading(true);
+    setSourceCardLoading(true);
     setPageCardTabsData(emptyPageCardTabsData());
+    setSourceCardData(emptyReferrersData());
 
-    fetchPageCardTabs(siteId, window, filters)
-      .catch(() => emptyPageCardTabsData())
-      .then((nextTabs) => {
+    Promise.all([
+      fetchPageCardTabs(siteId, window, filters).catch(() =>
+        emptyPageCardTabsData(),
+      ),
+      fetchReferrers(siteId, window, filters, {
+        fullUrl: true,
+        limit: 100,
+      }).catch(() => emptyReferrersData()),
+    ])
+      .then(([nextTabs, nextSource]) => {
         if (!active) return;
         setPageCardTabsData(nextTabs);
+        setSourceCardData(nextSource);
       })
       .finally(() => {
         if (!active) return;
         setPageCardLoading(false);
+        setSourceCardLoading(false);
       });
 
     return () => {
@@ -584,37 +736,47 @@ function OverviewPagesSection({
       setPageCardSearchTerm("");
     }
   }, [pageCardSearchOpen]);
+  useEffect(() => {
+    if (!sourceCardSearchOpen) {
+      setSourceCardSearchTerm("");
+    }
+  }, [sourceCardSearchOpen]);
 
   const noDataText = messages.common.noData;
 
   const pageCardTabMeta: Record<
     PageCardTab,
-    { label: string; columnLabel: string; mono: boolean }
+    { label: string; columnLabel: string; mono: boolean; showIcon: boolean }
   > = {
     path: {
       label: messages.common.path,
       columnLabel: messages.common.path,
       mono: true,
+      showIcon: false,
     },
     title: {
       label: messages.common.title,
       columnLabel: messages.common.title,
       mono: false,
+      showIcon: false,
     },
     hostname: {
       label: messages.common.hostname,
       columnLabel: messages.common.hostname,
       mono: true,
+      showIcon: true,
     },
     entry: {
       label: messages.common.entryPage,
       columnLabel: messages.common.entryPage,
       mono: true,
+      showIcon: false,
     },
     exit: {
       label: messages.common.exitPage,
       columnLabel: messages.common.exitPage,
       mono: true,
+      showIcon: false,
     },
   };
   const pathRows = useMemo<PageCardRow[]>(
@@ -753,9 +915,174 @@ function OverviewPagesSection({
     }
     return "";
   }, [hostnameRows]);
+  const sourceCardTabMeta: Record<
+    SourceCardTab,
+    { label: string; columnLabel: string; mono: boolean; showIcon: boolean }
+  > = {
+    domain: {
+      label: locale === "zh" ? "来源" : "Source",
+      columnLabel: locale === "zh" ? "来源（域名）" : "Source Domain",
+      mono: true,
+      showIcon: true,
+    },
+    link: {
+      label: locale === "zh" ? "来源链接" : "Source Link",
+      columnLabel: locale === "zh" ? "来源链接" : "Source Link",
+      mono: true,
+      showIcon: true,
+    },
+  };
+  const sourceCardDirectLabel = locale === "zh" ? "直接访问" : "Direct";
+  const sourceDomainRows = useMemo<SourceCardRow[]>(() => {
+    const aggregate = new Map<
+      string,
+      { views: number; sessions: number; targetUrl: string | null }
+    >();
+
+    for (const item of sourceCardData.data) {
+      const raw = String(item.referrer || "").trim();
+      const absolute = raw.length > 0 ? toAbsoluteHttpsUrl(raw) : null;
+
+      let domain = "";
+      if (absolute) {
+        try {
+          domain = sanitizeHostname(new URL(absolute).hostname || "");
+        } catch {
+          domain = "";
+        }
+      }
+      if (!domain && raw.length > 0) {
+        domain = sanitizeHostname(raw);
+      }
+
+      const label = domain || sourceCardDirectLabel;
+      const nextViews = Math.max(0, Number(item.views || 0));
+      const nextSessions = Math.max(0, Number(item.sessions || 0));
+      const prev = aggregate.get(label) ?? {
+        views: 0,
+        sessions: 0,
+        targetUrl: null,
+      };
+
+      aggregate.set(label, {
+        views: prev.views + nextViews,
+        sessions: prev.sessions + nextSessions,
+        targetUrl:
+          prev.targetUrl ?? (domain ? toAbsoluteHttpsUrl(domain) : null),
+      });
+    }
+
+    return Array.from(aggregate.entries()).map(([label, value], index) => ({
+      key: `domain-${label}-${index}`,
+      label,
+      targetUrl: value.targetUrl,
+      views: value.views,
+      sessions: value.sessions,
+      mono: true,
+    }));
+  }, [sourceCardData.data, sourceCardDirectLabel]);
+  const sourceLinkRows = useMemo<SourceCardRow[]>(() => {
+    const aggregate = new Map<
+      string,
+      { views: number; sessions: number; targetUrl: string | null }
+    >();
+
+    for (const item of sourceCardData.data) {
+      const raw = String(item.referrer || "").trim();
+      const targetUrl = raw.length > 0 ? toAbsoluteHttpsUrl(raw) : null;
+      const label = raw.length > 0 ? (targetUrl ?? raw) : sourceCardDirectLabel;
+      const nextViews = Math.max(0, Number(item.views || 0));
+      const nextSessions = Math.max(0, Number(item.sessions || 0));
+      const prev = aggregate.get(label) ?? {
+        views: 0,
+        sessions: 0,
+        targetUrl: null,
+      };
+
+      aggregate.set(label, {
+        views: prev.views + nextViews,
+        sessions: prev.sessions + nextSessions,
+        targetUrl: prev.targetUrl ?? targetUrl,
+      });
+    }
+
+    return Array.from(aggregate.entries()).map(([label, value], index) => ({
+      key: `link-${label}-${index}`,
+      label,
+      targetUrl: value.targetUrl,
+      views: value.views,
+      sessions: value.sessions,
+      mono: true,
+    }));
+  }, [sourceCardData.data, sourceCardDirectLabel]);
+  const sourceCardRows = useMemo<Record<SourceCardTab, SourceCardRow[]>>(
+    () => ({
+      domain: sourceDomainRows,
+      link: sourceLinkRows,
+    }),
+    [sourceDomainRows, sourceLinkRows],
+  );
+  const activeSourceTabMeta = sourceCardTabMeta[sourceCardTab];
+  const sortedSourceCardRows = useMemo(() => {
+    const direction = sourceCardSort.direction === "asc" ? 1 : -1;
+    return [...sourceCardRows[sourceCardTab]].sort((left, right) => {
+      const primary =
+        (left[sourceCardSort.key] - right[sourceCardSort.key]) * direction;
+      if (primary !== 0) return primary;
+      if (right.views !== left.views) return right.views - left.views;
+      if (right.sessions !== left.sessions)
+        return right.sessions - left.sessions;
+      return left.label.localeCompare(right.label);
+    });
+  }, [
+    sourceCardRows,
+    sourceCardSort.direction,
+    sourceCardSort.key,
+    sourceCardTab,
+  ]);
+  const activeSourceCardQueryValue = useMemo(() => {
+    const queryParamKey = SOURCE_CARD_QUERY_PARAM_BY_TAB[sourceCardTab];
+    const raw = searchParams.get(queryParamKey);
+    if (!raw) return null;
+    const normalized = raw.trim();
+    return normalized.length > 0 ? normalized : null;
+  }, [searchParams, sourceCardTab]);
+  const visibleSourceCardRows = useMemo(
+    () =>
+      activeSourceCardQueryValue
+        ? sortedSourceCardRows.filter(
+            (row) => row.label === activeSourceCardQueryValue,
+          )
+        : sortedSourceCardRows,
+    [activeSourceCardQueryValue, sortedSourceCardRows],
+  );
+  const normalizedSourceCardSearchTerm = sourceCardSearchTerm
+    .trim()
+    .toLocaleLowerCase();
+  const searchedSourceCardRows = useMemo(() => {
+    if (!normalizedSourceCardSearchTerm) return sortedSourceCardRows;
+    return sortedSourceCardRows.filter((row) =>
+      row.label.toLocaleLowerCase().includes(normalizedSourceCardSearchTerm),
+    );
+  }, [normalizedSourceCardSearchTerm, sortedSourceCardRows]);
+  const sourceCardProgressTotal = useMemo(
+    () =>
+      sortedSourceCardRows.reduce(
+        (sum, item) => sum + Math.max(0, Number(item[sourceCardSort.key] ?? 0)),
+        0,
+      ),
+    [sortedSourceCardRows, sourceCardSort.key],
+  );
 
   const togglePageCardSort = (key: PageCardSortKey) => {
     setPageCardSort((prev) =>
+      prev.key === key
+        ? { key, direction: prev.direction === "desc" ? "asc" : "desc" }
+        : { key, direction: "desc" },
+    );
+  };
+  const toggleSourceCardSort = (key: PageCardSortKey) => {
+    setSourceCardSort((prev) =>
       prev.key === key
         ? { key, direction: prev.direction === "desc" ? "asc" : "desc" }
         : { key, direction: "desc" },
@@ -781,6 +1108,26 @@ function OverviewPagesSection({
     const target = updated ? `${livePathname}?${updated}` : livePathname;
     router.replace(target, { scroll: false });
   };
+  const setSourceCardQueryFilter = (
+    next: { tab: SourceCardTab; value: string } | null,
+  ) => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const queryKey of Object.values(SOURCE_CARD_QUERY_PARAM_BY_TAB)) {
+      params.delete(queryKey);
+    }
+    if (next) {
+      const queryKey = SOURCE_CARD_QUERY_PARAM_BY_TAB[next.tab];
+      const normalized = next.value.trim();
+      if (normalized.length > 0) {
+        params.set(queryKey, normalized);
+      }
+    }
+    const current = searchParams.toString();
+    const updated = params.toString();
+    if (updated === current) return;
+    const target = updated ? `${livePathname}?${updated}` : livePathname;
+    router.replace(target, { scroll: false });
+  };
   const handlePageCardTabChange = (tab: PageCardTab) => {
     if (tab !== pageCardTab) {
       setPageCardTab(tab);
@@ -791,6 +1138,13 @@ function OverviewPagesSection({
     const isActive = activePageCardQueryValue === normalized;
     setPageCardQueryFilter(
       isActive ? null : { tab: pageCardTab, value: normalized },
+    );
+  };
+  const toggleSourceCardRowFilter = (rowKey: string) => {
+    const normalized = rowKey.trim();
+    const isActive = activeSourceCardQueryValue === normalized;
+    setSourceCardQueryFilter(
+      isActive ? null : { tab: sourceCardTab, value: normalized },
     );
   };
   const openPageCardRowTarget = (
@@ -816,6 +1170,22 @@ function OverviewPagesSection({
       </span>
     );
   };
+  const renderSourceSortIndicator = (key: PageCardSortKey) => {
+    if (sourceCardSort.key === key) {
+      return sourceCardSort.direction === "desc" ? (
+        <RiArrowDownSLine className="size-3.5" />
+      ) : (
+        <RiArrowUpSLine className="size-3.5" />
+      );
+    }
+
+    return (
+      <span className="inline-flex flex-col leading-none text-muted-foreground">
+        <RiArrowUpSLine className="-mb-1 size-3.5" />
+        <RiArrowDownSLine className="-mt-1 size-3.5" />
+      </span>
+    );
+  };
   const pageCardSearchLabel = locale === "zh" ? "搜索" : "Search";
   const pageCardSearchPlaceholder =
     locale === "zh"
@@ -825,6 +1195,15 @@ function OverviewPagesSection({
     locale === "zh"
       ? `搜索${activePageTabMeta.label}`
       : `Search ${activePageTabMeta.label}`;
+  const sourceCardSearchLabel = locale === "zh" ? "搜索" : "Search";
+  const sourceCardSearchPlaceholder =
+    locale === "zh"
+      ? `搜索${activeSourceTabMeta.label}`
+      : `Search ${activeSourceTabMeta.label}`;
+  const sourceCardSearchTitle =
+    locale === "zh"
+      ? `搜索${activeSourceTabMeta.label}`
+      : `Search ${activeSourceTabMeta.label}`;
   const pageCardTableHeader = (
     <TableRow className="hover:bg-transparent">
       <TableHead className="h-8 p-0">
@@ -907,7 +1286,11 @@ function OverviewPagesSection({
               )}
             >
               <span className="inline-flex items-center gap-2 break-words">
-                {item.label}
+                <LabelWithOptionalIcon
+                  label={item.label}
+                  showIcon={activePageTabMeta.showIcon}
+                  unknownLabel={messages.common.unknown}
+                />
                 {rowTargetUrl ? (
                   <Clickable
                     className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
@@ -936,6 +1319,164 @@ function OverviewPagesSection({
         </TableRow>
       );
     });
+  const sourceCardTableHeader = (
+    <TableRow className="hover:bg-transparent">
+      <TableHead className="h-8 p-0">
+        <div className="px-4">{activeSourceTabMeta.columnLabel}</div>
+      </TableHead>
+      <TableHead className="h-8 p-0 w-20">
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              sourceCardSort.key === "views"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleSourceCardSort("views")}
+          >
+            {messages.common.views}
+            {renderSourceSortIndicator("views")}
+          </button>
+        </div>
+      </TableHead>
+      <TableHead className="h-8 p-0 w-20">
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              sourceCardSort.key === "sessions"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleSourceCardSort("sessions")}
+          >
+            {messages.common.sessions}
+            {renderSourceSortIndicator("sessions")}
+          </button>
+        </div>
+      </TableHead>
+    </TableRow>
+  );
+  const renderSourceCardRows = (rows: SourceCardRow[]) =>
+    rows.map((item) => {
+      const rowValue = Math.max(0, Number(item[sourceCardSort.key] ?? 0));
+      const progressPercent =
+        sourceCardProgressTotal > 0
+          ? Math.min(100, (rowValue / sourceCardProgressTotal) * 100)
+          : 0;
+      const progressWidth = `${progressPercent.toFixed(2)}%`;
+      const targetUrl = item.targetUrl;
+      const rowFilterActive = activeSourceCardQueryValue === item.label;
+
+      return (
+        <TableRow
+          key={item.key}
+          className={cn(
+            "group/row cursor-pointer bg-no-repeat transition-[background-size,filter] duration-300 ease-out hover:brightness-95",
+            rowFilterActive && "brightness-95",
+          )}
+          style={{
+            backgroundImage:
+              "linear-gradient(90deg, var(--muted) 0%, var(--muted) 100%)",
+            backgroundSize: `${progressWidth} 100%`,
+            backgroundPosition: "left top",
+          }}
+          onClick={() => toggleSourceCardRowFilter(item.label)}
+        >
+          <TableCell className="p-0 whitespace-normal align-top">
+            <div
+              className={cn(
+                "px-4 py-2 leading-5 whitespace-normal break-words",
+                item.mono && "font-mono",
+              )}
+            >
+              <span className="inline-flex items-center gap-2 break-words">
+                <LabelWithOptionalIcon
+                  label={item.label}
+                  showIcon={activeSourceTabMeta.showIcon}
+                  unknownLabel={sourceCardDirectLabel}
+                />
+                {targetUrl ? (
+                  <Clickable
+                    className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                    onClick={(event) => openPageCardRowTarget(targetUrl, event)}
+                    aria-label={item.label}
+                    title={item.label}
+                  >
+                    <RiArrowRightUpLine size="1.4em" />
+                  </Clickable>
+                ) : null}
+              </span>
+            </div>
+          </TableCell>
+          <TableCell className="p-0">
+            <div className="px-2 py-2 text-right">
+              {numberFormat(locale, item.views)}
+            </div>
+          </TableCell>
+          <TableCell className="p-0">
+            <div className="px-4 py-2 text-right">
+              {numberFormat(locale, item.sessions)}
+            </div>
+          </TableCell>
+        </TableRow>
+      );
+    });
+  const sourceCardSearchContent = (
+    <div className="space-y-3">
+      <Input
+        value={sourceCardSearchTerm}
+        onChange={(event) => setSourceCardSearchTerm(event.target.value)}
+        placeholder={sourceCardSearchPlaceholder}
+      />
+      <PanelScrollbar
+        className="max-h-[60vh] pr-1"
+        syncKey={`${sourceCardTab}-${sourceCardSort.key}-${sourceCardSort.direction}-${sourceCardSearchTerm}-${searchedSourceCardRows.length}-${sourceCardLoading}`}
+      >
+        <DataTableSwitch
+          loading={sourceCardLoading}
+          hasContent={searchedSourceCardRows.length > 0}
+          loadingLabel={messages.common.loading}
+          emptyLabel={noDataText}
+          colSpan={3}
+          header={sourceCardTableHeader}
+          rows={renderSourceCardRows(searchedSourceCardRows)}
+        />
+      </PanelScrollbar>
+    </div>
+  );
+  const sourceCardSearchPanel = isMobile ? (
+    <Drawer open={sourceCardSearchOpen} onOpenChange={setSourceCardSearchOpen}>
+      <DrawerContent className="max-h-[90vh]">
+        <DrawerHeader>
+          <DrawerTitle>{sourceCardSearchTitle}</DrawerTitle>
+        </DrawerHeader>
+        <div className="px-4 pb-4">{sourceCardSearchContent}</div>
+      </DrawerContent>
+    </Drawer>
+  ) : (
+    <Dialog open={sourceCardSearchOpen} onOpenChange={setSourceCardSearchOpen}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{sourceCardSearchTitle}</DialogTitle>
+        </DialogHeader>
+        {sourceCardSearchContent}
+      </DialogContent>
+    </Dialog>
+  );
+  const sourceCardSearchAction = (
+    <Clickable
+      className="size-6 text-muted-foreground hover:text-foreground"
+      onClick={() => setSourceCardSearchOpen(true)}
+      aria-label={sourceCardSearchLabel}
+      title={sourceCardSearchLabel}
+    >
+      <RiSearchLine className="size-4" />
+    </Clickable>
+  );
   const pageCardSearchContent = (
     <div className="space-y-3">
       <Input
@@ -991,27 +1532,60 @@ function OverviewPagesSection({
 
   return (
     <>
-      <TabbedScrollMaskCard
-        value={pageCardTab}
-        onValueChange={(value) => handlePageCardTabChange(value)}
-        tabs={PAGE_CARD_TABS.map((tab) => ({
-          value: tab,
-          label: pageCardTabMeta[tab].label,
-        }))}
-        headerRight={pageCardSearchAction}
-        syncKey={`${pageCardLoading}-${pageCardTab}-${pageCardSort.key}-${pageCardSort.direction}-${sortedPageCardRows.length}-${activePageCardQueryValue ?? "all"}-${visiblePageCardRows.length}`}
-      >
-        <DataTableSwitch
-          loading={pageCardLoading}
-          hasContent={visiblePageCardRows.length > 0}
-          loadingLabel={messages.common.loading}
-          emptyLabel={noDataText}
-          colSpan={3}
-          contentKey={`${pageCardTab}-${activePageCardQueryValue ?? "all"}`}
-          header={pageCardTableHeader}
-          rows={renderPageCardRows(visiblePageCardRows)}
-        />
-      </TabbedScrollMaskCard>
+      <section className="grid items-stretch gap-6 xl:grid-cols-2">
+        <div className="min-w-0">
+          <TabbedScrollMaskCard
+            value={pageCardTab}
+            onValueChange={(value) => handlePageCardTabChange(value)}
+            tabs={PAGE_CARD_TABS.map((tab) => ({
+              value: tab,
+              label: pageCardTabMeta[tab].label,
+            }))}
+            headerRight={pageCardSearchAction}
+            className="h-full"
+            syncKey={`${pageCardLoading}-${pageCardTab}-${pageCardSort.key}-${pageCardSort.direction}-${sortedPageCardRows.length}-${activePageCardQueryValue ?? "all"}-${visiblePageCardRows.length}`}
+          >
+            <DataTableSwitch
+              loading={pageCardLoading}
+              hasContent={visiblePageCardRows.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyLabel={noDataText}
+              colSpan={3}
+              contentKey={`${pageCardTab}-${activePageCardQueryValue ?? "all"}`}
+              header={pageCardTableHeader}
+              rows={renderPageCardRows(visiblePageCardRows)}
+            />
+          </TabbedScrollMaskCard>
+        </div>
+
+        <div className="min-w-0">
+          <TabbedScrollMaskCard
+            value={sourceCardTab}
+            onValueChange={(value) => setSourceCardTab(value)}
+            tabs={(Object.keys(sourceCardTabMeta) as SourceCardTab[]).map(
+              (tab) => ({
+                value: tab,
+                label: sourceCardTabMeta[tab].label,
+              }),
+            )}
+            headerRight={sourceCardSearchAction}
+            className="h-full"
+            syncKey={`${sourceCardLoading}-${sourceCardTab}-${sourceCardSort.key}-${sourceCardSort.direction}-${sortedSourceCardRows.length}-${activeSourceCardQueryValue ?? "all"}-${visibleSourceCardRows.length}`}
+          >
+            <DataTableSwitch
+              loading={sourceCardLoading}
+              hasContent={visibleSourceCardRows.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyLabel={noDataText}
+              colSpan={3}
+              contentKey={`${sourceCardTab}-${activeSourceCardQueryValue ?? "all"}`}
+              header={sourceCardTableHeader}
+              rows={renderSourceCardRows(visibleSourceCardRows)}
+            />
+          </TabbedScrollMaskCard>
+        </div>
+      </section>
+      {sourceCardSearchPanel}
       {pageCardSearchPanel}
     </>
   );

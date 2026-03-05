@@ -164,14 +164,28 @@ export async function fetchPageCardTabs(
   return payload.tabs ?? emptyPageCardTabs();
 }
 
-export async function fetchReferrers(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<ReferrersData> {
-  return fetchPrivateJson<ReferrersData>("/api/private/referrers", withFilters({
-    siteId,
-    from: window.from,
-    to: window.to,
-    limit: 100,
-    fullUrl: 0,
-  }, filters));
+export async function fetchReferrers(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+  options?: {
+    fullUrl?: boolean;
+    limit?: number;
+  },
+): Promise<ReferrersData> {
+  return fetchPrivateJson<ReferrersData>(
+    "/api/private/referrers",
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        limit: options?.limit ?? 100,
+        fullUrl: options?.fullUrl ? 1 : 0,
+      },
+      filters,
+    ),
+  );
 }
 
 export async function fetchVisitors(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<VisitorsData> {
