@@ -64,6 +64,7 @@ import type { OverviewData, ReferrersData, TrendData } from "@/lib/edge-client";
 import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { formatI18nTemplate } from "@/lib/i18n/template";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
@@ -920,19 +921,19 @@ function OverviewPagesSection({
     { label: string; columnLabel: string; mono: boolean; showIcon: boolean }
   > = {
     domain: {
-      label: locale === "zh" ? "来源" : "Source",
-      columnLabel: locale === "zh" ? "来源（域名）" : "Source Domain",
+      label: messages.overview.sourceTab,
+      columnLabel: messages.overview.sourceDomainColumn,
       mono: true,
       showIcon: true,
     },
     link: {
-      label: locale === "zh" ? "来源链接" : "Source Link",
-      columnLabel: locale === "zh" ? "来源链接" : "Source Link",
+      label: messages.overview.sourceLinkTab,
+      columnLabel: messages.overview.sourceLinkColumn,
       mono: true,
       showIcon: true,
     },
   };
-  const sourceCardDirectLabel = locale === "zh" ? "直接访问" : "Direct";
+  const sourceCardDirectLabel = messages.overview.direct;
   const sourceDomainRows = useMemo<SourceCardRow[]>(() => {
     const aggregate = new Map<
       string,
@@ -1186,24 +1187,18 @@ function OverviewPagesSection({
       </span>
     );
   };
-  const pageCardSearchLabel = locale === "zh" ? "搜索" : "Search";
-  const pageCardSearchPlaceholder =
-    locale === "zh"
-      ? `搜索${activePageTabMeta.label}`
-      : `Search ${activePageTabMeta.label}`;
-  const pageCardSearchTitle =
-    locale === "zh"
-      ? `搜索${activePageTabMeta.label}`
-      : `Search ${activePageTabMeta.label}`;
-  const sourceCardSearchLabel = locale === "zh" ? "搜索" : "Search";
-  const sourceCardSearchPlaceholder =
-    locale === "zh"
-      ? `搜索${activeSourceTabMeta.label}`
-      : `Search ${activeSourceTabMeta.label}`;
-  const sourceCardSearchTitle =
-    locale === "zh"
-      ? `搜索${activeSourceTabMeta.label}`
-      : `Search ${activeSourceTabMeta.label}`;
+  const pageCardSearchLabel = messages.common.search;
+  const pageCardSearchPlaceholder = formatI18nTemplate(
+    messages.overview.searchInTab,
+    { tab: activePageTabMeta.label },
+  );
+  const pageCardSearchTitle = pageCardSearchPlaceholder;
+  const sourceCardSearchLabel = messages.common.search;
+  const sourceCardSearchPlaceholder = formatI18nTemplate(
+    messages.overview.searchInTab,
+    { tab: activeSourceTabMeta.label },
+  );
+  const sourceCardSearchTitle = sourceCardSearchPlaceholder;
   const pageCardTableHeader = (
     <TableRow className="hover:bg-transparent">
       <TableHead className="h-8 p-0">

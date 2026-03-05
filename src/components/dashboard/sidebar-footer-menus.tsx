@@ -81,6 +81,14 @@ export function SidebarFooterMenus({
   const displayName = String(user.name || user.username);
   const roleLabel =
     user.systemRole === "admin" ? messages.common.admin : messages.common.user;
+  const languageOptions: ReadonlyArray<{
+    locale: Locale;
+    href: string;
+    label: string;
+  }> = [
+    { locale: "en", href: switchToEn, label: messages.actions.switchToEnglish },
+    { locale: "zh", href: switchToZh, label: messages.actions.switchToChinese },
+  ];
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -161,27 +169,21 @@ export function SidebarFooterMenus({
         >
           <RiGlobalLine className="size-4" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent sideOffset={8} className="!w-44 !min-w-44">
-          <DropdownMenuLabel>{messages.common.language}</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem asChild>
-            <Link href={switchToEn}>
-              <span className="inline-flex w-4 justify-center">
-                {locale === "en" ? <RiCheckLine className="size-4" /> : null}
-              </span>
-              <span>{messages.actions.switchToEnglish}</span>
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href={switchToZh}>
-              <span className="inline-flex w-4 justify-center">
-                {locale === "zh" ? <RiCheckLine className="size-4" /> : null}
-              </span>
-              <span>{messages.actions.switchToChinese}</span>
-            </Link>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          <DropdownMenuContent sideOffset={8} className="!w-44 !min-w-44">
+            <DropdownMenuLabel>{messages.common.language}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {languageOptions.map((item) => (
+              <DropdownMenuItem key={item.locale} asChild>
+                <Link href={item.href}>
+                  <span className="inline-flex w-4 justify-center">
+                    {locale === item.locale ? <RiCheckLine className="size-4" /> : null}
+                  </span>
+                  <span>{item.label}</span>
+                </Link>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
       <DropdownMenu>
         <DropdownMenuTrigger

@@ -46,6 +46,10 @@ common:
   role: Role
   admin: Admin
   user: User
+  search: Search
+  time: Time
+  cycle: Cycle
+  close: Close
 ranges:
   title: Time Range
   last30m: 30m
@@ -88,6 +92,9 @@ dashboardHeader:
   intervalDisabledWeek: Week interval is only available within the last 12 months.
   filterTitle: Filters
   filterSubtitle: Filter settings are stored only and do not affect data queries yet.
+  previousPeriod: Previous period
+  nextPeriod: Next period
+  customSelectionSummary: "Selected range: {from} to {to} ({days} days)"
 filters:
   title: Filters
   country: Country
@@ -101,7 +108,10 @@ realtime:
   subtitle: Live stream of incoming events.
   activeNow: Active now
   connected: Connected
+  connecting: Connecting
   disconnected: Disconnected
+  reconnecting: Reconnecting
+  failed: Failed
   recentEvents: Recent live events
 overview:
   title: Traffic Overview
@@ -115,6 +125,12 @@ overview:
   topReferrers: Top Referrers
   recentSessions: Recent Sessions
   recentEvents: Recent Events
+  sourceTab: Source
+  sourceDomainColumn: Source (Domain)
+  sourceLinkTab: Source Link
+  sourceLinkColumn: Source Link
+  direct: Direct
+  searchInTab: "Search {tab}"
 pages:
   title: Pages
   subtitle: Most visited paths in the selected range.

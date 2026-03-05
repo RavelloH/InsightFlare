@@ -46,6 +46,10 @@ common:
   role: 角色
   admin: 管理员
   user: 普通用户
+  search: 搜索
+  time: 时间
+  cycle: 周期
+  close: 关闭
 ranges:
   title: 时间范围
   last30m: 30分钟
@@ -88,6 +92,9 @@ dashboardHeader:
   intervalDisabledWeek: 仅在最近 12 个月内可选周间隔。
   filterTitle: 筛选条件
   filterSubtitle: 当前仅保存筛选配置，不参与数据筛选。
+  previousPeriod: 上个周期
+  nextPeriod: 下个周期
+  customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）"
 filters:
   title: 筛选
   country: 国家
@@ -101,7 +108,10 @@ realtime:
   subtitle: 实时接收最新访问事件。
   activeNow: 当前在线
   connected: 已连接
+  connecting: 连接中
   disconnected: 未连接
+  reconnecting: 重连中
+  failed: 连接失败
   recentEvents: 实时事件
 overview:
   title: 访问总览
@@ -115,6 +125,12 @@ overview:
   topReferrers: 热门来源
   recentSessions: 最近会话
   recentEvents: 最近事件
+  sourceTab: 来源
+  sourceDomainColumn: 来源（域名）
+  sourceLinkTab: 来源链接
+  sourceLinkColumn: 来源链接
+  direct: 直接访问
+  searchInTab: "搜索{tab}"
 pages:
   title: 页面分析
   subtitle: 选定时间范围内访问最多的路径。

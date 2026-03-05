@@ -52,6 +52,10 @@ export interface AppMessages {
     role: string;
     admin: string;
     user: string;
+    search: string;
+    time: string;
+    cycle: string;
+    close: string;
   };
   ranges: {
     title: string;
@@ -97,6 +101,9 @@ export interface AppMessages {
     intervalDisabledWeek: string;
     filterTitle: string;
     filterSubtitle: string;
+    previousPeriod: string;
+    nextPeriod: string;
+    customSelectionSummary: string;
   };
   filters: {
     title: string;
@@ -112,7 +119,10 @@ export interface AppMessages {
     subtitle: string;
     activeNow: string;
     connected: string;
+    connecting: string;
     disconnected: string;
+    reconnecting: string;
+    failed: string;
     recentEvents: string;
   };
   overview: {
@@ -127,6 +137,12 @@ export interface AppMessages {
     topReferrers: string;
     recentSessions: string;
     recentEvents: string;
+    sourceTab: string;
+    sourceDomainColumn: string;
+    sourceLinkTab: string;
+    sourceLinkColumn: string;
+    direct: string;
+    searchInTab: string;
   };
   pages: {
     title: string;

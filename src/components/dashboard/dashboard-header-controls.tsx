@@ -70,6 +70,7 @@ import { isRealtimeMockEnabled } from "@/lib/realtime/client";
 import type { RealtimeConnectionState } from "@/lib/realtime/types";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { formatI18nTemplate } from "@/lib/i18n/template";
 
 interface DashboardHeaderControlsProps {
   locale: Locale;
@@ -135,17 +136,14 @@ function formatDateSpan(locale: Locale, from?: number, to?: number): string {
   return `${formatter.format(new Date(from as number))} - ${formatter.format(new Date(to as number))}`;
 }
 
-function realtimeStatusText(locale: Locale, status: RealtimeConnectionState): string {
-  if (locale === "zh") {
-    if (status === "connected") return "已连接";
-    if (status === "connecting") return "连接中";
-    if (status === "disconnected") return "重连中";
-    return "连接失败";
-  }
-  if (status === "connected") return "Connected";
-  if (status === "connecting") return "Connecting";
-  if (status === "disconnected") return "Reconnecting";
-  return "Failed";
+function realtimeStatusText(
+  messages: AppMessages,
+  status: RealtimeConnectionState,
+): string {
+  if (status === "connected") return messages.realtime.connected;
+  if (status === "connecting") return messages.realtime.connecting;
+  if (status === "disconnected") return messages.realtime.reconnecting;
+  return messages.realtime.failed;
 }
 
 function RealtimeStatusDot({ status }: { status: RealtimeConnectionState }) {
@@ -266,15 +264,15 @@ function RealtimeActiveBadge({
   status,
   showValue,
   label,
-  locale,
+  messages,
 }: {
   activeNow: number;
   status: RealtimeConnectionState;
   showValue: boolean;
   label: string;
-  locale: Locale;
+  messages: AppMessages;
 }) {
-  const statusText = realtimeStatusText(locale, status);
+  const statusText = realtimeStatusText(messages, status);
   const valueText = showValue ? String(activeNow) : "--";
 
   return (
@@ -361,12 +359,11 @@ export function DashboardHeaderControls({
     "previous",
   );
   const nextPeriodRange = shiftTimeWindow(window.from, window.to, "next");
-  const previousPeriodLabel =
-    locale === "zh" ? "上个周期" : "Previous period";
-  const nextPeriodLabel = locale === "zh" ? "下个周期" : "Next period";
-  const mobileTimeLabel = locale === "zh" ? "时间" : "Time";
-  const cycleLabel = locale === "zh" ? "周期" : "Cycle";
-  const closeLabel = locale === "zh" ? "关闭" : "Close";
+  const previousPeriodLabel = messages.dashboardHeader.previousPeriod;
+  const nextPeriodLabel = messages.dashboardHeader.nextPeriod;
+  const mobileTimeLabel = messages.common.time;
+  const cycleLabel = messages.common.cycle;
+  const closeLabel = messages.common.close;
   const naturalSelectionText = useMemo(() => {
     if (!pendingCustomRange?.from && !pendingCustomRange?.to) {
       return messages.dashboardHeader.customHint;
@@ -389,12 +386,17 @@ export function DashboardHeaderControls({
         (pendingNormalized.to - pendingNormalized.from) / (24 * 60 * 60 * 1000),
       ),
     );
-    if (locale === "zh") {
-      return `当前选择：${formatter.format(new Date(pendingNormalized.from))} 至 ${formatter.format(new Date(pendingNormalized.to))}（共 ${dayCount} 天）`;
-    }
-    return `Selected range: ${formatter.format(new Date(pendingNormalized.from))} to ${formatter.format(new Date(pendingNormalized.to))} (${dayCount} days)`;
+    return formatI18nTemplate(
+      messages.dashboardHeader.customSelectionSummary,
+      {
+        from: formatter.format(new Date(pendingNormalized.from)),
+        to: formatter.format(new Date(pendingNormalized.to)),
+        days: dayCount,
+      },
+    );
   }, [
     locale,
+    messages.dashboardHeader.customSelectionSummary,
     messages.dashboardHeader.customHint,
     messages.dashboardHeader.customPendingEnd,
     pendingCustomRange?.from,
@@ -432,14 +434,14 @@ export function DashboardHeaderControls({
       <div className="flex flex-wrap items-center justify-end gap-2">
         <div className="flex items-center justify-end gap-2 md:hidden">
           {showRealtimeBadge ? (
-            <RealtimeActiveBadge
-              activeNow={activeNow}
-              status={realtimeStatus}
-              showValue={hasRealtimeConnected}
-              label={messages.realtime.activeNow}
-              locale={locale}
-            />
-          ) : null}
+                <RealtimeActiveBadge
+                  activeNow={activeNow}
+                  status={realtimeStatus}
+                  showValue={hasRealtimeConnected}
+                  label={messages.realtime.activeNow}
+                  messages={messages}
+                />
+              ) : null}
           <Drawer
             open={mobileFilterDrawerOpen}
             onOpenChange={setMobileFilterDrawerOpen}
@@ -652,14 +654,14 @@ export function DashboardHeaderControls({
 
         <div className="hidden flex-wrap items-center justify-end gap-2 md:flex">
           {showRealtimeBadge ? (
-            <RealtimeActiveBadge
-              activeNow={activeNow}
-              status={realtimeStatus}
-              showValue={hasRealtimeConnected}
-              label={messages.realtime.activeNow}
-              locale={locale}
-            />
-          ) : null}
+                <RealtimeActiveBadge
+                  activeNow={activeNow}
+                  status={realtimeStatus}
+                  showValue={hasRealtimeConnected}
+                  label={messages.realtime.activeNow}
+                  messages={messages}
+                />
+              ) : null}
           <Sheet modal={false}>
             <SheetTrigger asChild disabled={!showFilterSheet}>
               <Button variant="outline" className="gap-2">
