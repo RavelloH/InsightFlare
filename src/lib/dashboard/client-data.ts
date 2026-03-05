@@ -1,10 +1,8 @@
 import type {
   DimensionData,
-  EventsData,
   OverviewData,
   PagesData,
   ReferrersData,
-  SessionsData,
   TrendData,
   VisitorsData,
 } from "@/lib/edge-client";
@@ -22,6 +20,8 @@ export interface OverviewBundle {
   previousOverview: OverviewData;
   trend: TrendData;
 }
+
+export type PageCardTabsData = NonNullable<PagesData["tabs"]>;
 
 function emptyOverview(): OverviewData {
   return {
@@ -51,15 +51,17 @@ function emptyPages(): PagesData {
   return { ok: true, data: [] };
 }
 
+function emptyPageCardTabs(): PageCardTabsData {
+  return {
+    path: [],
+    title: [],
+    hostname: [],
+    entry: [],
+    exit: [],
+  };
+}
+
 function emptyReferrers(): ReferrersData {
-  return { ok: true, data: [] };
-}
-
-function emptySessions(): SessionsData {
-  return { ok: true, data: [] };
-}
-
-function emptyEvents(): EventsData {
   return { ok: true, data: [] };
 }
 
@@ -148,31 +150,27 @@ export async function fetchPages(siteId: string, window: TimeWindow, filters?: D
   }, filters));
 }
 
+export async function fetchPageCardTabs(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+): Promise<PageCardTabsData> {
+  const payload = await fetchPrivateJson<PagesData>("/api/private/pages", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    limit: 100,
+  }, filters));
+  return payload.tabs ?? emptyPageCardTabs();
+}
+
 export async function fetchReferrers(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<ReferrersData> {
   return fetchPrivateJson<ReferrersData>("/api/private/referrers", withFilters({
     siteId,
     from: window.from,
     to: window.to,
     limit: 100,
-    fullUrl: 1,
-  }, filters));
-}
-
-export async function fetchSessions(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<SessionsData> {
-  return fetchPrivateJson<SessionsData>("/api/private/sessions", withFilters({
-    siteId,
-    from: window.from,
-    to: window.to,
-    limit: 100,
-  }, filters));
-}
-
-export async function fetchEvents(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<EventsData> {
-  return fetchPrivateJson<EventsData>("/api/private/events", withFilters({
-    siteId,
-    from: window.from,
-    to: window.to,
-    limit: 100,
+    fullUrl: 0,
   }, filters));
 }
 
@@ -283,6 +281,5 @@ export async function loadOverviewBundle(
 export const emptyDimensionData = emptyDimension;
 export const emptyPagesData = emptyPages;
 export const emptyReferrersData = emptyReferrers;
-export const emptySessionsData = emptySessions;
-export const emptyEventsData = emptyEvents;
 export const emptyVisitorsData = emptyVisitors;
+export const emptyPageCardTabsData = emptyPageCardTabs;

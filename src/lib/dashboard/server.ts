@@ -8,19 +8,15 @@ import {
   fetchPrivateDevices,
   fetchPrivateEventTypes,
   fetchAdminSites,
-  fetchPrivateEvents,
   fetchPrivateOverview,
   fetchPrivatePages,
   fetchPrivateReferrers,
-  fetchPrivateSessions,
   fetchPrivateTrend,
   fetchPrivateVisitors,
   type DimensionData,
-  type EventsData,
   type OverviewData,
   type PagesData,
   type ReferrersData,
-  type SessionsData,
   type SiteData,
   type TeamData,
   type TrendData,
@@ -328,14 +324,6 @@ function emptyReferrers(): ReferrersData {
   return { ok: true, data: [] };
 }
 
-function emptySessions(): SessionsData {
-  return { ok: true, data: [] };
-}
-
-function emptyEvents(): EventsData {
-  return { ok: true, data: [] };
-}
-
 function emptyVisitors(): VisitorsData {
   return { ok: true, data: [] };
 }
@@ -354,8 +342,6 @@ export async function loadOverviewBundle(
   trend: TrendData;
   pages: PagesData;
   referrers: ReferrersData;
-  sessions: SessionsData;
-  events: EventsData;
   countries: DimensionData;
   devices: DimensionData;
   browsers: DimensionData;
@@ -364,7 +350,7 @@ export async function loadOverviewBundle(
   const previousTo = Math.max(window.from - 1, 0);
   const previousFrom = Math.max(previousTo - (window.to - window.from), 0);
 
-  const [overview, pages, referrers, sessions, events, countries, devices, browsers, eventTypes] =
+  const [overview, pages, referrers, countries, devices, browsers, eventTypes] =
     await Promise.all([
       fetchPrivateOverview({
         siteId,
@@ -377,8 +363,6 @@ export async function loadOverviewBundle(
       }).catch(() => emptyOverview()),
       fetchPrivatePages({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyPages()),
       fetchPrivateReferrers({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyReferrers()),
-      fetchPrivateSessions({ siteId, from: window.from, to: window.to, filters }).catch(() => emptySessions()),
-      fetchPrivateEvents({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyEvents()),
       fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
       fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
       fetchPrivateBrowsers({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
@@ -417,8 +401,6 @@ export async function loadOverviewBundle(
     trend,
     pages,
     referrers,
-    sessions,
-    events,
     countries,
     devices,
     browsers,
@@ -432,14 +414,6 @@ export async function loadPages(siteId: string, window: TimeWindow, filters?: Da
 
 export async function loadReferrers(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<ReferrersData> {
   return fetchPrivateReferrers({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyReferrers());
-}
-
-export async function loadSessions(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<SessionsData> {
-  return fetchPrivateSessions({ siteId, from: window.from, to: window.to, filters }).catch(() => emptySessions());
-}
-
-export async function loadEvents(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<EventsData> {
-  return fetchPrivateEvents({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyEvents());
 }
 
 export async function loadVisitors(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<VisitorsData> {

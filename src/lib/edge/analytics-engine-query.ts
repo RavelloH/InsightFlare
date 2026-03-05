@@ -31,6 +31,22 @@ export interface AeTrendRow {
   total_duration: number;
 }
 
+export interface AeOverviewBySiteRow {
+  site_id: string;
+  views: number;
+  sessions: number;
+  visitors: number;
+  bounces: number;
+  total_duration: number;
+}
+
+export interface AeSiteTrendRow {
+  site_id: string;
+  bucket: number;
+  views: number;
+  visitors: number;
+}
+
 export interface AeTopPageRow {
   pathname: string;
   query_string?: string;
@@ -278,6 +294,46 @@ function buildAeWhere(siteId: string, range: AeRange, filters?: AeQueryFilters):
   return clauses.join(" AND ");
 }
 
+function buildAeWhereForSites(siteIds: string[], range: AeRange, filters?: AeQueryFilters): string {
+  const fromMs = toInt(range.fromMs);
+  const toMs = toInt(range.toMs);
+  const normalizedSiteIds = Array.from(
+    new Set(
+      siteIds
+        .map((siteId) => String(siteId || "").trim())
+        .filter((siteId) => siteId.length > 0),
+    ),
+  );
+  if (normalizedSiteIds.length === 0) {
+    return "1 = 0";
+  }
+
+  const siteListSql = normalizedSiteIds.map((siteId) => sqlString(siteId)).join(", ");
+  const clauses = [`index1 IN (${siteListSql})`, `${eventAtExpr()} BETWEEN ${fromMs} AND ${toMs}`];
+
+  const country = normalizeFilterValue(filters?.country);
+  if (country) {
+    clauses.push(`${countryExpr()} = ${sqlString(country)}`);
+  }
+
+  const device = normalizeFilterValue(filters?.device);
+  if (device) {
+    clauses.push(`${deviceExpr()} = ${sqlString(device)}`);
+  }
+
+  const browser = normalizeFilterValue(filters?.browser);
+  if (browser) {
+    clauses.push(`${browserExpr()} = ${sqlString(browser)}`);
+  }
+
+  const eventType = normalizeFilterValue(filters?.eventType);
+  if (eventType) {
+    clauses.push(`${eventTypeExpr()} = ${sqlString(eventType)}`);
+  }
+
+  return clauses.join(" AND ");
+}
+
 function ninetyDaysFloorMs(nowMs: number): number {
   return toInt(nowMs - NINETY_DAYS_MS);
 }
@@ -413,6 +469,78 @@ ORDER BY bucket
     sessions: parseNumber(row.sessions),
     bounces: parseNumber(row.bounces),
     total_duration: parseNumber(row.total_duration),
+  }));
+}
+
+export async function queryAeOverviewBySites(
+  env: Env,
+  siteIds: string[],
+  range: AeRange,
+  filters?: AeQueryFilters,
+): Promise<AeOverviewBySiteRow[]> {
+  if (siteIds.length === 0) return [];
+  const dataset = getAeDatasetName();
+  const where = buildAeWhereForSites(siteIds, range, filters);
+  const sql = `
+SELECT
+  index1 AS site_id,
+  sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions,
+  ${nonEmptyDistinctCountExpr(visitorExpr())} AS visitors,
+  sum(if(${durationExpr()} <= 0, _sample_interval, 0)) AS bounces,
+  sum(_sample_interval * ${durationExpr()}) AS total_duration
+FROM ${dataset}
+WHERE ${where}
+GROUP BY site_id
+`;
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => ({
+    site_id: parseString(row.site_id),
+    views: parseNumber(row.views),
+    sessions: parseNumber(row.sessions),
+    visitors: parseNumber(row.visitors),
+    bounces: parseNumber(row.bounces),
+    total_duration: parseNumber(row.total_duration),
+  }));
+}
+
+export async function queryAeTrendBySites(
+  env: Env,
+  siteIds: string[],
+  range: AeRange,
+  interval: "minute" | "hour" | "day" | "week" | "month",
+  filters?: AeQueryFilters,
+): Promise<AeSiteTrendRow[]> {
+  if (siteIds.length === 0) return [];
+  const dataset = getAeDatasetName();
+  const where = buildAeWhereForSites(siteIds, range, filters);
+  const bucketDivisor =
+    interval === "minute"
+      ? 60000
+      : interval === "hour"
+        ? 3600000
+        : interval === "day"
+          ? 86400000
+          : interval === "week"
+            ? 604800000
+            : 2592000000;
+  const sql = `
+SELECT
+  index1 AS site_id,
+  floor(${eventAtExpr()} / ${bucketDivisor}) AS bucket,
+  sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(visitorExpr())} AS visitors
+FROM ${dataset}
+WHERE ${where}
+GROUP BY site_id, bucket
+ORDER BY bucket, site_id
+`;
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => ({
+    site_id: parseString(row.site_id),
+    bucket: parseNumber(row.bucket),
+    views: parseNumber(row.views),
+    visitors: parseNumber(row.visitors),
   }));
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   TableCell,
@@ -11,12 +11,15 @@ import { PageHeading } from "@/components/dashboard/page-heading";
 import { TopItemsChart } from "@/components/dashboard/top-items-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
-import { fetchSessions, loadFilterOptions, type FilterOptions, emptySessionsData } from "@/lib/dashboard/client-data";
-import { durationFormat, numberFormat, shortDateTime } from "@/lib/dashboard/format";
+import {
+  emptyPageCardTabsData,
+  fetchPageCardTabs,
+  type PageCardTabsData,
+} from "@/lib/dashboard/client-data";
+import { numberFormat } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
-import type { SessionsData } from "@/lib/edge-client";
 
 interface SessionsClientPageProps {
   locale: Locale;
@@ -25,31 +28,27 @@ interface SessionsClientPageProps {
   pathname: string;
 }
 
-const EMPTY_FILTER_OPTIONS: FilterOptions = {
-  countries: [],
-  devices: [],
-  browsers: [],
-  eventTypes: [],
-};
+interface SessionPathRow {
+  label: string;
+  views: number;
+  sessions: number;
+}
 
-export function SessionsClientPage({ locale, messages, siteId, pathname }: SessionsClientPageProps) {
-  const { range, filters, window } = useDashboardQuery();
-  const [sessions, setSessions] = useState<SessionsData>(emptySessionsData());
-  const [filterOptions, setFilterOptions] = useState<FilterOptions>(EMPTY_FILTER_OPTIONS);
+export function SessionsClientPage({ locale, messages, siteId }: SessionsClientPageProps) {
+  const { filters, window } = useDashboardQuery();
+  const [tabsData, setTabsData] = useState<PageCardTabsData>(emptyPageCardTabsData());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setTabsData(emptyPageCardTabsData());
 
-    Promise.all([
-      fetchSessions(siteId, window, filters).catch(() => emptySessionsData()),
-      loadFilterOptions(siteId, window).catch(() => EMPTY_FILTER_OPTIONS),
-    ])
-      .then(([nextSessions, nextFilterOptions]) => {
+    fetchPageCardTabs(siteId, window, filters)
+      .catch(() => emptyPageCardTabsData())
+      .then((nextTabs) => {
         if (!active) return;
-        setSessions(nextSessions);
-        setFilterOptions(nextFilterOptions);
+        setTabsData(nextTabs);
       })
       .finally(() => {
         if (!active) return;
@@ -72,6 +71,16 @@ export function SessionsClientPage({ locale, messages, siteId, pathname }: Sessi
 
   const noDataText = messages.common.noData;
 
+  const entryRows = useMemo<SessionPathRow[]>(
+    () =>
+      tabsData.entry.map((item) => ({
+        label: String(item.label || "").trim() || "/",
+        views: Math.max(0, Number(item.views || 0)),
+        sessions: Math.max(0, Number(item.sessions || 0)),
+      })),
+    [tabsData.entry],
+  );
+
   return (
     <div className="space-y-6">
       <PageHeading
@@ -81,20 +90,20 @@ export function SessionsClientPage({ locale, messages, siteId, pathname }: Sessi
 
       <Card>
         <CardHeader>
-          <CardTitle>{messages.sessions.title}</CardTitle>
+          <CardTitle>{messages.common.entryPage}</CardTitle>
         </CardHeader>
         <CardContent>
           <ContentSwitch
             loading={loading}
-            hasContent={sessions.data.length > 0}
+            hasContent={entryRows.length > 0}
             loadingLabel={messages.common.loading}
             emptyContent={<p>{noDataText}</p>}
           >
             <TopItemsChart
-              valueLabel={messages.common.duration}
-              items={sessions.data.map((item) => ({
-                label: item.sessionId.slice(0, 8),
-                value: item.totalDurationMs,
+              valueLabel={messages.common.views}
+              items={entryRows.map((item) => ({
+                label: item.label,
+                value: item.views,
               }))}
             />
           </ContentSwitch>
@@ -108,28 +117,22 @@ export function SessionsClientPage({ locale, messages, siteId, pathname }: Sessi
         <CardContent>
           <DataTableSwitch
             loading={loading}
-            hasContent={sessions.data.length > 0}
+            hasContent={entryRows.length > 0}
             loadingLabel={messages.common.loading}
             emptyLabel={noDataText}
-            colSpan={5}
+            colSpan={3}
             header={(
               <TableRow>
-                <TableHead>{messages.common.startedAt}</TableHead>
-                <TableHead>{messages.common.endedAt}</TableHead>
+                <TableHead>{messages.common.entryPage}</TableHead>
                 <TableHead className="text-right">{messages.common.views}</TableHead>
-                <TableHead className="text-right">{messages.common.duration}</TableHead>
-                <TableHead className="text-right">{messages.common.page}</TableHead>
+                <TableHead className="text-right">{messages.common.sessions}</TableHead>
               </TableRow>
             )}
-            rows={sessions.data.map((item) => (
-              <TableRow key={item.sessionId}>
-                <TableCell>{shortDateTime(locale, item.startedAt)}</TableCell>
-                <TableCell>{shortDateTime(locale, item.endedAt)}</TableCell>
-                <TableCell className="text-right">{numberFormat(locale, item.views)}</TableCell>
-                <TableCell className="text-right">{durationFormat(locale, item.totalDurationMs)}</TableCell>
-                <TableCell className="max-w-[220px] truncate font-mono text-right">
-                  {item.entryPath || "/"}
-                </TableCell>
+            rows={entryRows.map((row) => (
+              <TableRow key={row.label}>
+                <TableCell className="max-w-[220px] truncate font-mono">{row.label}</TableCell>
+                <TableCell className="text-right">{numberFormat(locale, row.views)}</TableCell>
+                <TableCell className="text-right">{numberFormat(locale, row.sessions)}</TableCell>
               </TableRow>
             ))}
           />

@@ -4,6 +4,7 @@ import { requireSession } from "./session-auth";
 import {
   type AeDimensionRow,
   queryAeOverview,
+  queryAeOverviewBySites,
   queryAeRecentEvents,
   queryAeReferrers,
   queryAeSessionDetails,
@@ -13,6 +14,7 @@ import {
   queryAeTopEventTypes,
   queryAeTopPages,
   queryAeTrend,
+  queryAeTrendBySites,
   queryAeVisitorDetails,
   splitAeRange,
 } from "./analytics-engine-query";
@@ -230,6 +232,11 @@ function buildD1FilterSql(
   };
 }
 
+function crossSourceFetchLimit(limit: number, crossSource: boolean): number {
+  if (!crossSource) return limit;
+  return 2000;
+}
+
 async function resolvePublicSiteBySlug(env: Env, slug: string): Promise<PublicSiteRow | null> {
   const row = await env.DB.prepare(
     `
@@ -355,13 +362,39 @@ async function queryOverview(
   if (includeArchive) {
     const archived = await env.DB.prepare(
       `
+        WITH archive_rows AS (
+          SELECT
+            total_views,
+            total_sessions,
+            bounces,
+            total_duration,
+            visitors_json
+          FROM pageviews_archive_hourly
+          WHERE site_id = ? AND hour_bucket BETWEEN ? AND ?
+        ),
+        aggregate AS (
+          SELECT
+            COALESCE(SUM(total_views), 0) AS views,
+            COALESCE(SUM(total_sessions), 0) AS sessions,
+            COALESCE(SUM(bounces), 0) AS bounces,
+            COALESCE(SUM(total_duration), 0) AS total_duration
+          FROM archive_rows
+        ),
+        visitor_aggregate AS (
+          SELECT
+            COUNT(DISTINCT je.value) AS visitors
+          FROM archive_rows
+          JOIN json_each(archive_rows.visitors_json) je
+          WHERE typeof(je.value) = 'text' AND je.value != ''
+        )
         SELECT
-          SUM(total_views) AS views,
-          SUM(total_sessions) AS sessions,
-          SUM(bounces) AS bounces,
-          SUM(total_duration) AS total_duration
-        FROM pageviews_archive_hourly
-        WHERE site_id = ? AND hour_bucket BETWEEN ? AND ?
+          aggregate.views AS views,
+          aggregate.sessions AS sessions,
+          aggregate.bounces AS bounces,
+          aggregate.total_duration AS total_duration,
+          COALESCE(visitor_aggregate.visitors, 0) AS visitors
+        FROM aggregate
+        LEFT JOIN visitor_aggregate ON 1 = 1
       `,
     )
       .bind(siteId, window.archiveFromHour, window.archiveToHour)
@@ -370,41 +403,14 @@ async function queryOverview(
         sessions: number | null;
         bounces: number | null;
         total_duration: number | null;
+        visitors: number | null;
       }>();
 
     views += archived?.views ?? 0;
     sessions += archived?.sessions ?? 0;
     bounces += archived?.bounces ?? 0;
     totalDurationMs += archived?.total_duration ?? 0;
-
-    // Visitors in archive rows are JSON arrays and can only be approximated cheaply.
-    const visitorRows = await env.DB.prepare(
-      `
-        SELECT visitors_json
-        FROM pageviews_archive_hourly
-        WHERE site_id = ? AND hour_bucket BETWEEN ? AND ?
-      `,
-    )
-      .bind(siteId, window.archiveFromHour, window.archiveToHour)
-      .all<{ visitors_json: string | null }>();
-
-    const visitorSet = new Set<string>();
-    for (const row of visitorRows.results) {
-      if (!row.visitors_json) continue;
-      try {
-        const ids = JSON.parse(row.visitors_json) as unknown;
-        if (Array.isArray(ids)) {
-          for (const id of ids) {
-            if (typeof id === "string" && id.length > 0) {
-              visitorSet.add(id);
-            }
-          }
-        }
-      } catch {
-        // ignore malformed archive visitors_json
-      }
-    }
-    visitors += visitorSet.size;
+    visitors += archived?.visitors ?? 0;
     approximateVisitors = true;
   }
 
@@ -553,16 +559,46 @@ async function queryTrend(
 
   if (includeArchive) {
     const archiveSql = `
+      WITH archive_rows AS (
+        SELECT
+          CAST(hour_bucket / ? AS INTEGER) AS bucket,
+          total_views,
+          total_sessions,
+          bounces,
+          total_duration,
+          visitors_json
+        FROM pageviews_archive_hourly
+        WHERE site_id = ? AND hour_bucket BETWEEN ? AND ?
+      ),
+      aggregate AS (
+        SELECT
+          bucket,
+          SUM(total_views) AS views,
+          SUM(total_sessions) AS sessions,
+          SUM(bounces) AS bounces,
+          SUM(total_duration) AS total_duration
+        FROM archive_rows
+        GROUP BY bucket
+      ),
+      visitor_aggregate AS (
+        SELECT
+          archive_rows.bucket AS bucket,
+          COUNT(DISTINCT je.value) AS visitors
+        FROM archive_rows
+        JOIN json_each(archive_rows.visitors_json) je
+        WHERE typeof(je.value) = 'text' AND je.value != ''
+        GROUP BY archive_rows.bucket
+      )
       SELECT
-        CAST(hour_bucket / ? AS INTEGER) AS bucket,
-        SUM(total_views) AS views,
-        SUM(total_sessions) AS sessions,
-        SUM(bounces) AS bounces,
-        SUM(total_duration) AS total_duration
-      FROM pageviews_archive_hourly
-      WHERE site_id = ? AND hour_bucket BETWEEN ? AND ?
-      GROUP BY bucket
-      ORDER BY bucket
+        aggregate.bucket AS bucket,
+        aggregate.views AS views,
+        aggregate.sessions AS sessions,
+        aggregate.bounces AS bounces,
+        aggregate.total_duration AS total_duration,
+        COALESCE(visitor_aggregate.visitors, 0) AS visitors
+      FROM aggregate
+      LEFT JOIN visitor_aggregate ON visitor_aggregate.bucket = aggregate.bucket
+      ORDER BY aggregate.bucket
     `;
 
     const archiveRows = await env.DB.prepare(archiveSql)
@@ -573,6 +609,7 @@ async function queryTrend(
         sessions: number;
         bounces: number;
         total_duration: number;
+        visitors: number;
       }>();
 
     for (const row of archiveRows.results) {
@@ -586,61 +623,12 @@ async function queryTrend(
         archive: false,
       };
       entry.views += row.views ?? 0;
+      entry.visitors += row.visitors ?? 0;
       entry.sessions += row.sessions ?? 0;
       entry.bounces += row.bounces ?? 0;
       entry.totalDurationMs += row.total_duration ?? 0;
       entry.archive = true;
       buckets.set(row.bucket, entry);
-    }
-
-    const archiveVisitorRows = await env.DB.prepare(
-      `
-        SELECT hour_bucket, visitors_json
-        FROM pageviews_archive_hourly
-        WHERE site_id = ? AND hour_bucket BETWEEN ? AND ?
-      `,
-    )
-      .bind(siteId, window.archiveFromHour, window.archiveToHour)
-      .all<{ hour_bucket: number; visitors_json: string | null }>();
-
-    const visitorsByBucket = new Map<number, Set<string>>();
-    for (const row of archiveVisitorRows.results) {
-      const hourBucket = Number(row.hour_bucket ?? 0);
-      if (!Number.isFinite(hourBucket)) continue;
-      const bucket = Math.floor(hourBucket / bucketDivisor);
-      if (!Number.isFinite(bucket)) continue;
-
-      const visitorSet = visitorsByBucket.get(bucket) ?? new Set<string>();
-      if (row.visitors_json) {
-        try {
-          const ids = JSON.parse(row.visitors_json) as unknown;
-          if (Array.isArray(ids)) {
-            for (const id of ids) {
-              if (typeof id === "string" && id.length > 0) {
-                visitorSet.add(id);
-              }
-            }
-          }
-        } catch {
-          // ignore malformed archive visitors_json
-        }
-      }
-      visitorsByBucket.set(bucket, visitorSet);
-    }
-
-    for (const [bucket, visitorSet] of visitorsByBucket.entries()) {
-      const entry = buckets.get(bucket) ?? {
-        views: 0,
-        visitors: 0,
-        sessions: 0,
-        bounces: 0,
-        totalDurationMs: 0,
-        detail: false,
-        archive: false,
-      };
-      entry.visitors += visitorSet.size;
-      entry.archive = true;
-      buckets.set(bucket, entry);
     }
   }
 
@@ -684,6 +672,32 @@ type AeDimensionQueryFn = (
   filters?: DashboardFilters,
 ) => Promise<AeDimensionRow[]>;
 
+type PageCardTabKey = "path" | "title" | "hostname" | "entry" | "exit";
+
+interface PageCardTabRow {
+  label: string;
+  views: number;
+  sessions: number;
+}
+
+interface PageCardTabsData {
+  path: PageCardTabRow[];
+  title: PageCardTabRow[];
+  hostname: PageCardTabRow[];
+  entry: PageCardTabRow[];
+  exit: PageCardTabRow[];
+}
+
+function emptyPageCardTabsData(): PageCardTabsData {
+  return {
+    path: [],
+    title: [],
+    hostname: [],
+    entry: [],
+    exit: [],
+  };
+}
+
 async function queryDimensionStats(
   env: Env,
   siteId: string,
@@ -699,6 +713,7 @@ async function queryDimensionStats(
   const map = new Map<string, { value: string; views: number; sessions: number }>();
   const d1FilterSql = buildD1FilterSql(filters);
   const includeArchive = window.hasArchive && !hasActiveFilters(filters);
+  const sourceLimit = crossSourceFetchLimit(limit, window.hasAnalytics || includeArchive);
 
   if (window.hasAnalytics) {
     const aeRows = await options.aeQuery(
@@ -708,7 +723,7 @@ async function queryDimensionStats(
         fromMs: window.analyticsFromMs,
         toMs: window.analyticsToMs,
       },
-      limit,
+      sourceLimit,
       filters,
     );
     for (const row of aeRows) {
@@ -736,7 +751,7 @@ async function queryDimensionStats(
     `;
 
     const rows = await env.DB.prepare(sql)
-      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
+      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, sourceLimit)
       .all<{ k: string; views: number; sessions: number }>();
 
     for (const row of rows.results) {
@@ -792,6 +807,7 @@ async function queryTopPages(
   const pageMap = new Map<string, { pathname: string; query?: string; hash?: string; views: number; sessions: number }>();
   const d1FilterSql = buildD1FilterSql(filters);
   const includeArchive = window.hasArchive && !hasActiveFilters(filters);
+  const sourceLimit = crossSourceFetchLimit(limit, window.hasAnalytics || includeArchive);
 
   if (window.hasAnalytics) {
     const aeRows = await queryAeTopPages(
@@ -801,7 +817,7 @@ async function queryTopPages(
         fromMs: window.analyticsFromMs,
         toMs: window.analyticsToMs,
       },
-      limit,
+      sourceLimit,
       includeQueryHashDetails,
       filters,
     );
@@ -849,7 +865,7 @@ async function queryTopPages(
 
     if (includeQueryHashDetails) {
       const rows = await env.DB.prepare(sql)
-        .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
+        .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, sourceLimit)
         .all<{ pathname: string; query_string: string; hash_fragment: string; views: number; sessions: number }>();
 
       for (const row of rows.results) {
@@ -865,7 +881,7 @@ async function queryTopPages(
       }
     } else {
       const rows = await env.DB.prepare(sql)
-        .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
+        .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, sourceLimit)
         .all<{ pathname: string; views: number; sessions: number }>();
 
       for (const row of rows.results) {
@@ -914,6 +930,322 @@ async function queryTopPages(
     .slice(0, limit);
 }
 
+function sortPageCardRows(rows: PageCardTabRow[], limit: number): PageCardTabRow[] {
+  return [...rows]
+    .sort((a, b) => {
+      if (b.views !== a.views) return b.views - a.views;
+      if (b.sessions !== a.sessions) return b.sessions - a.sessions;
+      return a.label.localeCompare(b.label);
+    })
+    .slice(0, limit);
+}
+
+function mergePageCardRows(primary: PageCardTabRow[], extra: PageCardTabRow[], limit: number): PageCardTabRow[] {
+  const map = new Map<string, { views: number; sessions: number }>();
+
+  for (const row of primary) {
+    const key = String(row.label ?? "");
+    const prev = map.get(key);
+    map.set(key, {
+      views: (prev?.views ?? 0) + Math.max(0, Number(row.views ?? 0)),
+      sessions: (prev?.sessions ?? 0) + Math.max(0, Number(row.sessions ?? 0)),
+    });
+  }
+
+  for (const row of extra) {
+    const key = String(row.label ?? "");
+    const prev = map.get(key);
+    map.set(key, {
+      views: (prev?.views ?? 0) + Math.max(0, Number(row.views ?? 0)),
+      sessions: (prev?.sessions ?? 0) + Math.max(0, Number(row.sessions ?? 0)),
+    });
+  }
+
+  return sortPageCardRows(
+    Array.from(map.entries()).map(([label, value]) => ({
+      label,
+      views: value.views,
+      sessions: value.sessions,
+    })),
+    limit,
+  );
+}
+
+function mergePageCardTabs(primary: PageCardTabsData, extra: PageCardTabsData, limit: number): PageCardTabsData {
+  return {
+    path: mergePageCardRows(primary.path, extra.path, limit),
+    title: mergePageCardRows(primary.title, extra.title, limit),
+    hostname: mergePageCardRows(primary.hostname, extra.hostname, limit),
+    entry: mergePageCardRows(primary.entry, extra.entry, limit),
+    exit: mergePageCardRows(primary.exit, extra.exit, limit),
+  };
+}
+
+async function queryPageCardTabsFromSingleD1Sql(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  limit: number,
+  filters: DashboardFilters,
+): Promise<PageCardTabsData> {
+  if (!window.hasD1Detail) {
+    return emptyPageCardTabsData();
+  }
+
+  const d1FilterSql = buildD1FilterSql(filters, "p");
+  const sql = `
+    WITH filtered AS (
+      SELECT
+        CAST(id AS TEXT) AS id,
+        COALESCE(pathname, '/') AS pathname,
+        COALESCE(title, '') AS title,
+        COALESCE(hostname, '') AS hostname,
+        COALESCE(session_id, '') AS session_id,
+        event_at
+      FROM pageviews p
+      WHERE p.site_id = ? AND p.event_at BETWEEN ? AND ?${d1FilterSql.clause}
+    ),
+    dimension_expanded AS (
+      SELECT
+        CASE dims.dimension_key
+          WHEN 1 THEN 'path'
+          WHEN 2 THEN 'title'
+          ELSE 'hostname'
+        END AS tab,
+        CASE dims.dimension_key
+          WHEN 1 THEN pathname
+          WHEN 2 THEN title
+          ELSE hostname
+        END AS label,
+        session_id,
+        id
+      FROM filtered
+      JOIN (
+        SELECT 1 AS dimension_key
+        UNION ALL
+        SELECT 2 AS dimension_key
+        UNION ALL
+        SELECT 3 AS dimension_key
+      ) dims
+    ),
+    dimension_rows AS (
+      SELECT
+        tab,
+        label,
+        COUNT(*) AS views,
+        COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE id END) AS sessions
+      FROM dimension_expanded
+      GROUP BY tab, label
+    ),
+    session_ranked AS (
+      SELECT
+        CASE WHEN session_id != '' THEN session_id ELSE id END AS session_key,
+        pathname,
+        ROW_NUMBER() OVER (
+          PARTITION BY CASE WHEN session_id != '' THEN session_id ELSE id END
+          ORDER BY event_at ASC, id ASC
+        ) AS rn_entry,
+        ROW_NUMBER() OVER (
+          PARTITION BY CASE WHEN session_id != '' THEN session_id ELSE id END
+          ORDER BY event_at DESC, id DESC
+        ) AS rn_exit,
+        COUNT(*) OVER (
+          PARTITION BY CASE WHEN session_id != '' THEN session_id ELSE id END
+        ) AS session_views
+      FROM filtered
+    ),
+    session_heads AS (
+      SELECT
+        session_key,
+        MAX(CASE WHEN rn_entry = 1 THEN pathname END) AS entry_path,
+        MAX(CASE WHEN rn_exit = 1 THEN pathname END) AS exit_path,
+        MAX(session_views) AS session_views
+      FROM session_ranked
+      GROUP BY session_key
+    ),
+    entry_exit_rows AS (
+      SELECT
+        tab,
+        label,
+        SUM(session_views) AS views,
+        COUNT(*) AS sessions
+      FROM (
+        SELECT 'entry' AS tab, COALESCE(entry_path, '/') AS label, session_views
+        FROM session_heads
+        UNION ALL
+        SELECT 'exit' AS tab, COALESCE(exit_path, '/') AS label, session_views
+        FROM session_heads
+      )
+      GROUP BY tab, label
+    ),
+    combined AS (
+      SELECT tab, label, views, sessions FROM dimension_rows
+      UNION ALL
+      SELECT tab, label, views, sessions FROM entry_exit_rows
+    ),
+    ranked AS (
+      SELECT
+        tab,
+        label,
+        views,
+        sessions,
+        ROW_NUMBER() OVER (
+          PARTITION BY tab
+          ORDER BY views DESC, sessions DESC, label ASC
+        ) AS row_num
+      FROM combined
+    )
+    SELECT tab, label, views, sessions
+    FROM ranked
+    WHERE row_num <= ?
+    ORDER BY
+      CASE tab
+        WHEN 'path' THEN 1
+        WHEN 'title' THEN 2
+        WHEN 'hostname' THEN 3
+        WHEN 'entry' THEN 4
+        WHEN 'exit' THEN 5
+        ELSE 6
+      END ASC,
+      views DESC,
+      sessions DESC,
+      label ASC
+  `;
+
+  const rows = await env.DB.prepare(sql)
+    .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
+    .all<{
+      tab: string;
+      label: string;
+      views: number;
+      sessions: number;
+    }>();
+
+  const tabs = emptyPageCardTabsData();
+  for (const row of rows.results) {
+    const tab = row.tab as PageCardTabKey;
+    if (!(tab in tabs)) continue;
+    const normalizedLabel = tab === "title" || tab === "hostname"
+      ? String(row.label ?? "")
+      : (String(row.label ?? "").trim() || "/");
+
+    tabs[tab].push({
+      label: normalizedLabel,
+      views: Math.max(0, Number(row.views ?? 0)),
+      sessions: Math.max(0, Number(row.sessions ?? 0)),
+    });
+  }
+
+  return {
+    path: sortPageCardRows(tabs.path, limit),
+    title: sortPageCardRows(tabs.title, limit),
+    hostname: sortPageCardRows(tabs.hostname, limit),
+    entry: sortPageCardRows(tabs.entry, limit),
+    exit: sortPageCardRows(tabs.exit, limit),
+  };
+}
+
+async function queryPageCardTabsFallback(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  limit: number,
+  filters: DashboardFilters,
+): Promise<PageCardTabsData> {
+  const [paths, events, sessions] = await Promise.all([
+    queryTopPages(env, siteId, window, limit, false, filters),
+    queryRecentEvents(env, siteId, window, Math.max(limit, 100), filters),
+    querySessionDetails(env, siteId, window, Math.max(limit, 100), filters),
+  ]);
+
+  const pathRows: PageCardTabRow[] = paths.map((row) => ({
+    label: String(row.pathname || "/").trim() || "/",
+    views: Math.max(0, Number(row.views ?? 0)),
+    sessions: Math.max(0, Number(row.sessions ?? 0)),
+  }));
+
+  const aggregateEventDimension = (dimension: "title" | "hostname"): PageCardTabRow[] => {
+    const map = new Map<string, { views: number; sessionIds: Set<string>; unknownSessions: number }>();
+
+    for (const raw of events) {
+      if (!raw || typeof raw !== "object") continue;
+      const row = raw as Record<string, unknown>;
+      const rawLabel = String(row[dimension] ?? "").trim();
+      const key = rawLabel;
+      const prev = map.get(key) ?? {
+        views: 0,
+        sessionIds: new Set<string>(),
+        unknownSessions: 0,
+      };
+      prev.views += 1;
+      const sessionId = String(row.session_id ?? "").trim();
+      if (sessionId) {
+        prev.sessionIds.add(sessionId);
+      } else {
+        prev.unknownSessions += 1;
+      }
+      map.set(key, prev);
+    }
+
+    return Array.from(map.entries()).map(([label, value]) => ({
+      label,
+      views: value.views,
+      sessions: value.sessionIds.size + value.unknownSessions,
+    }));
+  };
+
+  const aggregateSessionPath = (dimension: "entryPath" | "exitPath"): PageCardTabRow[] => {
+    const map = new Map<string, { views: number; sessions: number }>();
+    for (const row of sessions) {
+      const label = String(row[dimension] ?? "").trim() || "/";
+      const prev = map.get(label) ?? { views: 0, sessions: 0 };
+      map.set(label, {
+        views: prev.views + Math.max(0, Number(row.views ?? 0)),
+        sessions: prev.sessions + 1,
+      });
+    }
+    return Array.from(map.entries()).map(([label, value]) => ({
+      label,
+      views: value.views,
+      sessions: value.sessions,
+    }));
+  };
+
+  return {
+    path: sortPageCardRows(pathRows, limit),
+    title: sortPageCardRows(aggregateEventDimension("title"), limit),
+    hostname: sortPageCardRows(aggregateEventDimension("hostname"), limit),
+    entry: sortPageCardRows(aggregateSessionPath("entryPath"), limit),
+    exit: sortPageCardRows(aggregateSessionPath("exitPath"), limit),
+  };
+}
+
+async function queryPageCardTabs(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  limit: number,
+  filters: DashboardFilters,
+): Promise<PageCardTabsData> {
+  if (!window.hasD1Detail) {
+    return queryPageCardTabsFallback(env, siteId, window, limit, filters);
+  }
+
+  const d1Tabs = await queryPageCardTabsFromSingleD1Sql(env, siteId, window, limit, filters);
+  if (!window.hasAnalytics && !window.hasArchive) {
+    return d1Tabs;
+  }
+
+  const nonD1Window: QueryWindow = {
+    ...window,
+    hasD1Detail: false,
+    d1DetailFromMs: 0,
+    d1DetailToMs: -1,
+  };
+  const nonD1Tabs = await queryPageCardTabsFallback(env, siteId, nonD1Window, limit, filters);
+  return mergePageCardTabs(d1Tabs, nonD1Tabs, limit);
+}
+
 async function queryReferrers(
   env: Env,
   siteId: string,
@@ -925,7 +1257,8 @@ async function queryReferrers(
   const keyField = includeFullUrl ? "referer" : "referer_host";
   const map = new Map<string, { referrer: string; views: number; sessions: number }>();
   const d1FilterSql = buildD1FilterSql(filters);
-  const includeArchive = window.hasArchive && !hasActiveFilters(filters);
+  const includeArchive = window.hasArchive && !hasActiveFilters(filters) && !includeFullUrl;
+  const sourceLimit = crossSourceFetchLimit(limit, window.hasAnalytics || includeArchive);
 
   if (window.hasAnalytics) {
     const aeRows = await queryAeReferrers(
@@ -935,7 +1268,7 @@ async function queryReferrers(
         fromMs: window.analyticsFromMs,
         toMs: window.analyticsToMs,
       },
-      limit,
+      sourceLimit,
       includeFullUrl,
       filters,
     );
@@ -963,7 +1296,7 @@ async function queryReferrers(
       LIMIT ?
     `;
     const rows = await env.DB.prepare(sql)
-      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, limit)
+      .bind(siteId, window.d1DetailFromMs, window.d1DetailToMs, ...d1FilterSql.bindings, sourceLimit)
       .all<{ ref: string; views: number; sessions: number }>();
 
     for (const row of rows.results) {
@@ -1265,8 +1598,6 @@ async function queryVisitorDetails(
     lastSeenAt: number;
     views: number;
     sessions: number;
-    countries: number;
-    latestPath: string;
   }>
 > {
   if (!window.hasD1Detail && !window.hasAnalytics) {
@@ -1282,8 +1613,6 @@ async function queryVisitorDetails(
       lastSeenAt: number;
       views: number;
       sessions: number;
-      countries: number;
-      latestPath: string;
     }
   >();
 
@@ -1307,8 +1636,6 @@ async function queryVisitorDetails(
         lastSeenAt: row.last_seen_at ?? 0,
         views: row.views ?? 0,
         sessions: row.sessions ?? 0,
-        countries: row.countries ?? 0,
-        latestPath: row.latest_path || "",
       });
     }
   }
@@ -1326,15 +1653,7 @@ async function queryVisitorDetails(
           MIN(p.event_at) AS first_seen_at,
           MAX(p.event_at) AS last_seen_at,
           COUNT(*) AS views,
-          COUNT(DISTINCT p.session_id) AS sessions,
-          COUNT(DISTINCT p.country) AS countries,
-          (
-            SELECT p2.pathname
-            FROM filtered p2
-            WHERE p2.visitor_id = p.visitor_id
-            ORDER BY p2.event_at DESC
-            LIMIT 1
-          ) AS latest_path
+          COUNT(DISTINCT p.session_id) AS sessions
         FROM filtered p
         GROUP BY p.visitor_id
         ORDER BY last_seen_at DESC
@@ -1348,8 +1667,6 @@ async function queryVisitorDetails(
         last_seen_at: number;
         views: number;
         sessions: number;
-        countries: number;
-        latest_path: string;
       }>();
 
     for (const row of rows.results) {
@@ -1362,8 +1679,6 @@ async function queryVisitorDetails(
           lastSeenAt: row.last_seen_at,
           views: row.views,
           sessions: row.sessions,
-          countries: row.countries,
-          latestPath: row.latest_path ?? "",
         });
         continue;
       }
@@ -1373,8 +1688,6 @@ async function queryVisitorDetails(
         lastSeenAt: Math.max(prev.lastSeenAt, row.last_seen_at),
         views: prev.views + row.views,
         sessions: prev.sessions + row.sessions,
-        countries: Math.max(prev.countries, row.countries),
-        latestPath: prev.lastSeenAt >= row.last_seen_at ? prev.latestPath : (row.latest_path ?? ""),
       });
     }
   }
@@ -1404,6 +1717,382 @@ function emptyOverviewMetrics(): {
     bounceRate: 0,
     approximateVisitors: false,
   };
+}
+
+function buildSiteIdBindings(siteIds: string[]): string[] {
+  return Array.from(
+    new Set(
+      siteIds
+        .map((siteId) => String(siteId || "").trim())
+        .filter((siteId) => siteId.length > 0),
+    ),
+  );
+}
+
+async function queryOverviewBySites(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+): Promise<
+  Map<
+    string,
+    {
+      views: number;
+      sessions: number;
+      visitors: number;
+      bounces: number;
+      totalDurationMs: number;
+      avgDurationMs: number;
+      bounceRate: number;
+      approximateVisitors: boolean;
+    }
+  >
+> {
+  const normalizedSiteIds = buildSiteIdBindings(siteIds);
+  const result = new Map<
+    string,
+    {
+      views: number;
+      sessions: number;
+      visitors: number;
+      bounces: number;
+      totalDurationMs: number;
+      avgDurationMs: number;
+      bounceRate: number;
+      approximateVisitors: boolean;
+    }
+  >();
+
+  if (normalizedSiteIds.length === 0) {
+    return result;
+  }
+
+  for (const siteId of normalizedSiteIds) {
+    result.set(siteId, emptyOverviewMetrics());
+  }
+
+  const placeholders = normalizedSiteIds.map(() => "?").join(",");
+  const includeArchive = window.hasArchive;
+
+  if (window.hasAnalytics) {
+    const aeRows = await queryAeOverviewBySites(
+      env,
+      normalizedSiteIds,
+      {
+        fromMs: window.analyticsFromMs,
+        toMs: window.analyticsToMs,
+      },
+      {},
+    );
+    for (const row of aeRows) {
+      const siteId = String(row.site_id || "");
+      if (!siteId || !result.has(siteId)) continue;
+      const prev = result.get(siteId) ?? emptyOverviewMetrics();
+      result.set(siteId, {
+        ...prev,
+        views: prev.views + (row.views ?? 0),
+        sessions: prev.sessions + (row.sessions ?? 0),
+        visitors: prev.visitors + (row.visitors ?? 0),
+        bounces: prev.bounces + (row.bounces ?? 0),
+        totalDurationMs: prev.totalDurationMs + (row.total_duration ?? 0),
+      });
+    }
+  }
+
+  if (window.hasD1Detail) {
+    const d1Rows = await env.DB.prepare(
+      `
+        SELECT
+          site_id,
+          COUNT(*) AS views,
+          COUNT(DISTINCT session_id) AS sessions,
+          COUNT(DISTINCT visitor_id) AS visitors,
+          SUM(CASE WHEN COALESCE(duration_ms, 0) <= 0 THEN 1 ELSE 0 END) AS bounces,
+          SUM(COALESCE(duration_ms, 0)) AS total_duration
+        FROM pageviews
+        WHERE site_id IN (${placeholders}) AND event_at BETWEEN ? AND ?
+        GROUP BY site_id
+      `,
+    )
+      .bind(...normalizedSiteIds, window.d1DetailFromMs, window.d1DetailToMs)
+      .all<{
+        site_id: string;
+        views: number;
+        sessions: number;
+        visitors: number;
+        bounces: number;
+        total_duration: number;
+      }>();
+
+    for (const row of d1Rows.results) {
+      const siteId = String(row.site_id || "");
+      if (!siteId || !result.has(siteId)) continue;
+      const prev = result.get(siteId) ?? emptyOverviewMetrics();
+      result.set(siteId, {
+        ...prev,
+        views: prev.views + (row.views ?? 0),
+        sessions: prev.sessions + (row.sessions ?? 0),
+        visitors: prev.visitors + (row.visitors ?? 0),
+        bounces: prev.bounces + (row.bounces ?? 0),
+        totalDurationMs: prev.totalDurationMs + (row.total_duration ?? 0),
+      });
+    }
+  }
+
+  if (includeArchive) {
+    const archiveRows = await env.DB.prepare(
+      `
+        WITH archive_rows AS (
+          SELECT
+            site_id,
+            total_views,
+            total_sessions,
+            bounces,
+            total_duration,
+            visitors_json
+          FROM pageviews_archive_hourly
+          WHERE site_id IN (${placeholders}) AND hour_bucket BETWEEN ? AND ?
+        ),
+        aggregate AS (
+          SELECT
+            site_id,
+            COALESCE(SUM(total_views), 0) AS views,
+            COALESCE(SUM(total_sessions), 0) AS sessions,
+            COALESCE(SUM(bounces), 0) AS bounces,
+            COALESCE(SUM(total_duration), 0) AS total_duration
+          FROM archive_rows
+          GROUP BY site_id
+        ),
+        visitor_aggregate AS (
+          SELECT
+            archive_rows.site_id AS site_id,
+            COUNT(DISTINCT je.value) AS visitors
+          FROM archive_rows
+          JOIN json_each(archive_rows.visitors_json) je
+          WHERE typeof(je.value) = 'text' AND je.value != ''
+          GROUP BY archive_rows.site_id
+        )
+        SELECT
+          aggregate.site_id AS site_id,
+          aggregate.views AS views,
+          aggregate.sessions AS sessions,
+          aggregate.bounces AS bounces,
+          aggregate.total_duration AS total_duration,
+          COALESCE(visitor_aggregate.visitors, 0) AS visitors
+        FROM aggregate
+        LEFT JOIN visitor_aggregate ON visitor_aggregate.site_id = aggregate.site_id
+      `,
+    )
+      .bind(...normalizedSiteIds, window.archiveFromHour, window.archiveToHour)
+      .all<{
+        site_id: string;
+        views: number;
+        sessions: number;
+        bounces: number;
+        total_duration: number;
+        visitors: number;
+      }>();
+
+    for (const row of archiveRows.results) {
+      const siteId = String(row.site_id || "");
+      if (!siteId || !result.has(siteId)) continue;
+      const prev = result.get(siteId) ?? emptyOverviewMetrics();
+      result.set(siteId, {
+        ...prev,
+        views: prev.views + (row.views ?? 0),
+        sessions: prev.sessions + (row.sessions ?? 0),
+        visitors: prev.visitors + (row.visitors ?? 0),
+        bounces: prev.bounces + (row.bounces ?? 0),
+        totalDurationMs: prev.totalDurationMs + (row.total_duration ?? 0),
+      });
+    }
+  }
+
+  for (const siteId of normalizedSiteIds) {
+    const value = result.get(siteId) ?? emptyOverviewMetrics();
+    result.set(siteId, {
+      ...value,
+      avgDurationMs: value.views > 0 ? Math.round(value.totalDurationMs / value.views) : 0,
+      bounceRate: value.views > 0 ? Number((value.bounces / value.views).toFixed(6)) : 0,
+      approximateVisitors: includeArchive,
+    });
+  }
+
+  return result;
+}
+
+async function queryTrendBySites(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+  interval: "minute" | "hour" | "day" | "week" | "month",
+): Promise<
+  Map<
+    string,
+    Array<{
+      bucket: number;
+      timestampMs: number;
+      views: number;
+      visitors: number;
+    }>
+  >
+> {
+  const normalizedSiteIds = buildSiteIdBindings(siteIds);
+  const siteBuckets = new Map<string, Map<number, { views: number; visitors: number }>>();
+  if (normalizedSiteIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = normalizedSiteIds.map(() => "?").join(",");
+  const bucketMs = intervalBucketMs(interval);
+  const bucketDivisor = interval === "hour"
+    ? 1
+    : interval === "day"
+      ? 24
+      : interval === "week"
+        ? 168
+        : interval === "month"
+          ? 720
+          : 0;
+  const includeArchive = window.hasArchive && interval !== "minute";
+
+  const addPoint = (siteId: string, bucket: number, views: number, visitors: number) => {
+    if (!siteId || !Number.isFinite(bucket)) return;
+    const bucketMap = siteBuckets.get(siteId) ?? new Map<number, { views: number; visitors: number }>();
+    const prev = bucketMap.get(bucket) ?? { views: 0, visitors: 0 };
+    bucketMap.set(bucket, {
+      views: prev.views + Math.max(0, views),
+      visitors: prev.visitors + Math.max(0, visitors),
+    });
+    siteBuckets.set(siteId, bucketMap);
+  };
+
+  if (window.hasAnalytics) {
+    const aeRows = await queryAeTrendBySites(
+      env,
+      normalizedSiteIds,
+      {
+        fromMs: window.analyticsFromMs,
+        toMs: window.analyticsToMs,
+      },
+      interval,
+      {},
+    );
+    for (const row of aeRows) {
+      addPoint(row.site_id, row.bucket, row.views ?? 0, row.visitors ?? 0);
+    }
+  }
+
+  if (window.hasD1Detail) {
+    const d1Rows = await env.DB.prepare(
+      `
+        SELECT
+          site_id,
+          CAST(event_at / ${bucketMs} AS INTEGER) AS bucket,
+          COUNT(*) AS views,
+          COUNT(DISTINCT visitor_id) AS visitors
+        FROM pageviews
+        WHERE site_id IN (${placeholders}) AND event_at BETWEEN ? AND ?
+        GROUP BY site_id, bucket
+      `,
+    )
+      .bind(...normalizedSiteIds, window.d1DetailFromMs, window.d1DetailToMs)
+      .all<{
+        site_id: string;
+        bucket: number;
+        views: number;
+        visitors: number;
+      }>();
+
+    for (const row of d1Rows.results) {
+      addPoint(row.site_id, row.bucket, row.views ?? 0, row.visitors ?? 0);
+    }
+  }
+
+  if (includeArchive) {
+    const archiveRows = await env.DB.prepare(
+      `
+        WITH archive_rows AS (
+          SELECT
+            site_id,
+            CAST(hour_bucket / ? AS INTEGER) AS bucket,
+            total_views,
+            visitors_json
+          FROM pageviews_archive_hourly
+          WHERE site_id IN (${placeholders}) AND hour_bucket BETWEEN ? AND ?
+        ),
+        aggregate AS (
+          SELECT
+            site_id,
+            bucket,
+            SUM(total_views) AS views
+          FROM archive_rows
+          GROUP BY site_id, bucket
+        ),
+        visitor_aggregate AS (
+          SELECT
+            archive_rows.site_id AS site_id,
+            archive_rows.bucket AS bucket,
+            COUNT(DISTINCT je.value) AS visitors
+          FROM archive_rows
+          JOIN json_each(archive_rows.visitors_json) je
+          WHERE typeof(je.value) = 'text' AND je.value != ''
+          GROUP BY archive_rows.site_id, archive_rows.bucket
+        )
+        SELECT
+          aggregate.site_id AS site_id,
+          aggregate.bucket AS bucket,
+          aggregate.views AS views,
+          COALESCE(visitor_aggregate.visitors, 0) AS visitors
+        FROM aggregate
+        LEFT JOIN visitor_aggregate
+          ON visitor_aggregate.site_id = aggregate.site_id
+         AND visitor_aggregate.bucket = aggregate.bucket
+      `,
+    )
+      .bind(bucketDivisor, ...normalizedSiteIds, window.archiveFromHour, window.archiveToHour)
+      .all<{
+        site_id: string;
+        bucket: number;
+        views: number;
+        visitors: number;
+      }>();
+
+    for (const row of archiveRows.results) {
+      addPoint(row.site_id, row.bucket, row.views ?? 0, row.visitors ?? 0);
+    }
+  }
+
+  const result = new Map<
+    string,
+    Array<{
+      bucket: number;
+      timestampMs: number;
+      views: number;
+      visitors: number;
+    }>
+  >();
+
+  for (const siteId of normalizedSiteIds) {
+    const bucketMap = siteBuckets.get(siteId);
+    if (!bucketMap || bucketMap.size === 0) {
+      result.set(siteId, []);
+      continue;
+    }
+    result.set(
+      siteId,
+      Array.from(bucketMap.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([bucket, value]) => ({
+          bucket,
+          timestampMs: bucket * bucketMs,
+          views: value.views,
+          visitors: value.visitors,
+        })),
+    );
+  }
+
+  return result;
 }
 
 function intervalBucketMs(interval: "minute" | "hour" | "day" | "week" | "month"): number {
@@ -1488,34 +2177,37 @@ async function queryTeamDashboard(
     )
     : null;
 
-  const siteStats = await Promise.all(
-    siteRows.map(async (site) => {
-      const [overview, trend, previousOverview] = await Promise.all([
-        queryOverview(env, site.id, window, {}).catch(() => emptyOverviewMetrics()),
-        queryTrend(env, site.id, window, interval, {}).catch(() => []),
-        previousWindow
-          ? queryOverview(env, site.id, previousWindow, {}).catch(() => emptyOverviewMetrics())
-          : Promise.resolve(emptyOverviewMetrics()),
-      ]);
-      const currentPagesPerSession = overview.sessions > 0 ? overview.views / overview.sessions : 0;
-      const previousPagesPerSession = previousOverview.sessions > 0
-        ? previousOverview.views / previousOverview.sessions
-        : 0;
-      return {
-        site,
-        overview,
-        trend,
-        changeRates: {
-          views: toPercentChange(overview.views, previousOverview.views),
-          visitors: toPercentChange(overview.visitors, previousOverview.visitors),
-          sessions: toPercentChange(overview.sessions, previousOverview.sessions),
-          bounceRate: toPercentChange(overview.bounceRate, previousOverview.bounceRate),
-          avgDurationMs: toPercentChange(overview.avgDurationMs, previousOverview.avgDurationMs),
-          pagesPerSession: toPercentChange(currentPagesPerSession, previousPagesPerSession),
-        },
-      };
-    }),
-  );
+  const siteIds = siteRows.map((site) => site.id);
+  const [overviewBySite, trendBySite, previousOverviewBySite] = await Promise.all([
+    queryOverviewBySites(env, siteIds, window).catch(() => new Map()),
+    queryTrendBySites(env, siteIds, window, interval).catch(() => new Map()),
+    previousWindow
+      ? queryOverviewBySites(env, siteIds, previousWindow).catch(() => new Map())
+      : Promise.resolve(new Map()),
+  ]);
+
+  const siteStats = siteRows.map((site) => {
+    const overview = overviewBySite.get(site.id) ?? emptyOverviewMetrics();
+    const trend = trendBySite.get(site.id) ?? [];
+    const previousOverview = previousOverviewBySite.get(site.id) ?? emptyOverviewMetrics();
+    const currentPagesPerSession = overview.sessions > 0 ? overview.views / overview.sessions : 0;
+    const previousPagesPerSession = previousOverview.sessions > 0
+      ? previousOverview.views / previousOverview.sessions
+      : 0;
+    return {
+      site,
+      overview,
+      trend,
+      changeRates: {
+        views: toPercentChange(overview.views, previousOverview.views),
+        visitors: toPercentChange(overview.visitors, previousOverview.visitors),
+        sessions: toPercentChange(overview.sessions, previousOverview.sessions),
+        bounceRate: toPercentChange(overview.bounceRate, previousOverview.bounceRate),
+        avgDurationMs: toPercentChange(overview.avgDurationMs, previousOverview.avgDurationMs),
+        pagesPerSession: toPercentChange(currentPagesPerSession, previousPagesPerSession),
+      },
+    };
+  });
 
   const bucketMs = intervalBucketMs(interval);
   const fromBucket = Math.floor(window.fromMs / bucketMs);
@@ -1758,45 +2450,26 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
 
   if (pathname === "/api/private/pages") {
     const limit = parseLimit(url, 30, 200);
-    const includeDetails = (url.searchParams.get("details") || "1") !== "0";
-    const data = await queryTopPages(env, siteId, window, limit, includeDetails, filters);
+    const tabs = await queryPageCardTabs(env, siteId, window, limit, filters);
+    const data = tabs.path.map((item) => ({
+      pathname: item.label,
+      views: item.views,
+      sessions: item.sessions,
+    }));
     return jsonResponse({
       ok: true,
       siteId,
       fromMs: window.fromMs,
       toMs: window.toMs,
       data,
+      tabs,
     });
   }
 
   if (pathname === "/api/private/referrers") {
     const limit = parseLimit(url, 30, 200);
-    const includeFullUrl = (url.searchParams.get("fullUrl") || "1") !== "0";
+    const includeFullUrl = (url.searchParams.get("fullUrl") || "0") !== "0";
     const data = await queryReferrers(env, siteId, window, limit, includeFullUrl, filters);
-    return jsonResponse({
-      ok: true,
-      siteId,
-      fromMs: window.fromMs,
-      toMs: window.toMs,
-      data,
-    });
-  }
-
-  if (pathname === "/api/private/events") {
-    const limit = parseLimit(url, 50, 500);
-    const data = await queryRecentEvents(env, siteId, window, limit, filters);
-    return jsonResponse({
-      ok: true,
-      siteId,
-      fromMs: window.fromMs,
-      toMs: window.toMs,
-      data,
-    });
-  }
-
-  if (pathname === "/api/private/sessions") {
-    const limit = parseLimit(url, 50, 500);
-    const data = await querySessionDetails(env, siteId, window, limit, filters);
     return jsonResponse({
       ok: true,
       siteId,

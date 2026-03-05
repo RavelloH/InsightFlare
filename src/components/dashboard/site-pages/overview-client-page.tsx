@@ -52,22 +52,13 @@ import {
   shortDateTime,
 } from "@/lib/dashboard/format";
 import {
-  emptyEventsData,
-  emptyPagesData,
-  emptySessionsData,
-  fetchEvents,
+  emptyPageCardTabsData,
+  fetchPageCardTabs,
   fetchOverview,
-  fetchPages,
-  fetchSessions,
   fetchTrend,
+  type PageCardTabsData,
 } from "@/lib/dashboard/client-data";
-import type {
-  EventsData,
-  OverviewData,
-  PagesData,
-  SessionsData,
-  TrendData,
-} from "@/lib/edge-client";
+import type { OverviewData, TrendData } from "@/lib/edge-client";
 import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -274,7 +265,6 @@ interface MetricAreaPoint {
 type PageCardTab = "path" | "title" | "hostname" | "entry" | "exit";
 type PageCardSortKey = "views" | "sessions";
 type PageCardNavigableTab = "path" | "hostname" | "entry" | "exit";
-type PageCardSourceKey = "pages" | "events" | "sessions";
 
 interface PageCardRow {
   key: string;
@@ -304,13 +294,6 @@ const PAGE_CARD_QUERY_PARAM_BY_TAB: Record<PageCardTab, string> = {
   hostname: "hostname",
   entry: "entry",
   exit: "exit",
-};
-const PAGE_CARD_SOURCE_BY_TAB: Record<PageCardTab, PageCardSourceKey> = {
-  path: "pages",
-  title: "events",
-  hostname: "events",
-  entry: "sessions",
-  exit: "sessions",
 };
 const PANEL_SCROLLBAR_OPTIONS = {
   overflow: {
@@ -551,24 +534,10 @@ function OverviewPagesSection({
   const livePathname = usePathname() || pathname;
   const isMobile = useIsMobile();
   const { filters, window } = useDashboardQuery();
-  const [pagesData, setPagesData] = useState<PagesData>(emptyPagesData);
-  const [eventsData, setEventsData] = useState<EventsData>(emptyEventsData);
-  const [sessionsData, setSessionsData] =
-    useState<SessionsData>(emptySessionsData);
-  const [pageCardSourceLoaded, setPageCardSourceLoaded] = useState<
-    Record<PageCardSourceKey, boolean>
-  >({
-    pages: false,
-    events: false,
-    sessions: false,
-  });
-  const [pageCardSourceLoading, setPageCardSourceLoading] = useState<
-    Record<PageCardSourceKey, boolean>
-  >({
-    pages: false,
-    events: false,
-    sessions: false,
-  });
+  const [pageCardTabsData, setPageCardTabsData] = useState<PageCardTabsData>(
+    emptyPageCardTabsData(),
+  );
+  const [pageCardLoading, setPageCardLoading] = useState(true);
   const [pageCardTab, setPageCardTab] = useState<PageCardTab>("path");
   const [pageCardSort, setPageCardSort] = useState<{
     key: PageCardSortKey;
@@ -581,19 +550,24 @@ function OverviewPagesSection({
   const [pageCardSearchTerm, setPageCardSearchTerm] = useState("");
 
   useEffect(() => {
-    setPagesData(emptyPagesData());
-    setEventsData(emptyEventsData());
-    setSessionsData(emptySessionsData());
-    setPageCardSourceLoaded({
-      pages: false,
-      events: false,
-      sessions: false,
-    });
-    setPageCardSourceLoading({
-      pages: false,
-      events: false,
-      sessions: false,
-    });
+    let active = true;
+    setPageCardLoading(true);
+    setPageCardTabsData(emptyPageCardTabsData());
+
+    fetchPageCardTabs(siteId, window, filters)
+      .catch(() => emptyPageCardTabsData())
+      .then((nextTabs) => {
+        if (!active) return;
+        setPageCardTabsData(nextTabs);
+      })
+      .finally(() => {
+        if (!active) return;
+        setPageCardLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [
     siteId,
     window.from,
@@ -604,86 +578,15 @@ function OverviewPagesSection({
     filters.browser,
     filters.eventType,
   ]);
+
   useEffect(() => {
     if (!pageCardSearchOpen) {
       setPageCardSearchTerm("");
     }
   }, [pageCardSearchOpen]);
-  const activePageCardSource = PAGE_CARD_SOURCE_BY_TAB[pageCardTab];
-  const activePageCardSourceLoaded = pageCardSourceLoaded[activePageCardSource];
-  const activePageCardSourceLoading =
-    pageCardSourceLoading[activePageCardSource];
-  const pageCardLoading =
-    activePageCardSourceLoading || !activePageCardSourceLoaded;
+
   const noDataText = messages.common.noData;
 
-  useEffect(() => {
-    if (activePageCardSourceLoaded || activePageCardSourceLoading) return;
-
-    let active = true;
-    setPageCardSourceLoading((prev) => ({
-      ...prev,
-      [activePageCardSource]: true,
-    }));
-
-    const markDone = () => {
-      if (!active) return;
-      setPageCardSourceLoaded((prev) => ({
-        ...prev,
-        [activePageCardSource]: true,
-      }));
-      setPageCardSourceLoading((prev) => ({
-        ...prev,
-        [activePageCardSource]: false,
-      }));
-    };
-
-    if (activePageCardSource === "events") {
-      fetchEvents(siteId, window, filters)
-        .catch(() => emptyEventsData())
-        .then((nextEvents) => {
-          if (!active) return;
-          setEventsData(nextEvents);
-        })
-        .finally(markDone);
-    } else if (activePageCardSource === "sessions") {
-      fetchSessions(siteId, window, filters)
-        .catch(() => emptySessionsData())
-        .then((nextSessions) => {
-          if (!active) return;
-          setSessionsData(nextSessions);
-        })
-        .finally(markDone);
-    } else {
-      fetchPages(siteId, window, filters)
-        .catch(() => emptyPagesData())
-        .then((nextPages) => {
-          if (!active) return;
-          setPagesData(nextPages);
-        })
-        .finally(markDone);
-    }
-
-    return () => {
-      active = false;
-      setPageCardSourceLoading((prev) =>
-        prev[activePageCardSource]
-          ? { ...prev, [activePageCardSource]: false }
-          : prev,
-      );
-    };
-  }, [
-    activePageCardSource,
-    activePageCardSourceLoaded,
-    filters.browser,
-    filters.country,
-    filters.device,
-    filters.eventType,
-    siteId,
-    window.from,
-    window.interval,
-    window.to,
-  ]);
   const pageCardTabMeta: Record<
     PageCardTab,
     { label: string; columnLabel: string; mono: boolean }
@@ -716,134 +619,75 @@ function OverviewPagesSection({
   };
   const pathRows = useMemo<PageCardRow[]>(
     () =>
-      pagesData.data.map((item) => ({
-        key: `${item.pathname || "/"}|${item.query || ""}|${item.hash || ""}`,
-        label: item.pathname || "/",
-        views: Math.max(0, Number(item.views ?? 0)),
-        sessions: Math.max(0, Number(item.sessions ?? 0)),
+      pageCardTabsData.path.map((item) => ({
+        key: String(item.label || "/"),
+        label: String(item.label || "/"),
+        views: Math.max(0, Number(item.views || 0)),
+        sessions: Math.max(0, Number(item.sessions || 0)),
         mono: true,
       })),
-    [pagesData.data],
+    [pageCardTabsData.path],
   );
-  const titleRows = useMemo<PageCardRow[]>(() => {
-    const map = new Map<
-      string,
-      {
-        key: string;
-        label: string;
-        views: number;
-        sessionIds: Set<string>;
-        unknownSessions: number;
-      }
-    >();
-
-    for (const event of eventsData.data) {
-      const rawTitle = String(event.title ?? "").trim();
-      const label = rawTitle.length > 0 ? rawTitle : messages.common.unknown;
-      const key = label;
-      const prev = map.get(key) ?? {
-        key,
-        label,
-        views: 0,
-        sessionIds: new Set<string>(),
-        unknownSessions: 0,
-      };
-      prev.views += 1;
-      const sessionId = String(event.sessionId ?? "").trim();
-      if (sessionId.length > 0) {
-        prev.sessionIds.add(sessionId);
-      } else {
-        prev.unknownSessions += 1;
-      }
-      map.set(key, prev);
-    }
-
-    return Array.from(map.values()).map((item) => ({
-      key: item.key,
-      label: item.label,
-      views: item.views,
-      sessions: item.sessionIds.size + item.unknownSessions,
-      mono: false,
-    }));
-  }, [eventsData.data, messages.common.unknown]);
-  const hostnameRows = useMemo<PageCardRow[]>(() => {
-    const map = new Map<
-      string,
-      {
-        key: string;
-        label: string;
-        views: number;
-        sessionIds: Set<string>;
-        unknownSessions: number;
-      }
-    >();
-
-    for (const event of eventsData.data) {
-      const rawHostname = String(event.hostname ?? "").trim();
-      const label =
-        rawHostname.length > 0 ? rawHostname : messages.common.unknown;
-      const key = label;
-      const prev = map.get(key) ?? {
-        key,
-        label,
-        views: 0,
-        sessionIds: new Set<string>(),
-        unknownSessions: 0,
-      };
-      prev.views += 1;
-      const sessionId = String(event.sessionId ?? "").trim();
-      if (sessionId.length > 0) {
-        prev.sessionIds.add(sessionId);
-      } else {
-        prev.unknownSessions += 1;
-      }
-      map.set(key, prev);
-    }
-
-    return Array.from(map.values()).map((item) => ({
-      key: item.key,
-      label: item.label,
-      views: item.views,
-      sessions: item.sessionIds.size + item.unknownSessions,
-      mono: true,
-    }));
-  }, [eventsData.data, messages.common.unknown]);
-  const entryRows = useMemo<PageCardRow[]>(() => {
-    const map = new Map<string, { views: number; sessions: number }>();
-    for (const session of sessionsData.data) {
-      const label = String(session.entryPath ?? "").trim() || "/";
-      const prev = map.get(label) ?? { views: 0, sessions: 0 };
-      map.set(label, {
-        views: prev.views + Math.max(0, Number(session.views ?? 0)),
-        sessions: prev.sessions + 1,
-      });
-    }
-    return Array.from(map.entries()).map(([label, value]) => ({
-      key: label,
-      label,
-      views: value.views,
-      sessions: value.sessions,
-      mono: true,
-    }));
-  }, [sessionsData.data]);
-  const exitRows = useMemo<PageCardRow[]>(() => {
-    const map = new Map<string, { views: number; sessions: number }>();
-    for (const session of sessionsData.data) {
-      const label = String(session.exitPath ?? "").trim() || "/";
-      const prev = map.get(label) ?? { views: 0, sessions: 0 };
-      map.set(label, {
-        views: prev.views + Math.max(0, Number(session.views ?? 0)),
-        sessions: prev.sessions + 1,
-      });
-    }
-    return Array.from(map.entries()).map(([label, value]) => ({
-      key: label,
-      label,
-      views: value.views,
-      sessions: value.sessions,
-      mono: true,
-    }));
-  }, [sessionsData.data]);
+  const titleRows = useMemo<PageCardRow[]>(
+    () =>
+      pageCardTabsData.title.map((item) => {
+        const normalized = String(item.label || "").trim();
+        const label =
+          normalized.length > 0 ? normalized : messages.common.unknown;
+        return {
+          key: label,
+          label,
+          views: Math.max(0, Number(item.views || 0)),
+          sessions: Math.max(0, Number(item.sessions || 0)),
+          mono: false,
+        };
+      }),
+    [messages.common.unknown, pageCardTabsData.title],
+  );
+  const hostnameRows = useMemo<PageCardRow[]>(
+    () =>
+      pageCardTabsData.hostname.map((item) => {
+        const normalized = String(item.label || "").trim();
+        const label =
+          normalized.length > 0 ? normalized : messages.common.unknown;
+        return {
+          key: label,
+          label,
+          views: Math.max(0, Number(item.views || 0)),
+          sessions: Math.max(0, Number(item.sessions || 0)),
+          mono: true,
+        };
+      }),
+    [messages.common.unknown, pageCardTabsData.hostname],
+  );
+  const entryRows = useMemo<PageCardRow[]>(
+    () =>
+      pageCardTabsData.entry.map((item) => {
+        const label = String(item.label || "").trim() || "/";
+        return {
+          key: label,
+          label,
+          views: Math.max(0, Number(item.views || 0)),
+          sessions: Math.max(0, Number(item.sessions || 0)),
+          mono: true,
+        };
+      }),
+    [pageCardTabsData.entry],
+  );
+  const exitRows = useMemo<PageCardRow[]>(
+    () =>
+      pageCardTabsData.exit.map((item) => {
+        const label = String(item.label || "").trim() || "/";
+        return {
+          key: label,
+          label,
+          views: Math.max(0, Number(item.views || 0)),
+          sessions: Math.max(0, Number(item.sessions || 0)),
+          mono: true,
+        };
+      }),
+    [pageCardTabsData.exit],
+  );
   const pageCardRows = useMemo<Record<PageCardTab, PageCardRow[]>>(
     () => ({
       path: pathRows,
@@ -900,15 +744,15 @@ function OverviewPagesSection({
     );
   }, [normalizedPageCardSearchTerm, sortedPageCardRows]);
   const pageCardDefaultHostname = useMemo(() => {
-    for (const event of eventsData.data) {
-      const hostname = sanitizeHostname(String(event.hostname ?? ""));
+    for (const row of hostnameRows) {
+      const hostname = sanitizeHostname(row.label);
       if (hostname.length > 0) return hostname;
     }
     if (typeof globalThis.window !== "undefined") {
       return sanitizeHostname(globalThis.window.location.hostname);
     }
     return "";
-  }, [eventsData.data]);
+  }, [hostnameRows]);
 
   const togglePageCardSort = (key: PageCardSortKey) => {
     setPageCardSort((prev) =>
@@ -1109,7 +953,6 @@ function OverviewPagesSection({
           loadingLabel={messages.common.loading}
           emptyLabel={noDataText}
           colSpan={3}
-          contentKey={`search-${pageCardTab}-${pageCardSearchTerm}-${activePageCardQueryValue ?? "all"}`}
           header={pageCardTableHeader}
           rows={renderPageCardRows(searchedPageCardRows)}
         />
