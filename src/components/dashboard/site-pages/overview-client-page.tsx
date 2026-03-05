@@ -38,12 +38,6 @@ import { Input } from "@/components/ui/input";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { TrendChart } from "@/components/dashboard/trend-chart";
-import { EngagementChart } from "@/components/dashboard/engagement-chart";
-import { TopItemsChart } from "@/components/dashboard/top-items-chart";
-import { DistributionDonutChart } from "@/components/dashboard/distribution-donut-chart";
-import { SessionDurationChart } from "@/components/dashboard/session-duration-chart";
-import { RealtimePanel } from "@/components/dashboard/realtime-panel";
-import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { TabbedScrollMaskCard } from "@/components/dashboard/tabbed-scroll-mask-card";
 import { Spinner } from "@/components/ui/spinner";
@@ -58,12 +52,23 @@ import {
   shortDateTime,
 } from "@/lib/dashboard/format";
 import {
-  loadFilterOptions,
-  loadOverviewBundle,
-  type FilterOptions,
-  type OverviewBundle,
+  emptyEventsData,
+  emptyPagesData,
+  emptySessionsData,
+  fetchEvents,
+  fetchOverview,
+  fetchPages,
+  fetchSessions,
+  fetchTrend,
 } from "@/lib/dashboard/client-data";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import type {
+  EventsData,
+  OverviewData,
+  PagesData,
+  SessionsData,
+  TrendData,
+} from "@/lib/edge-client";
+import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
@@ -83,56 +88,30 @@ function toDeltaPercent(current: number, previous: number): number | null {
   return ((current - previous) / previous) * 100;
 }
 
-function emptyOverviewBundle(interval: TimeWindow["interval"]): OverviewBundle {
+function emptyOverviewData(): OverviewData {
   return {
-    overview: {
-      ok: true,
-      data: {
-        views: 0,
-        sessions: 0,
-        visitors: 0,
-        bounces: 0,
-        totalDurationMs: 0,
-        avgDurationMs: 0,
-        bounceRate: 0,
-        approximateVisitors: false,
-      },
+    ok: true,
+    data: {
+      views: 0,
+      sessions: 0,
+      visitors: 0,
+      bounces: 0,
+      totalDurationMs: 0,
+      avgDurationMs: 0,
+      bounceRate: 0,
+      approximateVisitors: false,
     },
-    previousOverview: {
-      ok: true,
-      data: {
-        views: 0,
-        sessions: 0,
-        visitors: 0,
-        bounces: 0,
-        totalDurationMs: 0,
-        avgDurationMs: 0,
-        bounceRate: 0,
-        approximateVisitors: false,
-      },
-    },
-    trend: {
-      ok: true,
-      interval,
-      data: [],
-    },
-    pages: { ok: true, data: [] },
-    referrers: { ok: true, data: [] },
-    sessions: { ok: true, data: [] },
-    events: { ok: true, data: [] },
-    countries: { ok: true, data: [] },
-    devices: { ok: true, data: [] },
-    browsers: { ok: true, data: [] },
-    eventTypes: { ok: true, data: [] },
   };
 }
 
-const EMPTY_FILTER_OPTIONS: FilterOptions = {
-  countries: [],
-  devices: [],
-  browsers: [],
-  eventTypes: [],
-};
+function emptyTrendData(interval: TimeWindow["interval"]): TrendData {
+  return {
+    ok: true,
+    interval,
+    data: [],
+  };
+}
+
 const METRIC_AREA_COLOR = "var(--color-chart-1)";
 const MAX_TREND_PLACEHOLDER_POINTS = 120;
 
@@ -295,6 +274,7 @@ interface MetricAreaPoint {
 type PageCardTab = "path" | "title" | "hostname" | "entry" | "exit";
 type PageCardSortKey = "views" | "sessions";
 type PageCardNavigableTab = "path" | "hostname" | "entry" | "exit";
+type PageCardSourceKey = "pages" | "events" | "sessions";
 
 interface PageCardRow {
   key: string;
@@ -324,6 +304,13 @@ const PAGE_CARD_QUERY_PARAM_BY_TAB: Record<PageCardTab, string> = {
   hostname: "hostname",
   entry: "entry",
   exit: "exit",
+};
+const PAGE_CARD_SOURCE_BY_TAB: Record<PageCardTab, PageCardSourceKey> = {
+  path: "pages",
+  title: "events",
+  hostname: "events",
+  entry: "sessions",
+  exit: "sessions",
 };
 const PANEL_SCROLLBAR_OPTIONS = {
   overflow: {
@@ -553,7 +540,7 @@ function MetricAreaMap({
   );
 }
 
-export function OverviewClientPage({
+function OverviewPagesSection({
   locale,
   messages,
   siteId,
@@ -563,11 +550,25 @@ export function OverviewClientPage({
   const searchParams = useSearchParams();
   const livePathname = usePathname() || pathname;
   const isMobile = useIsMobile();
-  const { range, filters, window } = useDashboardQuery();
-  const [bundle, setBundle] = useState<OverviewBundle | null>(null);
-  const [filterOptions, setFilterOptions] =
-    useState<FilterOptions>(EMPTY_FILTER_OPTIONS);
-  const [loading, setLoading] = useState(true);
+  const { filters, window } = useDashboardQuery();
+  const [pagesData, setPagesData] = useState<PagesData>(emptyPagesData);
+  const [eventsData, setEventsData] = useState<EventsData>(emptyEventsData);
+  const [sessionsData, setSessionsData] =
+    useState<SessionsData>(emptySessionsData);
+  const [pageCardSourceLoaded, setPageCardSourceLoaded] = useState<
+    Record<PageCardSourceKey, boolean>
+  >({
+    pages: false,
+    events: false,
+    sessions: false,
+  });
+  const [pageCardSourceLoading, setPageCardSourceLoading] = useState<
+    Record<PageCardSourceKey, boolean>
+  >({
+    pages: false,
+    events: false,
+    sessions: false,
+  });
   const [pageCardTab, setPageCardTab] = useState<PageCardTab>("path");
   const [pageCardSort, setPageCardSort] = useState<{
     key: PageCardSortKey;
@@ -578,50 +579,21 @@ export function OverviewClientPage({
   });
   const [pageCardSearchOpen, setPageCardSearchOpen] = useState(false);
   const [pageCardSearchTerm, setPageCardSearchTerm] = useState("");
-  const [dataWindow, setDataWindow] = useState<
-    Pick<TimeWindow, "from" | "to" | "interval">
-  >(() => ({
-    from: window.from,
-    to: window.to,
-    interval: window.interval,
-  }));
 
   useEffect(() => {
-    let active = true;
-    setLoading(true);
-
-    Promise.all([
-      loadOverviewBundle(siteId, window, filters),
-      loadFilterOptions(siteId, window),
-    ])
-      .then(([nextBundle, nextFilterOptions]) => {
-        if (!active) return;
-        setBundle(nextBundle);
-        setFilterOptions(nextFilterOptions);
-        setDataWindow({
-          from: window.from,
-          to: window.to,
-          interval: window.interval,
-        });
-      })
-      .catch(() => {
-        if (!active) return;
-        setBundle(emptyOverviewBundle(window.interval));
-        setFilterOptions(EMPTY_FILTER_OPTIONS);
-        setDataWindow({
-          from: window.from,
-          to: window.to,
-          interval: window.interval,
-        });
-      })
-      .finally(() => {
-        if (!active) return;
-        setLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
+    setPagesData(emptyPagesData());
+    setEventsData(emptyEventsData());
+    setSessionsData(emptySessionsData());
+    setPageCardSourceLoaded({
+      pages: false,
+      events: false,
+      sessions: false,
+    });
+    setPageCardSourceLoading({
+      pages: false,
+      events: false,
+      sessions: false,
+    });
   }, [
     siteId,
     window.from,
@@ -637,83 +609,81 @@ export function OverviewClientPage({
       setPageCardSearchTerm("");
     }
   }, [pageCardSearchOpen]);
-
-  const data = useMemo(
-    () => bundle ?? emptyOverviewBundle(dataWindow.interval),
-    [bundle, dataWindow.interval],
-  );
-  const pagesPerSessionFormatter = useMemo(
-    () =>
-      new Intl.NumberFormat(intlLocale(locale), {
-        maximumFractionDigits: 2,
-      }),
-    [locale],
-  );
-
-  const previous = data.previousOverview.data;
+  const activePageCardSource = PAGE_CARD_SOURCE_BY_TAB[pageCardTab];
+  const activePageCardSourceLoaded = pageCardSourceLoaded[activePageCardSource];
+  const activePageCardSourceLoading =
+    pageCardSourceLoading[activePageCardSource];
+  const pageCardLoading =
+    activePageCardSourceLoading || !activePageCardSourceLoaded;
   const noDataText = messages.common.noData;
-  const currentPagesPerSession =
-    data.overview.data.sessions > 0
-      ? data.overview.data.views / data.overview.data.sessions
-      : 0;
-  const previousPagesPerSession =
-    previous.sessions > 0 ? previous.views / previous.sessions : 0;
-  const detailSeries = data.overview.detail?.data ?? data.trend.data;
-  const trendDisplayData = useMemo(() => {
-    if (!bundle && loading) {
-      return buildEmptyTrendData(dataWindow);
+
+  useEffect(() => {
+    if (activePageCardSourceLoaded || activePageCardSourceLoading) return;
+
+    let active = true;
+    setPageCardSourceLoading((prev) => ({
+      ...prev,
+      [activePageCardSource]: true,
+    }));
+
+    const markDone = () => {
+      if (!active) return;
+      setPageCardSourceLoaded((prev) => ({
+        ...prev,
+        [activePageCardSource]: true,
+      }));
+      setPageCardSourceLoading((prev) => ({
+        ...prev,
+        [activePageCardSource]: false,
+      }));
+    };
+
+    if (activePageCardSource === "events") {
+      fetchEvents(siteId, window, filters)
+        .catch(() => emptyEventsData())
+        .then((nextEvents) => {
+          if (!active) return;
+          setEventsData(nextEvents);
+        })
+        .finally(markDone);
+    } else if (activePageCardSource === "sessions") {
+      fetchSessions(siteId, window, filters)
+        .catch(() => emptySessionsData())
+        .then((nextSessions) => {
+          if (!active) return;
+          setSessionsData(nextSessions);
+        })
+        .finally(markDone);
+    } else {
+      fetchPages(siteId, window, filters)
+        .catch(() => emptyPagesData())
+        .then((nextPages) => {
+          if (!active) return;
+          setPagesData(nextPages);
+        })
+        .finally(markDone);
     }
-    return normalizeTrendData(dataWindow, data.trend.data);
+
+    return () => {
+      active = false;
+      setPageCardSourceLoading((prev) =>
+        prev[activePageCardSource]
+          ? { ...prev, [activePageCardSource]: false }
+          : prev,
+      );
+    };
   }, [
-    bundle,
-    loading,
-    dataWindow.from,
-    dataWindow.to,
-    dataWindow.interval,
-    data.trend.data,
+    activePageCardSource,
+    activePageCardSourceLoaded,
+    filters.browser,
+    filters.country,
+    filters.device,
+    filters.eventType,
+    siteId,
+    window.from,
+    window.interval,
+    window.to,
   ]);
-
-  const viewsSeries = detailSeries.map((point) => ({
-    timestampMs: point.timestampMs,
-    value: point.views,
-  }));
-  const visitorsSeries = detailSeries.map((point) => ({
-    timestampMs: point.timestampMs,
-    value: point.visitors,
-  }));
-  const sessionsSeries = detailSeries.map((point) => ({
-    timestampMs: point.timestampMs,
-    value: point.sessions,
-  }));
-  const bounceRateSeries = detailSeries
-    .filter((point) => point.views > 0)
-    .map((point) => ({
-      timestampMs: point.timestampMs,
-      value: point.bounces / point.views,
-    }));
-  const pagesPerSessionSeries = detailSeries
-    .filter((point) => point.sessions > 0)
-    .map((point) => ({
-      timestampMs: point.timestampMs,
-      value: point.views / point.sessions,
-    }));
-  const avgDurationSeries = detailSeries
-    .filter((point) => point.views > 0)
-    .map((point) => ({
-      timestampMs: point.timestampMs,
-      value: point.avgDurationMs,
-    }));
-
-  const eventTypeItems = data.eventTypes.data.map((item) => ({
-    label: item.value || messages.common.unknown,
-    value: item.views,
-  }));
-  const compositionItems = [
-    { label: messages.common.views, value: data.overview.data.views },
-    { label: messages.common.sessions, value: data.overview.data.sessions },
-    { label: messages.common.visitors, value: data.overview.data.visitors },
-    { label: messages.common.bounces, value: data.overview.data.bounces },
-  ];
   const pageCardTabMeta: Record<
     PageCardTab,
     { label: string; columnLabel: string; mono: boolean }
@@ -746,14 +716,14 @@ export function OverviewClientPage({
   };
   const pathRows = useMemo<PageCardRow[]>(
     () =>
-      data.pages.data.map((item) => ({
+      pagesData.data.map((item) => ({
         key: `${item.pathname || "/"}|${item.query || ""}|${item.hash || ""}`,
         label: item.pathname || "/",
         views: Math.max(0, Number(item.views ?? 0)),
         sessions: Math.max(0, Number(item.sessions ?? 0)),
         mono: true,
       })),
-    [data.pages.data],
+    [pagesData.data],
   );
   const titleRows = useMemo<PageCardRow[]>(() => {
     const map = new Map<
@@ -767,7 +737,7 @@ export function OverviewClientPage({
       }
     >();
 
-    for (const event of data.events.data) {
+    for (const event of eventsData.data) {
       const rawTitle = String(event.title ?? "").trim();
       const label = rawTitle.length > 0 ? rawTitle : messages.common.unknown;
       const key = label;
@@ -795,7 +765,7 @@ export function OverviewClientPage({
       sessions: item.sessionIds.size + item.unknownSessions,
       mono: false,
     }));
-  }, [data.events.data, messages.common.unknown]);
+  }, [eventsData.data, messages.common.unknown]);
   const hostnameRows = useMemo<PageCardRow[]>(() => {
     const map = new Map<
       string,
@@ -808,7 +778,7 @@ export function OverviewClientPage({
       }
     >();
 
-    for (const event of data.events.data) {
+    for (const event of eventsData.data) {
       const rawHostname = String(event.hostname ?? "").trim();
       const label =
         rawHostname.length > 0 ? rawHostname : messages.common.unknown;
@@ -837,10 +807,10 @@ export function OverviewClientPage({
       sessions: item.sessionIds.size + item.unknownSessions,
       mono: true,
     }));
-  }, [data.events.data, messages.common.unknown]);
+  }, [eventsData.data, messages.common.unknown]);
   const entryRows = useMemo<PageCardRow[]>(() => {
     const map = new Map<string, { views: number; sessions: number }>();
-    for (const session of data.sessions.data) {
+    for (const session of sessionsData.data) {
       const label = String(session.entryPath ?? "").trim() || "/";
       const prev = map.get(label) ?? { views: 0, sessions: 0 };
       map.set(label, {
@@ -855,10 +825,10 @@ export function OverviewClientPage({
       sessions: value.sessions,
       mono: true,
     }));
-  }, [data.sessions.data]);
+  }, [sessionsData.data]);
   const exitRows = useMemo<PageCardRow[]>(() => {
     const map = new Map<string, { views: number; sessions: number }>();
-    for (const session of data.sessions.data) {
+    for (const session of sessionsData.data) {
       const label = String(session.exitPath ?? "").trim() || "/";
       const prev = map.get(label) ?? { views: 0, sessions: 0 };
       map.set(label, {
@@ -873,7 +843,7 @@ export function OverviewClientPage({
       sessions: value.sessions,
       mono: true,
     }));
-  }, [data.sessions.data]);
+  }, [sessionsData.data]);
   const pageCardRows = useMemo<Record<PageCardTab, PageCardRow[]>>(
     () => ({
       path: pathRows,
@@ -930,7 +900,7 @@ export function OverviewClientPage({
     );
   }, [normalizedPageCardSearchTerm, sortedPageCardRows]);
   const pageCardDefaultHostname = useMemo(() => {
-    for (const event of data.events.data) {
+    for (const event of eventsData.data) {
       const hostname = sanitizeHostname(String(event.hostname ?? ""));
       if (hostname.length > 0) return hostname;
     }
@@ -938,7 +908,7 @@ export function OverviewClientPage({
       return sanitizeHostname(globalThis.window.location.hostname);
     }
     return "";
-  }, [data.events.data]);
+  }, [eventsData.data]);
 
   const togglePageCardSort = (key: PageCardSortKey) => {
     setPageCardSort((prev) =>
@@ -1131,10 +1101,10 @@ export function OverviewClientPage({
       />
       <PanelScrollbar
         className="max-h-[60vh] pr-1"
-        syncKey={`${pageCardTab}-${pageCardSearchTerm}-${searchedPageCardRows.length}-${loading}`}
+        syncKey={`${pageCardTab}-${pageCardSearchTerm}-${searchedPageCardRows.length}-${pageCardLoading}`}
       >
         <DataTableSwitch
-          loading={loading}
+          loading={pageCardLoading}
           hasContent={searchedPageCardRows.length > 0}
           loadingLabel={messages.common.loading}
           emptyLabel={noDataText}
@@ -1176,35 +1146,193 @@ export function OverviewClientPage({
     </Clickable>
   );
 
+  return (
+    <>
+      <TabbedScrollMaskCard
+        value={pageCardTab}
+        onValueChange={(value) => handlePageCardTabChange(value)}
+        tabs={PAGE_CARD_TABS.map((tab) => ({
+          value: tab,
+          label: pageCardTabMeta[tab].label,
+        }))}
+        headerRight={pageCardSearchAction}
+        syncKey={`${pageCardLoading}-${pageCardTab}-${pageCardSort.key}-${pageCardSort.direction}-${sortedPageCardRows.length}-${activePageCardQueryValue ?? "all"}-${visiblePageCardRows.length}`}
+      >
+        <DataTableSwitch
+          loading={pageCardLoading}
+          hasContent={visiblePageCardRows.length > 0}
+          loadingLabel={messages.common.loading}
+          emptyLabel={noDataText}
+          colSpan={3}
+          contentKey={`${pageCardTab}-${activePageCardQueryValue ?? "all"}`}
+          header={pageCardTableHeader}
+          rows={renderPageCardRows(visiblePageCardRows)}
+        />
+      </TabbedScrollMaskCard>
+      {pageCardSearchPanel}
+    </>
+  );
+}
+
+interface OverviewDataSectionProps {
+  locale: Locale;
+  messages: AppMessages;
+  siteId: string;
+  window: TimeWindow;
+  filters: DashboardFilters;
+}
+
+function OverviewMetricsSection({
+  locale,
+  messages,
+  siteId,
+  window,
+  filters,
+}: OverviewDataSectionProps) {
+  const [loading, setLoading] = useState(true);
+  const [overview, setOverview] = useState<OverviewData>(emptyOverviewData);
+  const [previousOverview, setPreviousOverview] =
+    useState<OverviewData>(emptyOverviewData);
+  const [detailSeries, setDetailSeries] = useState<TrendData["data"]>([]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setOverview(emptyOverviewData());
+    setPreviousOverview(emptyOverviewData());
+    setDetailSeries([]);
+
+    const previousTo = Math.max(window.from - 1, 0);
+    const previousFrom = Math.max(previousTo - (window.to - window.from), 0);
+    const previousWindow: TimeWindow = {
+      ...window,
+      from: previousFrom,
+      to: previousTo,
+    };
+
+    (async () => {
+      const current = await fetchOverview(siteId, window, filters, {
+        includeChange: true,
+        includeDetail: true,
+      }).catch(() => emptyOverviewData());
+      if (!active) return;
+      setOverview(current);
+
+      const [previous, trend] = await Promise.all([
+        current.previousData
+          ? Promise.resolve({
+              ok: current.ok,
+              data: current.previousData,
+            } as OverviewData)
+          : fetchOverview(siteId, previousWindow, filters).catch(() =>
+              emptyOverviewData(),
+            ),
+        current.detail
+          ? Promise.resolve({
+              ok: current.ok,
+              interval: current.detail.interval,
+              data: current.detail.data,
+            } as TrendData)
+          : fetchTrend(siteId, window, filters).catch(() =>
+              emptyTrendData(window.interval),
+            ),
+      ]);
+
+      if (!active) return;
+      setPreviousOverview(previous);
+      setDetailSeries(trend.data);
+    })().finally(() => {
+      if (!active) return;
+      setLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    filters.browser,
+    filters.country,
+    filters.device,
+    filters.eventType,
+    siteId,
+    window.from,
+    window.interval,
+    window.to,
+  ]);
+
+  const pagesPerSessionFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(intlLocale(locale), {
+        maximumFractionDigits: 2,
+      }),
+    [locale],
+  );
+  const previous = previousOverview.data;
+  const currentPagesPerSession =
+    overview.data.sessions > 0 ? overview.data.views / overview.data.sessions : 0;
+  const previousPagesPerSession =
+    previous.sessions > 0 ? previous.views / previous.sessions : 0;
+
+  const viewsSeries = detailSeries.map((point) => ({
+    timestampMs: point.timestampMs,
+    value: point.views,
+  }));
+  const visitorsSeries = detailSeries.map((point) => ({
+    timestampMs: point.timestampMs,
+    value: point.visitors,
+  }));
+  const sessionsSeries = detailSeries.map((point) => ({
+    timestampMs: point.timestampMs,
+    value: point.sessions,
+  }));
+  const bounceRateSeries = detailSeries
+    .filter((point) => point.views > 0)
+    .map((point) => ({
+      timestampMs: point.timestampMs,
+      value: point.bounces / point.views,
+    }));
+  const pagesPerSessionSeries = detailSeries
+    .filter((point) => point.sessions > 0)
+    .map((point) => ({
+      timestampMs: point.timestampMs,
+      value: point.views / point.sessions,
+    }));
+  const avgDurationSeries = detailSeries
+    .filter((point) => point.views > 0)
+    .map((point) => ({
+      timestampMs: point.timestampMs,
+      value: point.avgDurationMs,
+    }));
+
   const metrics = [
     {
       label: messages.common.views,
-      value: numberFormat(locale, data.overview.data.views),
-      delta: toDeltaPercent(data.overview.data.views, previous.views),
+      value: numberFormat(locale, overview.data.views),
+      delta: toDeltaPercent(overview.data.views, previous.views),
       trend: viewsSeries,
       formatTrendValue: (value: number) =>
         numberFormat(locale, Math.round(value)),
     },
     {
       label: messages.common.visitors,
-      value: numberFormat(locale, data.overview.data.visitors),
-      delta: toDeltaPercent(data.overview.data.visitors, previous.visitors),
+      value: numberFormat(locale, overview.data.visitors),
+      delta: toDeltaPercent(overview.data.visitors, previous.visitors),
       trend: visitorsSeries,
       formatTrendValue: (value: number) =>
         numberFormat(locale, Math.round(value)),
     },
     {
       label: messages.common.sessions,
-      value: numberFormat(locale, data.overview.data.sessions),
-      delta: toDeltaPercent(data.overview.data.sessions, previous.sessions),
+      value: numberFormat(locale, overview.data.sessions),
+      delta: toDeltaPercent(overview.data.sessions, previous.sessions),
       trend: sessionsSeries,
       formatTrendValue: (value: number) =>
         numberFormat(locale, Math.round(value)),
     },
     {
       label: messages.common.bounceRate,
-      value: percentFormat(locale, data.overview.data.bounceRate),
-      delta: toDeltaPercent(data.overview.data.bounceRate, previous.bounceRate),
+      value: percentFormat(locale, overview.data.bounceRate),
+      delta: toDeltaPercent(overview.data.bounceRate, previous.bounceRate),
       inverted: true,
       trend: bounceRateSeries,
       formatTrendValue: (value: number) => percentFormat(locale, value),
@@ -1219,11 +1347,8 @@ export function OverviewClientPage({
     },
     {
       label: messages.common.avgDuration,
-      value: durationFormat(locale, data.overview.data.avgDurationMs),
-      delta: toDeltaPercent(
-        data.overview.data.avgDurationMs,
-        previous.avgDurationMs,
-      ),
+      value: durationFormat(locale, overview.data.avgDurationMs),
+      delta: toDeltaPercent(overview.data.avgDurationMs, previous.avgDurationMs),
       trend: avgDurationSeries,
       formatTrendValue: (value: number) =>
         durationFormat(locale, Math.max(0, Math.round(value))),
@@ -1231,385 +1356,192 @@ export function OverviewClientPage({
   ];
 
   return (
+    <Card className="gap-0 py-0">
+      <CardContent className="px-0">
+        <section className="grid grid-cols-2 sm:grid-cols-3">
+          {metrics.map((item, index) => {
+            const hasDelta =
+              typeof item.delta === "number" && Number.isFinite(item.delta);
+            const effectiveDelta = hasDelta
+              ? item.inverted
+                ? -(item.delta ?? 0)
+                : (item.delta ?? 0)
+              : null;
+
+            return (
+              <div
+                key={item.label}
+                className={metricCellBorderClasses(index)}
+              >
+                <div className="relative min-h-[74px]">
+                  <div className="absolute inset-y-0 right-0 w-1/2 min-w-0">
+                    <MetricAreaMap
+                      points={item.trend}
+                      color={METRIC_AREA_COLOR}
+                      locale={locale}
+                      label={item.label}
+                      formatValue={item.formatTrendValue}
+                    />
+                  </div>
+                  <div className="pointer-events-none relative z-10 flex min-h-[74px] min-w-0 flex-col justify-between px-3 py-2.5">
+                    <p className="truncate text-xs text-muted-foreground mb-4">
+                      {item.label}
+                    </p>
+                    <div>
+                      <AutoResizer initial>
+                        <AutoTransition initial>
+                          {loading ? (
+                            <div
+                              key="loading"
+                              className="inline-flex items-center"
+                            >
+                              <Spinner className="size-5" />
+                            </div>
+                          ) : (
+                            <p
+                              key="value"
+                              className="inline-flex items-end gap-1.5 font-mono text-2xl font-semibold leading-none tracking-tight"
+                            >
+                              <span>{item.value}</span>
+                              <ChangeRateInline value={effectiveDelta} />
+                            </p>
+                          )}
+                        </AutoTransition>
+                      </AutoResizer>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OverviewTrendSection({
+  locale,
+  messages,
+  siteId,
+  window,
+  filters,
+}: OverviewDataSectionProps) {
+  const [loading, setLoading] = useState(true);
+  const [trendData, setTrendData] = useState<TrendData>(() =>
+    emptyTrendData(window.interval),
+  );
+  const [dataWindow, setDataWindow] = useState<
+    Pick<TimeWindow, "from" | "to" | "interval">
+  >(() => ({
+    from: window.from,
+    to: window.to,
+    interval: window.interval,
+  }));
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setTrendData(emptyTrendData(window.interval));
+
+    fetchTrend(siteId, window, filters)
+      .catch(() => emptyTrendData(window.interval))
+      .then((nextTrend) => {
+        if (!active) return;
+        setTrendData(nextTrend);
+        setDataWindow({
+          from: window.from,
+          to: window.to,
+          interval: window.interval,
+        });
+      })
+      .finally(() => {
+        if (!active) return;
+        setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    filters.browser,
+    filters.country,
+    filters.device,
+    filters.eventType,
+    siteId,
+    window.from,
+    window.interval,
+    window.to,
+  ]);
+
+  const trendDisplayData = useMemo(() => {
+    if (loading) {
+      return buildEmptyTrendData(dataWindow);
+    }
+    return normalizeTrendData(dataWindow, trendData.data);
+  }, [
+    dataWindow.from,
+    dataWindow.interval,
+    dataWindow.to,
+    loading,
+    trendData.data,
+  ]);
+
+  return (
+    <Card className="overflow-visible">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>{messages.overview.trendTitle}</CardTitle>
+        <span className="text-xs text-muted-foreground">
+          {messages.common.lastUpdated}: {shortDateTime(locale, Date.now())}
+        </span>
+      </CardHeader>
+      <CardContent>
+        <TrendChart
+          locale={locale}
+          interval={dataWindow.interval}
+          data={trendDisplayData}
+          viewsLabel={messages.common.views}
+          sessionsLabel={messages.common.sessions}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+export function OverviewClientPage({
+  locale,
+  messages,
+  siteId,
+  pathname,
+}: OverviewClientPageProps) {
+  const { filters, window } = useDashboardQuery();
+
+  return (
     <div className="space-y-6">
       <PageHeading
         title={messages.overview.title}
         subtitle={messages.overview.subtitle}
       />
-
-      <Card className="gap-0 py-0">
-        <CardContent className="px-0">
-          <section className="grid grid-cols-2 sm:grid-cols-3">
-            {metrics.map((item, index) => {
-              const hasDelta =
-                typeof item.delta === "number" && Number.isFinite(item.delta);
-              const effectiveDelta = hasDelta
-                ? item.inverted
-                  ? -(item.delta ?? 0)
-                  : (item.delta ?? 0)
-                : null;
-
-              return (
-                <div
-                  key={item.label}
-                  className={metricCellBorderClasses(index)}
-                >
-                  <div className="relative min-h-[74px]">
-                    <div className="absolute inset-y-0 right-0 w-1/2 min-w-0">
-                      <MetricAreaMap
-                        points={item.trend}
-                        color={METRIC_AREA_COLOR}
-                        locale={locale}
-                        label={item.label}
-                        formatValue={item.formatTrendValue}
-                      />
-                    </div>
-                    <div className="pointer-events-none relative z-10 flex min-h-[74px] min-w-0 flex-col justify-between px-3 py-2.5">
-                      <p className="truncate text-xs text-muted-foreground mb-4">
-                        {item.label}
-                      </p>
-                      <div>
-                        <AutoResizer initial>
-                          <AutoTransition initial>
-                            {loading ? (
-                              <div
-                                key="loading"
-                                className="inline-flex items-center"
-                              >
-                                <Spinner className="size-5" />
-                              </div>
-                            ) : (
-                              <p
-                                key="value"
-                                className="inline-flex items-end gap-1.5 font-mono text-2xl font-semibold leading-none tracking-tight"
-                              >
-                                <span>{item.value}</span>
-                                <ChangeRateInline value={effectiveDelta} />
-                              </p>
-                            )}
-                          </AutoTransition>
-                        </AutoResizer>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </section>
-        </CardContent>
-      </Card>
-
-      <Card className="overflow-visible">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>{messages.overview.trendTitle}</CardTitle>
-          <span className="text-xs text-muted-foreground">
-            {messages.common.lastUpdated}: {shortDateTime(locale, Date.now())}
-          </span>
-        </CardHeader>
-        <CardContent>
-          {!loading && data.trend.data.length === 0 ? (
-            <div className="flex min-h-[120px] items-center justify-center text-sm text-muted-foreground">
-              <p>{noDataText}</p>
-            </div>
-          ) : (
-            <TrendChart
-              locale={locale}
-              interval={dataWindow.interval}
-              data={trendDisplayData}
-              viewsLabel={messages.common.views}
-              sessionsLabel={messages.common.sessions}
-            />
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <TabbedScrollMaskCard
-          value={pageCardTab}
-          onValueChange={(value) => handlePageCardTabChange(value)}
-          tabs={PAGE_CARD_TABS.map((tab) => ({
-            value: tab,
-            label: pageCardTabMeta[tab].label,
-          }))}
-          headerRight={pageCardSearchAction}
-          syncKey={`${loading}-${pageCardTab}-${pageCardSort.key}-${pageCardSort.direction}-${sortedPageCardRows.length}-${activePageCardQueryValue ?? "all"}-${visiblePageCardRows.length}`}
-        >
-          <DataTableSwitch
-            loading={loading}
-            hasContent={visiblePageCardRows.length > 0}
-            loadingLabel={messages.common.loading}
-            emptyLabel={noDataText}
-            colSpan={3}
-            contentKey={`${pageCardTab}-${activePageCardQueryValue ?? "all"}`}
-            header={pageCardTableHeader}
-            rows={renderPageCardRows(visiblePageCardRows)}
-          />
-        </TabbedScrollMaskCard>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.overview.topReferrers}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <DataTableSwitch
-              loading={loading}
-              hasContent={data.referrers.data.length > 0}
-              loadingLabel={messages.common.loading}
-              emptyLabel={noDataText}
-              colSpan={3}
-              contentKey={2}
-              header={
-                <TableRow>
-                  <TableHead>{messages.common.referrer}</TableHead>
-                  <TableHead className="text-right">
-                    {messages.common.views}
-                  </TableHead>
-                  <TableHead className="text-right">
-                    {messages.common.sessions}
-                  </TableHead>
-                </TableRow>
-              }
-              rows={data.referrers.data.map((item) => (
-                <TableRow key={`${item.referrer}-${item.views}`}>
-                  <TableCell className="max-w-[260px] truncate font-mono">
-                    {item.referrer || messages.common.unknown}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {numberFormat(locale, item.views)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {numberFormat(locale, item.sessions)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            />
-          </CardContent>
-        </Card>
-      </div>
-      {pageCardSearchPanel}
-
-      <RealtimePanel siteId={siteId} locale={locale} messages={messages} />
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.overview.engagementTitle}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ContentSwitch
-              loading={loading}
-              hasContent={data.trend.data.length > 0}
-              loadingLabel={messages.common.loading}
-              emptyContent={<p>{noDataText}</p>}
-            >
-              <EngagementChart
-                locale={locale}
-                data={data.trend.data}
-                viewsLabel={messages.common.views}
-                sessionsLabel={messages.common.sessions}
-              />
-            </ContentSwitch>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.overview.compositionTitle}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ContentSwitch
-              loading={loading}
-              hasContent={compositionItems.some((item) => item.value > 0)}
-              loadingLabel={messages.common.loading}
-              emptyContent={<p>{noDataText}</p>}
-            >
-              <DistributionDonutChart items={compositionItems} />
-            </ContentSwitch>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.overview.eventTypesTitle}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ContentSwitch
-              loading={loading}
-              hasContent={eventTypeItems.length > 0}
-              loadingLabel={messages.common.loading}
-              emptyContent={<p>{noDataText}</p>}
-            >
-              <DistributionDonutChart items={eventTypeItems} />
-            </ContentSwitch>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.overview.sessionDurationTitle}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ContentSwitch
-              loading={loading}
-              hasContent={data.sessions.data.length > 0}
-              loadingLabel={messages.common.loading}
-              emptyContent={<p>{noDataText}</p>}
-            >
-              <SessionDurationChart
-                durationsMs={data.sessions.data.map(
-                  (item) => item.totalDurationMs,
-                )}
-              />
-            </ContentSwitch>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.navigation.geo}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ContentSwitch
-              loading={loading}
-              hasContent={data.countries.data.length > 0}
-              loadingLabel={messages.common.loading}
-              emptyContent={<p>{noDataText}</p>}
-            >
-              <TopItemsChart
-                valueLabel={messages.common.views}
-                items={data.countries.data.map((item) => ({
-                  label: item.value || messages.common.unknown,
-                  value: item.views,
-                }))}
-              />
-            </ContentSwitch>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.navigation.devices}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ContentSwitch
-              loading={loading}
-              hasContent={data.devices.data.length > 0}
-              loadingLabel={messages.common.loading}
-              emptyContent={<p>{noDataText}</p>}
-            >
-              <DistributionDonutChart
-                items={data.devices.data.map((item) => ({
-                  label: item.value || messages.common.unknown,
-                  value: item.views,
-                }))}
-              />
-            </ContentSwitch>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.navigation.browsers}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ContentSwitch
-              loading={loading}
-              hasContent={data.browsers.data.length > 0}
-              loadingLabel={messages.common.loading}
-              emptyContent={<p>{noDataText}</p>}
-            >
-              <DistributionDonutChart
-                items={data.browsers.data.map((item) => ({
-                  label: item.value || messages.common.unknown,
-                  value: item.views,
-                }))}
-              />
-            </ContentSwitch>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.overview.recentSessions}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <DataTableSwitch
-              loading={loading}
-              hasContent={data.sessions.data.length > 0}
-              loadingLabel={messages.common.loading}
-              emptyLabel={noDataText}
-              colSpan={3}
-              header={
-                <TableRow>
-                  <TableHead>{messages.common.startedAt}</TableHead>
-                  <TableHead className="text-right">
-                    {messages.common.views}
-                  </TableHead>
-                  <TableHead className="text-right">
-                    {messages.common.duration}
-                  </TableHead>
-                </TableRow>
-              }
-              rows={data.sessions.data.map((session) => (
-                <TableRow key={session.sessionId}>
-                  <TableCell>
-                    {shortDateTime(locale, session.startedAt)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {numberFormat(locale, session.views)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {durationFormat(locale, session.totalDurationMs)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.overview.recentEvents}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <DataTableSwitch
-              loading={loading}
-              hasContent={data.events.data.length > 0}
-              loadingLabel={messages.common.loading}
-              emptyLabel={noDataText}
-              colSpan={3}
-              header={
-                <TableRow>
-                  <TableHead>{messages.common.event}</TableHead>
-                  <TableHead>{messages.common.page}</TableHead>
-                  <TableHead className="text-right">
-                    {messages.common.startedAt}
-                  </TableHead>
-                </TableRow>
-              }
-              rows={data.events.data.map((event) => (
-                <TableRow key={event.id}>
-                  <TableCell>
-                    {event.eventType || messages.common.unknown}
-                  </TableCell>
-                  <TableCell className="max-w-[220px] truncate font-mono">
-                    {event.pathname || "/"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {shortDateTime(locale, event.eventAt)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            />
-          </CardContent>
-        </Card>
-      </div>
+      <OverviewMetricsSection
+        locale={locale}
+        messages={messages}
+        siteId={siteId}
+        window={window}
+        filters={filters}
+      />
+      <OverviewTrendSection
+        locale={locale}
+        messages={messages}
+        siteId={siteId}
+        window={window}
+        filters={filters}
+      />
+      <OverviewPagesSection
+        locale={locale}
+        messages={messages}
+        siteId={siteId}
+        pathname={pathname}
+      />
     </div>
   );
 }

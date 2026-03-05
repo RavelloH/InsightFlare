@@ -13,13 +13,17 @@ interface PageTransitionProps {
 
 export function PageTransition({ children }: PageTransitionProps) {
   const EXIT_DURATION_MS = 280;
+  const ENTER_DURATION_MS = 320;
   const pathname = usePathname();
   const router = useRouter();
   const reduceMotion = useRef(false);
   const exitingRef = useRef(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enterTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<NavigateRequest | null>(null);
-  const [isExiting, setIsExiting] = useState(false);
+  const [transitionState, setTransitionState] = useState<
+    "idle" | "enter" | "exit"
+  >("idle");
   const routeKey = pathname;
 
   const performNavigation = useCallback(
@@ -65,7 +69,7 @@ export function PageTransition({ children }: PageTransitionProps) {
       if (exitingRef.current) return;
       exitingRef.current = true;
       pendingRef.current = request;
-      setIsExiting(true);
+      setTransitionState("exit");
 
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -141,14 +145,37 @@ export function PageTransition({ children }: PageTransitionProps) {
   }, [startExit]);
 
   useEffect(() => {
+    if (enterTimeoutRef.current) {
+      clearTimeout(enterTimeoutRef.current);
+      enterTimeoutRef.current = null;
+    }
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
+    const shouldEnter = exitingRef.current && !reduceMotion.current;
     exitingRef.current = false;
     pendingRef.current = null;
-    setIsExiting(false);
+    if (shouldEnter) {
+      setTransitionState("enter");
+      enterTimeoutRef.current = setTimeout(() => {
+        setTransitionState("idle");
+        enterTimeoutRef.current = null;
+      }, ENTER_DURATION_MS);
+      return;
+    }
+
+    setTransitionState("idle");
   }, [routeKey]);
+
+  useEffect(() => {
+    return () => {
+      if (enterTimeoutRef.current) {
+        clearTimeout(enterTimeoutRef.current);
+        enterTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     window.scrollTo({
@@ -159,9 +186,8 @@ export function PageTransition({ children }: PageTransitionProps) {
 
   return (
     <div
-      key={routeKey}
       data-page-transition
-      data-transition={isExiting ? "exit" : "enter"}
+      data-transition={transitionState}
     >
       {children}
     </div>

@@ -21,14 +21,6 @@ export interface OverviewBundle {
   overview: OverviewData;
   previousOverview: OverviewData;
   trend: TrendData;
-  pages: PagesData;
-  referrers: ReferrersData;
-  sessions: SessionsData;
-  events: EventsData;
-  countries: DimensionData;
-  devices: DimensionData;
-  browsers: DimensionData;
-  eventTypes: DimensionData;
 }
 
 function emptyOverview(): OverviewData {
@@ -261,21 +253,10 @@ export async function loadOverviewBundle(
     to: previousTo,
   };
 
-  const [overview, pages, referrers, sessions, events, countries, devices, browsers, eventTypes] =
-    await Promise.all([
-      fetchOverview(siteId, window, filters, {
-        includeChange: true,
-        includeDetail: true,
-      }).catch(() => emptyOverview()),
-      fetchPages(siteId, window, filters).catch(() => emptyPages()),
-      fetchReferrers(siteId, window, filters).catch(() => emptyReferrers()),
-      fetchSessions(siteId, window, filters).catch(() => emptySessions()),
-      fetchEvents(siteId, window, filters).catch(() => emptyEvents()),
-      fetchCountries(siteId, window, filters).catch(() => emptyDimension()),
-      fetchDevices(siteId, window, filters).catch(() => emptyDimension()),
-      fetchBrowsers(siteId, window, filters).catch(() => emptyDimension()),
-      fetchEventTypes(siteId, window, filters).catch(() => emptyDimension()),
-    ]);
+  const overview = await fetchOverview(siteId, window, filters, {
+    includeChange: true,
+    includeDetail: true,
+  }).catch(() => emptyOverview());
 
   const trend = overview.detail
     ? {
@@ -296,14 +277,6 @@ export async function loadOverviewBundle(
     overview,
     previousOverview,
     trend,
-    pages,
-    referrers,
-    sessions,
-    events,
-    countries,
-    devices,
-    browsers,
-    eventTypes,
   };
 }
 
