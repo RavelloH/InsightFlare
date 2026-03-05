@@ -18,16 +18,19 @@ import {
   safeHostname,
 } from "./utils";
 
-const BUFFER_MAX_SIZE = 20_000;
 const BULK_FLUSH_THRESHOLD = 500;
 const PENDING_PREFIX = "pending:";
+const SNAPSHOT_PREFIX = "snapshot:";
 const FLUSH_PAGE_LIMIT = 500;
 const D1_BATCH_CHUNK_SIZE = 100;
+const SNAPSHOT_QUERY_SCAN_LIMIT = 20_000;
+const SNAPSHOT_BUFFER_RETENTION_MS = 30 * 60 * 1000;
+const ACTIVE_NOW_WINDOW_MS = 5 * 60 * 1000;
+const WS_SNAPSHOT_EVENT_LIMIT = 200;
 
 export class IngestDurableObject extends DurableObject {
   private readonly doState: DurableObjectState;
   private readonly doEnv: Env;
-  private buffer: NormalizedEvent[] = [];
   private sockets = new Set<WebSocket>();
   private isFlushing = false;
 
@@ -65,7 +68,8 @@ export class IngestDurableObject extends DurableObject {
 
   async alarm(): Promise<void> {
     await this.flushToD1();
-    if (await this.hasPendingItems()) {
+    await this.cleanupSnapshotWindow();
+    if (await this.hasPendingItems() || await this.hasSnapshotItems()) {
       await this.doState.storage.setAlarm(Date.now() + TEN_MINUTES_MS);
       return;
     }
@@ -83,13 +87,13 @@ export class IngestDurableObject extends DurableObject {
     const event = await this.normalizeEvent(envelope);
 
     await Promise.all([
-      this.appendToBuffer(event),
+      this.appendToStorage(event),
       this.writeToAnalyticsEngine(event),
       this.pushToWebsocketClients(event),
       this.ensureAlarm(),
     ]);
 
-    if (this.buffer.length >= BULK_FLUSH_THRESHOLD) {
+    if (await this.shouldFlushToD1()) {
       void this.flushToD1();
     }
 
@@ -115,6 +119,7 @@ export class IngestDurableObject extends DurableObject {
 
     server.accept();
     this.sockets.add(server);
+    void this.pushInitialSnapshotToSocket(server);
 
     server.addEventListener("close", () => {
       this.sockets.delete(server);
@@ -134,7 +139,7 @@ export class IngestDurableObject extends DurableObject {
     });
   }
 
-  private handleSnapshot(url: URL): Response {
+  private async handleSnapshot(url: URL): Promise<Response> {
     const fromMsRaw = Number(url.searchParams.get("from") || "0");
     const toMsRaw = Number(url.searchParams.get("to") || String(Date.now()));
     const limitRaw = Number(url.searchParams.get("limit") || "5000");
@@ -142,41 +147,24 @@ export class IngestDurableObject extends DurableObject {
     const fromMs = Number.isFinite(fromMsRaw) ? Math.max(0, Math.floor(fromMsRaw)) : 0;
     const toMs = Number.isFinite(toMsRaw) ? Math.max(fromMs, Math.floor(toMsRaw)) : Date.now();
     const limit = Number.isFinite(limitRaw) ? Math.min(20_000, Math.max(1, Math.floor(limitRaw))) : 5000;
+    const rows = await this.doState.storage.list<NormalizedEvent>({
+      prefix: SNAPSHOT_PREFIX,
+      reverse: true,
+      limit: SNAPSHOT_QUERY_SCAN_LIMIT,
+    });
 
     const payload = {
       ok: true,
-      buffered: this.buffer.length,
+      buffered: rows.size,
       data: [] as Array<Record<string, unknown>>,
     };
 
-    // Snapshot is best-effort; keep fast path when memory buffer is available.
-    for (let i = this.buffer.length - 1; i >= 0; i -= 1) {
+    // Snapshot is best-effort and backed by a short window in Durable Object storage.
+    for (const event of rows.values()) {
       if (payload.data.length >= limit) break;
-      const event = this.buffer[i];
+      if (!event) continue;
       if (event.eventAt < fromMs || event.eventAt > toMs) continue;
-      payload.data.push({
-        id: event.id,
-        eventType: event.eventType,
-        eventAt: event.eventAt,
-        pathname: event.pathname,
-        queryString: event.queryString,
-        hashFragment: event.hashFragment,
-        title: event.title,
-        hostname: event.hostname,
-        referer: event.referer,
-        refererHost: event.refererHost,
-        visitorId: event.visitorId,
-        sessionId: event.sessionId,
-        durationMs: event.durationMs,
-        country: event.country,
-        region: event.region,
-        city: event.city,
-        browser: event.browser,
-        os: event.os,
-        deviceType: event.deviceType,
-        language: event.language,
-        timezone: event.timezone,
-      });
+      payload.data.push(this.serializeSnapshotEvent(event));
     }
 
     return new Response(JSON.stringify(payload), {
@@ -309,12 +297,9 @@ export class IngestDurableObject extends DurableObject {
     }
   }
 
-  private async appendToBuffer(event: NormalizedEvent): Promise<void> {
-    if (this.buffer.length >= BUFFER_MAX_SIZE) {
-      this.buffer.shift();
-    }
-    this.buffer.push(event);
+  private async appendToStorage(event: NormalizedEvent): Promise<void> {
     await this.doState.storage.put(this.pendingStorageKey(event), event);
+    await this.doState.storage.put(this.snapshotStorageKey(event), event);
   }
 
   private pendingStorageKey(event: NormalizedEvent): string {
@@ -322,9 +307,32 @@ export class IngestDurableObject extends DurableObject {
     return `${PENDING_PREFIX}${ts}:${event.id}`;
   }
 
+  private snapshotStorageKey(event: NormalizedEvent): string {
+    const ts = String(event.receivedAt).padStart(13, "0");
+    return `${SNAPSHOT_PREFIX}${ts}:${event.id}`;
+  }
+
+  private snapshotCutoffStorageKey(cutoffMs: number): string {
+    const ts = String(Math.max(0, Math.floor(cutoffMs))).padStart(13, "0");
+    return `${SNAPSHOT_PREFIX}${ts}:`;
+  }
+
   private async hasPendingItems(): Promise<boolean> {
     const rows = await this.doState.storage.list({ prefix: PENDING_PREFIX, limit: 1 });
     return rows.size > 0;
+  }
+
+  private async hasSnapshotItems(): Promise<boolean> {
+    const rows = await this.doState.storage.list({ prefix: SNAPSHOT_PREFIX, limit: 1 });
+    return rows.size > 0;
+  }
+
+  private async shouldFlushToD1(): Promise<boolean> {
+    const rows = await this.doState.storage.list({
+      prefix: PENDING_PREFIX,
+      limit: BULK_FLUSH_THRESHOLD,
+    });
+    return rows.size >= BULK_FLUSH_THRESHOLD;
   }
 
   private async pullPendingEvents(limit: number): Promise<Array<{ key: string; event: NormalizedEvent }>> {
@@ -338,6 +346,84 @@ export class IngestDurableObject extends DurableObject {
       out.push({ key, event: value });
     }
     return out;
+  }
+
+  private serializeSnapshotEvent(event: NormalizedEvent): Record<string, unknown> {
+    return {
+      id: event.id,
+      eventType: event.eventType,
+      eventAt: event.eventAt,
+      pathname: event.pathname,
+      queryString: event.queryString,
+      hashFragment: event.hashFragment,
+      title: event.title,
+      hostname: event.hostname,
+      referer: event.referer,
+      refererHost: event.refererHost,
+      visitorId: event.visitorId,
+      sessionId: event.sessionId,
+      durationMs: event.durationMs,
+      country: event.country,
+      region: event.region,
+      city: event.city,
+      browser: event.browser,
+      os: event.os,
+      deviceType: event.deviceType,
+      language: event.language,
+      timezone: event.timezone,
+    };
+  }
+
+  private async pushInitialSnapshotToSocket(socket: WebSocket): Promise<void> {
+    let message = "";
+    try {
+      const nowMs = Date.now();
+      const activeWindowFromMs = nowMs - ACTIVE_NOW_WINDOW_MS;
+      const rows = await this.doState.storage.list<NormalizedEvent>({
+        prefix: SNAPSHOT_PREFIX,
+        reverse: true,
+        limit: SNAPSHOT_QUERY_SCAN_LIMIT,
+      });
+
+      const activeVisitors = new Set<string>();
+      const events: Array<Record<string, unknown>> = [];
+
+      for (const event of rows.values()) {
+        if (!event) continue;
+        if (event.eventAt < activeWindowFromMs || event.eventAt > nowMs) continue;
+        if (event.visitorId) {
+          activeVisitors.add(event.visitorId);
+        }
+        if (events.length < WS_SNAPSHOT_EVENT_LIMIT) {
+          events.push(this.serializeSnapshotEvent(event));
+        }
+      }
+
+      message = JSON.stringify({
+        type: "snapshot",
+        data: {
+          generatedAt: nowMs,
+          windowMs: ACTIVE_NOW_WINDOW_MS,
+          activeNow: activeVisitors.size,
+          buffered: rows.size,
+          events,
+        },
+      });
+    } catch (error) {
+      console.error("ws_snapshot_init_failed", error);
+      return;
+    }
+
+    try {
+      socket.send(message);
+    } catch {
+      this.sockets.delete(socket);
+      try {
+        socket.close();
+      } catch {
+        // no-op
+      }
+    }
   }
 
   private async writeToAnalyticsEngine(event: NormalizedEvent): Promise<void> {
@@ -405,6 +491,25 @@ export class IngestDurableObject extends DurableObject {
         socket.send(message);
       } catch {
         this.sockets.delete(socket);
+      }
+    }
+  }
+
+  private async cleanupSnapshotWindow(): Promise<void> {
+    const cutoffKey = this.snapshotCutoffStorageKey(Date.now() - SNAPSHOT_BUFFER_RETENTION_MS);
+    while (true) {
+      const rows = await this.doState.storage.list({
+        prefix: SNAPSHOT_PREFIX,
+        end: cutoffKey,
+        limit: FLUSH_PAGE_LIMIT,
+      });
+      if (rows.size === 0) {
+        break;
+      }
+
+      await this.doState.storage.delete(Array.from(rows.keys()));
+      if (rows.size < FLUSH_PAGE_LIMIT) {
+        break;
       }
     }
   }
@@ -527,11 +632,11 @@ export class IngestDurableObject extends DurableObject {
         }
 
         await this.doState.storage.delete(pending.map((x) => x.key));
-        const flushedIds = new Set(pending.map((x) => x.event.id));
-        this.buffer = this.buffer.filter((event) => !flushedIds.has(event.id));
 
         if (pending.length < FLUSH_PAGE_LIMIT) break;
       }
+
+      await this.cleanupSnapshotWindow();
     } catch (error) {
       console.error("flush_d1_failed", error);
     } finally {

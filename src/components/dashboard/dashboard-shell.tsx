@@ -254,6 +254,9 @@ export function DashboardShell({
     ? sites.find((site) => site.slug === resolvedActiveSiteSlug)?.name ||
       resolvedActiveSiteSlug
     : "";
+  const activeSiteId = hasActiveSite
+    ? sites.find((site) => site.slug === resolvedActiveSiteSlug)?.id || ""
+    : "";
   const mobileCurrentLevelName = hasActiveSite ? activeSiteName : activeTeamName;
   const teamOptions = teams.map((team) => ({
     slug: team.slug,
@@ -453,6 +456,7 @@ export function DashboardShell({
                   <DashboardHeaderControls
                     locale={locale}
                     messages={messages}
+                    siteId={activeSiteId}
                     showControls={
                       hasActiveSite || routeState.activeTeamSectionKey === "sites"
                     }

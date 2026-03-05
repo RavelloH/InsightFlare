@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { type DateRange } from "react-day-picker";
+import NumberFlow, { continuous } from "@number-flow/react";
 import {
   RiArrowLeftSLine,
   RiArrowRightSLine,
@@ -56,19 +57,24 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
+import { useRealtimeChannel } from "@/hooks/use-realtime-channel";
 import { intlLocale } from "@/lib/dashboard/format";
 import {
   normalizeCustomDateRange,
   type DashboardInterval,
   type RangePreset,
 } from "@/lib/dashboard/query-state";
+import { isRealtimeMockEnabled } from "@/lib/realtime/client";
+import type { RealtimeConnectionState } from "@/lib/realtime/types";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
 interface DashboardHeaderControlsProps {
   locale: Locale;
   messages: AppMessages;
+  siteId?: string;
   showControls: boolean;
   showFilterSheet: boolean;
 }
@@ -80,6 +86,7 @@ const INTERVAL_ORDER: readonly DashboardInterval[] = [
   "week",
   "month",
 ] as const;
+const USE_REALTIME_MOCK = isRealtimeMockEnabled();
 
 function rangeLabel(messages: AppMessages, range: RangePreset): string {
   if (range === "30m") return messages.ranges.last30m;
@@ -126,6 +133,51 @@ function formatDateSpan(locale: Locale, from?: number, to?: number): string {
     day: "numeric",
   });
   return `${formatter.format(new Date(from as number))} - ${formatter.format(new Date(to as number))}`;
+}
+
+function realtimeStatusText(locale: Locale, status: RealtimeConnectionState): string {
+  if (locale === "zh") {
+    if (status === "connected") return "已连接";
+    if (status === "connecting") return "连接中";
+    if (status === "disconnected") return "重连中";
+    return "连接失败";
+  }
+  if (status === "connected") return "Connected";
+  if (status === "connecting") return "Connecting";
+  if (status === "disconnected") return "Reconnecting";
+  return "Failed";
+}
+
+function RealtimeStatusDot({ status }: { status: RealtimeConnectionState }) {
+  return (
+    <AutoTransition
+      type="scale"
+      duration={0.14}
+      initial={false}
+      className="relative inline-flex size-4 items-center justify-center"
+    >
+      {status === "connected" ? (
+        <span key="connected" className="relative inline-flex size-4 items-center justify-center">
+          <span className="absolute inline-flex size-3 rounded-full bg-emerald-500/70 dark:bg-emerald-400/70 animate-ping" />
+          <span className="inline-flex size-2 rounded-full bg-emerald-500 dark:bg-emerald-400" />
+        </span>
+      ) : status === "connecting" ? (
+        <span key="connecting" className="relative inline-flex size-4 items-center justify-center">
+          <span className="inline-flex size-2 rounded-full bg-slate-400 dark:bg-slate-500 animate-pulse" />
+        </span>
+      ) : status === "disconnected" ? (
+        <span key="disconnected" className="relative inline-flex size-4 items-center justify-center">
+          <span className="absolute inline-flex size-3 rounded-full bg-amber-500/70 dark:bg-amber-400/70 animate-ping" />
+          <span className="inline-flex size-2 rounded-full bg-amber-500 dark:bg-amber-400" />
+        </span>
+      ) : (
+        <span key="failed" className="relative inline-flex size-4 items-center justify-center">
+          <span className="absolute inline-flex size-3 rounded-full bg-rose-500/70 dark:bg-rose-400/70 animate-ping" />
+          <span className="inline-flex size-2 rounded-full bg-rose-500 dark:bg-rose-400" />
+        </span>
+      )}
+    </AutoTransition>
+  );
 }
 
 function shiftTimeWindow(
@@ -209,9 +261,59 @@ function intervalDisabledReason(
   return "";
 }
 
+function RealtimeActiveBadge({
+  activeNow,
+  status,
+  showValue,
+  label,
+  locale,
+}: {
+  activeNow: number;
+  status: RealtimeConnectionState;
+  showValue: boolean;
+  label: string;
+  locale: Locale;
+}) {
+  const statusText = realtimeStatusText(locale, status);
+  const valueText = showValue ? String(activeNow) : "--";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="inline-flex h-9 items-center bg-background px-1 text-xs font-medium text-foreground/90">
+          <AutoTransition
+            type="fade"
+            duration={0.16}
+            initial={false}
+            presenceMode="wait"
+            className="inline-flex items-center"
+          >
+            {showValue ? (
+              <span key="active-now-value" className="inline-flex items-center">
+                <NumberFlow
+                  value={activeNow}
+                  plugins={[continuous]}
+                  className="font-mono tabular-nums"
+                />
+              </span>
+            ) : (
+              <span key="active-now-empty" className="inline-flex w-0 overflow-hidden" aria-hidden />
+            )}
+          </AutoTransition>
+          <span className={showValue ? "ml-2" : ""}>
+            <RealtimeStatusDot status={status} />
+          </span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{`${label}: ${valueText} · ${statusText}`}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function DashboardHeaderControls({
   locale,
   messages,
+  siteId,
   showControls,
   showFilterSheet,
 }: DashboardHeaderControlsProps) {
@@ -222,7 +324,7 @@ export function DashboardHeaderControls({
     uiFilters,
     setRange,
     setCustomRange,
-    setInterval,
+    setInterval: setDashboardInterval,
     setUiFilters,
     clearUiFilters,
     allowedIntervals,
@@ -238,6 +340,14 @@ export function DashboardHeaderControls({
   const [pendingCustomRange, setPendingCustomRange] = useState<
     DateRange | undefined
   >(selectedDateRange);
+  const realtimeSiteId = siteId || (USE_REALTIME_MOCK ? "local-mock-site" : undefined);
+  const showRealtimeBadge = showFilterSheet && (Boolean(siteId) || USE_REALTIME_MOCK);
+  const realtime = useRealtimeChannel(realtimeSiteId, {
+    enabled: showControls && showRealtimeBadge,
+  });
+  const activeNow = realtime.activeNow;
+  const realtimeStatus = realtime.status;
+  const hasRealtimeConnected = realtime.hasConnected;
 
   const orderedAllowedIntervals = INTERVAL_ORDER.filter((value) =>
     allowedIntervals.includes(value),
@@ -307,7 +417,7 @@ export function DashboardHeaderControls({
 
   const handleIntervalValueChange = (value: DashboardInterval) => {
     if (!orderedAllowedIntervals.includes(value)) return;
-    setInterval(value);
+    setDashboardInterval(value);
   };
 
   const handleShiftPeriod = (nextRange: { from: number; to: number } | null) => {
@@ -321,6 +431,15 @@ export function DashboardHeaderControls({
     <>
       <div className="flex flex-wrap items-center justify-end gap-2">
         <div className="flex items-center justify-end gap-2 md:hidden">
+          {showRealtimeBadge ? (
+            <RealtimeActiveBadge
+              activeNow={activeNow}
+              status={realtimeStatus}
+              showValue={hasRealtimeConnected}
+              label={messages.realtime.activeNow}
+              locale={locale}
+            />
+          ) : null}
           <Drawer
             open={mobileFilterDrawerOpen}
             onOpenChange={setMobileFilterDrawerOpen}
@@ -532,6 +651,15 @@ export function DashboardHeaderControls({
         </div>
 
         <div className="hidden flex-wrap items-center justify-end gap-2 md:flex">
+          {showRealtimeBadge ? (
+            <RealtimeActiveBadge
+              activeNow={activeNow}
+              status={realtimeStatus}
+              showValue={hasRealtimeConnected}
+              label={messages.realtime.activeNow}
+              locale={locale}
+            />
+          ) : null}
           <Sheet modal={false}>
             <SheetTrigger asChild disabled={!showFilterSheet}>
               <Button variant="outline" className="gap-2">

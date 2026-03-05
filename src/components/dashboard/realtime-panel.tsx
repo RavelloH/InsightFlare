@@ -1,62 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { AutoResizer } from "@/components/ui/auto-resizer";
-import type { Locale } from "@/lib/i18n/config";
+import { useRealtimeChannel } from "@/hooks/use-realtime-channel";
 import { intlLocale } from "@/lib/dashboard/format";
+import { isRealtimeMockEnabled } from "@/lib/realtime/client";
+import type { RealtimeConnectionState } from "@/lib/realtime/types";
+import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
-type ConnectionState = "connecting" | "connected" | "disconnected";
-
-interface LiveEvent {
-  id: string;
-  eventType: string;
-  eventAt: number;
-  pathname: string;
-  visitorId: string;
-  country: string;
-  browser: string;
-}
+const USE_REALTIME_MOCK = isRealtimeMockEnabled();
 
 interface RealtimePanelProps {
   siteId: string;
   locale: Locale;
   messages: AppMessages;
-}
-
-function toWsUrl(siteId: string): string {
-  const configuredBase = process.env.NEXT_PUBLIC_INSIGHTFLARE_EDGE_URL || "";
-  const origin = configuredBase.length > 0 ? configuredBase : window.location.origin;
-  const url = new URL("/admin/ws", origin);
-  url.searchParams.set("siteId", siteId);
-
-  const wsToken = process.env.NEXT_PUBLIC_ADMIN_WS_TOKEN || "";
-  if (wsToken) {
-    url.searchParams.set("token", wsToken);
-  }
-
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return url.toString();
-}
-
-function normalizeLiveEvent(payload: unknown): LiveEvent | null {
-  if (!payload || typeof payload !== "object") return null;
-  const record = payload as Record<string, unknown>;
-  const eventAt = Number(record.eventAt ?? record.event_at ?? Date.now());
-
-  return {
-    id: String(record.id ?? `${eventAt}-${String(record.visitorId ?? "")}`),
-    eventType: String(record.eventType ?? record.event_type ?? ""),
-    eventAt: Number.isFinite(eventAt) ? eventAt : Date.now(),
-    pathname: String(record.pathname ?? "/"),
-    visitorId: String(record.visitorId ?? record.visitor_id ?? ""),
-    country: String(record.country ?? ""),
-    browser: String(record.browser ?? ""),
-  };
 }
 
 function formatTime(locale: Locale, timestamp: number): string {
@@ -67,72 +29,34 @@ function formatTime(locale: Locale, timestamp: number): string {
   });
 }
 
+function statusLabel(
+  locale: Locale,
+  messages: AppMessages,
+  status: RealtimeConnectionState,
+) {
+  if (status === "connected") {
+    return <span key="connected">{messages.realtime.connected}</span>;
+  }
+  if (status === "connecting") {
+    return (
+      <span key="connecting" className="inline-flex items-center gap-2">
+        <Spinner className="size-3.5" />
+        {messages.common.loading}
+      </span>
+    );
+  }
+  if (status === "failed") {
+    return <span key="failed">{locale === "zh" ? "连接失败" : "Failed"}</span>;
+  }
+  return <span key="disconnected">{messages.realtime.disconnected}</span>;
+}
+
 export function RealtimePanel({ siteId, locale, messages }: RealtimePanelProps) {
-  const [status, setStatus] = useState<ConnectionState>("connecting");
-  const [events, setEvents] = useState<LiveEvent[]>([]);
-
-  useEffect(() => {
-    let socket: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let disposed = false;
-
-    const connect = () => {
-      if (disposed) return;
-      setStatus("connecting");
-
-      socket = new WebSocket(toWsUrl(siteId));
-
-      socket.onopen = () => {
-        setStatus("connected");
-      };
-
-      socket.onmessage = (message) => {
-        try {
-          const payload = JSON.parse(message.data as string) as {
-            type?: string;
-            data?: unknown;
-          };
-          if (payload.type !== "event") return;
-          const normalized = normalizeLiveEvent(payload.data);
-          if (!normalized) return;
-          setEvents((previous) => [normalized, ...previous].slice(0, 20));
-        } catch {
-          // Ignore malformed realtime payload.
-        }
-      };
-
-      socket.onerror = () => {
-        socket?.close();
-      };
-
-      socket.onclose = () => {
-        if (disposed) return;
-        setStatus("disconnected");
-        reconnectTimer = setTimeout(connect, 2000);
-      };
-    };
-
-    connect();
-
-    return () => {
-      disposed = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-        socket.close();
-      }
-    };
-  }, [siteId]);
-
-  const activeNow = useMemo(() => {
-    const cutoff = Date.now() - 5 * 60 * 1000;
-    const visitors = new Set<string>();
-    for (const event of events) {
-      if (event.eventAt >= cutoff && event.visitorId) {
-        visitors.add(event.visitorId);
-      }
-    }
-    return visitors.size;
-  }, [events]);
+  const realtimeSiteId = siteId || (USE_REALTIME_MOCK ? "local-mock-site" : undefined);
+  const realtime = useRealtimeChannel(realtimeSiteId, {
+    enabled: Boolean(siteId) || USE_REALTIME_MOCK,
+  });
+  const events = useMemo(() => realtime.events.slice(0, 20), [realtime.events]);
 
   return (
     <Card>
@@ -141,18 +65,9 @@ export function RealtimePanel({ siteId, locale, messages }: RealtimePanelProps) 
           <CardTitle>{messages.realtime.title}</CardTitle>
           <p className="text-xs text-muted-foreground">{messages.realtime.subtitle}</p>
         </div>
-        <Badge variant={status === "connected" ? "default" : "outline"}>
+        <Badge variant={realtime.status === "connected" ? "default" : "outline"}>
           <AutoTransition className="inline-flex items-center gap-2">
-            {status === "connected" ? (
-              <span key="connected">{messages.realtime.connected}</span>
-            ) : status === "connecting" ? (
-              <span key="connecting" className="inline-flex items-center gap-2">
-                <Spinner className="size-3.5" />
-                {messages.common.loading}
-              </span>
-            ) : (
-              <span key="disconnected">{messages.realtime.disconnected}</span>
-            )}
+            {statusLabel(locale, messages, realtime.status)}
           </AutoTransition>
         </Badge>
       </CardHeader>
@@ -161,12 +76,12 @@ export function RealtimePanel({ siteId, locale, messages }: RealtimePanelProps) 
           <p className="text-sm text-muted-foreground">{messages.realtime.activeNow}</p>
           <p className="text-2xl font-semibold">
             <AutoTransition initial className="inline-flex min-w-[2ch] justify-end">
-              {status === "connecting" ? (
+              {realtime.status === "connecting" ? (
                 <span key="active-loading" className="inline-flex items-center">
                   <Spinner className="size-5" />
                 </span>
               ) : (
-                <span key="active-value">{activeNow}</span>
+                <span key="active-value">{realtime.activeNow}</span>
               )}
             </AutoTransition>
           </p>

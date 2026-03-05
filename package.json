@@ -33,6 +33,7 @@
   "dependencies": {
     "@base-ui/react": "^1.2.0",
     "@noble/hashes": "^2.0.1",
+    "@number-flow/react": "^0.6.0",
     "@remixicon/react": "^4.9.0",
     "apache-arrow": "21.1.0",
     "class-variance-authority": "^0.7.1",
