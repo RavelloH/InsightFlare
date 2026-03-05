@@ -23,6 +23,11 @@ export interface AppMessages {
     bounceRate: string;
     avgDuration: string;
     page: string;
+    path: string;
+    title: string;
+    hostname: string;
+    entryPage: string;
+    exitPage: string;
     referrer: string;
     startedAt: string;
     endedAt: string;
@@ -381,4 +386,3 @@ const DICTIONARIES: Record<Locale, AppMessages> = {
 export function getMessages(locale: Locale): AppMessages {
   return DICTIONARIES[locale];
 }
-

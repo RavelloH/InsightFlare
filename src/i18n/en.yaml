@@ -17,6 +17,11 @@ common:
   bounceRate: Bounce Rate
   avgDuration: Avg. Duration
   page: Page
+  path: Path
+  title: Title
+  hostname: Hostname
+  entryPage: Entry Page
+  exitPage: Exit Page
   referrer: Referrer
   startedAt: Started
   endedAt: Ended

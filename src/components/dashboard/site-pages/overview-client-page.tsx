@@ -1,7 +1,17 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
-import { RiArrowDownLine, RiArrowUpLine } from "@remixicon/react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from "react";
+import {
+  RiArrowDownLine,
+  RiArrowDownSLine,
+  RiArrowUpLine,
+  RiArrowUpSLine,
+} from "@remixicon/react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
@@ -14,6 +24,7 @@ import { SessionDurationChart } from "@/components/dashboard/session-duration-ch
 import { RealtimePanel } from "@/components/dashboard/realtime-panel";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
+import { TabbedScrollMaskCard } from "@/components/dashboard/tabbed-scroll-mask-card";
 import { Spinner } from "@/components/ui/spinner";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -258,6 +269,25 @@ interface MetricAreaPoint {
   value: number;
 }
 
+type PageCardTab = "path" | "title" | "hostname" | "entry" | "exit";
+type PageCardSortKey = "views" | "sessions";
+
+interface PageCardRow {
+  key: string;
+  label: string;
+  views: number;
+  sessions: number;
+  mono: boolean;
+}
+
+const PAGE_CARD_TABS: PageCardTab[] = [
+  "path",
+  "title",
+  "hostname",
+  "entry",
+  "exit",
+];
+
 function MetricAreaMap({
   points,
   color,
@@ -373,6 +403,14 @@ export function OverviewClientPage({
   const [filterOptions, setFilterOptions] =
     useState<FilterOptions>(EMPTY_FILTER_OPTIONS);
   const [loading, setLoading] = useState(true);
+  const [pageCardTab, setPageCardTab] = useState<PageCardTab>("path");
+  const [pageCardSort, setPageCardSort] = useState<{
+    key: PageCardSortKey;
+    direction: "asc" | "desc";
+  }>({
+    key: "views",
+    direction: "desc",
+  });
   const [dataWindow, setDataWindow] = useState<
     Pick<TimeWindow, "from" | "to" | "interval">
   >(() => ({
@@ -504,6 +542,220 @@ export function OverviewClientPage({
     { label: messages.common.visitors, value: data.overview.data.visitors },
     { label: messages.common.bounces, value: data.overview.data.bounces },
   ];
+  const pageCardTabMeta: Record<
+    PageCardTab,
+    { label: string; columnLabel: string; mono: boolean }
+  > = {
+    path: {
+      label: messages.common.path,
+      columnLabel: messages.common.path,
+      mono: true,
+    },
+    title: {
+      label: messages.common.title,
+      columnLabel: messages.common.title,
+      mono: false,
+    },
+    hostname: {
+      label: messages.common.hostname,
+      columnLabel: messages.common.hostname,
+      mono: true,
+    },
+    entry: {
+      label: messages.common.entryPage,
+      columnLabel: messages.common.entryPage,
+      mono: true,
+    },
+    exit: {
+      label: messages.common.exitPage,
+      columnLabel: messages.common.exitPage,
+      mono: true,
+    },
+  };
+  const pathRows = useMemo<PageCardRow[]>(
+    () =>
+      data.pages.data.map((item) => ({
+        key: `${item.pathname || "/"}|${item.query || ""}|${item.hash || ""}`,
+        label: item.pathname || "/",
+        views: Math.max(0, Number(item.views ?? 0)),
+        sessions: Math.max(0, Number(item.sessions ?? 0)),
+        mono: true,
+      })),
+    [data.pages.data],
+  );
+  const titleRows = useMemo<PageCardRow[]>(() => {
+    const map = new Map<
+      string,
+      {
+        key: string;
+        label: string;
+        views: number;
+        sessionIds: Set<string>;
+        unknownSessions: number;
+      }
+    >();
+
+    for (const event of data.events.data) {
+      const rawTitle = String(event.title ?? "").trim();
+      const label = rawTitle.length > 0 ? rawTitle : messages.common.unknown;
+      const key = label;
+      const prev = map.get(key) ?? {
+        key,
+        label,
+        views: 0,
+        sessionIds: new Set<string>(),
+        unknownSessions: 0,
+      };
+      prev.views += 1;
+      const sessionId = String(event.sessionId ?? "").trim();
+      if (sessionId.length > 0) {
+        prev.sessionIds.add(sessionId);
+      } else {
+        prev.unknownSessions += 1;
+      }
+      map.set(key, prev);
+    }
+
+    return Array.from(map.values()).map((item) => ({
+      key: item.key,
+      label: item.label,
+      views: item.views,
+      sessions: item.sessionIds.size + item.unknownSessions,
+      mono: false,
+    }));
+  }, [data.events.data, messages.common.unknown]);
+  const hostnameRows = useMemo<PageCardRow[]>(() => {
+    const map = new Map<
+      string,
+      {
+        key: string;
+        label: string;
+        views: number;
+        sessionIds: Set<string>;
+        unknownSessions: number;
+      }
+    >();
+
+    for (const event of data.events.data) {
+      const rawHostname = String(event.hostname ?? "").trim();
+      const label =
+        rawHostname.length > 0 ? rawHostname : messages.common.unknown;
+      const key = label;
+      const prev = map.get(key) ?? {
+        key,
+        label,
+        views: 0,
+        sessionIds: new Set<string>(),
+        unknownSessions: 0,
+      };
+      prev.views += 1;
+      const sessionId = String(event.sessionId ?? "").trim();
+      if (sessionId.length > 0) {
+        prev.sessionIds.add(sessionId);
+      } else {
+        prev.unknownSessions += 1;
+      }
+      map.set(key, prev);
+    }
+
+    return Array.from(map.values()).map((item) => ({
+      key: item.key,
+      label: item.label,
+      views: item.views,
+      sessions: item.sessionIds.size + item.unknownSessions,
+      mono: true,
+    }));
+  }, [data.events.data, messages.common.unknown]);
+  const entryRows = useMemo<PageCardRow[]>(() => {
+    const map = new Map<string, { views: number; sessions: number }>();
+    for (const session of data.sessions.data) {
+      const label = String(session.entryPath ?? "").trim() || "/";
+      const prev = map.get(label) ?? { views: 0, sessions: 0 };
+      map.set(label, {
+        views: prev.views + Math.max(0, Number(session.views ?? 0)),
+        sessions: prev.sessions + 1,
+      });
+    }
+    return Array.from(map.entries()).map(([label, value]) => ({
+      key: label,
+      label,
+      views: value.views,
+      sessions: value.sessions,
+      mono: true,
+    }));
+  }, [data.sessions.data]);
+  const exitRows = useMemo<PageCardRow[]>(() => {
+    const map = new Map<string, { views: number; sessions: number }>();
+    for (const session of data.sessions.data) {
+      const label = String(session.exitPath ?? "").trim() || "/";
+      const prev = map.get(label) ?? { views: 0, sessions: 0 };
+      map.set(label, {
+        views: prev.views + Math.max(0, Number(session.views ?? 0)),
+        sessions: prev.sessions + 1,
+      });
+    }
+    return Array.from(map.entries()).map(([label, value]) => ({
+      key: label,
+      label,
+      views: value.views,
+      sessions: value.sessions,
+      mono: true,
+    }));
+  }, [data.sessions.data]);
+  const pageCardRows = useMemo<Record<PageCardTab, PageCardRow[]>>(
+    () => ({
+      path: pathRows,
+      title: titleRows,
+      hostname: hostnameRows,
+      entry: entryRows,
+      exit: exitRows,
+    }),
+    [pathRows, titleRows, hostnameRows, entryRows, exitRows],
+  );
+  const activePageTabMeta = pageCardTabMeta[pageCardTab];
+  const sortedPageCardRows = useMemo(() => {
+    const source = pageCardRows[pageCardTab];
+    const direction = pageCardSort.direction === "asc" ? 1 : -1;
+
+    return [...source].sort((left, right) => {
+      const primary =
+        (left[pageCardSort.key] - right[pageCardSort.key]) * direction;
+      if (primary !== 0) return primary;
+      return left.label.localeCompare(right.label);
+    });
+  }, [pageCardRows, pageCardSort.direction, pageCardSort.key, pageCardTab]);
+  const pageCardProgressTotal = useMemo(
+    () =>
+      sortedPageCardRows.reduce(
+        (sum, item) => sum + Math.max(0, Number(item[pageCardSort.key] ?? 0)),
+        0,
+      ),
+    [sortedPageCardRows, pageCardSort.key],
+  );
+
+  const togglePageCardSort = (key: PageCardSortKey) => {
+    setPageCardSort((prev) =>
+      prev.key === key
+        ? { key, direction: prev.direction === "desc" ? "asc" : "desc" }
+        : { key, direction: "desc" },
+    );
+  };
+  const renderSortIndicator = (key: PageCardSortKey) => {
+    if (pageCardSort.key === key) {
+      return pageCardSort.direction === "desc" ? (
+        <RiArrowDownSLine className="size-3.5" />
+      ) : (
+        <RiArrowUpSLine className="size-3.5" />
+      );
+    }
+
+    return (
+      <span className="inline-flex flex-col leading-none text-muted-foreground">
+        <RiArrowUpSLine className="-mb-1 size-3.5" />
+        <RiArrowDownSLine className="-mt-1 size-3.5" />
+      </span>
+    );
+  };
 
   const metrics = [
     {
@@ -653,44 +905,110 @@ export function OverviewClientPage({
       </Card>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>{messages.overview.topPages}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <DataTableSwitch
-              loading={loading}
-              hasContent={data.pages.data.length > 0}
-              loadingLabel={messages.common.loading}
-              emptyLabel={noDataText}
-              colSpan={3}
-              header={
-                <TableRow>
-                  <TableHead>{messages.common.page}</TableHead>
-                  <TableHead className="text-right">
-                    {messages.common.views}
-                  </TableHead>
-                  <TableHead className="text-right">
-                    {messages.common.sessions}
-                  </TableHead>
+        <TabbedScrollMaskCard
+          value={pageCardTab}
+          onValueChange={(value) => setPageCardTab(value)}
+          tabs={PAGE_CARD_TABS.map((tab) => ({
+            value: tab,
+            label: pageCardTabMeta[tab].label,
+          }))}
+          syncKey={`${loading}-${pageCardTab}-${pageCardSort.key}-${pageCardSort.direction}-${sortedPageCardRows.length}`}
+        >
+          <DataTableSwitch
+            loading={loading}
+            hasContent={sortedPageCardRows.length > 0}
+            loadingLabel={messages.common.loading}
+            emptyLabel={noDataText}
+            colSpan={3}
+            contentKey={pageCardTab}
+            header={
+              <TableRow>
+                <TableHead className="h-8 p-0">
+                  <div className="px-4">{activePageTabMeta.columnLabel}</div>
+                </TableHead>
+                <TableHead className="h-8 p-0 w-20">
+                  <div className="flex justify-end px-2">
+                    <button
+                      type="button"
+                      className={cn(
+                        "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+                        pageCardSort.key === "views"
+                          ? "text-foreground"
+                          : "text-muted-foreground",
+                      )}
+                      onClick={() => togglePageCardSort("views")}
+                    >
+                      {messages.common.views}
+                      {renderSortIndicator("views")}
+                    </button>
+                  </div>
+                </TableHead>
+                <TableHead className="h-8 p-0 w-20">
+                  <div className="flex justify-end px-2">
+                    <button
+                      type="button"
+                      className={cn(
+                        "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+                        pageCardSort.key === "sessions"
+                          ? "text-foreground"
+                          : "text-muted-foreground",
+                      )}
+                      onClick={() => togglePageCardSort("sessions")}
+                    >
+                      {messages.common.sessions}
+                      {renderSortIndicator("sessions")}
+                    </button>
+                  </div>
+                </TableHead>
+              </TableRow>
+            }
+            rows={sortedPageCardRows.map((item) => {
+              const rowValue = Math.max(
+                0,
+                Number(item[pageCardSort.key] ?? 0),
+              );
+              const progressPercent =
+                pageCardProgressTotal > 0
+                  ? Math.min(100, (rowValue / pageCardProgressTotal) * 100)
+                  : 0;
+              const progressWidth = `${progressPercent.toFixed(2)}%`;
+
+              return (
+                <TableRow
+                  key={`${pageCardTab}-${item.key}`}
+                  className="bg-no-repeat transition-[background-size] duration-300 ease-out"
+                  style={{
+                    backgroundImage:
+                      "linear-gradient(90deg, var(--muted) 0%, var(--muted) 100%)",
+                    backgroundSize: `${progressWidth} 100%`,
+                    backgroundPosition: "left top",
+                  }}
+                >
+                  <TableCell className="p-0 whitespace-normal align-top">
+                    <div
+                      className={cn(
+                        "px-4 py-2 leading-5 whitespace-normal break-words",
+                        activePageTabMeta.mono && "font-mono",
+                      )}
+                    >
+                      {item.label}
+                    </div>
+                  </TableCell>
+                  <TableCell className="p-0">
+                    <div className="px-2 py-2 text-right">
+                      {numberFormat(locale, item.views)}
+                    </div>
+                  </TableCell>
+                  <TableCell className="p-0">
+                    <div className="px-4 py-2 text-right">
+                      {numberFormat(locale, item.sessions)}
+                    </div>
+                  </TableCell>
                 </TableRow>
-              }
-              rows={data.pages.data.map((item) => (
-                <TableRow key={`${item.pathname}-${item.views}`}>
-                  <TableCell className="max-w-[260px] truncate font-mono">
-                    {item.pathname || "/"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {numberFormat(locale, item.views)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {numberFormat(locale, item.sessions)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            />
-          </CardContent>
-        </Card>
+              );
+            })}
+          />
+        </TabbedScrollMaskCard>
 
         <Card>
           <CardHeader>
@@ -703,6 +1021,7 @@ export function OverviewClientPage({
               loadingLabel={messages.common.loading}
               emptyLabel={noDataText}
               colSpan={3}
+              contentKey={2}
               header={
                 <TableRow>
                   <TableHead>{messages.common.referrer}</TableHead>

@@ -20,6 +20,7 @@ interface DataTableSwitchProps {
   colSpan: number;
   header: ReactNode;
   rows: ReactNode;
+  contentKey?: string | number;
 }
 
 export function DataTableSwitch({
@@ -30,16 +31,20 @@ export function DataTableSwitch({
   colSpan,
   header,
   rows,
+  contentKey,
 }: DataTableSwitchProps) {
   return (
     <AutoResizer initial>
-      <AutoTransition initial duration={0.22}>
+      <AutoTransition initial>
         {loading ? (
           <Table key="loading">
             <TableHeader>{header}</TableHeader>
             <TableBody>
               <TableRow>
-                <TableCell colSpan={colSpan} className="h-32 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={colSpan}
+                  className="h-32 text-center text-muted-foreground"
+                >
                   <span className="inline-flex items-center gap-2">
                     <Spinner className="size-4" />
                     {loadingLabel}
@@ -49,7 +54,7 @@ export function DataTableSwitch({
             </TableBody>
           </Table>
         ) : hasContent ? (
-          <Table key="content">
+          <Table key={contentKey ?? "content"}>
             <TableHeader>{header}</TableHeader>
             <TableBody>{rows}</TableBody>
           </Table>
@@ -58,7 +63,10 @@ export function DataTableSwitch({
             <TableHeader>{header}</TableHeader>
             <TableBody>
               <TableRow>
-                <TableCell colSpan={colSpan} className="h-24 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={colSpan}
+                  className="h-24 text-center text-muted-foreground"
+                >
                   {emptyLabel}
                 </TableCell>
               </TableRow>
@@ -69,4 +77,3 @@ export function DataTableSwitch({
     </AutoResizer>
   );
 }
-

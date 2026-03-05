@@ -17,6 +17,11 @@ common:
   bounceRate: 跳出率
   avgDuration: 平均停留
   page: 页面
+  path: 路径
+  title: 标题
+  hostname: 主机名
+  entryPage: 入口页面
+  exitPage: 出口页面
   referrer: 来源
   startedAt: 开始时间
   endedAt: 结束时间

@@ -163,7 +163,7 @@ function RealtimeStatusDot({ status }: { status: RealtimeConnectionState }) {
         </span>
       ) : status === "connecting" ? (
         <span key="connecting" className="relative inline-flex size-4 items-center justify-center">
-          <span className="inline-flex size-2 rounded-full bg-slate-400 dark:bg-slate-500 animate-pulse" />
+          <span className="inline-flex size-2 rounded-full bg-neutral-500 dark:bg-neutral-400 animate-pulse" />
         </span>
       ) : status === "disconnected" ? (
         <span key="disconnected" className="relative inline-flex size-4 items-center justify-center">
@@ -280,7 +280,7 @@ function RealtimeActiveBadge({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="inline-flex h-9 items-center bg-background px-1 text-xs font-medium text-foreground/90">
+        <div className="inline-flex h-9 items-center px-1 text-xs font-medium text-foreground/90">
           <AutoTransition
             type="fade"
             duration={0.16}
