@@ -28,7 +28,6 @@ import {
   queryAeTopOrganizations,
   queryAeTopPages,
   queryAeTopRegions,
-  queryAeTopScreenSizes,
   queryAeTopTimezones,
   queryAeTopTitles,
   queryAeTrend,
@@ -220,6 +219,10 @@ function toAeFilters(filters: DashboardFilters): AeQueryFilters {
     device: filters.device,
     browser: filters.browser,
   };
+}
+
+function hasDashboardFilters(filters: DashboardFilters): boolean {
+  return Boolean(filters.country || filters.device || filters.browser);
 }
 
 function shouldUseAnalyticsEngine(env: Env, fromMs: number, nowMs: number): boolean {
@@ -492,21 +495,46 @@ function cityValueExpr(): string {
   return "CASE WHEN TRIM(country) = '' AND TRIM(region_code) = '' AND TRIM(region) = '' AND TRIM(city) = '' THEN '' ELSE TRIM(country) || '::' || CASE WHEN TRIM(region_code) != '' THEN TRIM(region_code) ELSE TRIM(region) END || '::' || TRIM(region) || '::' || TRIM(city) END";
 }
 
+const VISIT_SOURCE_COLUMNS = `
+  visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at,
+  ended_at, finalized_at, duration_ms, duration_source, exit_reason,
+  pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
+  utm_source, utm_medium, utm_campaign, utm_term, utm_content,
+  is_eu, country, region, region_code, city, continent, latitude, longitude,
+  postal_code, metro_code, timezone, as_organization, ua_raw, browser, browser_version,
+  os, os_version, device_type, screen_width, screen_height, language, ae_synced_at
+`;
+
+const CUSTOM_EVENT_SOURCE_COLUMNS = `
+  event_id, site_id, visit_id, visitor_id, session_id, occurred_at, event_name, event_data_json,
+  pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
+  country, region, city, browser, os, os_version, device_type, language, timezone,
+  screen_width, screen_height, ae_synced_at
+`;
+
 function buildVisitSourceCte(): string {
   return `
 visit_source AS (
-  SELECT * FROM visits WHERE site_id = ? AND started_at BETWEEN ? AND ?
+  SELECT ${VISIT_SOURCE_COLUMNS}
+  FROM visits
+  WHERE site_id = ? AND started_at BETWEEN ? AND ?
   UNION ALL
-  SELECT * FROM visits_archive WHERE site_id = ? AND started_at BETWEEN ? AND ?
+  SELECT ${VISIT_SOURCE_COLUMNS}
+  FROM visits_archive
+  WHERE site_id = ? AND started_at BETWEEN ? AND ?
 )`;
 }
 
 function buildCustomEventSourceCte(): string {
   return `
 event_source AS (
-  SELECT * FROM custom_events WHERE site_id = ? AND occurred_at BETWEEN ? AND ?
+  SELECT ${CUSTOM_EVENT_SOURCE_COLUMNS}
+  FROM custom_events
+  WHERE site_id = ? AND occurred_at BETWEEN ? AND ?
   UNION ALL
-  SELECT * FROM custom_events_archive WHERE site_id = ? AND occurred_at BETWEEN ? AND ?
+  SELECT ${CUSTOM_EVENT_SOURCE_COLUMNS}
+  FROM custom_events_archive
+  WHERE site_id = ? AND occurred_at BETWEEN ? AND ?
 )`;
 }
 
@@ -745,6 +773,9 @@ async function queryOverviewAggregate(
   window: QueryWindow,
   filters: DashboardFilters,
 ): Promise<PreferredSourceResult<OverviewAggregateRow>> {
+  if (hasDashboardFilters(filters)) {
+    return { value: await queryOverviewFromD1(env, siteId, window, filters), source: "d1" };
+  }
   return loadWithPreferredSource(
     env,
     window,
@@ -762,6 +793,9 @@ async function queryTrendAggregate(
   interval: Interval,
   filters: DashboardFilters,
 ): Promise<PreferredSourceResult<TrendAggregateRow[]>> {
+  if (hasDashboardFilters(filters)) {
+    return { value: await queryTrendFromD1(env, siteId, window, interval, filters), source: "d1" };
+  }
   return loadWithPreferredSource(
     env,
     window,
@@ -1003,8 +1037,13 @@ async function buildOverviewClientDimensionTabs(
           queryAeTopLanguages(env, siteId, window, limit, aeFilters).then(
             mapAeDimensions,
           ),
-          queryAeTopScreenSizes(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
+          queryVisitDimensionFromD1(
+            env,
+            siteId,
+            window,
+            filters,
+            limit,
+            screenSizeExpr(),
           ),
         ]);
       return { browser, osVersion, deviceType, language, screenSize };

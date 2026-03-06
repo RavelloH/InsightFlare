@@ -97,97 +97,48 @@ export function isRangeWithinAnalyticsWindow(fromMs: number, nowMs: number): boo
   return fromMs >= nowMs - ANALYTICS_WINDOW_MS;
 }
 
-function buildVisitFilterClause(filters?: AeQueryFilters): string {
+function buildVisitFilterClause(filters?: AeQueryFilters, alias = ""): string {
+  const prefix = alias ? `${alias}.` : "";
   const clauses: string[] = [];
   if (filters?.country) {
-    clauses.push(`country = ${sqlString(filters.country.trim())}`);
+    clauses.push(`${prefix}blob11 = ${sqlString(filters.country.trim())}`);
   }
   if (filters?.device) {
-    clauses.push(`device_type = ${sqlString(filters.device.trim())}`);
+    clauses.push(`${prefix}blob17 = ${sqlString(filters.device.trim())}`);
   }
   if (filters?.browser) {
-    clauses.push(`browser = ${sqlString(filters.browser.trim())}`);
+    clauses.push(`${prefix}blob14 = ${sqlString(filters.browser.trim())}`);
   }
-  return clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  return clauses.length > 0 ? clauses.join("\n  AND ") : "";
 }
 
-function visitCtes(siteId: string, range: AeRange): string {
-  return `
-visit_rows AS (
-  SELECT
-    blob1 AS row_type,
-    blob2 AS visit_id,
-    blob3 AS visitor_id,
-    blob4 AS session_id,
-    blob5 AS pathname,
-    blob6 AS query_string,
-    blob7 AS hash_fragment,
-    blob8 AS hostname,
-    blob9 AS referrer_url,
-    blob10 AS referrer_host,
-    blob11 AS country,
-    blob12 AS region,
-    blob13 AS city,
-    blob14 AS browser,
-    blob15 AS os,
-    blob16 AS os_version,
-    blob17 AS device_type,
-    blob18 AS language,
-    blob19 AS timezone,
-    blob20 AS extra_value,
-    index2 AS continent,
-    index3 AS as_organization,
-    double1 AS event_at,
-    double2 AS duration_ms,
-    double3 AS started_at,
-    double4 AS screen_width,
-    double5 AS screen_height
-  FROM ${DATASET}
-  WHERE index1 = ${sqlString(siteId)}
-    AND double6 >= ${LAYOUT_VERSION}
-    AND double3 BETWEEN ${Math.floor(range.fromMs)} AND ${Math.floor(range.toMs)}
-    AND blob1 IN ('visit_start', 'visit_finalize')
-),
-visits AS (
-  SELECT
-    visit_id,
-    argMax(visitor_id, if(row_type = 'visit_start', event_at, -1)) AS visitor_id,
-    argMax(session_id, if(row_type = 'visit_start', event_at, -1)) AS session_id,
-    argMax(pathname, if(row_type = 'visit_start', event_at, -1)) AS pathname,
-    argMax(query_string, if(row_type = 'visit_start', event_at, -1)) AS query_string,
-    argMax(hash_fragment, if(row_type = 'visit_start', event_at, -1)) AS hash_fragment,
-    argMax(hostname, if(row_type = 'visit_start', event_at, -1)) AS hostname,
-    argMax(referrer_url, if(row_type = 'visit_start', event_at, -1)) AS referrer_url,
-    argMax(referrer_host, if(row_type = 'visit_start', event_at, -1)) AS referrer_host,
-    argMax(country, if(row_type = 'visit_start', event_at, -1)) AS country,
-    argMax(region, if(row_type = 'visit_start', event_at, -1)) AS region,
-    argMax(city, if(row_type = 'visit_start', event_at, -1)) AS city,
-    argMax(browser, if(row_type = 'visit_start', event_at, -1)) AS browser,
-    argMax(os, if(row_type = 'visit_start', event_at, -1)) AS os,
-    argMax(os_version, if(row_type = 'visit_start', event_at, -1)) AS os_version,
-    argMax(device_type, if(row_type = 'visit_start', event_at, -1)) AS device_type,
-    argMax(language, if(row_type = 'visit_start', event_at, -1)) AS language,
-    argMax(timezone, if(row_type = 'visit_start', event_at, -1)) AS timezone,
-    argMax(continent, if(row_type = 'visit_start', event_at, -1)) AS continent,
-    argMax(as_organization, if(row_type = 'visit_start', event_at, -1)) AS as_organization,
-    argMax(extra_value, if(row_type = 'visit_start', event_at, -1)) AS title,
-    argMax(screen_width, if(row_type = 'visit_start', event_at, -1)) AS screen_width,
-    argMax(screen_height, if(row_type = 'visit_start', event_at, -1)) AS screen_height,
-    max(if(row_type = 'visit_start', started_at, NULL)) AS started_at,
-    max(if(row_type = 'visit_finalize', event_at, NULL)) AS finalized_at,
-    max(if(row_type = 'visit_finalize', duration_ms, NULL)) AS duration_ms,
-    argMax(extra_value, if(row_type = 'visit_finalize', event_at, -1)) AS finalize_meta
-  FROM visit_rows
-  GROUP BY visit_id
-)`;
+function buildStartWhere(siteId: string, range: AeRange, alias = ""): string {
+  const prefix = alias ? `${alias}.` : "";
+  return [
+    `${prefix}index1 = ${sqlString(siteId)}`,
+    `${prefix}double6 >= ${LAYOUT_VERSION}`,
+    `${prefix}blob1 = 'visit_start'`,
+    `${prefix}double3 BETWEEN ${Math.floor(range.fromMs)} AND ${Math.floor(range.toMs)}`,
+  ].join("\n  AND ");
 }
 
-function screenSizeExpr(): string {
-  return `
-CASE
-  WHEN screen_width > 0 AND screen_height > 0 THEN concat(toString(toInt32(screen_width)), 'x', toString(toInt32(screen_height)))
-  ELSE ''
-END`;
+function buildFinalizeWhere(siteId: string, range: AeRange, alias = ""): string {
+  const prefix = alias ? `${alias}.` : "";
+  return [
+    `${prefix}index1 = ${sqlString(siteId)}`,
+    `${prefix}double6 >= ${LAYOUT_VERSION}`,
+    `${prefix}blob1 = 'visit_finalize'`,
+    `${prefix}double3 BETWEEN ${Math.floor(range.fromMs)} AND ${Math.floor(range.toMs)}`,
+  ].join("\n  AND ");
+}
+
+function appendWhere(base: string, extra: string): string {
+  return extra ? `${base}\n  AND ${extra}` : base;
+}
+
+function screenSizeExpr(alias = ""): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `if(${prefix}double4 > 0 AND ${prefix}double5 > 0, concat(toString(${prefix}double4), 'x', toString(${prefix}double5)), '')`;
 }
 
 async function runAeSql<T extends Record<string, unknown>>(env: Env, sql: string): Promise<T[]> {
@@ -232,37 +183,57 @@ export async function queryAeOverview(
   range: AeRange,
   filters?: AeQueryFilters,
 ): Promise<AeOverviewRow> {
-  const sql = `
-WITH
-${visitCtes(siteId, range)},
-filtered_visits AS (
-  SELECT *
-  FROM visits
-  ${buildVisitFilterClause(filters)}
-),
-session_rollup AS (
-  SELECT session_id, count() AS visit_count
-  FROM filtered_visits
-  WHERE session_id != ''
-  GROUP BY session_id
-)
+  if (filters?.country || filters?.device || filters?.browser) {
+    throw new Error("Analytics Engine overview with filters is not supported");
+  }
+
+  const startWhere = buildStartWhere(siteId, range);
+  const finalizeWhere = buildFinalizeWhere(siteId, range);
+  const [summary, durationRow, bounceRow] = await Promise.all([
+    runAeSql<Record<string, unknown>>(
+      env,
+      `
 SELECT
   count() AS views,
-  count(DISTINCT session_id) AS sessions,
-  count(DISTINCT visitor_id) AS visitors,
-  (SELECT count() FROM session_rollup WHERE visit_count = 1) AS bounces,
-  sum(if(duration_ms IS NOT NULL AND duration_ms >= 0, duration_ms, 0)) AS total_duration,
-  sum(if(duration_ms IS NOT NULL AND duration_ms >= 0, 1, 0)) AS duration_views
-FROM filtered_visits
-`;
-  const row = (await runAeSql<Record<string, unknown>>(env, sql))[0] ?? {};
+  count(DISTINCT blob4) AS sessions,
+  count(DISTINCT blob3) AS visitors
+FROM ${DATASET}
+WHERE ${startWhere}
+`,
+    ).then((rows) => rows[0] ?? {}),
+    runAeSql<Record<string, unknown>>(
+      env,
+      `
+SELECT
+  sum(if(double2 IS NOT NULL AND double2 >= 0, double2, 0.0)) AS total_duration,
+  sum(if(double2 IS NOT NULL AND double2 >= 0, 1, 0)) AS duration_views
+FROM ${DATASET}
+WHERE ${finalizeWhere}
+`,
+    ).then((rows) => rows[0] ?? {}),
+    runAeSql<Record<string, unknown>>(
+      env,
+      `
+SELECT
+  count() AS bounces
+FROM (
+  SELECT blob4
+  FROM ${DATASET}
+  WHERE ${startWhere}
+    AND blob4 != ''
+  GROUP BY blob4
+  HAVING count() = 1
+)
+`,
+    ).then((rows) => rows[0] ?? {}),
+  ]);
   return {
-    views: parseNumber(row.views),
-    sessions: parseNumber(row.sessions),
-    visitors: parseNumber(row.visitors),
-    bounces: parseNumber(row.bounces),
-    total_duration: parseNumber(row.total_duration),
-    duration_views: parseNumber(row.duration_views),
+    views: parseNumber(summary.views),
+    sessions: parseNumber(summary.sessions),
+    visitors: parseNumber(summary.visitors),
+    bounces: parseNumber(bounceRow.bounces),
+    total_duration: parseNumber(durationRow.total_duration),
+    duration_views: parseNumber(durationRow.duration_views),
   };
 }
 
@@ -273,6 +244,10 @@ export async function queryAeTrend(
   interval: "minute" | "hour" | "day" | "week" | "month",
   filters?: AeQueryFilters,
 ): Promise<AeTrendRow[]> {
+  if (filters?.country || filters?.device || filters?.browser) {
+    throw new Error("Analytics Engine trend with filters is not supported");
+  }
+
   const bucketDivisor =
     interval === "minute"
       ? 60_000
@@ -284,68 +259,101 @@ export async function queryAeTrend(
             ? 604_800_000
             : 2_592_000_000;
 
-  const sql = `
-WITH
-${visitCtes(siteId, range)},
-filtered_visits AS (
-  SELECT *
-  FROM visits
-  ${buildVisitFilterClause(filters)}
-),
-visit_bucket_rollup AS (
-  SELECT
-    floor(started_at / ${bucketDivisor}) AS bucket,
-    count() AS views,
-    count(DISTINCT visitor_id) AS visitors,
-    sum(if(duration_ms IS NOT NULL AND duration_ms >= 0, duration_ms, 0)) AS total_duration,
-    sum(if(duration_ms IS NOT NULL AND duration_ms >= 0, 1, 0)) AS duration_views
-  FROM filtered_visits
-  GROUP BY bucket
-),
-session_rollup AS (
-  SELECT
-    session_id,
-    min(started_at) AS session_started_at,
-    count() AS visit_count
-  FROM filtered_visits
-  WHERE session_id != ''
-  GROUP BY session_id
-),
-session_bucket_rollup AS (
-  SELECT
-    floor(session_started_at / ${bucketDivisor}) AS bucket,
-    count() AS sessions,
-    sum(if(visit_count = 1, 1, 0)) AS bounces
-  FROM session_rollup
-  GROUP BY bucket
-),
-combined AS (
-  SELECT bucket, views, visitors, 0 AS sessions, 0 AS bounces, total_duration, duration_views FROM visit_bucket_rollup
-  UNION ALL
-  SELECT bucket, 0 AS views, 0 AS visitors, sessions, bounces, 0 AS total_duration, 0 AS duration_views FROM session_bucket_rollup
-)
+  const startWhere = buildStartWhere(siteId, range);
+  const finalizeWhere = buildFinalizeWhere(siteId, range);
+  const [startRows, durationRows, sessionRows] = await Promise.all([
+    runAeSql<Record<string, unknown>>(
+      env,
+      `
 SELECT
-  bucket,
-  sum(views) AS views,
-  sum(visitors) AS visitors,
-  sum(sessions) AS sessions,
-  sum(bounces) AS bounces,
-  sum(total_duration) AS total_duration,
-  sum(duration_views) AS duration_views
-FROM combined
+  floor(double3 / ${bucketDivisor}) AS bucket,
+  count() AS views,
+  count(DISTINCT blob3) AS visitors
+FROM ${DATASET}
+WHERE ${startWhere}
 GROUP BY bucket
 ORDER BY bucket
-`;
+`,
+    ),
+    runAeSql<Record<string, unknown>>(
+      env,
+      `
+SELECT
+  floor(double3 / ${bucketDivisor}) AS bucket,
+  sum(if(double2 IS NOT NULL AND double2 >= 0, double2, 0.0)) AS total_duration,
+  sum(if(double2 IS NOT NULL AND double2 >= 0, 1, 0)) AS duration_views
+FROM ${DATASET}
+WHERE ${finalizeWhere}
+GROUP BY bucket
+ORDER BY bucket
+`,
+    ),
+    runAeSql<Record<string, unknown>>(
+      env,
+      `
+SELECT
+  floor(session_started_at / ${bucketDivisor}) AS bucket,
+  count() AS sessions,
+  sum(if(visit_count = 1, 1, 0)) AS bounces
+FROM (
+  SELECT
+    blob4 AS session_id,
+    min(double3) AS session_started_at,
+    count() AS visit_count
+  FROM ${DATASET}
+  WHERE ${startWhere}
+    AND blob4 != ''
+  GROUP BY blob4
+)
+GROUP BY bucket
+ORDER BY bucket
+`,
+    )]);
 
-  return (await runAeSql<Record<string, unknown>>(env, sql)).map((row) => ({
-    bucket: parseNumber(row.bucket),
-    views: parseNumber(row.views),
-    visitors: parseNumber(row.visitors),
-    sessions: parseNumber(row.sessions),
-    bounces: parseNumber(row.bounces),
-    total_duration: parseNumber(row.total_duration),
-    duration_views: parseNumber(row.duration_views),
-  }));
+  const buckets = new Map<number, AeTrendRow>();
+  for (const row of startRows) {
+    const bucket = parseNumber(row.bucket);
+    buckets.set(bucket, {
+      bucket,
+      views: parseNumber(row.views),
+      visitors: parseNumber(row.visitors),
+      sessions: 0,
+      bounces: 0,
+      total_duration: 0,
+      duration_views: 0,
+    });
+  }
+  for (const row of durationRows) {
+    const bucket = parseNumber(row.bucket);
+    const existing = buckets.get(bucket) ?? {
+      bucket,
+      views: 0,
+      visitors: 0,
+      sessions: 0,
+      bounces: 0,
+      total_duration: 0,
+      duration_views: 0,
+    };
+    existing.total_duration = parseNumber(row.total_duration);
+    existing.duration_views = parseNumber(row.duration_views);
+    buckets.set(bucket, existing);
+  }
+  for (const row of sessionRows) {
+    const bucket = parseNumber(row.bucket);
+    const existing = buckets.get(bucket) ?? {
+      bucket,
+      views: 0,
+      visitors: 0,
+      sessions: 0,
+      bounces: 0,
+      total_duration: 0,
+      duration_views: 0,
+    };
+    existing.sessions = parseNumber(row.sessions);
+    existing.bounces = parseNumber(row.bounces);
+    buckets.set(bucket, existing);
+  }
+  return [...buckets.values()].sort((a, b) => a.bucket - b.bucket);
 }
 
 async function queryAeVisitDimension(
@@ -356,19 +364,14 @@ async function queryAeVisitDimension(
   selectExpr: string,
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
+  const where = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
   const sql = `
-WITH
-${visitCtes(siteId, range)},
-filtered_visits AS (
-  SELECT *
-  FROM visits
-  ${buildVisitFilterClause(filters)}
-)
 SELECT
   ${selectExpr} AS key,
   count() AS views,
-  count(DISTINCT session_id) AS sessions
-FROM filtered_visits
+  count(DISTINCT blob4) AS sessions
+FROM ${DATASET}
+WHERE ${where}
 GROUP BY key
 ORDER BY views DESC
 LIMIT ${clampLimit(limit, 30)}
@@ -389,23 +392,18 @@ export async function queryAeTopPages(
   includeDetails: boolean,
   filters?: AeQueryFilters,
 ): Promise<AeTopPageRow[]> {
+  const where = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
   const sql = `
-WITH
-${visitCtes(siteId, range)},
-filtered_visits AS (
-  SELECT *
-  FROM visits
-  ${buildVisitFilterClause(filters)}
-)
 SELECT
-  pathname,
-  ${includeDetails ? "query_string," : "'' AS query_string,"}
-  ${includeDetails ? "hash_fragment," : "'' AS hash_fragment,"}
-  argMax(title, started_at) AS title,
-  argMax(hostname, started_at) AS hostname,
+  blob5 AS pathname,
+  ${includeDetails ? "blob6 AS query_string," : "'' AS query_string,"}
+  ${includeDetails ? "blob7 AS hash_fragment," : "'' AS hash_fragment,"}
+  argMax(blob20, double3) AS title,
+  argMax(blob8, double3) AS hostname,
   count() AS views,
-  count(DISTINCT session_id) AS sessions
-FROM filtered_visits
+  count(DISTINCT blob4) AS sessions
+FROM ${DATASET}
+WHERE ${where}
 GROUP BY pathname, query_string, hash_fragment
 ORDER BY views DESC
 LIMIT ${clampLimit(limit, 30)}
@@ -429,7 +427,7 @@ export async function queryAeTopPathnames(
   limit: number,
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
-  return queryAeVisitDimension(env, siteId, range, limit, "pathname", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob5", filters);
 }
 
 export async function queryAeTopTitles(
@@ -439,7 +437,7 @@ export async function queryAeTopTitles(
   limit: number,
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
-  return queryAeVisitDimension(env, siteId, range, limit, "title", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob20", filters);
 }
 
 export async function queryAeTopHostnames(
@@ -449,7 +447,7 @@ export async function queryAeTopHostnames(
   limit: number,
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
-  return queryAeVisitDimension(env, siteId, range, limit, "hostname", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob8", filters);
 }
 
 export async function queryAeEntryPages(
@@ -459,27 +457,21 @@ export async function queryAeEntryPages(
   limit: number,
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
+  const where = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
   const sql = `
-WITH
-${visitCtes(siteId, range)},
-filtered_visits AS (
-  SELECT *
-  FROM visits
-  ${buildVisitFilterClause(filters)}
-),
-session_rollup AS (
-  SELECT
-    session_id,
-    argMin(pathname, started_at) AS entry_path
-  FROM filtered_visits
-  WHERE session_id != ''
-  GROUP BY session_id
-)
 SELECT
   entry_path AS key,
   count() AS views,
   count() AS sessions
-FROM session_rollup
+FROM (
+  SELECT
+    blob4 AS session_id,
+    argMin(blob5, double3) AS entry_path
+  FROM ${DATASET}
+  WHERE ${where}
+    AND blob4 != ''
+  GROUP BY blob4
+)
 GROUP BY key
 ORDER BY views DESC
 LIMIT ${clampLimit(limit, 30)}
@@ -498,27 +490,21 @@ export async function queryAeExitPages(
   limit: number,
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
+  const where = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
   const sql = `
-WITH
-${visitCtes(siteId, range)},
-filtered_visits AS (
-  SELECT *
-  FROM visits
-  ${buildVisitFilterClause(filters)}
-),
-session_rollup AS (
-  SELECT
-    session_id,
-    argMax(pathname, started_at) AS exit_path
-  FROM filtered_visits
-  WHERE session_id != ''
-  GROUP BY session_id
-)
 SELECT
   exit_path AS key,
   count() AS views,
   count() AS sessions
-FROM session_rollup
+FROM (
+  SELECT
+    blob4 AS session_id,
+    argMax(blob5, double3) AS exit_path
+  FROM ${DATASET}
+  WHERE ${where}
+    AND blob4 != ''
+  GROUP BY blob4
+)
 GROUP BY key
 ORDER BY views DESC
 LIMIT ${clampLimit(limit, 30)}
@@ -538,7 +524,7 @@ export async function queryAeReferrers(
   includeFullUrl: boolean,
   filters?: AeQueryFilters,
 ): Promise<AeReferrerRow[]> {
-  const keyExpr = includeFullUrl ? "referrer_url" : "referrer_host";
+  const keyExpr = includeFullUrl ? "blob9" : "blob10";
   const rows = await queryAeVisitDimension(env, siteId, range, limit, keyExpr, filters);
   return rows.map((row) => ({
     ref: row.key,
@@ -548,47 +534,54 @@ export async function queryAeReferrers(
 }
 
 export async function queryAeTopCountries(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "country", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob11", filters);
 }
 
 export async function queryAeTopDevices(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "device_type", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob17", filters);
 }
 
 export async function queryAeTopBrowsers(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "browser", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob14", filters);
 }
 
 export async function queryAeTopLanguages(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "language", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob18", filters);
 }
 
 export async function queryAeTopOsVersions(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "trim(concat(os, ' ', os_version))", filters);
+  return queryAeVisitDimension(
+    env,
+    siteId,
+    range,
+    limit,
+    "trim(concat(blob15, ' ', blob16))",
+    filters,
+  );
 }
 
 export async function queryAeTopTimezones(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "timezone", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob19", filters);
 }
 
-export async function queryAeTopScreenSizes(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, screenSizeExpr(), filters);
+export async function queryAeTopScreenSizes(): Promise<AeDimensionRow[]> {
+  throw new Error("Analytics Engine screen size dimension is not supported");
 }
 
 export async function queryAeTopRegions(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "region", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob12", filters);
 }
 
 export async function queryAeTopCities(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "city", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob13", filters);
 }
 
 export async function queryAeTopContinents(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "continent", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "index2", filters);
 }
 
 export async function queryAeTopOrganizations(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "as_organization", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "index3", filters);
 }
 
 export async function queryAeVisitorDetails(
@@ -598,22 +591,17 @@ export async function queryAeVisitorDetails(
   limit: number,
   filters?: AeQueryFilters,
 ): Promise<AeVisitorRow[]> {
+  const where = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
   const sql = `
-WITH
-${visitCtes(siteId, range)},
-filtered_visits AS (
-  SELECT *
-  FROM visits
-  ${buildVisitFilterClause(filters)}
-)
 SELECT
-  visitor_id,
-  min(started_at) AS first_seen_at,
-  max(started_at) AS last_seen_at,
+  blob3 AS visitor_id,
+  min(double3) AS first_seen_at,
+  max(double3) AS last_seen_at,
   count() AS views,
-  count(DISTINCT session_id) AS sessions
-FROM filtered_visits
-WHERE visitor_id != ''
+  count(DISTINCT blob4) AS sessions
+FROM ${DATASET}
+WHERE ${where}
+  AND blob3 != ''
 GROUP BY visitor_id
 ORDER BY last_seen_at DESC
 LIMIT ${clampLimit(limit, 100)}
