@@ -178,6 +178,20 @@ export function resolveLanguageLabel(
   return { label: code, code };
 }
 
+export function resolveContinentLabel(
+  raw: string,
+  unknownLabel: string,
+  labels: Record<string, string>,
+): string {
+  const value = raw.trim();
+  if (!value) return unknownLabel;
+
+  const normalized = value.toUpperCase().replace(/_/g, " ");
+  const compacted = normalized.replace(/\s+/g, " ").trim();
+
+  return labels[normalized] ?? labels[compacted] ?? value;
+}
+
 export function resolveCountryFlagCode(
   countryCode: string | null,
   locale: Locale,

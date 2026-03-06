@@ -41,6 +41,7 @@ export interface AppMessages {
     region: string;
     city: string;
     continent: string;
+    continentLabels: Record<string, string>;
     timezone: string;
     organization: string;
     screenSize: string;

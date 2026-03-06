@@ -80,6 +80,7 @@ import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 import {
+  resolveContinentLabel,
   resolveCountryFlagCode,
   resolveCountryLabel,
   resolveLanguageLabel,
@@ -294,6 +295,7 @@ type GeoDimensionCardTab = keyof OverviewGeoDimensionTabsData;
 interface PageCardRow {
   key: string;
   label: string;
+  rawLabel?: string;
   views: number;
   sessions: number;
   mono: boolean;
@@ -314,6 +316,7 @@ interface PageCardRow {
     countryCode: string;
     stateCode: string;
     cityNameDefault: string;
+    hideCity: boolean;
   };
 }
 
@@ -430,6 +433,20 @@ function resolveGeoTranslationApiLocale(locale: Locale): string | null {
 
 function normalizeGeoTranslationLookupValue(value: string): string {
   return value.trim().toLocaleLowerCase();
+}
+
+function isSameGeoLabel(left: string, right: string): boolean {
+  const normalizedLeft = normalizeGeoTranslationLookupValue(left).replace(
+    /\s+/g,
+    " ",
+  );
+  const normalizedRight = normalizeGeoTranslationLookupValue(right).replace(
+    /\s+/g,
+    " ",
+  );
+  return Boolean(
+    normalizedLeft && normalizedRight && normalizedLeft === normalizedRight,
+  );
 }
 
 function parseGeoStateTranslationBundle(
@@ -741,6 +758,7 @@ function resolveGeoCityBreadcrumbData(
     countryCode: string;
     stateCode: string;
     cityNameDefault: string;
+    hideCity: boolean;
   } | null;
 } {
   const normalized = value.trim();
@@ -766,6 +784,7 @@ function resolveGeoCityBreadcrumbData(
       ? segments.slice(3).join(GEO_REGION_VALUE_SEPARATOR).trim()
       : segments.slice(2).join(GEO_REGION_VALUE_SEPARATOR).trim();
 
+  const hideCity = isSameGeoLabel(rawStateName, rawCity);
   const regionLabel = normalizeDimensionLabel(rawStateName, unknownLabel);
   const cityLabel = normalizeDimensionLabel(rawCity, unknownLabel);
   const { label: countryLabel, code } = resolveCountryLabel(
@@ -779,7 +798,9 @@ function resolveGeoCityBreadcrumbData(
     : null;
 
   return {
-    displayLabel: `${countryLabel} > ${regionLabel} > ${cityLabel}`,
+    displayLabel: hideCity
+      ? `${countryLabel} > ${regionLabel}`
+      : `${countryLabel} > ${regionLabel} > ${cityLabel}`,
     filterValue: rawCity || cityLabel,
     breadcrumb: {
       countryLabel,
@@ -789,8 +810,74 @@ function resolveGeoCityBreadcrumbData(
       countryCode: rawCountry.toUpperCase(),
       stateCode: rawStateCode || regionLabel,
       cityNameDefault: rawCity || cityLabel,
+      hideCity,
     },
   };
+}
+
+function buildGeoPagePath(pathname: string): string {
+  const normalized = pathname.trim().replace(/\/+$/, "");
+  if (!normalized) return "/geo";
+  if (normalized.endsWith("/geo")) return normalized;
+  return `${normalized}/geo`;
+}
+
+function resolveGeoLocationQueryValue(
+  tab: GeoDimensionCardTab,
+  row: PageCardRow,
+  unknownLabel: string,
+): string | null {
+  if (tab !== "country" && tab !== "region" && tab !== "city") return null;
+
+  const unknown = normalizeGeoTranslationLookupValue(unknownLabel);
+  const raw = String(row.rawLabel || row.label || "").trim();
+  if (!raw) return null;
+
+  const normalizedRaw = normalizeGeoTranslationLookupValue(raw);
+  if (normalizedRaw === unknown) return null;
+
+  const segments = raw
+    .split(GEO_REGION_VALUE_SEPARATOR)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+
+  if (tab === "country") {
+    const country = (segments[0] || raw).trim().toUpperCase();
+    if (!country) return null;
+    if (normalizeGeoTranslationLookupValue(country) === unknown) return null;
+    return country;
+  }
+
+  if (tab === "region") {
+    if (segments.length >= 3) {
+      return `${segments[0].toUpperCase()}${GEO_REGION_VALUE_SEPARATOR}${segments[1]}${GEO_REGION_VALUE_SEPARATOR}${segments.slice(2).join(GEO_REGION_VALUE_SEPARATOR)}`;
+    }
+    const breadcrumb = row.regionBreadcrumb;
+    if (!breadcrumb) return null;
+    if (
+      normalizeGeoTranslationLookupValue(breadcrumb.regionLabel) === unknown ||
+      normalizeGeoTranslationLookupValue(breadcrumb.countryCode) === unknown
+    ) {
+      return null;
+    }
+    return `${breadcrumb.countryCode.toUpperCase()}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.stateCode}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.regionLabel}`;
+  }
+
+  if (segments.length >= 4) {
+    return `${segments[0].toUpperCase()}${GEO_REGION_VALUE_SEPARATOR}${segments[1]}${GEO_REGION_VALUE_SEPARATOR}${segments[2]}${GEO_REGION_VALUE_SEPARATOR}${segments.slice(3).join(GEO_REGION_VALUE_SEPARATOR)}`;
+  }
+
+  const breadcrumb = row.cityBreadcrumb;
+  if (!breadcrumb) return null;
+  if (
+    normalizeGeoTranslationLookupValue(breadcrumb.cityNameDefault) ===
+      unknown ||
+    normalizeGeoTranslationLookupValue(breadcrumb.regionLabel) === unknown ||
+    normalizeGeoTranslationLookupValue(breadcrumb.countryCode) === unknown
+  ) {
+    return null;
+  }
+  return `${breadcrumb.countryCode.toUpperCase()}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.stateCode}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.regionLabel}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.cityNameDefault}`;
 }
 
 const UMAMI_BROWSER_ICON_PREFIX = "umami-browser:";
@@ -1093,6 +1180,7 @@ function CityBreadcrumbLabel({
   countryCode,
   stateCode,
   cityNameDefault,
+  hideCity,
 }: {
   locale: Locale;
   countryLabel: string;
@@ -1102,6 +1190,7 @@ function CityBreadcrumbLabel({
   countryCode: string;
   stateCode: string;
   cityNameDefault: string;
+  hideCity: boolean;
 }) {
   const { ref: visibilityRef, isInView } = useInViewOnce();
   const translationBundle = useGeoStateTranslationBundle({
@@ -1114,6 +1203,8 @@ function CityBreadcrumbLabel({
     translationBundle?.stateName.trim() || regionLabel;
   const localizedCityLabel =
     resolveLocalizedCityName(translationBundle, cityNameDefault) || cityLabel;
+  const shouldHideCity =
+    hideCity || isSameGeoLabel(localizedRegionLabel, localizedCityLabel);
 
   return (
     <span ref={visibilityRef} className="block">
@@ -1143,17 +1234,19 @@ function CityBreadcrumbLabel({
                 {localizedRegionLabel}
               </BreadcrumbPage>
             </BreadcrumbItem>
-            <BreadcrumbItem className="min-w-0">
-              <span
-                className="shrink-0 text-muted-foreground"
-                aria-hidden="true"
-              >
-                {">"}
-              </span>
-              <BreadcrumbPage className="block truncate leading-5">
-                {localizedCityLabel}
-              </BreadcrumbPage>
-            </BreadcrumbItem>
+            {shouldHideCity ? null : (
+              <BreadcrumbItem className="min-w-0">
+                <span
+                  className="shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                >
+                  {">"}
+                </span>
+                <BreadcrumbPage className="block truncate leading-5">
+                  {localizedCityLabel}
+                </BreadcrumbPage>
+              </BreadcrumbItem>
+            )}
           </AutoTransition>
         </BreadcrumbList>
       </Breadcrumb>
@@ -1171,6 +1264,165 @@ function normalizeDimensionLabel(
   if (options?.screenSize && (normalized === "0x0" || normalized === "0X0")) {
     return unknownLabel;
   }
+  return normalized;
+}
+
+const timezoneNameFormatterCache = new Map<string, Intl.DateTimeFormat>();
+const timezonePartsFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getTimezoneNameFormatter(
+  locale: Locale,
+  timeZone: string,
+): Intl.DateTimeFormat | null {
+  const cacheKey = `${locale}::${timeZone}`;
+  const cached = timezoneNameFormatterCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const formatter = new Intl.DateTimeFormat(intlLocale(locale), {
+      timeZone,
+      timeZoneName: "long",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    timezoneNameFormatterCache.set(cacheKey, formatter);
+    return formatter;
+  } catch {
+    return null;
+  }
+}
+
+function getTimezonePartsFormatter(
+  timeZone: string,
+): Intl.DateTimeFormat | null {
+  const cached = timezonePartsFormatterCache.get(timeZone);
+  if (cached) return cached;
+
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    timezonePartsFormatterCache.set(timeZone, formatter);
+    return formatter;
+  } catch {
+    return null;
+  }
+}
+
+function resolveTimezoneOffsetMinutes(
+  timeZone: string,
+  timestampMs: number,
+): number | null {
+  const formatter = getTimezonePartsFormatter(timeZone);
+  if (!formatter) return null;
+
+  const date = new Date(timestampMs);
+  if (!Number.isFinite(date.getTime())) return null;
+
+  const parts = formatter.formatToParts(date);
+  let year = NaN;
+  let month = NaN;
+  let day = NaN;
+  let hour = NaN;
+  let minute = NaN;
+  let second = NaN;
+
+  for (const part of parts) {
+    const value = Number(part.value);
+    if (!Number.isFinite(value)) continue;
+    if (part.type === "year") year = value;
+    else if (part.type === "month") month = value;
+    else if (part.type === "day") day = value;
+    else if (part.type === "hour") hour = value;
+    else if (part.type === "minute") minute = value;
+    else if (part.type === "second") second = value;
+  }
+
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    !Number.isFinite(second)
+  ) {
+    return null;
+  }
+
+  const asUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  return Math.round((asUtc - timestampMs) / 60000);
+}
+
+function formatUtcOffset(offsetMinutes: number): string {
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absolute = Math.abs(offsetMinutes);
+  const hours = Math.floor(absolute / 60)
+    .toString()
+    .padStart(2, "0");
+  const minutes = (absolute % 60).toString().padStart(2, "0");
+  return `UTC${sign}${hours}:${minutes}`;
+}
+
+function formatLocalTimeDeltaLabel(
+  deltaMinutes: number,
+  locale: Locale,
+): string {
+  const sign = deltaMinutes >= 0 ? "+" : "-";
+  const absolute = Math.abs(deltaMinutes);
+  const hours = Math.floor(absolute / 60)
+    .toString()
+    .padStart(2, "0");
+  const minutes = (absolute % 60).toString().padStart(2, "0");
+  const delta = `${sign}${hours}:${minutes}`;
+  if (locale === "zh") {
+    return `较本地 ${delta}`;
+  }
+  return `${delta} vs local`;
+}
+
+function resolveTimezoneDisplayLabel(params: {
+  value: string;
+  locale: Locale;
+  unknownLabel: string;
+  timestampMs: number;
+}): string {
+  const normalized = normalizeDimensionLabel(params.value, params.unknownLabel);
+  if (normalized === params.unknownLabel) return normalized;
+
+  const baseTimestamp =
+    Number.isFinite(params.timestampMs) && params.timestampMs > 0
+      ? params.timestampMs
+      : Date.now();
+  const date = new Date(baseTimestamp);
+  if (!Number.isFinite(date.getTime())) return normalized;
+
+  const nameFormatter = getTimezoneNameFormatter(params.locale, normalized);
+  const localizedName =
+    nameFormatter
+      ?.formatToParts(date)
+      .find((part) => part.type === "timeZoneName")
+      ?.value.trim() || null;
+  const offsetMinutes = resolveTimezoneOffsetMinutes(
+    normalized,
+    date.getTime(),
+  );
+
+  if (!localizedName && offsetMinutes === null) return normalized;
+  if (offsetMinutes !== null) {
+    const localOffsetMinutes = -date.getTimezoneOffset();
+    const localDelta = offsetMinutes - localOffsetMinutes;
+    const prefix = localizedName || normalized;
+    return `${prefix} (${formatUtcOffset(offsetMinutes)}, ${formatLocalTimeDeltaLabel(localDelta, params.locale)})`;
+  }
+  if (localizedName) return localizedName;
   return normalized;
 }
 
@@ -1465,6 +1717,13 @@ function OverviewPagesSection({
   const livePathname = usePathname() || pathname;
   const isMobile = useIsMobile();
   const { filters, window } = useDashboardQuery();
+  const timezoneReferenceTimestampMs = useMemo(() => {
+    const from = Number(window.from ?? 0);
+    const to = Number(window.to ?? 0);
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return Date.now();
+    if (to <= from) return Math.max(0, Math.floor(from));
+    return Math.floor(from + (to - from) / 2);
+  }, [window.from, window.to]);
   const [pageCardTabsData, setPageCardTabsData] = useState<PageCardTabsData>(
     emptyPageCardTabsData(),
   );
@@ -2075,6 +2334,7 @@ function OverviewPagesSection({
         return {
           key: `${label}-${index}`,
           label,
+          rawLabel: originalValue.trim() || rawLabel,
           views: Math.max(0, Number(item.views || 0)),
           sessions: Math.max(0, Number(item.sessions || 0)),
           mono: false,
@@ -2095,6 +2355,7 @@ function OverviewPagesSection({
         return {
           key: `${regionData.displayLabel}-${index}`,
           label: regionData.displayLabel,
+          rawLabel: value.trim() || regionData.filterValue,
           views: Math.max(0, Number(item.views || 0)),
           sessions: Math.max(0, Number(item.sessions || 0)),
           mono: false,
@@ -2116,6 +2377,7 @@ function OverviewPagesSection({
         return {
           key: `${cityData.displayLabel}-${index}`,
           label: cityData.displayLabel,
+          rawLabel: value.trim() || cityData.filterValue,
           views: Math.max(0, Number(item.views || 0)),
           sessions: Math.max(0, Number(item.sessions || 0)),
           mono: false,
@@ -2142,11 +2404,32 @@ function OverviewPagesSection({
       }),
       region: regionRows,
       city: cityRows,
-      continent: toRows(overviewGeoDimensionTabsData.continent),
-      timezone: toRows(overviewGeoDimensionTabsData.timezone),
+      continent: toRows(overviewGeoDimensionTabsData.continent, {
+        transformLabel: (value) =>
+          resolveContinentLabel(
+            value,
+            messages.common.unknown,
+            messages.common.continentLabels,
+          ),
+      }),
+      timezone: toRows(overviewGeoDimensionTabsData.timezone, {
+        transformLabel: (value) =>
+          resolveTimezoneDisplayLabel({
+            value,
+            locale,
+            unknownLabel: messages.common.unknown,
+            timestampMs: timezoneReferenceTimestampMs,
+          }),
+      }),
       organization: toRows(overviewGeoDimensionTabsData.organization),
     };
-  }, [locale, messages.common.unknown, overviewGeoDimensionTabsData]);
+  }, [
+    locale,
+    messages.common.continentLabels,
+    messages.common.unknown,
+    overviewGeoDimensionTabsData,
+    timezoneReferenceTimestampMs,
+  ]);
   const activeClientDimensionTabMeta =
     clientDimensionCardTabMeta[clientDimensionCardTab];
   const activeGeoDimensionTabMeta =
@@ -2246,11 +2529,14 @@ function OverviewPagesSection({
   const searchedGeoDimensionCardRows = useMemo(() => {
     if (!normalizedGeoDimensionCardSearchTerm)
       return sortedGeoDimensionCardRows;
-    return sortedGeoDimensionCardRows.filter((row) =>
-      row.label
-        .toLocaleLowerCase()
-        .includes(normalizedGeoDimensionCardSearchTerm),
-    );
+    return sortedGeoDimensionCardRows.filter((row) => {
+      const normalizedLabel = row.label.toLocaleLowerCase();
+      if (normalizedLabel.includes(normalizedGeoDimensionCardSearchTerm)) {
+        return true;
+      }
+      const normalizedRawLabel = (row.rawLabel || "").toLocaleLowerCase();
+      return normalizedRawLabel.includes(normalizedGeoDimensionCardSearchTerm);
+    });
   }, [normalizedGeoDimensionCardSearchTerm, sortedGeoDimensionCardRows]);
   const clientDimensionCardProgressTotal = useMemo(
     () =>
@@ -2422,6 +2708,13 @@ function OverviewPagesSection({
   ) => {
     event.stopPropagation();
     globalThis.window.open(targetUrl, "_blank", "noopener,noreferrer");
+  };
+  const openGeoDimensionLocationTarget = (
+    targetUrl: string,
+    event: MouseEvent<HTMLElement>,
+  ) => {
+    event.stopPropagation();
+    router.push(targetUrl);
   };
   const renderSortIndicator = (key: PageCardSortKey) => {
     if (pageCardSort.key === key) {
@@ -2981,8 +3274,14 @@ function OverviewPagesSection({
       </TableHead>
     </TableRow>
   );
-  const renderGeoDimensionCardRows = (rows: PageCardRow[]) =>
+  const renderGeoDimensionCardRows = (
+    rows: PageCardRow[],
+    options?: {
+      showRawLabel?: boolean;
+    },
+  ) =>
     rows.map((item) => {
+      const showRawLabel = options?.showRawLabel ?? false;
       const rowValue = Math.max(0, Number(item[geoDimensionCardSort.key] ?? 0));
       const progressPercent =
         geoDimensionCardProgressTotal > 0
@@ -2992,6 +3291,16 @@ function OverviewPagesSection({
       const rowFilterValue = item.filterValue ?? item.label;
       const rowFilterActive =
         activeGeoDimensionCardQueryValue === rowFilterValue;
+      const rowLocationValue = resolveGeoLocationQueryValue(
+        geoDimensionCardTab,
+        item,
+        messages.common.unknown,
+      );
+      const rowLocationTarget = rowLocationValue
+        ? `${buildGeoPagePath(livePathname)}?${new URLSearchParams({
+            location: rowLocationValue,
+          }).toString()}`
+        : null;
 
       return (
         <TableRow
@@ -3008,39 +3317,70 @@ function OverviewPagesSection({
           }}
           onClick={() => toggleGeoDimensionCardRowFilter(rowFilterValue)}
         >
-          <TableCell className="p-0 whitespace-normal align-top">
+          <TableCell
+            className={cn(
+              "p-0 whitespace-normal",
+              geoDimensionCardTab === "region" || geoDimensionCardTab === "city"
+                ? "align-middle"
+                : "align-top",
+            )}
+          >
             <div
               className={cn(
                 "px-4 py-2 leading-5 whitespace-normal break-words",
+                (geoDimensionCardTab === "region" ||
+                  geoDimensionCardTab === "city") &&
+                  "flex min-h-8 items-center",
                 item.mono && "font-mono",
               )}
             >
-              {geoDimensionCardTab === "region" && item.regionBreadcrumb ? (
-                <RegionBreadcrumbLabel
-                  locale={locale}
-                  countryLabel={item.regionBreadcrumb.countryLabel}
-                  countryIconName={item.regionBreadcrumb.countryIconName}
-                  regionLabel={item.regionBreadcrumb.regionLabel}
-                  countryCode={item.regionBreadcrumb.countryCode}
-                  stateCode={item.regionBreadcrumb.stateCode}
-                />
-              ) : geoDimensionCardTab === "city" && item.cityBreadcrumb ? (
-                <CityBreadcrumbLabel
-                  locale={locale}
-                  countryLabel={item.cityBreadcrumb.countryLabel}
-                  countryIconName={item.cityBreadcrumb.countryIconName}
-                  regionLabel={item.cityBreadcrumb.regionLabel}
-                  cityLabel={item.cityBreadcrumb.cityLabel}
-                  countryCode={item.cityBreadcrumb.countryCode}
-                  stateCode={item.cityBreadcrumb.stateCode}
-                  cityNameDefault={item.cityBreadcrumb.cityNameDefault}
-                />
-              ) : (
-                <LabelWithLeadingIcon
-                  label={item.label}
-                  iconName={item.iconName}
-                />
-              )}
+              <span className="inline-flex items-center gap-2 break-words">
+                {showRawLabel ? (
+                  <LabelWithLeadingIcon
+                    label={item.rawLabel?.trim() || item.label}
+                    iconName={item.iconName}
+                  />
+                ) : geoDimensionCardTab === "region" &&
+                  item.regionBreadcrumb ? (
+                  <RegionBreadcrumbLabel
+                    locale={locale}
+                    countryLabel={item.regionBreadcrumb.countryLabel}
+                    countryIconName={item.regionBreadcrumb.countryIconName}
+                    regionLabel={item.regionBreadcrumb.regionLabel}
+                    countryCode={item.regionBreadcrumb.countryCode}
+                    stateCode={item.regionBreadcrumb.stateCode}
+                  />
+                ) : geoDimensionCardTab === "city" && item.cityBreadcrumb ? (
+                  <CityBreadcrumbLabel
+                    locale={locale}
+                    countryLabel={item.cityBreadcrumb.countryLabel}
+                    countryIconName={item.cityBreadcrumb.countryIconName}
+                    regionLabel={item.cityBreadcrumb.regionLabel}
+                    cityLabel={item.cityBreadcrumb.cityLabel}
+                    countryCode={item.cityBreadcrumb.countryCode}
+                    stateCode={item.cityBreadcrumb.stateCode}
+                    cityNameDefault={item.cityBreadcrumb.cityNameDefault}
+                    hideCity={item.cityBreadcrumb.hideCity}
+                  />
+                ) : (
+                  <LabelWithLeadingIcon
+                    label={item.label}
+                    iconName={item.iconName}
+                  />
+                )}
+                {rowLocationTarget ? (
+                  <Clickable
+                    className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                    onClick={(event) =>
+                      openGeoDimensionLocationTarget(rowLocationTarget, event)
+                    }
+                    aria-label={messages.common.search}
+                    title={messages.common.search}
+                  >
+                    <RiSearchLine size="1.2em" />
+                  </Clickable>
+                ) : null}
+              </span>
             </div>
           </TableCell>
           <TableCell className="p-0">
@@ -3074,7 +3414,9 @@ function OverviewPagesSection({
           emptyLabel={noDataText}
           colSpan={3}
           header={geoDimensionCardTableHeader}
-          rows={renderGeoDimensionCardRows(searchedGeoDimensionCardRows)}
+          rows={renderGeoDimensionCardRows(searchedGeoDimensionCardRows, {
+            showRawLabel: true,
+          })}
         />
       </PanelScrollbar>
     </div>

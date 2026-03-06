@@ -35,6 +35,21 @@ common:
   region: 地区
   city: 城市
   continent: 大陆
+  continentLabels:
+    AF: 非洲
+    AN: 南极洲
+    AS: 亚洲
+    EU: 欧洲
+    NA: 北美洲
+    OC: 大洋洲
+    SA: 南美洲
+    AFRICA: 非洲
+    ANTARCTICA: 南极洲
+    ASIA: 亚洲
+    EUROPE: 欧洲
+    NORTH AMERICA: 北美洲
+    OCEANIA: 大洋洲
+    SOUTH AMERICA: 南美洲
   timezone: 时区
   organization: 运营商组织
   screenSize: 屏幕大小

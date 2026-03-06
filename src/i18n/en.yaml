@@ -35,6 +35,21 @@ common:
   region: Region
   city: City
   continent: Continent
+  continentLabels:
+    AF: Africa
+    AN: Antarctica
+    AS: Asia
+    EU: Europe
+    NA: North America
+    OC: Oceania
+    SA: South America
+    AFRICA: Africa
+    ANTARCTICA: Antarctica
+    ASIA: Asia
+    EUROPE: Europe
+    NORTH AMERICA: North America
+    OCEANIA: Oceania
+    SOUTH AMERICA: South America
   timezone: Timezone
   organization: Organization
   screenSize: Screen Size
