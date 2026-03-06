@@ -36,6 +36,7 @@ async function ensureParquetWasm(env: Env): Promise<void> {
 const HOT_ARCHIVE_RETENTION_DAYS = 365;
 const COLD_DELETE_SAFETY_DAYS = 7;
 const COLD_BATCH_MAX_HOURS = 48;
+const GEO_REGION_VALUE_SEPARATOR = "::";
 
 const ARCHIVE_LOCK_KEY = "job:archive:hourly:lock";
 const ARCHIVE_LOCK_TTL_SECONDS = 15 * 60;
@@ -295,10 +296,19 @@ async function runHotArchive(env: Env, upperHour: number): Promise<void> {
           (
             SELECT json_group_object(s.k, s.v)
             FROM (
-              SELECT COALESCE(p.region, '') AS k, COUNT(*) AS v
+              SELECT
+                CASE
+                  WHEN trim(COALESCE(NULLIF(p.region_code, ''), NULLIF(p.region, ''), '')) = '' THEN ''
+                  ELSE trim(COALESCE(p.country, '')) || '${GEO_REGION_VALUE_SEPARATOR}' || trim(COALESCE(NULLIF(p.region_code, ''), NULLIF(p.region, ''), '')) || '${GEO_REGION_VALUE_SEPARATOR}' || trim(COALESCE(NULLIF(p.region, ''), NULLIF(p.region_code, ''), ''))
+                END AS k,
+                COUNT(*) AS v
               FROM pageviews p
               WHERE p.site_id = c.site_id AND p.hour_bucket = c.hour_bucket
-              GROUP BY COALESCE(p.region, '')
+              GROUP BY
+                CASE
+                  WHEN trim(COALESCE(NULLIF(p.region_code, ''), NULLIF(p.region, ''), '')) = '' THEN ''
+                  ELSE trim(COALESCE(p.country, '')) || '${GEO_REGION_VALUE_SEPARATOR}' || trim(COALESCE(NULLIF(p.region_code, ''), NULLIF(p.region, ''), '')) || '${GEO_REGION_VALUE_SEPARATOR}' || trim(COALESCE(NULLIF(p.region, ''), NULLIF(p.region_code, ''), ''))
+                END
             ) s
           ),
           '{}'
@@ -307,10 +317,19 @@ async function runHotArchive(env: Env, upperHour: number): Promise<void> {
           (
             SELECT json_group_object(s.k, s.v)
             FROM (
-              SELECT COALESCE(p.city, '') AS k, COUNT(*) AS v
+              SELECT
+                CASE
+                  WHEN COALESCE(p.city, '') = '' THEN ''
+                  ELSE trim(COALESCE(p.country, '')) || '${GEO_REGION_VALUE_SEPARATOR}' || trim(COALESCE(NULLIF(p.region_code, ''), NULLIF(p.region, ''), '')) || '${GEO_REGION_VALUE_SEPARATOR}' || trim(COALESCE(NULLIF(p.region, ''), NULLIF(p.region_code, ''), '')) || '${GEO_REGION_VALUE_SEPARATOR}' || trim(COALESCE(p.city, ''))
+                END AS k,
+                COUNT(*) AS v
               FROM pageviews p
               WHERE p.site_id = c.site_id AND p.hour_bucket = c.hour_bucket
-              GROUP BY COALESCE(p.city, '')
+              GROUP BY
+                CASE
+                  WHEN COALESCE(p.city, '') = '' THEN ''
+                  ELSE trim(COALESCE(p.country, '')) || '${GEO_REGION_VALUE_SEPARATOR}' || trim(COALESCE(NULLIF(p.region_code, ''), NULLIF(p.region, ''), '')) || '${GEO_REGION_VALUE_SEPARATOR}' || trim(COALESCE(NULLIF(p.region, ''), NULLIF(p.region_code, ''), '')) || '${GEO_REGION_VALUE_SEPARATOR}' || trim(COALESCE(p.city, ''))
+                END
             ) s
           ),
           '{}'

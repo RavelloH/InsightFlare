@@ -34,8 +34,16 @@ export interface AppMessages {
     event: string;
     location: string;
     browser: string;
+    operatingSystem: string;
     device: string;
+    deviceType: string;
     country: string;
+    region: string;
+    city: string;
+    continent: string;
+    timezone: string;
+    organization: string;
+    screenSize: string;
     duration: string;
     loading: string;
     noData: string;

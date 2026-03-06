@@ -31,6 +31,8 @@
     "d1:migration:create": "wrangler d1 migrations create insightflare --config wrangler.toml"
   },
   "dependencies": {
+    "@iconify-json/flagpack": "^1.2.7",
+    "@iconify/react": "^6.0.2",
     "@noble/hashes": "^2.0.1",
     "@number-flow/react": "^0.6.0",
     "@remixicon/react": "^4.9.0",

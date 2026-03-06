@@ -464,7 +464,9 @@ export class IngestDurableObject extends DurableObject {
           event.colo || "",
           event.eventType,
           event.country || "ZZ",
-          event.region || "",
+          event.regionCode
+            ? `${event.regionCode}::${event.region || ""}`
+            : event.region || "",
           event.city || "",
           event.timezone || "",
           event.deviceType || "unknown",

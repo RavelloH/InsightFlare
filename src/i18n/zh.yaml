@@ -28,8 +28,16 @@ common:
   event: 事件
   location: 地区
   browser: 浏览器
+  operatingSystem: 操作系统
   device: 设备
+  deviceType: 设备类型
   country: 国家
+  region: 地区
+  city: 城市
+  continent: 大陆
+  timezone: 时区
+  organization: 运营商组织
+  screenSize: 屏幕大小
   duration: 时长
   loading: 加载中
   noData: 暂无数据

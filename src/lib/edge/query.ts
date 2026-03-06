@@ -9,10 +9,14 @@ import {
   queryAeReferrers,
   queryAeSessionDetails,
   queryAeTopBrowsers,
+  queryAeTopCountryRegionCities,
+  queryAeTopCountryRegions,
   queryAeTopCountries,
   queryAeTopDevices,
   queryAeTopEventTypes,
+  queryAeTopLanguages,
   queryAeTopPages,
+  queryAeTopTimezones,
   queryAeTrend,
   queryAeTrendBySites,
   queryAeVisitorDetails,
@@ -22,6 +26,8 @@ import { isAnalyticsEngineEnabled } from "./flags";
 
 const RETENTION_DAYS = 365;
 const ANALYTICS_WINDOW_DAYS = 90;
+const GEO_REGION_VALUE_SEPARATOR = "::";
+const GEO_CITY_VALUE_SEPARATOR = "::";
 
 interface QueryWindow {
   fromMs: number;
@@ -663,7 +669,17 @@ function mergeStatObject(target: Record<string, number>, jsonText: string | null
 }
 
 type DimensionKey = "country" | "device_type" | "browser" | "event_type";
-type ArchiveDimensionKey = "country_stats_json" | "device_stats_json" | "browser_stats_json" | null;
+type ArchiveDimensionKey =
+  | "country_stats_json"
+  | "region_stats_json"
+  | "city_stats_json"
+  | "device_stats_json"
+  | "browser_stats_json"
+  | "os_stats_json"
+  | "screen_stats_json"
+  | "language_stats_json"
+  | "timezone_stats_json"
+  | null;
 type AeDimensionQueryFn = (
   env: Env,
   siteId: string,
@@ -671,6 +687,11 @@ type AeDimensionQueryFn = (
   limit: number,
   filters?: DashboardFilters,
 ) => Promise<AeDimensionRow[]>;
+interface DimensionStatsOptions {
+  d1DimensionExpr: string;
+  archiveDimensionKey: ArchiveDimensionKey;
+  aeQuery?: AeDimensionQueryFn;
+}
 
 type PageCardTabKey = "path" | "title" | "hostname" | "entry" | "exit";
 
@@ -710,12 +731,27 @@ async function queryDimensionStats(
     aeQuery: AeDimensionQueryFn;
   },
 ): Promise<Array<{ value: string; views: number; sessions: number }>> {
+  return queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+    d1DimensionExpr: options.d1DimensionKey,
+    archiveDimensionKey: options.archiveDimensionKey,
+    aeQuery: options.aeQuery,
+  });
+}
+
+async function queryDimensionStatsByExpr(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  limit: number,
+  filters: DashboardFilters,
+  options: DimensionStatsOptions,
+): Promise<Array<{ value: string; views: number; sessions: number }>> {
   const map = new Map<string, { value: string; views: number; sessions: number }>();
   const d1FilterSql = buildD1FilterSql(filters);
   const includeArchive = window.hasArchive && !hasActiveFilters(filters);
   const sourceLimit = crossSourceFetchLimit(limit, window.hasAnalytics || includeArchive);
 
-  if (window.hasAnalytics) {
+  if (window.hasAnalytics && options.aeQuery) {
     const aeRows = await options.aeQuery(
       env,
       siteId,
@@ -740,7 +776,7 @@ async function queryDimensionStats(
   if (window.hasD1Detail) {
     const sql = `
       SELECT
-        COALESCE(${options.d1DimensionKey}, '') AS k,
+        COALESCE(${options.d1DimensionExpr}, '') AS k,
         COUNT(*) AS views,
         COUNT(DISTINCT session_id) AS sessions
       FROM pageviews
@@ -794,6 +830,165 @@ async function queryDimensionStats(
   return Array.from(map.values())
     .sort((a, b) => b.views - a.views)
     .slice(0, limit);
+}
+
+interface OverviewDimensionTabRow {
+  label: string;
+  views: number;
+  sessions: number;
+}
+
+interface OverviewClientDimensionTabsData {
+  browser: OverviewDimensionTabRow[];
+  osVersion: OverviewDimensionTabRow[];
+  deviceType: OverviewDimensionTabRow[];
+  language: OverviewDimensionTabRow[];
+  screenSize: OverviewDimensionTabRow[];
+}
+
+interface OverviewGeoDimensionTabsData {
+  country: OverviewDimensionTabRow[];
+  region: OverviewDimensionTabRow[];
+  city: OverviewDimensionTabRow[];
+  continent: OverviewDimensionTabRow[];
+  timezone: OverviewDimensionTabRow[];
+  organization: OverviewDimensionTabRow[];
+}
+
+function toOverviewDimensionRows(
+  rows: Array<{ value: string; views: number; sessions: number }>,
+): OverviewDimensionTabRow[] {
+  return rows.map((item) => ({
+    label: item.value,
+    views: Math.max(0, Number(item.views ?? 0)),
+    sessions: Math.max(0, Number(item.sessions ?? 0)),
+  }));
+}
+
+async function queryOverviewClientDimensionTabs(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  limit: number,
+  filters: DashboardFilters,
+): Promise<OverviewClientDimensionTabsData> {
+  const osWithVersionExpr = `
+    CASE
+      WHEN COALESCE(os, '') = '' AND COALESCE(os_version, '') = '' THEN ''
+      WHEN COALESCE(os_version, '') = '' THEN COALESCE(os, '')
+      ELSE trim(COALESCE(os, '') || ' ' || COALESCE(os_version, ''))
+    END
+  `;
+  const screenSizeExpr = `
+    CASE
+      WHEN COALESCE(screen_width, 0) > 0 AND COALESCE(screen_height, 0) > 0
+        THEN CAST(screen_width AS TEXT) || 'x' || CAST(screen_height AS TEXT)
+      ELSE ''
+    END
+  `;
+
+  const [browser, osVersion, deviceType, language, screenSize] =
+    await Promise.all([
+    queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+      d1DimensionExpr: "browser",
+      archiveDimensionKey: "browser_stats_json",
+      aeQuery: queryAeTopBrowsers,
+    }),
+    queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+      d1DimensionExpr: osWithVersionExpr,
+      archiveDimensionKey: null,
+    }),
+    queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+      d1DimensionExpr: "device_type",
+      archiveDimensionKey: "device_stats_json",
+      aeQuery: queryAeTopDevices,
+    }),
+    queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+      d1DimensionExpr: "language",
+      archiveDimensionKey: "language_stats_json",
+      aeQuery: queryAeTopLanguages,
+    }),
+    queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+      d1DimensionExpr: screenSizeExpr,
+      archiveDimensionKey: "screen_stats_json",
+    }),
+  ]);
+
+  return {
+    browser: toOverviewDimensionRows(browser),
+    osVersion: toOverviewDimensionRows(osVersion),
+    deviceType: toOverviewDimensionRows(deviceType),
+    language: toOverviewDimensionRows(language),
+    screenSize: toOverviewDimensionRows(screenSize),
+  };
+}
+
+async function queryOverviewGeoDimensionTabs(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  limit: number,
+  filters: DashboardFilters,
+): Promise<OverviewGeoDimensionTabsData> {
+  const regionCodeOrNameExpr = `
+    trim(COALESCE(NULLIF(region_code, ''), NULLIF(region, ''), ''))
+  `;
+  const regionNameExpr = `
+    trim(COALESCE(NULLIF(region, ''), NULLIF(region_code, ''), ''))
+  `;
+  const regionWithCountryExpr = `
+    CASE
+      WHEN ${regionCodeOrNameExpr} = '' THEN ''
+      ELSE trim(COALESCE(country, '')) || '${GEO_REGION_VALUE_SEPARATOR}' || ${regionCodeOrNameExpr} || '${GEO_REGION_VALUE_SEPARATOR}' || ${regionNameExpr}
+    END
+  `;
+  const cityWithRegionCountryExpr = `
+    CASE
+      WHEN COALESCE(city, '') = '' THEN ''
+      ELSE trim(COALESCE(country, '')) || '${GEO_CITY_VALUE_SEPARATOR}' || ${regionCodeOrNameExpr} || '${GEO_CITY_VALUE_SEPARATOR}' || ${regionNameExpr} || '${GEO_CITY_VALUE_SEPARATOR}' || trim(COALESCE(city, ''))
+    END
+  `;
+
+  const [country, region, city, continent, timezone, organization] =
+    await Promise.all([
+      queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+        d1DimensionExpr: "country",
+        archiveDimensionKey: "country_stats_json",
+        aeQuery: queryAeTopCountries,
+      }),
+      queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+        d1DimensionExpr: regionWithCountryExpr,
+        archiveDimensionKey: "region_stats_json",
+        aeQuery: queryAeTopCountryRegions,
+      }),
+      queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+        d1DimensionExpr: cityWithRegionCountryExpr,
+        archiveDimensionKey: "city_stats_json",
+        aeQuery: queryAeTopCountryRegionCities,
+      }),
+      queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+        d1DimensionExpr: "continent",
+        archiveDimensionKey: null,
+      }),
+      queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+        d1DimensionExpr: "timezone",
+        archiveDimensionKey: "timezone_stats_json",
+        aeQuery: queryAeTopTimezones,
+      }),
+      queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
+        d1DimensionExpr: "as_organization",
+        archiveDimensionKey: null,
+      }),
+    ]);
+
+  return {
+    country: toOverviewDimensionRows(country),
+    region: toOverviewDimensionRows(region),
+    city: toOverviewDimensionRows(city),
+    continent: toOverviewDimensionRows(continent),
+    timezone: toOverviewDimensionRows(timezone),
+    organization: toOverviewDimensionRows(organization),
+  };
 }
 
 async function queryTopPages(
@@ -2476,6 +2671,42 @@ export async function handlePrivateQuery(request: Request, env: Env, url: URL): 
       fromMs: window.fromMs,
       toMs: window.toMs,
       data,
+    });
+  }
+
+  if (pathname === "/api/private/overview-client-dimensions") {
+    const limit = parseLimit(url, 100, 300);
+    const tabs = await queryOverviewClientDimensionTabs(
+      env,
+      siteId,
+      window,
+      limit,
+      filters,
+    );
+    return jsonResponse({
+      ok: true,
+      siteId,
+      fromMs: window.fromMs,
+      toMs: window.toMs,
+      tabs,
+    });
+  }
+
+  if (pathname === "/api/private/overview-geo-dimensions") {
+    const limit = parseLimit(url, 100, 300);
+    const tabs = await queryOverviewGeoDimensionTabs(
+      env,
+      siteId,
+      window,
+      limit,
+      filters,
+    );
+    return jsonResponse({
+      ok: true,
+      siteId,
+      fromMs: window.fromMs,
+      toMs: window.toMs,
+      tabs,
     });
   }
 

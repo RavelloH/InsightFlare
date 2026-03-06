@@ -227,6 +227,29 @@ export interface DimensionData {
   }>;
 }
 
+export interface OverviewClientDimensionTabsData {
+  ok: boolean;
+  tabs: {
+    browser: Array<{ label: string; views: number; sessions: number }>;
+    osVersion: Array<{ label: string; views: number; sessions: number }>;
+    deviceType: Array<{ label: string; views: number; sessions: number }>;
+    language: Array<{ label: string; views: number; sessions: number }>;
+    screenSize: Array<{ label: string; views: number; sessions: number }>;
+  };
+}
+
+export interface OverviewGeoDimensionTabsData {
+  ok: boolean;
+  tabs: {
+    country: Array<{ label: string; views: number; sessions: number }>;
+    region: Array<{ label: string; views: number; sessions: number }>;
+    city: Array<{ label: string; views: number; sessions: number }>;
+    continent: Array<{ label: string; views: number; sessions: number }>;
+    timezone: Array<{ label: string; views: number; sessions: number }>;
+    organization: Array<{ label: string; views: number; sessions: number }>;
+  };
+}
+
 export interface TeamData {
   id: string;
   name: string;
@@ -368,6 +391,48 @@ export async function fetchPrivateReferrers(params: {
         to: params.to,
         limit: 8,
         fullUrl: 0,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateOverviewClientDimensions(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  limit?: number;
+  filters?: QueryFilters;
+}): Promise<OverviewClientDimensionTabsData> {
+  return fetchEdgeJson<OverviewClientDimensionTabsData>({
+    path: "/api/private/overview-client-dimensions",
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 100,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateOverviewGeoDimensions(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  limit?: number;
+  filters?: QueryFilters;
+}): Promise<OverviewGeoDimensionTabsData> {
+  return fetchEdgeJson<OverviewGeoDimensionTabsData>({
+    path: "/api/private/overview-geo-dimensions",
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 100,
       },
       params.filters,
     ),

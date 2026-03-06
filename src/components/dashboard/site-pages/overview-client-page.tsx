@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MutableRefObject,
   type MouseEvent,
   type ReactNode,
 } from "react";
@@ -18,6 +19,7 @@ import {
   RiArrowUpLine,
   RiArrowUpSLine,
 } from "@remixicon/react";
+import { Icon } from "@iconify/react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip } from "recharts";
 import { OverlayScrollbars } from "overlayscrollbars";
 import type { PartialOptions } from "overlayscrollbars";
@@ -35,6 +37,12 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+} from "@/components/ui/breadcrumb";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { TrendChart } from "@/components/dashboard/trend-chart";
@@ -54,10 +62,16 @@ import {
 import {
   emptyReferrersData,
   emptyPageCardTabsData,
+  emptyOverviewClientDimensionTabsData,
+  emptyOverviewGeoDimensionTabsData,
   fetchPageCardTabs,
+  fetchOverviewClientDimensionTabs,
+  fetchOverviewGeoDimensionTabs,
   fetchOverview,
   fetchReferrers,
   fetchTrend,
+  type OverviewClientDimensionTabsData,
+  type OverviewGeoDimensionTabsData,
   type PageCardTabsData,
 } from "@/lib/dashboard/client-data";
 import type { OverviewData, ReferrersData, TrendData } from "@/lib/edge-client";
@@ -65,6 +79,11 @@ import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
+import {
+  resolveCountryFlagCode,
+  resolveCountryLabel,
+  resolveLanguageLabel,
+} from "@/lib/i18n/code-labels";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
@@ -269,6 +288,8 @@ type PageCardTab = "path" | "title" | "hostname" | "entry" | "exit";
 type PageCardSortKey = "views" | "sessions";
 type PageCardNavigableTab = "path" | "hostname" | "entry" | "exit";
 type SourceCardTab = "domain" | "link";
+type ClientDimensionCardTab = keyof OverviewClientDimensionTabsData;
+type GeoDimensionCardTab = keyof OverviewGeoDimensionTabsData;
 
 interface PageCardRow {
   key: string;
@@ -276,6 +297,24 @@ interface PageCardRow {
   views: number;
   sessions: number;
   mono: boolean;
+  iconName?: string | null;
+  filterValue?: string;
+  regionBreadcrumb?: {
+    countryLabel: string;
+    countryIconName: string | null;
+    regionLabel: string;
+    countryCode: string;
+    stateCode: string;
+  };
+  cityBreadcrumb?: {
+    countryLabel: string;
+    countryIconName: string | null;
+    regionLabel: string;
+    cityLabel: string;
+    countryCode: string;
+    stateCode: string;
+    cityNameDefault: string;
+  };
 }
 
 interface SourceCardRow {
@@ -312,6 +351,42 @@ const SOURCE_CARD_QUERY_PARAM_BY_TAB: Record<SourceCardTab, string> = {
   domain: "sourceDomain",
   link: "sourceLink",
 };
+const CLIENT_DIMENSION_CARD_TABS: ClientDimensionCardTab[] = [
+  "browser",
+  "osVersion",
+  "deviceType",
+  "language",
+  "screenSize",
+];
+const GEO_DIMENSION_CARD_TABS: GeoDimensionCardTab[] = [
+  "country",
+  "region",
+  "city",
+  "continent",
+  "timezone",
+  "organization",
+];
+const CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB: Record<
+  ClientDimensionCardTab,
+  string
+> = {
+  browser: "clientBrowser",
+  osVersion: "clientOsVersion",
+  deviceType: "clientDeviceType",
+  language: "clientLanguage",
+  screenSize: "clientScreenSize",
+};
+const GEO_DIMENSION_CARD_QUERY_PARAM_BY_TAB: Record<
+  GeoDimensionCardTab,
+  string
+> = {
+  country: "geoCountry",
+  region: "geoRegion",
+  city: "geoCity",
+  continent: "geoContinent",
+  timezone: "geoTimezone",
+  organization: "geoOrganization",
+};
 const PANEL_SCROLLBAR_OPTIONS = {
   overflow: {
     x: "hidden",
@@ -324,6 +399,226 @@ const PANEL_SCROLLBAR_OPTIONS = {
     autoHideSuspend: false,
   },
 } satisfies PartialOptions;
+const GEO_REGION_VALUE_SEPARATOR = "::";
+const GEO_TRANSLATION_API_BASE_URL = "https://locale.ravelloh.com";
+const GEO_TRANSLATION_API_LOCALE_BY_APP_LOCALE: Record<Locale, string | null> =
+  {
+    en: null,
+    zh: "zh-CN",
+  };
+const GEO_STATE_CODE_PATTERN = /^[A-Z0-9-]{1,16}$/;
+
+interface GeoTranslationCity {
+  name: string;
+  nameDefault: string;
+  nativeName: string;
+}
+
+interface GeoStateTranslationBundle {
+  stateName: string;
+  cities: GeoTranslationCity[];
+}
+
+const geoStateTranslationCache = new Map<
+  string,
+  Promise<GeoStateTranslationBundle | null>
+>();
+
+function resolveGeoTranslationApiLocale(locale: Locale): string | null {
+  return GEO_TRANSLATION_API_LOCALE_BY_APP_LOCALE[locale] ?? null;
+}
+
+function normalizeGeoTranslationLookupValue(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+function parseGeoStateTranslationBundle(
+  payload: unknown,
+): GeoStateTranslationBundle | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as {
+    state?: unknown;
+    cities?: unknown;
+  };
+
+  const state =
+    record.state && typeof record.state === "object"
+      ? (record.state as Record<string, unknown>)
+      : null;
+  const stateName = typeof state?.name === "string" ? state.name.trim() : "";
+
+  const cities = Array.isArray(record.cities)
+    ? record.cities.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const city = entry as Record<string, unknown>;
+        const name = typeof city.name === "string" ? city.name.trim() : "";
+        const nameDefault =
+          typeof city.name_default === "string" ? city.name_default.trim() : "";
+        const nativeName =
+          typeof city.native === "string" ? city.native.trim() : "";
+        if (!name && !nameDefault && !nativeName) return [];
+        return [{ name, nameDefault, nativeName }];
+      })
+    : [];
+
+  return {
+    stateName,
+    cities,
+  };
+}
+
+async function fetchGeoStateTranslationBundle(
+  apiLocale: string,
+  countryCode: string,
+  stateCode: string,
+): Promise<GeoStateTranslationBundle | null> {
+  const normalizedCountry = countryCode.trim().toUpperCase();
+  const normalizedState = stateCode.trim().toUpperCase();
+  if (
+    !normalizedCountry ||
+    !normalizedState ||
+    !GEO_STATE_CODE_PATTERN.test(normalizedState)
+  ) {
+    return null;
+  }
+
+  const cacheKey = `${apiLocale}::${normalizedCountry}::${normalizedState}`;
+  const cached = geoStateTranslationCache.get(cacheKey);
+  if (cached) return cached;
+
+  const request = fetch(
+    `${GEO_TRANSLATION_API_BASE_URL}/${encodeURIComponent(apiLocale)}/${encodeURIComponent(normalizedCountry)}/${encodeURIComponent(normalizedState)}/`,
+    {
+      method: "GET",
+      cache: "force-cache",
+    },
+  )
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const payload = (await response.json()) as unknown;
+      return parseGeoStateTranslationBundle(payload);
+    })
+    .catch(() => null);
+
+  geoStateTranslationCache.set(cacheKey, request);
+  return request;
+}
+
+function resolveLocalizedCityName(
+  bundle: GeoStateTranslationBundle | null,
+  cityNameDefault: string,
+): string | null {
+  if (!bundle) return null;
+  const target = normalizeGeoTranslationLookupValue(cityNameDefault);
+  if (!target) return null;
+
+  for (const city of bundle.cities) {
+    const localized = normalizeGeoTranslationLookupValue(city.name);
+    const fallback = normalizeGeoTranslationLookupValue(city.nameDefault);
+    const nativeName = normalizeGeoTranslationLookupValue(city.nativeName);
+    if (target === fallback || target === localized || target === nativeName) {
+      return city.name || city.nameDefault || city.nativeName || null;
+    }
+  }
+
+  return null;
+}
+
+function useInViewOnce(rootMargin = "0px"): {
+  ref: MutableRefObject<HTMLSpanElement | null>;
+  isInView: boolean;
+} {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [isInView, setIsInView] = useState(false);
+
+  useEffect(() => {
+    if (isInView) return;
+    const target = ref.current;
+    if (!target) return;
+
+    if (typeof IntersectionObserver === "undefined") {
+      setIsInView(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        const visible = Boolean(
+          entry?.isIntersecting || (entry?.intersectionRatio ?? 0) > 0,
+        );
+        if (!visible) return;
+        setIsInView(true);
+        observer.disconnect();
+      },
+      {
+        root: null,
+        rootMargin,
+        threshold: 0.01,
+      },
+    );
+
+    observer.observe(target);
+    return () => {
+      observer.disconnect();
+    };
+  }, [isInView, rootMargin]);
+
+  return { ref, isInView };
+}
+
+function useGeoStateTranslationBundle({
+  locale,
+  countryCode,
+  stateCode,
+  enabled,
+}: {
+  locale: Locale;
+  countryCode: string;
+  stateCode: string;
+  enabled: boolean;
+}): GeoStateTranslationBundle | null {
+  const [bundle, setBundle] = useState<GeoStateTranslationBundle | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      setBundle(null);
+      return;
+    }
+    const apiLocale = resolveGeoTranslationApiLocale(locale);
+    if (!apiLocale) {
+      setBundle(null);
+      return;
+    }
+
+    const normalizedCountry = countryCode.trim().toUpperCase();
+    const normalizedState = stateCode.trim().toUpperCase();
+    if (
+      !normalizedCountry ||
+      !normalizedState ||
+      !GEO_STATE_CODE_PATTERN.test(normalizedState)
+    ) {
+      setBundle(null);
+      return;
+    }
+
+    let active = true;
+    fetchGeoStateTranslationBundle(
+      apiLocale,
+      normalizedCountry,
+      normalizedState,
+    ).then((nextBundle) => {
+      if (!active) return;
+      setBundle(nextBundle);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [countryCode, enabled, locale, stateCode]);
+
+  return bundle;
+}
 
 function isPageCardNavigableTab(tab: PageCardTab): tab is PageCardNavigableTab {
   return PAGE_CARD_NAVIGABLE_TABS.has(tab as PageCardNavigableTab);
@@ -379,6 +674,506 @@ function leadingLabelLetter(value: string): string {
   return normalized.slice(0, 1).toUpperCase();
 }
 
+function resolveGeoRegionBreadcrumbData(
+  value: string,
+  locale: Locale,
+  unknownLabel: string,
+): {
+  displayLabel: string;
+  filterValue: string;
+  breadcrumb: {
+    countryLabel: string;
+    countryIconName: string | null;
+    regionLabel: string;
+    countryCode: string;
+    stateCode: string;
+  };
+} {
+  const normalized = value.trim();
+  const segments = normalized
+    .split(GEO_REGION_VALUE_SEPARATOR)
+    .map((segment) => segment.trim());
+  const rawCountry = segments[0] || "";
+  const rawStateCode = segments.length >= 3 ? segments[1] || "" : "";
+  const rawStateName =
+    segments.length >= 3
+      ? segments.slice(2).join(GEO_REGION_VALUE_SEPARATOR).trim()
+      : segments.length >= 2
+        ? segments[1] || ""
+        : normalized;
+
+  const regionLabel = normalizeDimensionLabel(rawStateName, unknownLabel);
+  const { label: countryLabel, code } = resolveCountryLabel(
+    rawCountry,
+    locale,
+    unknownLabel,
+  );
+  const flagCode = resolveCountryFlagCode(code, locale);
+  const countryIconName = flagCode
+    ? `flagpack:${flagCode.toLowerCase()}`
+    : null;
+
+  return {
+    displayLabel: `${countryLabel} > ${regionLabel}`,
+    filterValue: rawStateCode || regionLabel,
+    breadcrumb: {
+      countryLabel,
+      countryIconName,
+      regionLabel,
+      countryCode: rawCountry.toUpperCase(),
+      stateCode: rawStateCode || regionLabel,
+    },
+  };
+}
+
+function resolveGeoCityBreadcrumbData(
+  value: string,
+  locale: Locale,
+  unknownLabel: string,
+): {
+  displayLabel: string;
+  filterValue: string;
+  breadcrumb: {
+    countryLabel: string;
+    countryIconName: string | null;
+    regionLabel: string;
+    cityLabel: string;
+    countryCode: string;
+    stateCode: string;
+    cityNameDefault: string;
+  } | null;
+} {
+  const normalized = value.trim();
+  const segments = normalized
+    .split(GEO_REGION_VALUE_SEPARATOR)
+    .map((segment) => segment.trim());
+
+  if (segments.length < 3) {
+    const cityLabel = normalizeDimensionLabel(normalized, unknownLabel);
+    return {
+      displayLabel: cityLabel,
+      filterValue: cityLabel,
+      breadcrumb: null,
+    };
+  }
+
+  const rawCountry = segments[0] || "";
+  const rawStateCode = segments.length >= 4 ? segments[1] || "" : "";
+  const rawStateName =
+    segments.length >= 4 ? segments[2] || "" : segments[1] || "";
+  const rawCity =
+    segments.length >= 4
+      ? segments.slice(3).join(GEO_REGION_VALUE_SEPARATOR).trim()
+      : segments.slice(2).join(GEO_REGION_VALUE_SEPARATOR).trim();
+
+  const regionLabel = normalizeDimensionLabel(rawStateName, unknownLabel);
+  const cityLabel = normalizeDimensionLabel(rawCity, unknownLabel);
+  const { label: countryLabel, code } = resolveCountryLabel(
+    rawCountry,
+    locale,
+    unknownLabel,
+  );
+  const flagCode = resolveCountryFlagCode(code, locale);
+  const countryIconName = flagCode
+    ? `flagpack:${flagCode.toLowerCase()}`
+    : null;
+
+  return {
+    displayLabel: `${countryLabel} > ${regionLabel} > ${cityLabel}`,
+    filterValue: rawCity || cityLabel,
+    breadcrumb: {
+      countryLabel,
+      countryIconName,
+      regionLabel,
+      cityLabel,
+      countryCode: rawCountry.toUpperCase(),
+      stateCode: rawStateCode || regionLabel,
+      cityNameDefault: rawCity || cityLabel,
+    },
+  };
+}
+
+const UMAMI_BROWSER_ICON_PREFIX = "umami-browser:";
+const UMAMI_OS_ICON_PREFIX = "umami-os:";
+const UMAMI_BROWSER_ICON_DIR = "/images/browser";
+const UMAMI_OS_ICON_DIR = "/images/os";
+const UMAMI_ICON_FALLBACK = "unknown";
+
+function resolveBrowserLogoIconName(value: string): string | null {
+  const normalized = value.trim().toLocaleLowerCase();
+  if (!normalized) return null;
+
+  let iconKey = UMAMI_ICON_FALLBACK;
+
+  if (
+    normalized.includes("android webview") ||
+    normalized.includes("android-webview")
+  ) {
+    iconKey = "android-webview";
+  } else if (normalized.includes("chromium-webview")) {
+    iconKey = "chromium-webview";
+  } else if (normalized.includes("edge chromium")) {
+    iconKey = "edge-chromium";
+  } else if (normalized.includes("edge ios")) {
+    iconKey = "edge-ios";
+  } else if (normalized.includes("edge")) {
+    iconKey = "edge";
+  } else if (
+    normalized.includes("chrome ios") ||
+    normalized.includes("crios")
+  ) {
+    iconKey = "crios";
+  } else if (
+    normalized.includes("firefox ios") ||
+    normalized.includes("fxios")
+  ) {
+    iconKey = "fxios";
+  } else if (normalized.includes("ios webview")) {
+    iconKey = "ios-webview";
+  } else if (normalized === "ios") {
+    iconKey = "ios";
+  } else if (normalized.includes("internet explorer") || normalized === "ie") {
+    iconKey = "ie";
+  } else if (normalized.includes("opera mini")) {
+    iconKey = "opera-mini";
+  } else if (normalized.includes("opera")) {
+    iconKey = "opera";
+  } else if (normalized.includes("samsung")) {
+    iconKey = "samsung";
+  } else if (normalized.includes("android")) {
+    iconKey = "android";
+  } else if (normalized.includes("miui")) {
+    iconKey = "miui";
+  } else if (normalized.includes("firefox")) {
+    iconKey = "firefox";
+  } else if (normalized.includes("safari")) {
+    iconKey = "safari";
+  } else if (normalized.includes("chrome") || normalized.includes("chromium")) {
+    iconKey = "chrome";
+  } else if (normalized.includes("brave")) {
+    iconKey = "brave";
+  } else if (normalized.includes("facebook")) {
+    iconKey = "facebook";
+  } else if (normalized.includes("instagram")) {
+    iconKey = "instagram";
+  } else if (normalized.includes("kakao")) {
+    iconKey = "kakaotalk";
+  } else if (normalized.includes("yandex")) {
+    iconKey = "yandexbrowser";
+  } else if (normalized.includes("silk")) {
+    iconKey = "silk";
+  } else if (normalized.includes("searchbot")) {
+    iconKey = "searchbot";
+  } else if (normalized.includes("curl")) {
+    iconKey = "curl";
+  } else if (normalized.includes("aol")) {
+    iconKey = "aol";
+  } else if (normalized.includes("beaker")) {
+    iconKey = "beaker";
+  } else if (normalized.includes("blackberry") || normalized.includes("bb10")) {
+    iconKey = "blackberry";
+  }
+
+  return `${UMAMI_BROWSER_ICON_PREFIX}${iconKey}`;
+}
+
+function resolveOsLogoIconName(value: string): string | null {
+  const normalized = value.trim().toLocaleLowerCase();
+  if (!normalized) return null;
+
+  let iconKey = UMAMI_ICON_FALLBACK;
+
+  if (normalized.includes("windows 11")) {
+    iconKey = "windows-11";
+  } else if (normalized.includes("windows 10")) {
+    iconKey = "windows-10";
+  } else if (normalized.includes("windows 8.1")) {
+    iconKey = "windows-8-1";
+  } else if (normalized.includes("windows 8")) {
+    iconKey = "windows-8";
+  } else if (normalized.includes("windows 7")) {
+    iconKey = "windows-7";
+  } else if (normalized.includes("windows vista")) {
+    iconKey = "windows-vista";
+  } else if (normalized.includes("windows xp")) {
+    iconKey = "windows-xp";
+  } else if (normalized.includes("windows 2000")) {
+    iconKey = "windows-2000";
+  } else if (normalized.includes("windows 98")) {
+    iconKey = "windows-98";
+  } else if (normalized.includes("windows 95")) {
+    iconKey = "windows-95";
+  } else if (normalized.includes("windows me")) {
+    iconKey = "windows-me";
+  } else if (normalized.includes("windows mobile")) {
+    iconKey = "windows-mobile";
+  } else if (normalized.includes("windows server 2003")) {
+    iconKey = "windows-server-2003";
+  } else if (normalized.startsWith("windows")) {
+    iconKey = "windows-10";
+  } else if (
+    normalized.startsWith("mac") ||
+    normalized.startsWith("os x") ||
+    normalized.startsWith("darwin")
+  ) {
+    iconKey = "mac-os";
+  } else if (normalized.startsWith("ios")) {
+    iconKey = "ios";
+  } else if (normalized.startsWith("android")) {
+    iconKey = "android-os";
+  } else if (
+    normalized.startsWith("chrome os") ||
+    normalized.startsWith("chromium os")
+  ) {
+    iconKey = "chrome-os";
+  } else if (normalized.startsWith("amazon os")) {
+    iconKey = "amazon-os";
+  } else if (normalized.startsWith("blackberry")) {
+    iconKey = "blackberry-os";
+  } else if (normalized.includes("openbsd")) {
+    iconKey = "open-bsd";
+  } else if (normalized.includes("qnx")) {
+    iconKey = "qnx";
+  } else if (normalized.includes("os/2") || normalized.includes("os 2")) {
+    iconKey = "os-2";
+  } else if (normalized.includes("beos")) {
+    iconKey = "beos";
+  } else if (normalized.includes("sun os") || normalized.includes("sunos")) {
+    iconKey = "sun-os";
+  } else if (
+    normalized.includes("linux") ||
+    normalized.startsWith("ubuntu") ||
+    normalized.startsWith("debian") ||
+    normalized.startsWith("fedora") ||
+    normalized.startsWith("centos")
+  ) {
+    iconKey = "linux";
+  }
+
+  return `${UMAMI_OS_ICON_PREFIX}${iconKey}`;
+}
+
+function resolveUmamiIconSource(
+  iconName: string,
+): { src: string; fallbackSrc: string } | null {
+  if (iconName.startsWith(UMAMI_BROWSER_ICON_PREFIX)) {
+    const iconKey = iconName.slice(UMAMI_BROWSER_ICON_PREFIX.length);
+    return {
+      src: `${UMAMI_BROWSER_ICON_DIR}/${iconKey}.png`,
+      fallbackSrc: `${UMAMI_BROWSER_ICON_DIR}/${UMAMI_ICON_FALLBACK}.png`,
+    };
+  }
+
+  if (iconName.startsWith(UMAMI_OS_ICON_PREFIX)) {
+    const iconKey = iconName.slice(UMAMI_OS_ICON_PREFIX.length);
+    return {
+      src: `${UMAMI_OS_ICON_DIR}/${iconKey}.png`,
+      fallbackSrc: `${UMAMI_OS_ICON_DIR}/${UMAMI_ICON_FALLBACK}.png`,
+    };
+  }
+
+  return null;
+}
+
+function LabelWithLeadingIcon({
+  label,
+  iconName,
+}: {
+  label: string;
+  iconName?: string | null;
+}) {
+  if (!iconName) {
+    return <span className="break-words">{label}</span>;
+  }
+
+  const isFlag = iconName.startsWith("flagpack:");
+  const umamiIcon = resolveUmamiIconSource(iconName);
+
+  return (
+    <span className="relative inline-block max-w-full break-words pl-6">
+      <span className="pointer-events-none absolute inset-y-0 left-0 inline-flex w-4 items-center justify-center">
+        <span className="inline-flex size-4 items-center justify-center">
+          {isFlag ? (
+            <Icon
+              icon={iconName}
+              style={{
+                width: 16,
+                height: 12,
+              }}
+              className="block shrink-0"
+            />
+          ) : umamiIcon ? (
+            <img
+              src={umamiIcon.src}
+              alt=""
+              width={16}
+              height={16}
+              className="block h-4 w-4 shrink-0"
+              loading="lazy"
+              decoding="async"
+              onError={(event) => {
+                const target = event.currentTarget;
+                if (target.dataset.fallbackApplied === "true") return;
+                target.dataset.fallbackApplied = "true";
+                target.src = umamiIcon.fallbackSrc;
+              }}
+            />
+          ) : null}
+        </span>
+      </span>
+      <span className="break-words">{label}</span>
+    </span>
+  );
+}
+
+function RegionBreadcrumbLabel({
+  locale,
+  countryLabel,
+  countryIconName,
+  regionLabel,
+  countryCode,
+  stateCode,
+}: {
+  locale: Locale;
+  countryLabel: string;
+  countryIconName: string | null;
+  regionLabel: string;
+  countryCode: string;
+  stateCode: string;
+}) {
+  const { ref: visibilityRef, isInView } = useInViewOnce();
+  const translationBundle = useGeoStateTranslationBundle({
+    locale,
+    countryCode,
+    stateCode,
+    enabled: isInView,
+  });
+  const localizedRegionLabel =
+    translationBundle?.stateName.trim() || regionLabel;
+
+  return (
+    <span ref={visibilityRef} className="block">
+      <Breadcrumb className="max-w-full">
+        <BreadcrumbList className="flex-nowrap gap-1">
+          <BreadcrumbItem className="min-w-0">
+            <BreadcrumbPage className="inline-flex min-w-0 items-center gap-2">
+              {countryIconName ? (
+                <Icon
+                  icon={countryIconName}
+                  style={{
+                    width: 16,
+                    height: 12,
+                  }}
+                  className="block shrink-0"
+                />
+              ) : null}
+              <span className="truncate leading-5">{countryLabel}</span>
+            </BreadcrumbPage>
+          </BreadcrumbItem>
+          <BreadcrumbItem className="min-w-0">
+            <span className="shrink-0 text-muted-foreground" aria-hidden="true">
+              {">"}
+            </span>
+            <BreadcrumbPage className="block truncate leading-5">
+              <AutoTransition>{localizedRegionLabel}</AutoTransition>
+            </BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+    </span>
+  );
+}
+
+function CityBreadcrumbLabel({
+  locale,
+  countryLabel,
+  countryIconName,
+  regionLabel,
+  cityLabel,
+  countryCode,
+  stateCode,
+  cityNameDefault,
+}: {
+  locale: Locale;
+  countryLabel: string;
+  countryIconName: string | null;
+  regionLabel: string;
+  cityLabel: string;
+  countryCode: string;
+  stateCode: string;
+  cityNameDefault: string;
+}) {
+  const { ref: visibilityRef, isInView } = useInViewOnce();
+  const translationBundle = useGeoStateTranslationBundle({
+    locale,
+    countryCode,
+    stateCode,
+    enabled: isInView,
+  });
+  const localizedRegionLabel =
+    translationBundle?.stateName.trim() || regionLabel;
+  const localizedCityLabel =
+    resolveLocalizedCityName(translationBundle, cityNameDefault) || cityLabel;
+
+  return (
+    <span ref={visibilityRef} className="block">
+      <Breadcrumb className="max-w-full">
+        <BreadcrumbList className="flex-nowrap gap-1">
+          <BreadcrumbItem className="min-w-0">
+            <BreadcrumbPage className="inline-flex min-w-0 items-center gap-2">
+              {countryIconName ? (
+                <Icon
+                  icon={countryIconName}
+                  style={{
+                    width: 16,
+                    height: 12,
+                  }}
+                  className="block shrink-0"
+                />
+              ) : null}
+              <span className="truncate">{countryLabel}</span>
+            </BreadcrumbPage>
+          </BreadcrumbItem>
+          <span className="shrink-0 text-muted-foreground" aria-hidden="true">
+            {">"}
+          </span>
+          <AutoTransition className="flex gap-1">
+            <BreadcrumbItem className="min-w-0" key={localizedRegionLabel}>
+              <BreadcrumbPage className="block truncate leading-5">
+                {localizedRegionLabel}
+              </BreadcrumbPage>
+            </BreadcrumbItem>
+            <BreadcrumbItem className="min-w-0">
+              <span
+                className="shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              >
+                {">"}
+              </span>
+              <BreadcrumbPage className="block truncate leading-5">
+                {localizedCityLabel}
+              </BreadcrumbPage>
+            </BreadcrumbItem>
+          </AutoTransition>
+        </BreadcrumbList>
+      </Breadcrumb>
+    </span>
+  );
+}
+
+function normalizeDimensionLabel(
+  value: string,
+  unknownLabel: string,
+  options?: { screenSize?: boolean },
+): string {
+  const normalized = value.trim();
+  if (!normalized) return unknownLabel;
+  if (options?.screenSize && (normalized === "0x0" || normalized === "0X0")) {
+    return unknownLabel;
+  }
+  return normalized;
+}
+
 function DomainOrUrlIcon({
   label,
   unknownLabel,
@@ -425,14 +1220,21 @@ function DomainOrUrlIcon({
       type="fade"
       duration={0.18}
       initial={false}
-      className="inline-flex size-3.5 shrink-0 items-center justify-center"
+      className="inline-flex size-4 shrink-0 items-center justify-center"
     >
       {showFavicon ? (
-        <img key="favicon" src={src!} alt="" className="size-3.5 shrink-0 -translate-y-0.25" />
+        <img
+          key="favicon"
+          src={src!}
+          alt=""
+          width={16}
+          height={16}
+          className="block size-4 shrink-0 object-contain"
+        />
       ) : (
         <span
           key="fallback"
-          className="inline-flex size-3.5 shrink-0 items-center justify-center bg-card leading-none font-medium text-muted-foreground -translate-y-1"
+          className="inline-flex size-4 shrink-0 items-center justify-center rounded-[2px] bg-card text-[10px] leading-none font-medium text-muted-foreground"
         >
           {leadingLabelLetter(fallbackValue)}
         </span>
@@ -456,7 +1258,7 @@ function LabelWithOptionalIcon({
 
   return (
     <span className="relative inline-block max-w-full break-words pl-6">
-      <span className="pointer-events-none absolute left-0 top-1">
+      <span className="pointer-events-none absolute inset-y-0 left-0 inline-flex w-4 items-center">
         <DomainOrUrlIcon label={label} unknownLabel={unknownLabel} />
       </span>
       <span className="break-words">{label}</span>
@@ -670,8 +1472,19 @@ function OverviewPagesSection({
   const [sourceCardData, setSourceCardData] =
     useState<ReferrersData>(emptyReferrersData());
   const [sourceCardLoading, setSourceCardLoading] = useState(true);
+  const [overviewClientDimensionTabsData, setOverviewClientDimensionTabsData] =
+    useState<OverviewClientDimensionTabsData>(
+      emptyOverviewClientDimensionTabsData(),
+    );
+  const [overviewGeoDimensionTabsData, setOverviewGeoDimensionTabsData] =
+    useState<OverviewGeoDimensionTabsData>(emptyOverviewGeoDimensionTabsData());
+  const [dimensionCardsLoading, setDimensionCardsLoading] = useState(true);
   const [pageCardTab, setPageCardTab] = useState<PageCardTab>("path");
   const [sourceCardTab, setSourceCardTab] = useState<SourceCardTab>("domain");
+  const [clientDimensionCardTab, setClientDimensionCardTab] =
+    useState<ClientDimensionCardTab>("browser");
+  const [geoDimensionCardTab, setGeoDimensionCardTab] =
+    useState<GeoDimensionCardTab>("country");
   const [pageCardSort, setPageCardSort] = useState<{
     key: PageCardSortKey;
     direction: "asc" | "desc";
@@ -686,17 +1499,42 @@ function OverviewPagesSection({
     key: "views",
     direction: "desc",
   });
+  const [clientDimensionCardSort, setClientDimensionCardSort] = useState<{
+    key: PageCardSortKey;
+    direction: "asc" | "desc";
+  }>({
+    key: "views",
+    direction: "desc",
+  });
+  const [geoDimensionCardSort, setGeoDimensionCardSort] = useState<{
+    key: PageCardSortKey;
+    direction: "asc" | "desc";
+  }>({
+    key: "views",
+    direction: "desc",
+  });
   const [pageCardSearchOpen, setPageCardSearchOpen] = useState(false);
   const [pageCardSearchTerm, setPageCardSearchTerm] = useState("");
   const [sourceCardSearchOpen, setSourceCardSearchOpen] = useState(false);
   const [sourceCardSearchTerm, setSourceCardSearchTerm] = useState("");
+  const [clientDimensionCardSearchOpen, setClientDimensionCardSearchOpen] =
+    useState(false);
+  const [clientDimensionCardSearchTerm, setClientDimensionCardSearchTerm] =
+    useState("");
+  const [geoDimensionCardSearchOpen, setGeoDimensionCardSearchOpen] =
+    useState(false);
+  const [geoDimensionCardSearchTerm, setGeoDimensionCardSearchTerm] =
+    useState("");
 
   useEffect(() => {
     let active = true;
     setPageCardLoading(true);
     setSourceCardLoading(true);
+    setDimensionCardsLoading(true);
     setPageCardTabsData(emptyPageCardTabsData());
     setSourceCardData(emptyReferrersData());
+    setOverviewClientDimensionTabsData(emptyOverviewClientDimensionTabsData());
+    setOverviewGeoDimensionTabsData(emptyOverviewGeoDimensionTabsData());
 
     Promise.all([
       fetchPageCardTabs(siteId, window, filters).catch(() =>
@@ -706,16 +1544,32 @@ function OverviewPagesSection({
         fullUrl: true,
         limit: 100,
       }).catch(() => emptyReferrersData()),
+      fetchOverviewClientDimensionTabs(siteId, window, filters, {
+        limit: 100,
+      }).catch(() => emptyOverviewClientDimensionTabsData()),
+      fetchOverviewGeoDimensionTabs(siteId, window, filters, {
+        limit: 100,
+      }).catch(() => emptyOverviewGeoDimensionTabsData()),
     ])
-      .then(([nextTabs, nextSource]) => {
-        if (!active) return;
-        setPageCardTabsData(nextTabs);
-        setSourceCardData(nextSource);
-      })
+      .then(
+        ([
+          nextTabs,
+          nextSource,
+          nextOverviewClientDimensions,
+          nextOverviewGeoDimensions,
+        ]) => {
+          if (!active) return;
+          setPageCardTabsData(nextTabs);
+          setSourceCardData(nextSource);
+          setOverviewClientDimensionTabsData(nextOverviewClientDimensions);
+          setOverviewGeoDimensionTabsData(nextOverviewGeoDimensions);
+        },
+      )
       .finally(() => {
         if (!active) return;
         setPageCardLoading(false);
         setSourceCardLoading(false);
+        setDimensionCardsLoading(false);
       });
 
     return () => {
@@ -742,6 +1596,16 @@ function OverviewPagesSection({
       setSourceCardSearchTerm("");
     }
   }, [sourceCardSearchOpen]);
+  useEffect(() => {
+    if (!clientDimensionCardSearchOpen) {
+      setClientDimensionCardSearchTerm("");
+    }
+  }, [clientDimensionCardSearchOpen]);
+  useEffect(() => {
+    if (!geoDimensionCardSearchOpen) {
+      setGeoDimensionCardSearchTerm("");
+    }
+  }, [geoDimensionCardSearchOpen]);
 
   const noDataText = messages.common.noData;
 
@@ -1074,6 +1938,338 @@ function OverviewPagesSection({
       ),
     [sortedSourceCardRows, sourceCardSort.key],
   );
+  const clientDimensionCardTabMeta: Record<
+    ClientDimensionCardTab,
+    { label: string; columnLabel: string; mono: boolean }
+  > = {
+    browser: {
+      label: messages.common.browser,
+      columnLabel: messages.common.browser,
+      mono: false,
+    },
+    osVersion: {
+      label: messages.common.operatingSystem,
+      columnLabel: messages.common.operatingSystem,
+      mono: false,
+    },
+    deviceType: {
+      label: messages.common.deviceType,
+      columnLabel: messages.common.deviceType,
+      mono: false,
+    },
+    language: {
+      label: messages.common.language,
+      columnLabel: messages.common.language,
+      mono: false,
+    },
+    screenSize: {
+      label: messages.common.screenSize,
+      columnLabel: messages.common.screenSize,
+      mono: true,
+    },
+  };
+  const geoDimensionCardTabMeta: Record<
+    GeoDimensionCardTab,
+    { label: string; columnLabel: string; mono: boolean }
+  > = {
+    country: {
+      label: locale === "zh" ? "国家/地区" : messages.common.country,
+      columnLabel: locale === "zh" ? "国家/地区" : messages.common.country,
+      mono: false,
+    },
+    region: {
+      label: locale === "zh" ? "州/省" : messages.common.region,
+      columnLabel: locale === "zh" ? "州/省" : messages.common.region,
+      mono: false,
+    },
+    city: {
+      label: locale === "zh" ? "市/县" : messages.common.city,
+      columnLabel: locale === "zh" ? "市/县" : messages.common.city,
+      mono: false,
+    },
+    continent: {
+      label: messages.common.continent,
+      columnLabel: messages.common.continent,
+      mono: false,
+    },
+    timezone: {
+      label: messages.common.timezone,
+      columnLabel: messages.common.timezone,
+      mono: false,
+    },
+    organization: {
+      label: messages.common.organization,
+      columnLabel: messages.common.organization,
+      mono: false,
+    },
+  };
+  const clientDimensionCardRows = useMemo<
+    Record<ClientDimensionCardTab, PageCardRow[]>
+  >(() => {
+    const toRows = (
+      rows: Array<{ label: string; views: number; sessions: number }>,
+      options?: {
+        mono?: boolean;
+        screenSize?: boolean;
+        transformLabel?: (value: string) => string;
+        resolveIconName?: (value: string) => string | null;
+      },
+    ): PageCardRow[] =>
+      rows.map((item, index) => {
+        const rawLabel = normalizeDimensionLabel(
+          String(item.label || ""),
+          messages.common.unknown,
+          { screenSize: options?.screenSize },
+        );
+        const label = options?.transformLabel
+          ? options.transformLabel(rawLabel)
+          : rawLabel;
+        return {
+          key: `${label}-${index}`,
+          label,
+          views: Math.max(0, Number(item.views || 0)),
+          sessions: Math.max(0, Number(item.sessions || 0)),
+          mono: options?.mono ?? false,
+          iconName: options?.resolveIconName?.(rawLabel) ?? null,
+        };
+      });
+
+    return {
+      browser: toRows(overviewClientDimensionTabsData.browser, {
+        resolveIconName: resolveBrowserLogoIconName,
+      }),
+      osVersion: toRows(overviewClientDimensionTabsData.osVersion, {
+        resolveIconName: resolveOsLogoIconName,
+      }),
+      deviceType: toRows(overviewClientDimensionTabsData.deviceType),
+      language: toRows(overviewClientDimensionTabsData.language, {
+        transformLabel: (value) =>
+          resolveLanguageLabel(value, locale, messages.common.unknown).label,
+      }),
+      screenSize: toRows(overviewClientDimensionTabsData.screenSize, {
+        mono: true,
+        screenSize: true,
+      }),
+    };
+  }, [locale, messages.common.unknown, overviewClientDimensionTabsData]);
+  const geoDimensionCardRows = useMemo<
+    Record<GeoDimensionCardTab, PageCardRow[]>
+  >(() => {
+    const toRows = (
+      rows: Array<{ label: string; views: number; sessions: number }>,
+      options?: {
+        transformLabel?: (value: string) => string;
+        resolveIconName?: (value: string) => string | null;
+        resolveFilterValue?: (value: string) => string;
+      },
+    ): PageCardRow[] =>
+      rows.map((item, index) => {
+        const originalValue = String(item.label || "");
+        const rawLabel = normalizeDimensionLabel(
+          originalValue,
+          messages.common.unknown,
+        );
+        const label = options?.transformLabel
+          ? options.transformLabel(rawLabel)
+          : rawLabel;
+        return {
+          key: `${label}-${index}`,
+          label,
+          views: Math.max(0, Number(item.views || 0)),
+          sessions: Math.max(0, Number(item.sessions || 0)),
+          mono: false,
+          iconName: options?.resolveIconName?.(rawLabel) ?? null,
+          filterValue: options?.resolveFilterValue?.(originalValue) ?? rawLabel,
+        };
+      });
+
+    const regionRows: PageCardRow[] = overviewGeoDimensionTabsData.region.map(
+      (item, index) => {
+        const value = String(item.label || "");
+        const regionData = resolveGeoRegionBreadcrumbData(
+          value,
+          locale,
+          messages.common.unknown,
+        );
+
+        return {
+          key: `${regionData.displayLabel}-${index}`,
+          label: regionData.displayLabel,
+          views: Math.max(0, Number(item.views || 0)),
+          sessions: Math.max(0, Number(item.sessions || 0)),
+          mono: false,
+          iconName: null,
+          filterValue: regionData.filterValue,
+          regionBreadcrumb: regionData.breadcrumb,
+        };
+      },
+    );
+    const cityRows: PageCardRow[] = overviewGeoDimensionTabsData.city.map(
+      (item, index) => {
+        const value = String(item.label || "");
+        const cityData = resolveGeoCityBreadcrumbData(
+          value,
+          locale,
+          messages.common.unknown,
+        );
+
+        return {
+          key: `${cityData.displayLabel}-${index}`,
+          label: cityData.displayLabel,
+          views: Math.max(0, Number(item.views || 0)),
+          sessions: Math.max(0, Number(item.sessions || 0)),
+          mono: false,
+          iconName: null,
+          filterValue: cityData.filterValue,
+          cityBreadcrumb: cityData.breadcrumb ?? undefined,
+        };
+      },
+    );
+
+    return {
+      country: toRows(overviewGeoDimensionTabsData.country, {
+        transformLabel: (value) =>
+          resolveCountryLabel(value, locale, messages.common.unknown).label,
+        resolveIconName: (value) => {
+          const { code } = resolveCountryLabel(
+            value,
+            locale,
+            messages.common.unknown,
+          );
+          const flagCode = resolveCountryFlagCode(code, locale);
+          return flagCode ? `flagpack:${flagCode.toLowerCase()}` : null;
+        },
+      }),
+      region: regionRows,
+      city: cityRows,
+      continent: toRows(overviewGeoDimensionTabsData.continent),
+      timezone: toRows(overviewGeoDimensionTabsData.timezone),
+      organization: toRows(overviewGeoDimensionTabsData.organization),
+    };
+  }, [locale, messages.common.unknown, overviewGeoDimensionTabsData]);
+  const activeClientDimensionTabMeta =
+    clientDimensionCardTabMeta[clientDimensionCardTab];
+  const activeGeoDimensionTabMeta =
+    geoDimensionCardTabMeta[geoDimensionCardTab];
+  const sortedClientDimensionCardRows = useMemo(() => {
+    const direction = clientDimensionCardSort.direction === "asc" ? 1 : -1;
+    return [...clientDimensionCardRows[clientDimensionCardTab]].sort(
+      (left, right) => {
+        const primary =
+          (left[clientDimensionCardSort.key] -
+            right[clientDimensionCardSort.key]) *
+          direction;
+        if (primary !== 0) return primary;
+        if (right.views !== left.views) return right.views - left.views;
+        if (right.sessions !== left.sessions)
+          return right.sessions - left.sessions;
+        return left.label.localeCompare(right.label);
+      },
+    );
+  }, [
+    clientDimensionCardRows,
+    clientDimensionCardSort.direction,
+    clientDimensionCardSort.key,
+    clientDimensionCardTab,
+  ]);
+  const sortedGeoDimensionCardRows = useMemo(() => {
+    const direction = geoDimensionCardSort.direction === "asc" ? 1 : -1;
+    return [...geoDimensionCardRows[geoDimensionCardTab]].sort(
+      (left, right) => {
+        const primary =
+          (left[geoDimensionCardSort.key] - right[geoDimensionCardSort.key]) *
+          direction;
+        if (primary !== 0) return primary;
+        if (right.views !== left.views) return right.views - left.views;
+        if (right.sessions !== left.sessions)
+          return right.sessions - left.sessions;
+        return left.label.localeCompare(right.label);
+      },
+    );
+  }, [
+    geoDimensionCardRows,
+    geoDimensionCardSort.direction,
+    geoDimensionCardSort.key,
+    geoDimensionCardTab,
+  ]);
+  const activeClientDimensionCardQueryValue = useMemo(() => {
+    const queryParamKey =
+      CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB[clientDimensionCardTab];
+    const raw = searchParams.get(queryParamKey);
+    if (!raw) return null;
+    const normalized = raw.trim();
+    return normalized.length > 0 ? normalized : null;
+  }, [clientDimensionCardTab, searchParams]);
+  const activeGeoDimensionCardQueryValue = useMemo(() => {
+    const queryParamKey =
+      GEO_DIMENSION_CARD_QUERY_PARAM_BY_TAB[geoDimensionCardTab];
+    const raw = searchParams.get(queryParamKey);
+    if (!raw) return null;
+    const normalized = raw.trim();
+    return normalized.length > 0 ? normalized : null;
+  }, [geoDimensionCardTab, searchParams]);
+  const visibleClientDimensionCardRows = useMemo(
+    () =>
+      activeClientDimensionCardQueryValue
+        ? sortedClientDimensionCardRows.filter(
+            (row) => row.label === activeClientDimensionCardQueryValue,
+          )
+        : sortedClientDimensionCardRows,
+    [activeClientDimensionCardQueryValue, sortedClientDimensionCardRows],
+  );
+  const visibleGeoDimensionCardRows = useMemo(
+    () =>
+      activeGeoDimensionCardQueryValue
+        ? sortedGeoDimensionCardRows.filter(
+            (row) =>
+              (row.filterValue ?? row.label) ===
+              activeGeoDimensionCardQueryValue,
+          )
+        : sortedGeoDimensionCardRows,
+    [activeGeoDimensionCardQueryValue, sortedGeoDimensionCardRows],
+  );
+  const normalizedClientDimensionCardSearchTerm = clientDimensionCardSearchTerm
+    .trim()
+    .toLocaleLowerCase();
+  const normalizedGeoDimensionCardSearchTerm = geoDimensionCardSearchTerm
+    .trim()
+    .toLocaleLowerCase();
+  const searchedClientDimensionCardRows = useMemo(() => {
+    if (!normalizedClientDimensionCardSearchTerm)
+      return sortedClientDimensionCardRows;
+    return sortedClientDimensionCardRows.filter((row) =>
+      row.label
+        .toLocaleLowerCase()
+        .includes(normalizedClientDimensionCardSearchTerm),
+    );
+  }, [normalizedClientDimensionCardSearchTerm, sortedClientDimensionCardRows]);
+  const searchedGeoDimensionCardRows = useMemo(() => {
+    if (!normalizedGeoDimensionCardSearchTerm)
+      return sortedGeoDimensionCardRows;
+    return sortedGeoDimensionCardRows.filter((row) =>
+      row.label
+        .toLocaleLowerCase()
+        .includes(normalizedGeoDimensionCardSearchTerm),
+    );
+  }, [normalizedGeoDimensionCardSearchTerm, sortedGeoDimensionCardRows]);
+  const clientDimensionCardProgressTotal = useMemo(
+    () =>
+      sortedClientDimensionCardRows.reduce(
+        (sum, item) =>
+          sum + Math.max(0, Number(item[clientDimensionCardSort.key] ?? 0)),
+        0,
+      ),
+    [sortedClientDimensionCardRows, clientDimensionCardSort.key],
+  );
+  const geoDimensionCardProgressTotal = useMemo(
+    () =>
+      sortedGeoDimensionCardRows.reduce(
+        (sum, item) =>
+          sum + Math.max(0, Number(item[geoDimensionCardSort.key] ?? 0)),
+        0,
+      ),
+    [sortedGeoDimensionCardRows, geoDimensionCardSort.key],
+  );
 
   const togglePageCardSort = (key: PageCardSortKey) => {
     setPageCardSort((prev) =>
@@ -1084,6 +2280,20 @@ function OverviewPagesSection({
   };
   const toggleSourceCardSort = (key: PageCardSortKey) => {
     setSourceCardSort((prev) =>
+      prev.key === key
+        ? { key, direction: prev.direction === "desc" ? "asc" : "desc" }
+        : { key, direction: "desc" },
+    );
+  };
+  const toggleClientDimensionCardSort = (key: PageCardSortKey) => {
+    setClientDimensionCardSort((prev) =>
+      prev.key === key
+        ? { key, direction: prev.direction === "desc" ? "asc" : "desc" }
+        : { key, direction: "desc" },
+    );
+  };
+  const toggleGeoDimensionCardSort = (key: PageCardSortKey) => {
+    setGeoDimensionCardSort((prev) =>
       prev.key === key
         ? { key, direction: prev.direction === "desc" ? "asc" : "desc" }
         : { key, direction: "desc" },
@@ -1129,6 +2339,50 @@ function OverviewPagesSection({
     const target = updated ? `${livePathname}?${updated}` : livePathname;
     router.replace(target, { scroll: false });
   };
+  const setClientDimensionCardQueryFilter = (
+    next: { tab: ClientDimensionCardTab; value: string } | null,
+  ) => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const queryKey of Object.values(
+      CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB,
+    )) {
+      params.delete(queryKey);
+    }
+    if (next) {
+      const queryKey = CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB[next.tab];
+      const normalized = next.value.trim();
+      if (normalized.length > 0) {
+        params.set(queryKey, normalized);
+      }
+    }
+    const current = searchParams.toString();
+    const updated = params.toString();
+    if (updated === current) return;
+    const target = updated ? `${livePathname}?${updated}` : livePathname;
+    router.replace(target, { scroll: false });
+  };
+  const setGeoDimensionCardQueryFilter = (
+    next: { tab: GeoDimensionCardTab; value: string } | null,
+  ) => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const queryKey of Object.values(
+      GEO_DIMENSION_CARD_QUERY_PARAM_BY_TAB,
+    )) {
+      params.delete(queryKey);
+    }
+    if (next) {
+      const queryKey = GEO_DIMENSION_CARD_QUERY_PARAM_BY_TAB[next.tab];
+      const normalized = next.value.trim();
+      if (normalized.length > 0) {
+        params.set(queryKey, normalized);
+      }
+    }
+    const current = searchParams.toString();
+    const updated = params.toString();
+    if (updated === current) return;
+    const target = updated ? `${livePathname}?${updated}` : livePathname;
+    router.replace(target, { scroll: false });
+  };
   const handlePageCardTabChange = (tab: PageCardTab) => {
     if (tab !== pageCardTab) {
       setPageCardTab(tab);
@@ -1146,6 +2400,20 @@ function OverviewPagesSection({
     const isActive = activeSourceCardQueryValue === normalized;
     setSourceCardQueryFilter(
       isActive ? null : { tab: sourceCardTab, value: normalized },
+    );
+  };
+  const toggleClientDimensionCardRowFilter = (rowKey: string) => {
+    const normalized = rowKey.trim();
+    const isActive = activeClientDimensionCardQueryValue === normalized;
+    setClientDimensionCardQueryFilter(
+      isActive ? null : { tab: clientDimensionCardTab, value: normalized },
+    );
+  };
+  const toggleGeoDimensionCardRowFilter = (rowKey: string) => {
+    const normalized = rowKey.trim();
+    const isActive = activeGeoDimensionCardQueryValue === normalized;
+    setGeoDimensionCardQueryFilter(
+      isActive ? null : { tab: geoDimensionCardTab, value: normalized },
     );
   };
   const openPageCardRowTarget = (
@@ -1187,6 +2455,38 @@ function OverviewPagesSection({
       </span>
     );
   };
+  const renderClientDimensionSortIndicator = (key: PageCardSortKey) => {
+    if (clientDimensionCardSort.key === key) {
+      return clientDimensionCardSort.direction === "desc" ? (
+        <RiArrowDownSLine className="size-3.5" />
+      ) : (
+        <RiArrowUpSLine className="size-3.5" />
+      );
+    }
+
+    return (
+      <span className="inline-flex flex-col leading-none text-muted-foreground">
+        <RiArrowUpSLine className="-mb-1 size-3.5" />
+        <RiArrowDownSLine className="-mt-1 size-3.5" />
+      </span>
+    );
+  };
+  const renderGeoDimensionSortIndicator = (key: PageCardSortKey) => {
+    if (geoDimensionCardSort.key === key) {
+      return geoDimensionCardSort.direction === "desc" ? (
+        <RiArrowDownSLine className="size-3.5" />
+      ) : (
+        <RiArrowUpSLine className="size-3.5" />
+      );
+    }
+
+    return (
+      <span className="inline-flex flex-col leading-none text-muted-foreground">
+        <RiArrowUpSLine className="-mb-1 size-3.5" />
+        <RiArrowDownSLine className="-mt-1 size-3.5" />
+      </span>
+    );
+  };
   const pageCardSearchLabel = messages.common.search;
   const pageCardSearchPlaceholder = formatI18nTemplate(
     messages.overview.searchInTab,
@@ -1199,6 +2499,18 @@ function OverviewPagesSection({
     { tab: activeSourceTabMeta.label },
   );
   const sourceCardSearchTitle = sourceCardSearchPlaceholder;
+  const clientDimensionCardSearchLabel = messages.common.search;
+  const clientDimensionCardSearchPlaceholder = formatI18nTemplate(
+    messages.overview.searchInTab,
+    { tab: activeClientDimensionTabMeta.label },
+  );
+  const clientDimensionCardSearchTitle = clientDimensionCardSearchPlaceholder;
+  const geoDimensionCardSearchLabel = messages.common.search;
+  const geoDimensionCardSearchPlaceholder = formatI18nTemplate(
+    messages.overview.searchInTab,
+    { tab: activeGeoDimensionTabMeta.label },
+  );
+  const geoDimensionCardSearchTitle = geoDimensionCardSearchPlaceholder;
   const pageCardTableHeader = (
     <TableRow className="hover:bg-transparent">
       <TableHead className="h-8 p-0">
@@ -1472,6 +2784,336 @@ function OverviewPagesSection({
       <RiSearchLine className="size-4" />
     </Clickable>
   );
+  const clientDimensionCardTableHeader = (
+    <TableRow className="hover:bg-transparent">
+      <TableHead className="h-8 p-0">
+        <div className="px-4">{activeClientDimensionTabMeta.columnLabel}</div>
+      </TableHead>
+      <TableHead className="h-8 p-0 w-20">
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              clientDimensionCardSort.key === "views"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleClientDimensionCardSort("views")}
+          >
+            {messages.common.views}
+            {renderClientDimensionSortIndicator("views")}
+          </button>
+        </div>
+      </TableHead>
+      <TableHead className="h-8 p-0 w-20">
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              clientDimensionCardSort.key === "sessions"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleClientDimensionCardSort("sessions")}
+          >
+            {messages.common.sessions}
+            {renderClientDimensionSortIndicator("sessions")}
+          </button>
+        </div>
+      </TableHead>
+    </TableRow>
+  );
+  const renderClientDimensionCardRows = (rows: PageCardRow[]) =>
+    rows.map((item) => {
+      const rowValue = Math.max(
+        0,
+        Number(item[clientDimensionCardSort.key] ?? 0),
+      );
+      const progressPercent =
+        clientDimensionCardProgressTotal > 0
+          ? Math.min(100, (rowValue / clientDimensionCardProgressTotal) * 100)
+          : 0;
+      const progressWidth = `${progressPercent.toFixed(2)}%`;
+      const rowFilterActive =
+        activeClientDimensionCardQueryValue === item.label;
+
+      return (
+        <TableRow
+          key={item.key}
+          className={cn(
+            "group/row cursor-pointer bg-no-repeat transition-[background-size,filter] duration-300 ease-out hover:brightness-95",
+            rowFilterActive && "brightness-95",
+          )}
+          style={{
+            backgroundImage:
+              "linear-gradient(90deg, var(--muted) 0%, var(--muted) 100%)",
+            backgroundSize: `${progressWidth} 100%`,
+            backgroundPosition: "left top",
+          }}
+          onClick={() => toggleClientDimensionCardRowFilter(item.label)}
+        >
+          <TableCell className="p-0 whitespace-normal align-top">
+            <div
+              className={cn(
+                "px-4 py-2 leading-5 whitespace-normal break-words",
+                item.mono && "font-mono",
+              )}
+            >
+              <LabelWithLeadingIcon
+                label={item.label}
+                iconName={item.iconName}
+              />
+            </div>
+          </TableCell>
+          <TableCell className="p-0">
+            <div className="px-2 py-2 text-right">
+              {numberFormat(locale, item.views)}
+            </div>
+          </TableCell>
+          <TableCell className="p-0">
+            <div className="px-4 py-2 text-right">
+              {numberFormat(locale, item.sessions)}
+            </div>
+          </TableCell>
+        </TableRow>
+      );
+    });
+  const clientDimensionCardSearchContent = (
+    <div className="space-y-3">
+      <Input
+        value={clientDimensionCardSearchTerm}
+        onChange={(event) =>
+          setClientDimensionCardSearchTerm(event.target.value)
+        }
+        placeholder={clientDimensionCardSearchPlaceholder}
+      />
+      <PanelScrollbar
+        className="max-h-[60vh] pr-1"
+        syncKey={`${clientDimensionCardTab}-${clientDimensionCardSort.key}-${clientDimensionCardSort.direction}-${clientDimensionCardSearchTerm}-${searchedClientDimensionCardRows.length}-${dimensionCardsLoading}`}
+      >
+        <DataTableSwitch
+          loading={dimensionCardsLoading}
+          hasContent={searchedClientDimensionCardRows.length > 0}
+          loadingLabel={messages.common.loading}
+          emptyLabel={noDataText}
+          colSpan={3}
+          header={clientDimensionCardTableHeader}
+          rows={renderClientDimensionCardRows(searchedClientDimensionCardRows)}
+        />
+      </PanelScrollbar>
+    </div>
+  );
+  const clientDimensionCardSearchPanel = isMobile ? (
+    <Drawer
+      open={clientDimensionCardSearchOpen}
+      onOpenChange={setClientDimensionCardSearchOpen}
+    >
+      <DrawerContent className="max-h-[90vh]">
+        <DrawerHeader>
+          <DrawerTitle>{clientDimensionCardSearchTitle}</DrawerTitle>
+        </DrawerHeader>
+        <div className="px-4 pb-4">{clientDimensionCardSearchContent}</div>
+      </DrawerContent>
+    </Drawer>
+  ) : (
+    <Dialog
+      open={clientDimensionCardSearchOpen}
+      onOpenChange={setClientDimensionCardSearchOpen}
+    >
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{clientDimensionCardSearchTitle}</DialogTitle>
+        </DialogHeader>
+        {clientDimensionCardSearchContent}
+      </DialogContent>
+    </Dialog>
+  );
+  const clientDimensionCardSearchAction = (
+    <Clickable
+      className="size-6 text-muted-foreground hover:text-foreground"
+      onClick={() => setClientDimensionCardSearchOpen(true)}
+      aria-label={clientDimensionCardSearchLabel}
+      title={clientDimensionCardSearchLabel}
+    >
+      <RiSearchLine className="size-4" />
+    </Clickable>
+  );
+  const geoDimensionCardTableHeader = (
+    <TableRow className="hover:bg-transparent">
+      <TableHead className="h-8 p-0">
+        <div className="px-4">{activeGeoDimensionTabMeta.columnLabel}</div>
+      </TableHead>
+      <TableHead className="h-8 p-0 w-20">
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              geoDimensionCardSort.key === "views"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleGeoDimensionCardSort("views")}
+          >
+            {messages.common.views}
+            {renderGeoDimensionSortIndicator("views")}
+          </button>
+        </div>
+      </TableHead>
+      <TableHead className="h-8 p-0 w-20">
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              geoDimensionCardSort.key === "sessions"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleGeoDimensionCardSort("sessions")}
+          >
+            {messages.common.sessions}
+            {renderGeoDimensionSortIndicator("sessions")}
+          </button>
+        </div>
+      </TableHead>
+    </TableRow>
+  );
+  const renderGeoDimensionCardRows = (rows: PageCardRow[]) =>
+    rows.map((item) => {
+      const rowValue = Math.max(0, Number(item[geoDimensionCardSort.key] ?? 0));
+      const progressPercent =
+        geoDimensionCardProgressTotal > 0
+          ? Math.min(100, (rowValue / geoDimensionCardProgressTotal) * 100)
+          : 0;
+      const progressWidth = `${progressPercent.toFixed(2)}%`;
+      const rowFilterValue = item.filterValue ?? item.label;
+      const rowFilterActive =
+        activeGeoDimensionCardQueryValue === rowFilterValue;
+
+      return (
+        <TableRow
+          key={item.key}
+          className={cn(
+            "group/row cursor-pointer bg-no-repeat transition-[background-size,filter] duration-300 ease-out hover:brightness-95",
+            rowFilterActive && "brightness-95",
+          )}
+          style={{
+            backgroundImage:
+              "linear-gradient(90deg, var(--muted) 0%, var(--muted) 100%)",
+            backgroundSize: `${progressWidth} 100%`,
+            backgroundPosition: "left top",
+          }}
+          onClick={() => toggleGeoDimensionCardRowFilter(rowFilterValue)}
+        >
+          <TableCell className="p-0 whitespace-normal align-top">
+            <div
+              className={cn(
+                "px-4 py-2 leading-5 whitespace-normal break-words",
+                item.mono && "font-mono",
+              )}
+            >
+              {geoDimensionCardTab === "region" && item.regionBreadcrumb ? (
+                <RegionBreadcrumbLabel
+                  locale={locale}
+                  countryLabel={item.regionBreadcrumb.countryLabel}
+                  countryIconName={item.regionBreadcrumb.countryIconName}
+                  regionLabel={item.regionBreadcrumb.regionLabel}
+                  countryCode={item.regionBreadcrumb.countryCode}
+                  stateCode={item.regionBreadcrumb.stateCode}
+                />
+              ) : geoDimensionCardTab === "city" && item.cityBreadcrumb ? (
+                <CityBreadcrumbLabel
+                  locale={locale}
+                  countryLabel={item.cityBreadcrumb.countryLabel}
+                  countryIconName={item.cityBreadcrumb.countryIconName}
+                  regionLabel={item.cityBreadcrumb.regionLabel}
+                  cityLabel={item.cityBreadcrumb.cityLabel}
+                  countryCode={item.cityBreadcrumb.countryCode}
+                  stateCode={item.cityBreadcrumb.stateCode}
+                  cityNameDefault={item.cityBreadcrumb.cityNameDefault}
+                />
+              ) : (
+                <LabelWithLeadingIcon
+                  label={item.label}
+                  iconName={item.iconName}
+                />
+              )}
+            </div>
+          </TableCell>
+          <TableCell className="p-0">
+            <div className="px-2 py-2 text-right">
+              {numberFormat(locale, item.views)}
+            </div>
+          </TableCell>
+          <TableCell className="p-0">
+            <div className="px-4 py-2 text-right">
+              {numberFormat(locale, item.sessions)}
+            </div>
+          </TableCell>
+        </TableRow>
+      );
+    });
+  const geoDimensionCardSearchContent = (
+    <div className="space-y-3">
+      <Input
+        value={geoDimensionCardSearchTerm}
+        onChange={(event) => setGeoDimensionCardSearchTerm(event.target.value)}
+        placeholder={geoDimensionCardSearchPlaceholder}
+      />
+      <PanelScrollbar
+        className="max-h-[60vh] pr-1"
+        syncKey={`${geoDimensionCardTab}-${geoDimensionCardSort.key}-${geoDimensionCardSort.direction}-${geoDimensionCardSearchTerm}-${searchedGeoDimensionCardRows.length}-${dimensionCardsLoading}`}
+      >
+        <DataTableSwitch
+          loading={dimensionCardsLoading}
+          hasContent={searchedGeoDimensionCardRows.length > 0}
+          loadingLabel={messages.common.loading}
+          emptyLabel={noDataText}
+          colSpan={3}
+          header={geoDimensionCardTableHeader}
+          rows={renderGeoDimensionCardRows(searchedGeoDimensionCardRows)}
+        />
+      </PanelScrollbar>
+    </div>
+  );
+  const geoDimensionCardSearchPanel = isMobile ? (
+    <Drawer
+      open={geoDimensionCardSearchOpen}
+      onOpenChange={setGeoDimensionCardSearchOpen}
+    >
+      <DrawerContent className="max-h-[90vh]">
+        <DrawerHeader>
+          <DrawerTitle>{geoDimensionCardSearchTitle}</DrawerTitle>
+        </DrawerHeader>
+        <div className="px-4 pb-4">{geoDimensionCardSearchContent}</div>
+      </DrawerContent>
+    </Drawer>
+  ) : (
+    <Dialog
+      open={geoDimensionCardSearchOpen}
+      onOpenChange={setGeoDimensionCardSearchOpen}
+    >
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{geoDimensionCardSearchTitle}</DialogTitle>
+        </DialogHeader>
+        {geoDimensionCardSearchContent}
+      </DialogContent>
+    </Dialog>
+  );
+  const geoDimensionCardSearchAction = (
+    <Clickable
+      className="size-6 text-muted-foreground hover:text-foreground"
+      onClick={() => setGeoDimensionCardSearchOpen(true)}
+      aria-label={geoDimensionCardSearchLabel}
+      title={geoDimensionCardSearchLabel}
+    >
+      <RiSearchLine className="size-4" />
+    </Clickable>
+  );
   const pageCardSearchContent = (
     <div className="space-y-3">
       <Input
@@ -1579,7 +3221,61 @@ function OverviewPagesSection({
             />
           </TabbedScrollMaskCard>
         </div>
+
+        <div className="min-w-0">
+          <TabbedScrollMaskCard
+            value={clientDimensionCardTab}
+            onValueChange={(value) => setClientDimensionCardTab(value)}
+            tabs={CLIENT_DIMENSION_CARD_TABS.map((tab) => ({
+              value: tab,
+              label: clientDimensionCardTabMeta[tab].label,
+            }))}
+            headerRight={clientDimensionCardSearchAction}
+            className="h-full"
+            syncKey={`${dimensionCardsLoading}-${clientDimensionCardTab}-${clientDimensionCardSort.key}-${clientDimensionCardSort.direction}-${sortedClientDimensionCardRows.length}-${activeClientDimensionCardQueryValue ?? "all"}-${visibleClientDimensionCardRows.length}`}
+          >
+            <DataTableSwitch
+              loading={dimensionCardsLoading}
+              hasContent={visibleClientDimensionCardRows.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyLabel={noDataText}
+              colSpan={3}
+              contentKey={`${clientDimensionCardTab}-${activeClientDimensionCardQueryValue ?? "all"}`}
+              header={clientDimensionCardTableHeader}
+              rows={renderClientDimensionCardRows(
+                visibleClientDimensionCardRows,
+              )}
+            />
+          </TabbedScrollMaskCard>
+        </div>
+
+        <div className="min-w-0">
+          <TabbedScrollMaskCard
+            value={geoDimensionCardTab}
+            onValueChange={(value) => setGeoDimensionCardTab(value)}
+            tabs={GEO_DIMENSION_CARD_TABS.map((tab) => ({
+              value: tab,
+              label: geoDimensionCardTabMeta[tab].label,
+            }))}
+            headerRight={geoDimensionCardSearchAction}
+            className="h-full"
+            syncKey={`${dimensionCardsLoading}-${geoDimensionCardTab}-${geoDimensionCardSort.key}-${geoDimensionCardSort.direction}-${sortedGeoDimensionCardRows.length}-${activeGeoDimensionCardQueryValue ?? "all"}-${visibleGeoDimensionCardRows.length}`}
+          >
+            <DataTableSwitch
+              loading={dimensionCardsLoading}
+              hasContent={visibleGeoDimensionCardRows.length > 0}
+              loadingLabel={messages.common.loading}
+              emptyLabel={noDataText}
+              colSpan={3}
+              contentKey={`${geoDimensionCardTab}-${activeGeoDimensionCardQueryValue ?? "all"}`}
+              header={geoDimensionCardTableHeader}
+              rows={renderGeoDimensionCardRows(visibleGeoDimensionCardRows)}
+            />
+          </TabbedScrollMaskCard>
+        </div>
       </section>
+      {geoDimensionCardSearchPanel}
+      {clientDimensionCardSearchPanel}
       {sourceCardSearchPanel}
       {pageCardSearchPanel}
     </>

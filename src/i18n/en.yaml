@@ -28,8 +28,16 @@ common:
   event: Event
   location: Location
   browser: Browser
+  operatingSystem: Operating System
   device: Device
+  deviceType: Device Type
   country: Country
+  region: Region
+  city: City
+  continent: Continent
+  timezone: Timezone
+  organization: Organization
+  screenSize: Screen Size
   duration: Duration
   loading: Loading
   noData: No data

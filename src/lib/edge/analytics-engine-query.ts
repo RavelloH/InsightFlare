@@ -1,6 +1,7 @@
 import type { Env } from "./types";
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+const GEO_REGION_VALUE_SEPARATOR = "::";
 
 export interface AeRange {
   fromMs: number;
@@ -139,6 +140,37 @@ function parseNumber(value: unknown): number {
 
 function parseString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function parseRegionCodeAndName(regionValue: string): {
+  stateCode: string;
+  stateName: string;
+} {
+  const normalized = regionValue.trim();
+  if (!normalized) {
+    return {
+      stateCode: "",
+      stateName: "",
+    };
+  }
+
+  const separatorIndex = normalized.indexOf(GEO_REGION_VALUE_SEPARATOR);
+  if (separatorIndex < 0) {
+    return {
+      stateCode: normalized,
+      stateName: normalized,
+    };
+  }
+
+  const stateCode = normalized.slice(0, separatorIndex).trim();
+  const stateName = normalized
+    .slice(separatorIndex + GEO_REGION_VALUE_SEPARATOR.length)
+    .trim();
+
+  return {
+    stateCode: stateCode || stateName,
+    stateName: stateName || stateCode,
+  };
 }
 
 function getAeDatasetName(): string {
@@ -683,6 +715,126 @@ export async function queryAeTopBrowsers(
   return queryAeTopDimension(env, siteId, range, limit, browserExpr(), filters);
 }
 
+export async function queryAeTopLanguages(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, languageExpr(), filters);
+}
+
+export async function queryAeTopRegions(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, regionExpr(), filters);
+}
+
+export async function queryAeTopCountryRegions(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  const dataset = getAeDatasetName();
+  const where = buildAeWhere(siteId, range, filters);
+  const n = clampLimit(limit, 30);
+  const sql = `
+SELECT
+  ${countryExpr()} AS country,
+  ${regionExpr()} AS region,
+  sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions
+FROM ${dataset}
+WHERE ${where}
+GROUP BY country, region
+ORDER BY views DESC
+LIMIT ${n}
+`;
+
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => {
+    const country = parseString(row.country).trim();
+    const region = parseString(row.region).trim();
+    const { stateCode, stateName } = parseRegionCodeAndName(region);
+
+    return {
+      key: stateName
+        ? `${country}${GEO_REGION_VALUE_SEPARATOR}${stateCode}${GEO_REGION_VALUE_SEPARATOR}${stateName}`
+        : "",
+      views: parseNumber(row.views),
+      sessions: parseNumber(row.sessions),
+    };
+  });
+}
+
+export async function queryAeTopCountryRegionCities(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  const dataset = getAeDatasetName();
+  const where = buildAeWhere(siteId, range, filters);
+  const n = clampLimit(limit, 30);
+  const sql = `
+SELECT
+  ${countryExpr()} AS country,
+  ${regionExpr()} AS region,
+  ${cityExpr()} AS city,
+  sum(_sample_interval) AS views,
+  ${nonEmptyDistinctCountExpr(sessionExpr())} AS sessions
+FROM ${dataset}
+WHERE ${where}
+GROUP BY country, region, city
+ORDER BY views DESC
+LIMIT ${n}
+`;
+
+  const rows = await runAeSql<Record<string, unknown>>(env, sql);
+  return rows.map((row) => {
+    const country = parseString(row.country).trim();
+    const region = parseString(row.region).trim();
+    const city = parseString(row.city).trim();
+    const { stateCode, stateName } = parseRegionCodeAndName(region);
+
+    return {
+      key: city
+        ? `${country}${GEO_REGION_VALUE_SEPARATOR}${stateCode}${GEO_REGION_VALUE_SEPARATOR}${stateName}${GEO_REGION_VALUE_SEPARATOR}${city}`
+        : "",
+      views: parseNumber(row.views),
+      sessions: parseNumber(row.sessions),
+    };
+  });
+}
+
+export async function queryAeTopCities(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, cityExpr(), filters);
+}
+
+export async function queryAeTopTimezones(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, timezoneExpr(), filters);
+}
+
 export async function queryAeTopEventTypes(
   env: Env,
   siteId: string,
@@ -730,27 +882,34 @@ ORDER BY event_at DESC
 LIMIT ${n}
 `;
   const rows = await runAeSql<Record<string, unknown>>(env, sql);
-  return rows.map((row) => ({
-    event_type: parseString(row.event_type),
-    event_at: parseNumber(row.event_at),
-    pathname: parseString(row.pathname),
-    query_string: parseString(row.query_string),
-    hash_fragment: parseString(row.hash_fragment),
-    hostname: parseString(row.hostname),
-    referer: parseString(row.referer),
-    referer_host: parseString(row.referer_host),
-    visitor_id: parseString(row.visitor_id),
-    session_id: parseString(row.session_id),
-    duration_ms: parseNumber(row.duration_ms),
-    country: parseString(row.country),
-    region: parseString(row.region),
-    city: parseString(row.city),
-    browser: parseString(row.browser),
-    os: parseString(row.os),
-    device_type: parseString(row.device_type),
-    language: parseString(row.language),
-    timezone: parseString(row.timezone),
-  }));
+  return rows.map((row) => {
+    // `blob16` now stores `stateCode::stateName`; keep API payload as plain state name.
+    // Legacy rows that only stored a state name are also handled.
+    const region = parseString(row.region);
+    const { stateName } = parseRegionCodeAndName(region);
+
+    return {
+      event_type: parseString(row.event_type),
+      event_at: parseNumber(row.event_at),
+      pathname: parseString(row.pathname),
+      query_string: parseString(row.query_string),
+      hash_fragment: parseString(row.hash_fragment),
+      hostname: parseString(row.hostname),
+      referer: parseString(row.referer),
+      referer_host: parseString(row.referer_host),
+      visitor_id: parseString(row.visitor_id),
+      session_id: parseString(row.session_id),
+      duration_ms: parseNumber(row.duration_ms),
+      country: parseString(row.country),
+      region: stateName,
+      city: parseString(row.city),
+      browser: parseString(row.browser),
+      os: parseString(row.os),
+      device_type: parseString(row.device_type),
+      language: parseString(row.language),
+      timezone: parseString(row.timezone),
+    };
+  });
 }
 
 export async function queryAeSessionDetails(

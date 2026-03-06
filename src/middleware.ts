@@ -164,6 +164,6 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|collect|script\\.js|healthz|favicon\\.ico|admin/ws).*)",
+    "/((?!api|_next/static|_next/image|collect|script\\.js|healthz|favicon\\.ico|admin/ws|.*\\..*).*)",
   ],
 };
