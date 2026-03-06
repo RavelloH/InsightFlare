@@ -626,6 +626,7 @@ async function hSites(req: Request, env: Env, url: URL): Promise<Response> {
   if (req.method === "PATCH") {
     const body = await parseJson(req);
     const siteId = clampString(String(body.siteId || ""), 120);
+    const intent = clampString(String(body.intent || ""), 20);
     if (!siteId) return bad("siteId is required");
     const e = await env.DB.prepare(
       "SELECT id,team_id AS teamId,name,domain,public_enabled AS publicEnabled,public_slug AS publicSlug FROM sites WHERE id=? LIMIT 1",
@@ -634,14 +635,26 @@ async function hSites(req: Request, env: Env, url: URL): Promise<Response> {
       .first<{ id: string; teamId: string; name: string; domain: string; publicEnabled: number; publicSlug: string | null }>();
     if (!e) return nf("Site not found");
     if (!(await canManageTeam(env, a, e.teamId))) return forb("Only team owner can update sites");
+    if (intent === "remove") {
+      await env.DB.prepare("DELETE FROM configs WHERE config_key=?").bind(`site:${siteId}`).run();
+      await env.DB.prepare("DELETE FROM pageviews_archive_hourly WHERE site_id=?").bind(siteId).run();
+      await env.DB.prepare("DELETE FROM pageviews WHERE site_id=?").bind(siteId).run();
+      await env.DB.prepare("DELETE FROM sites WHERE id=?").bind(siteId).run();
+      return j({ ok: true, data: { siteId, teamId: e.teamId, removed: true } });
+    }
+    const nextTeamId = clampString(String(body.teamId ?? e.teamId), 120);
+    if (!nextTeamId) return bad("teamId is required");
+    if (nextTeamId !== e.teamId && !(await canManageTeam(env, a, nextTeamId))) {
+      return forb("Only team owner can transfer sites");
+    }
     const name = clampString(String(body.name ?? e.name), 120);
     const domain = clampString(String(body.domain ?? e.domain), 255);
     const pub = bool(body.publicEnabled, e.publicEnabled === 1);
     const pubSlug = clampString(String(body.publicSlug ?? e.publicSlug ?? toSlug(name || domain)), 120);
-    await env.DB.prepare("UPDATE sites SET name=?,domain=?,public_enabled=?,public_slug=?,updated_at=unixepoch() WHERE id=?")
-      .bind(name, domain, pub ? 1 : 0, pub ? pubSlug : null, siteId)
+    await env.DB.prepare("UPDATE sites SET team_id=?,name=?,domain=?,public_enabled=?,public_slug=?,updated_at=unixepoch() WHERE id=?")
+      .bind(nextTeamId, name, domain, pub ? 1 : 0, pub ? pubSlug : null, siteId)
       .run();
-    return j({ ok: true, data: { id: siteId, teamId: e.teamId, name, domain, publicEnabled: pub, publicSlug: pub ? pubSlug : "" } });
+    return j({ ok: true, data: { id: siteId, teamId: nextTeamId, name, domain, publicEnabled: pub, publicSlug: pub ? pubSlug : "" } });
   }
   return na();
 }

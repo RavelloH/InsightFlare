@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminSite, updateAdminSite } from "@/lib/edge-client";
+import { createAdminSite, removeAdminSite, updateAdminSite } from "@/lib/edge-client";
 import { parseFormBool, safeRedirectPath, parseRequestBody, bodyStr } from "@/lib/form-helpers";
 
 function normalizeErrorMessage(error: unknown): string {
@@ -32,7 +32,16 @@ export async function POST(request: Request): Promise<NextResponse> {
   const publicSlug = bodyStr(body, "publicSlug");
 
   try {
-    if (intent === "update") {
+    if (intent === "remove") {
+      if (siteId.length === 0) {
+        if (isJson) return NextResponse.json({ ok: false, error: "missing_site_id" }, { status: 400 });
+        const url = new URL(returnTo, request.url);
+        url.searchParams.set("error", "missing_site_id");
+        return NextResponse.redirect(url, { status: 303 });
+      }
+      const removed = await removeAdminSite({ siteId });
+      if (isJson) return NextResponse.json({ ok: true, data: removed });
+    } else if (intent === "update") {
       if (siteId.length === 0) {
         if (isJson) return NextResponse.json({ ok: false, error: "missing_site_id" }, { status: 400 });
         const url = new URL(returnTo, request.url);
@@ -41,6 +50,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
       const updated = await updateAdminSite({
         siteId,
+        teamId: teamId || undefined,
         name: name || undefined,
         domain: domain || undefined,
         publicEnabled,

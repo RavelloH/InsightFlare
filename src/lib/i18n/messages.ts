@@ -6,6 +6,7 @@ export interface AppMessages {
   appName: string;
   navigation: {
     overview: string;
+    realtime: string;
     pages: string;
     referrers: string;
     sessions: string;
@@ -14,6 +15,7 @@ export interface AppMessages {
     geo: string;
     devices: string;
     browsers: string;
+    settings: string;
   };
   common: {
     views: string;
@@ -184,6 +186,44 @@ export interface AppMessages {
   browsers: {
     title: string;
     subtitle: string;
+  };
+  siteSettings: {
+    title: string;
+    subtitle: string;
+    editTitle: string;
+    editSubtitle: string;
+    nameLabel: string;
+    domainLabel: string;
+    publicSlugLabel: string;
+    save: string;
+    saving: string;
+    transferTitle: string;
+    transferSubtitle: string;
+    transferTeamLabel: string;
+    transfer: string;
+    transferring: string;
+    scriptTitle: string;
+    scriptSubtitle: string;
+    scriptHint: string;
+    copyScript: string;
+    copiedScript: string;
+    loadingScript: string;
+    scriptUnavailable: string;
+    deleteTitle: string;
+    deleteSubtitle: string;
+    delete: string;
+    deleting: string;
+    deleteConfirm: string;
+    toasts: {
+      saved: string;
+      saveFailed: string;
+      transferred: string;
+      transferFailed: string;
+      scriptLoadFailed: string;
+      deleted: string;
+      deleteFailed: string;
+      invalidInput: string;
+    };
   };
   login: {
     title: string;

@@ -1,6 +1,7 @@
 appName: InsightFlare
 navigation:
   overview: 总览
+  realtime: 实时
   pages: 页面
   referrers: 来源
   sessions: 会话
@@ -9,6 +10,7 @@ navigation:
   geo: 地区
   devices: 设备
   browsers: 浏览器
+  settings: 设置
 common:
   views: 浏览量
   sessions: 会话数
@@ -178,6 +180,42 @@ devices:
 browsers:
   title: 浏览器分析
   subtitle: 按浏览器查看访问分布。
+siteSettings:
+  title: 站点设置
+  subtitle: 管理当前站点的基础信息与生命周期。
+  editTitle: 修改站点信息
+  editSubtitle: 更新站点名称、域名和公开 Slug。
+  nameLabel: 站点名称
+  domainLabel: 域名
+  publicSlugLabel: 公开 Slug（可选）
+  save: 保存修改
+  saving: 保存中...
+  transferTitle: 转移到其他 Team
+  transferSubtitle: 将当前站点迁移到你可管理的其他团队。
+  transferTeamLabel: 目标 Team
+  transfer: 转移站点
+  transferring: 转移中...
+  scriptTitle: 安装统计脚本
+  scriptSubtitle: 将此脚本添加到你的网站后即可开始采集分析数据。
+  scriptHint: 推荐放在 </head> 结束标签前；若不方便，也可放在 </body> 前，但请确保每页只加载一次。
+  copyScript: 复制脚本
+  copiedScript: 脚本已复制。
+  loadingScript: 正在加载脚本...
+  scriptUnavailable: 当前无法获取脚本。
+  deleteTitle: 删除站点
+  deleteSubtitle: 此操作会将当前站点从团队中移除。
+  delete: 删除站点
+  deleting: 删除中...
+  deleteConfirm: 该操作不可撤销，是否继续？
+  toasts:
+    saved: 站点设置已保存。
+    saveFailed: 站点设置保存失败。
+    transferred: 站点已转移。
+    transferFailed: 站点转移失败。
+    scriptLoadFailed: 加载脚本片段失败。
+    deleted: 站点已删除。
+    deleteFailed: 删除站点失败。
+    invalidInput: 请填写有效的站点名称和域名。
 login:
   title: 登录
   subtitle: 使用 InsightFlare 账号登录。

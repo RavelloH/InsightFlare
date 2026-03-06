@@ -1,6 +1,7 @@
 appName: InsightFlare
 navigation:
   overview: Overview
+  realtime: Realtime
   pages: Pages
   referrers: Referrers
   sessions: Sessions
@@ -9,6 +10,7 @@ navigation:
   geo: Geo
   devices: Devices
   browsers: Browsers
+  settings: Settings
 common:
   views: Views
   sessions: Sessions
@@ -178,6 +180,42 @@ devices:
 browsers:
   title: Browsers
   subtitle: Browser distribution and share.
+siteSettings:
+  title: Site Settings
+  subtitle: Configure this site's basic information and lifecycle.
+  editTitle: Update Site Info
+  editSubtitle: Keep display name, domain and public slug up to date.
+  nameLabel: Site Name
+  domainLabel: Domain
+  publicSlugLabel: Public Slug (optional)
+  save: Save Changes
+  saving: Saving...
+  transferTitle: Transfer to Another Team
+  transferSubtitle: Move this site to another team you can manage.
+  transferTeamLabel: Target Team
+  transfer: Transfer Site
+  transferring: Transferring...
+  scriptTitle: Install Tracking Script
+  scriptSubtitle: Add this script to your website to start collecting analytics.
+  scriptHint: Recommended before </head>; if needed you can place it before </body>, but ensure it's loaded once per page.
+  copyScript: Copy Script
+  copiedScript: Script copied.
+  loadingScript: Loading script...
+  scriptUnavailable: Script is currently unavailable.
+  deleteTitle: Delete Site
+  deleteSubtitle: This action will remove the site from this team.
+  delete: Delete Site
+  deleting: Deleting...
+  deleteConfirm: This action cannot be undone. Continue?
+  toasts:
+    saved: Site settings saved.
+    saveFailed: Failed to save site settings.
+    transferred: Site transferred.
+    transferFailed: Failed to transfer site.
+    scriptLoadFailed: Failed to load script snippet.
+    deleted: Site deleted.
+    deleteFailed: Failed to delete site.
+    invalidInput: Please provide valid site name and domain.
 login:
   title: Sign in
   subtitle: Use your InsightFlare account.

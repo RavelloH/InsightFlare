@@ -704,6 +704,7 @@ export async function createAdminSite(input: {
 
 export async function updateAdminSite(input: {
   siteId: string;
+  teamId?: string;
   name?: string;
   domain?: string;
   publicEnabled?: boolean;
@@ -713,6 +714,23 @@ export async function updateAdminSite(input: {
     method: "PATCH",
     path: "/api/private/admin/sites",
     body: input,
+  });
+  return res.data;
+}
+
+export async function removeAdminSite(input: {
+  siteId: string;
+}): Promise<{ siteId: string; teamId: string; removed: boolean }> {
+  const res = await fetchEdgeJson<{
+    ok: boolean;
+    data: { siteId: string; teamId: string; removed: boolean };
+  }>({
+    method: "PATCH",
+    path: "/api/private/admin/sites",
+    body: {
+      ...input,
+      intent: "remove",
+    },
   });
   return res.data;
 }

@@ -262,7 +262,17 @@ export function buildSitePath(
   locale: Locale,
   teamSlug: string,
   siteSlug: string,
-  section?: "pages" | "referrers" | "sessions" | "events" | "visitors" | "geo" | "devices" | "browsers",
+  section?:
+    | "realtime"
+    | "pages"
+    | "referrers"
+    | "sessions"
+    | "events"
+    | "visitors"
+    | "geo"
+    | "devices"
+    | "browsers"
+    | "settings",
 ): string {
   const base = `/${locale}/app/${teamSlug}/${siteSlug}`;
   if (!section) return base;

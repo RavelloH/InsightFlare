@@ -64,6 +64,7 @@ interface SidebarSite {
 
 type AnalyticsNavKey =
   | "overview"
+  | "realtime"
   | "pages"
   | "referrers"
   | "sessions"
@@ -71,7 +72,8 @@ type AnalyticsNavKey =
   | "visitors"
   | "geo"
   | "devices"
-  | "browsers";
+  | "browsers"
+  | "settings";
 
 interface SidebarRouteState {
   mode: "team" | "site";
@@ -108,6 +110,7 @@ function buildSitePath(
   teamSlug: string,
   siteSlug: string,
   section?:
+    | "realtime"
     | "pages"
     | "referrers"
     | "sessions"
@@ -115,7 +118,8 @@ function buildSitePath(
     | "visitors"
     | "geo"
     | "devices"
-    | "browsers",
+    | "browsers"
+    | "settings",
 ): string {
   const base = `/${locale}/app/${teamSlug}/${siteSlug}`;
   if (!section) return base;
@@ -232,6 +236,7 @@ export function DashboardShell({
     hasActiveSite && activeSiteBase
       ? [
           { key: "overview", href: activeSiteBase },
+          { key: "realtime", href: `${activeSiteBase}/realtime` },
           { key: "pages", href: `${activeSiteBase}/pages` },
           { key: "referrers", href: `${activeSiteBase}/referrers` },
           { key: "sessions", href: `${activeSiteBase}/sessions` },
@@ -240,6 +245,7 @@ export function DashboardShell({
           { key: "geo", href: `${activeSiteBase}/geo` },
           { key: "devices", href: `${activeSiteBase}/devices` },
           { key: "browsers", href: `${activeSiteBase}/browsers` },
+          { key: "settings", href: `${activeSiteBase}/settings` },
         ]
       : [];
 

@@ -18,6 +18,8 @@ import {
   RiFlashlightLine,
   RiGlobalLine,
   RiMapPin2Line,
+  RiPulseLine,
+  RiSettings3Line,
   RiShareForwardLine,
   RiTimeLine,
   RiUser3Line,
@@ -26,6 +28,7 @@ import { cn } from "@/lib/utils";
 
 type AnalyticsTabKey =
   | "overview"
+  | "realtime"
   | "pages"
   | "referrers"
   | "sessions"
@@ -33,7 +36,8 @@ type AnalyticsTabKey =
   | "visitors"
   | "geo"
   | "devices"
-  | "browsers";
+  | "browsers"
+  | "settings";
 
 interface AnalyticsTabItem {
   key: AnalyticsTabKey;
@@ -47,6 +51,7 @@ interface AnalyticsTabsProps {
 
 function getAnalyticsSectionIcon(key: AnalyticsTabKey) {
   if (key === "overview") return RiDashboardLine;
+  if (key === "realtime") return RiPulseLine;
   if (key === "pages") return RiFileList3Line;
   if (key === "referrers") return RiShareForwardLine;
   if (key === "sessions") return RiTimeLine;
@@ -54,6 +59,7 @@ function getAnalyticsSectionIcon(key: AnalyticsTabKey) {
   if (key === "visitors") return RiUser3Line;
   if (key === "geo") return RiMapPin2Line;
   if (key === "devices") return RiComputerLine;
+  if (key === "settings") return RiSettings3Line;
   return RiGlobalLine;
 }
 
