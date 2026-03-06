@@ -554,11 +554,18 @@ async function hTeams(req: Request, env: Env): Promise<Response> {
         .all<{ id: string }>();
       const siteIds = siteRows.results.map((row) => row.id);
 
-      await env.DB.prepare("DELETE FROM pageviews WHERE team_id=?").bind(teamId).run();
-
       if (siteIds.length > 0) {
         const sitePlaceholders = siteIds.map(() => "?").join(",");
-        await env.DB.prepare(`DELETE FROM pageviews_archive_hourly WHERE site_id IN (${sitePlaceholders})`)
+        await env.DB.prepare(`DELETE FROM visits WHERE site_id IN (${sitePlaceholders})`)
+          .bind(...siteIds)
+          .run();
+        await env.DB.prepare(`DELETE FROM visits_archive WHERE site_id IN (${sitePlaceholders})`)
+          .bind(...siteIds)
+          .run();
+        await env.DB.prepare(`DELETE FROM custom_events WHERE site_id IN (${sitePlaceholders})`)
+          .bind(...siteIds)
+          .run();
+        await env.DB.prepare(`DELETE FROM custom_events_archive WHERE site_id IN (${sitePlaceholders})`)
           .bind(...siteIds)
           .run();
 
@@ -630,7 +637,10 @@ async function hSites(req: Request, env: Env, url: URL): Promise<Response> {
       .bind(siteId, teamId, name, domain, pub ? 1 : 0, pub ? pubSlug : null)
       .run();
     try {
-      await upsertSiteScriptSettings(env, siteId, DEFAULT_SITE_SCRIPT_SETTINGS);
+      await upsertSiteScriptSettings(env, siteId, {
+        siteDomain: domain,
+        settings: DEFAULT_SITE_SCRIPT_SETTINGS,
+      });
     } catch (error) {
       await env.DB.prepare("DELETE FROM sites WHERE id=?").bind(siteId).run();
       throw error;
@@ -651,8 +661,10 @@ async function hSites(req: Request, env: Env, url: URL): Promise<Response> {
     if (!(await canManageTeam(env, a, e.teamId))) return forb("Only team owner can update sites");
     if (intent === "remove") {
       await env.DB.prepare("DELETE FROM configs WHERE config_key=?").bind(`site:${siteId}`).run();
-      await env.DB.prepare("DELETE FROM pageviews_archive_hourly WHERE site_id=?").bind(siteId).run();
-      await env.DB.prepare("DELETE FROM pageviews WHERE site_id=?").bind(siteId).run();
+      await env.DB.prepare("DELETE FROM visits_archive WHERE site_id=?").bind(siteId).run();
+      await env.DB.prepare("DELETE FROM visits WHERE site_id=?").bind(siteId).run();
+      await env.DB.prepare("DELETE FROM custom_events_archive WHERE site_id=?").bind(siteId).run();
+      await env.DB.prepare("DELETE FROM custom_events WHERE site_id=?").bind(siteId).run();
       await env.DB.prepare("DELETE FROM sites WHERE id=?").bind(siteId).run();
       try {
         await deleteSiteScriptSettings(env, siteId);
@@ -673,6 +685,9 @@ async function hSites(req: Request, env: Env, url: URL): Promise<Response> {
     await env.DB.prepare("UPDATE sites SET team_id=?,name=?,domain=?,public_enabled=?,public_slug=?,updated_at=unixepoch() WHERE id=?")
       .bind(nextTeamId, name, domain, pub ? 1 : 0, pub ? pubSlug : null, siteId)
       .run();
+    await upsertSiteScriptSettings(env, siteId, {
+      siteDomain: domain,
+    });
     return j({ ok: true, data: { id: siteId, teamId: nextTeamId, name, domain, publicEnabled: pub, publicSlug: pub ? pubSlug : "" } });
   }
   return na();
@@ -764,7 +779,14 @@ async function hSiteConfig(req: Request, env: Env, url: URL): Promise<Response> 
     if (!(await canManageSite(env, a, siteId))) return forb("Only team owner can update site config");
     const cfg = (body.config && typeof body.config === "object" ? body.config : {}) as JsonRecord;
     try {
-      const next = await upsertSiteScriptSettings(env, siteId, cfg);
+      const site = await env.DB.prepare("SELECT domain FROM sites WHERE id=? LIMIT 1")
+        .bind(siteId)
+        .first<{ domain: string }>();
+      if (!site?.domain) return nf("Site not found");
+      const next = await upsertSiteScriptSettings(env, siteId, {
+        siteDomain: site.domain,
+        settings: cfg,
+      });
       return j({ ok: true, data: next });
     } catch (error) {
       const message = error instanceof Error ? error.message : "save_site_config_failed";

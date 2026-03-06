@@ -64,7 +64,6 @@ function normalizeFilters(filters: DashboardFilters | undefined | null): Dashboa
     country: clampFilter(filters?.country),
     device: clampFilter(filters?.device),
     browser: clampFilter(filters?.browser),
-    eventType: clampFilter(filters?.eventType),
   };
 }
 
@@ -203,7 +202,7 @@ export function DashboardQueryProvider({ children }: DashboardQueryProviderProps
     () => ({
       range,
       window: windowState,
-      filters: EMPTY_FILTERS,
+      filters: normalizeFilters(uiFilters),
       uiFilters,
       customRange,
       setRange,

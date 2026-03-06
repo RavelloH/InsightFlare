@@ -1,4 +1,4 @@
-import { IngestDurableObject } from "../src/lib/edge/ingest-do";
+import { IngestDurableObject as BaseIngestDurableObject } from "../src/lib/edge/ingest-do";
 import { runHourlyArchive } from "../src/lib/edge/archive";
 import nextWorker from "../.open-next/worker.js";
 
@@ -10,6 +10,8 @@ async function handleAdminWs(request, env) {
   const forwardUrl = "https://ingest.internal/ws" + incomingUrl.search;
   return stub.fetch(new Request(forwardUrl, request));
 }
+
+export class IngestDurableObject extends BaseIngestDurableObject {}
 
 export default {
   async fetch(request, env, ctx) {
@@ -25,6 +27,4 @@ export default {
     ctx.waitUntil(runHourlyArchive(env, controller.scheduledTime));
   },
 };
-
-export { IngestDurableObject };
 

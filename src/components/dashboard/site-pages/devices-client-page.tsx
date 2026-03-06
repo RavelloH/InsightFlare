@@ -67,7 +67,6 @@ export function DevicesClientPage({ locale, messages, siteId, pathname }: Device
     filters.country,
     filters.device,
     filters.browser,
-    filters.eventType,
   ]);
 
   const noDataText = messages.common.noData;
@@ -131,3 +130,4 @@ export function DevicesClientPage({ locale, messages, siteId, pathname }: Device
     </div>
   );
 }
+

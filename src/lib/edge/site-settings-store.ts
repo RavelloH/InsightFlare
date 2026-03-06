@@ -1,5 +1,7 @@
 import {
+  normalizeSiteTrackingConfig,
   normalizeSiteScriptSettings,
+  type SiteTrackingConfig,
   type SiteScriptSettings,
 } from "@/lib/site-settings";
 import type { Env } from "./types";
@@ -33,7 +35,7 @@ function cacheRequestForSiteSettings(siteId: string): Request {
   return new Request(`https://insightflare.internal/__site-settings/${encodeURIComponent(siteId)}`);
 }
 
-function cacheResponseForSiteSettings(settings: SiteScriptSettings): Response {
+function cacheResponseForSiteSettings(settings: SiteTrackingConfig): Response {
   return new Response(JSON.stringify(settings), {
     status: 200,
     headers: {
@@ -43,19 +45,19 @@ function cacheResponseForSiteSettings(settings: SiteScriptSettings): Response {
   });
 }
 
-async function readSettingsFromCache(siteId: string): Promise<SiteScriptSettings | null> {
+async function readSettingsFromCache(siteId: string): Promise<SiteTrackingConfig | null> {
   const cache = await openEdgeCache(SITE_SETTINGS_CACHE_NAME);
   if (!cache) return null;
   const hit = await cache.match(cacheRequestForSiteSettings(siteId));
   if (!hit) return null;
   try {
-    return normalizeSiteScriptSettings(await hit.json());
+    return normalizeSiteTrackingConfig(await hit.json());
   } catch {
     return null;
   }
 }
 
-async function writeSettingsToCache(siteId: string, settings: SiteScriptSettings): Promise<void> {
+async function writeSettingsToCache(siteId: string, settings: SiteTrackingConfig): Promise<void> {
   const cache = await openEdgeCache(SITE_SETTINGS_CACHE_NAME);
   if (!cache) return;
   await cache.put(cacheRequestForSiteSettings(siteId), cacheResponseForSiteSettings(settings));
@@ -84,6 +86,15 @@ export async function readSiteScriptSettings(
   env: Env,
   siteId: string,
 ): Promise<SiteScriptSettings | null> {
+  const config = await readSiteTrackingConfig(env, siteId);
+  if (!config) return null;
+  return normalizeSiteScriptSettings(config);
+}
+
+export async function readSiteTrackingConfig(
+  env: Env,
+  siteId: string,
+): Promise<SiteTrackingConfig | null> {
   const normalizedSiteId = normalizeSiteSettingsKey(siteId);
   if (!normalizedSiteId) return null;
 
@@ -101,7 +112,41 @@ export async function readSiteScriptSettings(
     parsed = {};
   }
 
-  const normalized = normalizeSiteScriptSettings(parsed);
+  const normalized = normalizeSiteTrackingConfig({
+    ...(parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {}),
+    siteId: normalizedSiteId,
+  });
+  await writeSettingsToCache(normalizedSiteId, normalized);
+  return normalized;
+}
+
+export async function upsertSiteTrackingConfig(
+  env: Env,
+  siteId: string,
+  input: {
+    siteDomain?: unknown;
+    settings?: unknown;
+  },
+): Promise<SiteTrackingConfig> {
+  const normalizedSiteId = normalizeSiteSettingsKey(siteId);
+  if (!normalizedSiteId) {
+    throw new Error("siteId is required");
+  }
+
+  const existing = await readSiteTrackingConfig(env, normalizedSiteId);
+  const normalized = normalizeSiteTrackingConfig({
+    ...(existing ?? {}),
+    ...(input.settings && typeof input.settings === "object"
+      ? (input.settings as Record<string, unknown>)
+      : {}),
+    siteId: normalizedSiteId,
+    siteDomain: input.siteDomain ?? existing?.siteDomain ?? "",
+  });
+  if (!normalized.siteDomain) {
+    throw new Error("siteDomain is required");
+  }
+  const kv = siteSettingsBinding(env);
+  await kv.put(normalizedSiteId, JSON.stringify(normalized));
   await writeSettingsToCache(normalizedSiteId, normalized);
   return normalized;
 }
@@ -109,18 +154,13 @@ export async function readSiteScriptSettings(
 export async function upsertSiteScriptSettings(
   env: Env,
   siteId: string,
-  input: unknown,
+  input: {
+    siteDomain: unknown;
+    settings?: unknown;
+  },
 ): Promise<SiteScriptSettings> {
-  const normalizedSiteId = normalizeSiteSettingsKey(siteId);
-  if (!normalizedSiteId) {
-    throw new Error("siteId is required");
-  }
-
-  const settings = normalizeSiteScriptSettings(input);
-  const kv = siteSettingsBinding(env);
-  await kv.put(normalizedSiteId, JSON.stringify(settings));
-  await writeSettingsToCache(normalizedSiteId, settings);
-  return settings;
+  const normalized = await upsertSiteTrackingConfig(env, siteId, input);
+  return normalizeSiteScriptSettings(normalized);
 }
 
 export async function deleteSiteScriptSettings(env: Env, siteId: string): Promise<void> {

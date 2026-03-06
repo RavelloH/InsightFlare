@@ -40,10 +40,15 @@ export interface SerializedRequestPayload {
   receivedAt: number;
 }
 
+export type TrackerPayloadKind = "visit_start" | "visit_finalize" | "custom_event";
+
 export interface TrackerClientPayload {
+  siteId?: string;
+  kind?: TrackerPayloadKind;
+  visitId?: string;
   eventId?: string;
-  eventType?: "pageview" | "route_change" | "hidden" | "unload";
   timestamp?: number;
+  startedAt?: number;
   pathname?: string;
   query?: string;
   hash?: string;
@@ -53,13 +58,12 @@ export interface TrackerClientPayload {
   timezone?: string;
   screenWidth?: number;
   screenHeight?: number;
-  referer?: string;
-  refererDetail?: string;
+  referrerUrl?: string;
   visitorId?: string;
-  sessionId?: string;
   durationMs?: number;
-  teamId?: string;
-  siteId?: string;
+  exitReason?: string;
+  eventName?: string;
+  eventData?: unknown;
   utmSource?: string;
   utmMedium?: string;
   utmCampaign?: string;
@@ -77,29 +81,24 @@ export interface IngestEnvelopePayload extends IngestEnvelope {
   client: TrackerClientPayload;
 }
 
-export interface NormalizedEvent {
-  id: string;
-  eventType: string;
-  eventAt: number;
-  receivedAt: number;
-  hourBucket: number;
-  teamId: string;
+export interface NormalizedVisitContext {
   siteId: string;
+  visitId: string;
+  visitorId: string;
+  sessionId: string;
+  startedAt: number;
   pathname: string;
   queryString: string;
   hashFragment: string;
   hostname: string;
   title: string;
-  referer: string;
-  refererHost: string;
+  referrerUrl: string;
+  referrerHost: string;
   utmSource: string;
   utmMedium: string;
   utmCampaign: string;
   utmTerm: string;
   utmContent: string;
-  visitorId: string;
-  sessionId: string;
-  durationMs: number;
   isEU: boolean;
   country: string;
   region: string;
@@ -122,3 +121,36 @@ export interface NormalizedEvent {
   screenHeight: number | null;
   language: string;
 }
+
+export interface NormalizedVisitStart extends NormalizedVisitContext {
+  kind: "visit_start";
+  receivedAt: number;
+}
+
+export interface NormalizedVisitFinalize {
+  kind: "visit_finalize";
+  siteId: string;
+  visitId: string;
+  visitorId: string;
+  sessionId: string;
+  startedAt: number;
+  finalizedAt: number;
+  receivedAt: number;
+  durationMs: number | null;
+  durationSource: "reported" | "timeout";
+  exitReason: string;
+}
+
+export interface NormalizedCustomEvent extends NormalizedVisitContext {
+  kind: "custom_event";
+  eventId: string;
+  receivedAt: number;
+  eventAt: number;
+  eventName: string;
+  eventDataJson: string;
+}
+
+export type NormalizedIngestRecord =
+  | NormalizedVisitStart
+  | NormalizedVisitFinalize
+  | NormalizedCustomEvent;

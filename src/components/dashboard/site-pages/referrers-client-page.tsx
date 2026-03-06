@@ -67,7 +67,6 @@ export function ReferrersClientPage({ locale, messages, siteId, pathname }: Refe
     filters.country,
     filters.device,
     filters.browser,
-    filters.eventType,
   ]);
 
   const noDataText = messages.common.noData;
@@ -134,3 +133,4 @@ export function ReferrersClientPage({ locale, messages, siteId, pathname }: Refe
     </div>
   );
 }
+

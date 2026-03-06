@@ -33,7 +33,6 @@ export interface DashboardFilters {
   country?: string;
   device?: string;
   browser?: string;
-  eventType?: string;
 }
 
 const RANGE_PRESETS: readonly RangePreset[] = [
@@ -257,7 +256,6 @@ export function parseDashboardFiltersFromSearchParams(searchParams: URLSearchPar
     country: normalizeFilterValue(searchParams.get("country")),
     device: normalizeFilterValue(searchParams.get("device")),
     browser: normalizeFilterValue(searchParams.get("browser")),
-    eventType: normalizeFilterValue(searchParams.get("eventType")),
   };
 }
 
@@ -266,7 +264,6 @@ function applyFiltersToParams(params: URLSearchParams, filters?: DashboardFilter
   if (filters.country) params.set("country", filters.country);
   if (filters.device) params.set("device", filters.device);
   if (filters.browser) params.set("browser", filters.browser);
-  if (filters.eventType) params.set("eventType", filters.eventType);
   return params;
 }
 

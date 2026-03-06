@@ -1832,7 +1832,6 @@ function OverviewPagesSection({
     filters.country,
     filters.device,
     filters.browser,
-    filters.eventType,
   ]);
 
   useEffect(() => {
@@ -3693,7 +3692,6 @@ function OverviewMetricsSection({
     filters.browser,
     filters.country,
     filters.device,
-    filters.eventType,
     siteId,
     window.from,
     window.interval,
@@ -3909,7 +3907,6 @@ function OverviewTrendSection({
     filters.browser,
     filters.country,
     filters.device,
-    filters.eventType,
     siteId,
     window.from,
     window.interval,
@@ -3987,3 +3984,4 @@ export function OverviewClientPage({
     </div>
   );
 }
+

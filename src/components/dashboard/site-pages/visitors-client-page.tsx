@@ -67,7 +67,6 @@ export function VisitorsClientPage({ locale, messages, siteId, pathname }: Visit
     filters.country,
     filters.device,
     filters.browser,
-    filters.eventType,
   ]);
 
   const noDataText = messages.common.noData;
@@ -136,3 +135,4 @@ export function VisitorsClientPage({ locale, messages, siteId, pathname }: Visit
     </div>
   );
 }
+

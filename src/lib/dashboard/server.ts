@@ -88,7 +88,6 @@ export function parseDashboardFilters(
     country: normalizeFilterValue(searchParams.country),
     device: normalizeFilterValue(searchParams.device),
     browser: normalizeFilterValue(searchParams.browser),
-    eventType: normalizeFilterValue(searchParams.eventType),
   };
 }
 
@@ -288,7 +287,6 @@ function applyFiltersToParams(params: URLSearchParams, filters?: DashboardFilter
   if (filters.country) params.set("country", filters.country);
   if (filters.device) params.set("device", filters.device);
   if (filters.browser) params.set("browser", filters.browser);
-  if (filters.eventType) params.set("eventType", filters.eventType);
   return params;
 }
 

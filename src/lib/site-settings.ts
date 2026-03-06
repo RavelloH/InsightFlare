@@ -9,6 +9,12 @@ export interface SiteScriptSettings {
   ignoreDoNotTrack: boolean;
 }
 
+export interface SiteTrackingConfig extends SiteScriptSettings {
+  siteId: string;
+  siteDomain: string;
+  allowedHostnames: string[];
+}
+
 export const DEFAULT_SITE_SCRIPT_SETTINGS: SiteScriptSettings = {
   trackingStrength: "smart",
   trackQueryParams: true,
@@ -92,6 +98,10 @@ function sanitizeDomainEntry(input: string): string {
   return value;
 }
 
+export function normalizeSiteDomain(input: unknown): string {
+  return sanitizeDomainEntry(String(input ?? ""));
+}
+
 function sanitizePathEntry(input: string): string {
   let value = input.trim();
   if (!value) return "";
@@ -164,5 +174,34 @@ export function normalizeSiteScriptSettings(input: unknown): SiteScriptSettings 
       record.ignoreDoNotTrack ?? record.ignoreDnt,
       DEFAULT_SITE_SCRIPT_SETTINGS.ignoreDoNotTrack,
     ),
+  };
+}
+
+export function buildAllowedHostnames(
+  siteDomain: string,
+  domainWhitelist: string[],
+): string[] {
+  return uniqueNonEmpty(
+    [normalizeSiteDomain(siteDomain), ...domainWhitelist.map((value) => normalizeSiteDomain(value))]
+      .filter((value) => value.length > 0),
+  );
+}
+
+export function normalizeSiteTrackingConfig(input: unknown): SiteTrackingConfig {
+  const source =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const settings = normalizeSiteScriptSettings(source);
+  const siteId = String(source.siteId ?? "").trim().slice(0, 120);
+  const siteDomain = normalizeSiteDomain(
+    source.siteDomain ?? source.domain ?? source.primaryDomain,
+  );
+
+  return {
+    siteId,
+    siteDomain,
+    allowedHostnames: buildAllowedHostnames(siteDomain, settings.domainWhitelist),
+    ...settings,
   };
 }

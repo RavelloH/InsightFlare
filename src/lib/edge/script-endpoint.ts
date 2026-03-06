@@ -1,7 +1,7 @@
 import { buildTrackerScript } from "./script";
 import {
   normalizeSiteSettingsKey,
-  readSiteScriptSettings,
+  readSiteTrackingConfig,
 } from "./site-settings-store";
 import type { Env } from "./types";
 
@@ -61,16 +61,14 @@ function settingsFingerprint(input: {
   trackQueryParams: boolean;
   trackHash: boolean;
   ignoreDoNotTrack: boolean;
-  domainWhitelist: string[];
-  pathBlacklist: string[];
+  siteDomain: string;
 }): string {
   return [
     input.trackingStrength,
     input.trackQueryParams ? "1" : "0",
     input.trackHash ? "1" : "0",
     input.ignoreDoNotTrack ? "1" : "0",
-    input.domainWhitelist.join(","),
-    input.pathBlacklist.join(","),
+    input.siteDomain,
   ].join("|");
 }
 
@@ -95,12 +93,12 @@ export async function handleTrackerScriptRequest(request: Request, env: Env): Pr
 
   let settings;
   try {
-    settings = await readSiteScriptSettings(env, siteId);
+    settings = await readSiteTrackingConfig(env, siteId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "site_settings_unavailable";
     return responseInternalServerError(message);
   }
-  if (!settings) {
+  if (!settings?.siteDomain) {
     return responseNotFound();
   }
 
@@ -122,8 +120,6 @@ export async function handleTrackerScriptRequest(request: Request, env: Env): Pr
     isEUMode: euMode,
     trackQueryParams: settings.trackQueryParams,
     trackHash: settings.trackHash,
-    domainWhitelist: settings.domainWhitelist,
-    pathBlacklist: settings.pathBlacklist,
     ignoreDoNotTrack: settings.ignoreDoNotTrack,
   });
 

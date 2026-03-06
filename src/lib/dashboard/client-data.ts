@@ -108,7 +108,6 @@ function withFilters(
   if (filters.country) next.country = filters.country;
   if (filters.device) next.device = filters.device;
   if (filters.browser) next.browser = filters.browser;
-  if (filters.eventType) next.eventType = filters.eventType;
   return next;
 }
 

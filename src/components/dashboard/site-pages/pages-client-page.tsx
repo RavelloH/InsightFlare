@@ -67,7 +67,6 @@ export function PagesClientPage({ locale, messages, siteId, pathname }: PagesCli
     filters.country,
     filters.device,
     filters.browser,
-    filters.eventType,
   ]);
 
   const noDataText = messages.common.noData;
@@ -132,3 +131,4 @@ export function PagesClientPage({ locale, messages, siteId, pathname }: PagesCli
     </div>
   );
 }
+

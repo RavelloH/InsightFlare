@@ -509,21 +509,6 @@ export function DashboardHeaderControls({
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="dashboard-filter-mobile-event">
-                    {messages.filters.eventType}
-                  </Label>
-                  <Input
-                    id="dashboard-filter-mobile-event"
-                    value={uiFilters.eventType || ""}
-                    onChange={(event) =>
-                      setUiFilters({
-                        ...uiFilters,
-                        eventType: event.target.value,
-                      })
-                    }
-                  />
-                </div>
               </div>
 
               <DrawerFooter>
@@ -721,22 +706,6 @@ export function DashboardHeaderControls({
                       setUiFilters({
                         ...uiFilters,
                         browser: event.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="dashboard-filter-desktop-event">
-                    {messages.filters.eventType}
-                  </Label>
-                  <Input
-                    id="dashboard-filter-desktop-event"
-                    value={uiFilters.eventType || ""}
-                    onChange={(event) =>
-                      setUiFilters({
-                        ...uiFilters,
-                        eventType: event.target.value,
                       })
                     }
                   />

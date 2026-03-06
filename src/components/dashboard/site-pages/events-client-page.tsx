@@ -12,14 +12,14 @@ import { TopItemsChart } from "@/components/dashboard/top-items-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import {
-  emptyPageCardTabsData,
-  fetchPageCardTabs,
-  type PageCardTabsData,
+  emptyDimensionData,
+  fetchEventTypes,
 } from "@/lib/dashboard/client-data";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import { numberFormat } from "@/lib/dashboard/format";
+import type { DimensionData } from "@/lib/edge-client";
 
 interface EventsClientPageProps {
   locale: Locale;
@@ -36,19 +36,19 @@ interface EventTypeRow {
 
 export function EventsClientPage({ locale, messages, siteId }: EventsClientPageProps) {
   const { filters, window } = useDashboardQuery();
-  const [tabsData, setTabsData] = useState<PageCardTabsData>(emptyPageCardTabsData());
+  const [eventTypes, setEventTypes] = useState<DimensionData>(emptyDimensionData());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    setTabsData(emptyPageCardTabsData());
+    setEventTypes(emptyDimensionData());
 
-    fetchPageCardTabs(siteId, window, filters)
-      .catch(() => emptyPageCardTabsData())
-      .then((nextTabs) => {
+    fetchEventTypes(siteId, window, filters)
+      .catch(() => emptyDimensionData())
+      .then((nextRows) => {
         if (!active) return;
-        setTabsData(nextTabs);
+        setEventTypes(nextRows);
       })
       .finally(() => {
         if (!active) return;
@@ -66,22 +66,21 @@ export function EventsClientPage({ locale, messages, siteId }: EventsClientPageP
     filters.country,
     filters.device,
     filters.browser,
-    filters.eventType,
   ]);
 
   const noDataText = messages.common.noData;
 
   const eventTypeRows = useMemo<EventTypeRow[]>(
     () =>
-      tabsData.title.map((item) => {
-        const normalized = String(item.label || "").trim();
+      eventTypes.data.map((item) => {
+        const normalized = String(item.value || "").trim();
         return {
           label: normalized.length > 0 ? normalized : messages.common.unknown,
           views: Math.max(0, Number(item.views || 0)),
           sessions: Math.max(0, Number(item.sessions || 0)),
         };
       }),
-    [messages.common.unknown, tabsData.title],
+    [eventTypes.data, messages.common.unknown],
   );
 
   return (
@@ -144,3 +143,4 @@ export function EventsClientPage({ locale, messages, siteId }: EventsClientPageP
     </div>
   );
 }
+

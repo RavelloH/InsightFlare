@@ -66,7 +66,6 @@ export function SessionsClientPage({ locale, messages, siteId }: SessionsClientP
     filters.country,
     filters.device,
     filters.browser,
-    filters.eventType,
   ]);
 
   const noDataText = messages.common.noData;
@@ -141,3 +140,4 @@ export function SessionsClientPage({ locale, messages, siteId }: SessionsClientP
     </div>
   );
 }
+
