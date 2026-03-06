@@ -607,7 +607,6 @@ async function runColdArchive(env: Env, nowMs: number): Promise<void> {
           postal_code,
           metro_code,
           timezone,
-          colo,
           as_organization,
           ua_raw,
           browser,

@@ -207,6 +207,14 @@ function hasNewBlobLayoutExpr(): string {
   return "blob14 != ''";
 }
 
+function layoutVersionExpr(): string {
+  return "double3";
+}
+
+function hasLayoutV2Expr(): string {
+  return `${layoutVersionExpr()} >= 2`;
+}
+
 function eventAtExpr(): string {
   return "double1";
 }
@@ -259,8 +267,26 @@ function osExpr(): string {
   return `if(${hasNewBlobLayoutExpr()}, blob10, blob3)`;
 }
 
+function osVersionExpr(): string {
+  return `if(${hasNewBlobLayoutExpr()}, blob11, '')`;
+}
+
+function osWithVersionExpr(): string {
+  return `
+  CASE
+    WHEN ${osExpr()} = '' AND ${osVersionExpr()} = '' THEN ''
+    WHEN ${osVersionExpr()} = '' THEN ${osExpr()}
+    ELSE trim(concat(${osExpr()}, ' ', ${osVersionExpr()}))
+  END
+`;
+}
+
 function languageExpr(): string {
   return `if(${hasNewBlobLayoutExpr()}, blob12, blob4)`;
+}
+
+function continentExpr(): string {
+  return `if(${hasLayoutV2Expr()}, blob13, '')`;
 }
 
 function countryExpr(): string {
@@ -281,6 +307,14 @@ function timezoneExpr(): string {
 
 function deviceExpr(): string {
   return `if(${hasNewBlobLayoutExpr()}, blob19, blob8)`;
+}
+
+function organizationExpr(): string {
+  return `if(${hasLayoutV2Expr()}, blob9, '')`;
+}
+
+function screenSizeExpr(): string {
+  return "if(double4 > 0 AND double5 > 0, concat(toString(toInt32(double4)), 'x', toString(toInt32(double5))), '')";
 }
 
 function nonEmptyDistinctCountExpr(expr: string): string {
@@ -725,6 +759,26 @@ export async function queryAeTopLanguages(
   return queryAeTopDimension(env, siteId, range, limit, languageExpr(), filters);
 }
 
+export async function queryAeTopOsVersions(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, osWithVersionExpr(), filters);
+}
+
+export async function queryAeTopScreenSizes(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, screenSizeExpr(), filters);
+}
+
 export async function queryAeTopRegions(
   env: Env,
   siteId: string,
@@ -833,6 +887,26 @@ export async function queryAeTopTimezones(
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
   return queryAeTopDimension(env, siteId, range, limit, timezoneExpr(), filters);
+}
+
+export async function queryAeTopContinents(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, continentExpr(), filters);
+}
+
+export async function queryAeTopOrganizations(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeTopDimension(env, siteId, range, limit, organizationExpr(), filters);
 }
 
 export async function queryAeTopEventTypes(

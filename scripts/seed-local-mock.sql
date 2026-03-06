@@ -345,7 +345,6 @@ INSERT INTO pageviews (
   postal_code,
   metro_code,
   timezone,
-  colo,
   as_organization,
   ua_raw,
   browser,
@@ -538,17 +537,6 @@ SELECT
   fr.postal_code,
   fr.metro_code,
   fr.timezone,
-  CASE
-    WHEN fr.country = 'US' THEN 'SJC'
-    WHEN fr.country = 'DE' THEN 'FRA'
-    WHEN fr.country = 'FR' THEN 'CDG'
-    WHEN fr.country = 'JP' THEN 'NRT'
-    WHEN fr.country = 'SG' THEN 'SIN'
-    WHEN fr.country = 'IN' THEN 'BOM'
-    WHEN fr.country = 'BR' THEN 'GRU'
-    WHEN fr.country = 'AU' THEN 'SYD'
-    ELSE 'LAX'
-  END AS colo,
   fr.as_organization,
   fr.ua_raw,
   fr.browser,

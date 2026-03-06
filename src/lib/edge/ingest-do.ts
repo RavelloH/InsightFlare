@@ -27,6 +27,7 @@ const SNAPSHOT_QUERY_SCAN_LIMIT = 20_000;
 const SNAPSHOT_BUFFER_RETENTION_MS = 30 * 60 * 1000;
 const ACTIVE_NOW_WINDOW_MS = 5 * 60 * 1000;
 const WS_SNAPSHOT_EVENT_LIMIT = 200;
+const AE_LAYOUT_VERSION = 2;
 
 export class IngestDurableObject extends DurableObject {
   private readonly doState: DurableObjectState;
@@ -258,7 +259,6 @@ export class IngestDurableObject extends DurableObject {
       postalCode: clampString(coerceString(cf.postalCode ?? ""), 32),
       metroCode: clampString(coerceString(cf.metroCode ?? ""), 32),
       timezone: clampString(coerceString(cf.timezone || client.timezone || ""), 128),
-      colo: clampString(coerceString(cf.colo ?? ""), 32),
       asOrganization: clampString(coerceString(cf.asOrganization ?? ""), 255),
       uaRaw,
       browser: clampString(coerceString(ua.browser.name ?? ""), 80),
@@ -441,7 +441,7 @@ export class IngestDurableObject extends DurableObject {
         doubles: [
           event.eventAt,
           event.durationMs,
-          0,
+          AE_LAYOUT_VERSION,
           event.screenWidth ?? 0,
           event.screenHeight ?? 0,
           event.latitude ?? 0,
@@ -457,11 +457,11 @@ export class IngestDurableObject extends DurableObject {
           event.sessionId || "",
           event.visitorId || "",
           event.browser || "",
-          event.browserVersion || "",
+          event.asOrganization || "",
           event.os || "",
           event.osVersion || "",
           event.language || "",
-          event.colo || "",
+          event.continent || "",
           event.eventType,
           event.country || "ZZ",
           event.regionCode
@@ -558,7 +558,6 @@ export class IngestDurableObject extends DurableObject {
         postal_code,
         metro_code,
         timezone,
-        colo,
         as_organization,
         ua_raw,
         browser,
@@ -570,7 +569,7 @@ export class IngestDurableObject extends DurableObject {
         screen_height,
         language,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     );
 
@@ -614,7 +613,6 @@ export class IngestDurableObject extends DurableObject {
             event.postalCode,
             event.metroCode,
             event.timezone,
-            event.colo,
             event.asOrganization,
             event.uaRaw,
             event.browser,

@@ -9,13 +9,17 @@ import {
   queryAeReferrers,
   queryAeSessionDetails,
   queryAeTopBrowsers,
+  queryAeTopContinents,
   queryAeTopCountryRegionCities,
   queryAeTopCountryRegions,
   queryAeTopCountries,
   queryAeTopDevices,
   queryAeTopEventTypes,
   queryAeTopLanguages,
+  queryAeTopOrganizations,
+  queryAeTopOsVersions,
   queryAeTopPages,
+  queryAeTopScreenSizes,
   queryAeTopTimezones,
   queryAeTrend,
   queryAeTrendBySites,
@@ -897,6 +901,7 @@ async function queryOverviewClientDimensionTabs(
     queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
       d1DimensionExpr: osWithVersionExpr,
       archiveDimensionKey: null,
+      aeQuery: queryAeTopOsVersions,
     }),
     queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
       d1DimensionExpr: "device_type",
@@ -911,6 +916,7 @@ async function queryOverviewClientDimensionTabs(
     queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
       d1DimensionExpr: screenSizeExpr,
       archiveDimensionKey: "screen_stats_json",
+      aeQuery: queryAeTopScreenSizes,
     }),
   ]);
 
@@ -969,6 +975,7 @@ async function queryOverviewGeoDimensionTabs(
       queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
         d1DimensionExpr: "continent",
         archiveDimensionKey: null,
+        aeQuery: queryAeTopContinents,
       }),
       queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
         d1DimensionExpr: "timezone",
@@ -978,6 +985,7 @@ async function queryOverviewGeoDimensionTabs(
       queryDimensionStatsByExpr(env, siteId, window, limit, filters, {
         d1DimensionExpr: "as_organization",
         archiveDimensionKey: null,
+        aeQuery: queryAeTopOrganizations,
       }),
     ]);
 

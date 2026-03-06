@@ -110,7 +110,6 @@ export interface NormalizedEvent {
   postalCode: string;
   metroCode: string;
   timezone: string;
-  colo: string;
   asOrganization: string;
   uaRaw: string;
   browser: string;
