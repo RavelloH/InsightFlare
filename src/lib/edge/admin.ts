@@ -2,6 +2,12 @@ import type { Env } from "./types";
 import { clampString } from "./utils";
 import { argon2id } from "@noble/hashes/argon2.js";
 import { requireSession } from "./session-auth";
+import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
+import {
+  deleteSiteScriptSettings,
+  readSiteScriptSettings,
+  upsertSiteScriptSettings,
+} from "./site-settings-store";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -561,6 +567,8 @@ async function hTeams(req: Request, env: Env): Promise<Response> {
         await env.DB.prepare(`DELETE FROM configs WHERE config_key IN (${cfgPlaceholders})`)
           .bind(...configKeys)
           .run();
+
+        await Promise.allSettled(siteIds.map((id) => deleteSiteScriptSettings(env, id)));
       }
 
       await env.DB.prepare("DELETE FROM teams WHERE id=?").bind(teamId).run();
@@ -621,6 +629,12 @@ async function hSites(req: Request, env: Env, url: URL): Promise<Response> {
     )
       .bind(siteId, teamId, name, domain, pub ? 1 : 0, pub ? pubSlug : null)
       .run();
+    try {
+      await upsertSiteScriptSettings(env, siteId, DEFAULT_SITE_SCRIPT_SETTINGS);
+    } catch (error) {
+      await env.DB.prepare("DELETE FROM sites WHERE id=?").bind(siteId).run();
+      throw error;
+    }
     return j({ ok: true, data: { id: siteId, teamId, name, domain, publicEnabled: pub, publicSlug: pub ? pubSlug : "" } });
   }
   if (req.method === "PATCH") {
@@ -640,6 +654,11 @@ async function hSites(req: Request, env: Env, url: URL): Promise<Response> {
       await env.DB.prepare("DELETE FROM pageviews_archive_hourly WHERE site_id=?").bind(siteId).run();
       await env.DB.prepare("DELETE FROM pageviews WHERE site_id=?").bind(siteId).run();
       await env.DB.prepare("DELETE FROM sites WHERE id=?").bind(siteId).run();
+      try {
+        await deleteSiteScriptSettings(env, siteId);
+      } catch {
+        // Best effort cleanup for KV-backed settings.
+      }
       return j({ ok: true, data: { siteId, teamId: e.teamId, removed: true } });
     }
     const nextTeamId = clampString(String(body.teamId ?? e.teamId), 120);
@@ -730,15 +749,12 @@ async function hSiteConfig(req: Request, env: Env, url: URL): Promise<Response> 
     const siteId = clampString(url.searchParams.get("siteId") || "", 120);
     if (!siteId) return bad("Missing siteId");
     if (!(await canReadSite(env, a, siteId))) return forb("Site access denied");
-    const key = `site:${siteId}`;
-    const row = await env.DB.prepare("SELECT value_json FROM configs WHERE config_key=? LIMIT 1")
-      .bind(key)
-      .first<{ value_json: string }>();
-    if (!row?.value_json) return j({ ok: true, data: {} });
     try {
-      return j({ ok: true, data: JSON.parse(row.value_json) as unknown });
-    } catch {
-      return j({ ok: true, data: {} });
+      const settings = await readSiteScriptSettings(env, siteId);
+      return j({ ok: true, data: settings ?? DEFAULT_SITE_SCRIPT_SETTINGS });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "load_site_config_failed";
+      return j({ ok: false, error: message }, 500);
     }
   }
   if (req.method === "POST") {
@@ -747,13 +763,13 @@ async function hSiteConfig(req: Request, env: Env, url: URL): Promise<Response> 
     if (!siteId) return bad("siteId is required");
     if (!(await canManageSite(env, a, siteId))) return forb("Only team owner can update site config");
     const cfg = (body.config && typeof body.config === "object" ? body.config : {}) as JsonRecord;
-    const key = `site:${siteId}`;
-    await env.DB.prepare(
-      "INSERT INTO configs (config_key,value_json,created_at,updated_at) VALUES (?,?,unixepoch(),unixepoch()) ON CONFLICT(config_key) DO UPDATE SET value_json=excluded.value_json,updated_at=unixepoch()",
-    )
-      .bind(key, JSON.stringify(cfg))
-      .run();
-    return j({ ok: true, data: cfg });
+    try {
+      const next = await upsertSiteScriptSettings(env, siteId, cfg);
+      return j({ ok: true, data: next });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "save_site_config_failed";
+      return j({ ok: false, error: message }, 500);
+    }
   }
   return na();
 }

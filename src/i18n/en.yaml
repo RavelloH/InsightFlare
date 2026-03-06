@@ -188,6 +188,43 @@ siteSettings:
   nameLabel: Site Name
   domainLabel: Domain
   publicSlugLabel: Public Slug (optional)
+  trackingStrengthGroupTitle: Tracking Strength
+  trackingStrengthDescription: Choose how aggressively the tracker identifies visitors.
+  trackingStrengthLabel: Tracking Strength Mode
+  trackingStrengthStrong: Strong
+  trackingStrengthSmart: Smart
+  trackingStrengthWeak: Weak
+  trackingStrengthStrongDescription: Always use high-precision visitor tracking. This may violate regulations in some countries, such as GDPR.
+  trackingStrengthSmartDescription: Automatically switch tracking strength based on the visitor's country.
+  trackingStrengthWeakDescription: Always reduce tracking precision. This can count the same visitor multiple times across visits and make retention impossible.
+  queryHashGroupTitle: Query and Hash Tracking
+  queryHashGroupDescription: Control how query strings, URL hashes, and Do Not Track are handled.
+  trackQueryParamsLabel: Track Query Parameters
+  trackHashLabel: Track URL Hash
+  rulesGroupTitle: Domain and Path Rules
+  rulesGroupDescription: Matching rules block event reporting.
+  domainWhitelistTitle: Domain Whitelist
+  domainWhitelistDescription: Events are sent only when the current hostname is in this list.
+  domainWhitelistLabel: Domain Whitelist (one per line)
+  domainWhitelistPlaceholder: |
+    example.com
+    www.example.com
+  domainWhitelistHint: Leave empty to allow all domains; exact matches only (no subdomains).
+  pathBlacklistTitle: Path Blacklist
+  pathBlacklistDescription: Events are blocked when the current pathname matches a blocked prefix.
+  pathBlacklistLabel: Path Blacklist (one per line)
+  pathBlacklistPlaceholder: |
+    /admin
+    /private
+  pathBlacklistHint: Uses startsWith prefix matching; matched paths are not reported.
+  privacyGroupTitle: Do Not Track
+  privacyGroupDescription: Control whether events are still sent when the browser enables DNT.
+  ignoreDoNotTrackLabel: Ignore Browser Do Not Track
+  booleanOn: On
+  booleanOff: Off
+  loadingSettings: Loading script settings...
+  saveTracking: Save Tracking Settings
+  savingTracking: Saving Tracking Settings...
   save: Save Changes
   saving: Saving...
   transferTitle: Transfer to Another Team
@@ -213,6 +250,8 @@ siteSettings:
     transferred: Site transferred.
     transferFailed: Failed to transfer site.
     scriptLoadFailed: Failed to load script snippet.
+    settingsLoadFailed: Failed to load script settings.
+    settingsPropagationHint: Global propagation to edge nodes may take up to 1 hour.
     deleted: Site deleted.
     deleteFailed: Failed to delete site.
     invalidInput: Please provide valid site name and domain.

@@ -1,5 +1,6 @@
 import { DEFAULT_EDGE_BASE_URL } from "./constants";
 import { getSessionToken } from "./auth";
+import type { SiteScriptSettings } from "@/lib/site-settings";
 
 type HttpMethod = "GET" | "POST" | "PATCH";
 
@@ -297,7 +298,7 @@ export interface AccountUserData {
 
 export interface SiteConfigData {
   ok: boolean;
-  data: Record<string, unknown>;
+  data: SiteScriptSettings;
 }
 
 export interface ScriptSnippetData {
@@ -768,7 +769,7 @@ export async function removeAdminMember(input: {
   return res.data;
 }
 
-export async function fetchAdminSiteConfig(siteId: string): Promise<Record<string, unknown>> {
+export async function fetchAdminSiteConfig(siteId: string): Promise<SiteScriptSettings> {
   const res = await fetchEdgeJson<SiteConfigData>({
     path: "/api/private/admin/site-config",
     params: { siteId },
@@ -778,8 +779,8 @@ export async function fetchAdminSiteConfig(siteId: string): Promise<Record<strin
 
 export async function upsertAdminSiteConfig(input: {
   siteId: string;
-  config: Record<string, unknown>;
-}): Promise<Record<string, unknown>> {
+  config: SiteScriptSettings | Record<string, unknown>;
+}): Promise<SiteScriptSettings> {
   const res = await fetchEdgeJson<SiteConfigData>({
     method: "POST",
     path: "/api/private/admin/site-config",

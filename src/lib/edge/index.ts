@@ -1,4 +1,3 @@
-import { buildTrackerScript } from "./script";
 import type { Env, IngestEnvelopePayload, SerializedRequestPayload, TrackerClientPayload } from "./types";
 import { jsonCloneRecord } from "./utils";
 import { IngestDurableObject } from "./ingest-do";
@@ -7,6 +6,7 @@ import { handlePrivateQuery, handlePublicQuery } from "./query";
 import { handlePrivateAdmin } from "./admin";
 import { handlePrivateArchive } from "./archive-query";
 import { isAnalyticsEngineEnabled } from "./flags";
+import { handleTrackerScriptRequest } from "./script-endpoint";
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -15,25 +15,12 @@ const corsHeaders = {
   "access-control-max-age": "86400",
 };
 
-function parseScriptCacheTtlSeconds(env: Env): number {
-  const parsed = Number(env.SCRIPT_CACHE_TTL_SECONDS ?? "3600");
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 3600;
-  }
-  return Math.floor(parsed);
-}
-
 function responseNotFound(): Response {
   return new Response("Not Found", { status: 404 });
 }
 
 function responseMethodNotAllowed(): Response {
   return new Response("Method Not Allowed", { status: 405 });
-}
-
-function isEUCountry(request: Request): boolean {
-  const cf = jsonCloneRecord((request as Request & { cf?: unknown }).cf);
-  return Boolean(cf?.isEUCountry);
 }
 
 function sanitizeInputPayload(payload: unknown): TrackerClientPayload {
@@ -74,34 +61,7 @@ function serializeRequestPayload(request: Request, body: string): SerializedRequ
 }
 
 async function handleScript(request: Request, env: Env): Promise<Response> {
-  if (request.method !== "GET") {
-    return responseMethodNotAllowed();
-  }
-
-  const euMode = isEUCountry(request);
-  const ttlSeconds = parseScriptCacheTtlSeconds(env);
-
-  const scriptRequestUrl = new URL(request.url);
-  scriptRequestUrl.searchParams.set("__eu", euMode ? "1" : "0");
-  const cacheKey = new Request(scriptRequestUrl.toString(), request);
-  const cache = await caches.open("insightflare-script-cache");
-  const cached = await cache.match(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  const script = buildTrackerScript({ isEUMode: euMode });
-  const response = new Response(script, {
-    status: 200,
-    headers: {
-      "content-type": "application/javascript; charset=utf-8",
-      "cache-control": `public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}`,
-      "access-control-allow-origin": "*",
-    },
-  });
-
-  await cache.put(cacheKey, response.clone());
-  return response;
+  return handleTrackerScriptRequest(request, env);
 }
 
 async function handleCollect(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

@@ -28,6 +28,7 @@ export interface Env {
   BOOTSTRAP_ADMIN_NAME?: string;
   SESSION_WINDOW_MINUTES?: string;
   SCRIPT_CACHE_TTL_SECONDS?: string;
+  SITE_SETTINGS_KV?: KVNamespace;
 }
 
 export interface SerializedRequestPayload {

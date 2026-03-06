@@ -1,17 +1,38 @@
 import { NextResponse } from "next/server";
-import { updateAdminSite, upsertAdminSiteConfig } from "@/lib/edge-client";
+import { upsertAdminSiteConfig } from "@/lib/edge-client";
 import { parseFormBool, safeRedirectPath, parseRequestBody, bodyStr } from "@/lib/form-helpers";
+
+function normalizeErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const jsonStart = raw.lastIndexOf("{");
+  if (jsonStart >= 0) {
+    const maybeJson = raw.slice(jsonStart).trim();
+    try {
+      const parsed = JSON.parse(maybeJson) as { message?: unknown; error?: unknown };
+      if (typeof parsed.message === "string" && parsed.message.trim()) return parsed.message.trim();
+      if (typeof parsed.error === "string" && parsed.error.trim()) return parsed.error.trim();
+    } catch {
+      // fall through to raw
+    }
+  }
+  return raw;
+}
+
+function buildLegacyConfig(body: Record<string, unknown>): Record<string, unknown> {
+  return {
+    privacy: {
+      maskQueryHashDetails: parseFormBool(body.maskQueryHashDetails, true),
+      maskVisitorTrajectory: parseFormBool(body.maskVisitorTrajectory, true),
+      maskDetailedReferrerUrl: parseFormBool(body.maskDetailedReferrerUrl, true),
+    },
+  };
+}
 
 export async function POST(request: Request): Promise<NextResponse> {
   const body = await parseRequestBody(request);
   const isJson = (request.headers.get("content-type") || "").includes("application/json");
   const returnTo = safeRedirectPath(body.returnTo as string | undefined, "/app/config");
-
   const siteId = bodyStr(body, "siteId");
-  const name = bodyStr(body, "name");
-  const domain = bodyStr(body, "domain");
-  const publicEnabled = parseFormBool(body.publicEnabled);
-  const publicSlug = bodyStr(body, "publicSlug");
 
   if (siteId.length === 0) {
     if (isJson) return NextResponse.json({ ok: false, error: "missing_site_id" }, { status: 400 });
@@ -20,27 +41,19 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.redirect(url, { status: 303 });
   }
 
-  const privacyConfig = {
-    maskQueryHashDetails: parseFormBool(body.maskQueryHashDetails, true),
-    maskVisitorTrajectory: parseFormBool(body.maskVisitorTrajectory, true),
-    maskDetailedReferrerUrl: parseFormBool(body.maskDetailedReferrerUrl, true),
-  };
+  const config =
+    body.config && typeof body.config === "object"
+      ? (body.config as Record<string, unknown>)
+      : buildLegacyConfig(body);
 
   try {
-    await updateAdminSite({
+    const saved = await upsertAdminSiteConfig({
       siteId,
-      name: name || undefined,
-      domain: domain || undefined,
-      publicEnabled,
-      publicSlug: publicSlug || undefined,
+      config,
     });
-    await upsertAdminSiteConfig({
-      siteId,
-      config: { privacy: privacyConfig },
-    });
-    if (isJson) return NextResponse.json({ ok: true });
+    if (isJson) return NextResponse.json({ ok: true, data: saved });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = normalizeErrorMessage(error);
     if (isJson) return NextResponse.json({ ok: false, error: "save_site_config_failed", message: msg }, { status: 500 });
     const url = new URL(returnTo, request.url);
     url.searchParams.set("error", "save_site_config_failed");

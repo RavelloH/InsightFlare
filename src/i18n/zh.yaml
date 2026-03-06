@@ -188,6 +188,43 @@ siteSettings:
   nameLabel: 站点名称
   domainLabel: 域名
   publicSlugLabel: 公开 Slug（可选）
+  trackingStrengthGroupTitle: 跟踪强度
+  trackingStrengthDescription: 选择脚本对访客标识与统计精度的处理方式。
+  trackingStrengthLabel: 跟踪强度策略
+  trackingStrengthStrong: 强
+  trackingStrengthSmart: 智能
+  trackingStrengthWeak: 弱
+  trackingStrengthStrongDescription: 始终进行针对访客的高精度追踪。这可能违反某些国家的法规，例如 GDPR。
+  trackingStrengthSmartDescription: 自动根据访客所处国家切换追踪强度。
+  trackingStrengthWeakDescription: 始终降低对访客的追踪精度。这可能导致同一访客在不同时间访问时被计数多次、且无法计算留存率。
+  queryHashGroupTitle: 查询参数与 Hash 跟踪
+  queryHashGroupDescription: 控制 URL 查询参数、Hash 与 Do Not Track 的处理方式。
+  trackQueryParamsLabel: 开启查询参数跟踪
+  trackHashLabel: 开启 Hash 跟踪
+  rulesGroupTitle: 域名与路径规则
+  rulesGroupDescription: 命中规则时将阻止事件上报。
+  domainWhitelistTitle: 域名白名单
+  domainWhitelistDescription: 仅当当前域名命中白名单时才会上报事件。
+  domainWhitelistLabel: 域名白名单（每行一个）
+  domainWhitelistPlaceholder: |
+    example.com
+    www.example.com
+  domainWhitelistHint: 留空表示不限制域名；仅支持精确匹配，不匹配子域名。
+  pathBlacklistTitle: 路径黑名单
+  pathBlacklistDescription: 当前路径命中前缀规则时将阻止事件上报。
+  pathBlacklistLabel: 路径黑名单（每行一个）
+  pathBlacklistPlaceholder: |
+    /admin
+    /private
+  pathBlacklistHint: 采用 startsWith 前缀匹配；命中后不发送采集事件。
+  privacyGroupTitle: Do Not Track 设置
+  privacyGroupDescription: 浏览器开启 DNT 时是否仍继续上报事件。
+  ignoreDoNotTrackLabel: 忽略浏览器 Do Not Track
+  booleanOn: 开启
+  booleanOff: 关闭
+  loadingSettings: 正在加载脚本设置...
+  saveTracking: 保存追踪设置
+  savingTracking: 保存追踪设置中...
   save: 保存修改
   saving: 保存中...
   transferTitle: 转移到其他 Team
@@ -213,6 +250,8 @@ siteSettings:
     transferred: 站点已转移。
     transferFailed: 站点转移失败。
     scriptLoadFailed: 加载脚本片段失败。
+    settingsLoadFailed: 加载脚本设置失败。
+    settingsPropagationHint: 设置分发到全球节点可能需要最多 1 小时。
     deleted: 站点已删除。
     deleteFailed: 删除站点失败。
     invalidInput: 请填写有效的站点名称和域名。

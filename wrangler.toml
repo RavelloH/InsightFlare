@@ -37,6 +37,10 @@ migrations_dir = "./migrations"
 binding = "ANALYTICS"
 dataset = "insightflare_events"
 
+[[kv_namespaces]]
+binding = "SITE_SETTINGS_KV"
+id = "dbef57f92fc748e4929303ac5153045e"
+
 [observability]
 [observability.logs]
 enabled = true
