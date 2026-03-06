@@ -161,23 +161,25 @@ export function TabbedScrollMaskCard<T extends string = string>({
           className="gap-0"
         >
           <div className="flex items-center gap-1 px-2 py-1">
-            <TabsList
-              variant="line"
-              className={cn(
-                "h-10 flex-1 justify-start gap-1 border-0 px-0",
-                tabsListClassName,
-              )}
-            >
-              {tabs.map((tab) => (
-                <TabsTrigger
-                  key={tab.value}
-                  value={tab.value}
-                  className={cn("h-8 flex-none px-3 text-xs", tabTriggerClassName)}
-                >
-                  {tab.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+            <div className="no-scrollbar min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+              <TabsList
+                variant="line"
+                className={cn(
+                  "h-10 w-max min-w-max justify-start gap-1 border-0 px-0",
+                  tabsListClassName,
+                )}
+              >
+                {tabs.map((tab) => (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    className={cn("h-8 flex-none px-3 text-xs", tabTriggerClassName)}
+                  >
+                    {tab.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
             {headerRight ? (
               <div className="shrink-0">{headerRight}</div>
             ) : null}

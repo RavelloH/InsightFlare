@@ -72,8 +72,6 @@ export function AnalyticsTabs({ items }: AnalyticsTabsProps) {
   const normalizedPathname = normalizePathname(pathname || "");
   const navRef = useRef<HTMLElement | null>(null);
   const linkRefs = useRef<Map<AnalyticsTabKey, HTMLAnchorElement>>(new Map());
-  const [optimisticActiveKey, setOptimisticActiveKey] =
-    useState<AnalyticsTabKey | null>(null);
   const [indicatorState, setIndicatorState] = useState({
     x: 0,
     width: 0,
@@ -85,7 +83,7 @@ export function AnalyticsTabs({ items }: AnalyticsTabsProps) {
     return activeItem?.key ?? items[0]?.key ?? null;
   }, [items, normalizedPathname]);
 
-  const resolvedActiveKey = optimisticActiveKey ?? pathActiveKey;
+  const resolvedActiveKey = pathActiveKey;
 
   const syncIndicator = useCallback(() => {
     if (!resolvedActiveKey || !navRef.current) {
@@ -114,21 +112,6 @@ export function AnalyticsTabs({ items }: AnalyticsTabsProps) {
   useLayoutEffect(() => {
     syncIndicator();
   }, [syncIndicator]);
-
-  useEffect(() => {
-    if (!optimisticActiveKey) return;
-    if (pathActiveKey === optimisticActiveKey) {
-      setOptimisticActiveKey(null);
-    }
-  }, [pathActiveKey, optimisticActiveKey]);
-
-  useEffect(() => {
-    if (!optimisticActiveKey) return;
-    const timeout = window.setTimeout(() => {
-      setOptimisticActiveKey(null);
-    }, 900);
-    return () => window.clearTimeout(timeout);
-  }, [optimisticActiveKey]);
 
   useEffect(() => {
     if (!navRef.current) return;
@@ -165,18 +148,6 @@ export function AnalyticsTabs({ items }: AnalyticsTabsProps) {
               }
             }}
             href={item.href}
-            onClick={(event) => {
-              if (
-                event.button !== 0 ||
-                event.metaKey ||
-                event.ctrlKey ||
-                event.shiftKey ||
-                event.altKey
-              ) {
-                return;
-              }
-              setOptimisticActiveKey(item.key);
-            }}
             className={cn(
               "relative inline-flex items-center gap-1.5 px-2 py-3 text-xs whitespace-nowrap transition-colors",
               isActive

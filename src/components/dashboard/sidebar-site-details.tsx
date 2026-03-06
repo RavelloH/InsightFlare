@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { TrafficPairBarChart } from "@/components/dashboard/site-traffic-charts";
 import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
@@ -225,7 +224,6 @@ export function SidebarSiteDetails({
   sites,
   labels,
 }: SidebarSiteDetailsProps) {
-  const pathname = usePathname();
   const { state: sidebarState, isMobile } = useSidebar();
   const { window } = useDashboardQuery();
   const [teamTrend, setTeamTrend] = useState<TeamDashboardTrendPoint[]>([]);
@@ -241,6 +239,7 @@ export function SidebarSiteDetails({
   );
   const [isRouteSettled, setIsRouteSettled] = useState(true);
   const didMountRef = useRef(false);
+  const resetKey = `${teamId}:${activeSiteSlug || ""}:${window.from}:${window.to}:${window.interval}`;
 
   useEffect(() => {
     if (isMobile) {
@@ -274,7 +273,7 @@ export function SidebarSiteDetails({
     }, SIDEBAR_ROUTE_SETTLE_DELAY_MS);
 
     return () => clearTimeout(timeout);
-  }, [pathname]);
+  }, [resetKey]);
 
   const canFetchCharts = shouldRenderCharts && isRouteSettled;
 

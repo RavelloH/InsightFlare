@@ -236,24 +236,14 @@ function normalizeTrendData(
 }
 
 function metricCellBorderClasses(index: number): string {
-  const mobileHasLeft = index % 2 === 1;
-  const mobileHasTop = index >= 2;
+  const mobileHasTop = index >= 1;
   const wideHasLeft = index % 3 !== 0;
   const wideHasTop = index >= 3;
 
   return cn(
-    mobileHasLeft ? "border-l" : "",
     mobileHasTop ? "border-t" : "",
-    mobileHasLeft !== wideHasLeft
-      ? wideHasLeft
-        ? "sm:border-l"
-        : "sm:border-l-0"
-      : "",
-    mobileHasTop !== wideHasTop
-      ? wideHasTop
-        ? "sm:border-t"
-        : "sm:border-t-0"
-      : "",
+    wideHasLeft ? "sm:border-l" : "sm:border-l-0",
+    wideHasTop ? "sm:border-t" : "sm:border-t-0",
   );
 }
 
@@ -3813,7 +3803,7 @@ function OverviewMetricsSection({
   return (
     <Card className="gap-0 py-0">
       <CardContent className="px-0">
-        <section className="grid grid-cols-2 sm:grid-cols-3">
+        <section className="grid grid-cols-1 sm:grid-cols-3">
           {metrics.map((item, index) => {
             const hasDelta =
               typeof item.delta === "number" && Number.isFinite(item.delta);
