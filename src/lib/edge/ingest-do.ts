@@ -107,29 +107,9 @@ interface BufferedCustomEventRow {
   eventId: string;
   siteId: string;
   visitId: string;
-  visitorId: string;
-  sessionId: string;
   occurredAt: number;
   eventName: string;
   eventDataJson: string;
-  pathname: string;
-  queryString: string;
-  hashFragment: string;
-  hostname: string;
-  title: string;
-  referrerUrl: string;
-  referrerHost: string;
-  country: string;
-  region: string;
-  city: string;
-  browser: string;
-  os: string;
-  osVersion: string;
-  deviceType: string;
-  language: string;
-  timezone: string;
-  screenWidth: number | null;
-  screenHeight: number | null;
   dirty: number;
   flushAttempts: number;
   createdAt: number;
@@ -198,12 +178,24 @@ const UPSERT_VISIT_SQL = `
 
 const INSERT_CUSTOM_EVENT_SQL = `
   INSERT INTO custom_events (
-    event_id, site_id, visit_id, visitor_id, session_id, occurred_at, event_name, event_data_json,
-    pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
-    country, region, city, browser, os, os_version, device_type, language, timezone,
-    screen_width, screen_height, ae_synced_at, created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    event_id, site_id, visit_id, occurred_at, event_name, event_data_json, ae_synced_at, created_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(event_id) DO NOTHING
+`;
+
+const CREATE_BUFFERED_CUSTOM_EVENTS_SQL = `
+  CREATE TABLE IF NOT EXISTS buffered_custom_events (
+    event_id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    visit_id TEXT NOT NULL,
+    occurred_at INTEGER NOT NULL,
+    event_name TEXT NOT NULL,
+    event_data_json TEXT NOT NULL DEFAULT '{}',
+    dirty INTEGER NOT NULL DEFAULT 1,
+    flush_attempts INTEGER NOT NULL DEFAULT 0,
+    last_flush_error TEXT,
+    created_at INTEGER NOT NULL
+  )
 `;
 
 function toUnixSeconds(ms: number): number {
@@ -268,29 +260,9 @@ function customEventBindings(row: BufferedCustomEventRow): SqlBinding[] {
     row.eventId,
     row.siteId,
     row.visitId,
-    row.visitorId,
-    row.sessionId,
     row.occurredAt,
     row.eventName,
     row.eventDataJson,
-    row.pathname,
-    row.queryString,
-    row.hashFragment,
-    row.hostname,
-    row.title,
-    row.referrerUrl,
-    row.referrerHost,
-    row.country,
-    row.region,
-    row.city,
-    row.browser,
-    row.os,
-    row.osVersion,
-    row.deviceType,
-    row.language,
-    row.timezone,
-    row.screenWidth,
-    row.screenHeight,
     null,
     row.createdAt,
   ];
@@ -532,40 +504,27 @@ export class IngestDurableObject extends DurableObject {
     `);
     sql.exec("DROP INDEX IF EXISTS idx_buffered_visits_dirty_updated");
     sql.exec("DROP INDEX IF EXISTS idx_buffered_visits_status_last_activity");
-    sql.exec(`
-      CREATE TABLE IF NOT EXISTS buffered_custom_events (
-        event_id TEXT PRIMARY KEY,
-        site_id TEXT NOT NULL,
-        visit_id TEXT NOT NULL,
-        visitor_id TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        occurred_at INTEGER NOT NULL,
-        event_name TEXT NOT NULL,
-        event_data_json TEXT NOT NULL DEFAULT '{}',
-        pathname TEXT NOT NULL,
-        query_string TEXT NOT NULL DEFAULT '',
-        hash_fragment TEXT NOT NULL DEFAULT '',
-        hostname TEXT NOT NULL,
-        title TEXT NOT NULL DEFAULT '',
-        referrer_url TEXT NOT NULL DEFAULT '',
-        referrer_host TEXT NOT NULL DEFAULT '',
-        country TEXT NOT NULL DEFAULT '',
-        region TEXT NOT NULL DEFAULT '',
-        city TEXT NOT NULL DEFAULT '',
-        browser TEXT NOT NULL DEFAULT '',
-        os TEXT NOT NULL DEFAULT '',
-        os_version TEXT NOT NULL DEFAULT '',
-        device_type TEXT NOT NULL DEFAULT '',
-        language TEXT NOT NULL DEFAULT '',
-        timezone TEXT NOT NULL DEFAULT '',
-        screen_width INTEGER,
-        screen_height INTEGER,
-        dirty INTEGER NOT NULL DEFAULT 1,
-        flush_attempts INTEGER NOT NULL DEFAULT 0,
-        last_flush_error TEXT,
-        created_at INTEGER NOT NULL
-      )
-    `);
+    sql.exec(CREATE_BUFFERED_CUSTOM_EVENTS_SQL);
+    const eventColumns = sql.exec("PRAGMA table_info(buffered_custom_events)").toArray() as Array<{ name?: string }>;
+    const hasLegacyEventContextColumns = eventColumns.some((row) =>
+      row.name === "visitor_id" || row.name === "session_id" || row.name === "pathname" || row.name === "hostname",
+    );
+    if (hasLegacyEventContextColumns) {
+      sql.exec("DROP TABLE IF EXISTS buffered_custom_events_legacy");
+      sql.exec("ALTER TABLE buffered_custom_events RENAME TO buffered_custom_events_legacy");
+      sql.exec(CREATE_BUFFERED_CUSTOM_EVENTS_SQL);
+      sql.exec(`
+        INSERT INTO buffered_custom_events (
+          event_id, site_id, visit_id, occurred_at, event_name, event_data_json,
+          dirty, flush_attempts, last_flush_error, created_at
+        )
+        SELECT
+          event_id, site_id, visit_id, occurred_at, event_name, event_data_json,
+          dirty, flush_attempts, last_flush_error, created_at
+        FROM buffered_custom_events_legacy
+      `);
+      sql.exec("DROP TABLE buffered_custom_events_legacy");
+    }
     sql.exec("DROP INDEX IF EXISTS idx_buffered_custom_events_dirty_occurred");
   }
 
@@ -1026,38 +985,16 @@ export class IngestDurableObject extends DurableObject {
     const rowsWritten = this.sqlRun(
       `
         INSERT OR IGNORE INTO buffered_custom_events (
-          event_id, site_id, visit_id, visitor_id, session_id, occurred_at, event_name, event_data_json,
-          pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
-          country, region, city, browser, os, os_version, device_type, language, timezone,
-          screen_width, screen_height, dirty, flush_attempts, last_flush_error, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, ?)
+          event_id, site_id, visit_id, occurred_at, event_name, event_data_json,
+          dirty, flush_attempts, last_flush_error, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, 0, NULL, ?)
       `,
       record.eventId,
       record.siteId,
       record.visitId,
-      record.visitorId,
-      record.sessionId,
       record.eventAt,
       record.eventName,
       record.eventDataJson,
-      record.pathname,
-      record.queryString,
-      record.hashFragment,
-      record.hostname,
-      record.title,
-      record.referrerUrl,
-      record.referrerHost,
-      record.country,
-      record.region,
-      record.city,
-      record.browser,
-      record.os,
-      record.osVersion,
-      record.deviceType,
-      record.language,
-      record.timezone,
-      record.screenWidth,
-      record.screenHeight,
       createdAt,
     );
     return rowsWritten > 0;
@@ -1135,12 +1072,15 @@ export class IngestDurableObject extends DurableObject {
             event_id AS id,
             event_name AS eventType,
             occurred_at AS eventAt,
-            pathname,
-            visitor_id AS visitorId,
-            country,
-            browser
-          FROM buffered_custom_events
-          WHERE occurred_at BETWEEN ? AND ?
+            COALESCE(v.pathname, '') AS pathname,
+            COALESCE(v.visitor_id, '') AS visitorId,
+            COALESCE(v.country, '') AS country,
+            COALESCE(v.browser, '') AS browser
+          FROM buffered_custom_events e
+          LEFT JOIN buffered_visits v
+            ON v.site_id = e.site_id
+           AND v.visit_id = e.visit_id
+          WHERE e.occurred_at BETWEEN ? AND ?
         )
         ORDER BY eventAt DESC
         LIMIT ?
@@ -1279,29 +1219,9 @@ export class IngestDurableObject extends DurableObject {
             event_id AS eventId,
             site_id AS siteId,
             visit_id AS visitId,
-            visitor_id AS visitorId,
-            session_id AS sessionId,
             occurred_at AS occurredAt,
             event_name AS eventName,
             event_data_json AS eventDataJson,
-            pathname,
-            query_string AS queryString,
-            hash_fragment AS hashFragment,
-            hostname,
-            title,
-            referrer_url AS referrerUrl,
-            referrer_host AS referrerHost,
-            country,
-            region,
-            city,
-            browser,
-            os,
-            os_version AS osVersion,
-            device_type AS deviceType,
-            language,
-            timezone,
-            screen_width AS screenWidth,
-            screen_height AS screenHeight,
             dirty,
             flush_attempts AS flushAttempts,
             created_at AS createdAt

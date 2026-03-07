@@ -479,10 +479,7 @@ const VISIT_SOURCE_COLUMNS = `
 `;
 
 const CUSTOM_EVENT_SOURCE_COLUMNS = `
-  event_id, site_id, visit_id, visitor_id, session_id, occurred_at, event_name, event_data_json,
-  pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
-  country, region, city, browser, os, os_version, device_type, language, timezone,
-  screen_width, screen_height, ae_synced_at
+  event_id, site_id, visit_id, occurred_at, event_name, event_data_json, ae_synced_at
 `;
 
 function buildVisitSourceCte(): string {
@@ -538,25 +535,6 @@ function visitSourceBindingsForSites(siteIds: string[], window: QueryWindow): Ar
 }
 
 function buildVisitFilterSql(filters: DashboardFilters, alias = ""): { clause: string; bindings: string[] } {
-  const prefix = alias ? `${alias}.` : "";
-  const clauses: string[] = [];
-  const bindings: string[] = [];
-  if (filters.country) {
-    clauses.push(`${prefix}country = ?`);
-    bindings.push(filters.country);
-  }
-  if (filters.device) {
-    clauses.push(`${prefix}device_type = ?`);
-    bindings.push(filters.device);
-  }
-  if (filters.browser) {
-    clauses.push(`${prefix}browser = ?`);
-    bindings.push(filters.browser);
-  }
-  return clauses.length > 0 ? { clause: `WHERE ${clauses.join(" AND ")}`, bindings } : { clause: "", bindings: [] };
-}
-
-function buildEventFilterSql(filters: DashboardFilters, alias = ""): { clause: string; bindings: string[] } {
   const prefix = alias ? `${alias}.` : "";
   const clauses: string[] = [];
   const bindings: string[] = [];
@@ -1743,13 +1721,30 @@ async function queryCustomEventNamesFromD1(
   filters: DashboardFilters,
   limit: number,
 ): Promise<DimensionRow[]> {
-  const filter = buildEventFilterSql(filters);
+  const filter = buildVisitFilterSql(filters, "vc");
   const sql = `
 WITH
 ${buildCustomEventSourceCte()},
+event_with_context AS (
+  SELECT
+    e.event_id,
+    e.event_name,
+    COALESCE(v.session_id, va.session_id, '') AS session_id,
+    COALESCE(v.country, va.country, '') AS country,
+    COALESCE(v.device_type, va.device_type, '') AS device_type,
+    COALESCE(v.browser, va.browser, '') AS browser
+  FROM event_source e
+  LEFT JOIN visits v
+    ON v.site_id = e.site_id
+   AND v.visit_id = e.visit_id
+  LEFT JOIN visits_archive va
+    ON va.site_id = e.site_id
+   AND va.visit_id = e.visit_id
+   AND v.visit_id IS NULL
+),
 filtered_events AS (
   SELECT *
-  FROM event_source
+  FROM event_with_context vc
   ${filter.clause}
 ),
 event_rollup AS (

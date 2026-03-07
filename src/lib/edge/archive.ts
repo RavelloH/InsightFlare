@@ -107,39 +107,16 @@ async function moveCustomEventsToArchive(env: Env, cutoffMs: number): Promise<nu
     env.DB.prepare(
       `
         INSERT OR REPLACE INTO custom_events_archive (
-          event_id, site_id, visit_id, visitor_id, session_id, occurred_at, event_name, event_data_json,
-          pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
-          country, region, city, browser, os, os_version, device_type, language, timezone,
-          screen_width, screen_height, ae_synced_at, archived_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+          event_id, site_id, visit_id, occurred_at, event_name, event_data_json, ae_synced_at, archived_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
       `,
     ).bind(
       row.event_id,
       row.site_id,
       row.visit_id,
-      row.visitor_id,
-      row.session_id,
       row.occurred_at,
       row.event_name,
       row.event_data_json,
-      row.pathname,
-      row.query_string,
-      row.hash_fragment,
-      row.hostname,
-      row.title,
-      row.referrer_url,
-      row.referrer_host,
-      row.country,
-      row.region,
-      row.city,
-      row.browser,
-      row.os,
-      row.os_version,
-      row.device_type,
-      row.language,
-      row.timezone,
-      row.screen_width,
-      row.screen_height,
       row.ae_synced_at,
     ),
     env.DB.prepare("DELETE FROM custom_events WHERE event_id = ?").bind(row.event_id),
