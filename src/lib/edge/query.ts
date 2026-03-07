@@ -325,7 +325,10 @@ async function loadWithPreferredSource<T>(
   return { value: await d1Loader(), source: "d1" };
 }
 
-function mapOverviewAggregate(row: OverviewAggregateRow) {
+function mapOverviewAggregate(
+  row: OverviewAggregateRow,
+  options?: { approximateVisitors?: boolean },
+) {
   return {
     views: row.views,
     sessions: row.sessions,
@@ -334,7 +337,7 @@ function mapOverviewAggregate(row: OverviewAggregateRow) {
     totalDurationMs: row.totalDuration,
     avgDurationMs: avgDuration(row.totalDuration, row.durationViews),
     bounceRate: bounceRate(row.bounces, row.sessions),
-    approximateVisitors: false,
+    approximateVisitors: Boolean(options?.approximateVisitors),
   };
 }
 
@@ -1198,7 +1201,9 @@ async function handleOverview(
   const interval = parseInterval(url);
 
   const current = await queryOverviewAggregate(env, siteId, window, filters);
-  const currentMetrics = mapOverviewAggregate(current.value);
+  const currentMetrics = mapOverviewAggregate(current.value, {
+    approximateVisitors: current.source === "ae",
+  });
   const payload: Record<string, unknown> = {
     ok: true,
     data: currentMetrics,
@@ -1218,7 +1223,9 @@ async function handleOverview(
       previousWindow,
       filters,
     );
-    const previousMetrics = mapOverviewAggregate(previous.value);
+    const previousMetrics = mapOverviewAggregate(previous.value, {
+      approximateVisitors: previous.source === "ae",
+    });
     payload.previousData = previousMetrics;
     payload.changeRates = {
       views: percentChange(currentMetrics.views, previousMetrics.views),
@@ -1510,6 +1517,8 @@ async function handleTeamDashboard(
       bounces: 0,
       totalDuration: 0,
       durationViews: 0,
+    }, {
+      approximateVisitors: currentOverview[index]?.source === "ae",
     });
     const previous = mapOverviewAggregate(previousOverview[index]?.value ?? {
       views: 0,
@@ -1518,6 +1527,8 @@ async function handleTeamDashboard(
       bounces: 0,
       totalDuration: 0,
       durationViews: 0,
+    }, {
+      approximateVisitors: previousOverview[index]?.source === "ae",
     });
     const currentPagesPerSession = overview.sessions > 0 ? overview.views / overview.sessions : 0;
     const previousPagesPerSession = previous.sessions > 0 ? previous.views / previous.sessions : 0;

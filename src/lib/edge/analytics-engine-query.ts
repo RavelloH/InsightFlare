@@ -173,11 +173,6 @@ function weightedSumExpr(valueExpr: string, alias = "", predicate?: string): str
   return predicate ? `sum(if(${predicate}, (${valueExpr}) * ${weight}, 0.0))` : `sum((${valueExpr}) * ${weight})`;
 }
 
-function screenSizeExpr(alias = ""): string {
-  const prefix = alias ? `${alias}.` : "";
-  return `if(${prefix}double4 > 0 AND ${prefix}double5 > 0, concat(toString(${prefix}double4), 'x', toString(${prefix}double5)), '')`;
-}
-
 async function runAeSql<T extends Record<string, unknown>>(env: Env, sql: string): Promise<T[]> {
   if (!isAnalyticsSqlConfigured(env)) {
     throw new Error("Analytics Engine SQL config missing");
@@ -617,7 +612,31 @@ export async function queryAeTopScreenSizes(
   limit: number,
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
-  return queryAeVisitDimension(env, siteId, range, limit, screenSizeExpr(), filters);
+  const where = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
+  const sql = `
+SELECT
+  double4 AS width,
+  double5 AS height,
+  ${weightedCountExpr()} AS views,
+  count(DISTINCT blob3) AS sessions
+FROM ${DATASET}
+WHERE ${where}
+  AND double4 > 0
+  AND double5 > 0
+GROUP BY width, height
+ORDER BY views DESC
+LIMIT ${clampLimit(limit, 30)}
+`;
+
+  return (await runAeSql<Record<string, unknown>>(env, sql)).map((row) => {
+    const width = Math.trunc(parseNumber(row.width));
+    const height = Math.trunc(parseNumber(row.height));
+    return {
+      key: width > 0 && height > 0 ? `${width}x${height}` : "",
+      views: parseNumber(row.views),
+      sessions: parseNumber(row.sessions),
+    };
+  }).filter((row) => row.key);
 }
 
 export async function queryAeTopRegions(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
