@@ -158,6 +158,21 @@ function appendWhere(base: string, extra: string): string {
   return extra ? `${base}\n  AND ${extra}` : base;
 }
 
+function sampleIntervalExpr(alias = ""): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `if(${prefix}_sample_interval IS NOT NULL AND ${prefix}_sample_interval > 0, ${prefix}_sample_interval, 1)`;
+}
+
+function weightedCountExpr(alias = "", predicate?: string): string {
+  const weight = sampleIntervalExpr(alias);
+  return predicate ? `sum(if(${predicate}, ${weight}, 0))` : `sum(${weight})`;
+}
+
+function weightedSumExpr(valueExpr: string, alias = "", predicate?: string): string {
+  const weight = sampleIntervalExpr(alias);
+  return predicate ? `sum(if(${predicate}, (${valueExpr}) * ${weight}, 0.0))` : `sum((${valueExpr}) * ${weight})`;
+}
+
 function screenSizeExpr(alias = ""): string {
   const prefix = alias ? `${alias}.` : "";
   return `if(${prefix}double4 > 0 AND ${prefix}double5 > 0, concat(toString(${prefix}double4), 'x', toString(${prefix}double5)), '')`;
@@ -212,7 +227,7 @@ export async function queryAeOverview(
       env,
       `
 SELECT
-  count() AS views,
+  ${weightedCountExpr()} AS views,
   count(DISTINCT blob3) AS sessions,
   count(DISTINCT blob2) AS visitors
 FROM ${DATASET}
@@ -223,8 +238,8 @@ WHERE ${startWhere}
       env,
       `
 SELECT
-  sum(if(double2 IS NOT NULL AND double2 >= 0, double2, 0.0)) AS total_duration,
-  sum(if(double2 IS NOT NULL AND double2 >= 0, 1, 0)) AS duration_views
+  ${weightedSumExpr("double2", "", "double2 IS NOT NULL AND double2 >= 0")} AS total_duration,
+  ${weightedCountExpr("", "double2 IS NOT NULL AND double2 >= 0")} AS duration_views
 FROM ${DATASET}
 WHERE ${finalizeWhere}
 `,
@@ -281,7 +296,7 @@ export async function queryAeTrend(
       `
 SELECT
   floor(double11 / ${bucketDivisor}) AS bucket,
-  count() AS views,
+  ${weightedCountExpr()} AS views,
   count(DISTINCT blob2) AS visitors
 FROM ${DATASET}
 WHERE ${startWhere}
@@ -294,8 +309,8 @@ ORDER BY bucket
       `
 SELECT
   floor(double11 / ${bucketDivisor}) AS bucket,
-  sum(if(double2 IS NOT NULL AND double2 >= 0, double2, 0.0)) AS total_duration,
-  sum(if(double2 IS NOT NULL AND double2 >= 0, 1, 0)) AS duration_views
+  ${weightedSumExpr("double2", "", "double2 IS NOT NULL AND double2 >= 0")} AS total_duration,
+  ${weightedCountExpr("", "double2 IS NOT NULL AND double2 >= 0")} AS duration_views
 FROM ${DATASET}
 WHERE ${finalizeWhere}
 GROUP BY bucket
@@ -382,7 +397,7 @@ async function queryAeVisitDimension(
   const sql = `
 SELECT
   ${selectExpr} AS key,
-  count() AS views,
+  ${weightedCountExpr()} AS views,
   count(DISTINCT blob3) AS sessions
 FROM ${DATASET}
 WHERE ${where}
@@ -414,7 +429,7 @@ SELECT
   ${includeDetails ? "blob6 AS hash_fragment," : "'' AS hash_fragment,"}
   argMax(blob20, double11) AS title,
   argMax(blob7, double11) AS hostname,
-  count() AS views,
+  ${weightedCountExpr()} AS views,
   count(DISTINCT blob3) AS sessions
 FROM ${DATASET}
 WHERE ${where}
@@ -634,7 +649,7 @@ SELECT
   blob2 AS visitor_id,
   min(double11) AS first_seen_at,
   max(double11) AS last_seen_at,
-  count() AS views,
+  ${weightedCountExpr()} AS views,
   count(DISTINCT blob3) AS sessions
 FROM ${DATASET}
 WHERE ${where}
@@ -667,7 +682,7 @@ export async function queryAeCustomEventNames(
   const sql = `
 SELECT
   blob20 AS key,
-  count() AS views,
+  ${weightedCountExpr()} AS views,
   count(DISTINCT blob3) AS sessions
 FROM ${DATASET}
 WHERE ${clauses.join("\n  AND ")}

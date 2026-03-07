@@ -22,7 +22,6 @@ import {
 } from "./analytics-engine-layout";
 import { readSiteTrackingConfig } from "./site-settings-store";
 import {
-  TEN_MINUTES_MS,
   clampString,
   coerceNumber,
   coerceString,
@@ -31,13 +30,16 @@ import {
 } from "./utils";
 
 const SNAPSHOT_PREFIX = "snapshot:";
-const OPEN_VISIT_PREFIX = "open:";
 const SESSION_PREFIX = "session:";
 const SNAPSHOT_QUERY_SCAN_LIMIT = 20_000;
 const SNAPSHOT_BUFFER_RETENTION_MS = 30 * 60 * 1000;
 const ACTIVE_NOW_WINDOW_MS = 5 * 60 * 1000;
 const VISIT_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const WS_SNAPSHOT_EVENT_LIMIT = 200;
+const D1_FLUSH_INTERVAL_MS = 60 * 1000;
+const D1_FLUSH_BATCH_SIZE = 100;
+const D1_FLUSH_IMMEDIATE_THRESHOLD = 200;
+const LOCAL_DEDUPE_RETENTION_MS = 48 * 60 * 60 * 1000;
 
 function toAeRegionValue(country: string, regionCode: string, region: string): string {
   const normalizedCountry = country.trim().toUpperCase();
@@ -122,6 +124,212 @@ interface VisitRow {
   language: string;
 }
 
+interface BufferedVisitRow extends VisitRow {
+  lastActivityAt: number;
+  endedAt: number | null;
+  finalizedAt: number | null;
+  durationMs: number | null;
+  durationSource: string;
+  exitReason: string;
+  dirty: number;
+  flushAttempts: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface BufferedCustomEventRow {
+  eventId: string;
+  siteId: string;
+  visitId: string;
+  visitorId: string;
+  sessionId: string;
+  occurredAt: number;
+  eventName: string;
+  eventDataJson: string;
+  pathname: string;
+  queryString: string;
+  hashFragment: string;
+  hostname: string;
+  title: string;
+  referrerUrl: string;
+  referrerHost: string;
+  country: string;
+  region: string;
+  city: string;
+  browser: string;
+  os: string;
+  osVersion: string;
+  deviceType: string;
+  language: string;
+  timezone: string;
+  screenWidth: number | null;
+  screenHeight: number | null;
+  dirty: number;
+  flushAttempts: number;
+  createdAt: number;
+}
+
+type SqlBinding = string | number | null;
+
+const UPSERT_VISIT_SQL = `
+  INSERT INTO visits (
+    visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at,
+    ended_at, finalized_at, duration_ms, duration_source, exit_reason,
+    pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
+    utm_source, utm_medium, utm_campaign, utm_term, utm_content,
+    is_eu, country, region, region_code, city, continent, latitude, longitude,
+    postal_code, metro_code, timezone, as_organization, ua_raw, browser, browser_version,
+    os, os_version, device_type, screen_width, screen_height, language, ae_synced_at, created_at, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(visit_id) DO UPDATE SET
+    site_id = excluded.site_id,
+    visitor_id = excluded.visitor_id,
+    session_id = excluded.session_id,
+    status = excluded.status,
+    started_at = excluded.started_at,
+    last_activity_at = excluded.last_activity_at,
+    ended_at = excluded.ended_at,
+    finalized_at = excluded.finalized_at,
+    duration_ms = excluded.duration_ms,
+    duration_source = excluded.duration_source,
+    exit_reason = excluded.exit_reason,
+    pathname = excluded.pathname,
+    query_string = excluded.query_string,
+    hash_fragment = excluded.hash_fragment,
+    hostname = excluded.hostname,
+    title = excluded.title,
+    referrer_url = excluded.referrer_url,
+    referrer_host = excluded.referrer_host,
+    utm_source = excluded.utm_source,
+    utm_medium = excluded.utm_medium,
+    utm_campaign = excluded.utm_campaign,
+    utm_term = excluded.utm_term,
+    utm_content = excluded.utm_content,
+    is_eu = excluded.is_eu,
+    country = excluded.country,
+    region = excluded.region,
+    region_code = excluded.region_code,
+    city = excluded.city,
+    continent = excluded.continent,
+    latitude = excluded.latitude,
+    longitude = excluded.longitude,
+    postal_code = excluded.postal_code,
+    metro_code = excluded.metro_code,
+    timezone = excluded.timezone,
+    as_organization = excluded.as_organization,
+    ua_raw = excluded.ua_raw,
+    browser = excluded.browser,
+    browser_version = excluded.browser_version,
+    os = excluded.os,
+    os_version = excluded.os_version,
+    device_type = excluded.device_type,
+    screen_width = excluded.screen_width,
+    screen_height = excluded.screen_height,
+    language = excluded.language,
+    ae_synced_at = excluded.ae_synced_at,
+    updated_at = excluded.updated_at
+`;
+
+const INSERT_CUSTOM_EVENT_SQL = `
+  INSERT INTO custom_events (
+    event_id, site_id, visit_id, visitor_id, session_id, occurred_at, event_name, event_data_json,
+    pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
+    country, region, city, browser, os, os_version, device_type, language, timezone,
+    screen_width, screen_height, ae_synced_at, created_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(event_id) DO NOTHING
+`;
+
+function toUnixSeconds(ms: number): number {
+  return Math.max(0, Math.floor(ms / 1000));
+}
+
+function visitBindings(row: BufferedVisitRow): SqlBinding[] {
+  return [
+    row.visitId,
+    row.siteId,
+    row.visitorId,
+    row.sessionId,
+    row.status,
+    row.startedAt,
+    row.lastActivityAt,
+    row.endedAt,
+    row.finalizedAt,
+    row.durationMs,
+    row.durationSource || null,
+    row.exitReason || null,
+    row.pathname,
+    row.queryString,
+    row.hashFragment,
+    row.hostname,
+    row.title,
+    row.referrerUrl,
+    row.referrerHost,
+    row.utmSource,
+    row.utmMedium,
+    row.utmCampaign,
+    row.utmTerm,
+    row.utmContent,
+    row.isEU,
+    row.country,
+    row.region,
+    row.regionCode,
+    row.city,
+    row.continent,
+    row.latitude,
+    row.longitude,
+    row.postalCode,
+    row.metroCode,
+    row.timezone,
+    row.asOrganization,
+    row.uaRaw,
+    row.browser,
+    row.browserVersion,
+    row.os,
+    row.osVersion,
+    row.deviceType,
+    row.screenWidth,
+    row.screenHeight,
+    row.language,
+    null,
+    row.createdAt,
+    row.updatedAt,
+  ];
+}
+
+function customEventBindings(row: BufferedCustomEventRow): SqlBinding[] {
+  return [
+    row.eventId,
+    row.siteId,
+    row.visitId,
+    row.visitorId,
+    row.sessionId,
+    row.occurredAt,
+    row.eventName,
+    row.eventDataJson,
+    row.pathname,
+    row.queryString,
+    row.hashFragment,
+    row.hostname,
+    row.title,
+    row.referrerUrl,
+    row.referrerHost,
+    row.country,
+    row.region,
+    row.city,
+    row.browser,
+    row.os,
+    row.osVersion,
+    row.deviceType,
+    row.language,
+    row.timezone,
+    row.screenWidth,
+    row.screenHeight,
+    null,
+    row.createdAt,
+  ];
+}
+
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -168,15 +376,20 @@ function toRealtimePayload(record: RealtimeSnapshotRecord): Record<string, unkno
 export class IngestDurableObject extends DurableObject {
   private readonly doState: DurableObjectState;
   private readonly doEnv: Env;
+  private readonly schemaReady: Promise<void>;
   private sockets = new Set<WebSocket>();
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
     this.doState = state;
     this.doEnv = env;
+    this.schemaReady = this.doState.blockConcurrencyWhile(async () => {
+      this.initializeSqlSchema();
+    });
   }
 
   async fetch(request: Request): Promise<Response> {
+    await this.schemaReady;
     const url = new URL(request.url);
 
     if (url.pathname === "/ws") {
@@ -193,6 +406,7 @@ export class IngestDurableObject extends DurableObject {
 
     if (url.pathname === "/flush" && request.method === "POST") {
       await this.flushTimeouts();
+      await this.flushPendingToD1();
       return jsonResponse({ ok: true });
     }
 
@@ -200,10 +414,13 @@ export class IngestDurableObject extends DurableObject {
   }
 
   async alarm(): Promise<void> {
+    await this.schemaReady;
     await this.flushTimeouts();
+    await this.flushPendingToD1();
+    await this.cleanupBufferedRows();
     await this.cleanupSnapshotWindow();
-    if ((await this.hasOpenVisits()) || (await this.hasSnapshotItems())) {
-      await this.doState.storage.setAlarm(Date.now() + TEN_MINUTES_MS);
+    if ((await this.hasOpenVisits()) || (await this.hasSnapshotItems()) || this.hasDirtyRows()) {
+      await this.doState.storage.setAlarm(Date.now() + D1_FLUSH_INTERVAL_MS);
       return;
     }
     await this.doState.storage.deleteAlarm();
@@ -230,6 +447,7 @@ export class IngestDurableObject extends DurableObject {
       await this.handleCustomEvent(record);
     }
 
+    await this.maybeFlushToD1();
     await this.ensureAlarm();
     return new Response("ok", { status: 202 });
   }
@@ -305,6 +523,129 @@ export class IngestDurableObject extends DurableObject {
 
     return jsonResponse(payload);
   }
+
+  private initializeSqlSchema(): void {
+    const sql = this.doState.storage.sql;
+    sql.exec(`
+      CREATE TABLE IF NOT EXISTS buffered_visits (
+        visit_id TEXT PRIMARY KEY,
+        site_id TEXT NOT NULL,
+        visitor_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        last_activity_at INTEGER NOT NULL,
+        ended_at INTEGER,
+        finalized_at INTEGER,
+        duration_ms INTEGER,
+        duration_source TEXT,
+        exit_reason TEXT,
+        pathname TEXT NOT NULL,
+        query_string TEXT NOT NULL DEFAULT '',
+        hash_fragment TEXT NOT NULL DEFAULT '',
+        hostname TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        referrer_url TEXT NOT NULL DEFAULT '',
+        referrer_host TEXT NOT NULL DEFAULT '',
+        utm_source TEXT NOT NULL DEFAULT '',
+        utm_medium TEXT NOT NULL DEFAULT '',
+        utm_campaign TEXT NOT NULL DEFAULT '',
+        utm_term TEXT NOT NULL DEFAULT '',
+        utm_content TEXT NOT NULL DEFAULT '',
+        is_eu INTEGER NOT NULL DEFAULT 0,
+        country TEXT NOT NULL DEFAULT '',
+        region TEXT NOT NULL DEFAULT '',
+        region_code TEXT NOT NULL DEFAULT '',
+        city TEXT NOT NULL DEFAULT '',
+        continent TEXT NOT NULL DEFAULT '',
+        latitude REAL,
+        longitude REAL,
+        postal_code TEXT NOT NULL DEFAULT '',
+        metro_code TEXT NOT NULL DEFAULT '',
+        timezone TEXT NOT NULL DEFAULT '',
+        as_organization TEXT NOT NULL DEFAULT '',
+        ua_raw TEXT NOT NULL DEFAULT '',
+        browser TEXT NOT NULL DEFAULT '',
+        browser_version TEXT NOT NULL DEFAULT '',
+        os TEXT NOT NULL DEFAULT '',
+        os_version TEXT NOT NULL DEFAULT '',
+        device_type TEXT NOT NULL DEFAULT '',
+        screen_width INTEGER,
+        screen_height INTEGER,
+        language TEXT NOT NULL DEFAULT '',
+        dirty INTEGER NOT NULL DEFAULT 1,
+        flush_attempts INTEGER NOT NULL DEFAULT 0,
+        last_flush_error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec("CREATE INDEX IF NOT EXISTS idx_buffered_visits_dirty_updated ON buffered_visits(dirty, updated_at)");
+    sql.exec("CREATE INDEX IF NOT EXISTS idx_buffered_visits_status_last_activity ON buffered_visits(status, last_activity_at)");
+    sql.exec(`
+      CREATE TABLE IF NOT EXISTS buffered_custom_events (
+        event_id TEXT PRIMARY KEY,
+        site_id TEXT NOT NULL,
+        visit_id TEXT NOT NULL,
+        visitor_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        occurred_at INTEGER NOT NULL,
+        event_name TEXT NOT NULL,
+        event_data_json TEXT NOT NULL DEFAULT '{}',
+        pathname TEXT NOT NULL,
+        query_string TEXT NOT NULL DEFAULT '',
+        hash_fragment TEXT NOT NULL DEFAULT '',
+        hostname TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        referrer_url TEXT NOT NULL DEFAULT '',
+        referrer_host TEXT NOT NULL DEFAULT '',
+        country TEXT NOT NULL DEFAULT '',
+        region TEXT NOT NULL DEFAULT '',
+        city TEXT NOT NULL DEFAULT '',
+        browser TEXT NOT NULL DEFAULT '',
+        os TEXT NOT NULL DEFAULT '',
+        os_version TEXT NOT NULL DEFAULT '',
+        device_type TEXT NOT NULL DEFAULT '',
+        language TEXT NOT NULL DEFAULT '',
+        timezone TEXT NOT NULL DEFAULT '',
+        screen_width INTEGER,
+        screen_height INTEGER,
+        dirty INTEGER NOT NULL DEFAULT 1,
+        flush_attempts INTEGER NOT NULL DEFAULT 0,
+        last_flush_error TEXT,
+        created_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec("CREATE INDEX IF NOT EXISTS idx_buffered_custom_events_dirty_occurred ON buffered_custom_events(dirty, occurred_at)");
+  }
+
+  private sqlAll<T>(query: string, ...bindings: SqlBinding[]): T[] {
+    return this.doState.storage.sql.exec(query, ...bindings).toArray() as T[];
+  }
+
+  private sqlOne<T>(query: string, ...bindings: SqlBinding[]): T | null {
+    const rows = this.sqlAll<T>(query, ...bindings);
+    return rows[0] ?? null;
+  }
+
+  private sqlRun(query: string, ...bindings: SqlBinding[]): number {
+    return this.doState.storage.sql.exec(query, ...bindings).rowsWritten;
+  }
+
+  private hasDirtyRows(): boolean {
+    const visits = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_visits WHERE dirty = 1");
+    if ((visits?.count ?? 0) > 0) return true;
+    const events = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_custom_events WHERE dirty = 1");
+    return (events?.count ?? 0) > 0;
+  }
+
+  private async maybeFlushToD1(): Promise<void> {
+    const visitCount = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_visits WHERE dirty = 1")?.count ?? 0;
+    const eventCount = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_custom_events WHERE dirty = 1")?.count ?? 0;
+    if (visitCount >= D1_FLUSH_IMMEDIATE_THRESHOLD || eventCount >= D1_FLUSH_IMMEDIATE_THRESHOLD) {
+      await this.flushPendingToD1();
+    }
+  }
   private async normalizeRecord(envelope: IngestEnvelopePayload): Promise<NormalizedIngestRecord | null> {
     const client = envelope.client ?? ({} as TrackerClientPayload);
     const siteId = clampString(coerceString(client.siteId), 120);
@@ -319,18 +660,8 @@ export class IngestDurableObject extends DurableObject {
     const receivedAt = clampTimestamp(envelope.request.receivedAt, nowMs);
     const eventAt = clampTimestamp(client.timestamp, nowMs);
     const startedAt = clampTimestamp(client.startedAt, eventAt);
-    const pathname = clampString(coerceString(client.pathname || "/"), 2048);
-    const hostname = clampString(
-      coerceString(client.hostname || safeHostname(requestUrl.toString())),
-      255,
-    ).toLowerCase();
-
-    if (!hostname || !config.allowedHostnames.includes(hostname)) {
-      return null;
-    }
-    if (matchesBlockedPath(pathname, config.pathBlacklist)) {
-      return null;
-    }
+    const kind = clampString(coerceString(client.kind), 40) as TrackerPayloadKind;
+    const visitId = clampString(coerceString(client.visitId), 128);
 
     const cf = envelope.request.cf ?? {};
     const uaRaw = clampString(coerceString(requestHeaders["user-agent"] ?? ""), 1024);
@@ -352,25 +683,7 @@ export class IngestDurableObject extends DurableObject {
       });
     }
 
-    const visitId = clampString(coerceString(client.visitId), 128);
-    const referrerUrl = clampString(coerceString(client.referrerUrl), 2000);
-    const contextBase = {
-      siteId,
-      visitId,
-      visitorId,
-      startedAt,
-      pathname,
-      queryString: clampString(coerceString(client.query || ""), 2048),
-      hashFragment: clampString(coerceString(client.hash || ""), 1024),
-      hostname,
-      title: clampString(coerceString(client.title || ""), 1024),
-      referrerUrl,
-      referrerHost: clampString(safeHostname(referrerUrl), 255),
-      utmSource: clampString(coerceString(client.utmSource || ""), 255),
-      utmMedium: clampString(coerceString(client.utmMedium || ""), 255),
-      utmCampaign: clampString(coerceString(client.utmCampaign || ""), 255),
-      utmTerm: clampString(coerceString(client.utmTerm || ""), 255),
-      utmContent: clampString(coerceString(client.utmContent || ""), 255),
+    const contextGeoBase = {
       isEU,
       country: clampString(coerceString(cf.country ?? ""), 10),
       region: clampString(coerceString(cf.region ?? ""), 128),
@@ -389,20 +702,47 @@ export class IngestDurableObject extends DurableObject {
       os: clampString(coerceString(ua.os.name ?? ""), 80),
       osVersion: clampString(coerceString(ua.os.version ?? ""), 80),
       deviceType: clampString(coerceString(ua.device.type ?? "desktop"), 40),
-      screenWidth: coerceNumber(client.screenWidth, null),
-      screenHeight: coerceNumber(client.screenHeight, null),
-      language: clampString(coerceString(client.language || ""), 120),
     };
 
-    const kind = clampString(coerceString(client.kind), 40) as TrackerPayloadKind;
     if (kind === "visit_start") {
       if (!visitId) return null;
+      const pathname = clampString(coerceString(client.pathname || "/"), 2048);
+      const hostname = clampString(
+        coerceString(client.hostname || safeHostname(requestUrl.toString())),
+        255,
+      ).toLowerCase();
+      if (!hostname || !config.allowedHostnames.includes(hostname)) {
+        return null;
+      }
+      if (matchesBlockedPath(pathname, config.pathBlacklist)) {
+        return null;
+      }
+      const referrerUrl = clampString(coerceString(client.referrerUrl), 2000);
       const sessionId = await this.resolveSessionId(visitorId, eventAt);
       return {
         kind: "visit_start",
         receivedAt,
+        siteId,
+        visitId,
+        visitorId,
         sessionId,
-        ...contextBase,
+        startedAt,
+        pathname,
+        queryString: clampString(coerceString(client.query || ""), 2048),
+        hashFragment: clampString(coerceString(client.hash || ""), 1024),
+        hostname,
+        title: clampString(coerceString(client.title || ""), 1024),
+        referrerUrl,
+        referrerHost: clampString(safeHostname(referrerUrl), 255),
+        utmSource: clampString(coerceString(client.utmSource || ""), 255),
+        utmMedium: clampString(coerceString(client.utmMedium || ""), 255),
+        utmCampaign: clampString(coerceString(client.utmCampaign || ""), 255),
+        utmTerm: clampString(coerceString(client.utmTerm || ""), 255),
+        utmContent: clampString(coerceString(client.utmContent || ""), 255),
+        screenWidth: coerceNumber(client.screenWidth, null),
+        screenHeight: coerceNumber(client.screenHeight, null),
+        language: clampString(coerceString(client.language || ""), 120),
+        ...contextGeoBase,
       } satisfies NormalizedVisitStart;
     }
 
@@ -492,13 +832,6 @@ export class IngestDurableObject extends DurableObject {
     }
 
     await this.touchSession(record.visitorId, record.sessionId, record.startedAt, 1);
-
-    const openVisit: StoredOpenVisit = {
-      ...record,
-      lastActivityAt: record.startedAt,
-    };
-
-    await this.doState.storage.put(this.openVisitStorageKey(record.visitId), openVisit);
     this.writeVisitStartToAe(record);
     await this.pushRealtimeRecord({
       id: record.visitId,
@@ -522,9 +855,9 @@ export class IngestDurableObject extends DurableObject {
       ? Math.max(0, Math.floor(record.durationMs))
       : Math.max(0, finalizedAt - visit.startedAt);
 
-    const result = await this.doEnv.DB.prepare(
+    const rowsWritten = this.sqlRun(
       `
-        UPDATE visits
+        UPDATE buffered_visits
         SET status = 'finalized',
             last_activity_at = ?,
             ended_at = ?,
@@ -532,27 +865,25 @@ export class IngestDurableObject extends DurableObject {
             duration_ms = ?,
             duration_source = ?,
             exit_reason = ?,
-            updated_at = unixepoch()
+            dirty = 1,
+            updated_at = ?
         WHERE site_id = ? AND visit_id = ? AND status = 'open'
       `,
-    )
-      .bind(
-        finalizedAt,
-        finalizedAt,
-        finalizedAt,
-        durationMs,
-        record.durationSource,
-        record.exitReason,
-        record.siteId,
-        record.visitId,
-      )
-      .run();
-    if (Number(result.meta?.changes ?? 0) === 0) {
+      finalizedAt,
+      finalizedAt,
+      finalizedAt,
+      durationMs,
+      record.durationSource,
+      record.exitReason,
+      toUnixSeconds(record.receivedAt),
+      record.siteId,
+      record.visitId,
+    );
+    if (rowsWritten === 0) {
       return;
     }
 
     await this.touchSession(record.visitorId, record.sessionId, finalizedAt, -1);
-    await this.doState.storage.delete(this.openVisitStorageKey(record.visitId));
     this.writeVisitFinalizeToAe({ ...record, finalizedAt, durationMs });
   }
 
@@ -575,9 +906,6 @@ export class IngestDurableObject extends DurableObject {
     });
   }
   private async getVisitContext(siteId: string, visitId: string): Promise<StoredOpenVisit | null> {
-    const openVisit = await this.doState.storage.get<StoredOpenVisit>(this.openVisitStorageKey(visitId));
-    if (openVisit) return openVisit;
-
     const row = await this.readVisitRow(siteId, visitId);
     if (!row) return null;
     return {
@@ -624,7 +952,7 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private async readVisitRow(siteId: string, visitId: string): Promise<VisitRow | null> {
-    return (await this.doEnv.DB.prepare(
+    return this.sqlOne<VisitRow>(
       `
         SELECT
           visit_id AS visitId,
@@ -666,114 +994,114 @@ export class IngestDurableObject extends DurableObject {
           screen_width AS screenWidth,
           screen_height AS screenHeight,
           language
-        FROM visits
+        FROM buffered_visits
         WHERE site_id = ? AND visit_id = ?
         LIMIT 1
       `,
-    )
-      .bind(siteId, visitId)
-      .first<VisitRow>()) ?? null;
+      siteId,
+      visitId,
+    );
   }
 
   private async insertVisit(record: NormalizedVisitStart): Promise<boolean> {
-    const result = await this.doEnv.DB.prepare(
+    const createdAt = toUnixSeconds(record.receivedAt);
+    const rowsWritten = this.sqlRun(
       `
-        INSERT OR IGNORE INTO visits (
+        INSERT OR IGNORE INTO buffered_visits (
           visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at,
           pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
           utm_source, utm_medium, utm_campaign, utm_term, utm_content,
           is_eu, country, region, region_code, city, continent, latitude, longitude,
           postal_code, metro_code, timezone, as_organization, ua_raw, browser, browser_version,
-          os, os_version, device_type, screen_width, screen_height, language, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())
+          os, os_version, device_type, screen_width, screen_height, language,
+          dirty, flush_attempts, last_flush_error, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, ?, ?)
       `,
-    )
-      .bind(
-        record.visitId,
-        record.siteId,
-        record.visitorId,
-        record.sessionId,
-        record.startedAt,
-        record.startedAt,
-        record.pathname,
-        record.queryString,
-        record.hashFragment,
-        record.hostname,
-        record.title,
-        record.referrerUrl,
-        record.referrerHost,
-        record.utmSource,
-        record.utmMedium,
-        record.utmCampaign,
-        record.utmTerm,
-        record.utmContent,
-        record.isEU ? 1 : 0,
-        record.country,
-        record.region,
-        record.regionCode,
-        record.city,
-        record.continent,
-        record.latitude,
-        record.longitude,
-        record.postalCode,
-        record.metroCode,
-        record.timezone,
-        record.asOrganization,
-        record.uaRaw,
-        record.browser,
-        record.browserVersion,
-        record.os,
-        record.osVersion,
-        record.deviceType,
-        record.screenWidth,
-        record.screenHeight,
-        record.language,
-      )
-      .run();
-    return Number(result.meta?.changes ?? 0) > 0;
+      record.visitId,
+      record.siteId,
+      record.visitorId,
+      record.sessionId,
+      record.startedAt,
+      record.startedAt,
+      record.pathname,
+      record.queryString,
+      record.hashFragment,
+      record.hostname,
+      record.title,
+      record.referrerUrl,
+      record.referrerHost,
+      record.utmSource,
+      record.utmMedium,
+      record.utmCampaign,
+      record.utmTerm,
+      record.utmContent,
+      record.isEU ? 1 : 0,
+      record.country,
+      record.region,
+      record.regionCode,
+      record.city,
+      record.continent,
+      record.latitude,
+      record.longitude,
+      record.postalCode,
+      record.metroCode,
+      record.timezone,
+      record.asOrganization,
+      record.uaRaw,
+      record.browser,
+      record.browserVersion,
+      record.os,
+      record.osVersion,
+      record.deviceType,
+      record.screenWidth,
+      record.screenHeight,
+      record.language,
+      createdAt,
+      createdAt,
+    );
+    return rowsWritten > 0;
   }
 
   private async insertCustomEvent(record: NormalizedCustomEvent): Promise<boolean> {
-    const result = await this.doEnv.DB.prepare(
+    const createdAt = toUnixSeconds(record.receivedAt);
+    const rowsWritten = this.sqlRun(
       `
-        INSERT OR IGNORE INTO custom_events (
+        INSERT OR IGNORE INTO buffered_custom_events (
           event_id, site_id, visit_id, visitor_id, session_id, occurred_at, event_name, event_data_json,
           pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
           country, region, city, browser, os, os_version, device_type, language, timezone,
-          screen_width, screen_height, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+          screen_width, screen_height, dirty, flush_attempts, last_flush_error, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, ?)
       `,
-    )
-      .bind(
-        record.eventId,
-        record.siteId,
-        record.visitId,
-        record.visitorId,
-        record.sessionId,
-        record.eventAt,
-        record.eventName,
-        record.eventDataJson,
-        record.pathname,
-        record.queryString,
-        record.hashFragment,
-        record.hostname,
-        record.title,
-        record.referrerUrl,
-        record.referrerHost,
-        record.country,
-        record.region,
-        record.city,
-        record.browser,
-        record.os,
-        record.osVersion,
-        record.deviceType,
-        record.language,
-        record.timezone,
-        record.screenWidth,
-        record.screenHeight,
-      )
-      .run();
-    return Number(result.meta?.changes ?? 0) > 0;
+      record.eventId,
+      record.siteId,
+      record.visitId,
+      record.visitorId,
+      record.sessionId,
+      record.eventAt,
+      record.eventName,
+      record.eventDataJson,
+      record.pathname,
+      record.queryString,
+      record.hashFragment,
+      record.hostname,
+      record.title,
+      record.referrerUrl,
+      record.referrerHost,
+      record.country,
+      record.region,
+      record.city,
+      record.browser,
+      record.os,
+      record.osVersion,
+      record.deviceType,
+      record.language,
+      record.timezone,
+      record.screenWidth,
+      record.screenHeight,
+      createdAt,
+    );
+    return rowsWritten > 0;
   }
 
   private writeVisitStartToAe(record: NormalizedVisitStart): void {
@@ -936,15 +1264,19 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private async updateOpenVisitActivity(visitId: string, eventAt: number): Promise<void> {
-    const key = this.openVisitStorageKey(visitId);
-    const visit = await this.doState.storage.get<StoredOpenVisit>(key);
-    if (!visit) return;
-    visit.lastActivityAt = Math.max(visit.lastActivityAt, eventAt);
-    await this.doState.storage.put(key, visit);
-  }
-
-  private openVisitStorageKey(visitId: string): string {
-    return `${OPEN_VISIT_PREFIX}${visitId}`;
+    this.sqlRun(
+      `
+        UPDATE buffered_visits
+        SET last_activity_at = CASE WHEN last_activity_at > ? THEN last_activity_at ELSE ? END,
+            dirty = 1,
+            updated_at = ?
+        WHERE visit_id = ? AND status = 'open'
+      `,
+      eventAt,
+      eventAt,
+      toUnixSeconds(eventAt),
+      visitId,
+    );
   }
 
   private sessionStorageKey(visitorId: string): string {
@@ -964,13 +1296,13 @@ export class IngestDurableObject extends DurableObject {
   private async ensureAlarm(): Promise<void> {
     const existing = await this.doState.storage.getAlarm();
     if (!existing) {
-      await this.doState.storage.setAlarm(Date.now() + TEN_MINUTES_MS);
+      await this.doState.storage.setAlarm(Date.now() + D1_FLUSH_INTERVAL_MS);
     }
   }
 
   private async hasOpenVisits(): Promise<boolean> {
-    const rows = await this.doState.storage.list({ prefix: OPEN_VISIT_PREFIX, limit: 1 });
-    return rows.size > 0;
+    const row = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_visits WHERE status = 'open' LIMIT 1");
+    return (row?.count ?? 0) > 0;
   }
 
   private async hasSnapshotItems(): Promise<boolean> {
@@ -1054,26 +1386,240 @@ export class IngestDurableObject extends DurableObject {
     }
   }
 
-  private async flushTimeouts(): Promise<void> {
-    const now = Date.now();
-    const rows = await this.doState.storage.list<StoredOpenVisit>({
-      prefix: OPEN_VISIT_PREFIX,
-      limit: 2048,
-    });
+  private async flushPendingToD1(): Promise<void> {
+    while (true) {
+      const visitRows = this.sqlAll<BufferedVisitRow>(
+        `
+          SELECT
+            visit_id AS visitId,
+            status,
+            site_id AS siteId,
+            visitor_id AS visitorId,
+            session_id AS sessionId,
+            started_at AS startedAt,
+            last_activity_at AS lastActivityAt,
+            ended_at AS endedAt,
+            finalized_at AS finalizedAt,
+            duration_ms AS durationMs,
+            COALESCE(duration_source, '') AS durationSource,
+            COALESCE(exit_reason, '') AS exitReason,
+            pathname,
+            query_string AS queryString,
+            hash_fragment AS hashFragment,
+            hostname,
+            title,
+            referrer_url AS referrerUrl,
+            referrer_host AS referrerHost,
+            utm_source AS utmSource,
+            utm_medium AS utmMedium,
+            utm_campaign AS utmCampaign,
+            utm_term AS utmTerm,
+            utm_content AS utmContent,
+            is_eu AS isEU,
+            country,
+            region,
+            region_code AS regionCode,
+            city,
+            continent,
+            latitude,
+            longitude,
+            postal_code AS postalCode,
+            metro_code AS metroCode,
+            timezone,
+            as_organization AS asOrganization,
+            ua_raw AS uaRaw,
+            browser,
+            browser_version AS browserVersion,
+            os,
+            os_version AS osVersion,
+            device_type AS deviceType,
+            screen_width AS screenWidth,
+            screen_height AS screenHeight,
+            language,
+            dirty,
+            flush_attempts AS flushAttempts,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+          FROM buffered_visits
+          WHERE dirty = 1
+          ORDER BY updated_at ASC, started_at ASC
+          LIMIT ?
+        `,
+        D1_FLUSH_BATCH_SIZE,
+      );
+      const eventRows = this.sqlAll<BufferedCustomEventRow>(
+        `
+          SELECT
+            event_id AS eventId,
+            site_id AS siteId,
+            visit_id AS visitId,
+            visitor_id AS visitorId,
+            session_id AS sessionId,
+            occurred_at AS occurredAt,
+            event_name AS eventName,
+            event_data_json AS eventDataJson,
+            pathname,
+            query_string AS queryString,
+            hash_fragment AS hashFragment,
+            hostname,
+            title,
+            referrer_url AS referrerUrl,
+            referrer_host AS referrerHost,
+            country,
+            region,
+            city,
+            browser,
+            os,
+            os_version AS osVersion,
+            device_type AS deviceType,
+            language,
+            timezone,
+            screen_width AS screenWidth,
+            screen_height AS screenHeight,
+            dirty,
+            flush_attempts AS flushAttempts,
+            created_at AS createdAt
+          FROM buffered_custom_events
+          WHERE dirty = 1
+          ORDER BY created_at ASC, occurred_at ASC
+          LIMIT ?
+        `,
+        D1_FLUSH_BATCH_SIZE,
+      );
 
-    for (const [key, visit] of rows.entries()) {
-      if (!visit) continue;
-      if (now - visit.lastActivityAt < VISIT_TIMEOUT_MS) continue;
-
-      const existing = await this.readVisitRow(visit.siteId, visit.visitId);
-      if (!existing || existing.status !== "open") {
-        await this.doState.storage.delete(key);
-        continue;
+      if (visitRows.length === 0 && eventRows.length === 0) {
+        return;
       }
 
-      await this.doEnv.DB.prepare(
+      try {
+        const statements = [
+          ...visitRows.map((row) => this.doEnv.DB.prepare(UPSERT_VISIT_SQL).bind(...visitBindings(row))),
+          ...eventRows.map((row) => this.doEnv.DB.prepare(INSERT_CUSTOM_EVENT_SQL).bind(...customEventBindings(row))),
+        ];
+        if (statements.length > 0) {
+          await this.doEnv.DB.batch(statements);
+        }
+        this.markVisitRowsFlushed(visitRows);
+        this.markCustomEventRowsFlushed(eventRows);
+      } catch (error) {
+        const message = clampString(String(error instanceof Error ? error.message : error), 400);
+        this.markVisitRowsFailed(visitRows, message);
+        this.markCustomEventRowsFailed(eventRows, message);
+        console.error("d1_flush_failed", error);
+        return;
+      }
+
+      if (visitRows.length < D1_FLUSH_BATCH_SIZE && eventRows.length < D1_FLUSH_BATCH_SIZE) {
+        return;
+      }
+    }
+  }
+
+  private markVisitRowsFlushed(rows: BufferedVisitRow[]): void {
+    if (rows.length === 0) return;
+    const openIds = rows.filter((row) => row.status === "open").map((row) => row.visitId);
+    const closedIds = rows.filter((row) => row.status !== "open").map((row) => row.visitId);
+    if (openIds.length > 0) {
+      this.sqlRun(
+        `UPDATE buffered_visits SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE visit_id IN (${openIds.map(() => "?").join(",")})`,
+        ...openIds,
+      );
+    }
+    if (closedIds.length > 0) {
+      this.sqlRun(
+        `UPDATE buffered_visits SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE visit_id IN (${closedIds.map(() => "?").join(",")})`,
+        ...closedIds,
+      );
+    }
+  }
+
+  private markCustomEventRowsFlushed(rows: BufferedCustomEventRow[]): void {
+    if (rows.length === 0) return;
+    const ids = rows.map((row) => row.eventId);
+    this.sqlRun(
+      `UPDATE buffered_custom_events SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE event_id IN (${ids.map(() => "?").join(",")})`,
+      ...ids,
+    );
+  }
+
+  private markVisitRowsFailed(rows: BufferedVisitRow[], errorMessage: string): void {
+    if (rows.length === 0) return;
+    const ids = rows.map((row) => row.visitId);
+    this.sqlRun(
+      `UPDATE buffered_visits SET flush_attempts = flush_attempts + 1, last_flush_error = ? WHERE visit_id IN (${ids.map(() => "?").join(",")})`,
+      errorMessage,
+      ...ids,
+    );
+  }
+
+  private markCustomEventRowsFailed(rows: BufferedCustomEventRow[], errorMessage: string): void {
+    if (rows.length === 0) return;
+    const ids = rows.map((row) => row.eventId);
+    this.sqlRun(
+      `UPDATE buffered_custom_events SET flush_attempts = flush_attempts + 1, last_flush_error = ? WHERE event_id IN (${ids.map(() => "?").join(",")})`,
+      errorMessage,
+      ...ids,
+    );
+  }
+
+  private async cleanupBufferedRows(): Promise<void> {
+    const visitCutoff = Date.now() - LOCAL_DEDUPE_RETENTION_MS;
+    const eventCutoff = visitCutoff;
+    this.sqlRun(
+      `
+        DELETE FROM buffered_visits
+        WHERE dirty = 0
+          AND status != 'open'
+          AND started_at < ?
+      `,
+      visitCutoff,
+    );
+    this.sqlRun(
+      `
+        DELETE FROM buffered_custom_events
+        WHERE dirty = 0
+          AND occurred_at < ?
+      `,
+      eventCutoff,
+    );
+  }
+
+  private async flushTimeouts(): Promise<void> {
+    const now = Date.now();
+    const rows = this.sqlAll<{
+      visitId: string;
+      siteId: string;
+      visitorId: string;
+      sessionId: string;
+      startedAt: number;
+      lastActivityAt: number;
+      country: string;
+      browser: string;
+      deviceType: string;
+    }>(
+      `
+        SELECT
+          visit_id AS visitId,
+          site_id AS siteId,
+          visitor_id AS visitorId,
+          session_id AS sessionId,
+          started_at AS startedAt,
+          last_activity_at AS lastActivityAt,
+          country,
+          browser,
+          device_type AS deviceType
+        FROM buffered_visits
+        WHERE status = 'open'
+          AND last_activity_at <= ?
+        LIMIT 2048
+      `,
+      now - VISIT_TIMEOUT_MS,
+    );
+
+    for (const visit of rows) {
+      const rowsWritten = this.sqlRun(
         `
-          UPDATE visits
+          UPDATE buffered_visits
           SET status = 'timeout',
               last_activity_at = ?,
               ended_at = ?,
@@ -1081,15 +1627,19 @@ export class IngestDurableObject extends DurableObject {
               duration_ms = NULL,
               duration_source = 'timeout',
               exit_reason = 'timeout',
-              updated_at = unixepoch()
+              dirty = 1,
+              updated_at = ?
           WHERE site_id = ? AND visit_id = ? AND status = 'open'
         `,
-      )
-        .bind(now, now, now, visit.siteId, visit.visitId)
-        .run();
-
+        now,
+        now,
+        now,
+        toUnixSeconds(now),
+        visit.siteId,
+        visit.visitId,
+      );
+      if (rowsWritten === 0) continue;
       await this.touchSession(visit.visitorId, visit.sessionId, now, -1);
-      await this.doState.storage.delete(key);
       this.writeVisitFinalizeToAe({
         kind: "visit_finalize",
         siteId: visit.siteId,

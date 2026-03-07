@@ -16,7 +16,6 @@ import {
   type AeQueryFilters,
   type AeReferrerRow,
   type AeTrendRow,
-  type AeVisitorRow,
   ANALYTICS_WINDOW_MS,
   isAnalyticsSqlConfigured,
   queryAeCustomEventNames,
@@ -39,7 +38,6 @@ import {
   queryAeTopTimezones,
   queryAeTopTitles,
   queryAeTrend,
-  queryAeVisitorDetails,
 } from "./analytics-engine-query";
 
 const RETENTION_DAYS = 365;
@@ -439,16 +437,6 @@ function mapAeDimensions(rows: AeDimensionRow[]): DimensionRow[] {
 function mapAeReferrers(rows: AeReferrerRow[]): ReferrerRow[] {
   return rows.map((row) => ({
     referrer: row.ref,
-    views: row.views,
-    sessions: row.sessions,
-  }));
-}
-
-function mapAeVisitors(rows: AeVisitorRow[]): VisitorRow[] {
-  return rows.map((row) => ({
-    visitorId: row.visitor_id,
-    firstSeenAt: row.first_seen_at,
-    lastSeenAt: row.last_seen_at,
     views: row.views,
     sessions: row.sessions,
   }));
@@ -986,23 +974,7 @@ async function queryVisitorAggregate(
   filters: DashboardFilters,
   limit: number,
 ): Promise<VisitorRow[]> {
-  const preferred = await loadWithPreferredSource(
-    env,
-    window,
-    "visitors",
-    async () =>
-      mapAeVisitors(
-        await queryAeVisitorDetails(
-          env,
-          siteId,
-          window,
-          limit,
-          toAeFilters(filters),
-        ),
-      ),
-    () => queryVisitorsFromD1(env, siteId, window, filters, limit),
-  );
-  return preferred.value;
+  return queryVisitorsFromD1(env, siteId, window, filters, limit);
 }
 
 async function queryDimensionAggregate(
