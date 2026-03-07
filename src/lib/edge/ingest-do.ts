@@ -30,6 +30,7 @@ const WRITE_BUDGET_PER_INVOCATION = 200;
 const D1_FLUSH_INTERVAL_MS = 60 * 1000;
 const D1_FLUSH_BATCH_SIZE = 100;
 const D1_FLUSH_IMMEDIATE_THRESHOLD = WRITE_BUDGET_PER_INVOCATION;
+const OPEN_VISIT_FLUSH_THRESHOLD = WRITE_BUDGET_PER_INVOCATION * 5;
 const TIMEOUT_FINALIZE_BATCH_SIZE = WRITE_BUDGET_PER_INVOCATION;
 const LOCAL_DEDUPE_RETENTION_MS = 48 * 60 * 60 * 1000;
 
@@ -529,8 +530,8 @@ export class IngestDurableObject extends DurableObject {
         updated_at INTEGER NOT NULL
       )
     `);
-    sql.exec("CREATE INDEX IF NOT EXISTS idx_buffered_visits_dirty_updated ON buffered_visits(dirty, updated_at)");
-    sql.exec("CREATE INDEX IF NOT EXISTS idx_buffered_visits_status_last_activity ON buffered_visits(status, last_activity_at)");
+    sql.exec("DROP INDEX IF EXISTS idx_buffered_visits_dirty_updated");
+    sql.exec("DROP INDEX IF EXISTS idx_buffered_visits_status_last_activity");
     sql.exec(`
       CREATE TABLE IF NOT EXISTS buffered_custom_events (
         event_id TEXT PRIMARY KEY,
@@ -565,7 +566,7 @@ export class IngestDurableObject extends DurableObject {
         created_at INTEGER NOT NULL
       )
     `);
-    sql.exec("CREATE INDEX IF NOT EXISTS idx_buffered_custom_events_dirty_occurred ON buffered_custom_events(dirty, occurred_at)");
+    sql.exec("DROP INDEX IF EXISTS idx_buffered_custom_events_dirty_occurred");
   }
 
   private sqlAll<T>(query: string, ...bindings: SqlBinding[]): T[] {
@@ -589,9 +590,14 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private async maybeFlushToD1(): Promise<void> {
-    const visitCount = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_visits WHERE dirty = 1")?.count ?? 0;
+    const visitCount = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_visits WHERE dirty = 1 AND status != 'open'")?.count ?? 0;
     const eventCount = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_custom_events WHERE dirty = 1")?.count ?? 0;
-    if (visitCount >= D1_FLUSH_IMMEDIATE_THRESHOLD || eventCount >= D1_FLUSH_IMMEDIATE_THRESHOLD) {
+    const openVisitCount = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_visits WHERE dirty = 1 AND status = 'open'")?.count ?? 0;
+    if (
+      visitCount >= D1_FLUSH_IMMEDIATE_THRESHOLD ||
+      eventCount >= D1_FLUSH_IMMEDIATE_THRESHOLD ||
+      openVisitCount >= OPEN_VISIT_FLUSH_THRESHOLD
+    ) {
       await this.flushPendingToD1();
     }
   }
@@ -1347,7 +1353,7 @@ export class IngestDurableObject extends DurableObject {
     }
     if (closedIds.length > 0) {
       this.sqlRun(
-        `UPDATE buffered_visits SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE visit_id IN (${closedIds.map(() => "?").join(",")})`,
+        `DELETE FROM buffered_visits WHERE visit_id IN (${closedIds.map(() => "?").join(",")})`,
         ...closedIds,
       );
     }
@@ -1357,7 +1363,7 @@ export class IngestDurableObject extends DurableObject {
     if (rows.length === 0) return;
     const ids = rows.map((row) => row.eventId);
     this.sqlRun(
-      `UPDATE buffered_custom_events SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE event_id IN (${ids.map(() => "?").join(",")})`,
+      `DELETE FROM buffered_custom_events WHERE event_id IN (${ids.map(() => "?").join(",")})`,
       ...ids,
     );
   }
