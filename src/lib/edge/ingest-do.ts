@@ -36,9 +36,13 @@ const SNAPSHOT_BUFFER_RETENTION_MS = 30 * 60 * 1000;
 const ACTIVE_NOW_WINDOW_MS = 5 * 60 * 1000;
 const VISIT_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const WS_SNAPSHOT_EVENT_LIMIT = 200;
+// Cloudflare Analytics Engine allows at most 250 writeDataPoint calls per Worker invocation.
+// Keep a safety margin because alarm-driven timeout flushes can emit many finalize rows at once.
+const AE_WRITE_BUDGET_PER_INVOCATION = 200;
 const D1_FLUSH_INTERVAL_MS = 60 * 1000;
 const D1_FLUSH_BATCH_SIZE = 100;
-const D1_FLUSH_IMMEDIATE_THRESHOLD = 200;
+const D1_FLUSH_IMMEDIATE_THRESHOLD = AE_WRITE_BUDGET_PER_INVOCATION;
+const TIMEOUT_FINALIZE_BATCH_SIZE = AE_WRITE_BUDGET_PER_INVOCATION;
 const LOCAL_DEDUPE_RETENTION_MS = 48 * 60 * 60 * 1000;
 
 function toAeRegionValue(country: string, regionCode: string, region: string): string {
@@ -1611,9 +1615,10 @@ export class IngestDurableObject extends DurableObject {
         FROM buffered_visits
         WHERE status = 'open'
           AND last_activity_at <= ?
-        LIMIT 2048
+        LIMIT ?
       `,
       now - VISIT_TIMEOUT_MS,
+      TIMEOUT_FINALIZE_BATCH_SIZE,
     );
 
     for (const visit of rows) {
