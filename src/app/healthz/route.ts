@@ -1,5 +1,4 @@
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
-import { isAnalyticsEngineEnabled } from "@/lib/edge/flags";
 
 export async function GET(request: Request): Promise<Response> {
   const { env } = await resolveEdgeRuntime(request);
@@ -11,8 +10,6 @@ export async function GET(request: Request): Promise<Response> {
       bindings: {
         d1: Boolean(env.DB),
         durableObject: Boolean(env.INGEST_DO),
-        analyticsEngine: Boolean(env.ANALYTICS),
-        analyticsEngineEnabled: isAnalyticsEngineEnabled(env),
         r2Archive: Boolean(env.ARCHIVE_BUCKET),
       },
     }),

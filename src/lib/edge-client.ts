@@ -249,6 +249,14 @@ export interface OverviewGeoDimensionTabsData {
   };
 }
 
+export interface OverviewPanelsData {
+  ok: boolean;
+  pageTabs: NonNullable<PagesData["tabs"]>;
+  referrers: ReferrersData["data"];
+  clientTabs: OverviewClientDimensionTabsData["tabs"];
+  geoTabs: OverviewGeoDimensionTabsData["tabs"];
+}
+
 export interface TeamData {
   id: string;
   name: string;

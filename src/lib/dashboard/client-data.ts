@@ -1,6 +1,7 @@
 import type {
   DimensionData,
   OverviewData,
+  OverviewPanelsData,
   OverviewClientDimensionTabsData as OverviewClientDimensionTabsResponse,
   OverviewGeoDimensionTabsData as OverviewGeoDimensionTabsResponse,
   PagesData,
@@ -89,6 +90,16 @@ function emptyOverviewGeoDimensionTabs(): OverviewGeoDimensionTabsData {
 
 function emptyReferrers(): ReferrersData {
   return { ok: true, data: [] };
+}
+
+function emptyOverviewPanels(): OverviewPanelsData {
+  return {
+    ok: true,
+    pageTabs: emptyPageCardTabs(),
+    referrers: [],
+    clientTabs: emptyOverviewClientDimensionTabs(),
+    geoTabs: emptyOverviewGeoDimensionTabs(),
+  };
 }
 
 function emptyVisitors(): VisitorsData {
@@ -257,6 +268,35 @@ export async function fetchOverviewGeoDimensionTabs(
     ),
   );
   return payload.tabs ?? emptyOverviewGeoDimensionTabs();
+}
+
+export async function fetchOverviewPanels(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+  options?: {
+    limit?: number;
+  },
+): Promise<OverviewPanelsData> {
+  const payload = await fetchPrivateJson<OverviewPanelsData>(
+    "/api/private/overview-panels",
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        limit: options?.limit ?? 100,
+      },
+      filters,
+    ),
+  ).catch(() => emptyOverviewPanels());
+  return {
+    ok: payload.ok,
+    pageTabs: payload.pageTabs ?? emptyPageCardTabs(),
+    referrers: payload.referrers ?? [],
+    clientTabs: payload.clientTabs ?? emptyOverviewClientDimensionTabs(),
+    geoTabs: payload.geoTabs ?? emptyOverviewGeoDimensionTabs(),
+  };
 }
 
 export async function fetchVisitors(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<VisitorsData> {

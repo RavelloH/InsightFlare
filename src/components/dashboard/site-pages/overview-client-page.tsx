@@ -64,11 +64,8 @@ import {
   emptyPageCardTabsData,
   emptyOverviewClientDimensionTabsData,
   emptyOverviewGeoDimensionTabsData,
-  fetchPageCardTabs,
-  fetchOverviewClientDimensionTabs,
-  fetchOverviewGeoDimensionTabs,
   fetchOverview,
-  fetchReferrers,
+  fetchOverviewPanels,
   fetchTrend,
   type OverviewClientDimensionTabsData,
   type OverviewGeoDimensionTabsData,
@@ -1785,35 +1782,23 @@ function OverviewPagesSection({
     setOverviewClientDimensionTabsData(emptyOverviewClientDimensionTabsData());
     setOverviewGeoDimensionTabsData(emptyOverviewGeoDimensionTabsData());
 
-    Promise.all([
-      fetchPageCardTabs(siteId, window, filters).catch(() =>
-        emptyPageCardTabsData(),
-      ),
-      fetchReferrers(siteId, window, filters, {
-        fullUrl: true,
-        limit: 100,
-      }).catch(() => emptyReferrersData()),
-      fetchOverviewClientDimensionTabs(siteId, window, filters, {
-        limit: 100,
-      }).catch(() => emptyOverviewClientDimensionTabsData()),
-      fetchOverviewGeoDimensionTabs(siteId, window, filters, {
-        limit: 100,
-      }).catch(() => emptyOverviewGeoDimensionTabsData()),
-    ])
-      .then(
-        ([
-          nextTabs,
-          nextSource,
-          nextOverviewClientDimensions,
-          nextOverviewGeoDimensions,
-        ]) => {
-          if (!active) return;
-          setPageCardTabsData(nextTabs);
-          setSourceCardData(nextSource);
-          setOverviewClientDimensionTabsData(nextOverviewClientDimensions);
-          setOverviewGeoDimensionTabsData(nextOverviewGeoDimensions);
-        },
-      )
+    fetchOverviewPanels(siteId, window, filters, {
+      limit: 100,
+    })
+      .then((payload) => {
+        if (!active) return;
+        setPageCardTabsData(payload.pageTabs ?? emptyPageCardTabsData());
+        setSourceCardData({
+          ok: payload.ok,
+          data: payload.referrers ?? emptyReferrersData().data,
+        });
+        setOverviewClientDimensionTabsData(
+          payload.clientTabs ?? emptyOverviewClientDimensionTabsData(),
+        );
+        setOverviewGeoDimensionTabsData(
+          payload.geoTabs ?? emptyOverviewGeoDimensionTabsData(),
+        );
+      })
       .finally(() => {
         if (!active) return;
         setPageCardLoading(false);

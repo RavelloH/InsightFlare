@@ -1,7 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { UAParser } from "ua-parser-js";
 import type {
-  AnalyticsEngineWriteDataPoint,
   Env,
   IngestEnvelopePayload,
   NormalizedCustomEvent,
@@ -12,14 +11,6 @@ import type {
   TrackerClientPayload,
   TrackerPayloadKind,
 } from "./types";
-import { isAnalyticsEngineEnabled } from "./flags";
-import {
-  AE_LAYOUT_VERSION,
-  encodeAeContinent,
-  encodeAeDeviceType,
-  encodeAeRowType,
-  toAeCoordinate,
-} from "./analytics-engine-layout";
 import { readSiteTrackingConfig } from "./site-settings-store";
 import {
   clampString,
@@ -37,35 +28,12 @@ const ACTIVE_NOW_WINDOW_MS = 5 * 60 * 1000;
 const VISIT_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const WS_SNAPSHOT_EVENT_LIMIT = 200;
 const WS_PRESENCE_LEAVE_EVENT = "__presence_leave";
-// Cloudflare Analytics Engine allows at most 250 writeDataPoint calls per Worker invocation.
-// Keep a safety margin because alarm-driven timeout flushes can emit many finalize rows at once.
-const AE_WRITE_BUDGET_PER_INVOCATION = 200;
+const WRITE_BUDGET_PER_INVOCATION = 200;
 const D1_FLUSH_INTERVAL_MS = 60 * 1000;
 const D1_FLUSH_BATCH_SIZE = 100;
-const D1_FLUSH_IMMEDIATE_THRESHOLD = AE_WRITE_BUDGET_PER_INVOCATION;
-const TIMEOUT_FINALIZE_BATCH_SIZE = AE_WRITE_BUDGET_PER_INVOCATION;
+const D1_FLUSH_IMMEDIATE_THRESHOLD = WRITE_BUDGET_PER_INVOCATION;
+const TIMEOUT_FINALIZE_BATCH_SIZE = WRITE_BUDGET_PER_INVOCATION;
 const LOCAL_DEDUPE_RETENTION_MS = 48 * 60 * 60 * 1000;
-
-function toAeRegionValue(country: string, regionCode: string, region: string): string {
-  const normalizedCountry = country.trim().toUpperCase();
-  const normalizedRegionCode = regionCode.trim() || region.trim();
-  const normalizedRegion = region.trim();
-  if (!normalizedCountry && !normalizedRegionCode && !normalizedRegion) {
-    return "";
-  }
-  return [normalizedCountry, normalizedRegionCode, normalizedRegion].join("::");
-}
-
-function toAeCityValue(country: string, regionCode: string, region: string, city: string): string {
-  const normalizedCountry = country.trim().toUpperCase();
-  const normalizedRegionCode = regionCode.trim() || region.trim();
-  const normalizedRegion = region.trim();
-  const normalizedCity = city.trim();
-  if (!normalizedCountry && !normalizedRegionCode && !normalizedRegion && !normalizedCity) {
-    return "";
-  }
-  return [normalizedCountry, normalizedRegionCode, normalizedRegion, normalizedCity].join("::");
-}
 
 interface RealtimeSnapshotRecord {
   id: string;
@@ -85,6 +53,9 @@ interface StoredSessionState {
   sessionId: string;
   lastSeenAt: number;
   openVisitCount: number;
+  sessionStartedAt: number;
+  visitCount: number;
+  engagedWritten: boolean;
 }
 
 interface VisitRow {
@@ -836,8 +807,7 @@ export class IngestDurableObject extends DurableObject {
       return;
     }
 
-    await this.touchSession(record.visitorId, record.sessionId, record.startedAt, 1);
-    this.writeVisitStartToAe(record);
+    await this.advanceSessionOnVisitStart(record);
     await this.pushRealtimeRecord({
       id: record.visitId,
       eventType: "visit",
@@ -889,7 +859,6 @@ export class IngestDurableObject extends DurableObject {
     }
 
     const session = await this.touchSession(record.visitorId, record.sessionId, finalizedAt, -1);
-    this.writeVisitFinalizeToAe({ ...record, finalizedAt, durationMs });
     if (record.exitReason !== "route_change" && session.openVisitCount === 0) {
       await this.pushRealtimeRecord({
         id: `leave:${record.visitId}`,
@@ -910,7 +879,6 @@ export class IngestDurableObject extends DurableObject {
     }
     await this.updateOpenVisitActivity(record.visitId, record.eventAt);
     await this.touchSession(record.visitorId, record.sessionId, record.eventAt, 0);
-    this.writeCustomEventToAe(record);
     await this.pushRealtimeRecord({
       id: record.eventId,
       eventType: record.eventName,
@@ -1120,141 +1088,6 @@ export class IngestDurableObject extends DurableObject {
     return rowsWritten > 0;
   }
 
-  private writeVisitStartToAe(record: NormalizedVisitStart): void {
-    this.writeToAe({
-      indexes: [record.siteId],
-      blobs: [
-        record.visitId,
-        record.visitorId,
-        record.sessionId,
-        record.pathname,
-        record.queryString,
-        record.hashFragment,
-        record.hostname,
-        record.referrerUrl,
-        record.referrerHost,
-        record.country,
-        toAeRegionValue(record.country, record.regionCode, record.region),
-        toAeCityValue(record.country, record.regionCode, record.region, record.city),
-        record.browser,
-        record.os,
-        record.osVersion,
-        record.language,
-        record.timezone,
-        record.asOrganization,
-        record.browserVersion,
-        record.title,
-      ],
-      doubles: [
-        record.startedAt,
-        -1,
-        AE_LAYOUT_VERSION,
-        record.screenWidth ?? 0,
-        record.screenHeight ?? 0,
-        toAeCoordinate(record.latitude),
-        toAeCoordinate(record.longitude),
-        encodeAeRowType(record.kind),
-        encodeAeDeviceType(record.deviceType),
-        encodeAeContinent(record.continent),
-        record.startedAt,
-        record.isEU ? 1 : 0,
-      ],
-    });
-  }
-
-  private writeVisitFinalizeToAe(record: NormalizedVisitFinalize & { durationMs: number }): void {
-    this.writeToAe({
-      indexes: [record.siteId],
-      blobs: [
-        record.visitId,
-        record.visitorId,
-        record.sessionId,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        record.country,
-        "",
-        "",
-        record.browser,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        `${record.exitReason}|${record.durationSource}`,
-      ],
-      doubles: [
-        record.finalizedAt,
-        record.durationMs,
-        AE_LAYOUT_VERSION,
-        0,
-        0,
-        toAeCoordinate(null),
-        toAeCoordinate(null),
-        encodeAeRowType(record.kind),
-        encodeAeDeviceType(record.deviceType),
-        0,
-        record.startedAt,
-        0,
-      ],
-    });
-  }
-
-  private writeCustomEventToAe(record: NormalizedCustomEvent): void {
-    this.writeToAe({
-      indexes: [record.siteId],
-      blobs: [
-        record.visitId,
-        record.visitorId,
-        record.sessionId,
-        record.pathname,
-        record.queryString,
-        record.hashFragment,
-        record.hostname,
-        record.referrerUrl,
-        record.referrerHost,
-        record.country,
-        toAeRegionValue(record.country, record.regionCode, record.region),
-        toAeCityValue(record.country, record.regionCode, record.region, record.city),
-        record.browser,
-        record.os,
-        record.osVersion,
-        record.language,
-        record.timezone,
-        record.asOrganization,
-        record.browserVersion,
-        record.eventName,
-      ],
-      doubles: [
-        record.eventAt,
-        -1,
-        AE_LAYOUT_VERSION,
-        record.screenWidth ?? 0,
-        record.screenHeight ?? 0,
-        toAeCoordinate(record.latitude),
-        toAeCoordinate(record.longitude),
-        encodeAeRowType(record.kind),
-        encodeAeDeviceType(record.deviceType),
-        encodeAeContinent(record.continent),
-        record.startedAt,
-        record.isEU ? 1 : 0,
-      ],
-    });
-  }
-
-  private writeToAe(data: AnalyticsEngineWriteDataPoint): void {
-    const analytics = this.doEnv.ANALYTICS;
-    if (!isAnalyticsEngineEnabled(this.doEnv) || !analytics) return;
-    try {
-      analytics.writeDataPoint(data);
-    } catch (error) {
-      console.error("analytics_engine_write_failed", error);
-    }
-  }
   private async resolveSessionId(visitorId: string, eventAt: number): Promise<string> {
     const sessionWindowMs = this.resolveSessionWindowMinutes() * 60 * 1000;
     const existing = await this.doState.storage.get<StoredSessionState>(this.sessionStorageKey(visitorId));
@@ -1262,6 +1095,25 @@ export class IngestDurableObject extends DurableObject {
       return existing.sessionId;
     }
     return crypto.randomUUID();
+  }
+
+  private async advanceSessionOnVisitStart(record: NormalizedVisitStart): Promise<void> {
+    const key = this.sessionStorageKey(record.visitorId);
+    const existing = await this.doState.storage.get<StoredSessionState>(key);
+    const isSameSession = existing?.sessionId === record.sessionId;
+    const visitCount = isSameSession ? Math.max(1, (existing?.visitCount ?? 0) + 1) : 1;
+    const nextState = {
+      sessionId: record.sessionId,
+      lastSeenAt: record.startedAt,
+      openVisitCount: Math.max(0, (isSameSession ? existing?.openVisitCount ?? 0 : 0) + 1),
+      sessionStartedAt: isSameSession ? existing?.sessionStartedAt ?? record.startedAt : record.startedAt,
+      visitCount,
+      engagedWritten: Boolean(
+        (isSameSession ? existing?.engagedWritten : false) ||
+        (isSameSession && !existing?.engagedWritten && visitCount >= 2),
+      ),
+    } satisfies StoredSessionState;
+    await this.doState.storage.put(key, nextState);
   }
 
   private async touchSession(
@@ -1276,6 +1128,9 @@ export class IngestDurableObject extends DurableObject {
       sessionId,
       lastSeenAt: Math.max(eventAt, existing?.lastSeenAt ?? 0),
       openVisitCount: Math.max(0, (existing?.openVisitCount ?? 0) + openVisitDelta),
+      sessionStartedAt: existing?.sessionStartedAt ?? eventAt,
+      visitCount: existing?.visitCount ?? 0,
+      engagedWritten: Boolean(existing?.engagedWritten),
     } satisfies StoredSessionState;
     await this.doState.storage.put(key, nextState);
     return nextState;
@@ -1677,22 +1532,6 @@ export class IngestDurableObject extends DurableObject {
       );
       if (rowsWritten === 0) continue;
       const session = await this.touchSession(visit.visitorId, visit.sessionId, now, -1);
-      this.writeVisitFinalizeToAe({
-        kind: "visit_finalize",
-        siteId: visit.siteId,
-        visitId: visit.visitId,
-        visitorId: visit.visitorId,
-        sessionId: visit.sessionId,
-        startedAt: visit.startedAt,
-        finalizedAt: now,
-        receivedAt: now,
-        durationMs: -1,
-        durationSource: "timeout",
-        exitReason: "timeout",
-        country: visit.country,
-        browser: visit.browser,
-        deviceType: visit.deviceType,
-      });
       if (session.openVisitCount === 0) {
         await this.pushRealtimeRecord({
           id: `leave:${visit.visitId}`,

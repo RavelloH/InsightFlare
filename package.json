@@ -23,7 +23,6 @@
     "cf:secret:daily-salt": "wrangler secret put DAILY_SALT_SECRET --config wrangler.toml",
     "cf:secret:bootstrap-admin-password": "wrangler secret put BOOTSTRAP_ADMIN_PASSWORD --config wrangler.toml",
     "cf:secret:session-secret": "wrangler secret put DASHBOARD_SESSION_SECRET --config wrangler.toml",
-    "cf:secret:analytics-sql-token": "wrangler secret put ANALYTICS_SQL_API_TOKEN --config wrangler.toml",
     "cf:tail": "wrangler tail --config wrangler.toml",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "d1:migrate:local": "wrangler d1 migrations apply insightflare --config wrangler.toml --local",

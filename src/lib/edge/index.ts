@@ -5,7 +5,6 @@ import { runHourlyArchive } from "./archive";
 import { handlePrivateQuery, handlePublicQuery } from "./query";
 import { handlePrivateAdmin } from "./admin";
 import { handlePrivateArchive } from "./archive-query";
-import { isAnalyticsEngineEnabled } from "./flags";
 import { handleTrackerScriptRequest } from "./script-endpoint";
 
 const corsHeaders = {
@@ -137,8 +136,6 @@ async function handleHealth(env: Env): Promise<Response> {
       bindings: {
         d1: Boolean(env.DB),
         durableObject: Boolean(env.INGEST_DO),
-        analyticsEngine: Boolean(env.ANALYTICS),
-        analyticsEngineEnabled: isAnalyticsEngineEnabled(env),
         r2Archive: Boolean(env.ARCHIVE_BUCKET),
       },
     }),

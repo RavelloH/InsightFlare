@@ -1,21 +1,7 @@
-export interface AnalyticsEngineWriteDataPoint {
-  blobs?: string[];
-  doubles?: number[];
-  indexes?: string[];
-}
-
-export interface AnalyticsEngineBinding {
-  writeDataPoint(data: AnalyticsEngineWriteDataPoint): void;
-}
-
 export interface Env {
   DB: D1Database;
   INGEST_DO: DurableObjectNamespace;
-  ANALYTICS?: AnalyticsEngineBinding;
   ARCHIVE_BUCKET?: R2Bucket;
-  ANALYTICS_ACCOUNT_ID?: string;
-  ANALYTICS_SQL_API_TOKEN?: string;
-  DISABLE_ANALYTICS_ENGINE?: string;
   DAILY_SALT_SECRET: string;
   ADMIN_WS_TOKEN?: string;
   DASHBOARD_SESSION_SECRET?: string;

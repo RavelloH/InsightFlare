@@ -1,48 +1,8 @@
 import type { Env } from "./types";
 import { ONE_DAY_MS, ONE_HOUR_MS, coerceNumber } from "./utils";
 import { requireSession } from "./session-auth";
-import { isAnalyticsEngineEnabled } from "./flags";
-import {
-  AE_LAYOUT_VERSION,
-  AE_ROW_TYPE_CUSTOM_EVENT,
-  AE_ROW_TYPE_VISIT_FINALIZE,
-  AE_ROW_TYPE_VISIT_START,
-  encodeAeDeviceType,
-} from "./analytics-engine-layout";
-import {
-  type AeDimensionRow,
-  type AeOverviewRow,
-  type AeTopPageRow,
-  type AeQueryFilters,
-  type AeReferrerRow,
-  type AeTrendRow,
-  ANALYTICS_WINDOW_MS,
-  isAnalyticsSqlConfigured,
-  queryAeCustomEventNames,
-  queryAeEntryPages,
-  queryAeExitPages,
-  queryAeOverview,
-  queryAeReferrers,
-  queryAeTopBrowsers,
-  queryAeTopCities,
-  queryAeTopContinents,
-  queryAeTopCountries,
-  queryAeTopDevices,
-  queryAeTopHostnames,
-  queryAeTopLanguages,
-  queryAeTopOsVersions,
-  queryAeTopOrganizations,
-  queryAeTopPages,
-  queryAeTopRegions,
-  queryAeTopScreenSizes,
-  queryAeTopTimezones,
-  queryAeTopTitles,
-  queryAeTrend,
-} from "./analytics-engine-query";
 
 const RETENTION_DAYS = 365;
-const AE_DATASET = "insightflare_events";
-const AE_MAX_SQL_LIMIT = 2000;
 const PRIVATE_CACHE_HEADERS = {
   "cache-control": "private, no-store",
   vary: "authorization, cookie",
@@ -138,20 +98,33 @@ interface PageTabs {
 }
 
 interface ClientDimensionTabs {
-  browser: Array<{ label: string; views: number; sessions: number }>;
-  osVersion: Array<{ label: string; views: number; sessions: number }>;
-  deviceType: Array<{ label: string; views: number; sessions: number }>;
-  language: Array<{ label: string; views: number; sessions: number }>;
-  screenSize: Array<{ label: string; views: number; sessions: number }>;
+  browser: DimensionRow[];
+  osVersion: DimensionRow[];
+  deviceType: DimensionRow[];
+  language: DimensionRow[];
+  screenSize: DimensionRow[];
 }
 
 interface GeoDimensionTabs {
-  country: Array<{ label: string; views: number; sessions: number }>;
-  region: Array<{ label: string; views: number; sessions: number }>;
-  city: Array<{ label: string; views: number; sessions: number }>;
-  continent: Array<{ label: string; views: number; sessions: number }>;
-  timezone: Array<{ label: string; views: number; sessions: number }>;
-  organization: Array<{ label: string; views: number; sessions: number }>;
+  country: DimensionRow[];
+  region: DimensionRow[];
+  city: DimensionRow[];
+  continent: DimensionRow[];
+  timezone: DimensionRow[];
+  organization: DimensionRow[];
+}
+
+interface OverviewPanelsAggregate {
+  pageTabs: {
+    path: DimensionRow[];
+    title: DimensionRow[];
+    hostname: DimensionRow[];
+    entry: DimensionRow[];
+    exit: DimensionRow[];
+  };
+  referrers: ReferrerRow[];
+  clientTabs: ClientDimensionTabs;
+  geoTabs: GeoDimensionTabs;
 }
 
 interface PublicSiteEnvelope {
@@ -163,6 +136,7 @@ interface PublicSiteEnvelope {
 interface PreferredSourceResult<T> {
   value: T;
   source: "ae" | "d1";
+  approximateVisitors?: boolean;
 }
 
 interface SiteQueryResponseOptions {
@@ -229,20 +203,6 @@ function parseFilters(url: URL): DashboardFilters {
   };
 }
 
-function toAeFilters(filters: DashboardFilters): AeQueryFilters {
-  return {
-    country: filters.country,
-    device: filters.device,
-    browser: filters.browser,
-  };
-}
-
-function shouldUseAnalyticsEngine(env: Env, fromMs: number, nowMs: number): boolean {
-  return isAnalyticsEngineEnabled(env)
-    && isAnalyticsSqlConfigured(env)
-    && fromMs >= nowMs - ANALYTICS_WINDOW_MS;
-}
-
 function sourceLabel(window: QueryWindow): "detail" | "archive" | "mixed" {
   const archiveCutoff = window.nowMs - RETENTION_DAYS * ONE_DAY_MS;
   if (window.toMs < archiveCutoff) return "archive";
@@ -305,24 +265,6 @@ function siteQueryResponse(siteId: string, payload: Record<string, unknown>, opt
 
 function parseBooleanFlag(url: URL, key: string): boolean {
   return parseBooleanSearchParam(url, key);
-}
-
-async function loadWithPreferredSource<T>(
-  env: Env,
-  window: QueryWindow,
-  label: string,
-  aeLoader: () => Promise<T>,
-  d1Loader: () => Promise<T>,
-): Promise<PreferredSourceResult<T>> {
-  if (shouldUseAnalyticsEngine(env, window.fromMs, window.nowMs)) {
-    try {
-      return { value: await aeLoader(), source: "ae" };
-    } catch (error) {
-      console.error(`analytics_query_failed:${label}`, error);
-      throw error;
-    }
-  }
-  return { value: await d1Loader(), source: "d1" };
 }
 
 function mapOverviewAggregate(
@@ -396,65 +338,46 @@ function mapVisitors(rows: VisitorRow[]) {
   }));
 }
 
-function mapAeOverview(row: AeOverviewRow): OverviewAggregateRow {
+function mapPageTabs(tabs: OverviewPanelsAggregate["pageTabs"]): PageTabs {
   return {
-    views: row.views,
-    sessions: row.sessions,
-    visitors: row.visitors,
-    bounces: row.bounces,
-    totalDuration: row.total_duration,
-    durationViews: row.duration_views,
+    path: mapTabs(tabs.path),
+    title: mapTabs(tabs.title),
+    hostname: mapTabs(tabs.hostname),
+    entry: mapTabs(tabs.entry),
+    exit: mapTabs(tabs.exit),
   };
 }
 
-function mapAeTrend(rows: AeTrendRow[]): TrendAggregateRow[] {
-  return rows.map((row) => ({
-    bucket: row.bucket,
-    views: row.views,
-    visitors: row.visitors,
-    sessions: row.sessions,
-    bounces: row.bounces,
-    totalDuration: row.total_duration,
-    durationViews: row.duration_views,
-  }));
+interface DimensionAccumulator {
+  views: number;
+  sessions: Set<string>;
 }
 
-function mapAePages(rows: AeTopPageRow[]): PageRow[] {
-  return rows.map((row) => ({
-    pathname: row.pathname,
-    query: row.query_string,
-    hash: row.hash_fragment,
-    views: row.views,
-    sessions: row.sessions,
-  }));
+function addDimensionValue(
+  buckets: Map<string, DimensionAccumulator>,
+  rawValue: string,
+  sessionId: string,
+): void {
+  const value = rawValue.trim();
+  if (!value) return;
+  const bucket = buckets.get(value) ?? { views: 0, sessions: new Set<string>() };
+  bucket.views += 1;
+  if (sessionId) bucket.sessions.add(sessionId);
+  buckets.set(value, bucket);
 }
 
-function mapAeDimensions(rows: AeDimensionRow[]): DimensionRow[] {
-  return rows.map((row) => ({
-    value: row.key,
-    views: row.views,
-    sessions: row.sessions,
-  }));
-}
-
-async function settleDimensionRows(
-  label: string,
-  loader: () => Promise<DimensionRow[]>,
-): Promise<DimensionRow[]> {
-  try {
-    return await loader();
-  } catch (error) {
-    console.error(`dimension_query_failed:${label}`, error);
-    return [];
-  }
-}
-
-function mapAeReferrers(rows: AeReferrerRow[]): ReferrerRow[] {
-  return rows.map((row) => ({
-    referrer: row.ref,
-    views: row.views,
-    sessions: row.sessions,
-  }));
+function finalizeDimensionBuckets(
+  buckets: Map<string, DimensionAccumulator>,
+  limit: number,
+): DimensionRow[] {
+  return [...buckets.entries()]
+    .map(([value, bucket]) => ({
+      value,
+      views: bucket.views,
+      sessions: bucket.sessions.size,
+    }))
+    .sort((left, right) => right.views - left.views || right.sessions - left.sessions || left.value.localeCompare(right.value))
+    .slice(0, limit);
 }
 
 async function resolvePrivateSite(
@@ -594,6 +517,24 @@ function visitSourceBindings(siteId: string, window: QueryWindow): Array<string 
 
 function eventSourceBindings(siteId: string, window: QueryWindow): Array<string | number> {
   return [siteId, window.fromMs, window.toMs, siteId, window.fromMs, window.toMs];
+}
+
+function buildVisitSourceCteForSites(siteCount: number): string {
+  const placeholders = Array.from({ length: siteCount }, () => "?").join(", ");
+  return `
+visit_source AS (
+  SELECT ${VISIT_SOURCE_COLUMNS}
+  FROM visits
+  WHERE site_id IN (${placeholders}) AND started_at BETWEEN ? AND ?
+  UNION ALL
+  SELECT ${VISIT_SOURCE_COLUMNS}
+  FROM visits_archive
+  WHERE site_id IN (${placeholders}) AND started_at BETWEEN ? AND ?
+)`;
+}
+
+function visitSourceBindingsForSites(siteIds: string[], window: QueryWindow): Array<string | number> {
+  return [...siteIds, window.fromMs, window.toMs, ...siteIds, window.fromMs, window.toMs];
 }
 
 function buildVisitFilterSql(filters: DashboardFilters, alias = ""): { clause: string; bindings: string[] } {
@@ -764,6 +705,114 @@ ORDER BY bucket ASC
   }));
 }
 
+async function queryTeamOverviewFromD1(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+): Promise<Map<string, OverviewAggregateRow>> {
+  if (siteIds.length === 0) return new Map();
+  const sql = `
+WITH
+${buildVisitSourceCteForSites(siteIds.length)},
+session_rollup AS (
+  SELECT site_id AS siteId, session_id, count(*) AS visit_count
+  FROM visit_source
+  WHERE session_id != ''
+  GROUP BY siteId, session_id
+),
+combined AS (
+  SELECT
+    site_id AS siteId,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
+    0 AS bounces,
+    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
+    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
+  FROM visit_source
+  GROUP BY siteId
+  UNION ALL
+  SELECT
+    siteId,
+    0 AS views,
+    0 AS sessions,
+    0 AS visitors,
+    COALESCE(sum(CASE WHEN visit_count = 1 THEN 1 ELSE 0 END), 0) AS bounces,
+    0 AS totalDuration,
+    0 AS durationViews
+  FROM session_rollup
+  GROUP BY siteId
+)
+SELECT
+  siteId,
+  sum(views) AS views,
+  sum(sessions) AS sessions,
+  sum(visitors) AS visitors,
+  sum(bounces) AS bounces,
+  sum(totalDuration) AS totalDuration,
+  sum(durationViews) AS durationViews
+FROM combined
+GROUP BY siteId
+`;
+  const rows = await queryD1All<Record<string, unknown>>(
+    env,
+    sql,
+    visitSourceBindingsForSites(siteIds, window),
+  );
+  return new Map(
+    rows.map((row) => [
+      String(row.siteId ?? ""),
+      {
+        views: Number(row.views ?? 0),
+        sessions: Number(row.sessions ?? 0),
+        visitors: Number(row.visitors ?? 0),
+        bounces: Number(row.bounces ?? 0),
+        totalDuration: Number(row.totalDuration ?? 0),
+        durationViews: Number(row.durationViews ?? 0),
+      } satisfies OverviewAggregateRow,
+    ]),
+  );
+}
+
+interface TeamTrendRow {
+  siteId: string;
+  bucket: number;
+  views: number;
+  visitors: number;
+}
+
+async function queryTeamTrendFromD1(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+  interval: Interval,
+): Promise<TeamTrendRow[]> {
+  if (siteIds.length === 0) return [];
+  const bucketDivisor = intervalBucketMs(interval);
+  const sql = `
+WITH
+${buildVisitSourceCteForSites(siteIds.length)}
+SELECT
+  site_id AS siteId,
+  CAST(started_at / ${bucketDivisor} AS INTEGER) AS bucket,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+FROM visit_source
+GROUP BY siteId, bucket
+ORDER BY bucket ASC, siteId ASC
+`;
+  return (await queryD1All<Record<string, unknown>>(
+    env,
+    sql,
+    visitSourceBindingsForSites(siteIds, window),
+  )).map((row) => ({
+    siteId: String(row.siteId ?? ""),
+    bucket: Number(row.bucket ?? 0),
+    views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
+  }));
+}
+
 async function queryTopPagesFromD1(
   env: Env,
   siteId: string,
@@ -823,14 +872,11 @@ async function queryOverviewAggregate(
   window: QueryWindow,
   filters: DashboardFilters,
 ): Promise<PreferredSourceResult<OverviewAggregateRow>> {
-  return loadWithPreferredSource(
-    env,
-    window,
-    "overview",
-    async () =>
-      mapAeOverview(await queryAeOverview(env, siteId, window, toAeFilters(filters))),
-    () => queryOverviewFromD1(env, siteId, window, filters),
-  );
+  return {
+    value: await queryOverviewFromD1(env, siteId, window, filters),
+    source: "d1",
+    approximateVisitors: false,
+  };
 }
 
 async function queryTrendAggregate(
@@ -840,14 +886,10 @@ async function queryTrendAggregate(
   interval: Interval,
   filters: DashboardFilters,
 ): Promise<PreferredSourceResult<TrendAggregateRow[]>> {
-  return loadWithPreferredSource(
-    env,
-    window,
-    "trend",
-    async () =>
-      mapAeTrend(await queryAeTrend(env, siteId, window, interval, toAeFilters(filters))),
-    () => queryTrendFromD1(env, siteId, window, interval, filters),
-  );
+  return {
+    value: await queryTrendFromD1(env, siteId, window, interval, filters),
+    source: "d1",
+  };
 }
 
 async function queryPagesAggregate(
@@ -858,24 +900,7 @@ async function queryPagesAggregate(
   limit: number,
   includeDetails: boolean,
 ): Promise<PageRow[]> {
-  const preferred = await loadWithPreferredSource(
-    env,
-    window,
-    "pages",
-    async () =>
-      mapAePages(
-        await queryAeTopPages(
-          env,
-          siteId,
-          window,
-          limit,
-          includeDetails,
-          toAeFilters(filters),
-        ),
-      ),
-    () => queryPagesFromD1(env, siteId, window, filters, limit, includeDetails),
-  );
-  return preferred.value;
+  return queryPagesFromD1(env, siteId, window, filters, limit, includeDetails);
 }
 
 async function queryPageTabsAggregate(
@@ -891,59 +916,7 @@ async function queryPageTabsAggregate(
   entry: DimensionRow[];
   exit: DimensionRow[];
 }> {
-  const preferred = await loadWithPreferredSource(
-    env,
-    window,
-    "page_tabs",
-    async () => {
-      const aeFilters = toAeFilters(filters);
-      const [path, title, hostname, entry, exit] = await Promise.all([
-        queryAeTopPages(env, siteId, window, limit, false, aeFilters).then((rows) =>
-          mapAePages(rows).map((row) => ({
-            value: row.pathname,
-            views: row.views,
-            sessions: row.sessions,
-          })),
-        ),
-        queryAeTopTitles(env, siteId, window, limit, aeFilters).then(mapAeDimensions),
-        queryAeTopHostnames(env, siteId, window, limit, aeFilters).then(
-          mapAeDimensions,
-        ),
-        queryAeEntryPages(env, siteId, window, limit, aeFilters).then(
-          mapAeDimensions,
-        ),
-        queryAeExitPages(env, siteId, window, limit, aeFilters).then(
-          mapAeDimensions,
-        ),
-      ]);
-      return { path, title, hostname, entry, exit };
-    },
-    async () => {
-      const [path, title, hostname, entry, exit] = await Promise.all([
-        queryVisitDimensionFromD1(env, siteId, window, filters, limit, "pathname"),
-        queryVisitDimensionFromD1(env, siteId, window, filters, limit, "title"),
-        queryVisitDimensionFromD1(env, siteId, window, filters, limit, "hostname"),
-        querySessionBoundaryDimensionFromD1(
-          env,
-          siteId,
-          window,
-          filters,
-          limit,
-          "entry",
-        ),
-        querySessionBoundaryDimensionFromD1(
-          env,
-          siteId,
-          window,
-          filters,
-          limit,
-          "exit",
-        ),
-      ]);
-      return { path, title, hostname, entry, exit };
-    },
-  );
-  return preferred.value;
+  return queryPageTabsFromD1(env, siteId, window, filters, limit);
 }
 
 async function queryReferrerAggregate(
@@ -954,32 +927,14 @@ async function queryReferrerAggregate(
   limit: number,
   includeFullUrl: boolean,
 ): Promise<ReferrerRow[]> {
-  const preferred = await loadWithPreferredSource(
+  return queryReferrersFromD1(
     env,
+    siteId,
     window,
-    "referrers",
-    async () =>
-      mapAeReferrers(
-        await queryAeReferrers(
-          env,
-          siteId,
-          window,
-          limit,
-          includeFullUrl,
-          toAeFilters(filters),
-        ),
-      ),
-    () =>
-      queryReferrersFromD1(
-        env,
-        siteId,
-        window,
-        filters,
-        limit,
-        includeFullUrl,
-      ),
+    filters,
+    limit,
+    includeFullUrl,
   );
-  return preferred.value;
 }
 
 async function queryVisitorAggregate(
@@ -998,18 +953,9 @@ async function queryDimensionAggregate(
   window: QueryWindow,
   filters: DashboardFilters,
   limit: number,
-  label: string,
-  aeLoader: (filters: AeQueryFilters) => Promise<AeDimensionRow[]>,
   d1Expr: string,
 ): Promise<DimensionRow[]> {
-  const preferred = await loadWithPreferredSource(
-    env,
-    window,
-    label,
-    async () => mapAeDimensions(await aeLoader(toAeFilters(filters))),
-    () => queryVisitDimensionFromD1(env, siteId, window, filters, limit, d1Expr),
-  );
-  return preferred.value;
+  return queryVisitDimensionFromD1(env, siteId, window, filters, limit, d1Expr);
 }
 
 async function queryEventTypeAggregate(
@@ -1019,23 +965,7 @@ async function queryEventTypeAggregate(
   filters: DashboardFilters,
   limit: number,
 ): Promise<DimensionRow[]> {
-  const preferred = await loadWithPreferredSource(
-    env,
-    window,
-    "event_types",
-    async () =>
-      mapAeDimensions(
-        await queryAeCustomEventNames(
-          env,
-          siteId,
-          window,
-          limit,
-          toAeFilters(filters),
-        ),
-      ),
-    () => queryCustomEventNamesFromD1(env, siteId, window, filters, limit),
-  );
-  return preferred.value;
+  return queryCustomEventNamesFromD1(env, siteId, window, filters, limit);
 }
 
 async function buildOverviewClientDimensionTabs(
@@ -1045,78 +975,7 @@ async function buildOverviewClientDimensionTabs(
   filters: DashboardFilters,
   limit: number,
 ) {
-  const preferred = await loadWithPreferredSource(
-    env,
-    window,
-    "overview_client_dimensions",
-    async () => {
-      const aeFilters = toAeFilters(filters);
-      const [browser, osVersion, deviceType, language, screenSize] =
-        await Promise.all([
-          settleDimensionRows("overview_client_dimensions:browser", () =>
-            queryAeTopBrowsers(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-          settleDimensionRows("overview_client_dimensions:os_version", () =>
-            queryAeTopOsVersions(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-          settleDimensionRows("overview_client_dimensions:device_type", () =>
-            queryAeTopDevices(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-          settleDimensionRows("overview_client_dimensions:language", () =>
-            queryAeTopLanguages(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-          settleDimensionRows("overview_client_dimensions:screen_size", () =>
-            queryAeTopScreenSizes(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-        ]);
-      return { browser, osVersion, deviceType, language, screenSize };
-    },
-    async () => {
-      const [browser, osVersion, deviceType, language, screenSize] =
-        await Promise.all([
-          queryVisitDimensionFromD1(env, siteId, window, filters, limit, "browser"),
-          queryVisitDimensionFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            limit,
-            osVersionExpr(),
-          ),
-          queryVisitDimensionFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            limit,
-            "device_type",
-          ),
-          queryVisitDimensionFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            limit,
-            "language",
-          ),
-          queryVisitDimensionFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            limit,
-            screenSizeExpr(),
-          ),
-        ]);
-      return { browser, osVersion, deviceType, language, screenSize };
-    },
-  );
-  return preferred.value;
+  return queryOverviewClientDimensionsFromD1(env, siteId, window, filters, limit);
 }
 
 async function buildOverviewGeoDimensionTabs(
@@ -1126,90 +985,7 @@ async function buildOverviewGeoDimensionTabs(
   filters: DashboardFilters,
   limit: number,
 ) {
-  const preferred = await loadWithPreferredSource(
-    env,
-    window,
-    "overview_geo_dimensions",
-    async () => {
-      const aeFilters = toAeFilters(filters);
-      const [country, region, city, continent, timezone, organization] =
-        await Promise.all([
-          settleDimensionRows("overview_geo_dimensions:country", () =>
-            queryAeTopCountries(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-          settleDimensionRows("overview_geo_dimensions:region", () =>
-            queryAeTopRegions(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-          settleDimensionRows("overview_geo_dimensions:city", () =>
-            queryAeTopCities(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-          settleDimensionRows("overview_geo_dimensions:continent", () =>
-            queryAeTopContinents(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-          settleDimensionRows("overview_geo_dimensions:timezone", () =>
-            queryAeTopTimezones(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-          settleDimensionRows("overview_geo_dimensions:organization", () =>
-            queryAeTopOrganizations(env, siteId, window, limit, aeFilters).then(
-              mapAeDimensions,
-            )),
-        ]);
-      return { country, region, city, continent, timezone, organization };
-    },
-    async () => {
-      const [country, region, city, continent, timezone, organization] =
-        await Promise.all([
-          queryVisitDimensionFromD1(env, siteId, window, filters, limit, "country"),
-          queryVisitDimensionFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            limit,
-            regionValueExpr(),
-          ),
-          queryVisitDimensionFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            limit,
-            cityValueExpr(),
-          ),
-          queryVisitDimensionFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            limit,
-            "continent",
-          ),
-          queryVisitDimensionFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            limit,
-            "timezone",
-          ),
-          queryVisitDimensionFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            limit,
-            "as_organization",
-          ),
-        ]);
-      return { country, region, city, continent, timezone, organization };
-    },
-  );
-  return preferred.value;
+  return queryOverviewGeoDimensionsFromD1(env, siteId, window, filters, limit);
 }
 async function handleOverview(
   env: Env,
@@ -1225,7 +1001,7 @@ async function handleOverview(
 
   const current = await queryOverviewAggregate(env, siteId, window, filters);
   const currentMetrics = mapOverviewAggregate(current.value, {
-    approximateVisitors: current.source === "ae",
+    approximateVisitors: Boolean(current.approximateVisitors),
   });
   const payload: Record<string, unknown> = {
     ok: true,
@@ -1247,7 +1023,7 @@ async function handleOverview(
       filters,
     );
     const previousMetrics = mapOverviewAggregate(previous.value, {
-      approximateVisitors: previous.source === "ae",
+      approximateVisitors: Boolean(previous.approximateVisitors),
     });
     payload.previousData = previousMetrics;
     payload.changeRates = {
@@ -1372,14 +1148,6 @@ async function handleDimension(
   env: Env,
   siteId: string,
   url: URL,
-  label: string,
-  aeLoader: (
-    env: Env,
-    siteId: string,
-    window: QueryWindow,
-    limit: number,
-    filters?: AeQueryFilters,
-  ) => Promise<AeDimensionRow[]>,
   d1Expr: string,
 ): Promise<Response> {
   const window = parseWindow(url);
@@ -1392,8 +1160,6 @@ async function handleDimension(
     window,
     filters,
     limit,
-    label,
-    (aeFilters) => aeLoader(env, siteId, window, limit, aeFilters),
     d1Expr,
   );
   return jsonResponse({ ok: true, data: mapTabs(rows) });
@@ -1436,6 +1202,38 @@ async function handleOverviewClientDimensions(
       deviceType: mapTabs(tabs.deviceType),
       language: mapTabs(tabs.language),
       screenSize: mapTabs(tabs.screenSize),
+    },
+  });
+}
+
+async function handleOverviewPanels(
+  env: Env,
+  siteId: string,
+  url: URL,
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const limit = parseLimit(url, 100, 200);
+  const panels = await queryOverviewPanelsFromD1(env, siteId, window, filters, limit);
+  return jsonResponse({
+    ok: true,
+    pageTabs: mapPageTabs(panels.pageTabs),
+    referrers: mapReferrers(panels.referrers),
+    clientTabs: {
+      browser: mapTabs(panels.clientTabs.browser),
+      osVersion: mapTabs(panels.clientTabs.osVersion),
+      deviceType: mapTabs(panels.clientTabs.deviceType),
+      language: mapTabs(panels.clientTabs.language),
+      screenSize: mapTabs(panels.clientTabs.screenSize),
+    },
+    geoTabs: {
+      country: mapTabs(panels.geoTabs.country),
+      region: mapTabs(panels.geoTabs.region),
+      city: mapTabs(panels.geoTabs.city),
+      continent: mapTabs(panels.geoTabs.continent),
+      timezone: mapTabs(panels.geoTabs.timezone),
+      organization: mapTabs(panels.geoTabs.organization),
     },
   });
 }
@@ -1524,34 +1322,29 @@ async function handleTeamDashboard(
     toMs: previousTo,
     nowMs: window.nowMs,
   };
-  const filters: DashboardFilters = {};
-
-  const [currentOverview, previousOverview, trends] = await Promise.all([
-    Promise.all(sites.map((site) => queryOverviewAggregate(env, site.id, window, filters))),
-    Promise.all(sites.map((site) => queryOverviewAggregate(env, site.id, previousWindow, filters))),
-    Promise.all(sites.map((site) => queryTrendAggregate(env, site.id, window, interval, filters))),
+  const siteIds = sites.map((site) => site.id);
+  const [currentOverview, previousOverview, trendRows] = await Promise.all([
+    queryTeamOverviewFromD1(env, siteIds, window),
+    queryTeamOverviewFromD1(env, siteIds, previousWindow),
+    queryTeamTrendFromD1(env, siteIds, window, interval),
   ]);
 
   const sitePayload = sites.map((site, index) => {
-    const overview = mapOverviewAggregate(currentOverview[index]?.value ?? {
+    const overview = mapOverviewAggregate(currentOverview.get(site.id) ?? {
       views: 0,
       sessions: 0,
       visitors: 0,
       bounces: 0,
       totalDuration: 0,
       durationViews: 0,
-    }, {
-      approximateVisitors: currentOverview[index]?.source === "ae",
     });
-    const previous = mapOverviewAggregate(previousOverview[index]?.value ?? {
+    const previous = mapOverviewAggregate(previousOverview.get(site.id) ?? {
       views: 0,
       sessions: 0,
       visitors: 0,
       bounces: 0,
       totalDuration: 0,
       durationViews: 0,
-    }, {
-      approximateVisitors: previousOverview[index]?.source === "ae",
     });
     const currentPagesPerSession = overview.sessions > 0 ? overview.views / overview.sessions : 0;
     const previousPagesPerSession = previous.sessions > 0 ? previous.views / previous.sessions : 0;
@@ -1580,23 +1373,19 @@ async function handleTeamDashboard(
     }
   >();
 
-  for (let index = 0; index < sites.length; index += 1) {
-    const site = sites[index];
-    const rows = trends[index]?.value ?? [];
-    for (const row of rows) {
-      const bucket = row.bucket;
-      const existing = trendByBucket.get(bucket) ?? {
-        bucket,
-        timestampMs: bucket * bucketMs,
-        sites: [],
-      };
-      existing.sites.push({
-        siteId: site.id,
-        views: row.views,
-        visitors: row.visitors,
-      });
-      trendByBucket.set(bucket, existing);
-    }
+  for (const row of trendRows) {
+    const bucket = row.bucket;
+    const existing = trendByBucket.get(bucket) ?? {
+      bucket,
+      timestampMs: bucket * bucketMs,
+      sites: [],
+    };
+    existing.sites.push({
+      siteId: row.siteId,
+      views: row.views,
+      visitors: row.visitors,
+    });
+    trendByBucket.set(bucket, existing);
   }
 
   return jsonResponse(
@@ -1626,36 +1415,18 @@ async function routeQuery(
   if (options.publicMode) return notFound();
   if (pathname === "visitors") return handleVisitors(env, siteId, url);
   if (pathname === "countries") {
-    return handleDimension(
-      env,
-      siteId,
-      url,
-      "countries",
-      queryAeTopCountries,
-      "country",
-    );
+    return handleDimension(env, siteId, url, "country");
   }
   if (pathname === "devices") {
-    return handleDimension(
-      env,
-      siteId,
-      url,
-      "devices",
-      queryAeTopDevices,
-      "device_type",
-    );
+    return handleDimension(env, siteId, url, "device_type");
   }
   if (pathname === "browsers") {
-    return handleDimension(
-      env,
-      siteId,
-      url,
-      "browsers",
-      queryAeTopBrowsers,
-      "browser",
-    );
+    return handleDimension(env, siteId, url, "browser");
   }
   if (pathname === "event-types") return handleEventTypes(env, siteId, url);
+  if (pathname === "overview-panels") {
+    return handleOverviewPanels(env, siteId, url);
+  }
   if (pathname === "overview-client-dimensions") {
     return handleOverviewClientDimensions(env, siteId, url);
   }
@@ -1807,6 +1578,85 @@ async function querySessionBoundaryDimensionFromD1(
   return querySessionPathDimensionFromD1(env, siteId, window, filters, limit, kind);
 }
 
+async function queryPageTabsFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+  limit: number,
+): Promise<{
+  path: DimensionRow[];
+  title: DimensionRow[];
+  hostname: DimensionRow[];
+  entry: DimensionRow[];
+  exit: DimensionRow[];
+}> {
+  const filter = buildVisitFilterSql(filters);
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    session_id AS sessionId,
+    started_at AS startedAt,
+    pathname,
+    title,
+    hostname
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT sessionId, startedAt, pathname, title, hostname
+FROM filtered_visits
+`;
+  const rows = await queryD1All<Record<string, unknown>>(
+    env,
+    sql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings],
+  );
+
+  const path = new Map<string, DimensionAccumulator>();
+  const title = new Map<string, DimensionAccumulator>();
+  const hostname = new Map<string, DimensionAccumulator>();
+  const entryBySession = new Map<string, { at: number; value: string }>();
+  const exitBySession = new Map<string, { at: number; value: string }>();
+
+  for (const row of rows) {
+    const sessionId = String(row.sessionId ?? "");
+    const startedAt = Number(row.startedAt ?? 0);
+    addDimensionValue(path, String(row.pathname ?? ""), sessionId);
+    addDimensionValue(title, String(row.title ?? ""), sessionId);
+    addDimensionValue(hostname, String(row.hostname ?? ""), sessionId);
+    if (!sessionId) continue;
+    const pathname = String(row.pathname ?? "").trim();
+    if (!pathname) continue;
+    const entry = entryBySession.get(sessionId);
+    if (!entry || startedAt < entry.at) {
+      entryBySession.set(sessionId, { at: startedAt, value: pathname });
+    }
+    const exit = exitBySession.get(sessionId);
+    if (!exit || startedAt >= exit.at) {
+      exitBySession.set(sessionId, { at: startedAt, value: pathname });
+    }
+  }
+
+  const entry = new Map<string, DimensionAccumulator>();
+  const exit = new Map<string, DimensionAccumulator>();
+  for (const [sessionId, edge] of entryBySession.entries()) {
+    addDimensionValue(entry, edge.value, sessionId);
+  }
+  for (const [sessionId, edge] of exitBySession.entries()) {
+    addDimensionValue(exit, edge.value, sessionId);
+  }
+
+  return {
+    path: finalizeDimensionBuckets(path, limit),
+    title: finalizeDimensionBuckets(title, limit),
+    hostname: finalizeDimensionBuckets(hostname, limit),
+    entry: finalizeDimensionBuckets(entry, limit),
+    exit: finalizeDimensionBuckets(exit, limit),
+  };
+}
+
 async function queryReferrersFromD1(
   env: Env,
   siteId: string,
@@ -1934,20 +1784,59 @@ async function queryOverviewClientDimensionsFromD1(
   filters: DashboardFilters,
   limit: number,
 ): Promise<ClientDimensionTabs> {
-  const [browser, osVersion, deviceType, language, screenSize] = await Promise.all([
-    queryDimensionFromD1(env, siteId, window, filters, limit, "browser"),
-    queryDimensionFromD1(env, siteId, window, filters, limit, osVersionExpr()),
-    queryDimensionFromD1(env, siteId, window, filters, limit, "device_type"),
-    queryDimensionFromD1(env, siteId, window, filters, limit, "language"),
-    queryDimensionFromD1(env, siteId, window, filters, limit, screenSizeExpr()),
-  ]);
+  const filter = buildVisitFilterSql(filters);
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    session_id AS sessionId,
+    browser,
+    os,
+    os_version AS osVersion,
+    device_type AS deviceType,
+    language,
+    screen_width AS screenWidth,
+    screen_height AS screenHeight
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT sessionId, browser, os, osVersion, deviceType, language, screenWidth, screenHeight
+FROM filtered_visits
+`;
+  const rows = await queryD1All<Record<string, unknown>>(
+    env,
+    sql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings],
+  );
+
+  const browser = new Map<string, DimensionAccumulator>();
+  const osVersion = new Map<string, DimensionAccumulator>();
+  const deviceType = new Map<string, DimensionAccumulator>();
+  const language = new Map<string, DimensionAccumulator>();
+  const screenSize = new Map<string, DimensionAccumulator>();
+
+  for (const row of rows) {
+    const sessionId = String(row.sessionId ?? "");
+    addDimensionValue(browser, String(row.browser ?? ""), sessionId);
+    addDimensionValue(deviceType, String(row.deviceType ?? ""), sessionId);
+    addDimensionValue(language, String(row.language ?? ""), sessionId);
+    const os = String(row.os ?? "").trim();
+    const version = String(row.osVersion ?? "").trim();
+    addDimensionValue(osVersion, os && version ? `${os} ${version}` : os || version, sessionId);
+    const width = Number(row.screenWidth ?? 0);
+    const height = Number(row.screenHeight ?? 0);
+    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+      addDimensionValue(screenSize, `${Math.trunc(width)}x${Math.trunc(height)}`, sessionId);
+    }
+  }
 
   return {
-    browser: browser.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
-    osVersion: osVersion.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
-    deviceType: deviceType.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
-    language: language.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
-    screenSize: screenSize.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
+    browser: finalizeDimensionBuckets(browser, limit),
+    osVersion: finalizeDimensionBuckets(osVersion, limit),
+    deviceType: finalizeDimensionBuckets(deviceType, limit),
+    language: finalizeDimensionBuckets(language, limit),
+    screenSize: finalizeDimensionBuckets(screenSize, limit),
   };
 }
 
@@ -1958,237 +1847,225 @@ async function queryOverviewGeoDimensionsFromD1(
   filters: DashboardFilters,
   limit: number,
 ): Promise<GeoDimensionTabs> {
-  const [country, region, city, continent, timezone, organization] = await Promise.all([
-    queryDimensionFromD1(env, siteId, window, filters, limit, "country"),
-    queryDimensionFromD1(env, siteId, window, filters, limit, "region"),
-    queryDimensionFromD1(env, siteId, window, filters, limit, "city"),
-    queryDimensionFromD1(env, siteId, window, filters, limit, "continent"),
-    queryDimensionFromD1(env, siteId, window, filters, limit, "timezone"),
-    queryDimensionFromD1(env, siteId, window, filters, limit, "as_organization"),
-  ]);
+  const filter = buildVisitFilterSql(filters);
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    session_id AS sessionId,
+    country,
+    region,
+    city,
+    continent,
+    timezone,
+    as_organization AS asOrganization
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT sessionId, country, region, city, continent, timezone, asOrganization
+FROM filtered_visits
+`;
+  const rows = await queryD1All<Record<string, unknown>>(
+    env,
+    sql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings],
+  );
+
+  const country = new Map<string, DimensionAccumulator>();
+  const region = new Map<string, DimensionAccumulator>();
+  const city = new Map<string, DimensionAccumulator>();
+  const continent = new Map<string, DimensionAccumulator>();
+  const timezone = new Map<string, DimensionAccumulator>();
+  const organization = new Map<string, DimensionAccumulator>();
+
+  for (const row of rows) {
+    const sessionId = String(row.sessionId ?? "");
+    addDimensionValue(country, String(row.country ?? ""), sessionId);
+    addDimensionValue(region, String(row.region ?? ""), sessionId);
+    addDimensionValue(city, String(row.city ?? ""), sessionId);
+    addDimensionValue(continent, String(row.continent ?? ""), sessionId);
+    addDimensionValue(timezone, String(row.timezone ?? ""), sessionId);
+    addDimensionValue(organization, String(row.asOrganization ?? ""), sessionId);
+  }
 
   return {
-    country: country.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
-    region: region.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
-    city: city.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
-    continent: continent.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
-    timezone: timezone.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
-    organization: organization.map((row) => ({ label: row.value, views: row.views, sessions: row.sessions })),
+    country: finalizeDimensionBuckets(country, limit),
+    region: finalizeDimensionBuckets(region, limit),
+    city: finalizeDimensionBuckets(city, limit),
+    continent: finalizeDimensionBuckets(continent, limit),
+    timezone: finalizeDimensionBuckets(timezone, limit),
+    organization: finalizeDimensionBuckets(organization, limit),
   };
 }
 
-function aeSqlString(value: string): string {
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
-function clampAeLimit(limit: number, fallback = 100): number {
-  const value = Math.floor(limit);
-  if (!Number.isFinite(value) || value <= 0) return fallback;
-  return Math.min(AE_MAX_SQL_LIMIT, value);
-}
-
-function parseAeNumber(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return 0;
-}
-
-function parseAeString(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-async function runAeSqlLocal<T extends Record<string, unknown>>(env: Env, sql: string): Promise<T[]> {
-  if (!isAnalyticsSqlConfigured(env)) {
-    throw new Error("Analytics Engine SQL config missing");
-  }
-
-  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${String(env.ANALYTICS_ACCOUNT_ID || "").trim()}/analytics_engine/sql`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${String(env.ANALYTICS_SQL_API_TOKEN || "").trim()}`,
-      "content-type": "text/plain",
-    },
-    body: sql,
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Analytics Engine SQL failed (${response.status}): ${text.slice(0, 512)}`);
-  }
-
-  const payload = (await response.json()) as Record<string, unknown>;
-  if (Array.isArray(payload.data)) return payload.data as T[];
-  if (Array.isArray(payload.results)) return payload.results as T[];
-  const result = payload.result;
-  if (result && typeof result === "object") {
-    const nested = result as Record<string, unknown>;
-    if (Array.isArray(nested.data)) return nested.data as T[];
-    if (Array.isArray(nested.results)) return nested.results as T[];
-  }
-  return [];
-}
-
-function buildAeVisitFilterClause(filters: DashboardFilters): string {
-  const clauses: string[] = [];
-  if (filters.country) clauses.push(`country = ${aeSqlString(filters.country)}`);
-  if (filters.device) clauses.push(`device_type_code = ${encodeAeDeviceType(filters.device)}`);
-  if (filters.browser) clauses.push(`browser = ${aeSqlString(filters.browser)}`);
-  return clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-}
-
-function aeDeviceTypeSql(codeExpr: string): string {
-  return [
-    `if(${codeExpr} = 1, 'desktop'`,
-    `if(${codeExpr} = 2, 'mobile'`,
-    `if(${codeExpr} = 3, 'tablet'`,
-    `if(${codeExpr} = 4, 'smarttv'`,
-    `if(${codeExpr} = 5, 'console'`,
-    `if(${codeExpr} = 6, 'wearable'`,
-    `if(${codeExpr} = 7, 'embedded'`,
-    `if(${codeExpr} = 255, 'other', ''))))))))`,
-  ].join(", ");
-}
-
-function aeVisitCtes(siteId: string, window: QueryWindow): string {
-  return `
-visit_rows AS (
-  SELECT
-    double8 AS row_type_code,
-    blob1 AS visit_id,
-    blob2 AS visitor_id,
-    blob3 AS session_id,
-    blob4 AS pathname,
-    blob5 AS query_string,
-    blob6 AS hash_fragment,
-    blob7 AS hostname,
-    blob8 AS referrer_url,
-    blob9 AS referrer_host,
-    blob10 AS country,
-    blob11 AS region,
-    blob12 AS city,
-    blob13 AS browser,
-    blob14 AS os,
-    blob15 AS os_version,
-    double9 AS device_type_code,
-    ${aeDeviceTypeSql("double9")} AS device_type,
-    blob16 AS language,
-    blob17 AS timezone,
-    blob20 AS extra_value,
-    double1 AS event_at,
-    double2 AS duration_ms,
-    double11 AS started_at,
-    double4 AS screen_width,
-    double5 AS screen_height
-  FROM ${AE_DATASET}
-  WHERE index1 = ${aeSqlString(siteId)}
-    AND double3 = ${AE_LAYOUT_VERSION}
-    AND double11 BETWEEN ${Math.floor(window.fromMs)} AND ${Math.floor(window.toMs)}
-    AND double8 IN (${AE_ROW_TYPE_VISIT_START}, ${AE_ROW_TYPE_VISIT_FINALIZE})
-),
-visits AS (
-  SELECT
-    visit_id,
-    argMax(visitor_id, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS visitor_id,
-    argMax(session_id, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS session_id,
-    argMax(pathname, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS pathname,
-    argMax(query_string, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS query_string,
-    argMax(hash_fragment, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS hash_fragment,
-    argMax(hostname, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS hostname,
-    argMax(referrer_url, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS referrer_url,
-    argMax(referrer_host, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS referrer_host,
-    argMax(country, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS country,
-    argMax(region, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS region,
-    argMax(city, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS city,
-    argMax(browser, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS browser,
-    argMax(os, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS os,
-    argMax(os_version, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS os_version,
-    argMax(device_type_code, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS device_type_code,
-    argMax(device_type, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS device_type,
-    argMax(language, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS language,
-    argMax(timezone, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS timezone,
-    argMax(extra_value, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS title,
-    max(if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, started_at, NULL)) AS started_at,
-    max(if(row_type_code = ${AE_ROW_TYPE_VISIT_FINALIZE}, event_at, NULL)) AS finalized_at,
-    max(if(row_type_code = ${AE_ROW_TYPE_VISIT_FINALIZE}, duration_ms, NULL)) AS duration_ms
-  FROM visit_rows
-  GROUP BY visit_id
-)`;
-}
-
-async function queryAeTopPagesExact(
+async function queryOverviewPanelsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  limit: number,
-  includeDetails: boolean,
   filters: DashboardFilters,
-): Promise<PageRow[]> {
+  limit: number,
+): Promise<OverviewPanelsAggregate> {
+  const filter = buildVisitFilterSql(filters);
   const sql = `
 WITH
-${aeVisitCtes(siteId, window)},
+${buildVisitSourceCte()},
 filtered_visits AS (
-  SELECT *
-  FROM visits
-  ${buildAeVisitFilterClause(filters)}
+  SELECT
+    session_id AS sessionId,
+    started_at AS startedAt,
+    pathname,
+    title,
+    hostname,
+    referrer_url AS referrerUrl,
+    browser,
+    os,
+    os_version AS osVersion,
+    device_type AS deviceType,
+    language,
+    screen_width AS screenWidth,
+    screen_height AS screenHeight,
+    country,
+    region,
+    city,
+    continent,
+    timezone,
+    as_organization AS asOrganization
+  FROM visit_source
+  ${filter.clause}
 )
 SELECT
+  sessionId,
+  startedAt,
   pathname,
-  ${includeDetails ? "query_string" : "'' AS query_string"},
-  ${includeDetails ? "hash_fragment" : "'' AS hash_fragment"},
-  count() AS views,
-  count(DISTINCT session_id) AS sessions
+  title,
+  hostname,
+  referrerUrl,
+  browser,
+  os,
+  osVersion,
+  deviceType,
+  language,
+  screenWidth,
+  screenHeight,
+  country,
+  region,
+  city,
+  continent,
+  timezone,
+  asOrganization
 FROM filtered_visits
-GROUP BY pathname, query_string, hash_fragment
-ORDER BY views DESC, pathname ASC
-LIMIT ${clampAeLimit(limit, 30)}
 `;
+  const rows = await queryD1All<Record<string, unknown>>(
+    env,
+    sql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings],
+  );
 
-  return (await runAeSqlLocal<Record<string, unknown>>(env, sql)).map((row) => ({
-    pathname: parseAeString(row.pathname),
-    query: parseAeString(row.query_string),
-    hash: parseAeString(row.hash_fragment),
-    views: parseAeNumber(row.views),
-    sessions: parseAeNumber(row.sessions),
-  }));
-}
+  const path = new Map<string, DimensionAccumulator>();
+  const title = new Map<string, DimensionAccumulator>();
+  const hostname = new Map<string, DimensionAccumulator>();
+  const referrers = new Map<string, DimensionAccumulator>();
+  const browser = new Map<string, DimensionAccumulator>();
+  const osVersion = new Map<string, DimensionAccumulator>();
+  const deviceType = new Map<string, DimensionAccumulator>();
+  const language = new Map<string, DimensionAccumulator>();
+  const screenSize = new Map<string, DimensionAccumulator>();
+  const country = new Map<string, DimensionAccumulator>();
+  const region = new Map<string, DimensionAccumulator>();
+  const city = new Map<string, DimensionAccumulator>();
+  const continent = new Map<string, DimensionAccumulator>();
+  const timezone = new Map<string, DimensionAccumulator>();
+  const organization = new Map<string, DimensionAccumulator>();
+  const entryBySession = new Map<string, { at: number; value: string }>();
+  const exitBySession = new Map<string, { at: number; value: string }>();
 
-async function queryAeCustomEventNamesExact(
-  env: Env,
-  siteId: string,
-  window: QueryWindow,
-  limit: number,
-  filters: DashboardFilters,
-): Promise<DimensionRow[]> {
-  const clauses = [
-    `index1 = ${aeSqlString(siteId)}`,
-    `double3 = ${AE_LAYOUT_VERSION}`,
-    `double8 = ${AE_ROW_TYPE_CUSTOM_EVENT}`,
-    `double1 BETWEEN ${Math.floor(window.fromMs)} AND ${Math.floor(window.toMs)}`,
-    "length(trim(blob20)) > 0",
-  ];
-  if (filters.country) clauses.push(`blob10 = ${aeSqlString(filters.country)}`);
-  if (filters.browser) clauses.push(`blob13 = ${aeSqlString(filters.browser)}`);
-  if (filters.device) clauses.push(`double9 = ${encodeAeDeviceType(filters.device)}`);
+  for (const row of rows) {
+    const sessionId = String(row.sessionId ?? "");
+    const startedAt = Number(row.startedAt ?? 0);
+    const pathnameValue = String(row.pathname ?? "");
 
-  const sql = `
-SELECT
-  blob20 AS value,
-  count() AS views,
-  count(DISTINCT blob3) AS sessions
-FROM ${AE_DATASET}
-WHERE ${clauses.join(" AND ")}
-GROUP BY value
-ORDER BY views DESC, sessions DESC, value ASC
-LIMIT ${clampAeLimit(limit, 30)}
-`;
+    addDimensionValue(path, pathnameValue, sessionId);
+    addDimensionValue(title, String(row.title ?? ""), sessionId);
+    addDimensionValue(hostname, String(row.hostname ?? ""), sessionId);
+    addDimensionValue(browser, String(row.browser ?? ""), sessionId);
+    addDimensionValue(deviceType, String(row.deviceType ?? ""), sessionId);
+    addDimensionValue(language, String(row.language ?? ""), sessionId);
+    addDimensionValue(country, String(row.country ?? ""), sessionId);
+    addDimensionValue(region, String(row.region ?? ""), sessionId);
+    addDimensionValue(city, String(row.city ?? ""), sessionId);
+    addDimensionValue(continent, String(row.continent ?? ""), sessionId);
+    addDimensionValue(timezone, String(row.timezone ?? ""), sessionId);
+    addDimensionValue(organization, String(row.asOrganization ?? ""), sessionId);
 
-  return (await runAeSqlLocal<Record<string, unknown>>(env, sql)).map((row) => ({
-    value: parseAeString(row.value),
-    views: parseAeNumber(row.views),
-    sessions: parseAeNumber(row.sessions),
-  }));
+    const os = String(row.os ?? "").trim();
+    const version = String(row.osVersion ?? "").trim();
+    addDimensionValue(osVersion, os && version ? `${os} ${version}` : os || version, sessionId);
+
+    const referrerValue = String(row.referrerUrl ?? "").trim();
+    const referrerBucket = referrers.get(referrerValue) ?? {
+      views: 0,
+      sessions: new Set<string>(),
+    };
+    referrerBucket.views += 1;
+    if (sessionId) referrerBucket.sessions.add(sessionId);
+    referrers.set(referrerValue, referrerBucket);
+
+    const width = Number(row.screenWidth ?? 0);
+    const height = Number(row.screenHeight ?? 0);
+    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+      addDimensionValue(screenSize, `${Math.trunc(width)}x${Math.trunc(height)}`, sessionId);
+    }
+
+    if (!sessionId) continue;
+    const normalizedPath = pathnameValue.trim();
+    if (!normalizedPath) continue;
+    const entry = entryBySession.get(sessionId);
+    if (!entry || startedAt < entry.at) {
+      entryBySession.set(sessionId, { at: startedAt, value: normalizedPath });
+    }
+    const exit = exitBySession.get(sessionId);
+    if (!exit || startedAt >= exit.at) {
+      exitBySession.set(sessionId, { at: startedAt, value: normalizedPath });
+    }
+  }
+
+  const entry = new Map<string, DimensionAccumulator>();
+  const exit = new Map<string, DimensionAccumulator>();
+  for (const [sessionId, edge] of entryBySession.entries()) {
+    addDimensionValue(entry, edge.value, sessionId);
+  }
+  for (const [sessionId, edge] of exitBySession.entries()) {
+    addDimensionValue(exit, edge.value, sessionId);
+  }
+
+  return {
+    pageTabs: {
+      path: finalizeDimensionBuckets(path, limit),
+      title: finalizeDimensionBuckets(title, limit),
+      hostname: finalizeDimensionBuckets(hostname, limit),
+      entry: finalizeDimensionBuckets(entry, limit),
+      exit: finalizeDimensionBuckets(exit, limit),
+    },
+    referrers: finalizeDimensionBuckets(referrers, limit).map((row) => ({
+      referrer: row.value,
+      views: row.views,
+      sessions: row.sessions,
+    })),
+    clientTabs: {
+      browser: finalizeDimensionBuckets(browser, limit),
+      osVersion: finalizeDimensionBuckets(osVersion, limit),
+      deviceType: finalizeDimensionBuckets(deviceType, limit),
+      language: finalizeDimensionBuckets(language, limit),
+      screenSize: finalizeDimensionBuckets(screenSize, limit),
+    },
+    geoTabs: {
+      country: finalizeDimensionBuckets(country, limit),
+      region: finalizeDimensionBuckets(region, limit),
+      city: finalizeDimensionBuckets(city, limit),
+      continent: finalizeDimensionBuckets(continent, limit),
+      timezone: finalizeDimensionBuckets(timezone, limit),
+      organization: finalizeDimensionBuckets(organization, limit),
+    },
+  };
 }
