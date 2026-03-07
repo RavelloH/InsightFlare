@@ -437,6 +437,18 @@ function mapAeDimensions(rows: AeDimensionRow[]): DimensionRow[] {
   }));
 }
 
+async function settleDimensionRows(
+  label: string,
+  loader: () => Promise<DimensionRow[]>,
+): Promise<DimensionRow[]> {
+  try {
+    return await loader();
+  } catch (error) {
+    console.error(`dimension_query_failed:${label}`, error);
+    return [];
+  }
+}
+
 function mapAeReferrers(rows: AeReferrerRow[]): ReferrerRow[] {
   return rows.map((row) => ({
     referrer: row.ref,
@@ -1041,21 +1053,26 @@ async function buildOverviewClientDimensionTabs(
       const aeFilters = toAeFilters(filters);
       const [browser, osVersion, deviceType, language, screenSize] =
         await Promise.all([
-          queryAeTopBrowsers(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
-          queryAeTopOsVersions(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
-          queryAeTopDevices(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
-          queryAeTopLanguages(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
-          queryAeTopScreenSizes(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
+          settleDimensionRows("overview_client_dimensions:browser", () =>
+            queryAeTopBrowsers(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
+          settleDimensionRows("overview_client_dimensions:os_version", () =>
+            queryAeTopOsVersions(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
+          settleDimensionRows("overview_client_dimensions:device_type", () =>
+            queryAeTopDevices(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
+          settleDimensionRows("overview_client_dimensions:language", () =>
+            queryAeTopLanguages(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
+          settleDimensionRows("overview_client_dimensions:screen_size", () =>
+            queryAeTopScreenSizes(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
         ]);
       return { browser, osVersion, deviceType, language, screenSize };
     },
@@ -1117,24 +1134,30 @@ async function buildOverviewGeoDimensionTabs(
       const aeFilters = toAeFilters(filters);
       const [country, region, city, continent, timezone, organization] =
         await Promise.all([
-          queryAeTopCountries(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
-          queryAeTopRegions(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
-          queryAeTopCities(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
-          queryAeTopContinents(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
-          queryAeTopTimezones(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
-          queryAeTopOrganizations(env, siteId, window, limit, aeFilters).then(
-            mapAeDimensions,
-          ),
+          settleDimensionRows("overview_geo_dimensions:country", () =>
+            queryAeTopCountries(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
+          settleDimensionRows("overview_geo_dimensions:region", () =>
+            queryAeTopRegions(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
+          settleDimensionRows("overview_geo_dimensions:city", () =>
+            queryAeTopCities(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
+          settleDimensionRows("overview_geo_dimensions:continent", () =>
+            queryAeTopContinents(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
+          settleDimensionRows("overview_geo_dimensions:timezone", () =>
+            queryAeTopTimezones(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
+          settleDimensionRows("overview_geo_dimensions:organization", () =>
+            queryAeTopOrganizations(env, siteId, window, limit, aeFilters).then(
+              mapAeDimensions,
+            )),
         ]);
       return { country, region, city, continent, timezone, organization };
     },
