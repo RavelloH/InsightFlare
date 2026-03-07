@@ -5,9 +5,9 @@ import type {
   IngestEnvelopePayload,
   NormalizedCustomEvent,
   NormalizedIngestRecord,
+  NormalizedLeave,
+  NormalizedPageview,
   NormalizedVisitContext,
-  NormalizedVisitFinalize,
-  NormalizedVisitStart,
   TrackerClientPayload,
   TrackerPayloadKind,
 } from "./types";
@@ -116,6 +116,18 @@ interface BufferedCustomEventRow {
 }
 
 type SqlBinding = string | number | null;
+
+const INSERT_VISIT_SQL = `
+  INSERT OR IGNORE INTO visits (
+    visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at,
+    ended_at, finalized_at, duration_ms, duration_source, exit_reason,
+    pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
+    utm_source, utm_medium, utm_campaign, utm_term, utm_content,
+    is_eu, country, region, region_code, city, continent, latitude, longitude,
+    postal_code, metro_code, timezone, as_organization, ua_raw, browser, browser_version,
+    os, os_version, device_type, screen_width, screen_height, language, ae_synced_at, created_at, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
 
 const UPSERT_VISIT_SQL = `
   INSERT INTO visits (
@@ -376,10 +388,10 @@ export class IngestDurableObject extends DurableObject {
       return new Response("ignored", { status: 202 });
     }
 
-    if (record.kind === "visit_start") {
-      await this.handleVisitStart(record);
-    } else if (record.kind === "visit_finalize") {
-      await this.handleVisitFinalize(record);
+    if (record.kind === "pageview") {
+      await this.handlePageview(record);
+    } else if (record.kind === "leave") {
+      await this.handleLeave(record);
     } else {
       await this.handleCustomEvent(record);
     }
@@ -618,7 +630,7 @@ export class IngestDurableObject extends DurableObject {
       deviceType: clampString(coerceString(ua.device.type ?? "desktop"), 40),
     };
 
-    if (kind === "visit_start") {
+    if (kind === "pageview") {
       if (!visitId) return null;
       const pathname = clampString(coerceString(client.pathname || "/"), 2048);
       const hostname = clampString(
@@ -634,7 +646,7 @@ export class IngestDurableObject extends DurableObject {
       const referrerUrl = clampString(coerceString(client.referrerUrl), 2000);
       const sessionId = clampString(coerceString(client.sessionId), 128) || crypto.randomUUID();
       return {
-        kind: "visit_start",
+        kind: "pageview",
         receivedAt,
         siteId,
         visitId,
@@ -657,29 +669,21 @@ export class IngestDurableObject extends DurableObject {
         screenHeight: coerceNumber(client.screenHeight, null),
         language: clampString(coerceString(client.language || ""), 120),
         ...contextGeoBase,
-      } satisfies NormalizedVisitStart;
+      } satisfies NormalizedPageview;
     }
 
-    if (kind === "visit_finalize") {
+    if (kind === "leave") {
       if (!visitId) return null;
-      const visit = await this.getVisitContext(siteId, visitId);
-      if (!visit) return null;
+      const sessionId = clampString(coerceString(client.sessionId), 128);
       return {
-        kind: "visit_finalize",
+        kind: "leave",
         siteId,
         visitId,
-        visitorId: visit.visitorId,
-        sessionId: visit.sessionId,
-        startedAt: visit.startedAt,
-        finalizedAt: eventAt,
+        sessionId,
         receivedAt,
+        leaveAt: eventAt,
         durationMs: coerceNumber(client.durationMs, null),
-        durationSource: "reported",
-        exitReason: clampString(coerceString(client.exitReason || "pagehide"), 80),
-        country: visit.country,
-        browser: visit.browser,
-        deviceType: visit.deviceType,
-      } satisfies NormalizedVisitFinalize;
+      } satisfies NormalizedLeave;
     }
 
     if (kind === "custom_event") {
@@ -739,7 +743,46 @@ export class IngestDurableObject extends DurableObject {
     return null;
   }
 
-  private async handleVisitStart(record: NormalizedVisitStart): Promise<void> {
+  private async handlePageview(record: NormalizedPageview): Promise<void> {
+    const now = toUnixSeconds(record.receivedAt);
+
+    // Complete the previous open visit for this session (server-side duration calculation)
+    const prevVisit = this.sqlOne<{ visitId: string; startedAt: number; visitorId: string; pathname: string; country: string; browser: string }>(
+      `
+        SELECT visit_id AS visitId, started_at AS startedAt, visitor_id AS visitorId,
+               pathname, country, browser
+        FROM buffered_visits
+        WHERE site_id = ? AND session_id = ? AND status = 'open'
+        ORDER BY started_at DESC
+        LIMIT 1
+      `,
+      record.siteId,
+      record.sessionId,
+    );
+    if (prevVisit) {
+      const durationMs = Math.max(0, record.startedAt - prevVisit.startedAt);
+      this.sqlRun(
+        `
+          UPDATE buffered_visits
+          SET status = 'complete',
+              last_activity_at = ?,
+              ended_at = ?,
+              finalized_at = ?,
+              duration_ms = ?,
+              duration_source = 'server',
+              dirty = 1,
+              updated_at = ?
+          WHERE visit_id = ? AND status = 'open'
+        `,
+        record.startedAt,
+        record.startedAt,
+        record.startedAt,
+        durationMs,
+        now,
+        prevVisit.visitId,
+      );
+    }
+
     const inserted = await this.insertVisit(record);
     if (!inserted) {
       return;
@@ -755,52 +798,60 @@ export class IngestDurableObject extends DurableObject {
     });
   }
 
-  private async handleVisitFinalize(record: NormalizedVisitFinalize): Promise<void> {
-    const visit = await this.readVisitRow(record.siteId, record.visitId);
-    if (!visit || visit.status !== "open") {
-      return;
-    }
+  private async handleLeave(record: NormalizedLeave): Promise<void> {
+    // Find the open visit matching this visitId (or the latest open visit for the session)
+    const visitQuery = record.visitId
+      ? `SELECT visit_id AS visitId, started_at AS startedAt, visitor_id AS visitorId, site_id AS siteId,
+                pathname, country, browser
+         FROM buffered_visits WHERE site_id = ? AND visit_id = ? AND status = 'open' LIMIT 1`
+      : `SELECT visit_id AS visitId, started_at AS startedAt, visitor_id AS visitorId, site_id AS siteId,
+                pathname, country, browser
+         FROM buffered_visits WHERE site_id = ? AND session_id = ? AND status = 'open'
+         ORDER BY started_at DESC LIMIT 1`;
+    const visitBindings = record.visitId
+      ? [record.siteId, record.visitId]
+      : [record.siteId, record.sessionId];
 
-    const finalizedAt = Math.max(record.finalizedAt, visit.startedAt);
+    const visit = this.sqlOne<{
+      visitId: string; startedAt: number; visitorId: string; siteId: string;
+      pathname: string; country: string; browser: string;
+    }>(visitQuery, ...visitBindings);
+    if (!visit) return;
+
+    const leaveAt = Math.max(record.leaveAt, visit.startedAt);
     const durationMs = typeof record.durationMs === "number" && Number.isFinite(record.durationMs)
       ? Math.max(0, Math.floor(record.durationMs))
-      : Math.max(0, finalizedAt - visit.startedAt);
+      : Math.max(0, leaveAt - visit.startedAt);
 
     const rowsWritten = this.sqlRun(
       `
         UPDATE buffered_visits
-        SET status = 'finalized',
+        SET status = 'complete',
             last_activity_at = ?,
             ended_at = ?,
             finalized_at = ?,
             duration_ms = ?,
-            duration_source = ?,
-            exit_reason = ?,
+            duration_source = 'reported',
             dirty = 1,
             updated_at = ?
-        WHERE site_id = ? AND visit_id = ? AND status = 'open'
+        WHERE visit_id = ? AND status = 'open'
       `,
-      finalizedAt,
-      finalizedAt,
-      finalizedAt,
+      leaveAt,
+      leaveAt,
+      leaveAt,
       durationMs,
-      record.durationSource,
-      record.exitReason,
       toUnixSeconds(record.receivedAt),
-      record.siteId,
-      record.visitId,
+      visit.visitId,
     );
-    if (rowsWritten === 0) {
-      return;
-    }
+    if (rowsWritten === 0) return;
 
-    if (record.exitReason !== "route_change" && !this.hasOpenVisitsForVisitor(record.siteId, record.visitorId)) {
+    if (!this.hasOpenVisitsForVisitor(visit.siteId, visit.visitorId)) {
       await this.pushRealtimeRecord({
-        id: `leave:${record.visitId}`,
+        id: `leave:${visit.visitId}`,
         eventType: WS_PRESENCE_LEAVE_EVENT,
-        eventAt: finalizedAt,
+        eventAt: leaveAt,
         pathname: visit.pathname,
-        visitorId: record.visitorId,
+        visitorId: visit.visitorId,
         country: visit.country,
         browser: visit.browser,
       });
@@ -921,7 +972,7 @@ export class IngestDurableObject extends DurableObject {
     );
   }
 
-  private async insertVisit(record: NormalizedVisitStart): Promise<boolean> {
+  private async insertVisit(record: NormalizedPageview): Promise<boolean> {
     const createdAt = toUnixSeconds(record.receivedAt);
     const rowsWritten = this.sqlRun(
       `
@@ -1239,7 +1290,10 @@ export class IngestDurableObject extends DurableObject {
 
       try {
         const statements = [
-          ...visitRows.map((row) => this.doEnv.DB.prepare(UPSERT_VISIT_SQL).bind(...visitBindings(row))),
+          ...visitRows.map((row) => {
+            const sql = row.status === "open" ? UPSERT_VISIT_SQL : INSERT_VISIT_SQL;
+            return this.doEnv.DB.prepare(sql).bind(...visitBindings(row));
+          }),
           ...eventRows.map((row) => this.doEnv.DB.prepare(INSERT_CUSTOM_EVENT_SQL).bind(...customEventBindings(row))),
         ];
         if (statements.length > 0) {
@@ -1375,7 +1429,6 @@ export class IngestDurableObject extends DurableObject {
               finalized_at = ?,
               duration_ms = NULL,
               duration_source = 'timeout',
-              exit_reason = 'timeout',
               dirty = 1,
               updated_at = ?
           WHERE site_id = ? AND visit_id = ? AND status = 'open'

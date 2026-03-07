@@ -23,7 +23,7 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
   const TRACK_QUERY_PARAMS = ${trackQueryParamsLiteral};
   const TRACK_HASH = ${trackHashLiteral};
   const IGNORE_DO_NOT_TRACK = ${ignoreDoNotTrackLiteral};
-  const INSTALL_KEY = "__insightflare_tracker_v3__";
+  const INSTALL_KEY = "__insightflare_tracker_v5__";
   const VISITOR_KEY = "__insightflare_visitor_" + SITE_ID + "__";
   const SESSION_KEY = "__insightflare_session_" + SITE_ID + "__";
   const SESSION_ACTIVITY_KEY = "__insightflare_session_activity_" + SITE_ID + "__";
@@ -79,12 +79,11 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
     ].join("|");
   }
 
-  function pagePayloadBase(kind, href, referrerUrl, startedAt, eventAt) {
+  function pagePayloadBase(href, referrerUrl, startedAt, eventAt) {
     const url = new URL(href, window.location.href);
     const currentSessionId = touchSession(eventAt);
     return {
       siteId: SITE_ID,
-      kind,
       visitId: currentVisit.id,
       sessionId: currentSessionId,
       timestamp: eventAt,
@@ -126,43 +125,42 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
   }
 
   function startVisit(href, referrerUrl, startedAt) {
+    leaveSent = false;
     currentVisit = {
       id: crypto.randomUUID(),
       startedAt,
       href,
       routeKey: routeKey(href),
       referrerUrl,
-      finalized: false
     };
 
     send(
-      pagePayloadBase(
-        "visit_start",
-        currentVisit.href,
-        currentVisit.referrerUrl,
-        currentVisit.startedAt,
-        currentVisit.startedAt,
-      ),
+      {
+        ...pagePayloadBase(
+          currentVisit.href,
+          currentVisit.referrerUrl,
+          currentVisit.startedAt,
+          currentVisit.startedAt,
+        ),
+        kind: "pageview",
+      },
       false,
     );
   }
 
-  function finalizeVisit(exitReason, useBeacon, finalizedAt) {
-    if (!currentVisit || currentVisit.finalized) return;
-    currentVisit.finalized = true;
+  function sendLeave() {
+    if (!currentVisit || leaveSent) return;
+    leaveSent = true;
     send(
       {
-        ...pagePayloadBase(
-          "visit_finalize",
-          currentVisit.href,
-          currentVisit.referrerUrl,
-          currentVisit.startedAt,
-          finalizedAt,
-        ),
-        durationMs: Math.max(0, finalizedAt - currentVisit.startedAt),
-        exitReason,
+        kind: "leave",
+        siteId: SITE_ID,
+        visitId: currentVisit.id,
+        sessionId,
+        timestamp: Date.now(),
+        durationMs: Math.max(0, Date.now() - currentVisit.startedAt),
       },
-      useBeacon,
+      true,
     );
   }
 
@@ -171,7 +169,6 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
     routeChangeTimer = 0;
     const nextKey = routeKey(routeChange.href);
     if (!currentVisit || nextKey === currentVisit.routeKey) return;
-    finalizeVisit("route_change", false, routeChange.transitionAt);
     startVisit(routeChange.href, routeChange.referrerUrl, routeChange.transitionAt);
   }
 
@@ -221,12 +218,12 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
     send(
       {
         ...pagePayloadBase(
-          "custom_event",
           currentVisit.href,
           currentVisit.referrerUrl,
           currentVisit.startedAt,
           Date.now(),
         ),
+        kind: "custom_event",
         eventId: crypto.randomUUID(),
         eventName: normalizedName,
         eventData: eventData ?? null,
@@ -238,6 +235,7 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
   let currentVisit = null;
   let pendingRouteChange = null;
   let routeChangeTimer = 0;
+  let leaveSent = false;
   startVisit(window.location.href, document.referrer || "", Date.now());
 
   wrapHistoryMethod("pushState");
@@ -248,13 +246,19 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
   window.addEventListener("hashchange", () => {
     scheduleRouteChange(window.location.href, currentVisit?.href || document.referrer || "");
   });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      flushPendingRouteChange();
+      sendLeave();
+    }
+  });
   window.addEventListener("pagehide", () => {
     flushPendingRouteChange();
-    finalizeVisit("pagehide", true, Date.now());
+    sendLeave();
   });
 
   window[INSTALL_KEY] = {
-    version: "4",
+    version: "5",
     siteId: SITE_ID,
     track
   };

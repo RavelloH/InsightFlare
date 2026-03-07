@@ -26,7 +26,7 @@ export interface SerializedRequestPayload {
   receivedAt: number;
 }
 
-export type TrackerPayloadKind = "visit_start" | "visit_finalize" | "custom_event";
+export type TrackerPayloadKind = "pageview" | "leave" | "custom_event";
 
 export interface TrackerClientPayload {
   siteId?: string;
@@ -109,26 +109,19 @@ export interface NormalizedVisitContext {
   language: string;
 }
 
-export interface NormalizedVisitStart extends NormalizedVisitContext {
-  kind: "visit_start";
+export interface NormalizedPageview extends NormalizedVisitContext {
+  kind: "pageview";
   receivedAt: number;
 }
 
-export interface NormalizedVisitFinalize {
-  kind: "visit_finalize";
+export interface NormalizedLeave {
+  kind: "leave";
   siteId: string;
   visitId: string;
-  visitorId: string;
   sessionId: string;
-  startedAt: number;
-  finalizedAt: number;
   receivedAt: number;
+  leaveAt: number;
   durationMs: number | null;
-  durationSource: "reported" | "timeout";
-  exitReason: string;
-  country: string;
-  browser: string;
-  deviceType: string;
 }
 
 export interface NormalizedCustomEvent extends NormalizedVisitContext {
@@ -141,6 +134,6 @@ export interface NormalizedCustomEvent extends NormalizedVisitContext {
 }
 
 export type NormalizedIngestRecord =
-  | NormalizedVisitStart
-  | NormalizedVisitFinalize
+  | NormalizedPageview
+  | NormalizedLeave
   | NormalizedCustomEvent;
