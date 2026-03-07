@@ -4,6 +4,7 @@ interface BuildTrackerScriptOptions {
   trackQueryParams: boolean;
   trackHash: boolean;
   ignoreDoNotTrack: boolean;
+  sessionWindowMinutes: number;
 }
 
 export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
@@ -12,6 +13,7 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
   const trackQueryParamsLiteral = options.trackQueryParams ? "true" : "false";
   const trackHashLiteral = options.trackHash ? "true" : "false";
   const ignoreDoNotTrackLiteral = options.ignoreDoNotTrack ? "true" : "false";
+  const sessionWindowMsLiteral = String(Math.max(1, Math.floor(options.sessionWindowMinutes)) * 60 * 1000);
 
   return `(() => {
   "use strict";
@@ -23,7 +25,10 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
   const IGNORE_DO_NOT_TRACK = ${ignoreDoNotTrackLiteral};
   const INSTALL_KEY = "__insightflare_tracker_v3__";
   const VISITOR_KEY = "__insightflare_visitor_" + SITE_ID + "__";
+  const SESSION_KEY = "__insightflare_session_" + SITE_ID + "__";
+  const SESSION_ACTIVITY_KEY = "__insightflare_session_activity_" + SITE_ID + "__";
   const ROUTE_SETTLE_DELAY_MS = 300;
+  const SESSION_WINDOW_MS = ${sessionWindowMsLiteral};
   const scriptEl = document.currentScript;
   if (!scriptEl || !(scriptEl instanceof HTMLScriptElement) || !scriptEl.src) return;
 
@@ -37,6 +42,7 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
   const scriptUrl = new URL(scriptEl.src);
   const collectUrl = new URL("/collect", scriptUrl.origin).toString();
   const visitorId = IS_EU_MODE ? "" : loadOrCreateVisitorId();
+  let sessionId = loadOrCreateSessionId(Date.now());
 
   function loadOrCreateVisitorId() {
     const existing = window.localStorage.getItem(VISITOR_KEY);
@@ -44,6 +50,24 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
     const next = crypto.randomUUID();
     window.localStorage.setItem(VISITOR_KEY, next);
     return next;
+  }
+
+  function loadOrCreateSessionId(now) {
+    const lastActivityRaw = Number(window.sessionStorage.getItem(SESSION_ACTIVITY_KEY) || "0");
+    const existing = window.sessionStorage.getItem(SESSION_KEY);
+    if (existing && Number.isFinite(lastActivityRaw) && now - lastActivityRaw <= SESSION_WINDOW_MS) {
+      window.sessionStorage.setItem(SESSION_ACTIVITY_KEY, String(now));
+      return existing;
+    }
+    const next = crypto.randomUUID();
+    window.sessionStorage.setItem(SESSION_KEY, next);
+    window.sessionStorage.setItem(SESSION_ACTIVITY_KEY, String(now));
+    return next;
+  }
+
+  function touchSession(now) {
+    sessionId = loadOrCreateSessionId(now);
+    return sessionId;
   }
 
   function routeKey(href) {
@@ -57,10 +81,12 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
 
   function pagePayloadBase(kind, href, referrerUrl, startedAt, eventAt) {
     const url = new URL(href, window.location.href);
+    const currentSessionId = touchSession(eventAt);
     return {
       siteId: SITE_ID,
       kind,
       visitId: currentVisit.id,
+      sessionId: currentSessionId,
       timestamp: eventAt,
       startedAt,
       pathname: url.pathname || "/",
@@ -228,7 +254,7 @@ export function buildTrackerScript(options: BuildTrackerScriptOptions): string {
   });
 
   window[INSTALL_KEY] = {
-    version: "3",
+    version: "4",
     siteId: SITE_ID,
     track
   };

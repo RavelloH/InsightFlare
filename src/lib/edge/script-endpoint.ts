@@ -62,6 +62,7 @@ function settingsFingerprint(input: {
   trackHash: boolean;
   ignoreDoNotTrack: boolean;
   siteDomain: string;
+  sessionWindowMinutes: number;
 }): string {
   return [
     input.trackingStrength,
@@ -69,6 +70,7 @@ function settingsFingerprint(input: {
     input.trackHash ? "1" : "0",
     input.ignoreDoNotTrack ? "1" : "0",
     input.siteDomain,
+    String(input.sessionWindowMinutes),
   ].join("|");
 }
 
@@ -104,8 +106,16 @@ export async function handleTrackerScriptRequest(request: Request, env: Env): Pr
 
   const requestEuMode = isEUCountry(request);
   const euMode = determineEuMode(settings.trackingStrength, requestEuMode);
+  const sessionWindowMinutes = (() => {
+    const raw = Number(env.SESSION_WINDOW_MINUTES || "30");
+    if (!Number.isFinite(raw) || raw <= 0) return 30;
+    return Math.max(1, Math.min(24 * 60, Math.floor(raw)));
+  })();
   const ttlSeconds = SCRIPT_RESPONSE_CACHE_TTL_SECONDS;
-  const fingerprint = settingsFingerprint(settings);
+  const fingerprint = settingsFingerprint({
+    ...settings,
+    sessionWindowMinutes,
+  });
   const cacheKey = scriptCacheKeyRequest(siteId, euMode, fingerprint);
   const scriptCache = await openEdgeCache(SCRIPT_RESPONSE_CACHE_NAME);
   if (scriptCache) {
@@ -121,6 +131,7 @@ export async function handleTrackerScriptRequest(request: Request, env: Env): Pr
     trackQueryParams: settings.trackQueryParams,
     trackHash: settings.trackHash,
     ignoreDoNotTrack: settings.ignoreDoNotTrack,
+    sessionWindowMinutes,
   });
 
   const response = new Response(script, {

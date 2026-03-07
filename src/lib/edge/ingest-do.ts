@@ -20,10 +20,8 @@ import {
   safeHostname,
 } from "./utils";
 
-const SNAPSHOT_PREFIX = "snapshot:";
-const SESSION_PREFIX = "session:";
-const SNAPSHOT_QUERY_SCAN_LIMIT = 20_000;
-const SNAPSHOT_BUFFER_RETENTION_MS = 30 * 60 * 1000;
+const RECENT_EVENT_RETENTION_MS = 30 * 60 * 1000;
+const RECENT_EVENT_QUERY_SCAN_LIMIT = 20_000;
 const ACTIVE_NOW_WINDOW_MS = 5 * 60 * 1000;
 const VISIT_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const WS_SNAPSHOT_EVENT_LIMIT = 200;
@@ -47,15 +45,6 @@ interface RealtimeSnapshotRecord {
 
 interface StoredOpenVisit extends NormalizedVisitContext {
   lastActivityAt: number;
-}
-
-interface StoredSessionState {
-  sessionId: string;
-  lastSeenAt: number;
-  openVisitCount: number;
-  sessionStartedAt: number;
-  visitCount: number;
-  engagedWritten: boolean;
 }
 
 interface VisitRow {
@@ -394,8 +383,7 @@ export class IngestDurableObject extends DurableObject {
     await this.flushTimeouts();
     await this.flushPendingToD1();
     await this.cleanupBufferedRows();
-    await this.cleanupSnapshotWindow();
-    if ((await this.hasOpenVisits()) || (await this.hasSnapshotItems()) || this.hasDirtyRows()) {
+    if ((await this.hasOpenVisits()) || this.hasDirtyRows()) {
       await this.doState.storage.setAlarm(Date.now() + D1_FLUSH_INTERVAL_MS);
       return;
     }
@@ -475,29 +463,14 @@ export class IngestDurableObject extends DurableObject {
     const fromMs = Number.isFinite(fromMsRaw) ? Math.max(0, Math.floor(fromMsRaw)) : 0;
     const toMs = Number.isFinite(toMsRaw) ? Math.max(fromMs, Math.floor(toMsRaw)) : Date.now();
     const limit = Number.isFinite(limitRaw)
-      ? Math.min(20_000, Math.max(1, Math.floor(limitRaw)))
+      ? Math.min(RECENT_EVENT_QUERY_SCAN_LIMIT, Math.max(1, Math.floor(limitRaw)))
       : 5000;
 
-    const rows = await this.doState.storage.list<RealtimeSnapshotRecord>({
-      prefix: SNAPSHOT_PREFIX,
-      reverse: true,
-      limit: SNAPSHOT_QUERY_SCAN_LIMIT,
-    });
-
-    const payload = {
+    return jsonResponse({
       ok: true,
-      buffered: rows.size,
-      data: [] as Array<Record<string, unknown>>,
-    };
-
-    for (const event of rows.values()) {
-      if (!event) continue;
-      if (payload.data.length >= limit) break;
-      if (event.eventAt < fromMs || event.eventAt > toMs) continue;
-      payload.data.push(toRealtimePayload(event));
-    }
-
-    return jsonResponse(payload);
+      buffered: 0,
+      data: this.readRecentRealtimeEvents(fromMs, toMs, limit),
+    });
   }
 
   private initializeSqlSchema(): void {
@@ -694,7 +667,7 @@ export class IngestDurableObject extends DurableObject {
         return null;
       }
       const referrerUrl = clampString(coerceString(client.referrerUrl), 2000);
-      const sessionId = await this.resolveSessionId(visitorId, eventAt);
+      const sessionId = clampString(coerceString(client.sessionId), 128) || crypto.randomUUID();
       return {
         kind: "visit_start",
         receivedAt,
@@ -806,8 +779,6 @@ export class IngestDurableObject extends DurableObject {
     if (!inserted) {
       return;
     }
-
-    await this.advanceSessionOnVisitStart(record);
     await this.pushRealtimeRecord({
       id: record.visitId,
       eventType: "visit",
@@ -858,8 +829,7 @@ export class IngestDurableObject extends DurableObject {
       return;
     }
 
-    const session = await this.touchSession(record.visitorId, record.sessionId, finalizedAt, -1);
-    if (record.exitReason !== "route_change" && session.openVisitCount === 0) {
+    if (record.exitReason !== "route_change" && !this.hasOpenVisitsForVisitor(record.siteId, record.visitorId)) {
       await this.pushRealtimeRecord({
         id: `leave:${record.visitId}`,
         eventType: WS_PRESENCE_LEAVE_EVENT,
@@ -878,7 +848,6 @@ export class IngestDurableObject extends DurableObject {
       return;
     }
     await this.updateOpenVisitActivity(record.visitId, record.eventAt);
-    await this.touchSession(record.visitorId, record.sessionId, record.eventAt, 0);
     await this.pushRealtimeRecord({
       id: record.eventId,
       eventType: record.eventName,
@@ -1088,81 +1057,20 @@ export class IngestDurableObject extends DurableObject {
     return rowsWritten > 0;
   }
 
-  private async resolveSessionId(visitorId: string, eventAt: number): Promise<string> {
-    const sessionWindowMs = this.resolveSessionWindowMinutes() * 60 * 1000;
-    const existing = await this.doState.storage.get<StoredSessionState>(this.sessionStorageKey(visitorId));
-    if (existing && (existing.openVisitCount > 0 || eventAt - existing.lastSeenAt <= sessionWindowMs)) {
-      return existing.sessionId;
-    }
-    return crypto.randomUUID();
-  }
-
-  private async advanceSessionOnVisitStart(record: NormalizedVisitStart): Promise<void> {
-    const key = this.sessionStorageKey(record.visitorId);
-    const existing = await this.doState.storage.get<StoredSessionState>(key);
-    const isSameSession = existing?.sessionId === record.sessionId;
-    const visitCount = isSameSession ? Math.max(1, (existing?.visitCount ?? 0) + 1) : 1;
-    const nextState = {
-      sessionId: record.sessionId,
-      lastSeenAt: record.startedAt,
-      openVisitCount: Math.max(0, (isSameSession ? existing?.openVisitCount ?? 0 : 0) + 1),
-      sessionStartedAt: isSameSession ? existing?.sessionStartedAt ?? record.startedAt : record.startedAt,
-      visitCount,
-      engagedWritten: Boolean(
-        (isSameSession ? existing?.engagedWritten : false) ||
-        (isSameSession && !existing?.engagedWritten && visitCount >= 2),
-      ),
-    } satisfies StoredSessionState;
-    await this.doState.storage.put(key, nextState);
-  }
-
-  private async touchSession(
-    visitorId: string,
-    sessionId: string,
-    eventAt: number,
-    openVisitDelta: number,
-  ): Promise<StoredSessionState> {
-    const key = this.sessionStorageKey(visitorId);
-    const existing = await this.doState.storage.get<StoredSessionState>(key);
-    const nextState = {
-      sessionId,
-      lastSeenAt: Math.max(eventAt, existing?.lastSeenAt ?? 0),
-      openVisitCount: Math.max(0, (existing?.openVisitCount ?? 0) + openVisitDelta),
-      sessionStartedAt: existing?.sessionStartedAt ?? eventAt,
-      visitCount: existing?.visitCount ?? 0,
-      engagedWritten: Boolean(existing?.engagedWritten),
-    } satisfies StoredSessionState;
-    await this.doState.storage.put(key, nextState);
-    return nextState;
-  }
-
   private async updateOpenVisitActivity(visitId: string, eventAt: number): Promise<void> {
     this.sqlRun(
       `
         UPDATE buffered_visits
-        SET last_activity_at = CASE WHEN last_activity_at > ? THEN last_activity_at ELSE ? END,
-            dirty = 1,
-            updated_at = ?
+        SET last_activity_at = CASE WHEN last_activity_at > ? THEN last_activity_at ELSE ? END
         WHERE visit_id = ? AND status = 'open'
       `,
       eventAt,
       eventAt,
-      toUnixSeconds(eventAt),
       visitId,
     );
   }
 
-  private sessionStorageKey(visitorId: string): string {
-    return `${SESSION_PREFIX}${visitorId}`;
-  }
-
-  private snapshotStorageKey(record: RealtimeSnapshotRecord): string {
-    const ts = String(record.eventAt).padStart(16, "0");
-    return `${SNAPSHOT_PREFIX}${ts}:${record.id}`;
-  }
-
   private async pushRealtimeRecord(record: RealtimeSnapshotRecord): Promise<void> {
-    await this.doState.storage.put(this.snapshotStorageKey(record), record);
     await this.pushToWebsocketClients(record);
   }
 
@@ -1178,39 +1086,76 @@ export class IngestDurableObject extends DurableObject {
     return (row?.count ?? 0) > 0;
   }
 
-  private async hasSnapshotItems(): Promise<boolean> {
-    const rows = await this.doState.storage.list({ prefix: SNAPSHOT_PREFIX, limit: 1 });
-    return rows.size > 0;
+  private hasOpenVisitsForVisitor(siteId: string, visitorId: string): boolean {
+    const row = this.sqlOne<{ count: number }>(
+      `
+        SELECT count(*) AS count
+        FROM buffered_visits
+        WHERE site_id = ?
+          AND visitor_id = ?
+          AND status = 'open'
+        LIMIT 1
+      `,
+      siteId,
+      visitorId,
+    );
+    return (row?.count ?? 0) > 0;
+  }
+
+  private readRecentRealtimeEvents(fromMs: number, toMs: number, limit: number): Array<Record<string, unknown>> {
+    const rows = this.sqlAll<RealtimeSnapshotRecord>(
+      `
+        SELECT
+          id,
+          eventType,
+          eventAt,
+          pathname,
+          visitorId,
+          country,
+          browser
+        FROM (
+          SELECT
+            visit_id AS id,
+            'visit' AS eventType,
+            started_at AS eventAt,
+            pathname,
+            visitor_id AS visitorId,
+            country,
+            browser
+          FROM buffered_visits
+          WHERE started_at BETWEEN ? AND ?
+          UNION ALL
+          SELECT
+            event_id AS id,
+            event_name AS eventType,
+            occurred_at AS eventAt,
+            pathname,
+            visitor_id AS visitorId,
+            country,
+            browser
+          FROM buffered_custom_events
+          WHERE occurred_at BETWEEN ? AND ?
+        )
+        ORDER BY eventAt DESC
+        LIMIT ?
+      `,
+      fromMs,
+      toMs,
+      fromMs,
+      toMs,
+      limit,
+    );
+    return rows.map((row) => toRealtimePayload(row));
   }
 
   private async pushInitialSnapshotToSocket(socket: WebSocket): Promise<void> {
     try {
-      const rows = await this.doState.storage.list<RealtimeSnapshotRecord>({
-        prefix: SNAPSHOT_PREFIX,
-        reverse: true,
-        limit: SNAPSHOT_QUERY_SCAN_LIMIT,
-      });
-
-      const events: Array<Record<string, unknown>> = [];
       const cutoffMs = Date.now() - ACTIVE_NOW_WINDOW_MS;
-      const visitorPresence = new Map<string, { eventAt: number; active: boolean }>();
-
-      for (const record of rows.values()) {
-        if (!record) continue;
-        if (record.eventType !== WS_PRESENCE_LEAVE_EVENT && events.length < WS_SNAPSHOT_EVENT_LIMIT) {
-          events.push(toRealtimePayload(record));
-        }
-        if (record.eventAt >= cutoffMs && record.visitorId) {
-          const existing = visitorPresence.get(record.visitorId);
-          if (!existing || record.eventAt > existing.eventAt) {
-            visitorPresence.set(record.visitorId, {
-              eventAt: record.eventAt,
-              active: record.eventType !== WS_PRESENCE_LEAVE_EVENT,
-            });
-          }
-        }
-      }
-
+      const events = this.readRecentRealtimeEvents(
+        Math.max(0, Date.now() - RECENT_EVENT_RETENTION_MS),
+        Date.now(),
+        WS_SNAPSHOT_EVENT_LIMIT,
+      );
       const activeNow = this.sqlOne<{ count: number }>(
         `
           SELECT count(DISTINCT visitor_id) AS count
@@ -1219,14 +1164,14 @@ export class IngestDurableObject extends DurableObject {
             AND last_activity_at >= ?
         `,
         cutoffMs,
-      )?.count ?? [...visitorPresence.values()].filter((item) => item.active).length;
+      )?.count ?? 0;
 
       socket.send(JSON.stringify({
         type: "snapshot",
         data: {
           activeNow,
           events,
-          buffered: rows.size,
+          buffered: events.length,
         },
       }));
     } catch (error) {
@@ -1258,20 +1203,6 @@ export class IngestDurableObject extends DurableObject {
       } catch {
         // no-op
       }
-    }
-  }
-
-  private async cleanupSnapshotWindow(): Promise<void> {
-    const cutoffKey = `${SNAPSHOT_PREFIX}${String(Date.now() - SNAPSHOT_BUFFER_RETENTION_MS).padStart(16, "0")}:`;
-    while (true) {
-      const rows = await this.doState.storage.list({
-        prefix: SNAPSHOT_PREFIX,
-        end: cutoffKey,
-        limit: 512,
-      });
-      if (rows.size === 0) return;
-      await this.doState.storage.delete(Array.from(rows.keys()));
-      if (rows.size < 512) return;
     }
   }
 
@@ -1531,8 +1462,7 @@ export class IngestDurableObject extends DurableObject {
         visit.visitId,
       );
       if (rowsWritten === 0) continue;
-      const session = await this.touchSession(visit.visitorId, visit.sessionId, now, -1);
-      if (session.openVisitCount === 0) {
+      if (!this.hasOpenVisitsForVisitor(visit.siteId, visit.visitorId)) {
         await this.pushRealtimeRecord({
           id: `leave:${visit.visitId}`,
           eventType: WS_PRESENCE_LEAVE_EVENT,
@@ -1546,9 +1476,4 @@ export class IngestDurableObject extends DurableObject {
     }
   }
 
-  private resolveSessionWindowMinutes(): number {
-    const raw = Number(this.doEnv.SESSION_WINDOW_MINUTES || "30");
-    if (!Number.isFinite(raw) || raw <= 0) return 30;
-    return Math.max(1, Math.min(24 * 60, Math.floor(raw)));
-  }
 }

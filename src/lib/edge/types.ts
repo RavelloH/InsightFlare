@@ -32,6 +32,7 @@ export interface TrackerClientPayload {
   siteId?: string;
   kind?: TrackerPayloadKind;
   visitId?: string;
+  sessionId?: string;
   eventId?: string;
   timestamp?: number;
   startedAt?: number;
