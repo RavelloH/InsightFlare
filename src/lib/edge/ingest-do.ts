@@ -36,6 +36,7 @@ const SNAPSHOT_BUFFER_RETENTION_MS = 30 * 60 * 1000;
 const ACTIVE_NOW_WINDOW_MS = 5 * 60 * 1000;
 const VISIT_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const WS_SNAPSHOT_EVENT_LIMIT = 200;
+const WS_PRESENCE_LEAVE_EVENT = "__presence_leave";
 // Cloudflare Analytics Engine allows at most 250 writeDataPoint calls per Worker invocation.
 // Keep a safety margin because alarm-driven timeout flushes can emit many finalize rows at once.
 const AE_WRITE_BUDGET_PER_INVOCATION = 200;
@@ -887,8 +888,19 @@ export class IngestDurableObject extends DurableObject {
       return;
     }
 
-    await this.touchSession(record.visitorId, record.sessionId, finalizedAt, -1);
+    const session = await this.touchSession(record.visitorId, record.sessionId, finalizedAt, -1);
     this.writeVisitFinalizeToAe({ ...record, finalizedAt, durationMs });
+    if (record.exitReason !== "route_change" && session.openVisitCount === 0) {
+      await this.pushRealtimeRecord({
+        id: `leave:${record.visitId}`,
+        eventType: WS_PRESENCE_LEAVE_EVENT,
+        eventAt: finalizedAt,
+        pathname: visit.pathname,
+        visitorId: record.visitorId,
+        country: visit.country,
+        browser: visit.browser,
+      });
+    }
   }
 
   private async handleCustomEvent(record: NormalizedCustomEvent): Promise<void> {
@@ -1257,14 +1269,16 @@ export class IngestDurableObject extends DurableObject {
     sessionId: string,
     eventAt: number,
     openVisitDelta: number,
-  ): Promise<void> {
+  ): Promise<StoredSessionState> {
     const key = this.sessionStorageKey(visitorId);
     const existing = await this.doState.storage.get<StoredSessionState>(key);
-    await this.doState.storage.put(key, {
+    const nextState = {
       sessionId,
       lastSeenAt: Math.max(eventAt, existing?.lastSeenAt ?? 0),
       openVisitCount: Math.max(0, (existing?.openVisitCount ?? 0) + openVisitDelta),
-    } satisfies StoredSessionState);
+    } satisfies StoredSessionState;
+    await this.doState.storage.put(key, nextState);
+    return nextState;
   }
 
   private async updateOpenVisitActivity(visitId: string, eventAt: number): Promise<void> {
@@ -1323,23 +1337,39 @@ export class IngestDurableObject extends DurableObject {
       });
 
       const events: Array<Record<string, unknown>> = [];
-      const activeVisitors = new Set<string>();
       const cutoffMs = Date.now() - ACTIVE_NOW_WINDOW_MS;
+      const visitorPresence = new Map<string, { eventAt: number; active: boolean }>();
 
       for (const record of rows.values()) {
         if (!record) continue;
-        if (events.length < WS_SNAPSHOT_EVENT_LIMIT) {
+        if (record.eventType !== WS_PRESENCE_LEAVE_EVENT && events.length < WS_SNAPSHOT_EVENT_LIMIT) {
           events.push(toRealtimePayload(record));
         }
         if (record.eventAt >= cutoffMs && record.visitorId) {
-          activeVisitors.add(record.visitorId);
+          const existing = visitorPresence.get(record.visitorId);
+          if (!existing || record.eventAt > existing.eventAt) {
+            visitorPresence.set(record.visitorId, {
+              eventAt: record.eventAt,
+              active: record.eventType !== WS_PRESENCE_LEAVE_EVENT,
+            });
+          }
         }
       }
+
+      const activeNow = this.sqlOne<{ count: number }>(
+        `
+          SELECT count(DISTINCT visitor_id) AS count
+          FROM buffered_visits
+          WHERE status = 'open'
+            AND last_activity_at >= ?
+        `,
+        cutoffMs,
+      )?.count ?? [...visitorPresence.values()].filter((item) => item.active).length;
 
       socket.send(JSON.stringify({
         type: "snapshot",
         data: {
-          activeNow: activeVisitors.size,
+          activeNow,
           events,
           buffered: rows.size,
         },
@@ -1597,6 +1627,7 @@ export class IngestDurableObject extends DurableObject {
       sessionId: string;
       startedAt: number;
       lastActivityAt: number;
+      pathname: string;
       country: string;
       browser: string;
       deviceType: string;
@@ -1609,6 +1640,7 @@ export class IngestDurableObject extends DurableObject {
           session_id AS sessionId,
           started_at AS startedAt,
           last_activity_at AS lastActivityAt,
+          pathname,
           country,
           browser,
           device_type AS deviceType
@@ -1644,7 +1676,7 @@ export class IngestDurableObject extends DurableObject {
         visit.visitId,
       );
       if (rowsWritten === 0) continue;
-      await this.touchSession(visit.visitorId, visit.sessionId, now, -1);
+      const session = await this.touchSession(visit.visitorId, visit.sessionId, now, -1);
       this.writeVisitFinalizeToAe({
         kind: "visit_finalize",
         siteId: visit.siteId,
@@ -1661,6 +1693,17 @@ export class IngestDurableObject extends DurableObject {
         browser: visit.browser,
         deviceType: visit.deviceType,
       });
+      if (session.openVisitCount === 0) {
+        await this.pushRealtimeRecord({
+          id: `leave:${visit.visitId}`,
+          eventType: WS_PRESENCE_LEAVE_EVENT,
+          eventAt: now,
+          pathname: visit.pathname,
+          visitorId: visit.visitorId,
+          country: visit.country,
+          browser: visit.browser,
+        });
+      }
     }
   }
 

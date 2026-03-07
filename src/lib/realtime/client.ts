@@ -13,6 +13,7 @@ const RECONNECT_DELAY_MS = 2_000;
 const CONNECT_WATCHDOG_MS = 4_000;
 const ACTIVE_RECOMPUTE_INTERVAL_MS = 15_000;
 const MAX_RECENT_EVENTS = 20;
+const PRESENCE_LEAVE_EVENT = "__presence_leave";
 
 const SOCKET_STATE = {
   CONNECTING: 0,
@@ -264,6 +265,20 @@ function applySnapshot(channel: ChannelContext, payload: unknown): void {
 function applyEvent(channel: ChannelContext, payload: unknown): void {
   const event = normalizeRealtimeEvent(payload);
   if (!event) return;
+
+  if (event.eventType === PRESENCE_LEAVE_EVENT) {
+    if (event.visitorId) {
+      channel.visitors.delete(event.visitorId);
+    }
+    if (
+      Date.now() - channel.snapshotBaseline.at <= ACTIVE_WINDOW_MS &&
+      channel.snapshotBaseline.value > 0
+    ) {
+      channel.snapshotBaseline.value -= 1;
+    }
+    recomputeActiveNow(channel, event.eventAt || Date.now());
+    return;
+  }
 
   if (event.visitorId) {
     channel.visitors.set(event.visitorId, event.eventAt);
