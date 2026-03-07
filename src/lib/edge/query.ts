@@ -3,6 +3,13 @@ import { ONE_DAY_MS, ONE_HOUR_MS, coerceNumber } from "./utils";
 import { requireSession } from "./session-auth";
 import { isAnalyticsEngineEnabled } from "./flags";
 import {
+  AE_LAYOUT_VERSION,
+  AE_ROW_TYPE_CUSTOM_EVENT,
+  AE_ROW_TYPE_VISIT_FINALIZE,
+  AE_ROW_TYPE_VISIT_START,
+  encodeAeDeviceType,
+} from "./analytics-engine-layout";
+import {
   type AeDimensionRow,
   type AeOverviewRow,
   type AeTopPageRow,
@@ -28,6 +35,7 @@ import {
   queryAeTopOrganizations,
   queryAeTopPages,
   queryAeTopRegions,
+  queryAeTopScreenSizes,
   queryAeTopTimezones,
   queryAeTopTitles,
   queryAeTrend,
@@ -36,7 +44,6 @@ import {
 
 const RETENTION_DAYS = 365;
 const AE_DATASET = "insightflare_events";
-const AE_LAYOUT_VERSION = 4;
 const AE_MAX_SQL_LIMIT = 2000;
 const PRIVATE_CACHE_HEADERS = {
   "cache-control": "private, no-store",
@@ -64,6 +71,17 @@ interface SiteRow {
   id: string;
   name: string;
   domain: string;
+}
+
+interface TeamSiteRow {
+  id: string;
+  teamId: string;
+  name: string;
+  domain: string;
+  publicEnabled: number;
+  publicSlug: string | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 interface DashboardFilters {
@@ -221,10 +239,6 @@ function toAeFilters(filters: DashboardFilters): AeQueryFilters {
   };
 }
 
-function hasDashboardFilters(filters: DashboardFilters): boolean {
-  return Boolean(filters.country || filters.device || filters.browser);
-}
-
 function shouldUseAnalyticsEngine(env: Env, fromMs: number, nowMs: number): boolean {
   return isAnalyticsEngineEnabled(env)
     && isAnalyticsSqlConfigured(env)
@@ -307,6 +321,7 @@ async function loadWithPreferredSource<T>(
       return { value: await aeLoader(), source: "ae" };
     } catch (error) {
       console.error(`analytics_query_failed:${label}`, error);
+      throw error;
     }
   }
   return { value: await d1Loader(), source: "d1" };
@@ -472,6 +487,38 @@ async function resolvePrivateSite(
     .bind(session.userId, siteId, session.userId)
     .first<SiteRow>();
   return site ?? notFound("Site not found", PRIVATE_CACHE_HEADERS);
+}
+
+async function resolvePrivateTeam(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<{ id: string } | Response> {
+  const session = await requireSession(request, env);
+  if (!session) return unauthorized("Unauthorized", PRIVATE_CACHE_HEADERS);
+
+  const teamId = normalizeFilterValue(url.searchParams.get("teamId"));
+  if (!teamId) return badRequest("teamId is required", PRIVATE_CACHE_HEADERS);
+
+  if (session.systemRole === "admin") {
+    const team = await env.DB.prepare("SELECT id FROM teams WHERE id=? LIMIT 1")
+      .bind(teamId)
+      .first<{ id: string }>();
+    return team ?? notFound("Team not found", PRIVATE_CACHE_HEADERS);
+  }
+
+  const team = await env.DB.prepare(
+    `
+      SELECT t.id
+      FROM teams t
+      LEFT JOIN team_members tm ON tm.team_id = t.id AND tm.user_id = ?
+      WHERE t.id = ? AND (t.owner_user_id = ? OR tm.user_id IS NOT NULL)
+      LIMIT 1
+    `,
+  )
+    .bind(session.userId, teamId, session.userId)
+    .first<{ id: string }>();
+  return team ?? notFound("Team not found", PRIVATE_CACHE_HEADERS);
 }
 
 async function fetchPublicSite(env: Env, url: URL): Promise<SiteRow | Response> {
@@ -773,9 +820,6 @@ async function queryOverviewAggregate(
   window: QueryWindow,
   filters: DashboardFilters,
 ): Promise<PreferredSourceResult<OverviewAggregateRow>> {
-  if (hasDashboardFilters(filters)) {
-    return { value: await queryOverviewFromD1(env, siteId, window, filters), source: "d1" };
-  }
   return loadWithPreferredSource(
     env,
     window,
@@ -793,9 +837,6 @@ async function queryTrendAggregate(
   interval: Interval,
   filters: DashboardFilters,
 ): Promise<PreferredSourceResult<TrendAggregateRow[]>> {
-  if (hasDashboardFilters(filters)) {
-    return { value: await queryTrendFromD1(env, siteId, window, interval, filters), source: "d1" };
-  }
   return loadWithPreferredSource(
     env,
     window,
@@ -1037,13 +1078,8 @@ async function buildOverviewClientDimensionTabs(
           queryAeTopLanguages(env, siteId, window, limit, aeFilters).then(
             mapAeDimensions,
           ),
-          queryVisitDimensionFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            limit,
-            screenSizeExpr(),
+          queryAeTopScreenSizes(env, siteId, window, limit, aeFilters).then(
+            mapAeDimensions,
           ),
         ]);
       return { browser, osVersion, deviceType, language, screenSize };
@@ -1430,6 +1466,146 @@ async function handleOverviewGeoDimensions(
     },
   });
 }
+
+async function listTeamSites(env: Env, teamId: string): Promise<TeamSiteRow[]> {
+  const result = await env.DB.prepare(
+    `
+      SELECT
+        id,
+        team_id AS teamId,
+        name,
+        domain,
+        public_enabled AS publicEnabled,
+        public_slug AS publicSlug,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+      FROM sites
+      WHERE team_id = ?
+      ORDER BY created_at DESC
+    `,
+  )
+    .bind(teamId)
+    .all<TeamSiteRow>();
+  return result.results;
+}
+
+async function handleTeamDashboard(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window", PRIVATE_CACHE_HEADERS);
+  const team = await resolvePrivateTeam(request, env, url);
+  if (team instanceof Response) return team;
+
+  const interval = parseInterval(url);
+  const sites = await listTeamSites(env, team.id);
+  if (sites.length === 0) {
+    return jsonResponse(
+      {
+        ok: true,
+        data: {
+          sites: [],
+          trend: [],
+        },
+      },
+      200,
+      PRIVATE_CACHE_HEADERS,
+    );
+  }
+
+  const previousTo = Math.max(window.fromMs - 1, 0);
+  const previousFrom = Math.max(previousTo - (window.toMs - window.fromMs), 0);
+  const previousWindow: QueryWindow = {
+    fromMs: previousFrom,
+    toMs: previousTo,
+    nowMs: window.nowMs,
+  };
+  const filters: DashboardFilters = {};
+
+  const [currentOverview, previousOverview, trends] = await Promise.all([
+    Promise.all(sites.map((site) => queryOverviewAggregate(env, site.id, window, filters))),
+    Promise.all(sites.map((site) => queryOverviewAggregate(env, site.id, previousWindow, filters))),
+    Promise.all(sites.map((site) => queryTrendAggregate(env, site.id, window, interval, filters))),
+  ]);
+
+  const sitePayload = sites.map((site, index) => {
+    const overview = mapOverviewAggregate(currentOverview[index]?.value ?? {
+      views: 0,
+      sessions: 0,
+      visitors: 0,
+      bounces: 0,
+      totalDuration: 0,
+      durationViews: 0,
+    });
+    const previous = mapOverviewAggregate(previousOverview[index]?.value ?? {
+      views: 0,
+      sessions: 0,
+      visitors: 0,
+      bounces: 0,
+      totalDuration: 0,
+      durationViews: 0,
+    });
+    const currentPagesPerSession = overview.sessions > 0 ? overview.views / overview.sessions : 0;
+    const previousPagesPerSession = previous.sessions > 0 ? previous.views / previous.sessions : 0;
+
+    return {
+      ...site,
+      overview,
+      changeRates: {
+        views: percentChange(overview.views, previous.views),
+        visitors: percentChange(overview.visitors, previous.visitors),
+        sessions: percentChange(overview.sessions, previous.sessions),
+        bounceRate: percentChange(overview.bounceRate, previous.bounceRate),
+        avgDurationMs: percentChange(overview.avgDurationMs, previous.avgDurationMs),
+        pagesPerSession: percentChange(currentPagesPerSession, previousPagesPerSession),
+      },
+    };
+  });
+
+  const bucketMs = intervalBucketMs(interval);
+  const trendByBucket = new Map<
+    number,
+    {
+      bucket: number;
+      timestampMs: number;
+      sites: Array<{ siteId: string; views: number; visitors: number }>;
+    }
+  >();
+
+  for (let index = 0; index < sites.length; index += 1) {
+    const site = sites[index];
+    const rows = trends[index]?.value ?? [];
+    for (const row of rows) {
+      const bucket = row.bucket;
+      const existing = trendByBucket.get(bucket) ?? {
+        bucket,
+        timestampMs: bucket * bucketMs,
+        sites: [],
+      };
+      existing.sites.push({
+        siteId: site.id,
+        views: row.views,
+        visitors: row.visitors,
+      });
+      trendByBucket.set(bucket, existing);
+    }
+  }
+
+  return jsonResponse(
+    {
+      ok: true,
+      data: {
+        sites: sitePayload,
+        trend: [...trendByBucket.values()].sort((left, right) => left.bucket - right.bucket),
+      },
+    },
+    200,
+    PRIVATE_CACHE_HEADERS,
+  );
+}
+
 async function routeQuery(
   env: Env,
   siteId: string,
@@ -1489,9 +1665,12 @@ export async function handlePrivateQuery(
   url: URL,
 ): Promise<Response> {
   if (request.method !== "GET") return notAllowed();
+  const pathname = url.pathname.replace(/^\/api\/private\//, "");
+  if (pathname === "team-dashboard") {
+    return handleTeamDashboard(request, env, url);
+  }
   const site = await resolvePrivateSite(request, env, url);
   if (site instanceof Response) return site;
-  const pathname = url.pathname.replace(/^\/api\/private\//, "");
   return routeQuery(env, site.id, pathname, url, { publicMode: false });
 }
 
@@ -1850,70 +2029,85 @@ async function runAeSqlLocal<T extends Record<string, unknown>>(env: Env, sql: s
 function buildAeVisitFilterClause(filters: DashboardFilters): string {
   const clauses: string[] = [];
   if (filters.country) clauses.push(`country = ${aeSqlString(filters.country)}`);
-  if (filters.device) clauses.push(`device_type = ${aeSqlString(filters.device)}`);
+  if (filters.device) clauses.push(`device_type_code = ${encodeAeDeviceType(filters.device)}`);
   if (filters.browser) clauses.push(`browser = ${aeSqlString(filters.browser)}`);
   return clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+}
+
+function aeDeviceTypeSql(codeExpr: string): string {
+  return [
+    `if(${codeExpr} = 1, 'desktop'`,
+    `if(${codeExpr} = 2, 'mobile'`,
+    `if(${codeExpr} = 3, 'tablet'`,
+    `if(${codeExpr} = 4, 'smarttv'`,
+    `if(${codeExpr} = 5, 'console'`,
+    `if(${codeExpr} = 6, 'wearable'`,
+    `if(${codeExpr} = 7, 'embedded'`,
+    `if(${codeExpr} = 255, 'other', ''))))))))`,
+  ].join(", ");
 }
 
 function aeVisitCtes(siteId: string, window: QueryWindow): string {
   return `
 visit_rows AS (
   SELECT
-    blob1 AS row_type,
-    blob2 AS visit_id,
-    blob3 AS visitor_id,
-    blob4 AS session_id,
-    blob5 AS pathname,
-    blob6 AS query_string,
-    blob7 AS hash_fragment,
-    blob8 AS hostname,
-    blob9 AS referrer_url,
-    blob10 AS referrer_host,
-    blob11 AS country,
-    blob12 AS region,
-    blob13 AS city,
-    blob14 AS browser,
-    blob15 AS os,
-    blob16 AS os_version,
-    blob17 AS device_type,
-    blob18 AS language,
-    blob19 AS timezone,
+    double8 AS row_type_code,
+    blob1 AS visit_id,
+    blob2 AS visitor_id,
+    blob3 AS session_id,
+    blob4 AS pathname,
+    blob5 AS query_string,
+    blob6 AS hash_fragment,
+    blob7 AS hostname,
+    blob8 AS referrer_url,
+    blob9 AS referrer_host,
+    blob10 AS country,
+    blob11 AS region,
+    blob12 AS city,
+    blob13 AS browser,
+    blob14 AS os,
+    blob15 AS os_version,
+    double9 AS device_type_code,
+    ${aeDeviceTypeSql("double9")} AS device_type,
+    blob16 AS language,
+    blob17 AS timezone,
     blob20 AS extra_value,
     double1 AS event_at,
     double2 AS duration_ms,
-    double3 AS started_at,
+    double11 AS started_at,
     double4 AS screen_width,
     double5 AS screen_height
   FROM ${AE_DATASET}
   WHERE index1 = ${aeSqlString(siteId)}
-    AND double6 >= ${AE_LAYOUT_VERSION}
-    AND double3 BETWEEN ${Math.floor(window.fromMs)} AND ${Math.floor(window.toMs)}
-    AND blob1 IN ('visit_start', 'visit_finalize')
+    AND double3 = ${AE_LAYOUT_VERSION}
+    AND double11 BETWEEN ${Math.floor(window.fromMs)} AND ${Math.floor(window.toMs)}
+    AND double8 IN (${AE_ROW_TYPE_VISIT_START}, ${AE_ROW_TYPE_VISIT_FINALIZE})
 ),
 visits AS (
   SELECT
     visit_id,
-    argMax(visitor_id, if(row_type = 'visit_start', event_at, -1)) AS visitor_id,
-    argMax(session_id, if(row_type = 'visit_start', event_at, -1)) AS session_id,
-    argMax(pathname, if(row_type = 'visit_start', event_at, -1)) AS pathname,
-    argMax(query_string, if(row_type = 'visit_start', event_at, -1)) AS query_string,
-    argMax(hash_fragment, if(row_type = 'visit_start', event_at, -1)) AS hash_fragment,
-    argMax(hostname, if(row_type = 'visit_start', event_at, -1)) AS hostname,
-    argMax(referrer_url, if(row_type = 'visit_start', event_at, -1)) AS referrer_url,
-    argMax(referrer_host, if(row_type = 'visit_start', event_at, -1)) AS referrer_host,
-    argMax(country, if(row_type = 'visit_start', event_at, -1)) AS country,
-    argMax(region, if(row_type = 'visit_start', event_at, -1)) AS region,
-    argMax(city, if(row_type = 'visit_start', event_at, -1)) AS city,
-    argMax(browser, if(row_type = 'visit_start', event_at, -1)) AS browser,
-    argMax(os, if(row_type = 'visit_start', event_at, -1)) AS os,
-    argMax(os_version, if(row_type = 'visit_start', event_at, -1)) AS os_version,
-    argMax(device_type, if(row_type = 'visit_start', event_at, -1)) AS device_type,
-    argMax(language, if(row_type = 'visit_start', event_at, -1)) AS language,
-    argMax(timezone, if(row_type = 'visit_start', event_at, -1)) AS timezone,
-    argMax(extra_value, if(row_type = 'visit_start', event_at, -1)) AS title,
-    max(if(row_type = 'visit_start', started_at, NULL)) AS started_at,
-    max(if(row_type = 'visit_finalize', event_at, NULL)) AS finalized_at,
-    max(if(row_type = 'visit_finalize', duration_ms, NULL)) AS duration_ms
+    argMax(visitor_id, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS visitor_id,
+    argMax(session_id, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS session_id,
+    argMax(pathname, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS pathname,
+    argMax(query_string, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS query_string,
+    argMax(hash_fragment, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS hash_fragment,
+    argMax(hostname, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS hostname,
+    argMax(referrer_url, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS referrer_url,
+    argMax(referrer_host, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS referrer_host,
+    argMax(country, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS country,
+    argMax(region, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS region,
+    argMax(city, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS city,
+    argMax(browser, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS browser,
+    argMax(os, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS os,
+    argMax(os_version, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS os_version,
+    argMax(device_type_code, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS device_type_code,
+    argMax(device_type, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS device_type,
+    argMax(language, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS language,
+    argMax(timezone, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS timezone,
+    argMax(extra_value, if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, event_at, -1)) AS title,
+    max(if(row_type_code = ${AE_ROW_TYPE_VISIT_START}, started_at, NULL)) AS started_at,
+    max(if(row_type_code = ${AE_ROW_TYPE_VISIT_FINALIZE}, event_at, NULL)) AS finalized_at,
+    max(if(row_type_code = ${AE_ROW_TYPE_VISIT_FINALIZE}, duration_ms, NULL)) AS duration_ms
   FROM visit_rows
   GROUP BY visit_id
 )`;
@@ -1965,20 +2159,20 @@ async function queryAeCustomEventNamesExact(
 ): Promise<DimensionRow[]> {
   const clauses = [
     `index1 = ${aeSqlString(siteId)}`,
-    `double6 >= ${AE_LAYOUT_VERSION}`,
-    `blob1 = 'custom_event'`,
+    `double3 = ${AE_LAYOUT_VERSION}`,
+    `double8 = ${AE_ROW_TYPE_CUSTOM_EVENT}`,
     `double1 BETWEEN ${Math.floor(window.fromMs)} AND ${Math.floor(window.toMs)}`,
     "length(trim(blob20)) > 0",
   ];
-  if (filters.country) clauses.push(`blob11 = ${aeSqlString(filters.country)}`);
-  if (filters.browser) clauses.push(`blob14 = ${aeSqlString(filters.browser)}`);
-  if (filters.device) clauses.push(`blob17 = ${aeSqlString(filters.device)}`);
+  if (filters.country) clauses.push(`blob10 = ${aeSqlString(filters.country)}`);
+  if (filters.browser) clauses.push(`blob13 = ${aeSqlString(filters.browser)}`);
+  if (filters.device) clauses.push(`double9 = ${encodeAeDeviceType(filters.device)}`);
 
   const sql = `
 SELECT
   blob20 AS value,
   count() AS views,
-  count(DISTINCT blob4) AS sessions
+  count(DISTINCT blob3) AS sessions
 FROM ${AE_DATASET}
 WHERE ${clauses.join(" AND ")}
 GROUP BY value

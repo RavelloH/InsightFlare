@@ -13,6 +13,13 @@ import type {
   TrackerPayloadKind,
 } from "./types";
 import { isAnalyticsEngineEnabled } from "./flags";
+import {
+  AE_LAYOUT_VERSION,
+  encodeAeContinent,
+  encodeAeDeviceType,
+  encodeAeRowType,
+  toAeCoordinate,
+} from "./analytics-engine-layout";
 import { readSiteTrackingConfig } from "./site-settings-store";
 import {
   TEN_MINUTES_MS,
@@ -31,7 +38,6 @@ const SNAPSHOT_BUFFER_RETENTION_MS = 30 * 60 * 1000;
 const ACTIVE_NOW_WINDOW_MS = 5 * 60 * 1000;
 const VISIT_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const WS_SNAPSHOT_EVENT_LIMIT = 200;
-const AE_LAYOUT_VERSION = 4;
 
 function toAeRegionValue(country: string, regionCode: string, region: string): string {
   const normalizedCountry = country.trim().toUpperCase();
@@ -416,6 +422,9 @@ export class IngestDurableObject extends DurableObject {
         durationMs: coerceNumber(client.durationMs, null),
         durationSource: "reported",
         exitReason: clampString(coerceString(client.exitReason || "pagehide"), 80),
+        country: visit.country,
+        browser: visit.browser,
+        deviceType: visit.deviceType,
       } satisfies NormalizedVisitFinalize;
     }
 
@@ -769,9 +778,8 @@ export class IngestDurableObject extends DurableObject {
 
   private writeVisitStartToAe(record: NormalizedVisitStart): void {
     this.writeToAe({
-      indexes: [record.siteId, record.continent, record.asOrganization],
+      indexes: [record.siteId],
       blobs: [
-        "visit_start",
         record.visitId,
         record.visitorId,
         record.sessionId,
@@ -787,18 +795,24 @@ export class IngestDurableObject extends DurableObject {
         record.browser,
         record.os,
         record.osVersion,
-        record.deviceType,
         record.language,
         record.timezone,
+        record.asOrganization,
+        record.browserVersion,
         record.title,
       ],
       doubles: [
         record.startedAt,
         -1,
-        record.startedAt,
+        AE_LAYOUT_VERSION,
         record.screenWidth ?? 0,
         record.screenHeight ?? 0,
-        AE_LAYOUT_VERSION,
+        toAeCoordinate(record.latitude),
+        toAeCoordinate(record.longitude),
+        encodeAeRowType(record.kind),
+        encodeAeDeviceType(record.deviceType),
+        encodeAeContinent(record.continent),
+        record.startedAt,
         record.isEU ? 1 : 0,
       ],
     });
@@ -806,9 +820,8 @@ export class IngestDurableObject extends DurableObject {
 
   private writeVisitFinalizeToAe(record: NormalizedVisitFinalize & { durationMs: number }): void {
     this.writeToAe({
-      indexes: [record.siteId, "", ""],
+      indexes: [record.siteId],
       blobs: [
-        "visit_finalize",
         record.visitId,
         record.visitorId,
         record.sessionId,
@@ -818,9 +831,10 @@ export class IngestDurableObject extends DurableObject {
         "",
         "",
         "",
+        record.country,
         "",
         "",
-        "",
+        record.browser,
         "",
         "",
         "",
@@ -832,10 +846,15 @@ export class IngestDurableObject extends DurableObject {
       doubles: [
         record.finalizedAt,
         record.durationMs,
-        record.startedAt,
-        0,
-        0,
         AE_LAYOUT_VERSION,
+        0,
+        0,
+        toAeCoordinate(null),
+        toAeCoordinate(null),
+        encodeAeRowType(record.kind),
+        encodeAeDeviceType(record.deviceType),
+        0,
+        record.startedAt,
         0,
       ],
     });
@@ -843,9 +862,8 @@ export class IngestDurableObject extends DurableObject {
 
   private writeCustomEventToAe(record: NormalizedCustomEvent): void {
     this.writeToAe({
-      indexes: [record.siteId, record.continent, record.asOrganization],
+      indexes: [record.siteId],
       blobs: [
-        "custom_event",
         record.visitId,
         record.visitorId,
         record.sessionId,
@@ -861,29 +879,34 @@ export class IngestDurableObject extends DurableObject {
         record.browser,
         record.os,
         record.osVersion,
-        record.deviceType,
         record.language,
         record.timezone,
+        record.asOrganization,
+        record.browserVersion,
         record.eventName,
       ],
       doubles: [
         record.eventAt,
         -1,
-        record.startedAt,
+        AE_LAYOUT_VERSION,
         record.screenWidth ?? 0,
         record.screenHeight ?? 0,
-        AE_LAYOUT_VERSION,
+        toAeCoordinate(record.latitude),
+        toAeCoordinate(record.longitude),
+        encodeAeRowType(record.kind),
+        encodeAeDeviceType(record.deviceType),
+        encodeAeContinent(record.continent),
+        record.startedAt,
         record.isEU ? 1 : 0,
       ],
     });
   }
 
   private writeToAe(data: AnalyticsEngineWriteDataPoint): void {
-    if (!isAnalyticsEngineEnabled(this.doEnv) || !this.doEnv.ANALYTICS) {
-      return;
-    }
+    const analytics = this.doEnv.ANALYTICS;
+    if (!isAnalyticsEngineEnabled(this.doEnv) || !analytics) return;
     try {
-      this.doEnv.ANALYTICS.writeDataPoint(data);
+      analytics.writeDataPoint(data);
     } catch (error) {
       console.error("analytics_engine_write_failed", error);
     }
@@ -1079,6 +1102,9 @@ export class IngestDurableObject extends DurableObject {
         durationMs: -1,
         durationSource: "timeout",
         exitReason: "timeout",
+        country: visit.country,
+        browser: visit.browser,
+        deviceType: visit.deviceType,
       });
     }
   }

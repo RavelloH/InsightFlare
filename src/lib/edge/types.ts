@@ -139,6 +139,9 @@ export interface NormalizedVisitFinalize {
   durationMs: number | null;
   durationSource: "reported" | "timeout";
   exitReason: string;
+  country: string;
+  browser: string;
+  deviceType: string;
 }
 
 export interface NormalizedCustomEvent extends NormalizedVisitContext {

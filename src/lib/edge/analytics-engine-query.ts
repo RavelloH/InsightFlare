@@ -1,4 +1,13 @@
 import type { Env } from "./types";
+import {
+  AE_LAYOUT_VERSION,
+  AE_ROW_TYPE_CUSTOM_EVENT,
+  AE_ROW_TYPE_VISIT_FINALIZE,
+  AE_ROW_TYPE_VISIT_START,
+  decodeAeContinent,
+  decodeAeDeviceType,
+  encodeAeDeviceType,
+} from "./analytics-engine-layout";
 
 export const ANALYTICS_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -63,7 +72,6 @@ export interface AeVisitorRow {
 }
 
 const DATASET = "insightflare_events";
-const LAYOUT_VERSION = 4;
 const MAX_SQL_LIMIT = 2000;
 
 function sqlString(value: string): string {
@@ -89,6 +97,10 @@ function parseString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function parseIntKey(value: unknown): number {
+  return Math.trunc(parseNumber(value));
+}
+
 export function isAnalyticsSqlConfigured(env: Env): boolean {
   return Boolean(String(env.ANALYTICS_ACCOUNT_ID || "").trim() && String(env.ANALYTICS_SQL_API_TOKEN || "").trim());
 }
@@ -101,13 +113,13 @@ function buildVisitFilterClause(filters?: AeQueryFilters, alias = ""): string {
   const prefix = alias ? `${alias}.` : "";
   const clauses: string[] = [];
   if (filters?.country) {
-    clauses.push(`${prefix}blob11 = ${sqlString(filters.country.trim())}`);
+    clauses.push(`${prefix}blob10 = ${sqlString(filters.country.trim())}`);
   }
   if (filters?.device) {
-    clauses.push(`${prefix}blob17 = ${sqlString(filters.device.trim())}`);
+    clauses.push(`${prefix}double9 = ${encodeAeDeviceType(filters.device)}`);
   }
   if (filters?.browser) {
-    clauses.push(`${prefix}blob14 = ${sqlString(filters.browser.trim())}`);
+    clauses.push(`${prefix}blob13 = ${sqlString(filters.browser.trim())}`);
   }
   return clauses.length > 0 ? clauses.join("\n  AND ") : "";
 }
@@ -116,9 +128,9 @@ function buildStartWhere(siteId: string, range: AeRange, alias = ""): string {
   const prefix = alias ? `${alias}.` : "";
   return [
     `${prefix}index1 = ${sqlString(siteId)}`,
-    `${prefix}double6 >= ${LAYOUT_VERSION}`,
-    `${prefix}blob1 = 'visit_start'`,
-    `${prefix}double3 BETWEEN ${Math.floor(range.fromMs)} AND ${Math.floor(range.toMs)}`,
+    `${prefix}double3 = ${AE_LAYOUT_VERSION}`,
+    `${prefix}double8 = ${AE_ROW_TYPE_VISIT_START}`,
+    `${prefix}double11 BETWEEN ${Math.floor(range.fromMs)} AND ${Math.floor(range.toMs)}`,
   ].join("\n  AND ");
 }
 
@@ -126,9 +138,19 @@ function buildFinalizeWhere(siteId: string, range: AeRange, alias = ""): string 
   const prefix = alias ? `${alias}.` : "";
   return [
     `${prefix}index1 = ${sqlString(siteId)}`,
-    `${prefix}double6 >= ${LAYOUT_VERSION}`,
-    `${prefix}blob1 = 'visit_finalize'`,
-    `${prefix}double3 BETWEEN ${Math.floor(range.fromMs)} AND ${Math.floor(range.toMs)}`,
+    `${prefix}double3 = ${AE_LAYOUT_VERSION}`,
+    `${prefix}double8 = ${AE_ROW_TYPE_VISIT_FINALIZE}`,
+    `${prefix}double11 BETWEEN ${Math.floor(range.fromMs)} AND ${Math.floor(range.toMs)}`,
+  ].join("\n  AND ");
+}
+
+function buildCustomEventWhere(siteId: string, range: AeRange, alias = ""): string {
+  const prefix = alias ? `${alias}.` : "";
+  return [
+    `${prefix}index1 = ${sqlString(siteId)}`,
+    `${prefix}double3 = ${AE_LAYOUT_VERSION}`,
+    `${prefix}double8 = ${AE_ROW_TYPE_CUSTOM_EVENT}`,
+    `${prefix}double1 BETWEEN ${Math.floor(range.fromMs)} AND ${Math.floor(range.toMs)}`,
   ].join("\n  AND ");
 }
 
@@ -183,20 +205,16 @@ export async function queryAeOverview(
   range: AeRange,
   filters?: AeQueryFilters,
 ): Promise<AeOverviewRow> {
-  if (filters?.country || filters?.device || filters?.browser) {
-    throw new Error("Analytics Engine overview with filters is not supported");
-  }
-
-  const startWhere = buildStartWhere(siteId, range);
-  const finalizeWhere = buildFinalizeWhere(siteId, range);
+  const startWhere = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
+  const finalizeWhere = appendWhere(buildFinalizeWhere(siteId, range), buildVisitFilterClause(filters));
   const [summary, durationRow, bounceRow] = await Promise.all([
     runAeSql<Record<string, unknown>>(
       env,
       `
 SELECT
   count() AS views,
-  count(DISTINCT blob4) AS sessions,
-  count(DISTINCT blob3) AS visitors
+  count(DISTINCT blob3) AS sessions,
+  count(DISTINCT blob2) AS visitors
 FROM ${DATASET}
 WHERE ${startWhere}
 `,
@@ -217,11 +235,11 @@ WHERE ${finalizeWhere}
 SELECT
   count() AS bounces
 FROM (
-  SELECT blob4
+  SELECT blob3
   FROM ${DATASET}
   WHERE ${startWhere}
-    AND blob4 != ''
-  GROUP BY blob4
+    AND blob3 != ''
+  GROUP BY blob3
   HAVING count() = 1
 )
 `,
@@ -244,10 +262,6 @@ export async function queryAeTrend(
   interval: "minute" | "hour" | "day" | "week" | "month",
   filters?: AeQueryFilters,
 ): Promise<AeTrendRow[]> {
-  if (filters?.country || filters?.device || filters?.browser) {
-    throw new Error("Analytics Engine trend with filters is not supported");
-  }
-
   const bucketDivisor =
     interval === "minute"
       ? 60_000
@@ -259,16 +273,16 @@ export async function queryAeTrend(
             ? 604_800_000
             : 2_592_000_000;
 
-  const startWhere = buildStartWhere(siteId, range);
-  const finalizeWhere = buildFinalizeWhere(siteId, range);
+  const startWhere = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
+  const finalizeWhere = appendWhere(buildFinalizeWhere(siteId, range), buildVisitFilterClause(filters));
   const [startRows, durationRows, sessionRows] = await Promise.all([
     runAeSql<Record<string, unknown>>(
       env,
       `
 SELECT
-  floor(double3 / ${bucketDivisor}) AS bucket,
+  floor(double11 / ${bucketDivisor}) AS bucket,
   count() AS views,
-  count(DISTINCT blob3) AS visitors
+  count(DISTINCT blob2) AS visitors
 FROM ${DATASET}
 WHERE ${startWhere}
 GROUP BY bucket
@@ -279,7 +293,7 @@ ORDER BY bucket
       env,
       `
 SELECT
-  floor(double3 / ${bucketDivisor}) AS bucket,
+  floor(double11 / ${bucketDivisor}) AS bucket,
   sum(if(double2 IS NOT NULL AND double2 >= 0, double2, 0.0)) AS total_duration,
   sum(if(double2 IS NOT NULL AND double2 >= 0, 1, 0)) AS duration_views
 FROM ${DATASET}
@@ -297,13 +311,13 @@ SELECT
   sum(if(visit_count = 1, 1, 0)) AS bounces
 FROM (
   SELECT
-    blob4 AS session_id,
-    min(double3) AS session_started_at,
+    blob3 AS session_id,
+    min(double11) AS session_started_at,
     count() AS visit_count
   FROM ${DATASET}
   WHERE ${startWhere}
-    AND blob4 != ''
-  GROUP BY blob4
+    AND blob3 != ''
+  GROUP BY blob3
 )
 GROUP BY bucket
 ORDER BY bucket
@@ -369,7 +383,7 @@ async function queryAeVisitDimension(
 SELECT
   ${selectExpr} AS key,
   count() AS views,
-  count(DISTINCT blob4) AS sessions
+  count(DISTINCT blob3) AS sessions
 FROM ${DATASET}
 WHERE ${where}
 GROUP BY key
@@ -378,7 +392,7 @@ LIMIT ${clampLimit(limit, 30)}
 `;
 
   return (await runAeSql<Record<string, unknown>>(env, sql)).map((row) => ({
-    key: parseString(row.key),
+    key: typeof row.key === "number" && Number.isFinite(row.key) ? String(row.key) : parseString(row.key),
     views: parseNumber(row.views),
     sessions: parseNumber(row.sessions),
   }));
@@ -395,13 +409,13 @@ export async function queryAeTopPages(
   const where = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
   const sql = `
 SELECT
-  blob5 AS pathname,
-  ${includeDetails ? "blob6 AS query_string," : "'' AS query_string,"}
-  ${includeDetails ? "blob7 AS hash_fragment," : "'' AS hash_fragment,"}
-  argMax(blob20, double3) AS title,
-  argMax(blob8, double3) AS hostname,
+  blob4 AS pathname,
+  ${includeDetails ? "blob5 AS query_string," : "'' AS query_string,"}
+  ${includeDetails ? "blob6 AS hash_fragment," : "'' AS hash_fragment,"}
+  argMax(blob20, double11) AS title,
+  argMax(blob7, double11) AS hostname,
   count() AS views,
-  count(DISTINCT blob4) AS sessions
+  count(DISTINCT blob3) AS sessions
 FROM ${DATASET}
 WHERE ${where}
 GROUP BY pathname, query_string, hash_fragment
@@ -427,7 +441,7 @@ export async function queryAeTopPathnames(
   limit: number,
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
-  return queryAeVisitDimension(env, siteId, range, limit, "blob5", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob4", filters);
 }
 
 export async function queryAeTopTitles(
@@ -447,7 +461,7 @@ export async function queryAeTopHostnames(
   limit: number,
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
-  return queryAeVisitDimension(env, siteId, range, limit, "blob8", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob7", filters);
 }
 
 export async function queryAeEntryPages(
@@ -465,12 +479,12 @@ SELECT
   count() AS sessions
 FROM (
   SELECT
-    blob4 AS session_id,
-    argMin(blob5, double3) AS entry_path
+    blob3 AS session_id,
+    argMin(blob4, double11) AS entry_path
   FROM ${DATASET}
   WHERE ${where}
-    AND blob4 != ''
-  GROUP BY blob4
+    AND blob3 != ''
+  GROUP BY blob3
 )
 GROUP BY key
 ORDER BY views DESC
@@ -498,12 +512,12 @@ SELECT
   count() AS sessions
 FROM (
   SELECT
-    blob4 AS session_id,
-    argMax(blob5, double3) AS exit_path
+    blob3 AS session_id,
+    argMax(blob4, double11) AS exit_path
   FROM ${DATASET}
   WHERE ${where}
-    AND blob4 != ''
-  GROUP BY blob4
+    AND blob3 != ''
+  GROUP BY blob3
 )
 GROUP BY key
 ORDER BY views DESC
@@ -524,7 +538,7 @@ export async function queryAeReferrers(
   includeFullUrl: boolean,
   filters?: AeQueryFilters,
 ): Promise<AeReferrerRow[]> {
-  const keyExpr = includeFullUrl ? "blob9" : "blob10";
+  const keyExpr = includeFullUrl ? "blob8" : "blob9";
   const rows = await queryAeVisitDimension(env, siteId, range, limit, keyExpr, filters);
   return rows.map((row) => ({
     ref: row.key,
@@ -534,19 +548,36 @@ export async function queryAeReferrers(
 }
 
 export async function queryAeTopCountries(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "blob11", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob10", filters);
+}
+
+async function queryAeNumericDimension(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  selectExpr: string,
+  decode: (code: number) => string,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  const rows = await queryAeVisitDimension(env, siteId, range, limit, selectExpr, filters);
+  return rows.map((row) => ({
+    key: decode(parseIntKey(row.key)),
+    views: row.views,
+    sessions: row.sessions,
+  })).filter((row) => row.key);
 }
 
 export async function queryAeTopDevices(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "blob17", filters);
+  return queryAeNumericDimension(env, siteId, range, limit, "double9", decodeAeDeviceType, filters);
 }
 
 export async function queryAeTopBrowsers(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "blob14", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob13", filters);
 }
 
 export async function queryAeTopLanguages(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "blob18", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob16", filters);
 }
 
 export async function queryAeTopOsVersions(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
@@ -555,33 +586,39 @@ export async function queryAeTopOsVersions(env: Env, siteId: string, range: AeRa
     siteId,
     range,
     limit,
-    "trim(concat(blob15, ' ', blob16))",
+    "trim(concat(blob14, ' ', blob15))",
     filters,
   );
 }
 
 export async function queryAeTopTimezones(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "blob19", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob17", filters);
 }
 
-export async function queryAeTopScreenSizes(): Promise<AeDimensionRow[]> {
-  throw new Error("Analytics Engine screen size dimension is not supported");
+export async function queryAeTopScreenSizes(
+  env: Env,
+  siteId: string,
+  range: AeRange,
+  limit: number,
+  filters?: AeQueryFilters,
+): Promise<AeDimensionRow[]> {
+  return queryAeVisitDimension(env, siteId, range, limit, screenSizeExpr(), filters);
 }
 
 export async function queryAeTopRegions(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "blob12", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob11", filters);
 }
 
 export async function queryAeTopCities(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "blob13", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob12", filters);
 }
 
 export async function queryAeTopContinents(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "index2", filters);
+  return queryAeNumericDimension(env, siteId, range, limit, "double10", decodeAeContinent, filters);
 }
 
 export async function queryAeTopOrganizations(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(env, siteId, range, limit, "index3", filters);
+  return queryAeVisitDimension(env, siteId, range, limit, "blob18", filters);
 }
 
 export async function queryAeVisitorDetails(
@@ -594,14 +631,14 @@ export async function queryAeVisitorDetails(
   const where = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
   const sql = `
 SELECT
-  blob3 AS visitor_id,
-  min(double3) AS first_seen_at,
-  max(double3) AS last_seen_at,
+  blob2 AS visitor_id,
+  min(double11) AS first_seen_at,
+  max(double11) AS last_seen_at,
   count() AS views,
-  count(DISTINCT blob4) AS sessions
+  count(DISTINCT blob3) AS sessions
 FROM ${DATASET}
 WHERE ${where}
-  AND blob3 != ''
+  AND blob2 != ''
 GROUP BY visitor_id
 ORDER BY last_seen_at DESC
 LIMIT ${clampLimit(limit, 100)}
@@ -623,20 +660,15 @@ export async function queryAeCustomEventNames(
   limit: number,
   filters?: AeQueryFilters,
 ): Promise<AeDimensionRow[]> {
-  const clauses = [
-    `index1 = ${sqlString(siteId)}`,
-    `double6 >= ${LAYOUT_VERSION}`,
-    `blob1 = 'custom_event'`,
-    `double1 BETWEEN ${Math.floor(range.fromMs)} AND ${Math.floor(range.toMs)}`,
-  ];
-  if (filters?.country) clauses.push(`blob11 = ${sqlString(filters.country.trim())}`);
-  if (filters?.browser) clauses.push(`blob14 = ${sqlString(filters.browser.trim())}`);
-  if (filters?.device) clauses.push(`blob17 = ${sqlString(filters.device.trim())}`);
+  const clauses = [buildCustomEventWhere(siteId, range)];
+  if (filters?.country) clauses.push(`blob10 = ${sqlString(filters.country.trim())}`);
+  if (filters?.browser) clauses.push(`blob13 = ${sqlString(filters.browser.trim())}`);
+  if (filters?.device) clauses.push(`double9 = ${encodeAeDeviceType(filters.device)}`);
   const sql = `
 SELECT
   blob20 AS key,
   count() AS views,
-  count(DISTINCT blob4) AS sessions
+  count(DISTINCT blob3) AS sessions
 FROM ${DATASET}
 WHERE ${clauses.join("\n  AND ")}
 GROUP BY key
