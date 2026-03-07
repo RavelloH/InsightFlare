@@ -591,14 +591,30 @@ export async function queryAeTopLanguages(env: Env, siteId: string, range: AeRan
 }
 
 export async function queryAeTopOsVersions(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
-  return queryAeVisitDimension(
-    env,
-    siteId,
-    range,
-    limit,
-    "trim(concat(blob14, ' ', blob15))",
-    filters,
-  );
+  const where = appendWhere(buildStartWhere(siteId, range), buildVisitFilterClause(filters));
+  const sql = `
+SELECT
+  blob14 AS os,
+  blob15 AS os_version,
+  ${weightedCountExpr()} AS views,
+  count(DISTINCT blob3) AS sessions
+FROM ${DATASET}
+WHERE ${where}
+GROUP BY os, os_version
+ORDER BY views DESC
+LIMIT ${clampLimit(limit, 30)}
+`;
+
+  return (await runAeSql<Record<string, unknown>>(env, sql)).map((row) => {
+    const os = parseString(row.os).trim();
+    const osVersion = parseString(row.os_version).trim();
+    const key = os && osVersion ? `${os} ${osVersion}` : (os || osVersion);
+    return {
+      key,
+      views: parseNumber(row.views),
+      sessions: parseNumber(row.sessions),
+    };
+  }).filter((row) => row.key);
 }
 
 export async function queryAeTopTimezones(env: Env, siteId: string, range: AeRange, limit: number, filters?: AeQueryFilters) {
