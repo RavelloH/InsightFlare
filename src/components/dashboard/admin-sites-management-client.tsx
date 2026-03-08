@@ -134,7 +134,8 @@ export function AdminSitesManagementClient({
   }
 
   async function handleCreateSite() {
-    if (!selectedTeam?.id) return;
+    const team = selectedTeam;
+    if (!team?.id) return;
     if (name.trim().length < 2 || domain.trim().length < 3) {
       toast.error(t.invalidInput);
       return;
@@ -149,21 +150,24 @@ export function AdminSitesManagementClient({
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          teamId: selectedTeam.id,
+          teamId: team.id,
           name: name.trim(),
           domain: domain.trim(),
           publicSlug: publicSlug.trim() || undefined,
         }),
       });
       const payload = (await response.json()) as ApiResponse<SiteData>;
-      if (!response.ok || !payload.ok) {
+      if (!response.ok || !payload.ok || !payload.data) {
         throw new Error(payload.message || payload.error || t.createFailed);
       }
       setName("");
       setDomain("");
       setPublicSlug("");
-      await refreshSites();
       toast.success(t.createSuccess);
+      navigateWithTransition(
+        router,
+        `/${locale}/app/${team.slug}/${siteSlug(payload.data)}/settings`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : t.createFailed;
       toast.error(message || t.createFailed);

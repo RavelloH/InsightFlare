@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { RiAddLine } from "@remixicon/react";
 import { toast } from "sonner";
@@ -68,6 +68,9 @@ export function TeamSelect({
   const [teamSlug, setTeamSlug] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const openCreateDialogTimeoutRef = useRef<
+    ReturnType<typeof globalThis.setTimeout> | null
+  >(null);
 
   const selectedSlug = useMemo(
     () =>
@@ -76,6 +79,31 @@ export function TeamSelect({
         : options[0]?.slug || "",
     [options, activeTeamSlug],
   );
+
+  useEffect(() => {
+    return () => {
+      if (openCreateDialogTimeoutRef.current !== null) {
+        globalThis.clearTimeout(openCreateDialogTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function resetCreateDialogState() {
+    setTeamName("");
+    setTeamSlug("");
+    setSubmitError("");
+  }
+
+  function queueOpenCreateDialog() {
+    resetCreateDialogState();
+    if (openCreateDialogTimeoutRef.current !== null) {
+      globalThis.clearTimeout(openCreateDialogTimeoutRef.current);
+    }
+    openCreateDialogTimeoutRef.current = globalThis.setTimeout(() => {
+      openCreateDialogTimeoutRef.current = null;
+      setOpenCreateDialog(true);
+    }, 0);
+  }
 
   async function handleCreateTeam() {
     if (submitting) return;
@@ -120,7 +148,6 @@ export function TeamSelect({
 
   const createTeamDialog = (
     <Dialog
-      modal={false}
       open={openCreateDialog}
       onOpenChange={(next) => {
         if (!next && submitting) return;
@@ -130,7 +157,7 @@ export function TeamSelect({
         }
       }}
     >
-      <DialogContent>
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{copy.createTitle}</DialogTitle>
           <DialogDescription>{copy.createDescription}</DialogDescription>
@@ -208,12 +235,7 @@ export function TeamSelect({
           variant="outline"
           size="sm"
           className="w-full justify-start"
-          onClick={() => {
-            setTeamName("");
-            setTeamSlug("");
-            setSubmitError("");
-            setOpenCreateDialog(true);
-          }}
+          onClick={queueOpenCreateDialog}
         >
           <RiAddLine />
           <span>{copy.createHint}</span>
@@ -229,10 +251,7 @@ export function TeamSelect({
         value={selectedSlug}
         onValueChange={(value) => {
           if (value === CREATE_TEAM_VALUE) {
-            setTeamName("");
-            setTeamSlug("");
-            setSubmitError("");
-            setOpenCreateDialog(true);
+            queueOpenCreateDialog();
             return;
           }
           const next = options.find((option) => option.slug === value);

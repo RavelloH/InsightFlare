@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  RiAddLine,
   RiArrowDownLine,
   RiArrowDownSLine,
   RiArrowRightSLine,
@@ -25,6 +26,14 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Clickable } from "@/components/ui/clickable";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -158,9 +167,7 @@ function withSiteSlug(site: SiteData): SiteData & { slug: string } {
 
 function sortSitesForInitialOrder<
   T extends { id: string; name: string; overview?: SiteOverviewMetrics | null },
->(
-  sites: T[],
-): T[] {
+>(sites: T[]): T[] {
   return [...sites].sort((left, right) => {
     const leftViews = left.overview?.views ?? 0;
     const rightViews = right.overview?.views ?? 0;
@@ -302,8 +309,16 @@ async function fetchTeamDashboard(
     const { handleDemoRequest } = await import("@/lib/realtime/mock");
     const result = handleDemoRequest({
       path: "/api/private/team-dashboard",
-      params: { teamId, from: window.from, to: window.to, interval: window.interval },
-    }) as { ok: boolean; data?: { sites?: TeamDashboardSite[]; trend?: TeamDashboardTrendPoint[] } };
+      params: {
+        teamId,
+        from: window.from,
+        to: window.to,
+        interval: window.interval,
+      },
+    }) as {
+      ok: boolean;
+      data?: { sites?: TeamDashboardSite[]; trend?: TeamDashboardTrendPoint[] };
+    };
     return {
       sites: Array.isArray(result.data?.sites) ? result.data.sites : [],
       trend: Array.isArray(result.data?.trend) ? result.data.trend : [],
@@ -406,10 +421,17 @@ export function TeamManagementClient({
   const router = useRouter();
   const { window } = useDashboardQuery();
   const copy = messages.teamManagement;
+  const siteCreateCopy = messages.adminSites;
   const [sites, setSites] = useState<Array<SiteData & { slug: string }>>([]);
   const [siteOrder, setSiteOrder] = useState<string[]>([]);
   const [members, setMembers] = useState<MemberData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [createSiteDialogOpen, setCreateSiteDialogOpen] = useState(false);
+  const [createSiteName, setCreateSiteName] = useState("");
+  const [createSiteDomain, setCreateSiteDomain] = useState("");
+  const [createSitePublicSlug, setCreateSitePublicSlug] = useState("");
+  const [createSiteError, setCreateSiteError] = useState("");
+  const [creatingSite, setCreatingSite] = useState(false);
   const [currentTeamName, setCurrentTeamName] = useState(activeTeam.name);
   const [teamName, setTeamName] = useState(activeTeam.name);
   const [teamSlug, setTeamSlug] = useState(activeTeam.slug);
@@ -434,6 +456,7 @@ export function TeamManagementClient({
     to: window.to,
     interval: window.interval,
   }));
+  const canManageSites = activeTeam.membershipRole === "owner";
 
   useEffect(() => {
     if (activeTab !== "members") return;
@@ -460,6 +483,11 @@ export function TeamManagementClient({
   }, [activeTeam.id, activeTab]);
 
   useEffect(() => {
+    setCreateSiteDialogOpen(false);
+    setCreateSiteName("");
+    setCreateSiteDomain("");
+    setCreateSitePublicSlug("");
+    setCreateSiteError("");
     setCurrentTeamName(activeTeam.name);
     setTeamName(activeTeam.name);
     setTeamSlug(activeTeam.slug);
@@ -515,8 +543,12 @@ export function TeamManagementClient({
                 visitors: normalizeChangeRate(site.changeRates?.visitors),
                 sessions: normalizeChangeRate(site.changeRates?.sessions),
                 bounceRate: normalizeChangeRate(site.changeRates?.bounceRate),
-                avgDurationMs: normalizeChangeRate(site.changeRates?.avgDurationMs),
-                pagesPerSession: normalizeChangeRate(site.changeRates?.pagesPerSession),
+                avgDurationMs: normalizeChangeRate(
+                  site.changeRates?.avgDurationMs,
+                ),
+                pagesPerSession: normalizeChangeRate(
+                  site.changeRates?.pagesPerSession,
+                ),
               },
             ]),
           ),
@@ -560,6 +592,47 @@ export function TeamManagementClient({
   async function refreshMembers() {
     const nextMembers = await fetchTeamMembers(activeTeam.id);
     setMembers(nextMembers);
+  }
+
+  async function handleCreateSite() {
+    const team = activeTeam;
+    const name = createSiteName.trim();
+    const domain = createSiteDomain.trim();
+    const publicSlug = createSitePublicSlug.trim();
+
+    if (!team?.id) return;
+    if (name.length < 2 || domain.length < 3) {
+      setCreateSiteError(siteCreateCopy.invalidInput);
+      toast.error(siteCreateCopy.invalidInput);
+      return;
+    }
+
+    setCreatingSite(true);
+    setCreateSiteError("");
+    try {
+      const created = await postJson<SiteData>("/api/admin/site", {
+        teamId: team.id,
+        name,
+        domain,
+        publicSlug: publicSlug || undefined,
+      });
+      setCreateSiteDialogOpen(false);
+      setCreateSiteName("");
+      setCreateSiteDomain("");
+      setCreateSitePublicSlug("");
+      toast.success(siteCreateCopy.createSuccess);
+      navigateWithTransition(
+        router,
+        `${buildSitePath(locale, team.slug, getSiteSlug(created))}/settings`,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : siteCreateCopy.createFailed;
+      setCreateSiteError(message || siteCreateCopy.createFailed);
+      toast.error(message || siteCreateCopy.createFailed);
+    } finally {
+      setCreatingSite(false);
+    }
   }
 
   async function handleSaveTeamSettings() {
@@ -714,12 +787,7 @@ export function TeamManagementClient({
           visitors: siteValue.visitors,
         })),
       }));
-  }, [
-    teamTrend,
-    chartWindow.from,
-    chartWindow.to,
-    chartWindow.interval,
-  ]);
+  }, [teamTrend, chartWindow.from, chartWindow.to, chartWindow.interval]);
 
   const siteTrendById = useMemo(() => {
     const stepMs = intervalStepMs(chartWindow.interval);
@@ -788,41 +856,39 @@ export function TeamManagementClient({
     chartWindow.interval,
   ]);
 
-  const siteDashboardCards = useMemo(
-    () => {
-      const cards = sites.map((site) => {
-        const overview = siteOverviewById[site.id] ?? emptyOverviewMetrics();
-        const pagesPerSession =
-          overview.sessions > 0 ? overview.views / overview.sessions : 0;
-        return {
-          site,
-          overview,
-          pagesPerSession,
-          changeRates: siteChangeRatesById[site.id] ?? emptySiteMetricChangeRates(),
-          trend: siteTrendById[site.id] ?? [],
-        };
-      });
+  const siteDashboardCards = useMemo(() => {
+    const cards = sites.map((site) => {
+      const overview = siteOverviewById[site.id] ?? emptyOverviewMetrics();
+      const pagesPerSession =
+        overview.sessions > 0 ? overview.views / overview.sessions : 0;
+      return {
+        site,
+        overview,
+        pagesPerSession,
+        changeRates:
+          siteChangeRatesById[site.id] ?? emptySiteMetricChangeRates(),
+        trend: siteTrendById[site.id] ?? [],
+      };
+    });
 
-      if (siteOrder.length === 0) return cards;
+    if (siteOrder.length === 0) return cards;
 
-      const cardById = new Map(cards.map((card) => [card.site.id, card]));
-      const orderedCards = [] as typeof cards;
+    const cardById = new Map(cards.map((card) => [card.site.id, card]));
+    const orderedCards = [] as typeof cards;
 
-      for (const siteId of siteOrder) {
-        const card = cardById.get(siteId);
-        if (!card) continue;
-        orderedCards.push(card);
-        cardById.delete(siteId);
-      }
+    for (const siteId of siteOrder) {
+      const card = cardById.get(siteId);
+      if (!card) continue;
+      orderedCards.push(card);
+      cardById.delete(siteId);
+    }
 
-      if (cardById.size > 0) {
-        orderedCards.push(...Array.from(cardById.values()));
-      }
+    if (cardById.size > 0) {
+      orderedCards.push(...Array.from(cardById.values()));
+    }
 
-      return orderedCards;
-    },
-    [sites, siteOverviewById, siteChangeRatesById, siteTrendById, siteOrder],
-  );
+    return orderedCards;
+  }, [sites, siteOverviewById, siteChangeRatesById, siteTrendById, siteOrder]);
   const aggregateChartSites = useMemo(
     () =>
       siteDashboardCards.map(({ site }) => ({
@@ -906,9 +972,120 @@ export function TeamManagementClient({
                 </AutoTransition>
               </span>
             </Badge>
+            {activeTab === "sites" && canManageSites ? (
+              <Button
+                type="button"
+                onClick={() => {
+                  setCreateSiteName("");
+                  setCreateSiteDomain("");
+                  setCreateSitePublicSlug("");
+                  setCreateSiteError("");
+                  setCreateSiteDialogOpen(true);
+                }}
+              >
+                <RiAddLine />
+                <span>{siteCreateCopy.create}</span>
+              </Button>
+            ) : null}
           </>
         }
       />
+
+      <Dialog
+        open={createSiteDialogOpen}
+        onOpenChange={(next) => {
+          if (!next && creatingSite) return;
+          setCreateSiteDialogOpen(next);
+          if (!next) {
+            setCreateSiteError("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{siteCreateCopy.createTitle}</DialogTitle>
+            <DialogDescription>
+              {siteCreateCopy.createSubtitle}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateSite();
+            }}
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="team-dashboard-create-site-name">
+                {siteCreateCopy.name}
+              </Label>
+              <Input
+                id="team-dashboard-create-site-name"
+                value={createSiteName}
+                onChange={(event) => setCreateSiteName(event.target.value)}
+                minLength={2}
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="team-dashboard-create-site-domain">
+                {siteCreateCopy.domain}
+              </Label>
+              <Input
+                id="team-dashboard-create-site-domain"
+                value={createSiteDomain}
+                onChange={(event) => setCreateSiteDomain(event.target.value)}
+                minLength={3}
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="team-dashboard-create-site-public-slug">
+                {siteCreateCopy.publicSlug}
+              </Label>
+              <Input
+                id="team-dashboard-create-site-public-slug"
+                value={createSitePublicSlug}
+                onChange={(event) =>
+                  setCreateSitePublicSlug(event.target.value)
+                }
+              />
+            </div>
+
+            {createSiteError ? (
+              <p className="text-xs text-destructive">{createSiteError}</p>
+            ) : null}
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateSiteDialogOpen(false)}
+                disabled={creatingSite}
+              >
+                {messages.teamSelect.cancel}
+              </Button>
+              <Button type="submit" disabled={creatingSite}>
+                <AutoTransition className="inline-flex items-center gap-2">
+                  {creatingSite ? (
+                    <span
+                      key="creating-site"
+                      className="inline-flex items-center gap-2"
+                    >
+                      <Spinner className="size-4" />
+                      {siteCreateCopy.creating}
+                    </span>
+                  ) : (
+                    <span key="create-site">{siteCreateCopy.create}</span>
+                  )}
+                </AutoTransition>
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <div className="space-y-4">
         {activeTab === "sites" ? (
@@ -1035,7 +1212,9 @@ export function TeamManagementClient({
                               </p>
                               <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
                                 {numberFormat(locale, overview.visitors)}
-                                <ChangeRateInline value={changeRates.visitors} />
+                                <ChangeRateInline
+                                  value={changeRates.visitors}
+                                />
                               </p>
                             </div>
                             <div className="space-y-1">
@@ -1044,7 +1223,9 @@ export function TeamManagementClient({
                               </p>
                               <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
                                 {numberFormat(locale, overview.sessions)}
-                                <ChangeRateInline value={changeRates.sessions} />
+                                <ChangeRateInline
+                                  value={changeRates.sessions}
+                                />
                               </p>
                             </div>
                             <div className="space-y-1">
@@ -1053,7 +1234,9 @@ export function TeamManagementClient({
                               </p>
                               <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
                                 {percentFormat(locale, overview.bounceRate)}
-                                <ChangeRateInline value={changeRates.bounceRate} />
+                                <ChangeRateInline
+                                  value={changeRates.bounceRate}
+                                />
                               </p>
                             </div>
                             <div className="space-y-1">
@@ -1064,7 +1247,9 @@ export function TeamManagementClient({
                                 {pagesPerSessionFormatter.format(
                                   pagesPerSession,
                                 )}
-                                <ChangeRateInline value={changeRates.pagesPerSession} />
+                                <ChangeRateInline
+                                  value={changeRates.pagesPerSession}
+                                />
                               </p>
                             </div>
                             <div className="space-y-1">
@@ -1073,7 +1258,9 @@ export function TeamManagementClient({
                               </p>
                               <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
                                 {durationFormat(locale, overview.avgDurationMs)}
-                                <ChangeRateInline value={changeRates.avgDurationMs} />
+                                <ChangeRateInline
+                                  value={changeRates.avgDurationMs}
+                                />
                               </p>
                             </div>
                           </div>

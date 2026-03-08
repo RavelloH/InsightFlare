@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { type DateRange } from "react-day-picker";
 import NumberFlow, { continuous } from "@number-flow/react";
 import {
@@ -335,6 +335,9 @@ export function DashboardHeaderControls({
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const [mobileFilterDrawerOpen, setMobileFilterDrawerOpen] = useState(false);
   const [mobileTimeDrawerOpen, setMobileTimeDrawerOpen] = useState(false);
+  const openCustomDialogTimeoutRef = useRef<
+    ReturnType<typeof globalThis.setTimeout> | null
+  >(null);
   const [pendingCustomRange, setPendingCustomRange] = useState<
     DateRange | undefined
   >(selectedDateRange);
@@ -404,6 +407,24 @@ export function DashboardHeaderControls({
     pendingNormalized,
   ]);
 
+  useEffect(() => {
+    return () => {
+      if (openCustomDialogTimeoutRef.current !== null) {
+        globalThis.clearTimeout(openCustomDialogTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const queueOpenCustomDialog = () => {
+    if (openCustomDialogTimeoutRef.current !== null) {
+      globalThis.clearTimeout(openCustomDialogTimeoutRef.current);
+    }
+    openCustomDialogTimeoutRef.current = globalThis.setTimeout(() => {
+      openCustomDialogTimeoutRef.current = null;
+      setCustomDialogOpen(true);
+    }, 0);
+  };
+
   const handleRangeValueChange = (
     value: RangePreset,
     source: "desktop" | "mobile" = "desktop",
@@ -414,7 +435,7 @@ export function DashboardHeaderControls({
     if (source === "mobile") {
       setMobileTimeDrawerOpen(false);
     }
-    setCustomDialogOpen(true);
+    queueOpenCustomDialog();
   };
 
   const handleIntervalValueChange = (value: DashboardInterval) => {
@@ -846,11 +867,7 @@ export function DashboardHeaderControls({
         </div>
       </div>
 
-      <Dialog
-        modal={false}
-        open={customDialogOpen}
-        onOpenChange={setCustomDialogOpen}
-      >
+      <Dialog open={customDialogOpen} onOpenChange={setCustomDialogOpen}>
         <DialogContent className="w-fit">
           <DialogHeader>
             <DialogTitle>{messages.ranges.custom}</DialogTitle>
