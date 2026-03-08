@@ -52,6 +52,13 @@ interface ApiResponse<T> {
 }
 
 async function getUsers(): Promise<AccountUserData[]> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+    const { handleDemoRequest } = await import("@/lib/realtime/mock");
+    const result = handleDemoRequest({
+      path: "/api/private/admin/users",
+    }) as ApiResponse<AccountUserData[]>;
+    return Array.isArray(result.data) ? result.data : [];
+  }
   const response = await fetch("/api/private/admin/users", {
     method: "GET",
     credentials: "include",

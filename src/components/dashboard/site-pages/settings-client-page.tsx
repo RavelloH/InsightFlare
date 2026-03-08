@@ -115,6 +115,19 @@ async function postJson<T>(
   url: string,
   body: Record<string, unknown>,
 ): Promise<T> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+    const { handleDemoRequest } = await import("@/lib/realtime/mock");
+    const result = handleDemoRequest({
+      path: url.split("?")[0],
+      method: "POST",
+      params: Object.fromEntries(new URLSearchParams(url.split("?")[1] || "")),
+      body,
+    }) as ActionResponse<T>;
+    if (!result.ok || result.data === undefined) {
+      throw new Error(result.message || result.error || "request_failed");
+    }
+    return result.data;
+  }
   const response = await fetch(url, {
     method: "POST",
     credentials: "include",
@@ -236,34 +249,50 @@ export function SettingsClientPage({
     let active = true;
     setLoadingSettings(true);
 
-    fetch(
-      `/api/private/admin/site-config?siteId=${encodeURIComponent(site.id)}`,
-      {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      },
-    )
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("load_site_config_failed");
-        }
-        const payload = (await response.json()) as SiteConfigPayload;
-        if (!payload.ok) {
-          throw new Error("load_site_config_failed");
-        }
+    const loadConfig = async () => {
+      if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+        const { handleDemoRequest } = await import("@/lib/realtime/mock");
+        const result = handleDemoRequest({
+          path: "/api/private/admin/site-config",
+          params: { siteId: site.id },
+        }) as SiteConfigPayload;
         if (!active) return;
-        applyTrackerSettings(payload.data ?? DEFAULT_SITE_SCRIPT_SETTINGS);
-      })
-      .catch(() => {
-        if (!active) return;
-        applyTrackerSettings(DEFAULT_SITE_SCRIPT_SETTINGS);
-        toast.error(copy.toasts.settingsLoadFailed);
-      })
-      .finally(() => {
-        if (!active) return;
+        applyTrackerSettings(result.data ?? DEFAULT_SITE_SCRIPT_SETTINGS);
         setLoadingSettings(false);
-      });
+        return;
+      }
+
+      fetch(
+        `/api/private/admin/site-config?siteId=${encodeURIComponent(site.id)}`,
+        {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        },
+      )
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error("load_site_config_failed");
+          }
+          const payload = (await response.json()) as SiteConfigPayload;
+          if (!payload.ok) {
+            throw new Error("load_site_config_failed");
+          }
+          if (!active) return;
+          applyTrackerSettings(payload.data ?? DEFAULT_SITE_SCRIPT_SETTINGS);
+        })
+        .catch(() => {
+          if (!active) return;
+          applyTrackerSettings(DEFAULT_SITE_SCRIPT_SETTINGS);
+          toast.error(copy.toasts.settingsLoadFailed);
+        })
+        .finally(() => {
+          if (!active) return;
+          setLoadingSettings(false);
+        });
+    };
+
+    loadConfig();
 
     return () => {
       active = false;
@@ -275,34 +304,50 @@ export function SettingsClientPage({
     setLoadingScript(true);
     setScriptSnippet("");
 
-    fetch(
-      `/api/private/admin/script-snippet?siteId=${encodeURIComponent(site.id)}`,
-      {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      },
-    )
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("load_script_snippet_failed");
-        }
-        const payload = (await response.json()) as ScriptSnippetPayload;
-        if (!payload.ok || !payload.data?.snippet) {
-          throw new Error("load_script_snippet_failed");
-        }
+    const loadSnippet = async () => {
+      if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+        const { handleDemoRequest } = await import("@/lib/realtime/mock");
+        const result = handleDemoRequest({
+          path: "/api/private/admin/script-snippet",
+          params: { siteId: site.id },
+        }) as ScriptSnippetPayload;
         if (!active) return;
-        setScriptSnippet(payload.data.snippet);
-      })
-      .catch(() => {
-        if (!active) return;
-        setScriptSnippet("");
-        toast.error(copy.toasts.scriptLoadFailed);
-      })
-      .finally(() => {
-        if (!active) return;
+        setScriptSnippet(result.data?.snippet || "");
         setLoadingScript(false);
-      });
+        return;
+      }
+
+      fetch(
+        `/api/private/admin/script-snippet?siteId=${encodeURIComponent(site.id)}`,
+        {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        },
+      )
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error("load_script_snippet_failed");
+          }
+          const payload = (await response.json()) as ScriptSnippetPayload;
+          if (!payload.ok || !payload.data?.snippet) {
+            throw new Error("load_script_snippet_failed");
+          }
+          if (!active) return;
+          setScriptSnippet(payload.data.snippet);
+        })
+        .catch(() => {
+          if (!active) return;
+          setScriptSnippet("");
+          toast.error(copy.toasts.scriptLoadFailed);
+        })
+        .finally(() => {
+          if (!active) return;
+          setLoadingScript(false);
+        });
+    };
+
+    loadSnippet();
 
     return () => {
       active = false;

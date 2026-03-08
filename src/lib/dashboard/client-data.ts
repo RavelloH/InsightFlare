@@ -133,6 +133,10 @@ function toQueryString(params?: Record<string, string | number>): string {
 }
 
 async function fetchPrivateJson<T>(path: string, params?: Record<string, string | number>): Promise<T> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+    const { handleDemoRequest } = await import("@/lib/realtime/mock");
+    return handleDemoRequest({ path, params }) as T;
+  }
   const res = await fetch(`${path}${toQueryString(params)}`, {
     method: "GET",
     credentials: "include",

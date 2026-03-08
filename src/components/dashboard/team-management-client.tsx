@@ -298,6 +298,17 @@ async function fetchTeamDashboard(
   teamId: string,
   window: Pick<TimeWindow, "from" | "to" | "interval">,
 ): Promise<TeamDashboardData> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+    const { handleDemoRequest } = await import("@/lib/realtime/mock");
+    const result = handleDemoRequest({
+      path: "/api/private/team-dashboard",
+      params: { teamId, from: window.from, to: window.to, interval: window.interval },
+    }) as { ok: boolean; data?: { sites?: TeamDashboardSite[]; trend?: TeamDashboardTrendPoint[] } };
+    return {
+      sites: Array.isArray(result.data?.sites) ? result.data.sites : [],
+      trend: Array.isArray(result.data?.trend) ? result.data.trend : [],
+    };
+  }
   const params = new URLSearchParams({
     teamId,
     from: String(window.from),
@@ -329,6 +340,14 @@ async function fetchTeamDashboard(
 }
 
 async function fetchTeamMembers(teamId: string): Promise<MemberData[]> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+    const { handleDemoRequest } = await import("@/lib/realtime/mock");
+    const result = handleDemoRequest({
+      path: "/api/private/admin/members",
+      params: { teamId },
+    }) as { ok: boolean; data?: MemberData[] };
+    return Array.isArray(result.data) ? result.data : [];
+  }
   const url = `/api/private/admin/members?teamId=${encodeURIComponent(teamId)}`;
   const response = await fetch(url, {
     method: "GET",
@@ -354,6 +373,15 @@ async function postJson<T>(
   url: string,
   body: Record<string, unknown>,
 ): Promise<T> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+    const { handleDemoRequest } = await import("@/lib/realtime/mock");
+    const result = handleDemoRequest({
+      path: url,
+      method: "POST",
+      body,
+    }) as ActionResponse<T>;
+    return (result.data ?? {}) as T;
+  }
   const response = await fetch(url, {
     method: "POST",
     credentials: "include",

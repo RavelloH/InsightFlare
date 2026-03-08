@@ -33,6 +33,7 @@ async function readServerCookieHeader(): Promise<string> {
 }
 
 export async function getSessionToken(): Promise<string> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") return "demo-token";
   if (typeof document !== "undefined") {
     return parseCookieValue(document.cookie || "", SESSION_COOKIE);
   }
@@ -41,11 +42,21 @@ export async function getSessionToken(): Promise<string> {
 }
 
 export async function getSession(): Promise<DashboardSession | null> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+    return {
+      userId: "demo-user-001",
+      username: "demo",
+      displayName: "Demo User",
+      systemRole: "admin",
+      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365,
+    };
+  }
   const token = await getSessionToken();
   return verifySessionToken(token);
 }
 
 export async function isAuthenticated(): Promise<boolean> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") return true;
   const session = await getSession();
   return Boolean(session);
 }

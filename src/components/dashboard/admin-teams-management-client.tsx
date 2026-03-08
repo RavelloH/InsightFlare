@@ -36,6 +36,13 @@ interface ApiResponse<T> {
 }
 
 async function fetchTeams(): Promise<TeamData[]> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+    const { handleDemoRequest } = await import("@/lib/realtime/mock");
+    const result = handleDemoRequest({
+      path: "/api/private/admin/teams",
+    }) as ApiResponse<TeamData[]>;
+    return Array.isArray(result.data) ? result.data : [];
+  }
   const response = await fetch("/api/private/admin/teams", {
     method: "GET",
     credentials: "include",

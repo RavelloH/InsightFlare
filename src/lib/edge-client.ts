@@ -62,6 +62,15 @@ function withFilters(
 }
 
 async function fetchEdgeJson<T>(options: FetchEdgeOptions): Promise<T> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+    const { handleDemoRequest } = await import("@/lib/realtime/mock");
+    return handleDemoRequest({
+      path: options.path,
+      method: options.method,
+      params: options.params as Record<string, string | number> | undefined,
+      body: options.body,
+    }) as T;
+  }
   const method = options.method || "GET";
   const baseUrl = await edgeBaseUrl();
   const url = withQuery(new URL(options.path, baseUrl), options.params);

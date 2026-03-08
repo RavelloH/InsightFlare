@@ -1,5 +1,5 @@
 import { broadcastRealtimeMessage } from "@/lib/realtime/broadcast-store";
-import { createMockRealtimeSocket, type RealtimeSocketLike } from "@/lib/realtime/mock";
+import type { RealtimeSocketLike } from "@/lib/realtime/mock";
 import type {
   RealtimeChannelState,
   RealtimeConnectionState,
@@ -21,6 +21,7 @@ const SOCKET_STATE = {
 } as const;
 
 const USE_REALTIME_MOCK =
+  process.env.NEXT_PUBLIC_DEMO_MODE === "1" ||
   process.env.NEXT_PUBLIC_REALTIME_MOCK === "1" ||
   (process.env.NEXT_PUBLIC_REALTIME_MOCK !== "0" &&
     process.env.NODE_ENV !== "production");
@@ -160,17 +161,27 @@ function stopChannel(channel: ChannelContext): void {
 function connect(channel: ChannelContext): void {
   if (channel.refCount <= 0) return;
 
-  let hasOpened = false;
   setChannelStatus(channel, "connecting");
 
   if (USE_REALTIME_MOCK) {
-    channel.socket = createMockRealtimeSocket({
-      siteId: channel.siteId,
-      activeWindowMs: ACTIVE_WINDOW_MS,
+    import("@/lib/realtime/mock").then(({ createMockRealtimeSocket }) => {
+      if (channel.refCount <= 0) return;
+      channel.socket = createMockRealtimeSocket({
+        siteId: channel.siteId,
+        activeWindowMs: ACTIVE_WINDOW_MS,
+      });
+      attachSocketHandlers(channel);
     });
   } else {
     channel.socket = new WebSocket(toRealtimeWsUrl(channel.siteId));
+    attachSocketHandlers(channel);
   }
+}
+
+function attachSocketHandlers(channel: ChannelContext): void {
+  if (!channel.socket) return;
+
+  let hasOpened = false;
 
   channel.connectWatchdog = setTimeout(() => {
     if (channel.refCount <= 0) return;

@@ -62,6 +62,14 @@ function siteSlug(site: SiteData): string {
 }
 
 async function fetchSites(teamId: string): Promise<SiteData[]> {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
+    const { handleDemoRequest } = await import("@/lib/realtime/mock");
+    const result = handleDemoRequest({
+      path: "/api/private/admin/sites",
+      params: { teamId },
+    }) as ApiResponse<SiteData[]>;
+    return Array.isArray(result.data) ? result.data : [];
+  }
   const response = await fetch(`/api/private/admin/sites?teamId=${encodeURIComponent(teamId)}`, {
     method: "GET",
     credentials: "include",
