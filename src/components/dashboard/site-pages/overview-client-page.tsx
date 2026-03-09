@@ -294,6 +294,7 @@ interface PageCardRow {
     regionLabel: string;
     countryCode: string;
     stateCode: string;
+    hideRegion: boolean;
   };
   cityBreadcrumb?: {
     countryLabel: string;
@@ -303,6 +304,7 @@ interface PageCardRow {
     countryCode: string;
     stateCode: string;
     cityNameDefault: string;
+    hideRegion: boolean;
     hideCity: boolean;
   };
 }
@@ -691,6 +693,7 @@ function resolveGeoRegionBreadcrumbData(
     regionLabel: string;
     countryCode: string;
     stateCode: string;
+    hideRegion: boolean;
   };
 } {
   const normalized = value.trim();
@@ -705,6 +708,7 @@ function resolveGeoRegionBreadcrumbData(
       : segments.length >= 2
         ? segments[1] || ""
         : normalized;
+  const hasRegion = Boolean(rawStateCode.trim() || rawStateName.trim());
 
   const regionLabel = normalizeDimensionLabel(rawStateName, unknownLabel);
   const { label: countryLabel, code } = resolveCountryLabel(
@@ -718,14 +722,17 @@ function resolveGeoRegionBreadcrumbData(
     : null;
 
   return {
-    displayLabel: `${countryLabel} > ${regionLabel}`,
-    filterValue: rawStateCode || regionLabel,
+    displayLabel: hasRegion ? `${countryLabel} > ${regionLabel}` : countryLabel,
+    filterValue: hasRegion
+      ? rawStateCode || regionLabel
+      : rawCountry.toUpperCase() || countryLabel,
     breadcrumb: {
       countryLabel,
       countryIconName,
       regionLabel,
       countryCode: rawCountry.toUpperCase(),
-      stateCode: rawStateCode || regionLabel,
+      stateCode: rawStateCode,
+      hideRegion: !hasRegion,
     },
   };
 }
@@ -745,6 +752,7 @@ function resolveGeoCityBreadcrumbData(
     countryCode: string;
     stateCode: string;
     cityNameDefault: string;
+    hideRegion: boolean;
     hideCity: boolean;
   } | null;
 } {
@@ -770,8 +778,8 @@ function resolveGeoCityBreadcrumbData(
     segments.length >= 4
       ? segments.slice(3).join(GEO_REGION_VALUE_SEPARATOR).trim()
       : segments.slice(2).join(GEO_REGION_VALUE_SEPARATOR).trim();
-
-  const hideCity = isSameGeoLabel(rawStateName, rawCity);
+  const hasRegion = Boolean(rawStateCode.trim() || rawStateName.trim());
+  const hideRegion = !hasRegion;
   const regionLabel = normalizeDimensionLabel(rawStateName, unknownLabel);
   const cityLabel = normalizeDimensionLabel(rawCity, unknownLabel);
   const { label: countryLabel, code } = resolveCountryLabel(
@@ -783,11 +791,18 @@ function resolveGeoCityBreadcrumbData(
   const countryIconName = flagCode
     ? `flagpack:${flagCode.toLowerCase()}`
     : null;
+  const hideCity =
+    isSameGeoLabel(rawStateName, rawCity) ||
+    (hideRegion && isSameGeoLabel(countryLabel, cityLabel));
 
   return {
-    displayLabel: hideCity
-      ? `${countryLabel} > ${regionLabel}`
-      : `${countryLabel} > ${regionLabel} > ${cityLabel}`,
+    displayLabel: hideRegion
+      ? hideCity
+        ? countryLabel
+        : `${countryLabel} > ${cityLabel}`
+      : hideCity
+        ? `${countryLabel} > ${regionLabel}`
+        : `${countryLabel} > ${regionLabel} > ${cityLabel}`,
     filterValue: rawCity || cityLabel,
     breadcrumb: {
       countryLabel,
@@ -795,8 +810,9 @@ function resolveGeoCityBreadcrumbData(
       regionLabel,
       cityLabel,
       countryCode: rawCountry.toUpperCase(),
-      stateCode: rawStateCode || regionLabel,
+      stateCode: rawStateCode,
       cityNameDefault: rawCity || cityLabel,
+      hideRegion,
       hideCity,
     },
   };
@@ -841,6 +857,10 @@ function resolveGeoLocationQueryValue(
     }
     const breadcrumb = row.regionBreadcrumb;
     if (!breadcrumb) return null;
+    if (breadcrumb.hideRegion) {
+      const country = breadcrumb.countryCode.trim().toUpperCase();
+      return country || null;
+    }
     if (
       normalizeGeoTranslationLookupValue(breadcrumb.regionLabel) === unknown ||
       normalizeGeoTranslationLookupValue(breadcrumb.countryCode) === unknown
@@ -856,6 +876,17 @@ function resolveGeoLocationQueryValue(
 
   const breadcrumb = row.cityBreadcrumb;
   if (!breadcrumb) return null;
+  if (breadcrumb.hideRegion) {
+    const country = breadcrumb.countryCode.trim().toUpperCase();
+    if (!country) return null;
+    if (
+      normalizeGeoTranslationLookupValue(breadcrumb.cityNameDefault) === unknown
+    ) {
+      return country;
+    }
+    if (breadcrumb.hideCity) return country;
+    return `${country}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.cityNameDefault}`;
+  }
   if (
     normalizeGeoTranslationLookupValue(breadcrumb.cityNameDefault) ===
       unknown ||
@@ -1107,6 +1138,7 @@ function RegionBreadcrumbLabel({
   regionLabel,
   countryCode,
   stateCode,
+  hideRegion,
 }: {
   locale: Locale;
   countryLabel: string;
@@ -1114,13 +1146,14 @@ function RegionBreadcrumbLabel({
   regionLabel: string;
   countryCode: string;
   stateCode: string;
+  hideRegion: boolean;
 }) {
   const { ref: visibilityRef, isInView } = useInViewOnce();
   const translationBundle = useGeoStateTranslationBundle({
     locale,
     countryCode,
     stateCode,
-    enabled: isInView,
+    enabled: isInView && !hideRegion,
   });
   const localizedRegionLabel =
     translationBundle?.stateName.trim() || regionLabel;
@@ -1144,14 +1177,16 @@ function RegionBreadcrumbLabel({
               <span className="truncate leading-5">{countryLabel}</span>
             </BreadcrumbPage>
           </BreadcrumbItem>
-          <BreadcrumbItem className="min-w-0">
-            <span className="shrink-0 text-muted-foreground" aria-hidden="true">
-              {">"}
-            </span>
-            <BreadcrumbPage className="block truncate leading-5">
-              <AutoTransition>{localizedRegionLabel}</AutoTransition>
-            </BreadcrumbPage>
-          </BreadcrumbItem>
+          {hideRegion ? null : (
+            <BreadcrumbItem className="min-w-0">
+              <span className="shrink-0 text-muted-foreground" aria-hidden="true">
+                {">"}
+              </span>
+              <BreadcrumbPage className="block truncate leading-5">
+                <AutoTransition>{localizedRegionLabel}</AutoTransition>
+              </BreadcrumbPage>
+            </BreadcrumbItem>
+          )}
         </BreadcrumbList>
       </Breadcrumb>
     </span>
@@ -1167,6 +1202,7 @@ function CityBreadcrumbLabel({
   countryCode,
   stateCode,
   cityNameDefault,
+  hideRegion,
   hideCity,
 }: {
   locale: Locale;
@@ -1177,6 +1213,7 @@ function CityBreadcrumbLabel({
   countryCode: string;
   stateCode: string;
   cityNameDefault: string;
+  hideRegion: boolean;
   hideCity: boolean;
 }) {
   const { ref: visibilityRef, isInView } = useInViewOnce();
@@ -1184,14 +1221,16 @@ function CityBreadcrumbLabel({
     locale,
     countryCode,
     stateCode,
-    enabled: isInView,
+    enabled: isInView && !hideRegion,
   });
   const localizedRegionLabel =
     translationBundle?.stateName.trim() || regionLabel;
   const localizedCityLabel =
     resolveLocalizedCityName(translationBundle, cityNameDefault) || cityLabel;
   const shouldHideCity =
-    hideCity || isSameGeoLabel(localizedRegionLabel, localizedCityLabel);
+    hideCity ||
+    (!hideRegion && isSameGeoLabel(localizedRegionLabel, localizedCityLabel)) ||
+    (hideRegion && isSameGeoLabel(countryLabel, localizedCityLabel));
 
   return (
     <span ref={visibilityRef} className="block">
@@ -1212,15 +1251,20 @@ function CityBreadcrumbLabel({
               <span className="truncate">{countryLabel}</span>
             </BreadcrumbPage>
           </BreadcrumbItem>
-          <span className="shrink-0 text-muted-foreground" aria-hidden="true">
-            {">"}
-          </span>
           <AutoTransition className="flex gap-1">
-            <BreadcrumbItem className="min-w-0" key={localizedRegionLabel}>
-              <BreadcrumbPage className="block truncate leading-5">
-                {localizedRegionLabel}
-              </BreadcrumbPage>
-            </BreadcrumbItem>
+            {hideRegion ? null : (
+              <BreadcrumbItem className="min-w-0" key={localizedRegionLabel}>
+                <span
+                  className="shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                >
+                  {">"}
+                </span>
+                <BreadcrumbPage className="block truncate leading-5">
+                  {localizedRegionLabel}
+                </BreadcrumbPage>
+              </BreadcrumbItem>
+            )}
             {shouldHideCity ? null : (
               <BreadcrumbItem className="min-w-0">
                 <span
@@ -3323,6 +3367,7 @@ function OverviewPagesSection({
                     regionLabel={item.regionBreadcrumb.regionLabel}
                     countryCode={item.regionBreadcrumb.countryCode}
                     stateCode={item.regionBreadcrumb.stateCode}
+                    hideRegion={item.regionBreadcrumb.hideRegion}
                   />
                 ) : geoDimensionCardTab === "city" && item.cityBreadcrumb ? (
                   <CityBreadcrumbLabel
@@ -3334,6 +3379,7 @@ function OverviewPagesSection({
                     countryCode={item.cityBreadcrumb.countryCode}
                     stateCode={item.cityBreadcrumb.stateCode}
                     cityNameDefault={item.cityBreadcrumb.cityNameDefault}
+                    hideRegion={item.cityBreadcrumb.hideRegion}
                     hideCity={item.cityBreadcrumb.hideCity}
                   />
                 ) : (
