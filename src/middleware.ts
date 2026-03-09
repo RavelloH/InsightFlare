@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/constants";
-import { verifySessionToken } from "@/lib/session";
+import { configuredSessionSecret, verifySessionToken } from "@/lib/session";
 import {
   SUPPORTED_LOCALES,
   DEFAULT_LOCALE,
@@ -10,29 +10,38 @@ import {
 } from "@/lib/i18n/config";
 import { isValidLocale } from "@/lib/i18n/config";
 
-async function isAuthenticated(request: NextRequest): Promise<boolean> {
-  const token = request.cookies.get(SESSION_COOKIE)?.value || "";
-  if (!token) return false;
+type AuthState = "authenticated" | "unauthenticated" | "unknown";
 
-  const session = await verifySessionToken(token);
-  if (!session) return false;
-
-  const url = request.nextUrl.clone();
-  url.pathname = "/api/private/admin/auth/me";
-  url.search = "";
+async function resolveSessionSecretForMiddleware(): Promise<string | null> {
+  const fromProcess = configuredSessionSecret();
+  if (fromProcess) return fromProcess;
 
   try {
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: {
-        authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    });
-    return response.ok;
+    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+    const context = await getCloudflareContext({ async: true });
+    const env = context.env as Record<string, unknown>;
+    const fromCloudflare = String(
+      env.DASHBOARD_SESSION_SECRET || env.SESSION_SECRET || "",
+    );
+    if (fromCloudflare.length > 0) {
+      return fromCloudflare;
+    }
   } catch {
-    return false;
+    // No Cloudflare runtime context available.
   }
+
+  return null;
+}
+
+async function authState(request: NextRequest): Promise<AuthState> {
+  const token = request.cookies.get(SESSION_COOKIE)?.value || "";
+  if (!token) return "unauthenticated";
+
+  const secret = await resolveSessionSecretForMiddleware();
+  if (!secret) return "unknown";
+
+  const session = await verifySessionToken(token, secret);
+  return session ? "authenticated" : "unauthenticated";
 }
 
 function getLocale(request: NextRequest): string {
@@ -144,12 +153,12 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     return demoResponse;
   }
 
-  let authenticated: boolean | null = null;
-  const ensureAuthenticated = async (): Promise<boolean> => {
-    if (authenticated === null) {
-      authenticated = await isAuthenticated(request);
+  let state: AuthState | null = null;
+  const ensureAuthState = async (): Promise<AuthState> => {
+    if (!state) {
+      state = await authState(request);
     }
-    return authenticated;
+    return state;
   };
   const normalizedPathname = normalizePathname(pathname);
   const localeFromPath = pathnameHasLocale(pathname) ? pathname.split("/")[1] : null;
@@ -160,14 +169,14 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
   // API routes — no locale handling, just auth checks
   if (pathname.startsWith("/api/admin")) {
-    if (!(await ensureAuthenticated())) {
+    if ((await ensureAuthState()) !== "authenticated") {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
     return NextResponse.next();
   }
 
   if (pathname.startsWith("/api/archive")) {
-    if (!(await ensureAuthenticated())) {
+    if ((await ensureAuthState()) !== "authenticated") {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
     return NextResponse.next();
@@ -187,7 +196,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
   // Protected routes under /[locale]/app/*
   if (restPath.startsWith("/app")) {
-    if (!(await ensureAuthenticated())) {
+    if ((await ensureAuthState()) === "unauthenticated") {
       const url = request.nextUrl.clone();
       url.pathname = `/${localeFromPath}/login`;
       url.searchParams.set("next", `${pathname}${search}`);
@@ -203,7 +212,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  if (restPath === "/login" && (await ensureAuthenticated())) {
+  if (restPath === "/login" && (await ensureAuthState()) === "authenticated") {
     return redirectWithPath(request, `/${localeFromPath}/app`, { preserveSearch: false });
   }
 

@@ -9,6 +9,14 @@ export interface DashboardSession {
 }
 
 function sessionSecret(): string {
+  const configured = configuredSessionSecret();
+  if (configured) {
+    return configured;
+  }
+  return "insightflare-session-secret-change-me";
+}
+
+export function configuredSessionSecret(): string | null {
   const fromEnv =
     process.env.DASHBOARD_SESSION_SECRET ||
     process.env.SESSION_SECRET ||
@@ -16,7 +24,7 @@ function sessionSecret(): string {
   if (fromEnv.length > 0) {
     return fromEnv;
   }
-  return "insightflare-session-secret-change-me";
+  return null;
 }
 
 function bytes(input: string): Uint8Array {
@@ -85,7 +93,10 @@ export async function createSessionToken(
   return `${encodedPayload}.${base64UrlEncode(signature)}`;
 }
 
-export async function verifySessionToken(token: string | null | undefined): Promise<DashboardSession | null> {
+export async function verifySessionToken(
+  token: string | null | undefined,
+  secretOverride?: string,
+): Promise<DashboardSession | null> {
   if (!token || token.length < 20) {
     return null;
   }
@@ -94,7 +105,7 @@ export async function verifySessionToken(token: string | null | undefined): Prom
     return null;
   }
 
-  const expectedSig = await hmacSha256(payloadPart, sessionSecret());
+  const expectedSig = await hmacSha256(payloadPart, secretOverride || sessionSecret());
   let actualSig: Uint8Array;
   try {
     actualSig = base64UrlDecode(signaturePart);
