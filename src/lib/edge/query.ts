@@ -1850,8 +1850,8 @@ filtered_visits AS (
   SELECT
     session_id AS sessionId,
     country,
-    region,
-    city,
+    ${regionValueExpr()} AS region,
+    ${cityValueExpr()} AS city,
     continent,
     timezone,
     as_organization AS asOrganization
@@ -1921,8 +1921,8 @@ filtered_visits AS (
     screen_width AS screenWidth,
     screen_height AS screenHeight,
     country,
-    region,
-    city,
+    ${regionValueExpr()} AS region,
+    ${cityValueExpr()} AS city,
     continent,
     timezone,
     as_organization AS asOrganization
