@@ -12,8 +12,27 @@ import { isValidLocale } from "@/lib/i18n/config";
 
 async function isAuthenticated(request: NextRequest): Promise<boolean> {
   const token = request.cookies.get(SESSION_COOKIE)?.value || "";
+  if (!token) return false;
+
   const session = await verifySessionToken(token);
-  return Boolean(session);
+  if (!session) return false;
+
+  const url = request.nextUrl.clone();
+  url.pathname = "/api/private/admin/auth/me";
+  url.search = "";
+
+  try {
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 function getLocale(request: NextRequest): string {
@@ -125,7 +144,13 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     return demoResponse;
   }
 
-  const authenticated = await isAuthenticated(request);
+  let authenticated: boolean | null = null;
+  const ensureAuthenticated = async (): Promise<boolean> => {
+    if (authenticated === null) {
+      authenticated = await isAuthenticated(request);
+    }
+    return authenticated;
+  };
   const normalizedPathname = normalizePathname(pathname);
   const localeFromPath = pathnameHasLocale(pathname) ? pathname.split("/")[1] : null;
 
@@ -135,14 +160,14 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
   // API routes — no locale handling, just auth checks
   if (pathname.startsWith("/api/admin")) {
-    if (!authenticated) {
+    if (!(await ensureAuthenticated())) {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
     return NextResponse.next();
   }
 
   if (pathname.startsWith("/api/archive")) {
-    if (!authenticated) {
+    if (!(await ensureAuthenticated())) {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
     return NextResponse.next();
@@ -162,7 +187,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
   // Protected routes under /[locale]/app/*
   if (restPath.startsWith("/app")) {
-    if (!authenticated) {
+    if (!(await ensureAuthenticated())) {
       const url = request.nextUrl.clone();
       url.pathname = `/${localeFromPath}/login`;
       url.searchParams.set("next", `${pathname}${search}`);
@@ -178,7 +203,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  if (restPath === "/login" && authenticated) {
+  if (restPath === "/login" && (await ensureAuthenticated())) {
     return redirectWithPath(request, `/${localeFromPath}/app`, { preserveSearch: false });
   }
 
