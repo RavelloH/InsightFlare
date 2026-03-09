@@ -1,9 +1,9 @@
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
+import { normalizeSiteSettingsKey, readSiteTrackingConfig } from "@/lib/edge/site-settings-store";
 import type { IngestEnvelopePayload, SerializedRequestPayload, TrackerClientPayload } from "@/lib/edge/types";
 import { jsonCloneRecord } from "@/lib/edge/utils";
 
-const CORS_HEADERS = {
-  "access-control-allow-origin": "*",
+const CORS_BASE_HEADERS = {
   "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
   "access-control-allow-headers": "content-type, authorization",
   "access-control-max-age": "86400",
@@ -46,8 +46,121 @@ function serializeRequestPayload(request: Request, body: string): SerializedRequ
   };
 }
 
-export async function OPTIONS(): Promise<Response> {
-  return new Response(null, { status: 204, headers: CORS_HEADERS });
+function parseOrigin(request: Request): string | null {
+  const raw = (request.headers.get("origin") || "").trim();
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
+}
+
+function parseOriginHostname(origin: string | null): string {
+  if (!origin) return "";
+  try {
+    return new URL(origin).hostname.trim().toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function toCorsHeaders(origin: string | null): Record<string, string> {
+  if (!origin) {
+    return {
+      ...CORS_BASE_HEADERS,
+      vary: "Origin",
+    };
+  }
+  return {
+    ...CORS_BASE_HEADERS,
+    "access-control-allow-origin": origin,
+    "access-control-allow-credentials": "true",
+    vary: "Origin",
+  };
+}
+
+interface CorsDecision {
+  allowRequest: boolean;
+  allowOrigin: string | null;
+}
+
+async function decideCorsPolicy(
+  request: Request,
+  env: Awaited<ReturnType<typeof resolveEdgeRuntime>>["env"],
+  siteIdInput: unknown,
+): Promise<CorsDecision> {
+  const origin = parseOrigin(request);
+  if (!origin) {
+    return {
+      allowRequest: true,
+      allowOrigin: null,
+    };
+  }
+
+  const originHostname = parseOriginHostname(origin);
+  if (!originHostname) {
+    return {
+      allowRequest: false,
+      allowOrigin: null,
+    };
+  }
+
+  const siteId = normalizeSiteSettingsKey(siteIdInput);
+  if (!siteId) {
+    return {
+      allowRequest: true,
+      allowOrigin: origin,
+    };
+  }
+
+  let settings = null;
+  try {
+    // `readSiteTrackingConfig` already caches KV results for 1 hour.
+    settings = await readSiteTrackingConfig(env, siteId);
+  } catch {
+    settings = null;
+  }
+
+  if (!settings) {
+    return {
+      allowRequest: true,
+      allowOrigin: origin,
+    };
+  }
+
+  const hasWhitelist = Array.isArray(settings.domainWhitelist) && settings.domainWhitelist.length > 0;
+  if (!hasWhitelist) {
+    return {
+      allowRequest: true,
+      allowOrigin: origin,
+    };
+  }
+
+  const allowed = settings.allowedHostnames.some(
+    (hostname) => hostname.trim().toLowerCase() === originHostname,
+  );
+  if (!allowed) {
+    return {
+      allowRequest: false,
+      allowOrigin: null,
+    };
+  }
+
+  return {
+    allowRequest: true,
+    allowOrigin: origin,
+  };
+}
+
+export async function OPTIONS(request: Request): Promise<Response> {
+  const { env, url } = await resolveEdgeRuntime(request);
+  const siteIdFromQuery = url.searchParams.get("siteId") || "";
+  const cors = await decideCorsPolicy(request, env, siteIdFromQuery);
+  if (!cors.allowRequest) {
+    return new Response(null, { status: 403, headers: toCorsHeaders(cors.allowOrigin) });
+  }
+  return new Response(null, { status: 204, headers: toCorsHeaders(cors.allowOrigin) });
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -64,6 +177,14 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const siteId = pickSiteIdFromPayload(payload, url);
+  const cors = await decideCorsPolicy(requestWithCf, env, siteId);
+  if (!cors.allowRequest) {
+    return new Response(null, {
+      status: 403,
+      headers: toCorsHeaders(cors.allowOrigin),
+    });
+  }
+
   const doId = env.INGEST_DO.idFromName(siteId);
   const stub = env.INGEST_DO.get(doId);
 
@@ -88,6 +209,6 @@ export async function POST(request: Request): Promise<Response> {
 
   return new Response(null, {
     status: 204,
-    headers: CORS_HEADERS,
+    headers: toCorsHeaders(cors.allowOrigin),
   });
 }
