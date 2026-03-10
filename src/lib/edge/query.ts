@@ -210,9 +210,9 @@ function sourceLabel(window: QueryWindow): "detail" | "archive" | "mixed" {
   return "detail";
 }
 
-function avgDuration(totalDuration: number, durationViews: number): number {
-  if (durationViews <= 0) return 0;
-  return Math.round(totalDuration / durationViews);
+function avgDuration(totalDuration: number, sessions: number): number {
+  if (sessions <= 0) return 0;
+  return Math.round(totalDuration / sessions);
 }
 
 function bounceRate(bounces: number, sessions: number): number {
@@ -277,7 +277,7 @@ function mapOverviewAggregate(
     visitors: row.visitors,
     bounces: row.bounces,
     totalDurationMs: row.totalDuration,
-    avgDurationMs: avgDuration(row.totalDuration, row.durationViews),
+    avgDurationMs: avgDuration(row.totalDuration, row.sessions),
     bounceRate: bounceRate(row.bounces, row.sessions),
     approximateVisitors: Boolean(options?.approximateVisitors),
   };
@@ -297,7 +297,7 @@ function mapTrendRows(
     sessions: row.sessions,
     bounces: row.bounces,
     totalDurationMs: row.totalDuration,
-    avgDurationMs: avgDuration(row.totalDuration, row.durationViews),
+    avgDurationMs: avgDuration(row.totalDuration, row.sessions),
     source,
   }));
 }
