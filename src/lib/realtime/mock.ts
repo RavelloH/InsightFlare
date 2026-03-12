@@ -714,6 +714,59 @@ const ALL_CITIES = [
   "NL::NH::North Holland::Amsterdam", "KR::11::Seoul::Seoul",
 ] as const;
 
+const COUNTRY_COORDINATE_ANCHORS: Record<string, { latitude: number; longitude: number }> = {
+  US: { latitude: 39.5, longitude: -98.35 },
+  CA: { latitude: 56.13, longitude: -106.35 },
+  GB: { latitude: 54.8, longitude: -2.3 },
+  DE: { latitude: 51.16, longitude: 10.45 },
+  FR: { latitude: 46.23, longitude: 2.21 },
+  JP: { latitude: 36.2, longitude: 138.25 },
+  CN: { latitude: 35.86, longitude: 104.2 },
+  IN: { latitude: 20.59, longitude: 78.96 },
+  BR: { latitude: -14.24, longitude: -51.93 },
+  AU: { latitude: -25.27, longitude: 133.77 },
+  NL: { latitude: 52.13, longitude: 5.29 },
+  KR: { latitude: 35.91, longitude: 127.77 },
+  SG: { latitude: 1.35, longitude: 103.82 },
+  SE: { latitude: 60.13, longitude: 18.64 },
+  IT: { latitude: 41.87, longitude: 12.57 },
+  RU: { latitude: 61.52, longitude: 105.32 },
+  IE: { latitude: 53.14, longitude: -7.69 },
+  NZ: { latitude: -40.9, longitude: 174.89 },
+  ZA: { latitude: -30.56, longitude: 22.94 },
+  PH: { latitude: 12.88, longitude: 121.77 },
+  NG: { latitude: 9.08, longitude: 8.68 },
+  PL: { latitude: 51.92, longitude: 19.15 },
+  ES: { latitude: 40.46, longitude: -3.75 },
+  PT: { latitude: 39.4, longitude: -8.22 },
+  ID: { latitude: -0.79, longitude: 113.92 },
+  MX: { latitude: 23.63, longitude: -102.55 },
+  TR: { latitude: 38.96, longitude: 35.24 },
+};
+
+function normalizeLongitude(longitude: number): number {
+  if (!Number.isFinite(longitude)) return 0;
+  let value = longitude;
+  while (value > 180) value -= 360;
+  while (value < -180) value += 360;
+  return value;
+}
+
+function weightedPickCountry(
+  rng: () => number,
+  countries: Array<{ code: string; weight: number }>,
+): string {
+  const totalWeight = countries.reduce((sum, item) => sum + Math.max(0, item.weight), 0);
+  if (totalWeight <= 0 || countries.length === 0) return "US";
+  let hit = rng() * totalWeight;
+  for (const item of countries) {
+    const weight = Math.max(0, item.weight);
+    hit -= weight;
+    if (hit <= 0) return item.code;
+  }
+  return countries[countries.length - 1]?.code || "US";
+}
+
 // ---------------------------------------------------------------------------
 //  Core integration: per-site deterministic traffic rate function
 //
@@ -1240,6 +1293,76 @@ function generateDemoGeoDimensionTabs(
   };
 }
 
+function generateDemoGeoPoints(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const profile = findSiteProfile(siteId);
+  const rng = createDemoRng(siteId, "geo-points");
+  const limit = Math.max(50, Math.min(20000, Number(params.limit || 5000)));
+  const from = Number(params.from || Math.max(0, Date.now() - 24 * 3600 * 1000));
+  const to = Number(params.to || Date.now());
+  const span = Math.max(1, to - from);
+  const totalViews = Math.max(0, integrateViews(siteId, from, to));
+  const desired = Math.max(120, Math.round(Math.sqrt(totalViews + 1) * 28));
+  const count = Math.min(limit, desired);
+
+  const points: Array<{
+    latitude: number;
+    longitude: number;
+    timestampMs: number;
+    country: string;
+  }> = [];
+  const countryBuckets = new Map<
+    string,
+    { views: number; sessions: Set<string>; visitors: Set<string> }
+  >();
+
+  for (let index = 0; index < count; index += 1) {
+    const countryCode = weightedPickCountry(rng, profile.topCountries);
+    const anchor = COUNTRY_COORDINATE_ANCHORS[countryCode] ?? { latitude: 20, longitude: 0 };
+    const latitude = Math.max(
+      -85,
+      Math.min(85, anchor.latitude + sFloat(rng, -2.6, 2.6)),
+    );
+    const longitude = normalizeLongitude(anchor.longitude + sFloat(rng, -3.2, 3.2));
+    const timestampMs = to - Math.round(rng() * span);
+    points.push({
+      latitude: Number(latitude.toFixed(5)),
+      longitude: Number(longitude.toFixed(5)),
+      timestampMs,
+      country: countryCode,
+    });
+
+    const bucket = countryBuckets.get(countryCode) ?? {
+      views: 0,
+      sessions: new Set<string>(),
+      visitors: new Set<string>(),
+    };
+    bucket.views += 1;
+    const sessionId = `${countryCode}-s-${sInt(rng, 1, Math.max(3, Math.round(count * 0.55)))}`;
+    const visitorId = `${countryCode}-v-${sInt(rng, 1, Math.max(2, Math.round(count * 0.38)))}`;
+    bucket.sessions.add(sessionId);
+    bucket.visitors.add(visitorId);
+    countryBuckets.set(countryCode, bucket);
+  }
+
+  const countryCounts = Array.from(countryBuckets.entries())
+    .map(([country, bucket]) => ({
+      country,
+      views: bucket.views,
+      sessions: bucket.sessions.size,
+      visitors: bucket.visitors.size,
+    }))
+    .sort((left, right) => right.views - left.views || left.country.localeCompare(right.country));
+
+  return {
+    ok: true,
+    data: points.sort((left, right) => right.timestampMs - left.timestampMs),
+    countryCounts,
+  };
+}
+
 function generateDemoOverviewPanels(
   siteId: string,
   params: Record<string, string | number>,
@@ -1477,6 +1600,9 @@ export function handleDemoRequest(options: {
   }
   if (path.includes("/overview-geo-dimensions")) {
     return generateDemoGeoDimensionTabs(siteId, params);
+  }
+  if (path.includes("/overview-geo-points")) {
+    return generateDemoGeoPoints(siteId, params);
   }
   if (path.includes("/team-dashboard")) {
     const tid = teamId || getDemoTeams()[0].id;

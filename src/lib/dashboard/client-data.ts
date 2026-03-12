@@ -4,6 +4,7 @@ import type {
   OverviewPanelsData,
   OverviewClientDimensionTabsData as OverviewClientDimensionTabsResponse,
   OverviewGeoDimensionTabsData as OverviewGeoDimensionTabsResponse,
+  OverviewGeoPointsData,
   PagesData,
   ReferrersData,
   TrendData,
@@ -85,6 +86,14 @@ function emptyOverviewGeoDimensionTabs(): OverviewGeoDimensionTabsData {
     continent: [],
     timezone: [],
     organization: [],
+  };
+}
+
+function emptyOverviewGeoPoints(): OverviewGeoPointsData {
+  return {
+    ok: true,
+    data: [],
+    countryCounts: [],
   };
 }
 
@@ -274,6 +283,48 @@ export async function fetchOverviewGeoDimensionTabs(
   return payload.tabs ?? emptyOverviewGeoDimensionTabs();
 }
 
+export async function fetchOverviewGeoPoints(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+  options?: {
+    limit?: number;
+  },
+): Promise<OverviewGeoPointsData> {
+  return fetchPrivateJson<OverviewGeoPointsData>(
+    "/api/private/overview-geo-points",
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        limit: options?.limit ?? 5000,
+      },
+      filters,
+    ),
+  )
+    .then((payload) => ({
+      ok: payload.ok,
+      data: Array.isArray(payload.data)
+        ? payload.data.map((row) => ({
+            latitude: Number((row as { latitude?: unknown }).latitude ?? 0),
+            longitude: Number((row as { longitude?: unknown }).longitude ?? 0),
+            timestampMs: Number((row as { timestampMs?: unknown }).timestampMs ?? 0),
+            country: String((row as { country?: unknown }).country ?? ""),
+          }))
+        : [],
+      countryCounts: Array.isArray(payload.countryCounts)
+        ? payload.countryCounts.map((row) => ({
+            country: String((row as { country?: unknown }).country ?? ""),
+            views: Number((row as { views?: unknown }).views ?? 0),
+            sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
+            visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
+          }))
+        : [],
+    }))
+    .catch(() => emptyOverviewGeoPoints());
+}
+
 export async function fetchOverviewPanels(
   siteId: string,
   window: TimeWindow,
@@ -415,3 +466,4 @@ export const emptyPageCardTabsData = emptyPageCardTabs;
 export const emptyOverviewClientDimensionTabsData =
   emptyOverviewClientDimensionTabs;
 export const emptyOverviewGeoDimensionTabsData = emptyOverviewGeoDimensionTabs;
+export const emptyOverviewGeoPointsData = emptyOverviewGeoPoints;

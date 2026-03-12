@@ -258,6 +258,22 @@ export interface OverviewGeoDimensionTabsData {
   };
 }
 
+export interface OverviewGeoPointsData {
+  ok: boolean;
+  data: Array<{
+    latitude: number;
+    longitude: number;
+    timestampMs: number;
+    country: string;
+  }>;
+  countryCounts: Array<{
+    country: string;
+    views: number;
+    sessions: number;
+    visitors: number;
+  }>;
+}
+
 export interface OverviewPanelsData {
   ok: boolean;
   pageTabs: NonNullable<PagesData["tabs"]>;
@@ -449,6 +465,27 @@ export async function fetchPrivateOverviewGeoDimensions(params: {
         from: params.from,
         to: params.to,
         limit: params.limit ?? 100,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateOverviewGeoPoints(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  limit?: number;
+  filters?: QueryFilters;
+}): Promise<OverviewGeoPointsData> {
+  return fetchEdgeJson<OverviewGeoPointsData>({
+    path: "/api/private/overview-geo-points",
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 5000,
       },
       params.filters,
     ),

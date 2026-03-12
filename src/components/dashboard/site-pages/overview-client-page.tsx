@@ -48,6 +48,7 @@ import { PageHeading } from "@/components/dashboard/page-heading";
 import { TrendChart } from "@/components/dashboard/trend-chart";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { TabbedScrollMaskCard } from "@/components/dashboard/tabbed-scroll-mask-card";
+import { OverviewGeoPointsMapCard } from "@/components/dashboard/overview-geo-points-map-card";
 import { Spinner } from "@/components/ui/spinner";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -4011,6 +4012,13 @@ export function OverviewClientPage({
         messages={messages}
         siteId={siteId}
         pathname={pathname}
+      />
+      <OverviewGeoPointsMapCard
+        locale={locale}
+        messages={messages}
+        siteId={siteId}
+        window={window}
+        filters={filters}
       />
     </div>
   );

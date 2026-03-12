@@ -89,6 +89,25 @@ interface VisitorRow {
   sessions: number;
 }
 
+interface GeoPointRow {
+  latitude: number;
+  longitude: number;
+  timestampMs: number;
+  country: string;
+}
+
+interface GeoCountryCountRow {
+  country: string;
+  views: number;
+  sessions: number;
+  visitors: number;
+}
+
+interface GeoPointAggregate {
+  points: GeoPointRow[];
+  countryCounts: GeoCountryCountRow[];
+}
+
 interface PageTabs {
   path: Array<{ label: string; views: number; sessions: number }>;
   title: Array<{ label: string; views: number; sessions: number }>;
@@ -925,6 +944,16 @@ async function queryVisitorAggregate(
   return queryVisitorsFromD1(env, siteId, window, filters, limit);
 }
 
+async function queryGeoPointAggregate(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+  limit: number,
+): Promise<GeoPointAggregate> {
+  return queryGeoPointsFromD1(env, siteId, window, filters, limit);
+}
+
 async function queryDimensionAggregate(
   env: Env,
   siteId: string,
@@ -1245,6 +1274,29 @@ async function handleOverviewGeoDimensions(
   });
 }
 
+async function handleOverviewGeoPoints(
+  env: Env,
+  siteId: string,
+  url: URL,
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const limit = parseLimit(url, 5000, 20000);
+  const aggregate = await queryGeoPointAggregate(
+    env,
+    siteId,
+    window,
+    filters,
+    limit,
+  );
+  return jsonResponse({
+    ok: true,
+    data: aggregate.points,
+    countryCounts: aggregate.countryCounts,
+  });
+}
+
 async function listTeamSites(env: Env, teamId: string): Promise<TeamSiteRow[]> {
   const result = await env.DB.prepare(
     `
@@ -1410,6 +1462,9 @@ async function routeQuery(
   }
   if (pathname === "overview-geo-dimensions") {
     return handleOverviewGeoDimensions(env, siteId, url);
+  }
+  if (pathname === "overview-geo-points") {
+    return handleOverviewGeoPoints(env, siteId, url);
   }
   return notFound();
 }
@@ -1712,6 +1767,85 @@ LIMIT ?
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),
   }));
+}
+
+async function queryGeoPointsFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+  limit: number,
+): Promise<GeoPointAggregate> {
+  const filter = buildVisitFilterSql(filters);
+  const pointsSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT *
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  latitude,
+  longitude,
+  started_at AS timestampMs,
+  country
+FROM filtered_visits
+WHERE
+  latitude IS NOT NULL
+  AND longitude IS NOT NULL
+  AND ABS(latitude) <= 90
+  AND ABS(longitude) <= 180
+ORDER BY timestampMs DESC
+LIMIT ?
+`;
+  const points = (await queryD1All<Record<string, unknown>>(
+    env,
+    pointsSql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings, limit],
+  )).map((row) => ({
+    latitude: Number(row.latitude ?? 0),
+    longitude: Number(row.longitude ?? 0),
+    timestampMs: Number(row.timestampMs ?? 0),
+    country: String(row.country ?? ""),
+  }));
+
+  const countrySql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    country,
+    session_id AS sessionId,
+    visitor_id AS visitorId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  country,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors
+FROM filtered_visits
+GROUP BY country
+ORDER BY views DESC, sessions DESC, country ASC
+LIMIT 300
+`;
+  const countryCounts = (await queryD1All<Record<string, unknown>>(
+    env,
+    countrySql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings],
+  )).map((row) => ({
+    country: String(row.country ?? ""),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
+  }));
+
+  return {
+    points,
+    countryCounts,
+  };
 }
 
 async function queryCustomEventNamesFromD1(

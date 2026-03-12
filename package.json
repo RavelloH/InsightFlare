@@ -30,6 +30,11 @@
     "d1:migration:create": "wrangler d1 migrations create insightflare --config wrangler.toml"
   },
   "dependencies": {
+    "@deck.gl/core": "^9.2.11",
+    "@deck.gl/geo-layers": "^9.2.11",
+    "@deck.gl/layers": "^9.2.11",
+    "@deck.gl/mapbox": "^9.2.11",
+    "@deck.gl/react": "^9.2.11",
     "@iconify-json/flagpack": "^1.2.7",
     "@iconify/react": "^6.0.2",
     "@noble/hashes": "^2.0.1",
@@ -38,6 +43,8 @@
     "apache-arrow": "21.1.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "i18n-iso-countries": "^7.14.0",
+    "maplibre-gl": "^5.20.0",
     "motion": "^12.34.5",
     "next": "^16.1.6",
     "next-themes": "^0.4.6",
@@ -47,6 +54,7 @@
     "react": "^19.2.4",
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.4",
+    "react-map-gl": "^8.1.0",
     "recharts": "^2.15.4",
     "shadcn": "^3.8.5",
     "sonner": "^2.0.7",
