@@ -904,6 +904,7 @@ const UMAMI_OS_ICON_PREFIX = "umami-os:";
 const UMAMI_BROWSER_ICON_DIR = "/images/browser";
 const UMAMI_OS_ICON_DIR = "/images/os";
 const UMAMI_ICON_FALLBACK = "unknown";
+const UMAMI_BROWSER_SVG_ICON_KEYS = new Set(["arc", "duckduckgo", "wechat", "qq"]);
 
 function resolveBrowserLogoIconName(value: string): string | null {
   const normalized = value.trim().toLocaleLowerCase();
@@ -940,20 +941,70 @@ function resolveBrowserLogoIconName(value: string): string | null {
     iconKey = "ios";
   } else if (normalized.includes("internet explorer") || normalized === "ie") {
     iconKey = "ie";
+  } else if (normalized.includes("arc")) {
+    iconKey = "arc";
   } else if (normalized.includes("opera mini")) {
     iconKey = "opera-mini";
+  } else if (normalized.includes("opera gx")) {
+    iconKey = "opera-gx";
   } else if (normalized.includes("opera")) {
     iconKey = "opera";
   } else if (normalized.includes("samsung")) {
     iconKey = "samsung";
+  } else if (normalized.includes("ucbrowser") || normalized.includes("uc browser")) {
+    iconKey = "uc";
+  } else if (
+    normalized.includes("qqbrowser") ||
+    normalized.includes("qq browser") ||
+    normalized === "qq"
+  ) {
+    iconKey = "qq";
+  } else if (normalized.includes("duckduckgo")) {
+    iconKey = "duckduckgo";
+  } else if (normalized.includes("wechat")) {
+    iconKey = "wechat";
+  } else if (normalized.includes("vivaldi")) {
+    iconKey = "vivaldi";
+  } else if (
+    normalized.includes("huawei browser") ||
+    normalized.includes("honor") ||
+    normalized.includes("vivo browser") ||
+    normalized.includes("heytap")
+  ) {
+    iconKey = "android";
   } else if (normalized.includes("android")) {
     iconKey = "android";
   } else if (normalized.includes("miui")) {
     iconKey = "miui";
+  } else if (
+    normalized.includes("waterfox") ||
+    normalized.includes("librewolf") ||
+    normalized.includes("iceweasel") ||
+    normalized.includes("icecat") ||
+    normalized.includes("icedragon") ||
+    normalized.includes("fennec") ||
+    normalized.includes("seamonkey") ||
+    normalized.includes("pale moon")
+  ) {
+    iconKey = "firefox";
   } else if (normalized.includes("firefox")) {
     iconKey = "firefox";
   } else if (normalized.includes("safari")) {
     iconKey = "safari";
+  } else if (
+    normalized.includes("bing") ||
+    normalized.includes("ecosia") ||
+    normalized === "gsa" ||
+    normalized.includes("coc coc") ||
+    normalized.includes("coccoc") ||
+    normalized.includes("whale") ||
+    normalized.includes("naver") ||
+    normalized.includes("sogou") ||
+    normalized.includes("maxthon") ||
+    normalized.includes("puffin") ||
+    normalized.includes("quark")
+  ) {
+    iconKey = "chrome";
   } else if (normalized.includes("chrome") || normalized.includes("chromium")) {
     iconKey = "chrome";
   } else if (normalized.includes("brave")) {
@@ -1064,8 +1115,9 @@ function resolveUmamiIconSource(
 ): { src: string; fallbackSrc: string } | null {
   if (iconName.startsWith(UMAMI_BROWSER_ICON_PREFIX)) {
     const iconKey = iconName.slice(UMAMI_BROWSER_ICON_PREFIX.length);
+    const extension = UMAMI_BROWSER_SVG_ICON_KEYS.has(iconKey) ? "svg" : "png";
     return {
-      src: `${UMAMI_BROWSER_ICON_DIR}/${iconKey}.png`,
+      src: `${UMAMI_BROWSER_ICON_DIR}/${iconKey}.${extension}`,
       fallbackSrc: `${UMAMI_BROWSER_ICON_DIR}/${UMAMI_ICON_FALLBACK}.png`,
     };
   }
