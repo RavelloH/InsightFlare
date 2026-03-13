@@ -25,7 +25,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   const username = bodyStr(body, "username");
   const password = String(body.password ?? "");
   const nextPathRaw = bodyStr(body, "next") || "/app";
-  const nextPath = nextPathRaw.startsWith("/") ? nextPathRaw : "/app";
+  const nextPathClean = nextPathRaw.split("?")[0].replace(/\/+$/, "");
+  const isUnsafe = !nextPathRaw.startsWith("/") || nextPathRaw.startsWith("//") || nextPathClean === "/login" || nextPathClean.endsWith("/login");
+  const nextPath = isUnsafe ? "/app" : nextPathRaw;
 
   if (username.length < 2 || password.length < 1) {
     if (isJson) {
