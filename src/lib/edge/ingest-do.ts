@@ -1291,7 +1291,7 @@ export class IngestDurableObject extends DurableObject {
       try {
         const statements = [
           ...visitRows.map((row) => {
-            const sql = row.status === "open" ? UPSERT_VISIT_SQL : INSERT_VISIT_SQL;
+            const sql = UPSERT_VISIT_SQL;
             return this.doEnv.DB.prepare(sql).bind(...visitBindings(row));
           }),
           ...eventRows.map((row) => this.doEnv.DB.prepare(INSERT_CUSTOM_EVENT_SQL).bind(...customEventBindings(row))),
