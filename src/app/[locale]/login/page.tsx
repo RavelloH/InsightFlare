@@ -22,7 +22,11 @@ interface LoginPageProps {
 }
 
 function safeNextPath(value: string | undefined, locale: string): string {
-  if (!value || !value.startsWith("/")) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return `/${locale}/app`;
+  }
+  const pathname = value.split("?")[0].replace(/\/+$/, "");
+  if (pathname === "/login" || pathname.endsWith("/login")) {
     return `/${locale}/app`;
   }
   return value;

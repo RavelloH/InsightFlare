@@ -7,7 +7,7 @@ export function parseFormBool(value: unknown, fallback = false): boolean {
 
 export function safeRedirectPath(input: FormDataEntryValue | null | string | undefined, fallback = "/app"): string {
   const raw = String(input || "").trim();
-  if (!raw.startsWith("/")) return fallback;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return fallback;
   return raw;
 }
 
