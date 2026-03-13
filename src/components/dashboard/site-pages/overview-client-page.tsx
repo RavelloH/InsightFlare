@@ -904,13 +904,8 @@ const UMAMI_OS_ICON_PREFIX = "umami-os:";
 const UMAMI_BROWSER_ICON_DIR = "/images/browser";
 const UMAMI_OS_ICON_DIR = "/images/os";
 const UMAMI_ICON_FALLBACK = "unknown";
-const UMAMI_BROWSER_SVG_ICON_KEYS = new Set([
-  "arc",
-  "duckduckgo",
-  "wechat",
-  "qq",
-  "huawei",
-]);
+const UMAMI_BROWSER_APPLE_ICON_KEYS = new Set(["ios", "ios-webview"]);
+const UMAMI_OS_APPLE_ICON_KEYS = new Set(["ios", "mac-os"]);
 
 function resolveBrowserLogoIconName(value: string): string | null {
   const normalized = value.trim().toLocaleLowerCase();
@@ -1119,21 +1114,22 @@ function resolveOsLogoIconName(value: string): string | null {
 
 function resolveUmamiIconSource(
   iconName: string,
-): { src: string; fallbackSrc: string } | null {
+): { src: string; fallbackSrc: string; isAppleGlyph?: boolean } | null {
   if (iconName.startsWith(UMAMI_BROWSER_ICON_PREFIX)) {
     const iconKey = iconName.slice(UMAMI_BROWSER_ICON_PREFIX.length);
-    const extension = UMAMI_BROWSER_SVG_ICON_KEYS.has(iconKey) ? "svg" : "png";
     return {
-      src: `${UMAMI_BROWSER_ICON_DIR}/${iconKey}.${extension}`,
-      fallbackSrc: `${UMAMI_BROWSER_ICON_DIR}/${UMAMI_ICON_FALLBACK}.png`,
+      src: `${UMAMI_BROWSER_ICON_DIR}/${iconKey}.svg`,
+      fallbackSrc: `${UMAMI_BROWSER_ICON_DIR}/${UMAMI_ICON_FALLBACK}.svg`,
+      isAppleGlyph: UMAMI_BROWSER_APPLE_ICON_KEYS.has(iconKey),
     };
   }
 
   if (iconName.startsWith(UMAMI_OS_ICON_PREFIX)) {
     const iconKey = iconName.slice(UMAMI_OS_ICON_PREFIX.length);
     return {
-      src: `${UMAMI_OS_ICON_DIR}/${iconKey}.png`,
-      fallbackSrc: `${UMAMI_OS_ICON_DIR}/${UMAMI_ICON_FALLBACK}.png`,
+      src: `${UMAMI_OS_ICON_DIR}/${iconKey}.svg`,
+      fallbackSrc: `${UMAMI_OS_ICON_DIR}/${UMAMI_ICON_FALLBACK}.svg`,
+      isAppleGlyph: UMAMI_OS_APPLE_ICON_KEYS.has(iconKey),
     };
   }
 
@@ -1173,7 +1169,7 @@ function LabelWithLeadingIcon({
               alt=""
               width={16}
               height={16}
-              className="block h-4 w-4 shrink-0"
+              className={`block h-4 w-4 shrink-0 ${umamiIcon.isAppleGlyph ? "dark:invert" : ""}`}
               loading="lazy"
               decoding="async"
               onError={(event) => {
