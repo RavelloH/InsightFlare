@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminUser, removeAdminUser, updateAdminUser } from "@/lib/edge-client";
-import { safeRedirectPath, parseRequestBody, bodyStr } from "@/lib/form-helpers";
+import { parseRequestBody, bodyStr } from "@/lib/form-helpers";
 
 function normalizeErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
@@ -20,32 +20,23 @@ function normalizeErrorMessage(error: unknown): string {
 
 export async function POST(request: Request): Promise<NextResponse> {
   const body = await parseRequestBody(request);
-  const isJson = (request.headers.get("content-type") || "").includes("application/json");
-  const returnTo = safeRedirectPath(body.returnTo as string | undefined, "/app/account");
   const intent = bodyStr(body, "intent") || "create";
 
   try {
     if (intent === "remove" || intent === "delete") {
       const userId = bodyStr(body, "userId");
       if (!userId) {
-        if (isJson) return NextResponse.json({ ok: false, error: "missing_user_id" }, { status: 400 });
-        const url = new URL(returnTo, request.url);
-        url.searchParams.set("error", "missing_user_id");
-        return NextResponse.redirect(url, { status: 303 });
+        return NextResponse.json({ ok: false, error: "missing_user_id" }, { status: 400 });
       }
 
       const result = await removeAdminUser({ userId });
-      if (isJson) return NextResponse.json({ ok: true, data: result });
-      return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
+      return NextResponse.json({ ok: true, data: result });
     }
 
     if (intent === "update") {
       const userId = bodyStr(body, "userId");
       if (!userId) {
-        if (isJson) return NextResponse.json({ ok: false, error: "missing_user_id" }, { status: 400 });
-        const url = new URL(returnTo, request.url);
-        url.searchParams.set("error", "missing_user_id");
-        return NextResponse.redirect(url, { status: 303 });
+        return NextResponse.json({ ok: false, error: "missing_user_id" }, { status: 400 });
       }
 
       const result = await updateAdminUser({
@@ -56,8 +47,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         password: bodyStr(body, "password") || undefined,
         systemRole: bodyStr(body, "systemRole").toLowerCase() === "admin" ? "admin" : "user",
       });
-      if (isJson) return NextResponse.json({ ok: true, data: result });
-      return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
+      return NextResponse.json({ ok: true, data: result });
     }
 
     const username = bodyStr(body, "username");
@@ -67,10 +57,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const systemRole = bodyStr(body, "systemRole").toLowerCase() === "admin" ? "admin" : "user";
 
     if (!username || !email || password.length < 8) {
-      if (isJson) return NextResponse.json({ ok: false, error: "invalid_user_input" }, { status: 400 });
-      const url = new URL(returnTo, request.url);
-      url.searchParams.set("error", "invalid_user_input");
-      return NextResponse.redirect(url, { status: 303 });
+      return NextResponse.json({ ok: false, error: "invalid_user_input" }, { status: 400 });
     }
 
     const result = await createAdminUser({
@@ -80,14 +67,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       name: name || undefined,
       systemRole,
     });
-    if (isJson) return NextResponse.json({ ok: true, data: result });
-    return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
+    return NextResponse.json({ ok: true, data: result });
   } catch (error) {
     const msg = normalizeErrorMessage(error);
-    if (isJson) return NextResponse.json({ ok: false, error: "user_mutation_failed", message: msg }, { status: 500 });
-    const url = new URL(returnTo, request.url);
-    url.searchParams.set("error", "user_mutation_failed");
-    url.searchParams.set("message", msg);
-    return NextResponse.redirect(url, { status: 303 });
+    return NextResponse.json(
+      { ok: false, error: "user_mutation_failed", message: msg },
+      { status: 500 },
+    );
   }
 }

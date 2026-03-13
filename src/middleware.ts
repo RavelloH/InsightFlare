@@ -12,6 +12,12 @@ import { isValidLocale } from "@/lib/i18n/config";
 
 type AuthState = "authenticated" | "unauthenticated" | "unknown";
 
+interface RedirectProfile {
+  teams: Array<{
+    slug: string;
+  }>;
+}
+
 async function resolveSessionSecretForMiddleware(): Promise<string | null> {
   const fromProcess = configuredSessionSecret();
   if (fromProcess) return fromProcess;
@@ -42,6 +48,49 @@ async function authState(request: NextRequest): Promise<AuthState> {
 
   const session = await verifySessionToken(token, secret);
   return session ? "authenticated" : "unauthenticated";
+}
+
+async function fetchRedirectProfile(request: NextRequest): Promise<RedirectProfile | null> {
+  const token = request.cookies.get(SESSION_COOKIE)?.value || "";
+  if (!token) return null;
+
+  try {
+    const url = request.nextUrl.clone();
+    url.pathname = "/api/private/admin/auth/me";
+    url.search = "";
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) return null;
+
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      data?: {
+        teams?: Array<{
+          slug?: unknown;
+        }>;
+      };
+    };
+    if (!payload.ok) return null;
+
+    const teams = Array.isArray(payload.data?.teams)
+      ? payload.data.teams
+          .map((team) => String(team?.slug || "").trim())
+          .filter((slug) => slug.length > 0)
+      : [];
+
+    return {
+      teams: teams.map((slug) => ({ slug })),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function getLocale(request: NextRequest): string {
@@ -154,11 +203,18 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   let state: AuthState | null = null;
+  let redirectProfile: RedirectProfile | null | undefined;
   const ensureAuthState = async (): Promise<AuthState> => {
     if (!state) {
       state = await authState(request);
     }
     return state;
+  };
+  const ensureRedirectProfile = async (): Promise<RedirectProfile | null> => {
+    if (redirectProfile === undefined) {
+      redirectProfile = await fetchRedirectProfile(request);
+    }
+    return redirectProfile;
   };
   const normalizedPathname = normalizePathname(pathname);
   const localeFromPath = pathnameHasLocale(pathname) ? pathname.split("/")[1] : null;
@@ -193,10 +249,12 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   const restPath = pathname.replace(/^\/[^/]+/, "") || "/";
+  const normalizedRestPath = normalizePathname(restPath);
 
   // Protected routes under /[locale]/app/*
   if (restPath.startsWith("/app")) {
-    if ((await ensureAuthState()) === "unauthenticated") {
+    const currentAuthState = await ensureAuthState();
+    if (currentAuthState === "unauthenticated") {
       const url = request.nextUrl.clone();
       url.pathname = `/${localeFromPath}/login`;
       url.searchParams.set("next", `${pathname}${search}`);
@@ -210,9 +268,32 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
       });
       return response;
     }
+
+    const appSegments = normalizedRestPath.split("/").filter((segment) => segment.length > 0);
+    if (appSegments.length === 1) {
+      const profile = await ensureRedirectProfile();
+      if (profile && profile.teams.length === 1) {
+        return redirectWithPath(
+          request,
+          `/${localeFromPath}/app/${profile.teams[0].slug}`,
+          { preserveSearch: false },
+        );
+      }
+    }
+
+    if (appSegments.length === 2) {
+      const legacyTab = request.nextUrl.searchParams.get("tab");
+      if (legacyTab === "settings" || legacyTab === "members") {
+        return redirectWithPath(
+          request,
+          `/${localeFromPath}/app/${appSegments[1]}/${legacyTab}`,
+          { preserveSearch: false },
+        );
+      }
+    }
   }
 
-  if (restPath === "/login" && (await ensureAuthState()) === "authenticated") {
+  if (normalizedRestPath === "/login" && (await ensureAuthState()) === "authenticated") {
     return redirectWithPath(request, `/${localeFromPath}/app`, { preserveSearch: false });
   }
 

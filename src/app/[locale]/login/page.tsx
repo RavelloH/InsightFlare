@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -12,7 +11,6 @@ import { LoginForm } from "@/components/auth/login-form";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
-import { isAuthenticated } from "@/lib/auth";
 
 interface LoginPageProps {
   params: Promise<{ locale: string }>;
@@ -48,10 +46,6 @@ export default async function LoginPage({
   const search = await searchParams;
   const resolvedLocale = resolveLocale(locale);
   const t = getMessages(resolvedLocale);
-
-  if (await isAuthenticated()) {
-    redirect(`/${resolvedLocale}/app`);
-  }
 
   const nextPath = safeNextPath(search.next, resolvedLocale);
 

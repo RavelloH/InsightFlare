@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminSite, removeAdminSite, updateAdminSite } from "@/lib/edge-client";
-import { parseFormBool, safeRedirectPath, parseRequestBody, bodyStr } from "@/lib/form-helpers";
+import { parseFormBool, parseRequestBody, bodyStr } from "@/lib/form-helpers";
 
 function normalizeErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
@@ -20,8 +20,6 @@ function normalizeErrorMessage(error: unknown): string {
 
 export async function POST(request: Request): Promise<NextResponse> {
   const body = await parseRequestBody(request);
-  const isJson = (request.headers.get("content-type") || "").includes("application/json");
-  const returnTo = safeRedirectPath(body.returnTo as string | undefined, "/app/teams");
   const intent = bodyStr(body, "intent") || "create";
 
   const teamId = bodyStr(body, "teamId");
@@ -34,19 +32,13 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     if (intent === "remove") {
       if (siteId.length === 0) {
-        if (isJson) return NextResponse.json({ ok: false, error: "missing_site_id" }, { status: 400 });
-        const url = new URL(returnTo, request.url);
-        url.searchParams.set("error", "missing_site_id");
-        return NextResponse.redirect(url, { status: 303 });
+        return NextResponse.json({ ok: false, error: "missing_site_id" }, { status: 400 });
       }
       const removed = await removeAdminSite({ siteId });
-      if (isJson) return NextResponse.json({ ok: true, data: removed });
+      return NextResponse.json({ ok: true, data: removed });
     } else if (intent === "update") {
       if (siteId.length === 0) {
-        if (isJson) return NextResponse.json({ ok: false, error: "missing_site_id" }, { status: 400 });
-        const url = new URL(returnTo, request.url);
-        url.searchParams.set("error", "missing_site_id");
-        return NextResponse.redirect(url, { status: 303 });
+        return NextResponse.json({ ok: false, error: "missing_site_id" }, { status: 400 });
       }
       const updated = await updateAdminSite({
         siteId,
@@ -56,13 +48,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         publicEnabled,
         publicSlug: publicSlug || undefined,
       });
-      if (isJson) return NextResponse.json({ ok: true, data: updated });
+      return NextResponse.json({ ok: true, data: updated });
     } else {
       if (teamId.length === 0 || name.length === 0 || domain.length === 0) {
-        if (isJson) return NextResponse.json({ ok: false, error: "invalid_site_input" }, { status: 400 });
-        const url = new URL(returnTo, request.url);
-        url.searchParams.set("error", "invalid_site_input");
-        return NextResponse.redirect(url, { status: 303 });
+        return NextResponse.json({ ok: false, error: "invalid_site_input" }, { status: 400 });
       }
       const created = await createAdminSite({
         teamId,
@@ -71,20 +60,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         publicEnabled,
         publicSlug: publicSlug || undefined,
       });
-      if (isJson) return NextResponse.json({ ok: true, data: created });
-      const url = new URL(returnTo, request.url);
-      url.searchParams.set("siteId", created.id);
-      url.searchParams.set("teamId", created.teamId);
-      return NextResponse.redirect(url, { status: 303 });
+      return NextResponse.json({ ok: true, data: created });
     }
   } catch (error) {
     const msg = normalizeErrorMessage(error);
-    if (isJson) return NextResponse.json({ ok: false, error: "site_mutation_failed", message: msg }, { status: 500 });
-    const url = new URL(returnTo, request.url);
-    url.searchParams.set("error", "site_mutation_failed");
-    url.searchParams.set("message", msg);
-    return NextResponse.redirect(url, { status: 303 });
+    return NextResponse.json(
+      { ok: false, error: "site_mutation_failed", message: msg },
+      { status: 500 },
+    );
   }
-
-  return NextResponse.redirect(new URL(returnTo, request.url), { status: 303 });
 }
