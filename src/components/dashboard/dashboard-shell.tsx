@@ -413,7 +413,7 @@ export function DashboardShell({
         <SidebarInset>
           <div className="sticky top-0 z-20 border-b bg-background/90 backdrop-blur">
             <div className="p-3">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
                 <SidebarTrigger />
                 <div className="min-w-0 flex-1">
                   <Breadcrumb className="md:hidden">
@@ -458,7 +458,7 @@ export function DashboardShell({
                     </BreadcrumbList>
                   </Breadcrumb>
                 </div>
-                <div className="ml-auto w-full min-w-0 lg:w-auto">
+                <div className="ml-auto min-w-0">
                   <DashboardHeaderControls
                     locale={locale}
                     messages={messages}
