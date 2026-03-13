@@ -413,7 +413,7 @@ export function DashboardShell({
         <SidebarInset>
           <div className="sticky top-0 z-20 border-b bg-background/90 backdrop-blur">
             <div className="p-3">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <SidebarTrigger />
                 <div className="min-w-0 flex-1">
                   <Breadcrumb className="md:hidden">
@@ -458,7 +458,7 @@ export function DashboardShell({
                     </BreadcrumbList>
                   </Breadcrumb>
                 </div>
-                <div className="ml-auto">
+                <div className="ml-auto w-full min-w-0 lg:w-auto">
                   <DashboardHeaderControls
                     locale={locale}
                     messages={messages}
@@ -495,7 +495,7 @@ export function DashboardShell({
               </AutoTransition>
             </AutoResizer>
           </div>
-          <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
+          <div className="mx-auto min-w-0 w-full max-w-[1400px] p-4 md:p-6">
             <PageTransition>{children}</PageTransition>
           </div>
         </SidebarInset>

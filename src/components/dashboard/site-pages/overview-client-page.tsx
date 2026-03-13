@@ -904,7 +904,13 @@ const UMAMI_OS_ICON_PREFIX = "umami-os:";
 const UMAMI_BROWSER_ICON_DIR = "/images/browser";
 const UMAMI_OS_ICON_DIR = "/images/os";
 const UMAMI_ICON_FALLBACK = "unknown";
-const UMAMI_BROWSER_SVG_ICON_KEYS = new Set(["arc", "duckduckgo", "wechat", "qq"]);
+const UMAMI_BROWSER_SVG_ICON_KEYS = new Set([
+  "arc",
+  "duckduckgo",
+  "wechat",
+  "qq",
+  "huawei",
+]);
 
 function resolveBrowserLogoIconName(value: string): string | null {
   const normalized = value.trim().toLocaleLowerCase();
@@ -924,7 +930,7 @@ function resolveBrowserLogoIconName(value: string): string | null {
   } else if (normalized.includes("edge ios")) {
     iconKey = "edge-ios";
   } else if (normalized.includes("edge")) {
-    iconKey = "edge";
+    iconKey = "edge-chromium";
   } else if (
     normalized.includes("chrome ios") ||
     normalized.includes("crios")
@@ -965,8 +971,9 @@ function resolveBrowserLogoIconName(value: string): string | null {
     iconKey = "wechat";
   } else if (normalized.includes("vivaldi")) {
     iconKey = "vivaldi";
+  } else if (normalized.includes("huawei browser") || normalized === "huawei") {
+    iconKey = "huawei";
   } else if (
-    normalized.includes("huawei browser") ||
     normalized.includes("honor") ||
     normalized.includes("vivo browser") ||
     normalized.includes("heytap")

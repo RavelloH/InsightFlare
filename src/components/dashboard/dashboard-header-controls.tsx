@@ -452,8 +452,8 @@ export function DashboardHeaderControls({
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <div className="flex items-center justify-end gap-2 md:hidden">
+      <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-2 lg:hidden">
           {showRealtimeBadge ? (
                 <RealtimeActiveBadge
                   activeNow={activeNow}
@@ -658,7 +658,7 @@ export function DashboardHeaderControls({
           </Drawer>
         </div>
 
-        <div className="hidden flex-wrap items-center justify-end gap-2 md:flex">
+        <div className="hidden min-w-0 max-w-full flex-wrap items-center justify-end gap-2 lg:flex">
           {showRealtimeBadge ? (
                 <RealtimeActiveBadge
                   activeNow={activeNow}

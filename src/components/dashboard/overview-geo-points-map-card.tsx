@@ -9,11 +9,12 @@ import type { Feature, GeoJSON, Geometry } from "geojson";
 import { AnimatePresence, animate, motion } from "motion/react";
 import { useTheme } from "next-themes";
 import type { StyleSpecification } from "maplibre-gl";
-import Map, { useControl } from "react-map-gl/maplibre";
+import Map, { type MapRef, useControl } from "react-map-gl/maplibre";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
   emptyOverviewGeoPointsData,
   fetchOverviewGeoPoints,
@@ -97,8 +98,8 @@ function buildRasterStyle(theme: EffectiveMapTheme): StyleSpecification {
 const DEFAULT_VIEW_STATE: MapViewState = {
   longitude: 0,
   latitude: 20,
-  zoom: 1.35,
-  minZoom: 0.7,
+  zoom: 1,
+  minZoom: 0.3,
   maxZoom: 19,
   pitch: 0,
   bearing: 0,
@@ -135,7 +136,7 @@ function computeInitialViewState(points: GeoPoint[]): MapViewState {
   const centerLon = (minLon + maxLon) / 2;
   const zoomFromLat = Math.log2(170 / Math.max(4, latSpan));
   const zoomFromLon = Math.log2(360 / Math.max(4, lonSpan));
-  const zoom = clamp(Math.min(zoomFromLat, zoomFromLon) + 0.15, 1.15, 6.2);
+  const zoom = clamp(Math.min(zoomFromLat, zoomFromLon) + 0.02, 0.95, 6.2);
 
   return {
     ...DEFAULT_VIEW_STATE,
@@ -302,6 +303,14 @@ function normalizeClusterZoom(zoom: number): number {
   );
 }
 
+function computeClusterPointRadius(count: number, zoom: number): number {
+  const safeCount = Number.isFinite(count) ? Math.max(1, count) : 1;
+  const safeZoom = normalizeClusterZoom(zoom);
+  const baseRadius = 2.8 + Math.log2(safeCount + 1) * 2.15;
+  const zoomScale = clamp(0.62 + safeZoom * 0.18, 0.74, 1.28);
+  return clamp(baseRadius * zoomScale, 2.2, 32);
+}
+
 export function OverviewGeoPointsMapCard({
   locale,
   messages,
@@ -310,6 +319,7 @@ export function OverviewGeoPointsMapCard({
   filters,
 }: OverviewGeoPointsMapCardProps) {
   const { resolvedTheme } = useTheme();
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [geoPointsData, setGeoPointsData] = useState(emptyOverviewGeoPointsData());
   const [mounted, setMounted] = useState(false);
@@ -329,7 +339,7 @@ export function OverviewGeoPointsMapCard({
   useEffect(() => {
     let active = true;
 
-    fetch("/data/world-countries.geojson", { cache: "force-cache" })
+    fetch("/api/world-countries", { cache: "force-cache" })
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (!active) return;
@@ -415,9 +425,23 @@ export function OverviewGeoPointsMapCard({
   }, [geoPointsData.countryCounts]);
 
   const initialViewState = useMemo(() => computeInitialViewState(points), [points]);
+  const mobileMinZoom = initialViewState.minZoom ?? DEFAULT_VIEW_STATE.minZoom ?? 0;
+  const mapInitialViewState = useMemo(
+    () =>
+      isMobile
+        ? {
+            ...initialViewState,
+            zoom: mobileMinZoom,
+          }
+        : initialViewState,
+    [initialViewState, isMobile, mobileMinZoom],
+  );
+
   useEffect(() => {
-    setCurrentZoom(normalizeClusterZoom(initialViewState.zoom ?? DEFAULT_VIEW_STATE.zoom));
-  }, [initialViewState.zoom]);
+    setCurrentZoom(
+      normalizeClusterZoom(mapInitialViewState.zoom ?? DEFAULT_VIEW_STATE.zoom),
+    );
+  }, [mapInitialViewState.zoom]);
 
   const clusteredPoints = useMemo(
     () => clusterGeoPoints(points, currentZoom),
@@ -429,6 +453,7 @@ export function OverviewGeoPointsMapCard({
   const [outgoingClusters, setOutgoingClusters] = useState<ClusteredGeoPoint[]>([]);
   const [clusterFadeProgress, setClusterFadeProgress] = useState(1);
   const incomingClustersRef = useRef<ClusteredGeoPoint[]>(clusteredPoints);
+  const mapRef = useRef<MapRef | null>(null);
   useEffect(() => {
     if (!hasClusterCrossfadeInitialized.current) {
       hasClusterCrossfadeInitialized.current = true;
@@ -487,10 +512,10 @@ export function OverviewGeoPointsMapCard({
         data,
         getFillColor: withAlpha(MAP_ACCENT_RGB, alpha),
         getPosition: (item) => [item.longitude, item.latitude],
-        getRadius: (item) => Math.min(34, 3 + Math.sqrt(item.count) * 2.2),
+        getRadius: (item) => computeClusterPointRadius(item.count, currentZoom),
         radiusUnits: "pixels",
-        radiusMinPixels: 3,
-        radiusMaxPixels: 40,
+        radiusMinPixels: 2,
+        radiusMaxPixels: 32,
         pickable: false,
       });
 
@@ -550,6 +575,7 @@ export function OverviewGeoPointsMapCard({
     return result;
   }, [
     countryGeoJson,
+    currentZoom,
     hoveredCountryKey,
     incomingAlpha,
     incomingClusters,
@@ -578,6 +604,13 @@ export function OverviewGeoPointsMapCard({
   const hoveredSessionsText = numberFormat(locale, hoveredSessions);
   const showCountryToolbar = Boolean(hoveredCountryKey);
 
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !isMobile) return;
+    map.jumpTo({ zoom: mobileMinZoom });
+    setCurrentZoom(normalizeClusterZoom(mobileMinZoom));
+  }, [isMobile, mobileMinZoom]);
+
   return (
     <Card className="overflow-hidden">
       <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -604,7 +637,8 @@ export function OverviewGeoPointsMapCard({
             className={`relative ${MAP_HEIGHT_CLASS} w-full overflow-hidden rounded-md border border-border/70`}
           >
             <Map
-              initialViewState={initialViewState}
+              ref={mapRef}
+              initialViewState={mapInitialViewState}
               mapStyle={mapStyle}
               attributionControl={false}
               scrollZoom
