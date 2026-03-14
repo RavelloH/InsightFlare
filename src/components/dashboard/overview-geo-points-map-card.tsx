@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MapViewState } from "@deck.gl/core";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
 import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
@@ -149,11 +149,17 @@ function computeInitialViewState(points: GeoPoint[]): MapViewState {
   };
 }
 
-function DeckOverlay(props: MapboxOverlayProps) {
+const MAP_VIEWPORT_RENDER_ISOLATION_STYLE = {
+  contain: "layout paint",
+  transform: "translateZ(0)",
+  willChange: "transform",
+} as const;
+
+const DeckOverlay = memo(function DeckOverlay(props: MapboxOverlayProps) {
   const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay(props));
   overlay.setProps(props);
   return null;
-}
+});
 
 function resolveCountryFeatureKey(feature: CountryFeature | null | undefined): string {
   if (!feature) return "";
@@ -736,6 +742,7 @@ export function OverviewGeoPointsMapCard({
         ) : (
           <div
             className={`relative ${MAP_HEIGHT_CLASS} w-full overflow-hidden rounded-md border border-border/70`}
+            style={MAP_VIEWPORT_RENDER_ISOLATION_STYLE}
           >
             <Map
               ref={mapRef}
