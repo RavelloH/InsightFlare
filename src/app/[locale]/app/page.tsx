@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LogoutActionButton } from "@/components/auth/logout-action-button";
@@ -15,6 +16,10 @@ export default async function AppRootPage({ params }: AppRootPageProps) {
   const resolvedLocale = resolveLocale(locale);
   const t = getMessages(resolvedLocale);
   const profile = await getDashboardProfile();
+
+  if (profile && profile.teams.length === 1) {
+    redirect(`/${resolvedLocale}/app/${profile.teams[0].slug}`);
+  }
 
   if (profile && profile.teams.length > 0) {
     return (
