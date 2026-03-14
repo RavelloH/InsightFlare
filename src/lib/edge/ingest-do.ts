@@ -17,6 +17,7 @@ import {
   coerceNumber,
   coerceString,
   deriveEuVisitorId,
+  isSameHostname,
   safeHostname,
 } from "./utils";
 
@@ -643,7 +644,11 @@ export class IngestDurableObject extends DurableObject {
       if (matchesBlockedPath(pathname, config.pathBlacklist)) {
         return null;
       }
-      const referrerUrl = clampString(coerceString(client.referrerUrl), 2000);
+      const rawReferrerUrl = clampString(coerceString(client.referrerUrl), 2000);
+      const rawReferrerHost = clampString(safeHostname(rawReferrerUrl), 255).toLowerCase();
+      const referrerIsSameHostname = isSameHostname(rawReferrerHost, hostname);
+      const referrerUrl = referrerIsSameHostname ? "" : rawReferrerUrl;
+      const referrerHost = referrerIsSameHostname ? "" : rawReferrerHost;
       const sessionId = clampString(coerceString(client.sessionId), 128) || crypto.randomUUID();
       return {
         kind: "pageview",
@@ -659,7 +664,7 @@ export class IngestDurableObject extends DurableObject {
         hostname,
         title: clampString(coerceString(client.title || ""), 1024),
         referrerUrl,
-        referrerHost: clampString(safeHostname(referrerUrl), 255),
+        referrerHost,
         utmSource: clampString(coerceString(client.utmSource || ""), 255),
         utmMedium: clampString(coerceString(client.utmMedium || ""), 255),
         utmCampaign: clampString(coerceString(client.utmCampaign || ""), 255),

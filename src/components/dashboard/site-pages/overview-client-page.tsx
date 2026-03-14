@@ -342,7 +342,6 @@ const PAGE_CARD_TABS: PageCardTab[] = [
 ];
 const SOURCE_CARD_TABS: SourceCardTab[] = [
   "domain",
-  "link",
 ];
 const PAGE_CARD_NAVIGABLE_TABS = new Set<PageCardNavigableTab>([
   "path",
@@ -3978,7 +3977,7 @@ function OverviewPagesSection({
           <TabbedScrollMaskCard
             value={sourceCardTab}
             onValueChange={(value) => setSourceCardTab(value)}
-            tabs={(Object.keys(sourceCardTabMeta) as SourceCardTab[]).map(
+            tabs={SOURCE_CARD_TABS.map(
               (tab) => ({
                 value: tab,
                 label: sourceCardTabMeta[tab].label,

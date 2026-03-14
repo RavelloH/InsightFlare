@@ -42,6 +42,16 @@ export function safeHostname(urlLike: string): string {
   }
 }
 
+function normalizeHostnameForComparison(value: string): string {
+  return value.trim().toLowerCase().replace(/\.+$/, "");
+}
+
+export function isSameHostname(left: string, right: string): boolean {
+  const normalizedLeft = normalizeHostnameForComparison(left);
+  const normalizedRight = normalizeHostnameForComparison(right);
+  return normalizedLeft.length > 0 && normalizedLeft === normalizedRight;
+}
+
 export function clampString(input: string, maxLen: number): string {
   if (input.length <= maxLen) {
     return input;

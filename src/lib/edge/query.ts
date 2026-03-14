@@ -751,6 +751,7 @@ function buildVisitFilterSql(filters: DashboardFilters, alias = ""): { clause: s
   const prefix = alias ? `${alias}.` : "";
   const clauses: string[] = [];
   const bindings: string[] = [];
+  const sameDomainReferrerCondition = `LOWER(TRIM(COALESCE(${prefix}referrer_host, ''))) != '' AND LOWER(TRIM(COALESCE(${prefix}referrer_host, ''))) = LOWER(TRIM(COALESCE(${prefix}hostname, '')))`;
 
   const equalsTrimmed = (column: string, value: string) => {
     clauses.push(`TRIM(COALESCE(${column}, '')) = ?`);
@@ -795,14 +796,18 @@ function buildVisitFilterSql(filters: DashboardFilters, alias = ""): { clause: s
   }
   if (filters.sourceDomain) {
     if (filters.sourceDomain === DIRECT_REFERRER_FILTER_VALUE) {
-      clauses.push(`TRIM(COALESCE(${prefix}referrer_host, '')) = ''`);
+      clauses.push(
+        `(TRIM(COALESCE(${prefix}referrer_host, '')) = '' OR (${sameDomainReferrerCondition}))`,
+      );
     } else {
       equalsCaseInsensitive(`${prefix}referrer_host`, filters.sourceDomain);
     }
   }
   if (filters.sourceLink) {
     if (filters.sourceLink === DIRECT_REFERRER_FILTER_VALUE) {
-      clauses.push(`TRIM(COALESCE(${prefix}referrer_url, '')) = ''`);
+      clauses.push(
+        `(TRIM(COALESCE(${prefix}referrer_url, '')) = '' OR (${sameDomainReferrerCondition}))`,
+      );
     } else {
       equalsCaseInsensitive(`${prefix}referrer_url`, filters.sourceLink);
     }
@@ -2174,7 +2179,10 @@ async function queryReferrersFromD1(
   includeFullUrl: boolean,
 ): Promise<ReferrerRow[]> {
   const filter = buildVisitFilterSql(filters);
-  const keyExpr = includeFullUrl ? "referrer_url" : "referrer_host";
+  const sameDomainReferrerCondition = `LOWER(TRIM(COALESCE(referrer_host, ''))) != '' AND LOWER(TRIM(COALESCE(referrer_host, ''))) = LOWER(TRIM(COALESCE(hostname, '')))`;
+  const keyExpr = includeFullUrl
+    ? `CASE WHEN ${sameDomainReferrerCondition} THEN '' ELSE COALESCE(referrer_url, '') END`
+    : `CASE WHEN ${sameDomainReferrerCondition} THEN '' ELSE COALESCE(referrer_host, '') END`;
   const sql = `
 WITH
 ${buildVisitSourceCte()},
@@ -2184,7 +2192,7 @@ filtered_visits AS (
   ${filter.clause}
 )
 SELECT
-  COALESCE(${keyExpr}, '') AS referrer,
+  ${keyExpr} AS referrer,
   count(*) AS views,
   count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
 FROM filtered_visits
