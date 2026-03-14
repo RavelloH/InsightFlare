@@ -124,14 +124,6 @@ interface GeoPointAggregate {
   countryCounts: GeoCountryCountRow[];
 }
 
-interface PageTabs {
-  path: Array<{ label: string; views: number; sessions: number }>;
-  title: Array<{ label: string; views: number; sessions: number }>;
-  hostname: Array<{ label: string; views: number; sessions: number }>;
-  entry: Array<{ label: string; views: number; sessions: number }>;
-  exit: Array<{ label: string; views: number; sessions: number }>;
-}
-
 interface ClientDimensionTabs {
   browser: DimensionRow[];
   osVersion: DimensionRow[];
@@ -149,19 +141,6 @@ interface GeoDimensionTabs {
   organization: DimensionRow[];
 }
 
-interface OverviewPanelsAggregate {
-  pageTabs: {
-    path: DimensionRow[];
-    title: DimensionRow[];
-    hostname: DimensionRow[];
-    entry: DimensionRow[];
-    exit: DimensionRow[];
-  };
-  referrers: ReferrerRow[];
-  clientTabs: ClientDimensionTabs;
-  geoTabs: GeoDimensionTabs;
-}
-
 interface PublicSiteEnvelope {
   slug: string;
   name: string;
@@ -176,6 +155,14 @@ interface PreferredSourceResult<T> {
 
 interface SiteQueryResponseOptions {
   publicSite?: PublicSiteEnvelope;
+}
+
+type FilterOptionKey = keyof DashboardFilters;
+
+interface DashboardFilterOption {
+  value: string;
+  label: string;
+  group?: "country" | "region" | "city";
 }
 
 const jsonResponse = (payload: unknown, status = 200, extraHeaders?: Record<string, string>) =>
@@ -257,6 +244,44 @@ function parseFilters(url: URL): DashboardFilters {
     geoTimezone: normalizeFilterValue(url.searchParams.get("geoTimezone")),
     geoOrganization: normalizeFilterValue(url.searchParams.get("geoOrganization")),
   };
+}
+
+function parseFilterOptionKey(url: URL): FilterOptionKey | null {
+  const raw = normalizeFilterValue(url.searchParams.get("filterKey"));
+  if (!raw) return null;
+  const keys: FilterOptionKey[] = [
+    "country",
+    "device",
+    "browser",
+    "path",
+    "title",
+    "hostname",
+    "entry",
+    "exit",
+    "sourceDomain",
+    "sourceLink",
+    "clientBrowser",
+    "clientOsVersion",
+    "clientDeviceType",
+    "clientLanguage",
+    "clientScreenSize",
+    "geo",
+    "geoContinent",
+    "geoTimezone",
+    "geoOrganization",
+  ];
+  return keys.includes(raw as FilterOptionKey)
+    ? (raw as FilterOptionKey)
+    : null;
+}
+
+function withoutFilterKey(
+  filters: DashboardFilters,
+  key: FilterOptionKey,
+): DashboardFilters {
+  const next = { ...filters };
+  delete next[key];
+  return next;
 }
 
 function sourceLabel(window: QueryWindow): "detail" | "archive" | "mixed" {
@@ -396,14 +421,95 @@ function mapVisitors(rows: VisitorRow[]) {
   }));
 }
 
-function mapPageTabs(tabs: OverviewPanelsAggregate["pageTabs"]): PageTabs {
-  return {
-    path: mapTabs(tabs.path),
-    title: mapTabs(tabs.title),
-    hostname: mapTabs(tabs.hostname),
-    entry: mapTabs(tabs.entry),
-    exit: mapTabs(tabs.exit),
-  };
+function dedupeFilterOptions(
+  options: DashboardFilterOption[],
+): DashboardFilterOption[] {
+  const seen = new Set<string>();
+  const deduped: DashboardFilterOption[] = [];
+  for (const option of options) {
+    const value = String(option.value ?? "").trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    deduped.push({
+      value,
+      label: String(option.label ?? value).trim() || value,
+      ...(option.group ? { group: option.group } : {}),
+    });
+  }
+  return deduped;
+}
+
+function mapDimensionRowsToFilterOptions(rows: DimensionRow[]): DashboardFilterOption[] {
+  return dedupeFilterOptions(
+    rows.map((row) => {
+      const value = String(row.value ?? "").trim();
+      return {
+        value,
+        label: value,
+      };
+    }),
+  );
+}
+
+function mapReferrerRowsToFilterOptions(rows: ReferrerRow[]): DashboardFilterOption[] {
+  return dedupeFilterOptions(
+    rows.map((row) => {
+      const value = String(row.referrer ?? "").trim();
+      if (!value) {
+        return {
+          value: DIRECT_REFERRER_FILTER_VALUE,
+          label: DIRECT_REFERRER_FILTER_VALUE,
+        };
+      }
+      return {
+        value,
+        label: value,
+      };
+    }),
+  );
+}
+
+function mapGeoRowsToFilterOptions(
+  rows: DimensionRow[],
+  group: "country" | "region" | "city",
+): DashboardFilterOption[] {
+  return dedupeFilterOptions(
+    rows.map((row) => {
+      const value = String(row.value ?? "").trim();
+      if (!value) {
+        return {
+          value: "",
+          label: "",
+          group,
+        };
+      }
+      const parsed = parseGeoFilterValue(value);
+      if (group === "country") {
+        return {
+          value,
+          label: parsed?.country || value,
+          group,
+        };
+      }
+      if (group === "region") {
+        return {
+          value,
+          label: parsed?.regionName || parsed?.regionCode || parsed?.country || value,
+          group,
+        };
+      }
+      return {
+        value,
+        label:
+          parsed?.city ||
+          parsed?.regionName ||
+          parsed?.regionCode ||
+          parsed?.country ||
+          value,
+        group,
+      };
+    }),
+  );
 }
 
 interface DimensionAccumulator {
@@ -1369,15 +1475,77 @@ async function handleEventTypes(
   return jsonResponse({ ok: true, data: mapTabs(rows) });
 }
 
-async function handleOverviewClientDimensions(
+type OverviewPageTabKey = "path" | "title" | "hostname" | "entry" | "exit";
+type OverviewSourceTabKey = "domain" | "link";
+type OverviewClientTabKey =
+  | "browser"
+  | "osVersion"
+  | "deviceType"
+  | "language"
+  | "screenSize";
+type OverviewGeoTabKey =
+  | "country"
+  | "region"
+  | "city"
+  | "continent"
+  | "timezone"
+  | "organization";
+
+async function handleOverviewPageTab(
   env: Env,
   siteId: string,
   url: URL,
+  tab: OverviewPageTabKey,
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilters(url);
-  const limit = parseLimit(url, 20, 200);
+  const limit = parseLimit(url, 100, 200);
+  const tabs = await queryPageTabsAggregate(env, siteId, window, filters, limit);
+  return jsonResponse({
+    ok: true,
+    data: mapTabs(tabs[tab]),
+  });
+}
+
+async function handleOverviewSourceTab(
+  env: Env,
+  siteId: string,
+  url: URL,
+  tab: OverviewSourceTabKey,
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const limit = parseLimit(url, 100, 200);
+  const rows = await queryReferrerAggregate(
+    env,
+    siteId,
+    window,
+    filters,
+    limit,
+    tab === "link",
+  );
+  return jsonResponse({
+    ok: true,
+    data: rows.map((row) => ({
+      label: row.referrer,
+      views: row.views,
+      sessions: row.sessions,
+    })),
+  });
+}
+
+async function handleOverviewClientTab(
+  env: Env,
+  siteId: string,
+  url: URL,
+  tab: OverviewClientTabKey,
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const limit = parseLimit(url, 100, 200);
   const tabs = await buildOverviewClientDimensionTabs(
     env,
     siteId,
@@ -1387,66 +1555,20 @@ async function handleOverviewClientDimensions(
   );
   return jsonResponse({
     ok: true,
-    tabs: {
-      browser: mapTabs(tabs.browser),
-      osVersion: mapTabs(tabs.osVersion),
-      deviceType: mapTabs(tabs.deviceType),
-      language: mapTabs(tabs.language),
-      screenSize: mapTabs(tabs.screenSize),
-    },
+    data: mapTabs(tabs[tab]),
   });
 }
 
-async function handleOverviewPanels(
+async function handleOverviewGeoTab(
   env: Env,
   siteId: string,
   url: URL,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
-  const limit = parseLimit(url, 100, 200);
-  const panels = await queryOverviewPanelsFromD1(env, siteId, window, filters, limit);
-  const geoTabs = filters.geo
-    ? await buildOverviewGeoDimensionTabs(
-        env,
-        siteId,
-        window,
-        withoutGeoFilter(filters),
-        limit,
-      )
-    : panels.geoTabs;
-  return jsonResponse({
-    ok: true,
-    pageTabs: mapPageTabs(panels.pageTabs),
-    referrers: mapReferrers(panels.referrers),
-    clientTabs: {
-      browser: mapTabs(panels.clientTabs.browser),
-      osVersion: mapTabs(panels.clientTabs.osVersion),
-      deviceType: mapTabs(panels.clientTabs.deviceType),
-      language: mapTabs(panels.clientTabs.language),
-      screenSize: mapTabs(panels.clientTabs.screenSize),
-    },
-    geoTabs: {
-      country: mapTabs(geoTabs.country),
-      region: mapTabs(geoTabs.region),
-      city: mapTabs(geoTabs.city),
-      continent: mapTabs(geoTabs.continent),
-      timezone: mapTabs(geoTabs.timezone),
-      organization: mapTabs(geoTabs.organization),
-    },
-  });
-}
-
-async function handleOverviewGeoDimensions(
-  env: Env,
-  siteId: string,
-  url: URL,
+  tab: OverviewGeoTabKey,
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = withoutGeoFilter(parseFilters(url));
-  const limit = parseLimit(url, 20, 200);
+  const limit = parseLimit(url, 100, 200);
   const tabs = await buildOverviewGeoDimensionTabs(
     env,
     siteId,
@@ -1456,15 +1578,129 @@ async function handleOverviewGeoDimensions(
   );
   return jsonResponse({
     ok: true,
-    tabs: {
-      country: mapTabs(tabs.country),
-      region: mapTabs(tabs.region),
-      city: mapTabs(tabs.city),
-      continent: mapTabs(tabs.continent),
-      timezone: mapTabs(tabs.timezone),
-      organization: mapTabs(tabs.organization),
-    },
+    data: mapTabs(tabs[tab]),
   });
+}
+
+async function handleFilterOptions(
+  env: Env,
+  siteId: string,
+  url: URL,
+): Promise<Response> {
+  const filterKey = parseFilterOptionKey(url);
+  if (!filterKey) return badRequest("Invalid filter key");
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = withoutFilterKey(parseFilters(url), filterKey);
+  const limit = parseLimit(url, 200, 500);
+
+  let data: DashboardFilterOption[] = [];
+
+  if (filterKey === "country") {
+    const rows = await queryDimensionAggregate(
+      env,
+      siteId,
+      window,
+      filters,
+      limit,
+      "country",
+    );
+    data = mapDimensionRowsToFilterOptions(rows);
+  } else if (filterKey === "device") {
+    const rows = await queryDimensionAggregate(
+      env,
+      siteId,
+      window,
+      filters,
+      limit,
+      "device_type",
+    );
+    data = mapDimensionRowsToFilterOptions(rows);
+  } else if (filterKey === "browser") {
+    const rows = await queryDimensionAggregate(
+      env,
+      siteId,
+      window,
+      filters,
+      limit,
+      "browser",
+    );
+    data = mapDimensionRowsToFilterOptions(rows);
+  } else if (
+    filterKey === "path" ||
+    filterKey === "title" ||
+    filterKey === "hostname" ||
+    filterKey === "entry" ||
+    filterKey === "exit"
+  ) {
+    const tabs = await queryPageTabsAggregate(env, siteId, window, filters, limit);
+    data = mapDimensionRowsToFilterOptions(tabs[filterKey]);
+  } else if (filterKey === "sourceDomain" || filterKey === "sourceLink") {
+    const rows = await queryReferrerAggregate(
+      env,
+      siteId,
+      window,
+      filters,
+      limit,
+      filterKey === "sourceLink",
+    );
+    data = mapReferrerRowsToFilterOptions(rows);
+  } else if (
+    filterKey === "clientBrowser" ||
+    filterKey === "clientOsVersion" ||
+    filterKey === "clientDeviceType" ||
+    filterKey === "clientLanguage" ||
+    filterKey === "clientScreenSize"
+  ) {
+    const tabs = await buildOverviewClientDimensionTabs(
+      env,
+      siteId,
+      window,
+      filters,
+      limit,
+    );
+    const keyMap = {
+      clientBrowser: "browser",
+      clientOsVersion: "osVersion",
+      clientDeviceType: "deviceType",
+      clientLanguage: "language",
+      clientScreenSize: "screenSize",
+    } as const;
+    data = mapDimensionRowsToFilterOptions(tabs[keyMap[filterKey]]);
+  } else if (filterKey === "geo") {
+    const tabs = await buildOverviewGeoDimensionTabs(
+      env,
+      siteId,
+      window,
+      filters,
+      limit,
+    );
+    data = dedupeFilterOptions([
+      ...mapGeoRowsToFilterOptions(tabs.country, "country"),
+      ...mapGeoRowsToFilterOptions(tabs.region, "region"),
+      ...mapGeoRowsToFilterOptions(tabs.city, "city"),
+    ]);
+  } else if (
+    filterKey === "geoContinent" ||
+    filterKey === "geoTimezone" ||
+    filterKey === "geoOrganization"
+  ) {
+    const tabs = await buildOverviewGeoDimensionTabs(
+      env,
+      siteId,
+      window,
+      filters,
+      limit,
+    );
+    const keyMap = {
+      geoContinent: "continent",
+      geoTimezone: "timezone",
+      geoOrganization: "organization",
+    } as const;
+    data = mapDimensionRowsToFilterOptions(tabs[keyMap[filterKey]]);
+  }
+
+  return jsonResponse({ ok: true, data });
 }
 
 async function handleOverviewGeoPoints(
@@ -1647,14 +1883,60 @@ async function routeQuery(
     return handleDimension(env, siteId, url, "browser");
   }
   if (pathname === "event-types") return handleEventTypes(env, siteId, url);
-  if (pathname === "overview-panels") {
-    return handleOverviewPanels(env, siteId, url);
+  if (pathname === "filter-options") return handleFilterOptions(env, siteId, url);
+  if (pathname === "overview-page-path") {
+    return handleOverviewPageTab(env, siteId, url, "path");
   }
-  if (pathname === "overview-client-dimensions") {
-    return handleOverviewClientDimensions(env, siteId, url);
+  if (pathname === "overview-page-title") {
+    return handleOverviewPageTab(env, siteId, url, "title");
   }
-  if (pathname === "overview-geo-dimensions") {
-    return handleOverviewGeoDimensions(env, siteId, url);
+  if (pathname === "overview-page-hostname") {
+    return handleOverviewPageTab(env, siteId, url, "hostname");
+  }
+  if (pathname === "overview-page-entry") {
+    return handleOverviewPageTab(env, siteId, url, "entry");
+  }
+  if (pathname === "overview-page-exit") {
+    return handleOverviewPageTab(env, siteId, url, "exit");
+  }
+  if (pathname === "overview-source-domain") {
+    return handleOverviewSourceTab(env, siteId, url, "domain");
+  }
+  if (pathname === "overview-source-link") {
+    return handleOverviewSourceTab(env, siteId, url, "link");
+  }
+  if (pathname === "overview-client-browser") {
+    return handleOverviewClientTab(env, siteId, url, "browser");
+  }
+  if (pathname === "overview-client-os-version") {
+    return handleOverviewClientTab(env, siteId, url, "osVersion");
+  }
+  if (pathname === "overview-client-device-type") {
+    return handleOverviewClientTab(env, siteId, url, "deviceType");
+  }
+  if (pathname === "overview-client-language") {
+    return handleOverviewClientTab(env, siteId, url, "language");
+  }
+  if (pathname === "overview-client-screen-size") {
+    return handleOverviewClientTab(env, siteId, url, "screenSize");
+  }
+  if (pathname === "overview-geo-country") {
+    return handleOverviewGeoTab(env, siteId, url, "country");
+  }
+  if (pathname === "overview-geo-region") {
+    return handleOverviewGeoTab(env, siteId, url, "region");
+  }
+  if (pathname === "overview-geo-city") {
+    return handleOverviewGeoTab(env, siteId, url, "city");
+  }
+  if (pathname === "overview-geo-continent") {
+    return handleOverviewGeoTab(env, siteId, url, "continent");
+  }
+  if (pathname === "overview-geo-timezone") {
+    return handleOverviewGeoTab(env, siteId, url, "timezone");
+  }
+  if (pathname === "overview-geo-organization") {
+    return handleOverviewGeoTab(env, siteId, url, "organization");
   }
   if (pathname === "overview-geo-points") {
     return handleOverviewGeoPoints(env, siteId, url);
@@ -2231,173 +2513,3 @@ FROM filtered_visits
   };
 }
 
-async function queryOverviewPanelsFromD1(
-  env: Env,
-  siteId: string,
-  window: QueryWindow,
-  filters: DashboardFilters,
-  limit: number,
-): Promise<OverviewPanelsAggregate> {
-  const filter = buildVisitFilterSql(filters);
-  const sql = `
-WITH
-${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT
-    session_id AS sessionId,
-    started_at AS startedAt,
-    pathname,
-    title,
-    hostname,
-    referrer_url AS referrerUrl,
-    browser,
-    os,
-    os_version AS osVersion,
-    device_type AS deviceType,
-    language,
-    screen_width AS screenWidth,
-    screen_height AS screenHeight,
-    country,
-    ${regionValueExpr()} AS region,
-    ${cityValueExpr()} AS city,
-    continent,
-    timezone,
-    as_organization AS asOrganization
-  FROM visit_source
-  ${filter.clause}
-)
-SELECT
-  sessionId,
-  startedAt,
-  pathname,
-  title,
-  hostname,
-  referrerUrl,
-  browser,
-  os,
-  osVersion,
-  deviceType,
-  language,
-  screenWidth,
-  screenHeight,
-  country,
-  region,
-  city,
-  continent,
-  timezone,
-  asOrganization
-FROM filtered_visits
-`;
-  const rows = await queryD1All<Record<string, unknown>>(
-    env,
-    sql,
-    [...visitSourceBindings(siteId, window), ...filter.bindings],
-  );
-
-  const path = new Map<string, DimensionAccumulator>();
-  const title = new Map<string, DimensionAccumulator>();
-  const hostname = new Map<string, DimensionAccumulator>();
-  const referrers = new Map<string, DimensionAccumulator>();
-  const browser = new Map<string, DimensionAccumulator>();
-  const osVersion = new Map<string, DimensionAccumulator>();
-  const deviceType = new Map<string, DimensionAccumulator>();
-  const language = new Map<string, DimensionAccumulator>();
-  const screenSize = new Map<string, DimensionAccumulator>();
-  const country = new Map<string, DimensionAccumulator>();
-  const region = new Map<string, DimensionAccumulator>();
-  const city = new Map<string, DimensionAccumulator>();
-  const continent = new Map<string, DimensionAccumulator>();
-  const timezone = new Map<string, DimensionAccumulator>();
-  const organization = new Map<string, DimensionAccumulator>();
-  const entryBySession = new Map<string, { at: number; value: string }>();
-  const exitBySession = new Map<string, { at: number; value: string }>();
-
-  for (const row of rows) {
-    const sessionId = String(row.sessionId ?? "");
-    const startedAt = Number(row.startedAt ?? 0);
-    const pathnameValue = String(row.pathname ?? "");
-
-    addDimensionValue(path, pathnameValue, sessionId);
-    addDimensionValue(title, String(row.title ?? ""), sessionId);
-    addDimensionValue(hostname, String(row.hostname ?? ""), sessionId);
-    addDimensionValue(browser, String(row.browser ?? ""), sessionId);
-    addDimensionValue(deviceType, String(row.deviceType ?? ""), sessionId);
-    addDimensionValue(language, String(row.language ?? ""), sessionId);
-    addDimensionValue(country, String(row.country ?? ""), sessionId);
-    addDimensionValue(region, String(row.region ?? ""), sessionId);
-    addDimensionValue(city, String(row.city ?? ""), sessionId);
-    addDimensionValue(continent, String(row.continent ?? ""), sessionId);
-    addDimensionValue(timezone, String(row.timezone ?? ""), sessionId);
-    addDimensionValue(organization, String(row.asOrganization ?? ""), sessionId);
-
-    const os = String(row.os ?? "").trim();
-    const version = String(row.osVersion ?? "").trim();
-    addDimensionValue(osVersion, os && version ? `${os} ${version}` : os || version, sessionId);
-
-    const referrerValue = String(row.referrerUrl ?? "").trim();
-    const referrerBucket = referrers.get(referrerValue) ?? {
-      views: 0,
-      sessions: new Set<string>(),
-    };
-    referrerBucket.views += 1;
-    if (sessionId) referrerBucket.sessions.add(sessionId);
-    referrers.set(referrerValue, referrerBucket);
-
-    const width = Number(row.screenWidth ?? 0);
-    const height = Number(row.screenHeight ?? 0);
-    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
-      addDimensionValue(screenSize, `${Math.trunc(width)}x${Math.trunc(height)}`, sessionId);
-    }
-
-    if (!sessionId) continue;
-    const normalizedPath = pathnameValue.trim();
-    if (!normalizedPath) continue;
-    const entry = entryBySession.get(sessionId);
-    if (!entry || startedAt < entry.at) {
-      entryBySession.set(sessionId, { at: startedAt, value: normalizedPath });
-    }
-    const exit = exitBySession.get(sessionId);
-    if (!exit || startedAt >= exit.at) {
-      exitBySession.set(sessionId, { at: startedAt, value: normalizedPath });
-    }
-  }
-
-  const entry = new Map<string, DimensionAccumulator>();
-  const exit = new Map<string, DimensionAccumulator>();
-  for (const [sessionId, edge] of entryBySession.entries()) {
-    addDimensionValue(entry, edge.value, sessionId);
-  }
-  for (const [sessionId, edge] of exitBySession.entries()) {
-    addDimensionValue(exit, edge.value, sessionId);
-  }
-
-  return {
-    pageTabs: {
-      path: finalizeDimensionBuckets(path, limit),
-      title: finalizeDimensionBuckets(title, limit),
-      hostname: finalizeDimensionBuckets(hostname, limit),
-      entry: finalizeDimensionBuckets(entry, limit),
-      exit: finalizeDimensionBuckets(exit, limit),
-    },
-    referrers: finalizeDimensionBuckets(referrers, limit).map((row) => ({
-      referrer: row.value,
-      views: row.views,
-      sessions: row.sessions,
-    })),
-    clientTabs: {
-      browser: finalizeDimensionBuckets(browser, limit),
-      osVersion: finalizeDimensionBuckets(osVersion, limit),
-      deviceType: finalizeDimensionBuckets(deviceType, limit),
-      language: finalizeDimensionBuckets(language, limit),
-      screenSize: finalizeDimensionBuckets(screenSize, limit),
-    },
-    geoTabs: {
-      country: finalizeDimensionBuckets(country, limit),
-      region: finalizeDimensionBuckets(region, limit),
-      city: finalizeDimensionBuckets(city, limit),
-      continent: finalizeDimensionBuckets(continent, limit),
-      timezone: finalizeDimensionBuckets(timezone, limit),
-      organization: finalizeDimensionBuckets(organization, limit),
-    },
-  };
-}

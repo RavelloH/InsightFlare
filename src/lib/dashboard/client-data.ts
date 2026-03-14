@@ -1,7 +1,9 @@
 import type {
+  DashboardFilterOption,
+  DashboardFilterOptionsData,
   DimensionData,
   OverviewData,
-  OverviewPanelsData,
+  OverviewTabData,
   OverviewClientDimensionTabsData as OverviewClientDimensionTabsResponse,
   OverviewGeoDimensionTabsData as OverviewGeoDimensionTabsResponse,
   OverviewGeoPointsData,
@@ -19,6 +21,8 @@ export interface FilterOptions {
   eventTypes: string[];
 }
 
+export type DashboardFilterOptionData = DashboardFilterOption;
+
 export interface OverviewBundle {
   overview: OverviewData;
   previousOverview: OverviewData;
@@ -29,6 +33,7 @@ export type PageCardTabsData = NonNullable<PagesData["tabs"]>;
 export type OverviewClientDimensionTabsData =
   OverviewClientDimensionTabsResponse["tabs"];
 export type OverviewGeoDimensionTabsData = OverviewGeoDimensionTabsResponse["tabs"];
+export type OverviewTabRows = OverviewTabData["data"];
 
 function emptyOverview(): OverviewData {
   return {
@@ -101,21 +106,19 @@ function emptyReferrers(): ReferrersData {
   return { ok: true, data: [] };
 }
 
-function emptyOverviewPanels(): OverviewPanelsData {
-  return {
-    ok: true,
-    pageTabs: emptyPageCardTabs(),
-    referrers: [],
-    clientTabs: emptyOverviewClientDimensionTabs(),
-    geoTabs: emptyOverviewGeoDimensionTabs(),
-  };
-}
-
 function emptyVisitors(): VisitorsData {
   return { ok: true, data: [] };
 }
 
 function emptyDimension(): DimensionData {
+  return { ok: true, data: [] };
+}
+
+function emptyOverviewTab(): OverviewTabData {
+  return { ok: true, data: [] };
+}
+
+function emptyDashboardFilterOptions(): DashboardFilterOptionsData {
   return { ok: true, data: [] };
 }
 
@@ -253,52 +256,6 @@ export async function fetchReferrers(
   );
 }
 
-export async function fetchOverviewClientDimensionTabs(
-  siteId: string,
-  window: TimeWindow,
-  filters?: DashboardFilters,
-  options?: {
-    limit?: number;
-  },
-): Promise<OverviewClientDimensionTabsData> {
-  const payload = await fetchPrivateJson<OverviewClientDimensionTabsResponse>(
-    "/api/private/overview-client-dimensions",
-    withFilters(
-      {
-        siteId,
-        from: window.from,
-        to: window.to,
-        limit: options?.limit ?? 100,
-      },
-      filters,
-    ),
-  );
-  return payload.tabs ?? emptyOverviewClientDimensionTabs();
-}
-
-export async function fetchOverviewGeoDimensionTabs(
-  siteId: string,
-  window: TimeWindow,
-  filters?: DashboardFilters,
-  options?: {
-    limit?: number;
-  },
-): Promise<OverviewGeoDimensionTabsData> {
-  const payload = await fetchPrivateJson<OverviewGeoDimensionTabsResponse>(
-    "/api/private/overview-geo-dimensions",
-    withFilters(
-      {
-        siteId,
-        from: window.from,
-        to: window.to,
-        limit: options?.limit ?? 100,
-      },
-      filters,
-    ),
-  );
-  return payload.tabs ?? emptyOverviewGeoDimensionTabs();
-}
-
 export async function fetchOverviewGeoPoints(
   siteId: string,
   window: TimeWindow,
@@ -341,16 +298,17 @@ export async function fetchOverviewGeoPoints(
     .catch(() => emptyOverviewGeoPoints());
 }
 
-export async function fetchOverviewPanels(
+export async function fetchOverviewPageCardTab(
   siteId: string,
   window: TimeWindow,
+  tab: "path" | "title" | "hostname" | "entry" | "exit",
   filters?: DashboardFilters,
   options?: {
     limit?: number;
   },
-): Promise<OverviewPanelsData> {
-  const payload = await fetchPrivateJson<OverviewPanelsData>(
-    "/api/private/overview-panels",
+): Promise<OverviewTabRows> {
+  const payload = await fetchPrivateJson<OverviewTabData>(
+    `/api/private/overview-page-${tab}`,
     withFilters(
       {
         siteId,
@@ -360,14 +318,118 @@ export async function fetchOverviewPanels(
       },
       filters,
     ),
-  ).catch(() => emptyOverviewPanels());
-  return {
-    ok: payload.ok,
-    pageTabs: payload.pageTabs ?? emptyPageCardTabs(),
-    referrers: payload.referrers ?? [],
-    clientTabs: payload.clientTabs ?? emptyOverviewClientDimensionTabs(),
-    geoTabs: payload.geoTabs ?? emptyOverviewGeoDimensionTabs(),
-  };
+  ).catch(() => emptyOverviewTab());
+  return payload.data ?? [];
+}
+
+export async function fetchOverviewSourceCardTab(
+  siteId: string,
+  window: TimeWindow,
+  tab: "domain" | "link",
+  filters?: DashboardFilters,
+  options?: {
+    limit?: number;
+  },
+): Promise<OverviewTabRows> {
+  const payload = await fetchPrivateJson<OverviewTabData>(
+    `/api/private/overview-source-${tab}`,
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        limit: options?.limit ?? 100,
+      },
+      filters,
+    ),
+  ).catch(() => emptyOverviewTab());
+  return payload.data ?? [];
+}
+
+export async function fetchOverviewClientDimensionTab(
+  siteId: string,
+  window: TimeWindow,
+  tab: "browser" | "osVersion" | "deviceType" | "language" | "screenSize",
+  filters?: DashboardFilters,
+  options?: {
+    limit?: number;
+  },
+): Promise<OverviewTabRows> {
+  const pathByTab = {
+    browser: "browser",
+    osVersion: "os-version",
+    deviceType: "device-type",
+    language: "language",
+    screenSize: "screen-size",
+  } as const;
+  const payload = await fetchPrivateJson<OverviewTabData>(
+    `/api/private/overview-client-${pathByTab[tab]}`,
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        limit: options?.limit ?? 100,
+      },
+      filters,
+    ),
+  ).catch(() => emptyOverviewTab());
+  return payload.data ?? [];
+}
+
+export async function fetchOverviewGeoDimensionTab(
+  siteId: string,
+  window: TimeWindow,
+  tab:
+    | "country"
+    | "region"
+    | "city"
+    | "continent"
+    | "timezone"
+    | "organization",
+  filters?: DashboardFilters,
+  options?: {
+    limit?: number;
+  },
+): Promise<OverviewTabRows> {
+  const payload = await fetchPrivateJson<OverviewTabData>(
+    `/api/private/overview-geo-${tab}`,
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        limit: options?.limit ?? 100,
+      },
+      filters,
+    ),
+  ).catch(() => emptyOverviewTab());
+  return payload.data ?? [];
+}
+
+export async function fetchDashboardFilterOptions(
+  siteId: string,
+  window: TimeWindow,
+  filterKey: keyof DashboardFilters,
+  filters?: DashboardFilters,
+  options?: {
+    limit?: number;
+  },
+): Promise<DashboardFilterOptionData[]> {
+  const payload = await fetchPrivateJson<DashboardFilterOptionsData>(
+    "/api/private/filter-options",
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        filterKey,
+        limit: options?.limit ?? 200,
+      },
+      filters,
+    ),
+  ).catch(() => emptyDashboardFilterOptions());
+  return Array.isArray(payload.data) ? payload.data : [];
 }
 
 export async function fetchVisitors(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<VisitorsData> {

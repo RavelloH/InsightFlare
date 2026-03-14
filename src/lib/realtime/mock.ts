@@ -2862,10 +2862,19 @@ function collectReferrerRows(
   dataset: DemoFactDataset,
   filtered: DemoFilteredFacts,
   limit: number,
+  options?: {
+    includeFullUrl?: boolean;
+    directValue?: string;
+  },
 ): Array<{ referrer: string; views: number; sessions: number }> {
-  const rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => (
-    visit.referrerHost.trim() ? visit.referrerHost : "(direct)"
-  ));
+  const includeFullUrl = options?.includeFullUrl ?? false;
+  const directValue = options?.directValue ?? "(direct)";
+  const rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => {
+    const referrer = includeFullUrl
+      ? visit.referrerUrl.trim()
+      : visit.referrerHost.trim();
+    return referrer || directValue;
+  });
   return rows.map((row) => ({
     referrer: row.label,
     views: row.views,
@@ -3286,31 +3295,328 @@ function generateDemoGeoPoints(
   };
 }
 
-function generateDemoOverviewPanels(
+function generateDemoOverviewPageTab(
   siteId: string,
   params: Record<string, string | number>,
+  tab: "path" | "title" | "hostname" | "entry" | "exit",
 ): Record<string, unknown> {
-  const limit = parseDemoLimit(params.limit, 12, 1, 200);
+  const payload = generateDemoPages(siteId, params) as {
+    ok: boolean;
+    tabs?: Record<string, unknown>;
+  };
+  const data = Array.isArray(payload.tabs?.[tab]) ? payload.tabs?.[tab] : [];
+  return {
+    ok: payload.ok,
+    data,
+  };
+}
+
+function generateDemoOverviewSourceTab(
+  siteId: string,
+  params: Record<string, string | number>,
+  tab: "domain" | "link",
+): Record<string, unknown> {
+  const limit = parseDemoLimit(params.limit, 100, 1, 500);
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
   const filters = parseDemoFilters(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
-  const geoFiltered = filters.geo
-    ? applyDemoFilters(dataset, withoutDemoGeoFilter(filters))
-    : filtered;
-  const pages = collectPageDataAndTabs(dataset, filtered, limit);
-  const referrers = collectReferrerRows(dataset, filtered, limit);
-  const clientTabs = collectClientTabs(dataset, filtered, limit);
-  const geoTabs = collectGeoTabs(dataset, geoFiltered, limit);
-
+  const rows = collectReferrerRows(dataset, filtered, limit, {
+    includeFullUrl: tab === "link",
+    directValue: "",
+  });
   return {
     ok: true,
-    pageTabs: pages.tabs,
-    referrers,
-    clientTabs,
-    geoTabs,
+    data: rows.map((item) => ({
+      label: String(item.referrer ?? ""),
+      views: Number(item.views ?? 0),
+      sessions: Number(item.sessions ?? 0),
+    })),
   };
+}
+
+function generateDemoOverviewClientTab(
+  siteId: string,
+  params: Record<string, string | number>,
+  tab: "browser" | "osVersion" | "deviceType" | "language" | "screenSize",
+): Record<string, unknown> {
+  const payload = generateDemoClientDimensionTabs(siteId, params) as {
+    ok: boolean;
+    tabs?: Record<string, unknown>;
+  };
+  const data = Array.isArray(payload.tabs?.[tab]) ? payload.tabs?.[tab] : [];
+  return {
+    ok: payload.ok,
+    data,
+  };
+}
+
+function generateDemoOverviewGeoTab(
+  siteId: string,
+  params: Record<string, string | number>,
+  tab:
+    | "country"
+    | "region"
+    | "city"
+    | "continent"
+    | "timezone"
+    | "organization",
+): Record<string, unknown> {
+  const payload = generateDemoGeoDimensionTabs(siteId, params) as {
+    ok: boolean;
+    tabs?: Record<string, unknown>;
+  };
+  const data = Array.isArray(payload.tabs?.[tab]) ? payload.tabs?.[tab] : [];
+  return {
+    ok: payload.ok,
+    data,
+  };
+}
+
+function dedupeDemoFilterOptions(
+  options: Array<{
+    value: string;
+    label: string;
+    group?: "country" | "region" | "city";
+  }>,
+): Array<{ value: string; label: string; group?: "country" | "region" | "city" }> {
+  const seen = new Set<string>();
+  const deduped: Array<{
+    value: string;
+    label: string;
+    group?: "country" | "region" | "city";
+  }> = [];
+
+  for (const option of options) {
+    const value = String(option.value ?? "").trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    deduped.push({
+      value,
+      label: String(option.label ?? value).trim() || value,
+      ...(option.group ? { group: option.group } : {}),
+    });
+  }
+
+  return deduped;
+}
+
+function withoutDemoFilterKey(
+  filters: DemoQueryFilters,
+  key: keyof DemoQueryFilters,
+): DemoQueryFilters {
+  const next = { ...filters };
+  delete next[key];
+  return next;
+}
+
+function parseDemoFilterKey(
+  params: Record<string, string | number>,
+): keyof DemoQueryFilters | null {
+  const raw = normalizeDemoFilterValue(params.filterKey);
+  if (!raw) return null;
+  const keys: Array<keyof DemoQueryFilters> = [
+    "country",
+    "device",
+    "browser",
+    "path",
+    "title",
+    "hostname",
+    "entry",
+    "exit",
+    "sourceDomain",
+    "sourceLink",
+    "clientBrowser",
+    "clientOsVersion",
+    "clientDeviceType",
+    "clientLanguage",
+    "clientScreenSize",
+    "geo",
+    "geoContinent",
+    "geoTimezone",
+    "geoOrganization",
+  ];
+  return keys.includes(raw as keyof DemoQueryFilters)
+    ? (raw as keyof DemoQueryFilters)
+    : null;
+}
+
+function generateDemoFilterOptions(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const filterKey = parseDemoFilterKey(params);
+  if (!filterKey) {
+    return { ok: false, data: [] };
+  }
+  const limit = parseDemoLimit(params.limit, 200, 1, 500);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = withoutDemoFilterKey(parseDemoFilters(params), filterKey);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+
+  if (filterKey === "country") {
+    const rows = aggregateDimensionRowsFromVisits(
+      dataset,
+      filtered.visits,
+      limit,
+      (visit) => visit.country,
+    );
+    return {
+      ok: true,
+      data: dedupeDemoFilterOptions(rows.map((row) => ({
+        value: row.label,
+        label: row.label,
+      }))),
+    };
+  }
+  if (filterKey === "device") {
+    const rows = aggregateDimensionRowsFromVisits(
+      dataset,
+      filtered.visits,
+      limit,
+      (visit) => visit.deviceType,
+    );
+    return {
+      ok: true,
+      data: dedupeDemoFilterOptions(rows.map((row) => ({
+        value: row.label,
+        label: row.label,
+      }))),
+    };
+  }
+  if (filterKey === "browser") {
+    const rows = aggregateDimensionRowsFromVisits(
+      dataset,
+      filtered.visits,
+      limit,
+      (visit) => visit.browser,
+    );
+    return {
+      ok: true,
+      data: dedupeDemoFilterOptions(rows.map((row) => ({
+        value: row.label,
+        label: row.label,
+      }))),
+    };
+  }
+  if (
+    filterKey === "path" ||
+    filterKey === "title" ||
+    filterKey === "hostname" ||
+    filterKey === "entry" ||
+    filterKey === "exit"
+  ) {
+    const pages = collectPageDataAndTabs(dataset, filtered, limit);
+    return {
+      ok: true,
+      data: dedupeDemoFilterOptions(
+        (pages.tabs[filterKey] ?? []).map((row) => ({
+          value: String(row.label ?? "").trim(),
+          label: String(row.label ?? "").trim(),
+        })),
+      ),
+    };
+  }
+  if (filterKey === "sourceDomain" || filterKey === "sourceLink") {
+    const rows = collectReferrerRows(dataset, filtered, limit, {
+      includeFullUrl: filterKey === "sourceLink",
+      directValue: "",
+    });
+    return {
+      ok: true,
+      data: dedupeDemoFilterOptions(rows.map((row) => {
+        const value = String(row.referrer ?? "").trim();
+        return value
+          ? { value, label: value }
+          : {
+              value: DEMO_DIRECT_REFERRER_FILTER_VALUE,
+              label: DEMO_DIRECT_REFERRER_FILTER_VALUE,
+            };
+      })),
+    };
+  }
+
+  const clientTabs = collectClientTabs(dataset, filtered, limit);
+  if (
+    filterKey === "clientBrowser" ||
+    filterKey === "clientOsVersion" ||
+    filterKey === "clientDeviceType" ||
+    filterKey === "clientLanguage" ||
+    filterKey === "clientScreenSize"
+  ) {
+    const keyMap = {
+      clientBrowser: "browser",
+      clientOsVersion: "osVersion",
+      clientDeviceType: "deviceType",
+      clientLanguage: "language",
+      clientScreenSize: "screenSize",
+    } as const;
+    const rows = clientTabs[keyMap[filterKey]] ?? [];
+    return {
+      ok: true,
+      data: dedupeDemoFilterOptions(rows.map((row) => ({
+        value: String(row.label ?? "").trim(),
+        label: String(row.label ?? "").trim(),
+      }))),
+    };
+  }
+
+  const geoTabs = collectGeoTabs(dataset, filtered, limit);
+  if (filterKey === "geo") {
+    return {
+      ok: true,
+      data: dedupeDemoFilterOptions([
+        ...(geoTabs.country ?? []).map((row) => ({
+          value: String(row.label ?? "").trim(),
+          label: String(row.label ?? "").trim(),
+          group: "country" as const,
+        })),
+        ...(geoTabs.region ?? []).map((row) => {
+          const value = String(row.label ?? "").trim();
+          const segments = value.split("::").map((segment) => segment.trim());
+          return {
+            value,
+            label: segments[2] || segments[1] || segments[0] || value,
+            group: "region" as const,
+          };
+        }),
+        ...(geoTabs.city ?? []).map((row) => {
+          const value = String(row.label ?? "").trim();
+          const segments = value.split("::").map((segment) => segment.trim());
+          return {
+            value,
+            label: segments[3] || segments[2] || segments[1] || segments[0] || value,
+            group: "city" as const,
+          };
+        }),
+      ]),
+    };
+  }
+
+  if (
+    filterKey === "geoContinent" ||
+    filterKey === "geoTimezone" ||
+    filterKey === "geoOrganization"
+  ) {
+    const keyMap = {
+      geoContinent: "continent",
+      geoTimezone: "timezone",
+      geoOrganization: "organization",
+    } as const;
+    const rows = geoTabs[keyMap[filterKey]] ?? [];
+    return {
+      ok: true,
+      data: dedupeDemoFilterOptions(rows.map((row) => ({
+        value: String(row.label ?? "").trim(),
+        label: String(row.label ?? "").trim(),
+      }))),
+    };
+  }
+
+  return { ok: true, data: [] };
 }
 
 function generateDemoTeamDashboard(
@@ -3516,14 +3822,62 @@ export function handleDemoRequest(options: {
   }
 
   // Analytics query routes
-  if (path.includes("/overview-panels")) {
-    return generateDemoOverviewPanels(siteId, params);
+  if (path.includes("/filter-options")) {
+    return generateDemoFilterOptions(siteId, params);
   }
-  if (path.includes("/overview-client-dimensions")) {
-    return generateDemoClientDimensionTabs(siteId, params);
+  if (path.includes("/overview-page-path")) {
+    return generateDemoOverviewPageTab(siteId, params, "path");
   }
-  if (path.includes("/overview-geo-dimensions")) {
-    return generateDemoGeoDimensionTabs(siteId, params);
+  if (path.includes("/overview-page-title")) {
+    return generateDemoOverviewPageTab(siteId, params, "title");
+  }
+  if (path.includes("/overview-page-hostname")) {
+    return generateDemoOverviewPageTab(siteId, params, "hostname");
+  }
+  if (path.includes("/overview-page-entry")) {
+    return generateDemoOverviewPageTab(siteId, params, "entry");
+  }
+  if (path.includes("/overview-page-exit")) {
+    return generateDemoOverviewPageTab(siteId, params, "exit");
+  }
+  if (path.includes("/overview-source-domain")) {
+    return generateDemoOverviewSourceTab(siteId, params, "domain");
+  }
+  if (path.includes("/overview-source-link")) {
+    return generateDemoOverviewSourceTab(siteId, params, "link");
+  }
+  if (path.includes("/overview-client-browser")) {
+    return generateDemoOverviewClientTab(siteId, params, "browser");
+  }
+  if (path.includes("/overview-client-os-version")) {
+    return generateDemoOverviewClientTab(siteId, params, "osVersion");
+  }
+  if (path.includes("/overview-client-device-type")) {
+    return generateDemoOverviewClientTab(siteId, params, "deviceType");
+  }
+  if (path.includes("/overview-client-language")) {
+    return generateDemoOverviewClientTab(siteId, params, "language");
+  }
+  if (path.includes("/overview-client-screen-size")) {
+    return generateDemoOverviewClientTab(siteId, params, "screenSize");
+  }
+  if (path.includes("/overview-geo-country")) {
+    return generateDemoOverviewGeoTab(siteId, params, "country");
+  }
+  if (path.includes("/overview-geo-region")) {
+    return generateDemoOverviewGeoTab(siteId, params, "region");
+  }
+  if (path.includes("/overview-geo-city")) {
+    return generateDemoOverviewGeoTab(siteId, params, "city");
+  }
+  if (path.includes("/overview-geo-continent")) {
+    return generateDemoOverviewGeoTab(siteId, params, "continent");
+  }
+  if (path.includes("/overview-geo-timezone")) {
+    return generateDemoOverviewGeoTab(siteId, params, "timezone");
+  }
+  if (path.includes("/overview-geo-organization")) {
+    return generateDemoOverviewGeoTab(siteId, params, "organization");
   }
   if (path.includes("/overview-geo-points")) {
     return generateDemoGeoPoints(siteId, params);

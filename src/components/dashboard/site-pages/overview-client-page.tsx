@@ -62,18 +62,15 @@ import {
   shortDateTime,
 } from "@/lib/dashboard/format";
 import {
-  emptyReferrersData,
-  emptyPageCardTabsData,
-  emptyOverviewClientDimensionTabsData,
-  emptyOverviewGeoDimensionTabsData,
   fetchOverview,
-  fetchOverviewPanels,
+  fetchOverviewClientDimensionTab,
+  fetchOverviewGeoDimensionTab,
+  fetchOverviewPageCardTab,
+  fetchOverviewSourceCardTab,
   fetchTrend,
-  type OverviewClientDimensionTabsData,
-  type OverviewGeoDimensionTabsData,
-  type PageCardTabsData,
+  type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
-import type { OverviewData, ReferrersData, TrendData } from "@/lib/edge-client";
+import type { OverviewData, TrendData } from "@/lib/edge-client";
 import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -280,9 +277,21 @@ type PageCardTab = "path" | "title" | "hostname" | "entry" | "exit";
 type PageCardSortKey = "views" | "sessions";
 type PageCardNavigableTab = "path" | "hostname" | "entry" | "exit";
 type SourceCardTab = "domain" | "link";
-type ClientDimensionCardTab = keyof OverviewClientDimensionTabsData;
-type GeoDimensionCardTab = keyof OverviewGeoDimensionTabsData;
+type ClientDimensionCardTab =
+  | "browser"
+  | "osVersion"
+  | "deviceType"
+  | "language"
+  | "screenSize";
+type GeoDimensionCardTab =
+  | "country"
+  | "region"
+  | "city"
+  | "continent"
+  | "timezone"
+  | "organization";
 type GeoLocationTab = Extract<GeoDimensionCardTab, "country" | "region" | "city">;
+type OverviewCardTabCache<T extends string> = Record<T, OverviewTabRows | null>;
 
 interface PageCardRow {
   key: string;
@@ -330,6 +339,10 @@ const PAGE_CARD_TABS: PageCardTab[] = [
   "hostname",
   "entry",
   "exit",
+];
+const SOURCE_CARD_TABS: SourceCardTab[] = [
+  "domain",
+  "link",
 ];
 const PAGE_CARD_NAVIGABLE_TABS = new Set<PageCardNavigableTab>([
   "path",
@@ -421,6 +434,24 @@ const geoStateTranslationCache = new Map<
   string,
   Promise<GeoStateTranslationBundle | null>
 >();
+
+function createOverviewCardTabCache<T extends string>(
+  tabs: readonly T[],
+): OverviewCardTabCache<T> {
+  return tabs.reduce((acc, tab) => {
+    acc[tab] = null;
+    return acc;
+  }, {} as OverviewCardTabCache<T>);
+}
+
+function createOverviewCardTabFlightState<T extends string>(
+  tabs: readonly T[],
+): Record<T, boolean> {
+  return tabs.reduce((acc, tab) => {
+    acc[tab] = false;
+    return acc;
+  }, {} as Record<T, boolean>);
+}
 
 function resolveGeoTranslationApiLocale(locale: Locale): string | null {
   return GEO_TRANSLATION_API_LOCALE_BY_APP_LOCALE[locale] ?? null;
@@ -2025,20 +2056,31 @@ function OverviewPagesSection({
     if (to <= from) return Math.max(0, Math.floor(from));
     return Math.floor(from + (to - from) / 2);
   }, [window.from, window.to]);
-  const [pageCardTabsData, setPageCardTabsData] = useState<PageCardTabsData>(
-    emptyPageCardTabsData(),
+  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const pageCardInFlightRef = useRef<Record<PageCardTab, boolean>>(
+    createOverviewCardTabFlightState(PAGE_CARD_TABS),
   );
-  const [pageCardLoading, setPageCardLoading] = useState(true);
-  const [sourceCardData, setSourceCardData] =
-    useState<ReferrersData>(emptyReferrersData());
-  const [sourceCardLoading, setSourceCardLoading] = useState(true);
-  const [overviewClientDimensionTabsData, setOverviewClientDimensionTabsData] =
-    useState<OverviewClientDimensionTabsData>(
-      emptyOverviewClientDimensionTabsData(),
-    );
-  const [overviewGeoDimensionTabsData, setOverviewGeoDimensionTabsData] =
-    useState<OverviewGeoDimensionTabsData>(emptyOverviewGeoDimensionTabsData());
-  const [dimensionCardsLoading, setDimensionCardsLoading] = useState(true);
+  const sourceCardInFlightRef = useRef<Record<SourceCardTab, boolean>>(
+    createOverviewCardTabFlightState(SOURCE_CARD_TABS),
+  );
+  const clientDimensionCardInFlightRef = useRef<
+    Record<ClientDimensionCardTab, boolean>
+  >(createOverviewCardTabFlightState(CLIENT_DIMENSION_CARD_TABS));
+  const geoDimensionCardInFlightRef = useRef<Record<GeoDimensionCardTab, boolean>>(
+    createOverviewCardTabFlightState(GEO_DIMENSION_CARD_TABS),
+  );
+  const [pageCardTabData, setPageCardTabData] = useState<
+    OverviewCardTabCache<PageCardTab>
+  >(() => createOverviewCardTabCache(PAGE_CARD_TABS));
+  const [sourceCardTabData, setSourceCardTabData] = useState<
+    OverviewCardTabCache<SourceCardTab>
+  >(() => createOverviewCardTabCache(SOURCE_CARD_TABS));
+  const [clientDimensionCardTabData, setClientDimensionCardTabData] = useState<
+    OverviewCardTabCache<ClientDimensionCardTab>
+  >(() => createOverviewCardTabCache(CLIENT_DIMENSION_CARD_TABS));
+  const [geoDimensionCardTabData, setGeoDimensionCardTabData] = useState<
+    OverviewCardTabCache<GeoDimensionCardTab>
+  >(() => createOverviewCardTabCache(GEO_DIMENSION_CARD_TABS));
   const [pageCardTab, setPageCardTab] = useState<PageCardTab>("path");
   const [sourceCardTab, setSourceCardTab] = useState<SourceCardTab>("domain");
   const [clientDimensionCardTab, setClientDimensionCardTab] =
@@ -2085,50 +2127,178 @@ function OverviewPagesSection({
     useState(false);
   const [geoDimensionCardSearchTerm, setGeoDimensionCardSearchTerm] =
     useState("");
+  const activePageCardTabData = pageCardTabData[pageCardTab];
+  const activeSourceCardTabData = sourceCardTabData[sourceCardTab];
+  const activeClientDimensionCardTabData =
+    clientDimensionCardTabData[clientDimensionCardTab];
+  const activeGeoDimensionCardTabData =
+    geoDimensionCardTabData[geoDimensionCardTab];
 
   useEffect(() => {
-    let active = true;
-    setPageCardLoading(true);
-    setSourceCardLoading(true);
-    setDimensionCardsLoading(true);
-    setPageCardTabsData(emptyPageCardTabsData());
-    setSourceCardData(emptyReferrersData());
-    setOverviewClientDimensionTabsData(emptyOverviewClientDimensionTabsData());
-    setOverviewGeoDimensionTabsData(emptyOverviewGeoDimensionTabsData());
+    pageCardInFlightRef.current = createOverviewCardTabFlightState(PAGE_CARD_TABS);
+    sourceCardInFlightRef.current = createOverviewCardTabFlightState(
+      SOURCE_CARD_TABS,
+    );
+    clientDimensionCardInFlightRef.current = createOverviewCardTabFlightState(
+      CLIENT_DIMENSION_CARD_TABS,
+    );
+    geoDimensionCardInFlightRef.current = createOverviewCardTabFlightState(
+      GEO_DIMENSION_CARD_TABS,
+    );
+    setPageCardTabData(createOverviewCardTabCache(PAGE_CARD_TABS));
+    setSourceCardTabData(createOverviewCardTabCache(SOURCE_CARD_TABS));
+    setClientDimensionCardTabData(
+      createOverviewCardTabCache(CLIENT_DIMENSION_CARD_TABS),
+    );
+    setGeoDimensionCardTabData(createOverviewCardTabCache(GEO_DIMENSION_CARD_TABS));
+  }, [
+    filtersKey,
+    siteId,
+    window.from,
+    window.to,
+    window.interval,
+  ]);
 
-    fetchOverviewPanels(siteId, window, filters, {
+  useEffect(() => {
+    if (activePageCardTabData !== null) return;
+    if (pageCardInFlightRef.current[pageCardTab]) return;
+    let active = true;
+    pageCardInFlightRef.current[pageCardTab] = true;
+
+    fetchOverviewPageCardTab(siteId, window, pageCardTab, filters, {
       limit: 100,
     })
-      .then((payload) => {
+      .then((data) => {
         if (!active) return;
-        setPageCardTabsData(payload.pageTabs ?? emptyPageCardTabsData());
-        setSourceCardData({
-          ok: payload.ok,
-          data: payload.referrers ?? emptyReferrersData().data,
-        });
-        setOverviewClientDimensionTabsData(
-          payload.clientTabs ?? emptyOverviewClientDimensionTabsData(),
-        );
-        setOverviewGeoDimensionTabsData(
-          payload.geoTabs ?? emptyOverviewGeoDimensionTabsData(),
-        );
+        setPageCardTabData((prev) => ({
+          ...prev,
+          [pageCardTab]: data,
+        }));
       })
       .finally(() => {
-        if (!active) return;
-        setPageCardLoading(false);
-        setSourceCardLoading(false);
-        setDimensionCardsLoading(false);
+        pageCardInFlightRef.current[pageCardTab] = false;
       });
 
     return () => {
       active = false;
     };
   }, [
+    activePageCardTabData,
+    filters,
+    pageCardTab,
     siteId,
     window.from,
-    window.to,
     window.interval,
+    window.to,
+    window,
+  ]);
+
+  useEffect(() => {
+    if (activeSourceCardTabData !== null) return;
+    if (sourceCardInFlightRef.current[sourceCardTab]) return;
+    let active = true;
+    sourceCardInFlightRef.current[sourceCardTab] = true;
+
+    fetchOverviewSourceCardTab(siteId, window, sourceCardTab, filters, {
+      limit: 100,
+    })
+      .then((data) => {
+        if (!active) return;
+        setSourceCardTabData((prev) => ({
+          ...prev,
+          [sourceCardTab]: data,
+        }));
+      })
+      .finally(() => {
+        sourceCardInFlightRef.current[sourceCardTab] = false;
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    activeSourceCardTabData,
     filters,
+    siteId,
+    sourceCardTab,
+    window.from,
+    window.interval,
+    window.to,
+    window,
+  ]);
+
+  useEffect(() => {
+    if (activeClientDimensionCardTabData !== null) return;
+    if (clientDimensionCardInFlightRef.current[clientDimensionCardTab]) return;
+    let active = true;
+    clientDimensionCardInFlightRef.current[clientDimensionCardTab] = true;
+
+    fetchOverviewClientDimensionTab(
+      siteId,
+      window,
+      clientDimensionCardTab,
+      filters,
+      {
+        limit: 100,
+      },
+    )
+      .then((data) => {
+        if (!active) return;
+        setClientDimensionCardTabData((prev) => ({
+          ...prev,
+          [clientDimensionCardTab]: data,
+        }));
+      })
+      .finally(() => {
+        clientDimensionCardInFlightRef.current[clientDimensionCardTab] = false;
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    activeClientDimensionCardTabData,
+    clientDimensionCardTab,
+    filters,
+    siteId,
+    window.from,
+    window.interval,
+    window.to,
+    window,
+  ]);
+
+  useEffect(() => {
+    if (activeGeoDimensionCardTabData !== null) return;
+    if (geoDimensionCardInFlightRef.current[geoDimensionCardTab]) return;
+    let active = true;
+    geoDimensionCardInFlightRef.current[geoDimensionCardTab] = true;
+
+    fetchOverviewGeoDimensionTab(siteId, window, geoDimensionCardTab, filters, {
+      limit: 100,
+    })
+      .then((data) => {
+        if (!active) return;
+        setGeoDimensionCardTabData((prev) => ({
+          ...prev,
+          [geoDimensionCardTab]: data,
+        }));
+      })
+      .finally(() => {
+        geoDimensionCardInFlightRef.current[geoDimensionCardTab] = false;
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    activeGeoDimensionCardTabData,
+    filters,
+    geoDimensionCardTab,
+    siteId,
+    window.from,
+    window.interval,
+    window.to,
+    window,
   ]);
 
   useEffect(() => {
@@ -2152,6 +2322,10 @@ function OverviewPagesSection({
     }
   }, [geoDimensionCardSearchOpen]);
 
+  const pageCardLoading = activePageCardTabData === null;
+  const sourceCardLoading = activeSourceCardTabData === null;
+  const clientDimensionCardLoading = activeClientDimensionCardTabData === null;
+  const geoDimensionCardLoading = activeGeoDimensionCardTabData === null;
   const noDataText = messages.common.noData;
 
   const pageCardTabMeta: Record<
@@ -2191,18 +2365,18 @@ function OverviewPagesSection({
   };
   const pathRows = useMemo<PageCardRow[]>(
     () =>
-      pageCardTabsData.path.map((item) => ({
+      (pageCardTabData.path ?? []).map((item) => ({
         key: String(item.label || "/"),
         label: String(item.label || "/"),
         views: Math.max(0, Number(item.views || 0)),
         sessions: Math.max(0, Number(item.sessions || 0)),
         mono: true,
       })),
-    [pageCardTabsData.path],
+    [pageCardTabData.path],
   );
   const titleRows = useMemo<PageCardRow[]>(
     () =>
-      pageCardTabsData.title.map((item) => {
+      (pageCardTabData.title ?? []).map((item) => {
         const normalized = String(item.label || "").trim();
         const label =
           normalized.length > 0 ? normalized : messages.common.unknown;
@@ -2214,11 +2388,11 @@ function OverviewPagesSection({
           mono: false,
         };
       }),
-    [messages.common.unknown, pageCardTabsData.title],
+    [messages.common.unknown, pageCardTabData.title],
   );
   const hostnameRows = useMemo<PageCardRow[]>(
     () =>
-      pageCardTabsData.hostname.map((item) => {
+      (pageCardTabData.hostname ?? []).map((item) => {
         const normalized = String(item.label || "").trim();
         const label =
           normalized.length > 0 ? normalized : messages.common.unknown;
@@ -2230,11 +2404,11 @@ function OverviewPagesSection({
           mono: true,
         };
       }),
-    [messages.common.unknown, pageCardTabsData.hostname],
+    [messages.common.unknown, pageCardTabData.hostname],
   );
   const entryRows = useMemo<PageCardRow[]>(
     () =>
-      pageCardTabsData.entry.map((item) => {
+      (pageCardTabData.entry ?? []).map((item) => {
         const label = String(item.label || "").trim() || "/";
         return {
           key: label,
@@ -2244,11 +2418,11 @@ function OverviewPagesSection({
           mono: true,
         };
       }),
-    [pageCardTabsData.entry],
+    [pageCardTabData.entry],
   );
   const exitRows = useMemo<PageCardRow[]>(
     () =>
-      pageCardTabsData.exit.map((item) => {
+      (pageCardTabData.exit ?? []).map((item) => {
         const label = String(item.label || "").trim() || "/";
         return {
           key: label,
@@ -2258,7 +2432,7 @@ function OverviewPagesSection({
           mono: true,
         };
       }),
-    [pageCardTabsData.exit],
+    [pageCardTabData.exit],
   );
   const pageCardRows = useMemo<Record<PageCardTab, PageCardRow[]>>(
     () => ({
@@ -2344,95 +2518,38 @@ function OverviewPagesSection({
   };
   const sourceCardDirectLabel = messages.overview.direct;
   const sourceDomainRows = useMemo<SourceCardRow[]>(() => {
-    const aggregate = new Map<
-      string,
-      { label: string; views: number; sessions: number; targetUrl: string | null }
-    >();
-
-    for (const item of sourceCardData.data) {
-      const raw = String(item.referrer || "").trim();
-      const absolute = raw.length > 0 ? toAbsoluteHttpsUrl(raw) : null;
-
-      let domain = "";
-      if (absolute) {
-        try {
-          domain = sanitizeHostname(new URL(absolute).hostname || "");
-        } catch {
-          domain = "";
-        }
-      }
-      if (!domain && raw.length > 0) {
-        domain = sanitizeHostname(raw);
-      }
-
+    return (sourceCardTabData.domain ?? []).map((item, index) => {
+      const raw = String(item.label || "").trim();
+      const domain = raw.length > 0 ? sanitizeHostname(raw) : "";
       const filterValue = domain || DIRECT_REFERRER_FILTER_VALUE;
       const label = domain || sourceCardDirectLabel;
-      const nextViews = Math.max(0, Number(item.views || 0));
-      const nextSessions = Math.max(0, Number(item.sessions || 0));
-      const prev = aggregate.get(filterValue) ?? {
+      return {
+        key: `domain-${filterValue}-${index}`,
         label,
-        views: 0,
-        sessions: 0,
-        targetUrl: null,
+        filterValue,
+        targetUrl: domain ? toAbsoluteHttpsUrl(domain) : null,
+        views: Math.max(0, Number(item.views || 0)),
+        sessions: Math.max(0, Number(item.sessions || 0)),
+        mono: true,
       };
-
-      aggregate.set(filterValue, {
-        label: prev.label || label,
-        views: prev.views + nextViews,
-        sessions: prev.sessions + nextSessions,
-        targetUrl:
-          prev.targetUrl ?? (domain ? toAbsoluteHttpsUrl(domain) : null),
-      });
-    }
-
-    return Array.from(aggregate.entries()).map(([filterValue, value], index) => ({
-      key: `domain-${filterValue}-${index}`,
-      label: value.label,
-      filterValue,
-      targetUrl: value.targetUrl,
-      views: value.views,
-      sessions: value.sessions,
-      mono: true,
-    }));
-  }, [sourceCardData.data, sourceCardDirectLabel]);
+    });
+  }, [sourceCardDirectLabel, sourceCardTabData.domain]);
   const sourceLinkRows = useMemo<SourceCardRow[]>(() => {
-    const aggregate = new Map<
-      string,
-      { label: string; views: number; sessions: number; targetUrl: string | null }
-    >();
-
-    for (const item of sourceCardData.data) {
-      const raw = String(item.referrer || "").trim();
+    return (sourceCardTabData.link ?? []).map((item, index) => {
+      const raw = String(item.label || "").trim();
       const targetUrl = raw.length > 0 ? toAbsoluteHttpsUrl(raw) : null;
       const filterValue = raw.length > 0 ? raw : DIRECT_REFERRER_FILTER_VALUE;
-      const label = raw.length > 0 ? (targetUrl ?? raw) : sourceCardDirectLabel;
-      const nextViews = Math.max(0, Number(item.views || 0));
-      const nextSessions = Math.max(0, Number(item.sessions || 0));
-      const prev = aggregate.get(filterValue) ?? {
-        label,
-        views: 0,
-        sessions: 0,
-        targetUrl: null,
+      return {
+        key: `link-${filterValue}-${index}`,
+        label: raw.length > 0 ? (targetUrl ?? raw) : sourceCardDirectLabel,
+        filterValue,
+        targetUrl,
+        views: Math.max(0, Number(item.views || 0)),
+        sessions: Math.max(0, Number(item.sessions || 0)),
+        mono: true,
       };
-
-      aggregate.set(filterValue, {
-        label: prev.label || label,
-        views: prev.views + nextViews,
-        sessions: prev.sessions + nextSessions,
-        targetUrl: prev.targetUrl ?? targetUrl,
-      });
-    }
-
-    return Array.from(aggregate.entries()).map(([filterValue, value], index) => ({
-      key: `link-${filterValue}-${index}`,
-      label: value.label,
-      filterValue,
-      targetUrl: value.targetUrl,
-      views: value.views,
-      sessions: value.sessions,
-      mono: true,
-    }));
-  }, [sourceCardData.data, sourceCardDirectLabel]);
+    });
+  }, [sourceCardDirectLabel, sourceCardTabData.link]);
   const sourceCardRows = useMemo<Record<SourceCardTab, SourceCardRow[]>>(
     () => ({
       domain: sourceDomainRows,
@@ -2593,25 +2710,25 @@ function OverviewPagesSection({
       });
 
     return {
-      browser: toRows(overviewClientDimensionTabsData.browser, {
+      browser: toRows(clientDimensionCardTabData.browser ?? [], {
         resolveIconName: resolveBrowserLogoIconName,
       }),
-      osVersion: toRows(overviewClientDimensionTabsData.osVersion, {
+      osVersion: toRows(clientDimensionCardTabData.osVersion ?? [], {
         resolveIconName: resolveOsLogoIconName,
       }),
-      deviceType: toRows(overviewClientDimensionTabsData.deviceType),
-      language: toRows(overviewClientDimensionTabsData.language, {
+      deviceType: toRows(clientDimensionCardTabData.deviceType ?? []),
+      language: toRows(clientDimensionCardTabData.language ?? [], {
         transformLabel: (value) =>
           resolveLanguageLabel(value, locale, messages.common.unknown).label,
         resolveFilterValue: (rawValue, normalizedLabel) =>
           rawValue.trim() || normalizedLabel,
       }),
-      screenSize: toRows(overviewClientDimensionTabsData.screenSize, {
+      screenSize: toRows(clientDimensionCardTabData.screenSize ?? [], {
         mono: true,
         screenSize: true,
       }),
     };
-  }, [locale, messages.common.unknown, overviewClientDimensionTabsData]);
+  }, [clientDimensionCardTabData, locale, messages.common.unknown]);
   const geoDimensionCardRows = useMemo<
     Record<GeoDimensionCardTab, PageCardRow[]>
   >(() => {
@@ -2644,7 +2761,7 @@ function OverviewPagesSection({
         };
       });
 
-    const regionRows: PageCardRow[] = overviewGeoDimensionTabsData.region.map(
+    const regionRows: PageCardRow[] = (geoDimensionCardTabData.region ?? []).map(
       (item, index) => {
         const value = String(item.label || "");
         const regionData = resolveGeoRegionBreadcrumbData(
@@ -2666,7 +2783,7 @@ function OverviewPagesSection({
         };
       },
     );
-    const cityRows: PageCardRow[] = overviewGeoDimensionTabsData.city.map(
+    const cityRows: PageCardRow[] = (geoDimensionCardTabData.city ?? []).map(
       (item, index) => {
         const value = String(item.label || "");
         const cityData = resolveGeoCityBreadcrumbData(
@@ -2690,7 +2807,7 @@ function OverviewPagesSection({
     );
 
     return {
-      country: toRows(overviewGeoDimensionTabsData.country, {
+      country: toRows(geoDimensionCardTabData.country ?? [], {
         transformLabel: (value) =>
           resolveCountryLabel(value, locale, messages.common.unknown).label,
         resolveIconName: (value) => {
@@ -2705,7 +2822,7 @@ function OverviewPagesSection({
       }),
       region: regionRows,
       city: cityRows,
-      continent: toRows(overviewGeoDimensionTabsData.continent, {
+      continent: toRows(geoDimensionCardTabData.continent ?? [], {
         transformLabel: (value) =>
           resolveContinentLabel(
             value,
@@ -2713,7 +2830,7 @@ function OverviewPagesSection({
             messages.common.continentLabels,
           ),
       }),
-      timezone: toRows(overviewGeoDimensionTabsData.timezone, {
+      timezone: toRows(geoDimensionCardTabData.timezone ?? [], {
         transformLabel: (value) =>
           resolveTimezoneDisplayLabel({
             value,
@@ -2722,13 +2839,13 @@ function OverviewPagesSection({
             timestampMs: timezoneReferenceTimestampMs,
           }),
       }),
-      organization: toRows(overviewGeoDimensionTabsData.organization),
+      organization: toRows(geoDimensionCardTabData.organization ?? []),
     };
   }, [
+    geoDimensionCardTabData,
     locale,
     messages.common.continentLabels,
     messages.common.unknown,
-    overviewGeoDimensionTabsData,
     timezoneReferenceTimestampMs,
   ]);
   const activeClientDimensionTabMeta =
@@ -2812,10 +2929,16 @@ function OverviewPagesSection({
   const visibleGeoDimensionCardRows = useMemo(
     () => {
       if (!activeGeoDimensionCardQueryValue) return sortedGeoDimensionCardRows;
-      if (isGeoLocationTab(geoDimensionCardTab)) return sortedGeoDimensionCardRows;
+      const activeGeoQueryValue = isGeoLocationTab(geoDimensionCardTab)
+        ? resolveGeoLocationHighlightValue(
+            geoDimensionCardTab,
+            activeGeoDimensionCardQueryValue,
+          )
+        : activeGeoDimensionCardQueryValue;
+      if (!activeGeoQueryValue) return sortedGeoDimensionCardRows;
       return sortedGeoDimensionCardRows.filter(
         (row) =>
-          (row.filterValue ?? row.label) === activeGeoDimensionCardQueryValue,
+          (row.filterValue ?? row.label) === activeGeoQueryValue,
       );
     },
     [activeGeoDimensionCardQueryValue, geoDimensionCardTab, sortedGeoDimensionCardRows],
@@ -3491,10 +3614,10 @@ function OverviewPagesSection({
       />
       <PanelScrollbar
         className="max-h-[60vh] pr-1"
-        syncKey={`${clientDimensionCardTab}-${clientDimensionCardSort.key}-${clientDimensionCardSort.direction}-${clientDimensionCardSearchTerm}-${searchedClientDimensionCardRows.length}-${dimensionCardsLoading}`}
+        syncKey={`${clientDimensionCardTab}-${clientDimensionCardSort.key}-${clientDimensionCardSort.direction}-${clientDimensionCardSearchTerm}-${searchedClientDimensionCardRows.length}-${clientDimensionCardLoading}`}
       >
         <DataTableSwitch
-          loading={dimensionCardsLoading}
+          loading={clientDimensionCardLoading}
           hasContent={searchedClientDimensionCardRows.length > 0}
           loadingLabel={messages.common.loading}
           emptyLabel={noDataText}
@@ -3719,10 +3842,10 @@ function OverviewPagesSection({
       />
       <PanelScrollbar
         className="max-h-[60vh] pr-1"
-        syncKey={`${geoDimensionCardTab}-${geoDimensionCardSort.key}-${geoDimensionCardSort.direction}-${geoDimensionCardSearchTerm}-${searchedGeoDimensionCardRows.length}-${dimensionCardsLoading}`}
+        syncKey={`${geoDimensionCardTab}-${geoDimensionCardSort.key}-${geoDimensionCardSort.direction}-${geoDimensionCardSearchTerm}-${searchedGeoDimensionCardRows.length}-${geoDimensionCardLoading}`}
       >
         <DataTableSwitch
-          loading={dimensionCardsLoading}
+          loading={geoDimensionCardLoading}
           hasContent={searchedGeoDimensionCardRows.length > 0}
           loadingLabel={messages.common.loading}
           emptyLabel={noDataText}
@@ -3888,10 +4011,10 @@ function OverviewPagesSection({
             }))}
             headerRight={clientDimensionCardSearchAction}
             className="h-full"
-            syncKey={`${dimensionCardsLoading}-${clientDimensionCardTab}-${clientDimensionCardSort.key}-${clientDimensionCardSort.direction}-${sortedClientDimensionCardRows.length}-${activeClientDimensionCardQueryValue ?? "all"}-${visibleClientDimensionCardRows.length}`}
+            syncKey={`${clientDimensionCardLoading}-${clientDimensionCardTab}-${clientDimensionCardSort.key}-${clientDimensionCardSort.direction}-${sortedClientDimensionCardRows.length}-${activeClientDimensionCardQueryValue ?? "all"}-${visibleClientDimensionCardRows.length}`}
           >
             <DataTableSwitch
-              loading={dimensionCardsLoading}
+              loading={clientDimensionCardLoading}
               hasContent={visibleClientDimensionCardRows.length > 0}
               loadingLabel={messages.common.loading}
               emptyLabel={noDataText}
@@ -3915,10 +4038,10 @@ function OverviewPagesSection({
             }))}
             headerRight={geoDimensionCardSearchAction}
             className="h-full"
-            syncKey={`${dimensionCardsLoading}-${geoDimensionCardTab}-${geoDimensionCardSort.key}-${geoDimensionCardSort.direction}-${sortedGeoDimensionCardRows.length}-${activeGeoDimensionCardQueryValue ?? "all"}-${visibleGeoDimensionCardRows.length}`}
+            syncKey={`${geoDimensionCardLoading}-${geoDimensionCardTab}-${geoDimensionCardSort.key}-${geoDimensionCardSort.direction}-${sortedGeoDimensionCardRows.length}-${activeGeoDimensionCardQueryValue ?? "all"}-${visibleGeoDimensionCardRows.length}`}
           >
             <DataTableSwitch
-              loading={dimensionCardsLoading}
+              loading={geoDimensionCardLoading}
               hasContent={visibleGeoDimensionCardRows.length > 0}
               loadingLabel={messages.common.loading}
               emptyLabel={noDataText}

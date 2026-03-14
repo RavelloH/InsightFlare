@@ -1,13 +1,24 @@
 "use client";
 
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type DateRange } from "react-day-picker";
 import NumberFlow, { continuous } from "@number-flow/react";
+import { OverlayScrollbars } from "overlayscrollbars";
+import type { PartialOptions } from "overlayscrollbars";
 import {
   RiArrowLeftSLine,
   RiArrowRightSLine,
   RiArrowDownSLine,
+  RiCloseLine,
   RiCalendarLine,
   RiFilter3Line,
   RiTimeLine,
@@ -15,8 +26,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Calendar } from "@/components/ui/calendar";
+import { Clickable } from "@/components/ui/clickable";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,6 +74,10 @@ import {
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
+import {
+  fetchDashboardFilterOptions,
+  type DashboardFilterOptionData,
+} from "@/lib/dashboard/client-data";
 import { useRealtimeChannel } from "@/hooks/use-realtime-channel";
 import { intlLocale } from "@/lib/dashboard/format";
 import {
@@ -68,7 +85,13 @@ import {
   type DashboardFilters,
   type DashboardInterval,
   type RangePreset,
+  type TimeWindow,
 } from "@/lib/dashboard/query-state";
+import {
+  resolveContinentLabel,
+  resolveCountryLabel,
+  resolveLanguageLabel,
+} from "@/lib/i18n/code-labels";
 import { isRealtimeMockEnabled } from "@/lib/realtime/client";
 import type { RealtimeConnectionState } from "@/lib/realtime/types";
 import type { Locale } from "@/lib/i18n/config";
@@ -160,6 +183,18 @@ const INTERVAL_ORDER: readonly DashboardInterval[] = [
   "month",
 ] as const;
 const USE_REALTIME_MOCK = isRealtimeMockEnabled();
+const PANEL_SCROLLBAR_OPTIONS = {
+  overflow: {
+    x: "hidden",
+    y: "scroll",
+  },
+  scrollbars: {
+    theme: "os-theme-insightflare",
+    autoHide: "move",
+    autoHideDelay: 420,
+    autoHideSuspend: false,
+  },
+} satisfies PartialOptions;
 
 function rangeLabel(messages: AppMessages, range: RangePreset): string {
   if (range === "30m") return messages.ranges.last30m;
@@ -421,6 +456,539 @@ function FilterActiveCountBadge({ count }: { count: number }) {
   );
 }
 
+const DIRECT_REFERRER_FILTER_VALUE = "__direct__";
+const GEO_FILTER_SEGMENT_SEPARATOR = "::";
+
+function omitFilterKey(
+  filters: DashboardFilters,
+  key: FilterQueryKey,
+): DashboardFilters {
+  const next = { ...filters };
+  delete next[key];
+  return next;
+}
+
+function inferGeoOptionGroup(
+  value: string,
+): DashboardFilterOptionData["group"] | undefined {
+  const segments = value
+    .split(GEO_FILTER_SEGMENT_SEPARATOR)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  if (segments.length <= 1) return "country";
+  if (segments.length === 3) return "region";
+  if (segments.length >= 4) return "city";
+  return undefined;
+}
+
+function formatGeoOptionLabel(
+  value: string,
+  locale: Locale,
+  messages: AppMessages,
+  group?: DashboardFilterOptionData["group"],
+): string {
+  const segments = value
+    .split(GEO_FILTER_SEGMENT_SEPARATOR)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  if (segments.length === 0) return messages.common.unknown;
+
+  const countryCode = segments[0] || "";
+  const countryLabel = resolveCountryLabel(
+    countryCode,
+    locale,
+    messages.common.unknown,
+  ).label;
+
+  if ((group ?? inferGeoOptionGroup(value)) === "country" || segments.length === 1) {
+    return countryLabel;
+  }
+
+  const regionLabel = segments[2] || segments[1] || messages.common.unknown;
+  if ((group ?? inferGeoOptionGroup(value)) === "region" || segments.length === 3) {
+    return `${countryLabel} / ${regionLabel}`;
+  }
+
+  const cityLabel = segments[3] || messages.common.unknown;
+  return `${countryLabel} / ${regionLabel} / ${cityLabel}`;
+}
+
+function formatFilterOptionLabel(
+  key: FilterQueryKey,
+  option: DashboardFilterOptionData,
+  locale: Locale,
+  messages: AppMessages,
+): string {
+  const value = String(option.value ?? "").trim();
+  const label = String(option.label ?? value).trim() || value;
+
+  if (key === "country") {
+    return resolveCountryLabel(value || label, locale, messages.common.unknown)
+      .label;
+  }
+  if (key === "clientLanguage") {
+    return resolveLanguageLabel(label, locale, messages.common.unknown).label;
+  }
+  if (key === "geoContinent") {
+    return resolveContinentLabel(
+      label,
+      messages.common.unknown,
+      messages.common.continentLabels,
+    );
+  }
+  if (key === "sourceDomain" || key === "sourceLink") {
+    if (value === DIRECT_REFERRER_FILTER_VALUE) {
+      return messages.overview.direct;
+    }
+  }
+  if (key === "geo") {
+    return formatGeoOptionLabel(value || label, locale, messages, option.group);
+  }
+  return label || messages.common.unknown;
+}
+
+function filterOptionGroupLabel(
+  messages: AppMessages,
+  group: DashboardFilterOptionData["group"],
+): string {
+  if (group === "country") return messages.common.country;
+  if (group === "region") return messages.common.region;
+  if (group === "city") return messages.common.city;
+  return "";
+}
+
+function buildSyntheticFilterOption(
+  key: FilterQueryKey,
+  value: string,
+): DashboardFilterOptionData {
+  return {
+    value,
+    label: value,
+    ...(key === "geo"
+      ? { group: inferGeoOptionGroup(value) }
+      : {}),
+  };
+}
+
+function PanelScrollbar({
+  className,
+  children,
+  syncKey,
+}: {
+  className?: string;
+  children: ReactNode;
+  syncKey?: string | number | boolean | null;
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+
+    const existing = OverlayScrollbars(host);
+    const instance =
+      existing ?? OverlayScrollbars(host, PANEL_SCROLLBAR_OPTIONS);
+    if (existing) {
+      existing.options(PANEL_SCROLLBAR_OPTIONS);
+    }
+    scrollbarRef.current = instance;
+    instance.update(true);
+
+    return () => {
+      if (!existing) {
+        instance.destroy();
+      }
+      if (scrollbarRef.current === instance) {
+        scrollbarRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    scrollbarRef.current?.update(true);
+  }, [syncKey]);
+
+  return (
+    <div
+      ref={hostRef}
+      className={cn("overflow-hidden", className)}
+      data-overlayscrollbars-initialize
+    >
+      {children}
+    </div>
+  );
+}
+
+interface DashboardFilterSelectFieldProps {
+  locale: Locale;
+  messages: AppMessages;
+  siteId?: string;
+  triggerId?: string;
+  filterKey: FilterQueryKey;
+  currentValue?: string;
+  currentFilters: DashboardFilters;
+  window: TimeWindow;
+  onValueChange: (value: string) => void;
+}
+
+function DashboardFilterSelectField({
+  locale,
+  messages,
+  siteId,
+  triggerId,
+  filterKey,
+  currentValue,
+  currentFilters,
+  window,
+  onValueChange,
+}: DashboardFilterSelectFieldProps) {
+  const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [optionState, setOptionState] = useState<{
+    signature: string;
+    loading: boolean;
+    options: DashboardFilterOptionData[] | null;
+  }>({
+    signature: "",
+    loading: false,
+    options: null,
+  });
+
+  const requestFilters = useMemo(
+    () => omitFilterKey(currentFilters, filterKey),
+    [currentFilters, filterKey],
+  );
+  const requestSignature = useMemo(
+    () =>
+      JSON.stringify({
+        siteId: siteId ?? "",
+        filterKey,
+        from: window.from,
+        to: window.to,
+        interval: window.interval,
+        filters: requestFilters,
+      }),
+    [
+      filterKey,
+      requestFilters,
+      siteId,
+      window.from,
+      window.interval,
+      window.to,
+    ],
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setSearchTerm("");
+      return;
+    }
+    if (!siteId) return;
+
+    let active = true;
+    setOptionState({
+      signature: requestSignature,
+      loading: true,
+      options: null,
+    });
+
+    fetchDashboardFilterOptions(siteId, window, filterKey, requestFilters, {
+      limit: 200,
+    })
+      .then((options) => {
+        if (!active) return;
+        setOptionState({
+          signature: requestSignature,
+          loading: false,
+          options,
+        });
+      })
+      .catch(() => {
+        if (!active) return;
+        setOptionState({
+          signature: requestSignature,
+          loading: false,
+          options: [],
+        });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    filterKey,
+    open,
+    requestFilters,
+    requestSignature,
+    siteId,
+    window,
+  ]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (rootRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const resolvedOptions = useMemo(() => {
+    const base = optionState.signature === requestSignature
+      ? optionState.options ?? []
+      : [];
+    if (!currentValue) return base;
+    return base.some((option) => option.value === currentValue)
+      ? base
+      : [buildSyntheticFilterOption(filterKey, currentValue), ...base];
+  }, [
+    currentValue,
+    filterKey,
+    optionState.options,
+    optionState.signature,
+    requestSignature,
+  ]);
+
+  const normalizedSearchTerm = searchTerm.trim().toLocaleLowerCase();
+  const visibleOptions = useMemo(() => {
+    if (!normalizedSearchTerm) return resolvedOptions;
+    return resolvedOptions.filter((option) => {
+      const displayLabel = formatFilterOptionLabel(
+        filterKey,
+        option,
+        locale,
+        messages,
+      ).toLocaleLowerCase();
+      const rawValue = option.value.toLocaleLowerCase();
+      return (
+        displayLabel.includes(normalizedSearchTerm) ||
+        rawValue.includes(normalizedSearchTerm)
+      );
+    });
+  }, [filterKey, locale, messages, normalizedSearchTerm, resolvedOptions]);
+
+  const groupedOptions = useMemo(() => {
+    const groups = new Map<string, DashboardFilterOptionData[]>();
+    for (const option of visibleOptions) {
+      const groupKey = option.group ?? "default";
+      const existing = groups.get(groupKey) ?? [];
+      existing.push(option);
+      groups.set(groupKey, existing);
+    }
+    return Array.from(groups.entries());
+  }, [visibleOptions]);
+
+  const selectedOption = useMemo(
+    () =>
+      currentValue
+        ? resolvedOptions.find((option) => option.value === currentValue) ??
+          buildSyntheticFilterOption(filterKey, currentValue)
+        : null,
+    [currentValue, filterKey, resolvedOptions],
+  );
+  const selectedLabel = selectedOption
+    ? formatFilterOptionLabel(filterKey, selectedOption, locale, messages)
+    : messages.filters.all;
+  const listSyncKey = `${requestSignature}:${optionState.loading ? "1" : "0"}:${visibleOptions.length}:${normalizedSearchTerm}`;
+
+  return (
+    <div ref={rootRef} className="relative w-full">
+      <button
+        type="button"
+        id={triggerId}
+        role="combobox"
+        aria-expanded={open}
+        aria-label={filterFieldLabel(messages, filterKey)}
+        disabled={!siteId}
+        onClick={() => {
+          setOpen((previous) => !previous);
+        }}
+        className={cn(
+          "flex h-8 w-full items-center gap-1.5 rounded-none border border-input bg-transparent py-2 pl-2.5 text-xs whitespace-nowrap transition-colors outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50",
+          currentValue ? "pr-14" : "pr-8",
+          !currentValue && "text-muted-foreground",
+        )}
+      >
+        <span className="truncate">{selectedLabel}</span>
+      </button>
+      {currentValue ? (
+        <Clickable
+          aria-label={messages.filters.clear}
+          onClick={(event) => {
+            event.stopPropagation();
+            onValueChange("");
+            setOpen(false);
+          }}
+          className="absolute top-1/2 right-7 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded-none text-muted-foreground transition-colors hover:text-foreground"
+          enableHoverScale={false}
+          tapScale={0.96}
+        >
+          <RiCloseLine className="size-3.5" />
+        </Clickable>
+      ) : null}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2"
+      >
+        <RiArrowDownSLine
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </span>
+
+      {open ? (
+        <div className="absolute top-[calc(100%+0.25rem)] left-0 z-[70] w-full overflow-hidden rounded-none border bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10">
+          <div className="sticky top-0 z-10 border-b bg-popover p-2">
+            <Input
+              value={searchTerm}
+              onChange={(event) => {
+                setSearchTerm(event.target.value);
+              }}
+              placeholder={messages.common.search}
+              className="h-8 w-full text-xs"
+              autoFocus
+            />
+          </div>
+
+          <PanelScrollbar className="max-h-80" syncKey={listSyncKey}>
+            <div
+              className="py-1"
+              role="listbox"
+              aria-label={filterFieldLabel(messages, filterKey)}
+            >
+              {optionState.loading && optionState.signature === requestSignature ? (
+                <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
+                  <Spinner className="size-3.5" />
+                  <span>{messages.common.loading}</span>
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={!currentValue}
+                    onClick={() => {
+                      onValueChange("");
+                      setOpen(false);
+                    }}
+                    className={cn(
+                      "flex w-full items-center px-2 py-2 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground",
+                      !currentValue && "bg-accent text-accent-foreground",
+                    )}
+                  >
+                    {messages.filters.all}
+                  </button>
+
+                  {groupedOptions.length > 0 ? (
+                    groupedOptions.map(([groupKey, options]) => (
+                      <div key={`${filterKey}-${groupKey}`}>
+                        {groupKey !== "default" ? (
+                          <p className="px-2 py-1 text-xs text-muted-foreground">
+                            {filterOptionGroupLabel(
+                              messages,
+                              groupKey as DashboardFilterOptionData["group"],
+                            )}
+                          </p>
+                        ) : null}
+                        {options.map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            role="option"
+                            aria-selected={option.value === currentValue}
+                            onClick={() => {
+                              onValueChange(option.value);
+                              setOpen(false);
+                            }}
+                            className={cn(
+                              "flex w-full items-center px-2 py-2 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground",
+                              option.value === currentValue &&
+                                "bg-accent text-accent-foreground",
+                            )}
+                          >
+                            {formatFilterOptionLabel(filterKey, option, locale, messages)}
+                          </button>
+                        ))}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="px-2 py-3 text-xs text-muted-foreground">
+                      {messages.common.noData}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </PanelScrollbar>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DashboardFilterFields({
+  locale,
+  messages,
+  siteId,
+  queryFilters,
+  window,
+  onValueChange,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  siteId?: string;
+  queryFilters: DashboardFilters;
+  window: TimeWindow;
+  onValueChange: (key: FilterQueryKey, value: string) => void;
+}) {
+  return (
+    <>
+      {FILTER_QUERY_KEYS.map((key) => {
+        const inputId = `dashboard-filter-${key}`;
+        return (
+          <div key={inputId} className="space-y-2">
+            <Label htmlFor={inputId}>{filterFieldLabel(messages, key)}</Label>
+            <DashboardFilterSelectField
+              locale={locale}
+              messages={messages}
+              siteId={siteId}
+              triggerId={inputId}
+              filterKey={key}
+              currentValue={queryFilters[key]}
+              currentFilters={queryFilters}
+              window={window}
+              onValueChange={(value) => {
+                onValueChange(key, value);
+              }}
+            />
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export function DashboardHeaderControls({
   locale,
   messages,
@@ -665,25 +1233,18 @@ export function DashboardHeaderControls({
                 </DrawerDescription>
               </DrawerHeader>
 
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-2">
-                {FILTER_QUERY_KEYS.map((key) => {
-                  const inputId = `dashboard-filter-mobile-${key}`;
-                  return (
-                    <div key={inputId} className="space-y-2">
-                      <Label htmlFor={inputId}>
-                        {filterFieldLabel(messages, key)}
-                      </Label>
-                      <Input
-                        id={inputId}
-                        value={queryFilters[key] || ""}
-                        onChange={(event) => {
-                          setFilterQueryValue(key, event.target.value);
-                        }}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+              <PanelScrollbar className="min-h-0 flex-1" syncKey={searchParamsKey}>
+                <div className="space-y-4 px-4 pb-2">
+                  <DashboardFilterFields
+                    locale={locale}
+                    messages={messages}
+                    siteId={siteId}
+                    queryFilters={queryFilters}
+                    window={window}
+                    onValueChange={setFilterQueryValue}
+                  />
+                </div>
+              </PanelScrollbar>
 
               <DrawerFooter>
                 <Button variant="outline" onClick={clearAllFilterQueryValues}>
@@ -844,29 +1405,22 @@ export function DashboardHeaderControls({
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
-                {FILTER_QUERY_KEYS.map((key) => {
-                  const inputId = `dashboard-filter-desktop-${key}`;
-                  return (
-                    <div key={inputId} className="space-y-2">
-                      <Label htmlFor={inputId}>
-                        {filterFieldLabel(messages, key)}
-                      </Label>
-                      <Input
-                        id={inputId}
-                        value={queryFilters[key] || ""}
-                        onChange={(event) => {
-                          setFilterQueryValue(key, event.target.value);
-                        }}
-                      />
-                    </div>
-                  );
-                })}
+              <PanelScrollbar className="min-h-0 flex-1" syncKey={searchParamsKey}>
+                <div className="space-y-4 px-4 pb-4">
+                  <DashboardFilterFields
+                    locale={locale}
+                    messages={messages}
+                    siteId={siteId}
+                    queryFilters={queryFilters}
+                    window={window}
+                    onValueChange={setFilterQueryValue}
+                  />
 
-                <Button variant="outline" onClick={clearAllFilterQueryValues}>
-                  {messages.filters.clear}
-                </Button>
-              </div>
+                  <Button variant="outline" onClick={clearAllFilterQueryValues}>
+                    {messages.filters.clear}
+                  </Button>
+                </div>
+              </PanelScrollbar>
             </SheetContent>
           </Sheet>
 

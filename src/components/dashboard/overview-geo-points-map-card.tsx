@@ -383,6 +383,9 @@ export function OverviewGeoPointsMapCard({
       ...filters,
       country: undefined,
       geo: undefined,
+      geoContinent: undefined,
+      geoTimezone: undefined,
+      geoOrganization: undefined,
     }),
     [filters],
   );
@@ -447,7 +450,6 @@ export function OverviewGeoPointsMapCard({
     };
   }, [
     requestFiltersKey,
-    requestFilters,
     siteId,
     window.from,
     window.interval,
