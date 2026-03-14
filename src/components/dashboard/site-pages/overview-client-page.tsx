@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -83,7 +84,9 @@ import {
   resolveCountryLabel,
   resolveLanguageLabel,
 } from "@/lib/i18n/code-labels";
-import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
+import {
+  useDashboardQuery,
+} from "@/components/dashboard/dashboard-query-provider";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
@@ -4040,7 +4043,44 @@ export function OverviewClientPage({
   siteId,
   pathname,
 }: OverviewClientPageProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const livePathname = usePathname() || pathname;
   const { filters, window } = useDashboardQuery();
+  const selectedGeoCountry = useMemo(() => {
+    const raw = searchParams.get(
+      GEO_DIMENSION_CARD_QUERY_PARAM_BY_TAB.country,
+    );
+    if (!raw) return null;
+    const normalized = raw.trim().toUpperCase();
+    return normalized.length > 0 ? normalized : null;
+  }, [searchParams]);
+  const handleMapCountrySelect = useCallback(
+    (countryCode: string | null) => {
+      const normalizedCurrent = String(selectedGeoCountry ?? "")
+        .trim()
+        .toUpperCase();
+      const normalizedNext = String(countryCode ?? "").trim().toUpperCase();
+      const nextCountry =
+        normalizedNext.length > 0 && normalizedNext !== normalizedCurrent
+          ? normalizedNext
+          : undefined;
+      const params = new URLSearchParams(searchParams.toString());
+      for (const queryKey of Object.values(GEO_DIMENSION_CARD_QUERY_PARAM_BY_TAB)) {
+        params.delete(queryKey);
+      }
+      if (nextCountry) {
+        params.set(GEO_DIMENSION_CARD_QUERY_PARAM_BY_TAB.country, nextCountry);
+      }
+      const nextQuery = params.toString();
+      const target = nextQuery ? `${livePathname}?${nextQuery}` : livePathname;
+      const current = searchParams.toString();
+      if (nextQuery !== current) {
+        router.replace(target, { scroll: false });
+      }
+    },
+    [livePathname, router, searchParams, selectedGeoCountry],
+  );
 
   return (
     <div className="space-y-6">
@@ -4074,6 +4114,8 @@ export function OverviewClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        selectedCountryCode={selectedGeoCountry}
+        onCountrySelect={handleMapCountrySelect}
       />
     </div>
   );

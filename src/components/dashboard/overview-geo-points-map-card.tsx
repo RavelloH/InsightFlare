@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MapViewState } from "@deck.gl/core";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
 import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
@@ -31,6 +31,8 @@ interface OverviewGeoPointsMapCardProps {
   siteId: string;
   window: TimeWindow;
   filters: DashboardFilters;
+  selectedCountryCode?: string | null;
+  onCountrySelect?: (countryCode: string | null) => void;
 }
 
 interface GeoPoint {
@@ -191,27 +193,61 @@ function normalizeCountryCode(value: string | null | undefined): string | null {
 function resolveCountryCodeFromFeature(feature: CountryFeature | null | undefined): string | null {
   if (!feature) return null;
   const props = feature.properties ?? {};
-  const directCandidates = [
+  const alpha2Candidates = [
     props.ISO_A2,
     props.iso_a2,
     props.ADM0_A2,
     props.adm0_a2,
+    props.WB_A2,
+    props.wb_a2,
     props.country,
   ];
-  for (const candidate of directCandidates) {
+
+  for (const candidate of alpha2Candidates) {
     const code = normalizeCountryCode(String(candidate ?? ""));
     if (code) return code;
   }
 
-  const key = resolveCountryFeatureKey(feature).toUpperCase();
-  if (/^[A-Z]{3}$/.test(key)) {
-    const alpha2 = isoCountries.alpha3ToAlpha2(key);
+  const alpha3Candidates = [
+    props.ISO_A3,
+    props.iso_a3,
+    props.ADM0_A3,
+    props.adm0_a3,
+    props.WB_A3,
+    props.wb_a3,
+    props.SOV_A3,
+    props.sov_a3,
+    props.GU_A3,
+    props.gu_a3,
+    props.SU_A3,
+    props.su_a3,
+    props.BRK_A3,
+    props.brk_a3,
+    typeof feature.id === "string" ? feature.id : null,
+    resolveCountryFeatureKey(feature),
+  ];
+
+  for (const candidate of alpha3Candidates) {
+    const normalizedAlpha3 = String(candidate ?? "").trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(normalizedAlpha3)) continue;
+    const alpha2 = isoCountries.alpha3ToAlpha2(normalizedAlpha3);
     const code = normalizeCountryCode(alpha2 ?? "");
     if (code) return code;
   }
 
-  if (typeof feature.id === "string" && /^[A-Z]{3}$/i.test(feature.id)) {
-    const alpha2 = isoCountries.alpha3ToAlpha2(feature.id.toUpperCase());
+  const nameCandidates = [
+    props.name,
+    props.NAME,
+    props.NAME_LONG,
+    props.ADMIN,
+    props.admin,
+    props.FORMAL_EN,
+    resolveCountryDisplayNameFromFeature(feature),
+  ];
+  for (const candidate of nameCandidates) {
+    const normalizedName = String(candidate ?? "").trim();
+    if (!normalizedName) continue;
+    const alpha2 = isoCountries.getAlpha2Code(normalizedName, "en");
     const code = normalizeCountryCode(alpha2 ?? "");
     if (code) return code;
   }
@@ -317,6 +353,8 @@ export function OverviewGeoPointsMapCard({
   siteId,
   window,
   filters,
+  selectedCountryCode,
+  onCountrySelect,
 }: OverviewGeoPointsMapCardProps) {
   const { resolvedTheme } = useTheme();
   const isMobile = useIsMobile();
@@ -364,7 +402,15 @@ export function OverviewGeoPointsMapCard({
     let active = true;
     setLoading(true);
 
-    fetchOverviewGeoPoints(siteId, window, filters, { limit: 5000 })
+    fetchOverviewGeoPoints(
+      siteId,
+      window,
+      {
+        ...filters,
+        country: undefined,
+      },
+      { limit: 5000 },
+    )
       .then((next) => {
         if (!active) return;
         setGeoPointsData(next);
@@ -383,7 +429,6 @@ export function OverviewGeoPointsMapCard({
     };
   }, [
     filters.browser,
-    filters.country,
     filters.device,
     siteId,
     window.from,
@@ -496,6 +541,19 @@ export function OverviewGeoPointsMapCard({
     () => buildRasterStyle(effectiveMapTheme),
     [effectiveMapTheme],
   );
+  const normalizedSelectedCountryCode = useMemo(
+    () => normalizeCountryCode(selectedCountryCode),
+    [selectedCountryCode],
+  );
+  const handleCountryClick = useCallback(
+    (feature: CountryFeature | null) => {
+      if (!onCountrySelect) return;
+      const nextCode = resolveCountryCodeFromFeature(feature);
+      if (!nextCode) return;
+      onCountrySelect(nextCode);
+    },
+    [onCountrySelect],
+  );
 
   const layers = useMemo(() => {
     const result: Array<
@@ -546,13 +604,25 @@ export function OverviewGeoPointsMapCard({
         stroked: true,
         lineWidthUnits: "pixels",
         lineWidthMinPixels: 0,
-        getFillColor: [0, 0, 0, 0],
-        getLineColor: (feature) =>
-          resolveCountryFeatureKey(feature) === hoveredCountryKey
-            ? withAlpha(MAP_ACCENT_RGB, 240)
+        getFillColor: (feature) =>
+          normalizedSelectedCountryCode &&
+          resolveCountryCodeFromFeature(feature) === normalizedSelectedCountryCode
+            ? withAlpha(MAP_ACCENT_RGB, 80)
             : [0, 0, 0, 0],
+        getLineColor: (feature) =>
+          normalizedSelectedCountryCode &&
+          resolveCountryCodeFromFeature(feature) === normalizedSelectedCountryCode
+            ? withAlpha(MAP_ACCENT_RGB, 255)
+            : resolveCountryFeatureKey(feature) === hoveredCountryKey
+              ? withAlpha(MAP_ACCENT_RGB, 240)
+              : [0, 0, 0, 0],
         getLineWidth: (feature) =>
-          resolveCountryFeatureKey(feature) === hoveredCountryKey ? 2.5 : 0,
+          normalizedSelectedCountryCode &&
+          resolveCountryCodeFromFeature(feature) === normalizedSelectedCountryCode
+            ? 3
+            : resolveCountryFeatureKey(feature) === hoveredCountryKey
+              ? 2.5
+              : 0,
         pickable: true,
         onHover: (info) => {
           const feature = (info.object as CountryFeature | undefined) ?? null;
@@ -566,9 +636,14 @@ export function OverviewGeoPointsMapCard({
           setHoveredCountryCode((prev) => (prev === nextCode ? prev : nextCode));
           setHoveredCountryName((prev) => (prev === nextName ? prev : nextName));
         },
+        onClick: (info) => {
+          const feature = (info.object as CountryFeature | undefined) ?? null;
+          handleCountryClick(feature);
+        },
         updateTriggers: {
-          getLineColor: hoveredCountryKey,
-          getLineWidth: hoveredCountryKey,
+          getFillColor: normalizedSelectedCountryCode,
+          getLineColor: [hoveredCountryKey, normalizedSelectedCountryCode],
+          getLineWidth: [hoveredCountryKey, normalizedSelectedCountryCode],
         },
       }));
 
@@ -576,9 +651,11 @@ export function OverviewGeoPointsMapCard({
   }, [
     countryGeoJson,
     currentZoom,
+    handleCountryClick,
     hoveredCountryKey,
     incomingAlpha,
     incomingClusters,
+    normalizedSelectedCountryCode,
     outgoingAlpha,
     outgoingClusters,
   ]);
