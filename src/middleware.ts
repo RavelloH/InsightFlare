@@ -94,18 +94,24 @@ async function fetchRedirectProfile(request: NextRequest): Promise<RedirectProfi
 }
 
 function getLocale(request: NextRequest): string {
-  const cookieLocale = request.cookies.get(LOCALE_COOKIE)?.value;
-  if (cookieLocale && isValidLocale(cookieLocale)) {
-    return cookieLocale;
-  }
-
   const acceptLang = request.headers.get("accept-language");
   if (acceptLang) {
     const preferred = acceptLang
       .split(",")
-      .map((part) => part.trim().split(";")[0].trim().toLowerCase().slice(0, 2))
-      .find((code) => isValidLocale(code));
+      .map((part) => part.trim().split(";")[0].trim().toLowerCase())
+      .map((tag) => {
+        // Try exact match first (e.g. "zh"), then language-only prefix (e.g. "zh" from "zh-cn")
+        if (isValidLocale(tag)) return tag;
+        const lang = tag.slice(0, 2);
+        return isValidLocale(lang) ? lang : null;
+      })
+      .find((code): code is string => code !== null);
     if (preferred) return preferred;
+  }
+
+  const cookieLocale = request.cookies.get(LOCALE_COOKIE)?.value;
+  if (cookieLocale && isValidLocale(cookieLocale)) {
+    return cookieLocale;
   }
 
   return DEFAULT_LOCALE;
