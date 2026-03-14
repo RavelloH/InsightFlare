@@ -1791,9 +1791,9 @@ function computeMetrics(siteId: string, fromMs: number, toMs: number) {
 
     const sessionsFrac = viewsFrac * base.sessionsPerView * sf;
     const visitorsFrac = sessionsFrac * base.visitorsPerSession * vf;
-    // bounces is based on views (not sessions) so that bounces/views = bounceRate,
-    // matching the frontend chart formula: point.bounces / point.views
-    const bouncesFrac = viewsFrac * base.bounceRate * bf;
+    // Bounce rate is defined as bounces / sessions.
+    // Cap daily bounce rate at 100% so bounces never exceed sessions.
+    const bouncesFrac = sessionsFrac * Math.min(1, base.bounceRate * bf);
     const durationFrac = sessionsFrac * base.avgDurationMs * df;
 
     sumViews += viewsFrac;
@@ -1806,9 +1806,9 @@ function computeMetrics(siteId: string, fromMs: number, toMs: number) {
   const views = Math.round(sumViews);
   const sessions = Math.max(views > 0 ? 1 : 0, Math.round(sumSessions));
   const visitors = Math.max(sessions > 0 ? 1 : 0, Math.round(sumVisitors));
-  const bounces = Math.min(views, Math.round(sumBounces));
+  const bounces = Math.min(sessions, Math.round(sumBounces));
   const totalDurationMs = Math.round(sumDurationMs);
-  const bounceRate = views > 0 ? Math.round((bounces / views) * 10000) / 10000 : 0;
+  const bounceRate = sessions > 0 ? Math.round((bounces / sessions) * 10000) / 10000 : 0;
   const avgDurationMs = sessions > 0 ? Math.round(totalDurationMs / sessions) : 0;
 
   return {

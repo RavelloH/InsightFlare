@@ -3816,10 +3816,10 @@ function OverviewMetricsSection({
     value: point.sessions,
   }));
   const bounceRateSeries = detailSeries
-    .filter((point) => point.views > 0)
+    .filter((point) => point.sessions > 0)
     .map((point) => ({
       timestampMs: point.timestampMs,
-      value: point.bounces / point.views,
+      value: point.bounces / point.sessions,
     }));
   const pagesPerSessionSeries = detailSeries
     .filter((point) => point.sessions > 0)
