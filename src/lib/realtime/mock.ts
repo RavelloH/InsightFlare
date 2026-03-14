@@ -1828,6 +1828,1196 @@ function demoIntervalStepMs(interval: string): number {
   }
 }
 
+interface DemoQueryFilters {
+  country?: string;
+  device?: string;
+  browser?: string;
+  path?: string;
+  title?: string;
+  hostname?: string;
+  entry?: string;
+  exit?: string;
+  sourceDomain?: string;
+  sourceLink?: string;
+  clientBrowser?: string;
+  clientOsVersion?: string;
+  clientDeviceType?: string;
+  clientLanguage?: string;
+  clientScreenSize?: string;
+  geo?: string;
+  geoContinent?: string;
+  geoTimezone?: string;
+  geoOrganization?: string;
+}
+
+interface ParsedDemoGeoFilter {
+  country: string;
+  regionCode?: string;
+  regionName?: string;
+  city?: string;
+}
+
+interface DemoSessionFact {
+  sessionId: string;
+  visitorId: string;
+  entryPath: string;
+  exitPath: string;
+  weight: number;
+}
+
+interface DemoVisitorFact {
+  visitorId: string;
+  weight: number;
+}
+
+interface DemoVisitFact {
+  visitId: string;
+  sessionId: string;
+  visitorId: string;
+  startedAt: number;
+  pathname: string;
+  title: string;
+  hostname: string;
+  referrerHost: string;
+  referrerUrl: string;
+  browser: string;
+  osVersion: string;
+  deviceType: string;
+  language: string;
+  screenSize: string;
+  country: string;
+  regionCode: string;
+  regionName: string;
+  region: string;
+  cityName: string;
+  city: string;
+  continent: string;
+  timezone: string;
+  organization: string;
+  latitude: number;
+  longitude: number;
+  eventType: string;
+  durationMs: number;
+}
+
+interface DemoFactDataset {
+  from: number;
+  to: number;
+  viewWeight: number;
+  visits: DemoVisitFact[];
+  sessions: Map<string, DemoSessionFact>;
+  visitors: Map<string, DemoVisitorFact>;
+}
+
+interface DemoFilteredFacts {
+  visits: DemoVisitFact[];
+  sessions: Set<string>;
+  visitors: Set<string>;
+  visitsBySession: Map<string, number>;
+}
+
+interface DemoDimensionRow {
+  label: string;
+  views: number;
+  sessions: number;
+}
+
+const DEMO_GEO_SEGMENT_SEPARATOR = "::";
+const DEMO_DIRECT_REFERRER_FILTER_VALUE = "__direct__";
+const DEMO_INTERVALS = new Set(["minute", "hour", "day", "week", "month"]);
+
+const DEMO_DESKTOP_OS = [
+  "Windows 11",
+  "Windows 10",
+  "macOS 15",
+  "macOS 14",
+  "Ubuntu 24.04",
+  "Ubuntu 22.04",
+  "Fedora 40",
+  "Debian 12",
+  "Chrome OS",
+] as const;
+const DEMO_MOBILE_OS = [
+  "iOS 18",
+  "iOS 17",
+  "Android 15",
+  "Android 14",
+  "HarmonyOS 5",
+] as const;
+const DEMO_DESKTOP_SCREENS = [
+  "1920x1080",
+  "2560x1440",
+  "1440x900",
+  "1366x768",
+  "1536x864",
+  "1600x900",
+  "3840x2160",
+] as const;
+const DEMO_MOBILE_SCREENS = [
+  "390x844",
+  "393x852",
+  "412x915",
+  "430x932",
+  "360x780",
+  "360x800",
+] as const;
+const DEMO_TABLET_SCREENS = [
+  "768x1024",
+  "834x1194",
+  "1024x1366",
+] as const;
+
+const DEMO_COUNTRY_TO_CONTINENT: Record<string, string> = {
+  US: "North America",
+  CA: "North America",
+  MX: "North America",
+  GB: "Europe",
+  DE: "Europe",
+  FR: "Europe",
+  NL: "Europe",
+  ES: "Europe",
+  IT: "Europe",
+  PL: "Europe",
+  SE: "Europe",
+  IE: "Europe",
+  PT: "Europe",
+  RU: "Europe",
+  TR: "Europe",
+  CN: "Asia",
+  JP: "Asia",
+  IN: "Asia",
+  KR: "Asia",
+  SG: "Asia",
+  PH: "Asia",
+  ID: "Asia",
+  VN: "Asia",
+  TH: "Asia",
+  MY: "Asia",
+  PK: "Asia",
+  TW: "Asia",
+  HK: "Asia",
+  AE: "Asia",
+  BR: "South America",
+  AR: "South America",
+  CL: "South America",
+  CO: "South America",
+  AU: "Oceania",
+  NZ: "Oceania",
+  ZA: "Africa",
+  NG: "Africa",
+  KE: "Africa",
+  EG: "Africa",
+};
+
+const DEMO_COUNTRY_TO_TIMEZONES: Record<string, string[]> = {
+  US: ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"],
+  CA: ["America/Toronto", "America/Vancouver"],
+  MX: ["America/Mexico_City"],
+  BR: ["America/Sao_Paulo"],
+  CO: ["America/Bogota"],
+  GB: ["Europe/London"],
+  DE: ["Europe/Berlin"],
+  FR: ["Europe/Paris"],
+  NL: ["Europe/Amsterdam"],
+  ES: ["Europe/Madrid"],
+  PL: ["Europe/Warsaw"],
+  TR: ["Europe/Istanbul"],
+  JP: ["Asia/Tokyo"],
+  CN: ["Asia/Shanghai", "Asia/Hong_Kong"],
+  HK: ["Asia/Hong_Kong"],
+  TW: ["Asia/Hong_Kong"],
+  SG: ["Asia/Singapore"],
+  IN: ["Asia/Kolkata"],
+  KR: ["Asia/Seoul"],
+  ID: ["Asia/Jakarta"],
+  PH: ["Asia/Manila"],
+  TH: ["Asia/Bangkok"],
+  AU: ["Australia/Sydney", "Australia/Melbourne"],
+  NZ: ["Pacific/Auckland"],
+  ZA: ["Africa/Johannesburg"],
+  NG: ["Africa/Lagos"],
+  KE: ["Africa/Nairobi"],
+};
+
+const DEMO_COUNTRY_TO_LANGUAGES: Record<string, string[]> = {
+  US: ["en-US"],
+  GB: ["en-GB"],
+  CA: ["en-US", "fr-FR"],
+  DE: ["de-DE"],
+  FR: ["fr-FR"],
+  NL: ["nl-NL"],
+  ES: ["es-ES"],
+  IT: ["it-IT"],
+  PL: ["pl-PL"],
+  SE: ["en-GB", "de-DE"],
+  IE: ["en-GB"],
+  PT: ["pt-BR", "en-GB"],
+  RU: ["ru-RU"],
+  TR: ["tr-TR"],
+  CN: ["zh-CN"],
+  TW: ["zh-TW"],
+  HK: ["zh-TW", "en-US"],
+  JP: ["ja-JP"],
+  KR: ["ko-KR"],
+  IN: ["en-US", "en-GB"],
+  SG: ["en-US", "zh-CN"],
+  BR: ["pt-BR"],
+  MX: ["es-419"],
+  CO: ["es-419"],
+  AR: ["es-419"],
+  CL: ["es-419"],
+  AU: ["en-US"],
+  NZ: ["en-US"],
+  ID: ["id-ID"],
+  PH: ["en-US"],
+  VN: ["vi-VN"],
+  TH: ["th-TH"],
+  MY: ["en-US", "zh-CN"],
+  PK: ["en-US", "ar-SA"],
+  ZA: ["en-US", "en-GB"],
+  NG: ["en-US"],
+  KE: ["en-US"],
+  EG: ["ar-SA", "en-US"],
+  AE: ["ar-SA", "en-US"],
+};
+
+function groupGeoLabelsByCountry(labels: readonly string[]): Map<string, string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const label of labels) {
+    const country = String(label).split(DEMO_GEO_SEGMENT_SEPARATOR)[0]?.trim().toUpperCase() || "";
+    if (!country) continue;
+    const list = grouped.get(country) ?? [];
+    list.push(String(label));
+    grouped.set(country, list);
+  }
+  return grouped;
+}
+
+const DEMO_REGIONS_BY_COUNTRY = groupGeoLabelsByCountry(ALL_REGIONS);
+const DEMO_CITIES_BY_COUNTRY = groupGeoLabelsByCountry(ALL_CITIES);
+const DEMO_FACT_DATASET_CACHE = new Map<string, DemoFactDataset>();
+
+function normalizeDemoFilterValue(value: string | number | undefined): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const normalized = String(value).trim().slice(0, 120);
+  if (normalized.length === 0) return undefined;
+  const lowered = normalized.toLowerCase();
+  if (lowered === "all" || lowered === "null" || lowered === "undefined") {
+    return undefined;
+  }
+  return normalized;
+}
+
+function parseDemoFilters(params: Record<string, string | number>): DemoQueryFilters {
+  const geo =
+    normalizeDemoFilterValue(params.geo)
+    || normalizeDemoFilterValue(params.geoCountry)
+    || normalizeDemoFilterValue(params.geoRegion)
+    || normalizeDemoFilterValue(params.geoCity);
+  return {
+    country: normalizeDemoFilterValue(params.country),
+    device: normalizeDemoFilterValue(params.device),
+    browser: normalizeDemoFilterValue(params.browser),
+    path: normalizeDemoFilterValue(params.path),
+    title: normalizeDemoFilterValue(params.title),
+    hostname: normalizeDemoFilterValue(params.hostname),
+    entry: normalizeDemoFilterValue(params.entry),
+    exit: normalizeDemoFilterValue(params.exit),
+    sourceDomain: normalizeDemoFilterValue(params.sourceDomain),
+    sourceLink: normalizeDemoFilterValue(params.sourceLink),
+    clientBrowser: normalizeDemoFilterValue(params.clientBrowser),
+    clientOsVersion: normalizeDemoFilterValue(params.clientOsVersion),
+    clientDeviceType: normalizeDemoFilterValue(params.clientDeviceType),
+    clientLanguage: normalizeDemoFilterValue(params.clientLanguage),
+    clientScreenSize: normalizeDemoFilterValue(params.clientScreenSize),
+    geo,
+    geoContinent: normalizeDemoFilterValue(params.geoContinent),
+    geoTimezone: normalizeDemoFilterValue(params.geoTimezone),
+    geoOrganization: normalizeDemoFilterValue(params.geoOrganization),
+  };
+}
+
+function withoutDemoGeoFilter(filters: DemoQueryFilters): DemoQueryFilters {
+  return { ...filters, geo: undefined };
+}
+
+function parseDemoGeoFilterValue(value: string | undefined): ParsedDemoGeoFilter | null {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return null;
+  const segments = normalized
+    .split(DEMO_GEO_SEGMENT_SEPARATOR)
+    .map((segment) => segment.trim());
+  const country = (segments[0] || "").toUpperCase();
+  if (!country) return null;
+
+  if (segments.length === 1) {
+    return { country };
+  }
+  if (segments.length === 2) {
+    const city = segments[1] || "";
+    return city ? { country, city } : { country };
+  }
+
+  const regionCode = segments[1] || "";
+  const regionName = segments[2] || "";
+  const city = segments.length >= 4
+    ? segments.slice(3).join(DEMO_GEO_SEGMENT_SEPARATOR).trim()
+    : "";
+
+  return {
+    country,
+    ...(regionCode ? { regionCode } : {}),
+    ...(regionName ? { regionName } : {}),
+    ...(city ? { city } : {}),
+  };
+}
+
+function parseDemoNumber(value: string | number | undefined, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseDemoLimit(
+  value: string | number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const parsed = Math.floor(parseDemoNumber(value, fallback));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function parseDemoBoolean(value: string | number | undefined): boolean {
+  if (typeof value === "number") return value === 1;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function parseDemoInterval(value: string | number | undefined): "minute" | "hour" | "day" | "week" | "month" {
+  const normalized = String(value ?? "day").trim().toLowerCase();
+  if (DEMO_INTERVALS.has(normalized)) {
+    return normalized as "minute" | "hour" | "day" | "week" | "month";
+  }
+  return "day";
+}
+
+function pickFromList<T>(rng: () => number, values: readonly T[], fallback: T): T {
+  if (!values.length) return fallback;
+  return values[Math.floor(rng() * values.length)] ?? fallback;
+}
+
+function isMobileBrowserLabel(label: string): boolean {
+  return (
+    label.includes("Mobile")
+    || label.includes("Samsung")
+    || label.includes("UC")
+    || label.includes("QQ")
+    || label.includes("Huawei")
+    || label.includes("Mi")
+  );
+}
+
+function pickDemoDeviceType(rng: () => number, profile: DemoSiteProfile): string {
+  const entries = Object.entries(profile.deviceWeights).map(([label, weight]) => ({ label, weight }));
+  const index = weightedPickIndex(rng, entries.map((entry) => entry.weight));
+  return entries[index]?.label ?? "Desktop";
+}
+
+function pickDemoBrowser(rng: () => number, deviceType: string): string {
+  const adjusted = BROWSER_MARKET_WEIGHTS.map((entry) => {
+    let weight = entry.weight;
+    const mobileBrowser = isMobileBrowserLabel(entry.label);
+    if (deviceType === "Mobile") {
+      weight *= mobileBrowser ? 2.1 : 0.56;
+    } else if (deviceType === "Tablet") {
+      weight *= mobileBrowser ? 1.35 : 0.82;
+    } else {
+      weight *= mobileBrowser ? 0.38 : 1.15;
+    }
+    return {
+      label: entry.label,
+      weight,
+    };
+  });
+  return weightedPickLabel(rng, adjusted, "Chrome");
+}
+
+function pickDemoOsVersion(rng: () => number, deviceType: string): string {
+  if (deviceType === "Mobile") return pickFromList(rng, DEMO_MOBILE_OS, "Android 15");
+  if (deviceType === "Tablet") {
+    return rng() < 0.5
+      ? pickFromList(rng, DEMO_MOBILE_OS, "iOS 18")
+      : pickFromList(rng, DEMO_DESKTOP_OS, "Windows 11");
+  }
+  return pickFromList(rng, DEMO_DESKTOP_OS, "Windows 11");
+}
+
+function pickDemoScreenSize(rng: () => number, deviceType: string): string {
+  if (deviceType === "Mobile") return pickFromList(rng, DEMO_MOBILE_SCREENS, "390x844");
+  if (deviceType === "Tablet") return pickFromList(rng, DEMO_TABLET_SCREENS, "834x1194");
+  return pickFromList(rng, DEMO_DESKTOP_SCREENS, "1920x1080");
+}
+
+function pickDemoLanguage(rng: () => number, country: string): string {
+  const candidates = DEMO_COUNTRY_TO_LANGUAGES[country] ?? [];
+  return pickFromList(rng, candidates.length > 0 ? candidates : ALL_LANGUAGES, ALL_LANGUAGES[0]);
+}
+
+function pickDemoTimezone(rng: () => number, country: string): string {
+  const candidates = DEMO_COUNTRY_TO_TIMEZONES[country] ?? [];
+  return pickFromList(rng, candidates.length > 0 ? candidates : ALL_TIMEZONES, ALL_TIMEZONES[0]);
+}
+
+function pickDemoContinent(rng: () => number, country: string): string {
+  return DEMO_COUNTRY_TO_CONTINENT[country] ?? pickFromList(rng, ALL_CONTINENTS, "North America");
+}
+
+function pickDemoOrganization(rng: () => number, country: string): string {
+  const offset = fnv1a(country || "US") % ALL_ORGS.length;
+  const index = (offset + sInt(rng, 0, Math.min(4, ALL_ORGS.length - 1))) % ALL_ORGS.length;
+  return ALL_ORGS[index];
+}
+
+function parseDemoRegionLabel(label: string): {
+  country: string;
+  regionCode: string;
+  regionName: string;
+  region: string;
+} | null {
+  const segments = String(label)
+    .split(DEMO_GEO_SEGMENT_SEPARATOR)
+    .map((segment) => segment.trim());
+  const country = (segments[0] || "").toUpperCase();
+  const regionCode = segments[1] || "";
+  const regionName = segments.slice(2).join(DEMO_GEO_SEGMENT_SEPARATOR).trim();
+  if (!country || (!regionCode && !regionName)) return null;
+  const regionToken = regionCode || regionName;
+  return {
+    country,
+    regionCode,
+    regionName,
+    region: `${country}${DEMO_GEO_SEGMENT_SEPARATOR}${regionToken}${DEMO_GEO_SEGMENT_SEPARATOR}${regionName || regionToken}`,
+  };
+}
+
+function parseDemoCityLabel(label: string): {
+  country: string;
+  regionCode: string;
+  regionName: string;
+  region: string;
+  cityName: string;
+  city: string;
+} | null {
+  const segments = String(label)
+    .split(DEMO_GEO_SEGMENT_SEPARATOR)
+    .map((segment) => segment.trim());
+  const country = (segments[0] || "").toUpperCase();
+  const regionCode = segments[1] || "";
+  const regionName = segments[2] || "";
+  const cityName = segments.slice(3).join(DEMO_GEO_SEGMENT_SEPARATOR).trim();
+  if (!country || !cityName || (!regionCode && !regionName)) return null;
+  const regionToken = regionCode || regionName;
+  const normalizedRegionName = regionName || regionToken;
+  const region = `${country}${DEMO_GEO_SEGMENT_SEPARATOR}${regionToken}${DEMO_GEO_SEGMENT_SEPARATOR}${normalizedRegionName}`;
+  return {
+    country,
+    regionCode,
+    regionName: normalizedRegionName,
+    region,
+    cityName,
+    city: `${region}${DEMO_GEO_SEGMENT_SEPARATOR}${cityName}`,
+  };
+}
+
+function pickDemoGeoContext(
+  rng: () => number,
+  country: string,
+): {
+  regionCode: string;
+  regionName: string;
+  region: string;
+  cityName: string;
+  city: string;
+  continent: string;
+  timezone: string;
+  organization: string;
+  latitude: number;
+  longitude: number;
+} {
+  const regionCandidates = DEMO_REGIONS_BY_COUNTRY.get(country) ?? [];
+  const cityCandidates = DEMO_CITIES_BY_COUNTRY.get(country) ?? [];
+  let regionCode = "";
+  let regionName = "";
+  let region = "";
+  let cityName = "";
+  let city = "";
+
+  const preferCity = cityCandidates.length > 0 && (regionCandidates.length === 0 || rng() < 0.72);
+  if (preferCity) {
+    const parsedCity = parseDemoCityLabel(
+      pickFromList(rng, cityCandidates, cityCandidates[0] || ""),
+    );
+    if (parsedCity) {
+      regionCode = parsedCity.regionCode;
+      regionName = parsedCity.regionName;
+      region = parsedCity.region;
+      cityName = parsedCity.cityName;
+      city = parsedCity.city;
+    }
+  }
+
+  if (!region && regionCandidates.length > 0) {
+    const parsedRegion = parseDemoRegionLabel(
+      pickFromList(rng, regionCandidates, regionCandidates[0] || ""),
+    );
+    if (parsedRegion) {
+      regionCode = parsedRegion.regionCode;
+      regionName = parsedRegion.regionName;
+      region = parsedRegion.region;
+    }
+  }
+
+  const point = sampleGeoPointByCountry(rng, country);
+  return {
+    regionCode,
+    regionName,
+    region,
+    cityName,
+    city,
+    continent: pickDemoContinent(rng, country),
+    timezone: pickDemoTimezone(rng, country),
+    organization: pickDemoOrganization(rng, country),
+    latitude: point.latitude,
+    longitude: point.longitude,
+  };
+}
+
+function buildDemoPathTitleMap(profile: DemoSiteProfile, expandedPaths: string[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (let index = 0; index < profile.paths.length; index += 1) {
+    const path = normalizePath(profile.paths[index] || "");
+    if (!path) continue;
+    const title = String(profile.titles[index] || "").trim();
+    map.set(path, title || titleFromPath(path));
+  }
+  for (const path of expandedPaths) {
+    if (!map.has(path)) {
+      map.set(path, titleFromPath(path));
+    }
+  }
+  return map;
+}
+
+function emptyDemoFactDataset(from: number, to: number): DemoFactDataset {
+  return {
+    from,
+    to,
+    viewWeight: 1,
+    visits: [],
+    sessions: new Map<string, DemoSessionFact>(),
+    visitors: new Map<string, DemoVisitorFact>(),
+  };
+}
+
+function buildDemoFactDataset(siteId: string, from: number, to: number): DemoFactDataset {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+    return emptyDemoFactDataset(from, to);
+  }
+
+  const day = todayKey();
+  const cacheKey = `${day}:${siteId}:${from}:${to}`;
+  const cached = DEMO_FACT_DATASET_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const profile = findSiteProfile(siteId);
+  const metrics = computeMetrics(siteId, from, to);
+  if (metrics.views <= 0) {
+    const empty = emptyDemoFactDataset(from, to);
+    DEMO_FACT_DATASET_CACHE.set(cacheKey, empty);
+    return empty;
+  }
+
+  const rng = createDemoRng(siteId, `facts:${from}:${to}`);
+  const sampledViewsTarget = Math.max(320, Math.min(12_000, Math.round(Math.sqrt(metrics.views + 1) * 46)));
+  const sampledViews = Math.max(1, Math.min(metrics.views, sampledViewsTarget));
+  const sampledSessionsRaw = Math.round((metrics.sessions / Math.max(metrics.views, 1)) * sampledViews);
+  const sampledSessions = Math.max(1, Math.min(sampledViews, sampledSessionsRaw));
+  const sampledVisitorsRaw = Math.round((metrics.visitors / Math.max(metrics.sessions, 1)) * sampledSessions);
+  const sampledVisitors = Math.max(1, Math.min(sampledSessions, sampledVisitorsRaw));
+
+  const viewWeight = metrics.views / sampledViews;
+  const sessionWeight = metrics.sessions / sampledSessions;
+  const visitorWeight = metrics.visitors / sampledVisitors;
+
+  let sampledBounces = Math.max(
+    0,
+    Math.min(sampledSessions, Math.round(metrics.bounces / Math.max(sessionWeight, Number.EPSILON))),
+  );
+  const availableIncrements = sampledViews - sampledSessions;
+  const requiredIncrementsForNonBounce = sampledSessions - sampledBounces;
+  if (requiredIncrementsForNonBounce > availableIncrements) {
+    sampledBounces = sampledSessions - availableIncrements;
+  }
+
+  const sessionViewCounts = new Array(sampledSessions).fill(1);
+  const sessionIndexes = sShuffle(rng, Array.from({ length: sampledSessions }, (_, index) => index));
+  const nonBounceIndexes = sessionIndexes.slice(0, Math.max(0, sampledSessions - sampledBounces));
+  for (const sessionIndex of nonBounceIndexes) {
+    sessionViewCounts[sessionIndex] += 1;
+  }
+  let remaining = sampledViews - sampledSessions - nonBounceIndexes.length;
+  while (remaining > 0) {
+    const pool = nonBounceIndexes.length > 0 ? nonBounceIndexes : sessionIndexes;
+    const pickIndex = pool[Math.floor(Math.pow(rng(), 1.25) * pool.length)] ?? pool[0] ?? 0;
+    sessionViewCounts[pickIndex] += 1;
+    remaining -= 1;
+  }
+
+  const countryPool = buildCountryPool(
+    rng,
+    profile.topCountries,
+    Math.min(36, Math.max(18, profile.topCountries.length + 14)),
+  );
+  const referrerPool = buildReferrerPool(
+    rng,
+    profile.topReferrers,
+    Math.min(36, Math.max(16, profile.topReferrers.length + 12)),
+  );
+
+  const expandedPaths = expandPathLabels(
+    rng,
+    profile.paths,
+    Math.max(28, Math.min(180, profile.paths.length * 6)),
+  );
+  const pathWeights = expandedPaths.map((_, index) => 1 / (1 + index * 0.85));
+  const pathTitleMap = buildDemoPathTitleMap(profile, expandedPaths);
+  const eventPool = ["pageview", ...profile.eventNames];
+  const span = Math.max(1, to - from);
+  const fallbackAvgDuration = Math.max(4_000, Math.round(siteRatios(siteId).avgDurationMs));
+
+  const visitorIds = Array.from(
+    { length: sampledVisitors },
+    (_, index) => `v-${siteId.slice(-3)}-${index.toString(36).padStart(4, "0")}`,
+  );
+  const visitorOrder = sShuffle(rng, [...visitorIds]);
+  const visitors = new Map<string, DemoVisitorFact>();
+  for (const visitorId of visitorIds) {
+    visitors.set(visitorId, { visitorId, weight: visitorWeight });
+  }
+
+  const sessions = new Map<string, DemoSessionFact>();
+  const visits: DemoVisitFact[] = [];
+
+  for (let sessionIndex = 0; sessionIndex < sampledSessions; sessionIndex += 1) {
+    const viewCount = Math.max(1, sessionViewCounts[sessionIndex] ?? 1);
+    const sessionId = `${siteId}-s-${sessionIndex.toString(36).padStart(5, "0")}`;
+    const visitorId = visitorOrder[sessionIndex % visitorOrder.length] ?? visitorOrder[0] ?? `${siteId}-v-0`;
+    const country = weightedPickCountry(rng, countryPool);
+    const geo = pickDemoGeoContext(rng, country);
+    const deviceType = pickDemoDeviceType(rng, profile);
+    const browser = pickDemoBrowser(rng, deviceType);
+    const osVersion = pickDemoOsVersion(rng, deviceType);
+    const language = pickDemoLanguage(rng, country);
+    const screenSize = pickDemoScreenSize(rng, deviceType);
+
+    const selectedReferrer = weightedPickLabel(
+      rng,
+      referrerPool.map((item) => ({ label: item.label, weight: item.weight })),
+      "(direct)",
+    );
+    const isDirect = selectedReferrer === "(direct)";
+    const referrerHost = isDirect ? "" : selectedReferrer.toLowerCase();
+    const keyword = encodeURIComponent(
+      titleFromPath(pickFromList(rng, expandedPaths, "/"))
+        .toLowerCase()
+        .replace(/\s+/g, "-"),
+    );
+    const referrerUrl = isDirect
+      ? ""
+      : `https://${referrerHost}/${pickFromList(rng, ["search", "r", "ref", "posts", "share"], "search")}/${keyword}`;
+
+    let cursor = from + Math.floor(rng() * span);
+    let previousPath = "";
+    let entryPath = "/";
+    let exitPath = "/";
+    const avgSessionDuration = metrics.avgDurationMs > 0 ? metrics.avgDurationMs : fallbackAvgDuration;
+    const sessionDuration = Math.max(1200, Math.round(avgSessionDuration * (0.56 + rng() * 1.24)));
+
+    for (let visitIndex = 0; visitIndex < viewCount; visitIndex += 1) {
+      const pathIndex = weightedPickIndex(rng, pathWeights);
+      const pickedPath = expandedPaths[pathIndex] ?? expandedPaths[0] ?? "/";
+      const pathname = visitIndex > 0 && previousPath && rng() < 0.28 ? previousPath : pickedPath;
+      const title = pathTitleMap.get(pathname) ?? titleFromPath(pathname);
+      const increment = visitIndex === 0 ? sInt(rng, 0, 12_000) : sInt(rng, 8_000, 160_000);
+      cursor = Math.min(to - 1, Math.max(from, cursor + increment));
+      previousPath = pathname;
+      if (visitIndex === 0) entryPath = pathname;
+      exitPath = pathname;
+
+      const eventType = visitIndex === 0 || rng() < 0.7
+        ? eventPool[0]
+        : pickFromList(rng, eventPool.slice(1), eventPool[0]);
+      const durationMs = Math.max(
+        0,
+        Math.round((sessionDuration / viewCount) * (0.74 + rng() * 0.62)),
+      );
+
+      visits.push({
+        visitId: `${sessionId}-v-${visitIndex.toString(36).padStart(3, "0")}`,
+        sessionId,
+        visitorId,
+        startedAt: cursor,
+        pathname,
+        title,
+        hostname: profile.domain,
+        referrerHost,
+        referrerUrl,
+        browser,
+        osVersion,
+        deviceType,
+        language,
+        screenSize,
+        country,
+        regionCode: geo.regionCode,
+        regionName: geo.regionName,
+        region: geo.region,
+        cityName: geo.cityName,
+        city: geo.city,
+        continent: geo.continent,
+        timezone: geo.timezone,
+        organization: geo.organization,
+        latitude: geo.latitude,
+        longitude: geo.longitude,
+        eventType,
+        durationMs,
+      });
+    }
+
+    sessions.set(sessionId, {
+      sessionId,
+      visitorId,
+      entryPath,
+      exitPath,
+      weight: sessionWeight,
+    });
+  }
+
+  visits.sort((left, right) => left.startedAt - right.startedAt || left.visitId.localeCompare(right.visitId));
+
+  const weightedDuration = visits.reduce((sum, visit) => sum + visit.durationMs * viewWeight, 0);
+  if (metrics.totalDurationMs > 0 && weightedDuration > 0) {
+    const scale = metrics.totalDurationMs / weightedDuration;
+    for (const visit of visits) {
+      visit.durationMs = Math.max(0, Math.round(visit.durationMs * scale));
+    }
+  }
+
+  const dataset: DemoFactDataset = {
+    from,
+    to,
+    viewWeight,
+    visits,
+    sessions,
+    visitors,
+  };
+  if (DEMO_FACT_DATASET_CACHE.size > 140) DEMO_FACT_DATASET_CACHE.clear();
+  DEMO_FACT_DATASET_CACHE.set(cacheKey, dataset);
+  return dataset;
+}
+
+function weightedSessionCount(dataset: DemoFactDataset, sessionIds: Iterable<string>): number {
+  let total = 0;
+  for (const sessionId of sessionIds) {
+    total += dataset.sessions.get(sessionId)?.weight ?? 0;
+  }
+  return total;
+}
+
+function weightedVisitorCount(dataset: DemoFactDataset, visitorIds: Iterable<string>): number {
+  let total = 0;
+  for (const visitorId of visitorIds) {
+    total += dataset.visitors.get(visitorId)?.weight ?? 0;
+  }
+  return total;
+}
+
+function applyDemoFilters(
+  dataset: DemoFactDataset,
+  filters: DemoQueryFilters,
+): DemoFilteredFacts {
+  const result: DemoFilteredFacts = {
+    visits: [],
+    sessions: new Set<string>(),
+    visitors: new Set<string>(),
+    visitsBySession: new Map<string, number>(),
+  };
+  const parsedGeo = parseDemoGeoFilterValue(filters.geo);
+  const regionTokens = new Set(
+    [parsedGeo?.regionCode, parsedGeo?.regionName]
+      .map((value) => String(value ?? "").trim().toUpperCase())
+      .filter(Boolean),
+  );
+  const equalsTrimmed = (left: string, right: string) => left.trim() === right;
+  const equalsCaseInsensitive = (left: string, right: string) => left.trim().toLowerCase() === right.toLowerCase();
+
+  for (const visit of dataset.visits) {
+    if (filters.country && !equalsCaseInsensitive(visit.country, filters.country)) continue;
+    if (filters.device && !equalsTrimmed(visit.deviceType, filters.device)) continue;
+    if (filters.browser && !equalsTrimmed(visit.browser, filters.browser)) continue;
+    if (filters.path && !equalsTrimmed(visit.pathname, filters.path)) continue;
+    if (filters.title && !equalsTrimmed(visit.title, filters.title)) continue;
+    if (filters.hostname && !equalsCaseInsensitive(visit.hostname, filters.hostname)) continue;
+
+    if (filters.entry) {
+      const session = dataset.sessions.get(visit.sessionId);
+      if (!session || !equalsTrimmed(session.entryPath, filters.entry)) continue;
+    }
+    if (filters.exit) {
+      const session = dataset.sessions.get(visit.sessionId);
+      if (!session || !equalsTrimmed(session.exitPath, filters.exit)) continue;
+    }
+
+    if (filters.sourceDomain) {
+      if (filters.sourceDomain === DEMO_DIRECT_REFERRER_FILTER_VALUE) {
+        if (visit.referrerHost.trim()) continue;
+      } else if (!equalsCaseInsensitive(visit.referrerHost, filters.sourceDomain)) {
+        continue;
+      }
+    }
+    if (filters.sourceLink) {
+      if (filters.sourceLink === DEMO_DIRECT_REFERRER_FILTER_VALUE) {
+        if (visit.referrerUrl.trim()) continue;
+      } else {
+        let sourceLinkMatch = equalsCaseInsensitive(visit.referrerUrl, filters.sourceLink)
+          || equalsCaseInsensitive(visit.referrerHost, filters.sourceLink);
+        if (!sourceLinkMatch) {
+          try {
+            const hostname = new URL(filters.sourceLink).hostname;
+            sourceLinkMatch = equalsCaseInsensitive(visit.referrerHost, hostname);
+          } catch {
+            // ignore invalid URL parse and keep fallback matching result
+          }
+        }
+        if (!sourceLinkMatch) continue;
+      }
+    }
+
+    if (filters.clientBrowser && !equalsTrimmed(visit.browser, filters.clientBrowser)) continue;
+    if (filters.clientOsVersion && !equalsTrimmed(visit.osVersion, filters.clientOsVersion)) continue;
+    if (filters.clientDeviceType && !equalsTrimmed(visit.deviceType, filters.clientDeviceType)) continue;
+    if (filters.clientLanguage && !equalsTrimmed(visit.language, filters.clientLanguage)) continue;
+    if (filters.clientScreenSize && !equalsTrimmed(visit.screenSize, filters.clientScreenSize)) continue;
+    if (filters.geoContinent && !equalsTrimmed(visit.continent, filters.geoContinent)) continue;
+    if (filters.geoTimezone && !equalsTrimmed(visit.timezone, filters.geoTimezone)) continue;
+    if (filters.geoOrganization && !equalsTrimmed(visit.organization, filters.geoOrganization)) continue;
+
+    if (parsedGeo?.country && !equalsCaseInsensitive(visit.country, parsedGeo.country)) continue;
+    if (regionTokens.size > 0) {
+      const visitRegionTokens = [visit.regionCode, visit.regionName]
+        .map((value) => value.trim().toUpperCase())
+        .filter(Boolean);
+      if (!visitRegionTokens.some((token) => regionTokens.has(token))) continue;
+    }
+    if (parsedGeo?.city && !equalsCaseInsensitive(visit.cityName, parsedGeo.city)) continue;
+
+    result.visits.push(visit);
+    result.sessions.add(visit.sessionId);
+    result.visitors.add(visit.visitorId);
+    result.visitsBySession.set(visit.sessionId, (result.visitsBySession.get(visit.sessionId) ?? 0) + 1);
+  }
+
+  return result;
+}
+
+function aggregateOverviewMetrics(dataset: DemoFactDataset, filtered: DemoFilteredFacts) {
+  const views = Math.round(filtered.visits.length * dataset.viewWeight);
+  const sessions = Math.round(weightedSessionCount(dataset, filtered.sessions));
+  const visitors = Math.round(weightedVisitorCount(dataset, filtered.visitors));
+  let bouncesWeighted = 0;
+  for (const [sessionId, count] of filtered.visitsBySession.entries()) {
+    if (count === 1) {
+      bouncesWeighted += dataset.sessions.get(sessionId)?.weight ?? 0;
+    }
+  }
+  const bounces = Math.min(sessions, Math.round(bouncesWeighted));
+  const totalDurationMs = Math.round(
+    filtered.visits.reduce((sum, visit) => sum + visit.durationMs * dataset.viewWeight, 0),
+  );
+  const avgDurationMs = sessions > 0 ? Math.round(totalDurationMs / sessions) : 0;
+  const bounceRate = sessions > 0 ? Math.round((bounces / sessions) * 10000) / 10000 : 0;
+  return {
+    views,
+    sessions,
+    visitors,
+    bounces,
+    totalDurationMs,
+    avgDurationMs,
+    bounceRate,
+    approximateVisitors: false,
+  };
+}
+
+function aggregateDimensionRowsFromVisits(
+  dataset: DemoFactDataset,
+  visits: DemoVisitFact[],
+  limit: number,
+  getLabel: (visit: DemoVisitFact) => string,
+): DemoDimensionRow[] {
+  const buckets = new Map<string, { views: number; sessions: Set<string> }>();
+  for (const visit of visits) {
+    const label = String(getLabel(visit) || "").trim();
+    if (!label) continue;
+    const bucket = buckets.get(label) ?? { views: 0, sessions: new Set<string>() };
+    bucket.views += dataset.viewWeight;
+    bucket.sessions.add(visit.sessionId);
+    buckets.set(label, bucket);
+  }
+  return Array.from(buckets.entries())
+    .map(([label, bucket]) => ({
+      label,
+      views: Math.max(0, Math.round(bucket.views)),
+      sessions: Math.max(0, Math.round(weightedSessionCount(dataset, bucket.sessions))),
+    }))
+    .sort((left, right) => right.views - left.views || right.sessions - left.sessions || left.label.localeCompare(right.label))
+    .slice(0, limit);
+}
+
+function aggregateSessionEdgeRows(
+  dataset: DemoFactDataset,
+  filtered: DemoFilteredFacts,
+  kind: "entry" | "exit",
+  limit: number,
+): DemoDimensionRow[] {
+  const edges = new Map<string, { at: number; value: string }>();
+  for (const visit of filtered.visits) {
+    const existing = edges.get(visit.sessionId);
+    if (!existing) {
+      edges.set(visit.sessionId, { at: visit.startedAt, value: visit.pathname });
+      continue;
+    }
+    if (kind === "entry" && visit.startedAt < existing.at) {
+      edges.set(visit.sessionId, { at: visit.startedAt, value: visit.pathname });
+    } else if (kind === "exit" && visit.startedAt >= existing.at) {
+      edges.set(visit.sessionId, { at: visit.startedAt, value: visit.pathname });
+    }
+  }
+  const buckets = new Map<string, { views: number; sessions: Set<string> }>();
+  for (const [sessionId, edge] of edges.entries()) {
+    const value = edge.value.trim();
+    if (!value) continue;
+    const bucket = buckets.get(value) ?? { views: 0, sessions: new Set<string>() };
+    bucket.views += dataset.sessions.get(sessionId)?.weight ?? 0;
+    bucket.sessions.add(sessionId);
+    buckets.set(value, bucket);
+  }
+  return Array.from(buckets.entries())
+    .map(([label, bucket]) => ({
+      label,
+      views: Math.max(0, Math.round(bucket.views)),
+      sessions: Math.max(0, Math.round(weightedSessionCount(dataset, bucket.sessions))),
+    }))
+    .sort((left, right) => right.views - left.views || right.sessions - left.sessions || left.label.localeCompare(right.label))
+    .slice(0, limit);
+}
+
+function collectPageDataAndTabs(
+  dataset: DemoFactDataset,
+  filtered: DemoFilteredFacts,
+  limit: number,
+): {
+  data: Array<{ pathname: string; views: number; sessions: number }>;
+  tabs: {
+    path: Array<{ label: string; views: number; sessions: number }>;
+    title: Array<{ label: string; views: number; sessions: number }>;
+    hostname: Array<{ label: string; views: number; sessions: number }>;
+    entry: Array<{ label: string; views: number; sessions: number }>;
+    exit: Array<{ label: string; views: number; sessions: number }>;
+  };
+} {
+  const pathRows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.pathname);
+  const titleRows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.title);
+  const hostRows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.hostname);
+  const entryRows = aggregateSessionEdgeRows(dataset, filtered, "entry", limit);
+  const exitRows = aggregateSessionEdgeRows(dataset, filtered, "exit", limit);
+
+  return {
+    data: pathRows.map((row) => ({
+      pathname: row.label,
+      views: row.views,
+      sessions: row.sessions,
+    })),
+    tabs: {
+      path: pathRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+      title: titleRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+      hostname: hostRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+      entry: entryRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+      exit: exitRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    },
+  };
+}
+
+function collectReferrerRows(
+  dataset: DemoFactDataset,
+  filtered: DemoFilteredFacts,
+  limit: number,
+): Array<{ referrer: string; views: number; sessions: number }> {
+  const rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => (
+    visit.referrerHost.trim() ? visit.referrerHost : "(direct)"
+  ));
+  return rows.map((row) => ({
+    referrer: row.label,
+    views: row.views,
+    sessions: row.sessions,
+  }));
+}
+
+function collectClientTabs(
+  dataset: DemoFactDataset,
+  filtered: DemoFilteredFacts,
+  limit: number,
+): {
+  browser: Array<{ label: string; views: number; sessions: number }>;
+  osVersion: Array<{ label: string; views: number; sessions: number }>;
+  deviceType: Array<{ label: string; views: number; sessions: number }>;
+  language: Array<{ label: string; views: number; sessions: number }>;
+  screenSize: Array<{ label: string; views: number; sessions: number }>;
+} {
+  const browser = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.browser);
+  const osVersion = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.osVersion);
+  const deviceType = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.deviceType);
+  const language = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.language);
+  const screenSize = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.screenSize);
+  return {
+    browser: browser.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    osVersion: osVersion.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    deviceType: deviceType.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    language: language.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    screenSize: screenSize.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+  };
+}
+
+function collectGeoTabs(
+  dataset: DemoFactDataset,
+  filtered: DemoFilteredFacts,
+  limit: number,
+): {
+  country: Array<{ label: string; views: number; sessions: number }>;
+  region: Array<{ label: string; views: number; sessions: number }>;
+  city: Array<{ label: string; views: number; sessions: number }>;
+  continent: Array<{ label: string; views: number; sessions: number }>;
+  timezone: Array<{ label: string; views: number; sessions: number }>;
+  organization: Array<{ label: string; views: number; sessions: number }>;
+} {
+  const country = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.country);
+  const region = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.region);
+  const city = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.city);
+  const continent = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.continent);
+  const timezone = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.timezone);
+  const organization = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.organization);
+  return {
+    country: country.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    region: region.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    city: city.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    continent: continent.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    timezone: timezone.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    organization: organization.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+  };
+}
+
+function buildDemoTrendBuckets(
+  siteId: string,
+  from: number,
+  to: number,
+  interval: "minute" | "hour" | "day" | "week" | "month",
+  filters: DemoQueryFilters,
+) {
+  const stepMs = demoIntervalStepMs(interval);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const bucketStats = new Map<number, {
+    views: number;
+    totalDurationMs: number;
+    visitors: Set<string>;
+    sessions: number;
+    bounces: number;
+  }>();
+  const sessionFirstTs = new Map<string, number>();
+
+  const ensureBucket = (bucket: number) => {
+    const existing = bucketStats.get(bucket);
+    if (existing) return existing;
+    const created = {
+      views: 0,
+      totalDurationMs: 0,
+      visitors: new Set<string>(),
+      sessions: 0,
+      bounces: 0,
+    };
+    bucketStats.set(bucket, created);
+    return created;
+  };
+
+  for (const visit of filtered.visits) {
+    const bucket = Math.floor(visit.startedAt / stepMs);
+    const agg = ensureBucket(bucket);
+    agg.views += dataset.viewWeight;
+    agg.totalDurationMs += visit.durationMs * dataset.viewWeight;
+    agg.visitors.add(visit.visitorId);
+    const firstTs = sessionFirstTs.get(visit.sessionId);
+    if (firstTs === undefined || visit.startedAt < firstTs) {
+      sessionFirstTs.set(visit.sessionId, visit.startedAt);
+    }
+  }
+
+  for (const [sessionId, sessionStartedAt] of sessionFirstTs.entries()) {
+    const bucket = Math.floor(sessionStartedAt / stepMs);
+    const agg = ensureBucket(bucket);
+    const sessionWeight = dataset.sessions.get(sessionId)?.weight ?? 0;
+    agg.sessions += sessionWeight;
+    if ((filtered.visitsBySession.get(sessionId) ?? 0) === 1) {
+      agg.bounces += sessionWeight;
+    }
+  }
+
+  const rows: Array<{
+    bucket: number;
+    timestampMs: number;
+    views: number;
+    visitors: number;
+    sessions: number;
+    bounces: number;
+    totalDurationMs: number;
+    avgDurationMs: number;
+    source: string;
+  }> = [];
+  for (let ts = from; ts < to; ts += stepMs) {
+    const bucket = Math.floor(ts / stepMs);
+    const agg = bucketStats.get(bucket);
+    const views = Math.max(0, Math.round(agg?.views ?? 0));
+    const visitors = Math.max(
+      0,
+      Math.round(agg ? weightedVisitorCount(dataset, agg.visitors) : 0),
+    );
+    const sessions = Math.max(0, Math.round(agg?.sessions ?? 0));
+    const bounces = Math.min(sessions, Math.max(0, Math.round(agg?.bounces ?? 0)));
+    const totalDurationMs = Math.max(0, Math.round(agg?.totalDurationMs ?? 0));
+    rows.push({
+      bucket,
+      timestampMs: ts,
+      views,
+      visitors,
+      sessions,
+      bounces,
+      totalDurationMs,
+      avgDurationMs: sessions > 0 ? Math.round(totalDurationMs / sessions) : 0,
+      source: "detail",
+    });
+  }
+  return rows;
+}
+
 // ---------------------------------------------------------------------------
 //  Data generators (integration-based)
 // ---------------------------------------------------------------------------
@@ -1836,14 +3026,20 @@ function generateDemoOverview(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const from = Number(params.from || 0);
-  const to = Number(params.to || Date.now());
-  const data = computeMetrics(siteId, from, to);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const data = aggregateOverviewMetrics(dataset, filtered);
   const result: Record<string, unknown> = { ok: true, data };
 
-  if (params.includeChange) {
+  if (parseDemoBoolean(params.includeChange)) {
     const span = to - from;
-    const previousData = computeMetrics(siteId, Math.max(0, from - span), from);
+    const previousFrom = Math.max(0, from - span);
+    const previousDataset = buildDemoFactDataset(siteId, previousFrom, from);
+    const previousFiltered = applyDemoFilters(previousDataset, filters);
+    const previousData = aggregateOverviewMetrics(previousDataset, previousFiltered);
     result.previousData = previousData;
     const cr = (cur: number, prev: number) =>
       prev === 0 ? null : Math.round(((cur - prev) / prev) * 10000) / 10000;
@@ -1857,119 +3053,48 @@ function generateDemoOverview(
     };
   }
 
-  if (params.includeDetail) {
-    const interval = String(params.interval || "day");
+  if (parseDemoBoolean(params.includeDetail)) {
+    const interval = parseDemoInterval(params.interval);
     result.detail = {
       interval,
-      data: generateTrendBuckets(siteId, from, to, interval),
+      data: buildDemoTrendBuckets(siteId, from, to, interval, filters),
     };
   }
 
   return result;
 }
 
-function generateTrendBuckets(siteId: string, from: number, to: number, interval: string) {
-  const stepMs = demoIntervalStepMs(interval);
-  const buckets: Array<{
-    bucket: number; timestampMs: number;
-    views: number; visitors: number; sessions: number;
-    bounces: number; totalDurationMs: number; avgDurationMs: number;
-    source: string;
-  }> = [];
-
-  for (let ts = from; ts < to; ts += stepMs) {
-    const end = Math.min(ts + stepMs, to);
-    const m = computeMetrics(siteId, ts, end);
-    buckets.push({
-      bucket: Math.floor(ts / stepMs),
-      timestampMs: ts,
-      views: m.views,
-      visitors: m.visitors,
-      sessions: m.sessions,
-      bounces: m.bounces,
-      totalDurationMs: m.totalDurationMs,
-      avgDurationMs: m.avgDurationMs,
-      source: "detail",
-    });
-  }
-
-  return buckets;
-}
-
 function generateDemoTrend(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const from = Number(params.from || 0);
-  const to = Number(params.to || Date.now());
-  const interval = String(params.interval || "day");
-  return { ok: true, interval, data: generateTrendBuckets(siteId, from, to, interval) };
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const interval = parseDemoInterval(params.interval);
+  const filters = parseDemoFilters(params);
+  return {
+    ok: true,
+    interval,
+    data: buildDemoTrendBuckets(siteId, from, to, interval, filters),
+  };
 }
 
 function generateDemoPages(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const profile = findSiteProfile(siteId);
-  const rng = createDemoRng(siteId, "pages");
-  const limit = Number(params.limit || 100);
-  const from = Number(params.from || 0);
-  const to = Number(params.to || Date.now());
-  const totalViews = integrateViews(siteId, from, to);
-  const r = siteRatios(siteId);
-
-  const expandedPaths = expandPathLabels(
-    rng,
-    profile.paths,
-    Math.min(
-      Math.max(18, profile.paths.length * 3),
-      Math.max(limit, 18),
-    ),
-  );
-  const count = Math.min(limit, expandedPaths.length);
-  const dist = weightedDistribution(rng, expandedPaths, totalViews, count);
-
-  const data = dist.map((d) => ({
-    pathname: d.label,
-    views: d.views,
-    sessions: d.sessions,
-  })).sort((a, b) => b.views - a.views);
-
-  const pathTitleMap = new Map<string, string>();
-  for (let index = 0; index < profile.paths.length; index += 1) {
-    const path = normalizePath(profile.paths[index] || "");
-    const title = String(profile.titles[index] || "").trim();
-    if (!path) continue;
-    pathTitleMap.set(path, title || titleFromPath(path));
-  }
-
-  // Generate tabs
-  const pathTab = data.map((d) => ({ label: d.pathname, views: d.views, sessions: d.sessions }));
-  const titleTab = data
-    .slice(0, Math.min(limit, 28))
-    .map((item) => ({
-      label: pathTitleMap.get(item.pathname) ?? titleFromPath(item.pathname),
-      views: item.views,
-      sessions: item.sessions,
-    }))
-    .sort((left, right) => right.views - left.views);
-  const hostTab = [{ label: profile.domain, views: totalViews, sessions: Math.round(totalViews * r.sessionsPerView) }];
-  const topSlice = Math.max(5, Math.min(12, Math.round(data.length * 0.36)));
-  const entryTab = data.slice(0, topSlice).map((d) => ({
-    label: d.pathname,
-    views: Math.round(d.views * (0.6 + rng() * 0.3)),
-    sessions: Math.round(d.sessions * (0.6 + rng() * 0.3)),
-  }));
-  const exitTab = sShuffle(rng, [...data]).slice(0, topSlice).map((d) => ({
-    label: d.pathname,
-    views: Math.round(d.views * (0.3 + rng() * 0.4)),
-    sessions: Math.round(d.sessions * (0.3 + rng() * 0.4)),
-  }));
+  const limit = parseDemoLimit(params.limit, 100, 1, 500);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const pages = collectPageDataAndTabs(dataset, filtered, limit);
 
   return {
     ok: true,
-    data,
-    tabs: { path: pathTab, title: titleTab, hostname: hostTab, entry: entryTab, exit: exitTab },
+    data: pages.data,
+    tabs: pages.tabs,
   };
 }
 
@@ -1977,33 +3102,16 @@ function generateDemoReferrers(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const profile = findSiteProfile(siteId);
-  const rng = createDemoRng(siteId, "referrers");
-  const limit = Number(params.limit || 100);
-  const from = Number(params.from || 0);
-  const to = Number(params.to || Date.now());
-  const totalViews = integrateViews(siteId, from, to);
-
-  const referrerPool = buildReferrerPool(
-    rng,
-    profile.topReferrers,
-    Math.min(Math.max(14, profile.topReferrers.length + 12), Math.max(limit, 14)),
-  );
-  const dist = weightedDistributionFromWeights(
-    rng,
-    referrerPool,
-    totalViews,
-    Math.min(limit, referrerPool.length),
-    [0.5, 0.86],
-  );
+  const limit = parseDemoLimit(params.limit, 100, 1, 500);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
 
   return {
     ok: true,
-    data: dist.map((d) => ({
-      referrer: d.label,
-      views: d.views,
-      sessions: d.sessions,
-    })).sort((a, b) => b.views - a.views),
+    data: collectReferrerRows(dataset, filtered, limit),
   };
 }
 
@@ -2011,37 +3119,47 @@ function generateDemoVisitors(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const rng = createDemoRng(siteId, "visitors");
-  const limit = Number(params.limit || 100);
-  const from = Number(params.from || Date.now() - 7 * 24 * 3600 * 1000);
-  const to = Number(params.to || Date.now());
-  const span = to - from;
+  const limit = parseDemoLimit(params.limit, 100, 1, 500);
+  const from = parseDemoNumber(params.from, Date.now() - 7 * 24 * 3600 * 1000);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
 
-  const visitors: Array<{
-    visitorId: string;
-    firstSeenAt: number;
-    lastSeenAt: number;
-    views: number;
-    sessions: number;
-  }> = [];
-
-  for (let i = 0; i < limit; i++) {
-    const firstSeen = from + Math.round(rng() * span * 0.8);
-    const lastSeen = firstSeen + Math.round(rng() * (to - firstSeen));
-    const views = sInt(rng, 1, 25);
-    const sessions = Math.max(1, Math.min(views, sInt(rng, 1, 8)));
-    visitors.push({
-      visitorId: `v-${siteId.slice(-3)}-${i.toString(36).padStart(3, "0")}`,
-      firstSeenAt: firstSeen,
-      lastSeenAt: lastSeen,
-      views,
-      sessions,
-    });
+  const buckets = new Map<
+    string,
+    { firstSeenAt: number; lastSeenAt: number; views: number; sessions: Set<string> }
+  >();
+  for (const visit of filtered.visits) {
+    const bucket = buckets.get(visit.visitorId) ?? {
+      firstSeenAt: visit.startedAt,
+      lastSeenAt: visit.startedAt,
+      views: 0,
+      sessions: new Set<string>(),
+    };
+    bucket.firstSeenAt = Math.min(bucket.firstSeenAt, visit.startedAt);
+    bucket.lastSeenAt = Math.max(bucket.lastSeenAt, visit.startedAt);
+    bucket.views += dataset.viewWeight;
+    bucket.sessions.add(visit.sessionId);
+    buckets.set(visit.visitorId, bucket);
   }
 
   return {
     ok: true,
-    data: visitors.sort((a, b) => b.lastSeenAt - a.lastSeenAt),
+    data: Array.from(buckets.entries())
+      .map(([visitorId, bucket]) => ({
+        visitorId,
+        firstSeenAt: bucket.firstSeenAt,
+        lastSeenAt: bucket.lastSeenAt,
+        views: Math.max(0, Math.round(bucket.views)),
+        sessions: Math.max(0, Math.round(weightedSessionCount(dataset, bucket.sessions))),
+      }))
+      .sort((left, right) => (
+        right.lastSeenAt - left.lastSeenAt
+        || right.views - left.views
+        || left.visitorId.localeCompare(right.visitorId)
+      ))
+      .slice(0, limit),
   };
 }
 
@@ -2050,56 +3168,35 @@ function generateDemoDimension(
   dimensionType: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const profile = findSiteProfile(siteId);
-  const rng = createDemoRng(siteId, `dim-${dimensionType}`);
-  const limit = Number(params.limit || 20);
-  const from = Number(params.from || 0);
-  const to = Number(params.to || Date.now());
-  const totalViews = integrateViews(siteId, from, to);
-
-  let dist: Array<{ label: string; views: number; sessions: number }>;
+  const limit = parseDemoLimit(params.limit, 20, 1, 500);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  let filters = parseDemoFilters(params);
   if (dimensionType === "countries") {
-    const countryPool = buildCountryPool(
-      rng,
-      profile.topCountries,
-      Math.min(Math.max(14, profile.topCountries.length + 10), Math.max(limit, 14)),
-    );
-    dist = weightedDistributionFromWeights(
-      rng,
-      countryPool.map((item) => ({ label: item.code, weight: item.weight })),
-      totalViews,
-      Math.min(limit, countryPool.length),
-      [0.48, 0.8],
-    );
+    filters = withoutDemoGeoFilter(filters);
+  }
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+
+  let rows: DemoDimensionRow[] = [];
+  if (dimensionType === "countries") {
+    rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.country);
   } else if (dimensionType === "browsers") {
-    dist = weightedDistributionFromWeights(
-      rng,
-      BROWSER_MARKET_WEIGHTS,
-      totalViews,
-      Math.min(limit, BROWSER_MARKET_WEIGHTS.length),
-      [0.54, 0.88],
-    );
-  } else {
-    let labels: string[];
-    switch (dimensionType) {
-      case "devices":
-        labels = Object.keys(profile.deviceWeights);
-        break;
-      case "event-types":
-        labels = profile.eventNames;
-        break;
-      default:
-        labels = profile.topCountries.map((c) => c.code);
-    }
-    dist = weightedDistribution(rng, labels, totalViews, Math.min(limit, labels.length));
+    rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.browser);
+  } else if (dimensionType === "devices") {
+    rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.deviceType);
+  } else if (dimensionType === "event-types") {
+    rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => (
+      visit.eventType === "pageview" ? "" : visit.eventType
+    ));
   }
 
   return {
     ok: true,
-    data: dist.map((d) => ({
-      value: d.label,
-      views: d.views,
-      sessions: d.sessions,
+    data: rows.map((row) => ({
+      value: row.label,
+      views: row.views,
+      sessions: row.sessions,
     })).sort((a, b) => b.views - a.views),
   };
 }
@@ -2108,59 +3205,17 @@ function generateDemoClientDimensionTabs(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const profile = findSiteProfile(siteId);
-  const rng = createDemoRng(siteId, "client-dims");
-  const limit = Number(params.limit || 100);
-  const from = Number(params.from || 0);
-  const to = Number(params.to || Date.now());
-  const totalViews = integrateViews(siteId, from, to);
-
-  const mkTab = (labels: readonly string[], n: number) =>
-    weightedDistribution(rng, labels, totalViews, Math.min(n, limit))
-      .sort((a, b) => b.views - a.views);
-
-  const mobileLikeShare = Math.max(
-    0,
-    Math.min(1, profile.deviceWeights.Mobile + profile.deviceWeights.Tablet * 0.45),
-  );
-  const browserPool = BROWSER_MARKET_WEIGHTS.map((item) => {
-    let weight = item.weight;
-    if (
-      item.label.includes("Mobile")
-      || item.label.includes("Samsung")
-      || item.label.includes("UC")
-      || item.label.includes("QQ")
-      || item.label.includes("Huawei")
-      || item.label.includes("Mi")
-    ) {
-      weight *= 0.7 + mobileLikeShare * 1.45;
-    } else {
-      weight *= 0.9 + (1 - mobileLikeShare) * 0.28;
-    }
-    return { label: item.label, weight };
-  });
-  const browserTab = weightedDistributionFromWeights(
-    rng,
-    browserPool,
-    totalViews,
-    Math.min(limit, Math.max(10, Math.min(18, browserPool.length))),
-    [0.52, 0.88],
-  ).sort((left, right) => right.views - left.views);
-
-  const deviceLabels = Object.entries(profile.deviceWeights)
-    .sort((a, b) => b[1] - a[1])
-    .map(([k]) => k);
-  const deviceTab = mkTab(deviceLabels, 3);
+  const limit = parseDemoLimit(params.limit, 100, 1, 500);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const tabs = collectClientTabs(dataset, filtered, limit);
 
   return {
     ok: true,
-    tabs: {
-      browser: browserTab,
-      osVersion: mkTab(ALL_OS, 12),
-      deviceType: deviceTab,
-      language: mkTab(ALL_LANGUAGES, 16),
-      screenSize: mkTab(ALL_SCREEN_SIZES, 12),
-    },
+    tabs,
   };
 }
 
@@ -2168,43 +3223,17 @@ function generateDemoGeoDimensionTabs(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const profile = findSiteProfile(siteId);
-  const rng = createDemoRng(siteId, "geo-dims");
-  const limit = Number(params.limit || 100);
-  const from = Number(params.from || 0);
-  const to = Number(params.to || Date.now());
-  const totalViews = integrateViews(siteId, from, to);
-
-  const mkTab = (labels: readonly string[], n: number) =>
-    weightedDistribution(rng, labels, totalViews, Math.min(n, limit))
-      .sort((a, b) => b.views - a.views);
-
-  const countryPool = buildCountryPool(
-    rng,
-    profile.topCountries,
-    Math.min(Math.max(16, profile.topCountries.length + 12), Math.max(limit, 16)),
-  );
-  const countryLabels = countryPool.map((item) => item.code);
-  const regionLabels = filterGeoLabelsByCountries(ALL_REGIONS, countryLabels);
-  const cityLabels = filterGeoLabelsByCountries(ALL_CITIES, countryLabels);
-  const countryTab = weightedDistributionFromWeights(
-    rng,
-    countryPool.map((item) => ({ label: item.code, weight: item.weight })),
-    totalViews,
-    Math.min(limit, countryPool.length),
-    [0.48, 0.8],
-  ).sort((left, right) => right.views - left.views);
+  const limit = parseDemoLimit(params.limit, 100, 1, 500);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = withoutDemoGeoFilter(parseDemoFilters(params));
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const tabs = collectGeoTabs(dataset, filtered, limit);
 
   return {
     ok: true,
-    tabs: {
-      country: countryTab,
-      region: mkTab(regionLabels, Math.min(24, regionLabels.length)),
-      city: mkTab(cityLabels, Math.min(32, cityLabels.length)),
-      continent: mkTab(ALL_CONTINENTS, 6),
-      timezone: mkTab(ALL_TIMEZONES, 18),
-      organization: mkTab(ALL_ORGS, 18),
-    },
+    tabs,
   };
 }
 
@@ -2212,70 +3241,47 @@ function generateDemoGeoPoints(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const profile = findSiteProfile(siteId);
-  const rng = createDemoRng(siteId, "geo-points");
-  const limit = Math.max(50, Math.min(20000, Number(params.limit || 5000)));
-  const from = Number(params.from || Math.max(0, Date.now() - 24 * 3600 * 1000));
-  const to = Number(params.to || Date.now());
-  const span = Math.max(1, to - from);
-  const totalViews = Math.max(0, integrateViews(siteId, from, to));
-  const desired = Math.max(120, Math.round(Math.sqrt(totalViews + 1) * 28));
-  const count = Math.min(limit, desired);
-  const countryPool = buildCountryPool(
-    rng,
-    profile.topCountries,
-    Math.min(34, Math.max(18, profile.topCountries.length + 14)),
-  );
-  const sessionSpace = Math.max(8, Math.round(count * 0.58));
-  const visitorSpace = Math.max(6, Math.round(count * 0.43));
+  const limit = parseDemoLimit(params.limit, 5000, 50, 20_000);
+  const from = parseDemoNumber(params.from, Math.max(0, Date.now() - 24 * 3600 * 1000));
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = withoutDemoGeoFilter(parseDemoFilters(params));
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const orderedVisits = [...filtered.visits].sort((left, right) => right.startedAt - left.startedAt);
 
-  const points: Array<{
-    latitude: number;
-    longitude: number;
-    timestampMs: number;
-    country: string;
-  }> = [];
   const countryBuckets = new Map<
     string,
     { views: number; sessions: Set<string>; visitors: Set<string> }
   >();
-
-  for (let index = 0; index < count; index += 1) {
-    const countryCode = weightedPickCountry(rng, countryPool);
-    const point = sampleGeoPointByCountry(rng, countryCode);
-    const timestampMs = to - Math.round(rng() * span);
-    points.push({
-      latitude: point.latitude,
-      longitude: point.longitude,
-      timestampMs,
-      country: countryCode,
-    });
-
-    const bucket = countryBuckets.get(countryCode) ?? {
+  for (const visit of filtered.visits) {
+    const bucket = countryBuckets.get(visit.country) ?? {
       views: 0,
       sessions: new Set<string>(),
       visitors: new Set<string>(),
     };
-    bucket.views += 1;
-    const sessionId = `${countryCode}-s-${sInt(rng, 1, sessionSpace)}`;
-    const visitorId = `${countryCode}-v-${sInt(rng, 1, visitorSpace)}`;
-    bucket.sessions.add(sessionId);
-    bucket.visitors.add(visitorId);
-    countryBuckets.set(countryCode, bucket);
+    bucket.views += dataset.viewWeight;
+    bucket.sessions.add(visit.sessionId);
+    bucket.visitors.add(visit.visitorId);
+    countryBuckets.set(visit.country, bucket);
   }
 
   const countryCounts = Array.from(countryBuckets.entries())
     .map(([country, bucket]) => ({
       country,
-      views: bucket.views,
-      sessions: bucket.sessions.size,
-      visitors: bucket.visitors.size,
+      views: Math.max(0, Math.round(bucket.views)),
+      sessions: Math.max(0, Math.round(weightedSessionCount(dataset, bucket.sessions))),
+      visitors: Math.max(0, Math.round(weightedVisitorCount(dataset, bucket.visitors))),
     }))
     .sort((left, right) => right.views - left.views || left.country.localeCompare(right.country));
 
   return {
     ok: true,
-    data: points.sort((left, right) => right.timestampMs - left.timestampMs),
+    data: orderedVisits.slice(0, limit).map((visit) => ({
+      latitude: visit.latitude,
+      longitude: visit.longitude,
+      timestampMs: visit.startedAt,
+      country: visit.country,
+    })),
     countryCounts,
   };
 }
@@ -2284,25 +3290,26 @@ function generateDemoOverviewPanels(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const pages = generateDemoPages(siteId, { ...params, limit: 12 }) as {
-    tabs: Record<string, unknown>;
-  };
-  const referrers = generateDemoReferrers(siteId, { ...params, limit: 12 }) as {
-    data: unknown[];
-  };
-  const clientTabs = generateDemoClientDimensionTabs(siteId, params) as {
-    tabs: Record<string, unknown>;
-  };
-  const geoTabs = generateDemoGeoDimensionTabs(siteId, params) as {
-    tabs: Record<string, unknown>;
-  };
+  const limit = parseDemoLimit(params.limit, 12, 1, 200);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const geoFiltered = filters.geo
+    ? applyDemoFilters(dataset, withoutDemoGeoFilter(filters))
+    : filtered;
+  const pages = collectPageDataAndTabs(dataset, filtered, limit);
+  const referrers = collectReferrerRows(dataset, filtered, limit);
+  const clientTabs = collectClientTabs(dataset, filtered, limit);
+  const geoTabs = collectGeoTabs(dataset, geoFiltered, limit);
 
   return {
     ok: true,
     pageTabs: pages.tabs,
-    referrers: referrers.data,
-    clientTabs: clientTabs.tabs,
-    geoTabs: geoTabs.tabs,
+    referrers,
+    clientTabs,
+    geoTabs,
   };
 }
 

@@ -348,6 +348,14 @@ function computeClusterPointRadius(count: number, zoom: number): number {
   return clamp(baseRadius * zoomScale, 2.2, 32);
 }
 
+function dashboardFilterSignature(filters: DashboardFilters): string {
+  const entries = Object.entries(filters)
+    .map(([key, value]) => [key, String(value ?? "").trim()] as const)
+    .filter(([, value]) => value.length > 0)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return JSON.stringify(entries);
+}
+
 export function OverviewGeoPointsMapCard({
   locale,
   messages,
@@ -370,6 +378,18 @@ export function OverviewGeoPointsMapCard({
     normalizeClusterZoom(DEFAULT_VIEW_STATE.zoom),
   );
   const hasClusterCrossfadeInitialized = useRef(false);
+  const requestFilters = useMemo<DashboardFilters>(
+    () => ({
+      ...filters,
+      country: undefined,
+      geo: undefined,
+    }),
+    [filters],
+  );
+  const requestFiltersKey = useMemo(
+    () => dashboardFilterSignature(requestFilters),
+    [requestFilters],
+  );
 
   useEffect(() => {
     setMounted(true);
@@ -406,10 +426,7 @@ export function OverviewGeoPointsMapCard({
     fetchOverviewGeoPoints(
       siteId,
       window,
-      {
-        ...filters,
-        country: undefined,
-      },
+      requestFilters,
       { limit: 5000 },
     )
       .then((next) => {
@@ -429,8 +446,8 @@ export function OverviewGeoPointsMapCard({
       active = false;
     };
   }, [
-    filters.browser,
-    filters.device,
+    requestFiltersKey,
+    requestFilters,
     siteId,
     window.from,
     window.interval,

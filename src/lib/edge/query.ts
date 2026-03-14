@@ -46,6 +46,22 @@ interface DashboardFilters {
   country?: string;
   device?: string;
   browser?: string;
+  path?: string;
+  title?: string;
+  hostname?: string;
+  entry?: string;
+  exit?: string;
+  sourceDomain?: string;
+  sourceLink?: string;
+  clientBrowser?: string;
+  clientOsVersion?: string;
+  clientDeviceType?: string;
+  clientLanguage?: string;
+  clientScreenSize?: string;
+  geo?: string;
+  geoContinent?: string;
+  geoTimezone?: string;
+  geoOrganization?: string;
 }
 
 interface OverviewAggregateRow {
@@ -215,10 +231,31 @@ function normalizeFilterValue(value: string | null): string | undefined {
 }
 
 function parseFilters(url: URL): DashboardFilters {
+  const geo =
+    normalizeFilterValue(url.searchParams.get("geo")) ||
+    normalizeFilterValue(url.searchParams.get("geoCountry")) ||
+    normalizeFilterValue(url.searchParams.get("geoRegion")) ||
+    normalizeFilterValue(url.searchParams.get("geoCity"));
   return {
     country: normalizeFilterValue(url.searchParams.get("country")),
     device: normalizeFilterValue(url.searchParams.get("device")),
     browser: normalizeFilterValue(url.searchParams.get("browser")),
+    path: normalizeFilterValue(url.searchParams.get("path")),
+    title: normalizeFilterValue(url.searchParams.get("title")),
+    hostname: normalizeFilterValue(url.searchParams.get("hostname")),
+    entry: normalizeFilterValue(url.searchParams.get("entry")),
+    exit: normalizeFilterValue(url.searchParams.get("exit")),
+    sourceDomain: normalizeFilterValue(url.searchParams.get("sourceDomain")),
+    sourceLink: normalizeFilterValue(url.searchParams.get("sourceLink")),
+    clientBrowser: normalizeFilterValue(url.searchParams.get("clientBrowser")),
+    clientOsVersion: normalizeFilterValue(url.searchParams.get("clientOsVersion")),
+    clientDeviceType: normalizeFilterValue(url.searchParams.get("clientDeviceType")),
+    clientLanguage: normalizeFilterValue(url.searchParams.get("clientLanguage")),
+    clientScreenSize: normalizeFilterValue(url.searchParams.get("clientScreenSize")),
+    geo,
+    geoContinent: normalizeFilterValue(url.searchParams.get("geoContinent")),
+    geoTimezone: normalizeFilterValue(url.searchParams.get("geoTimezone")),
+    geoOrganization: normalizeFilterValue(url.searchParams.get("geoOrganization")),
   };
 }
 
@@ -263,12 +300,14 @@ function formatPageLabel(pathname: string, query = "", hash = "", includeDetails
   return `${base}${query || ""}${hash || ""}`;
 }
 
-function osVersionExpr(): string {
-  return "trim(CASE WHEN os != '' AND os_version != '' THEN os || ' ' || os_version WHEN os != '' THEN os WHEN os_version != '' THEN os_version ELSE '' END)";
+function osVersionExpr(alias = ""): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `trim(CASE WHEN ${prefix}os != '' AND ${prefix}os_version != '' THEN ${prefix}os || ' ' || ${prefix}os_version WHEN ${prefix}os != '' THEN ${prefix}os WHEN ${prefix}os_version != '' THEN ${prefix}os_version ELSE '' END)`;
 }
 
-function screenSizeExpr(): string {
-  return "CASE WHEN screen_width > 0 AND screen_height > 0 THEN CAST(screen_width AS TEXT) || 'x' || CAST(screen_height AS TEXT) ELSE '' END";
+function screenSizeExpr(alias = ""): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `CASE WHEN ${prefix}screen_width > 0 AND ${prefix}screen_height > 0 THEN CAST(${prefix}screen_width AS TEXT) || 'x' || CAST(${prefix}screen_height AS TEXT) ELSE '' END`;
 }
 
 function siteQueryHeaders(options: SiteQueryResponseOptions): Record<string, string> {
@@ -553,22 +592,163 @@ function visitSourceBindingsForSites(siteIds: string[], window: QueryWindow): Ar
   return [...siteIds, window.fromMs, window.toMs, ...siteIds, window.fromMs, window.toMs];
 }
 
+const GEO_SEGMENT_SEPARATOR = "::";
+const DIRECT_REFERRER_FILTER_VALUE = "__direct__";
+
+interface ParsedGeoFilter {
+  country: string;
+  regionCode?: string;
+  regionName?: string;
+  city?: string;
+}
+
+function parseGeoFilterValue(value: string | undefined): ParsedGeoFilter | null {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return null;
+  const segments = normalized
+    .split(GEO_SEGMENT_SEPARATOR)
+    .map((segment) => segment.trim());
+  const country = (segments[0] || "").toUpperCase();
+  if (!country) return null;
+
+  if (segments.length === 1) {
+    return { country };
+  }
+
+  if (segments.length === 2) {
+    const city = segments[1] || "";
+    return city ? { country, city } : { country };
+  }
+
+  const regionCode = segments[1] || "";
+  const regionName = segments[2] || "";
+  const city = segments.length >= 4
+    ? segments.slice(3).join(GEO_SEGMENT_SEPARATOR).trim()
+    : "";
+
+  return {
+    country,
+    ...(regionCode ? { regionCode } : {}),
+    ...(regionName ? { regionName } : {}),
+    ...(city ? { city } : {}),
+  };
+}
+
+function withoutGeoFilter(filters: DashboardFilters): DashboardFilters {
+  return {
+    ...filters,
+    geo: undefined,
+  };
+}
+
 function buildVisitFilterSql(filters: DashboardFilters, alias = ""): { clause: string; bindings: string[] } {
   const prefix = alias ? `${alias}.` : "";
   const clauses: string[] = [];
   const bindings: string[] = [];
+
+  const equalsTrimmed = (column: string, value: string) => {
+    clauses.push(`TRIM(COALESCE(${column}, '')) = ?`);
+    bindings.push(value);
+  };
+  const equalsCaseInsensitive = (column: string, value: string) => {
+    clauses.push(`LOWER(TRIM(COALESCE(${column}, ''))) = ?`);
+    bindings.push(value.toLowerCase());
+  };
+
   if (filters.country) {
-    clauses.push(`${prefix}country = ?`);
-    bindings.push(filters.country);
+    equalsCaseInsensitive(`${prefix}country`, filters.country);
   }
   if (filters.device) {
-    clauses.push(`${prefix}device_type = ?`);
-    bindings.push(filters.device);
+    equalsTrimmed(`${prefix}device_type`, filters.device);
   }
   if (filters.browser) {
-    clauses.push(`${prefix}browser = ?`);
-    bindings.push(filters.browser);
+    equalsTrimmed(`${prefix}browser`, filters.browser);
   }
+  if (filters.path) {
+    equalsTrimmed(`${prefix}pathname`, filters.path);
+  }
+  if (filters.title) {
+    equalsTrimmed(`${prefix}title`, filters.title);
+  }
+  if (filters.hostname) {
+    equalsCaseInsensitive(`${prefix}hostname`, filters.hostname);
+  }
+  if (filters.entry) {
+    clauses.push(`TRIM(COALESCE(${prefix}session_id, '')) != ''`);
+    clauses.push(
+      `COALESCE((SELECT edge.pathname FROM visit_source edge WHERE edge.session_id = ${prefix}session_id ORDER BY edge.started_at ASC, edge.visit_id ASC LIMIT 1), '') = ?`,
+    );
+    bindings.push(filters.entry);
+  }
+  if (filters.exit) {
+    clauses.push(`TRIM(COALESCE(${prefix}session_id, '')) != ''`);
+    clauses.push(
+      `COALESCE((SELECT edge.pathname FROM visit_source edge WHERE edge.session_id = ${prefix}session_id ORDER BY edge.started_at DESC, edge.visit_id DESC LIMIT 1), '') = ?`,
+    );
+    bindings.push(filters.exit);
+  }
+  if (filters.sourceDomain) {
+    if (filters.sourceDomain === DIRECT_REFERRER_FILTER_VALUE) {
+      clauses.push(`TRIM(COALESCE(${prefix}referrer_host, '')) = ''`);
+    } else {
+      equalsCaseInsensitive(`${prefix}referrer_host`, filters.sourceDomain);
+    }
+  }
+  if (filters.sourceLink) {
+    if (filters.sourceLink === DIRECT_REFERRER_FILTER_VALUE) {
+      clauses.push(`TRIM(COALESCE(${prefix}referrer_url, '')) = ''`);
+    } else {
+      equalsCaseInsensitive(`${prefix}referrer_url`, filters.sourceLink);
+    }
+  }
+  if (filters.clientBrowser) {
+    equalsTrimmed(`${prefix}browser`, filters.clientBrowser);
+  }
+  if (filters.clientOsVersion) {
+    equalsTrimmed(osVersionExpr(alias), filters.clientOsVersion);
+  }
+  if (filters.clientDeviceType) {
+    equalsTrimmed(`${prefix}device_type`, filters.clientDeviceType);
+  }
+  if (filters.clientLanguage) {
+    equalsTrimmed(`${prefix}language`, filters.clientLanguage);
+  }
+  if (filters.clientScreenSize) {
+    equalsTrimmed(screenSizeExpr(alias), filters.clientScreenSize);
+  }
+  if (filters.geoContinent) {
+    equalsTrimmed(`${prefix}continent`, filters.geoContinent);
+  }
+  if (filters.geoTimezone) {
+    equalsTrimmed(`${prefix}timezone`, filters.geoTimezone);
+  }
+  if (filters.geoOrganization) {
+    equalsTrimmed(`${prefix}as_organization`, filters.geoOrganization);
+  }
+
+  const parsedGeo = parseGeoFilterValue(filters.geo);
+  if (parsedGeo?.country) {
+    equalsCaseInsensitive(`${prefix}country`, parsedGeo.country);
+  }
+  if (parsedGeo?.regionCode || parsedGeo?.regionName) {
+    const geoRegionTokens = Array.from(
+      new Set(
+        [parsedGeo.regionCode, parsedGeo.regionName]
+          .map((value) => String(value ?? "").trim().toUpperCase())
+          .filter((value) => value.length > 0),
+      ),
+    );
+    if (geoRegionTokens.length > 0) {
+      clauses.push(
+        `UPPER(TRIM(CASE WHEN TRIM(COALESCE(${prefix}region_code, '')) != '' THEN ${prefix}region_code ELSE ${prefix}region END)) IN (${geoRegionTokens.map(() => "?").join(", ")})`,
+      );
+      bindings.push(...geoRegionTokens);
+    }
+  }
+  if (parsedGeo?.city) {
+    equalsCaseInsensitive(`${prefix}city`, parsedGeo.city);
+  }
+
   return clauses.length > 0 ? { clause: `WHERE ${clauses.join(" AND ")}`, bindings } : { clause: "", bindings: [] };
 }
 
@@ -1156,10 +1336,14 @@ async function handleDimension(
   siteId: string,
   url: URL,
   d1Expr: string,
+  options?: {
+    ignoreGeo?: boolean;
+  },
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const rawFilters = parseFilters(url);
+  const filters = options?.ignoreGeo ? withoutGeoFilter(rawFilters) : rawFilters;
   const limit = parseLimit(url, 20, 200);
   const rows = await queryDimensionAggregate(
     env,
@@ -1223,6 +1407,15 @@ async function handleOverviewPanels(
   const filters = parseFilters(url);
   const limit = parseLimit(url, 100, 200);
   const panels = await queryOverviewPanelsFromD1(env, siteId, window, filters, limit);
+  const geoTabs = filters.geo
+    ? await buildOverviewGeoDimensionTabs(
+        env,
+        siteId,
+        window,
+        withoutGeoFilter(filters),
+        limit,
+      )
+    : panels.geoTabs;
   return jsonResponse({
     ok: true,
     pageTabs: mapPageTabs(panels.pageTabs),
@@ -1235,12 +1428,12 @@ async function handleOverviewPanels(
       screenSize: mapTabs(panels.clientTabs.screenSize),
     },
     geoTabs: {
-      country: mapTabs(panels.geoTabs.country),
-      region: mapTabs(panels.geoTabs.region),
-      city: mapTabs(panels.geoTabs.city),
-      continent: mapTabs(panels.geoTabs.continent),
-      timezone: mapTabs(panels.geoTabs.timezone),
-      organization: mapTabs(panels.geoTabs.organization),
+      country: mapTabs(geoTabs.country),
+      region: mapTabs(geoTabs.region),
+      city: mapTabs(geoTabs.city),
+      continent: mapTabs(geoTabs.continent),
+      timezone: mapTabs(geoTabs.timezone),
+      organization: mapTabs(geoTabs.organization),
     },
   });
 }
@@ -1252,7 +1445,7 @@ async function handleOverviewGeoDimensions(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = withoutGeoFilter(parseFilters(url));
   const limit = parseLimit(url, 20, 200);
   const tabs = await buildOverviewGeoDimensionTabs(
     env,
@@ -1281,7 +1474,7 @@ async function handleOverviewGeoPoints(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = withoutGeoFilter(parseFilters(url));
   const limit = parseLimit(url, 5000, 20000);
   const aggregate = await queryGeoPointAggregate(
     env,
@@ -1445,7 +1638,7 @@ async function routeQuery(
   if (options.publicMode) return notFound();
   if (pathname === "visitors") return handleVisitors(env, siteId, url);
   if (pathname === "countries") {
-    return handleDimension(env, siteId, url, "country");
+    return handleDimension(env, siteId, url, "country", { ignoreGeo: true });
   }
   if (pathname === "devices") {
     return handleDimension(env, siteId, url, "device_type");
@@ -1858,23 +2051,33 @@ async function queryCustomEventNamesFromD1(
   const filter = buildVisitFilterSql(filters, "vc");
   const sql = `
 WITH
+${buildVisitSourceCte()},
 ${buildCustomEventSourceCte()},
 event_with_context AS (
   SELECT
     e.event_id,
     e.event_name,
-    COALESCE(v.session_id, va.session_id, '') AS session_id,
-    COALESCE(v.country, va.country, '') AS country,
-    COALESCE(v.device_type, va.device_type, '') AS device_type,
-    COALESCE(v.browser, va.browser, '') AS browser
+    COALESCE(vs.session_id, '') AS session_id,
+    COALESCE(vs.country, '') AS country,
+    COALESCE(vs.region, '') AS region,
+    COALESCE(vs.region_code, '') AS region_code,
+    COALESCE(vs.city, '') AS city,
+    COALESCE(vs.pathname, '') AS pathname,
+    COALESCE(vs.title, '') AS title,
+    COALESCE(vs.hostname, '') AS hostname,
+    COALESCE(vs.referrer_host, '') AS referrer_host,
+    COALESCE(vs.referrer_url, '') AS referrer_url,
+    COALESCE(vs.device_type, '') AS device_type,
+    COALESCE(vs.browser, '') AS browser,
+    COALESCE(vs.os, '') AS os,
+    COALESCE(vs.os_version, '') AS os_version,
+    COALESCE(vs.language, '') AS language,
+    COALESCE(vs.screen_width, 0) AS screen_width,
+    COALESCE(vs.screen_height, 0) AS screen_height
   FROM event_source e
-  LEFT JOIN visits v
-    ON v.site_id = e.site_id
-   AND v.visit_id = e.visit_id
-  LEFT JOIN visits_archive va
-    ON va.site_id = e.site_id
-   AND va.visit_id = e.visit_id
-   AND v.visit_id IS NULL
+  LEFT JOIN visit_source vs
+    ON vs.site_id = e.site_id
+   AND vs.visit_id = e.visit_id
 ),
 filtered_events AS (
   SELECT *
@@ -1898,7 +2101,7 @@ LIMIT ?
   return (await queryD1All<Record<string, unknown>>(
     env,
     sql,
-    [...eventSourceBindings(siteId, window), ...filter.bindings, limit],
+    [...visitSourceBindings(siteId, window), ...eventSourceBindings(siteId, window), ...filter.bindings, limit],
   )).map((row) => ({
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),

@@ -126,7 +126,10 @@ function buildSitePath(
   return `${base}/${section}`;
 }
 
-function parseSidebarRouteState(pathname: string, activeTeamSlug: string): SidebarRouteState {
+function parseSidebarRouteState(
+  pathname: string,
+  activeTeamSlug: string,
+): SidebarRouteState {
   const segments = pathname.split("/").filter((segment) => segment.length > 0);
   const teamIndex = segments.findIndex(
     (segment, index) =>
@@ -263,7 +266,9 @@ export function DashboardShell({
   const activeSiteId = hasActiveSite
     ? sites.find((site) => site.slug === resolvedActiveSiteSlug)?.id || ""
     : "";
-  const mobileCurrentLevelName = hasActiveSite ? activeSiteName : activeTeamName;
+  const mobileCurrentLevelName = hasActiveSite
+    ? activeSiteName
+    : activeTeamName;
   const teamOptions = teams.map((team) => ({
     slug: team.slug,
     name: team.name,
@@ -272,19 +277,24 @@ export function DashboardShell({
 
   return (
     <SidebarProvider>
-      <DashboardQueryProvider>
+      <DashboardQueryProvider scopeKey={activeSiteId}>
         <Sidebar variant="inset" collapsible="icon">
           <SidebarHeader className="group-data-[collapsible=icon]:hidden">
-            <div className="py-2">
-              <p className="text-xl text-primary flex gap-2 items-center justify-center md:justify-start">
-                <span className="group-data-[collapsible=icon]:hidden">
-                  {messages.appName}
-                </span>
-                <span className="text-muted-foreground group-data-[collapsible=icon]:hidden">
-                  v1
-                </span>
-              </p>
-            </div>
+            <Link
+              href="https://github.com/RavelloH/InsightFlare"
+              target="_black"
+            >
+              <div className="py-2">
+                <p className="text-xl text-primary flex gap-2 items-center justify-center md:justify-start">
+                  <span className="group-data-[collapsible=icon]:hidden">
+                    {messages.appName}
+                  </span>
+                  <span className="text-muted-foreground group-data-[collapsible=icon]:hidden">
+                    {process.env.NEXT_PUBLIC_DEMO_MODE ? "Demo" : "v1"}
+                  </span>
+                </p>
+              </div>
+            </Link>
           </SidebarHeader>
 
           <SidebarContent>
@@ -303,11 +313,14 @@ export function DashboardShell({
               {routeState.mode === "team" ? (
                 <>
                   <SidebarGroup>
-                    <SidebarGroupLabel>{messages.common.team}</SidebarGroupLabel>
+                    <SidebarGroupLabel>
+                      {messages.common.team}
+                    </SidebarGroupLabel>
                     <SidebarGroupContent>
                       <SidebarMenu>
                         {teamSections?.map((item) => {
-                          const isActive = routeState.activeTeamSectionKey === item.key;
+                          const isActive =
+                            routeState.activeTeamSectionKey === item.key;
                           const SectionIcon = getTeamSectionIcon(item.key);
                           return (
                             <SidebarMenuItem key={item.key}>
@@ -335,11 +348,17 @@ export function DashboardShell({
                           <SidebarMenu>
                             {managementSections?.map((item) => {
                               const isActive =
-                                routeState.activeManagementSectionKey === item.key;
-                              const SectionIcon = getManagementSectionIcon(item.key);
+                                routeState.activeManagementSectionKey ===
+                                item.key;
+                              const SectionIcon = getManagementSectionIcon(
+                                item.key,
+                              );
                               return (
                                 <SidebarMenuItem key={item.key}>
-                                  <SidebarMenuButton asChild isActive={isActive}>
+                                  <SidebarMenuButton
+                                    asChild
+                                    isActive={isActive}
+                                  >
                                     <Link href={item.href}>
                                       <SectionIcon />
                                       <span>{item.label}</span>
@@ -374,7 +393,9 @@ export function DashboardShell({
                   <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
 
                   <SidebarGroup>
-                    <SidebarGroupLabel>{messages.common.site}</SidebarGroupLabel>
+                    <SidebarGroupLabel>
+                      {messages.common.site}
+                    </SidebarGroupLabel>
                     <SidebarGroupContent>
                       <SidebarSiteDetails
                         locale={locale}
@@ -464,7 +485,8 @@ export function DashboardShell({
                     messages={messages}
                     siteId={activeSiteId}
                     showControls={
-                      hasActiveSite || routeState.activeTeamSectionKey === "sites"
+                      hasActiveSite ||
+                      routeState.activeTeamSectionKey === "sites"
                     }
                     showFilterSheet={hasActiveSite}
                   />

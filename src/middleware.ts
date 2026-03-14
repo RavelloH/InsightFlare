@@ -105,7 +105,9 @@ function getLocale(request: NextRequest): string {
         const lang = tag.slice(0, 2);
         return isValidLocale(lang) ? lang : null;
       })
-      .find((code): code is string => code !== null);
+      .find(
+        (code): code is (typeof SUPPORTED_LOCALES)[number] => code !== null,
+      );
     if (preferred) return preferred;
   }
 

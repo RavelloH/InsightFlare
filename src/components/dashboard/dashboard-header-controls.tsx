@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type DateRange } from "react-day-picker";
 import NumberFlow, { continuous } from "@number-flow/react";
 import {
@@ -57,12 +58,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
 import { useRealtimeChannel } from "@/hooks/use-realtime-channel";
 import { intlLocale } from "@/lib/dashboard/format";
 import {
   normalizeCustomDateRange,
+  type DashboardFilters,
   type DashboardInterval,
   type RangePreset,
 } from "@/lib/dashboard/query-state";
@@ -71,6 +74,7 @@ import type { RealtimeConnectionState } from "@/lib/realtime/types";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
+import { cn } from "@/lib/utils";
 
 interface DashboardHeaderControlsProps {
   locale: Locale;
@@ -78,6 +82,74 @@ interface DashboardHeaderControlsProps {
   siteId?: string;
   showControls: boolean;
   showFilterSheet: boolean;
+}
+
+const FILTER_QUERY_KEYS = [
+  "country",
+  "device",
+  "browser",
+  "path",
+  "title",
+  "hostname",
+  "entry",
+  "exit",
+  "sourceDomain",
+  "sourceLink",
+  "clientBrowser",
+  "clientOsVersion",
+  "clientDeviceType",
+  "clientLanguage",
+  "clientScreenSize",
+  "geo",
+  "geoContinent",
+  "geoTimezone",
+  "geoOrganization",
+] as const;
+
+type FilterQueryKey = (typeof FILTER_QUERY_KEYS)[number];
+
+function normalizeFilterInputValue(raw: string | null | undefined): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const normalized = raw.trim().slice(0, 160);
+  if (!normalized) return undefined;
+  const lowered = normalized.toLowerCase();
+  if (lowered === "all" || lowered === "null" || lowered === "undefined") {
+    return undefined;
+  }
+  return normalized;
+}
+
+function parseFiltersFromSearchParams(searchParams: URLSearchParams): DashboardFilters {
+  const next: DashboardFilters = {};
+  for (const key of FILTER_QUERY_KEYS) {
+    const normalized = normalizeFilterInputValue(searchParams.get(key));
+    if (normalized) {
+      next[key] = normalized;
+    }
+  }
+  return next;
+}
+
+function filterFieldLabel(messages: AppMessages, key: FilterQueryKey): string {
+  if (key === "country") return messages.filters.country;
+  if (key === "device") return messages.filters.device;
+  if (key === "browser") return messages.filters.browser;
+  if (key === "path") return messages.common.path;
+  if (key === "title") return messages.common.title;
+  if (key === "hostname") return messages.common.hostname;
+  if (key === "entry") return messages.common.entryPage;
+  if (key === "exit") return messages.common.exitPage;
+  if (key === "sourceDomain") return messages.overview.sourceDomainColumn;
+  if (key === "sourceLink") return messages.overview.sourceLinkColumn;
+  if (key === "clientBrowser") return messages.common.browser;
+  if (key === "clientOsVersion") return messages.common.operatingSystem;
+  if (key === "clientDeviceType") return messages.common.deviceType;
+  if (key === "clientLanguage") return messages.common.language;
+  if (key === "clientScreenSize") return messages.common.screenSize;
+  if (key === "geo") return messages.common.location;
+  if (key === "geoContinent") return messages.common.continent;
+  if (key === "geoTimezone") return messages.common.timezone;
+  return messages.common.organization;
 }
 
 const INTERVAL_ORDER: readonly DashboardInterval[] = [
@@ -308,6 +380,47 @@ function RealtimeActiveBadge({
   );
 }
 
+function FilterActiveCountBadge({ count }: { count: number }) {
+  const hasCount = count > 0;
+
+  return (
+    <AutoResizer
+      initial
+      animateWidth
+      animateHeight={false}
+      className="inline-flex shrink-0 items-center"
+    >
+      <AutoTransition
+        className="inline-block"
+        duration={0.2}
+        type="fade"
+        initial={false}
+        presenceMode="wait"
+        customVariants={{
+          initial: { opacity: 0 },
+          animate: { opacity: 1 },
+          exit: { opacity: 0 },
+        }}
+      >
+        {hasCount ? (
+          <span
+            key={`active-filter-count-${count}`}
+            className="inline-flex min-w-5 items-center justify-center rounded-full border border-primary/40 bg-primary/15 px-1.5 text-[11px] leading-4 font-semibold text-primary"
+          >
+            {count}
+          </span>
+        ) : (
+          <span
+            key="active-filter-count-empty"
+            className="inline-flex w-0 overflow-hidden"
+            aria-hidden
+          />
+        )}
+      </AutoTransition>
+    </AutoResizer>
+  );
+}
+
 export function DashboardHeaderControls({
   locale,
   messages,
@@ -315,18 +428,45 @@ export function DashboardHeaderControls({
   showControls,
   showFilterSheet,
 }: DashboardHeaderControlsProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const livePathname = usePathname() || "/";
   const {
     range,
     window,
     customRange,
-    uiFilters,
     setRange,
     setCustomRange,
     setInterval: setDashboardInterval,
     setUiFilters,
-    clearUiFilters,
     allowedIntervals,
   } = useDashboardQueryControls();
+  const searchParamsKey = searchParams.toString();
+  const queryFilters = useMemo(
+    () => parseFiltersFromSearchParams(new URLSearchParams(searchParamsKey)),
+    [searchParamsKey],
+  );
+  const activeFilterCount = useMemo(
+    () =>
+      FILTER_QUERY_KEYS.reduce(
+        (count, key) => (queryFilters[key] ? count + 1 : count),
+        0,
+      ),
+    [queryFilters],
+  );
+  const hasActiveFilters = activeFilterCount > 0;
+  const filterTriggerClassName = cn(
+    "gap-2 transition-colors",
+    hasActiveFilters &&
+      "!border-primary/60 !bg-primary/10 !text-primary hover:!bg-primary/15 hover:!text-primary aria-expanded:!bg-primary/15 dark:!border-primary/60 dark:!bg-primary/20 dark:hover:!bg-primary/25",
+  );
+  const filterTriggerStyle = hasActiveFilters
+    ? {
+        borderColor: "hsl(var(--primary) / 0.6)",
+        backgroundColor: "hsl(var(--primary) / 0.12)",
+        color: "hsl(var(--primary))",
+      }
+    : undefined;
 
   const selectedDateRange = useMemo(
     () => toDateRange(customRange?.from, customRange?.to),
@@ -415,6 +555,45 @@ export function DashboardHeaderControls({
     };
   }, []);
 
+  useEffect(() => {
+    setUiFilters(queryFilters);
+  }, [queryFilters, setUiFilters]);
+
+  const setFilterQueryValue = useCallback((key: FilterQueryKey, rawValue: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    const normalized = normalizeFilterInputValue(rawValue);
+    if (normalized) params.set(key, normalized);
+    else params.delete(key);
+
+    const updated = params.toString();
+    const current = searchParams.toString();
+    if (updated !== current) {
+      const target = updated ? `${livePathname}?${updated}` : livePathname;
+      startTransition(() => {
+        router.replace(target, { scroll: false });
+      });
+    }
+  }, [livePathname, router, searchParams]);
+
+  const clearAllFilterQueryValues = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const key of FILTER_QUERY_KEYS) {
+      params.delete(key);
+    }
+    params.delete("geoCountry");
+    params.delete("geoRegion");
+    params.delete("geoCity");
+
+    const updated = params.toString();
+    const current = searchParams.toString();
+    if (updated !== current) {
+      const target = updated ? `${livePathname}?${updated}` : livePathname;
+      startTransition(() => {
+        router.replace(target, { scroll: false });
+      });
+    }
+  }, [livePathname, router, searchParams]);
+
   const queueOpenCustomDialog = () => {
     if (openCustomDialogTimeoutRef.current !== null) {
       globalThis.clearTimeout(openCustomDialogTimeoutRef.current);
@@ -468,12 +647,17 @@ export function DashboardHeaderControls({
             onOpenChange={setMobileFilterDrawerOpen}
           >
             <DrawerTrigger asChild disabled={!showFilterSheet}>
-              <Button variant="outline" className="gap-2">
+              <Button
+                variant="outline"
+                className={filterTriggerClassName}
+                style={filterTriggerStyle}
+              >
                 <RiFilter3Line className="size-4" />
                 {messages.dashboardHeader.filters}
+                <FilterActiveCountBadge count={activeFilterCount} />
               </Button>
             </DrawerTrigger>
-            <DrawerContent>
+            <DrawerContent className="max-h-[90vh] flex flex-col">
               <DrawerHeader>
                 <DrawerTitle>{messages.dashboardHeader.filterTitle}</DrawerTitle>
                 <DrawerDescription>
@@ -481,59 +665,28 @@ export function DashboardHeaderControls({
                 </DrawerDescription>
               </DrawerHeader>
 
-              <div className="space-y-4 overflow-y-auto px-4 pb-2">
-                <div className="space-y-2">
-                  <Label htmlFor="dashboard-filter-mobile-country">
-                    {messages.filters.country}
-                  </Label>
-                  <Input
-                    id="dashboard-filter-mobile-country"
-                    value={uiFilters.country || ""}
-                    onChange={(event) =>
-                      setUiFilters({
-                        ...uiFilters,
-                        country: event.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="dashboard-filter-mobile-device">
-                    {messages.filters.device}
-                  </Label>
-                  <Input
-                    id="dashboard-filter-mobile-device"
-                    value={uiFilters.device || ""}
-                    onChange={(event) =>
-                      setUiFilters({
-                        ...uiFilters,
-                        device: event.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="dashboard-filter-mobile-browser">
-                    {messages.filters.browser}
-                  </Label>
-                  <Input
-                    id="dashboard-filter-mobile-browser"
-                    value={uiFilters.browser || ""}
-                    onChange={(event) =>
-                      setUiFilters({
-                        ...uiFilters,
-                        browser: event.target.value,
-                      })
-                    }
-                  />
-                </div>
-
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-2">
+                {FILTER_QUERY_KEYS.map((key) => {
+                  const inputId = `dashboard-filter-mobile-${key}`;
+                  return (
+                    <div key={inputId} className="space-y-2">
+                      <Label htmlFor={inputId}>
+                        {filterFieldLabel(messages, key)}
+                      </Label>
+                      <Input
+                        id={inputId}
+                        value={queryFilters[key] || ""}
+                        onChange={(event) => {
+                          setFilterQueryValue(key, event.target.value);
+                        }}
+                      />
+                    </div>
+                  );
+                })}
               </div>
 
               <DrawerFooter>
-                <Button variant="outline" onClick={clearUiFilters}>
+                <Button variant="outline" onClick={clearAllFilterQueryValues}>
                   {messages.filters.clear}
                 </Button>
                 <DrawerClose asChild>
@@ -670,12 +823,20 @@ export function DashboardHeaderControls({
               ) : null}
           <Sheet modal={false}>
             <SheetTrigger asChild disabled={!showFilterSheet}>
-              <Button variant="outline" className="gap-2">
+              <Button
+                variant="outline"
+                className={filterTriggerClassName}
+                style={filterTriggerStyle}
+              >
                 <RiFilter3Line className="size-4" />
                 {messages.dashboardHeader.filters}
+                <FilterActiveCountBadge count={activeFilterCount} />
               </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-full sm:max-w-md">
+            <SheetContent
+              side="right"
+              className="flex h-full max-h-screen w-full flex-col sm:max-w-md"
+            >
               <SheetHeader>
                 <SheetTitle>{messages.dashboardHeader.filterTitle}</SheetTitle>
                 <SheetDescription>
@@ -683,56 +844,26 @@ export function DashboardHeaderControls({
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="space-y-4 px-4">
-                <div className="space-y-2">
-                  <Label htmlFor="dashboard-filter-desktop-country">
-                    {messages.filters.country}
-                  </Label>
-                  <Input
-                    id="dashboard-filter-desktop-country"
-                    value={uiFilters.country || ""}
-                    onChange={(event) =>
-                      setUiFilters({
-                        ...uiFilters,
-                        country: event.target.value,
-                      })
-                    }
-                  />
-                </div>
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
+                {FILTER_QUERY_KEYS.map((key) => {
+                  const inputId = `dashboard-filter-desktop-${key}`;
+                  return (
+                    <div key={inputId} className="space-y-2">
+                      <Label htmlFor={inputId}>
+                        {filterFieldLabel(messages, key)}
+                      </Label>
+                      <Input
+                        id={inputId}
+                        value={queryFilters[key] || ""}
+                        onChange={(event) => {
+                          setFilterQueryValue(key, event.target.value);
+                        }}
+                      />
+                    </div>
+                  );
+                })}
 
-                <div className="space-y-2">
-                  <Label htmlFor="dashboard-filter-desktop-device">
-                    {messages.filters.device}
-                  </Label>
-                  <Input
-                    id="dashboard-filter-desktop-device"
-                    value={uiFilters.device || ""}
-                    onChange={(event) =>
-                      setUiFilters({
-                        ...uiFilters,
-                        device: event.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="dashboard-filter-desktop-browser">
-                    {messages.filters.browser}
-                  </Label>
-                  <Input
-                    id="dashboard-filter-desktop-browser"
-                    value={uiFilters.browser || ""}
-                    onChange={(event) =>
-                      setUiFilters({
-                        ...uiFilters,
-                        browser: event.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <Button variant="outline" onClick={clearUiFilters}>
+                <Button variant="outline" onClick={clearAllFilterQueryValues}>
                   {messages.filters.clear}
                 </Button>
               </div>

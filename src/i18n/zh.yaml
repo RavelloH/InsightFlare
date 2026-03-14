@@ -116,7 +116,7 @@ dashboardHeader:
   intervalDisabledDay: 仅在最近 90 天内可选日间隔。
   intervalDisabledWeek: 仅在最近 12 个月内可选周间隔。
   filterTitle: 筛选条件
-  filterSubtitle: 当前仅保存筛选配置，不参与数据筛选。
+  filterSubtitle: 筛选条件会实时参与当前总览数据查询。
   previousPeriod: 上个周期
   nextPeriod: 下个周期
   customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）"

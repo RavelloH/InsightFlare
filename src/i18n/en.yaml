@@ -116,7 +116,7 @@ dashboardHeader:
   intervalDisabledDay: Day interval is only available within the last 90 days.
   intervalDisabledWeek: Week interval is only available within the last 12 months.
   filterTitle: Filters
-  filterSubtitle: Filter settings are stored only and do not affect data queries yet.
+  filterSubtitle: Filters are applied to current overview data queries in real time.
   previousPeriod: Previous period
   nextPeriod: Next period
   customSelectionSummary: "Selected range: {from} to {to} ({days} days)"

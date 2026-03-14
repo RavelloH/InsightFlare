@@ -88,6 +88,22 @@ export function parseDashboardFilters(
     country: normalizeFilterValue(searchParams.country),
     device: normalizeFilterValue(searchParams.device),
     browser: normalizeFilterValue(searchParams.browser),
+    path: normalizeFilterValue(searchParams.path),
+    title: normalizeFilterValue(searchParams.title),
+    hostname: normalizeFilterValue(searchParams.hostname),
+    entry: normalizeFilterValue(searchParams.entry),
+    exit: normalizeFilterValue(searchParams.exit),
+    sourceDomain: normalizeFilterValue(searchParams.sourceDomain),
+    sourceLink: normalizeFilterValue(searchParams.sourceLink),
+    clientBrowser: normalizeFilterValue(searchParams.clientBrowser),
+    clientOsVersion: normalizeFilterValue(searchParams.clientOsVersion),
+    clientDeviceType: normalizeFilterValue(searchParams.clientDeviceType),
+    clientLanguage: normalizeFilterValue(searchParams.clientLanguage),
+    clientScreenSize: normalizeFilterValue(searchParams.clientScreenSize),
+    geo: normalizeFilterValue(searchParams.geo),
+    geoContinent: normalizeFilterValue(searchParams.geoContinent),
+    geoTimezone: normalizeFilterValue(searchParams.geoTimezone),
+    geoOrganization: normalizeFilterValue(searchParams.geoOrganization),
   };
 }
 
@@ -287,6 +303,22 @@ function applyFiltersToParams(params: URLSearchParams, filters?: DashboardFilter
   if (filters.country) params.set("country", filters.country);
   if (filters.device) params.set("device", filters.device);
   if (filters.browser) params.set("browser", filters.browser);
+  if (filters.path) params.set("path", filters.path);
+  if (filters.title) params.set("title", filters.title);
+  if (filters.hostname) params.set("hostname", filters.hostname);
+  if (filters.entry) params.set("entry", filters.entry);
+  if (filters.exit) params.set("exit", filters.exit);
+  if (filters.sourceDomain) params.set("sourceDomain", filters.sourceDomain);
+  if (filters.sourceLink) params.set("sourceLink", filters.sourceLink);
+  if (filters.clientBrowser) params.set("clientBrowser", filters.clientBrowser);
+  if (filters.clientOsVersion) params.set("clientOsVersion", filters.clientOsVersion);
+  if (filters.clientDeviceType) params.set("clientDeviceType", filters.clientDeviceType);
+  if (filters.clientLanguage) params.set("clientLanguage", filters.clientLanguage);
+  if (filters.clientScreenSize) params.set("clientScreenSize", filters.clientScreenSize);
+  if (filters.geo) params.set("geo", filters.geo);
+  if (filters.geoContinent) params.set("geoContinent", filters.geoContinent);
+  if (filters.geoTimezone) params.set("geoTimezone", filters.geoTimezone);
+  if (filters.geoOrganization) params.set("geoOrganization", filters.geoOrganization);
   return params;
 }
 

@@ -54,7 +54,12 @@ export default async function LoginPage({
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-2">
           <div className="py-8 w-full text-4xl flex items-center justify-center text-primary">
-            InsightFlare
+            <Link
+              href="https://github.com/RavelloH/InsightFlare"
+              target="_blank"
+            >
+              {t.appName}
+            </Link>
           </div>
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="text-xl">{t.login.title}</CardTitle>

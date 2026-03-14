@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -45,6 +46,7 @@ interface DashboardQueryContextValue {
 
 interface DashboardQueryProviderProps {
   children: ReactNode;
+  scopeKey?: string;
 }
 
 const STORAGE_KEY = "insightflare.dashboard.query.v2";
@@ -56,7 +58,12 @@ const DashboardQueryContext = createContext<DashboardQueryContextValue | null>(n
 function clampFilter(value: string | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim().slice(0, 120);
-  return normalized.length > 0 ? normalized : undefined;
+  if (normalized.length === 0) return undefined;
+  const lowered = normalized.toLowerCase();
+  if (lowered === "all" || lowered === "null" || lowered === "undefined") {
+    return undefined;
+  }
+  return normalized;
 }
 
 function normalizeFilters(filters: DashboardFilters | undefined | null): DashboardFilters {
@@ -64,6 +71,22 @@ function normalizeFilters(filters: DashboardFilters | undefined | null): Dashboa
     country: clampFilter(filters?.country),
     device: clampFilter(filters?.device),
     browser: clampFilter(filters?.browser),
+    path: clampFilter(filters?.path),
+    title: clampFilter(filters?.title),
+    hostname: clampFilter(filters?.hostname),
+    entry: clampFilter(filters?.entry),
+    exit: clampFilter(filters?.exit),
+    sourceDomain: clampFilter(filters?.sourceDomain),
+    sourceLink: clampFilter(filters?.sourceLink),
+    clientBrowser: clampFilter(filters?.clientBrowser),
+    clientOsVersion: clampFilter(filters?.clientOsVersion),
+    clientDeviceType: clampFilter(filters?.clientDeviceType),
+    clientLanguage: clampFilter(filters?.clientLanguage),
+    clientScreenSize: clampFilter(filters?.clientScreenSize),
+    geo: clampFilter(filters?.geo),
+    geoContinent: clampFilter(filters?.geoContinent),
+    geoTimezone: clampFilter(filters?.geoTimezone),
+    geoOrganization: clampFilter(filters?.geoOrganization),
   };
 }
 
@@ -124,12 +147,16 @@ function buildInitialState() {
   };
 }
 
-export function DashboardQueryProvider({ children }: DashboardQueryProviderProps) {
+export function DashboardQueryProvider({
+  children,
+  scopeKey = "",
+}: DashboardQueryProviderProps) {
   const initial = useMemo(() => buildInitialState(), []);
   const [range, setRangeState] = useState<RangePreset>(initial.range);
   const [interval, setIntervalState] = useState<DashboardInterval>(initial.interval);
   const [customRange, setCustomRangeState] = useState<CustomTimeRange | null>(initial.customRange);
   const [uiFilters, setUiFiltersState] = useState<DashboardFilters>(initial.uiFilters);
+  const previousScopeKeyRef = useRef(scopeKey);
 
   const windowState = useMemo(
     () =>
@@ -158,6 +185,13 @@ export function DashboardQueryProvider({ children }: DashboardQueryProviderProps
     };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }, [range, windowState.interval, customRange, uiFilters]);
+
+  useEffect(() => {
+    if (previousScopeKeyRef.current === scopeKey) return;
+    previousScopeKeyRef.current = scopeKey;
+    // Site-scoped data filters are easy to carry across sites and cause empty states.
+    setUiFiltersState(EMPTY_FILTERS);
+  }, [scopeKey]);
 
   const setRange = useCallback((next: RangePreset) => {
     if (next === "custom" && !customRange) {

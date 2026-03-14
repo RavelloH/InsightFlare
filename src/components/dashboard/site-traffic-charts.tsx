@@ -518,6 +518,7 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
   className,
 }: SiteTrafficStackChartProps) {
   const cachedSiteOrderRef = useRef<string[] | null>(null);
+  const [activeSiteIds, setActiveSiteIds] = useState<string[]>([]);
   const { containerRef, isVisible, hasMeasuredVisibility } =
     useChartVisibility();
 
@@ -590,6 +591,21 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
       config: nextConfig,
     };
   }, [orderedSites, viewsLabel, visitorsLabel]);
+
+  useEffect(() => {
+    const validSiteIds = new Set(series.map((item) => item.siteId));
+    setActiveSiteIds((current) => {
+      if (current.length === 0) return current;
+      const next = current.filter((siteId) => validSiteIds.has(siteId));
+      return next.length === current.length ? current : next;
+    });
+  }, [series]);
+
+  const activeSiteIdSet = useMemo(
+    () => new Set(activeSiteIds),
+    [activeSiteIds],
+  );
+  const hasActiveSites = activeSiteIds.length > 0;
 
   const chartData = useMemo(
     () =>
@@ -678,6 +694,9 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
               dataKey={item.visitorsKey}
               stackId="visitors"
               fill={`var(--color-${item.visitorsKey})`}
+              fillOpacity={
+                !hasActiveSites || activeSiteIdSet.has(item.siteId) ? 1 : 0.28
+              }
               radius={0}
               isAnimationActive={isAnimationActive}
               animationDuration={isAnimationActive ? 260 : 0}
@@ -689,6 +708,9 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
               dataKey={item.viewsKey}
               stackId="views"
               fill={`var(--color-${item.viewsKey})`}
+              fillOpacity={
+                !hasActiveSites || activeSiteIdSet.has(item.siteId) ? 1 : 0.28
+              }
               radius={0}
               isAnimationActive={isAnimationActive}
               animationDuration={isAnimationActive ? 260 : 0}
@@ -704,18 +726,39 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
             className="mx-auto flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs"
           >
             {series.map((item) => (
-              <div
+              <button
                 key={item.siteId}
-                className="inline-flex min-w-0 items-center gap-1.5"
+                type="button"
+                aria-pressed={activeSiteIdSet.has(item.siteId)}
+                onClick={() =>
+                  setActiveSiteIds((current) =>
+                    current.includes(item.siteId)
+                      ? current.filter((siteId) => siteId !== item.siteId)
+                      : [...current, item.siteId],
+                  )
+                }
+                className={cn(
+                  "inline-flex min-w-0 cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-left transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
+                  hasActiveSites && !activeSiteIdSet.has(item.siteId)
+                    ? "opacity-45"
+                    : "opacity-100",
+                )}
               >
                 <span
                   className="h-2.5 w-2.5 shrink-0"
                   style={{ backgroundColor: item.viewsColor }}
                 />
-                <span className="max-w-[180px] truncate text-muted-foreground">
+                <span
+                  className={cn(
+                    "max-w-[180px] truncate",
+                    activeSiteIdSet.has(item.siteId)
+                      ? "text-foreground"
+                      : "text-muted-foreground",
+                  )}
+                >
                   {item.siteName}
                 </span>
-              </div>
+              </button>
             ))}
           </div>
         </AutoTransition>

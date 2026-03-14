@@ -33,6 +33,22 @@ export interface DashboardFilters {
   country?: string;
   device?: string;
   browser?: string;
+  path?: string;
+  title?: string;
+  hostname?: string;
+  entry?: string;
+  exit?: string;
+  sourceDomain?: string;
+  sourceLink?: string;
+  clientBrowser?: string;
+  clientOsVersion?: string;
+  clientDeviceType?: string;
+  clientLanguage?: string;
+  clientScreenSize?: string;
+  geo?: string;
+  geoContinent?: string;
+  geoTimezone?: string;
+  geoOrganization?: string;
 }
 
 const RANGE_PRESETS: readonly RangePreset[] = [
@@ -256,6 +272,22 @@ export function parseDashboardFiltersFromSearchParams(searchParams: URLSearchPar
     country: normalizeFilterValue(searchParams.get("country")),
     device: normalizeFilterValue(searchParams.get("device")),
     browser: normalizeFilterValue(searchParams.get("browser")),
+    path: normalizeFilterValue(searchParams.get("path")),
+    title: normalizeFilterValue(searchParams.get("title")),
+    hostname: normalizeFilterValue(searchParams.get("hostname")),
+    entry: normalizeFilterValue(searchParams.get("entry")),
+    exit: normalizeFilterValue(searchParams.get("exit")),
+    sourceDomain: normalizeFilterValue(searchParams.get("sourceDomain")),
+    sourceLink: normalizeFilterValue(searchParams.get("sourceLink")),
+    clientBrowser: normalizeFilterValue(searchParams.get("clientBrowser")),
+    clientOsVersion: normalizeFilterValue(searchParams.get("clientOsVersion")),
+    clientDeviceType: normalizeFilterValue(searchParams.get("clientDeviceType")),
+    clientLanguage: normalizeFilterValue(searchParams.get("clientLanguage")),
+    clientScreenSize: normalizeFilterValue(searchParams.get("clientScreenSize")),
+    geo: normalizeFilterValue(searchParams.get("geo")),
+    geoContinent: normalizeFilterValue(searchParams.get("geoContinent")),
+    geoTimezone: normalizeFilterValue(searchParams.get("geoTimezone")),
+    geoOrganization: normalizeFilterValue(searchParams.get("geoOrganization")),
   };
 }
 
@@ -264,6 +296,22 @@ function applyFiltersToParams(params: URLSearchParams, filters?: DashboardFilter
   if (filters.country) params.set("country", filters.country);
   if (filters.device) params.set("device", filters.device);
   if (filters.browser) params.set("browser", filters.browser);
+  if (filters.path) params.set("path", filters.path);
+  if (filters.title) params.set("title", filters.title);
+  if (filters.hostname) params.set("hostname", filters.hostname);
+  if (filters.entry) params.set("entry", filters.entry);
+  if (filters.exit) params.set("exit", filters.exit);
+  if (filters.sourceDomain) params.set("sourceDomain", filters.sourceDomain);
+  if (filters.sourceLink) params.set("sourceLink", filters.sourceLink);
+  if (filters.clientBrowser) params.set("clientBrowser", filters.clientBrowser);
+  if (filters.clientOsVersion) params.set("clientOsVersion", filters.clientOsVersion);
+  if (filters.clientDeviceType) params.set("clientDeviceType", filters.clientDeviceType);
+  if (filters.clientLanguage) params.set("clientLanguage", filters.clientLanguage);
+  if (filters.clientScreenSize) params.set("clientScreenSize", filters.clientScreenSize);
+  if (filters.geo) params.set("geo", filters.geo);
+  if (filters.geoContinent) params.set("geoContinent", filters.geoContinent);
+  if (filters.geoTimezone) params.set("geoTimezone", filters.geoTimezone);
+  if (filters.geoOrganization) params.set("geoOrganization", filters.geoOrganization);
   return params;
 }
 
