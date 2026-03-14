@@ -342,6 +342,7 @@ const PAGE_CARD_TABS: PageCardTab[] = [
 ];
 const SOURCE_CARD_TABS: SourceCardTab[] = [
   "domain",
+  "link",
 ];
 const PAGE_CARD_NAVIGABLE_TABS = new Set<PageCardNavigableTab>([
   "path",
