@@ -7,6 +7,7 @@ import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import isoCountries from "i18n-iso-countries";
 import type { Feature, GeoJSON, Geometry } from "geojson";
 import { AnimatePresence, animate, motion } from "motion/react";
+import { RiCopyrightLine } from "@remixicon/react";
 import { useTheme } from "next-themes";
 import type { StyleSpecification } from "maplibre-gl";
 import Map, { type MapRef, useControl } from "react-map-gl/maplibre";
@@ -694,8 +695,12 @@ export function OverviewGeoPointsMapCard({
         <div className="space-y-1">
           <CardTitle>{title}</CardTitle>
         </div>
-        <div className="text-xs text-muted-foreground">
-          © OpenStreetMap contributors · © CARTO
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <RiCopyrightLine aria-hidden="true" size="1em" />
+          <span>OpenStreetMap contributors</span>
+          <span aria-hidden="true">·</span>
+          <RiCopyrightLine aria-hidden="true" size="1em" />
+          <span>CARTO</span>
         </div>
       </CardHeader>
       <CardContent className="pt-0">
