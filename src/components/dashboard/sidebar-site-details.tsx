@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TrafficPairBarChart } from "@/components/dashboard/site-traffic-charts";
 import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -74,7 +74,6 @@ interface SiteIconProps {
 }
 
 const SIDEBAR_EXPAND_CHART_DELAY_MS = 220;
-const SIDEBAR_ROUTE_SETTLE_DELAY_MS = 360;
 
 function buildSitePath(locale: Locale, teamSlug: string, siteSlug: string): string {
   return `/${locale}/app/${teamSlug}/${siteSlug}`;
@@ -248,9 +247,6 @@ export function SidebarSiteDetails({
   const [shouldRenderCharts, setShouldRenderCharts] = useState(
     isMobile || sidebarState !== "collapsed",
   );
-  const [isRouteSettled, setIsRouteSettled] = useState(true);
-  const didMountRef = useRef(false);
-  const resetKey = `${teamId}:${activeSiteSlug || ""}:${window.from}:${window.to}:${window.interval}`;
 
   useEffect(() => {
     if (isMobile) {
@@ -270,24 +266,6 @@ export function SidebarSiteDetails({
     return () => clearTimeout(timeout);
   }, [sidebarState, isMobile]);
 
-  useLayoutEffect(() => {
-    if (!didMountRef.current) {
-      didMountRef.current = true;
-      return;
-    }
-
-    setTeamTrend([]);
-    setIsRouteSettled(false);
-
-    const timeout = setTimeout(() => {
-      setIsRouteSettled(true);
-    }, SIDEBAR_ROUTE_SETTLE_DELAY_MS);
-
-    return () => clearTimeout(timeout);
-  }, [resetKey]);
-
-  const canFetchCharts = shouldRenderCharts && isRouteSettled;
-
   useEffect(() => {
     if (!teamId || sites.length === 0) {
       setTeamTrend([]);
@@ -299,7 +277,7 @@ export function SidebarSiteDetails({
       return;
     }
 
-    if (!canFetchCharts) {
+    if (!shouldRenderCharts) {
       return;
     }
 
@@ -331,7 +309,7 @@ export function SidebarSiteDetails({
       active = false;
       controller.abort();
     };
-  }, [teamId, sites.length, canFetchCharts, window.from, window.to, window.interval]);
+  }, [teamId, sites.length, shouldRenderCharts, window.from, window.to, window.interval]);
 
   const siteTrendById = useMemo(() => {
     const stepMs = intervalStepMs(chartWindow.interval);
