@@ -1683,27 +1683,18 @@ export class IngestDurableObject extends DurableObject {
 
   private markVisitRowsFlushed(rows: BufferedVisitRow[]): void {
     if (rows.length === 0) return;
-    const openIds = rows.filter((row) => row.status === "open").map((row) => row.visitId);
-    const closedIds = rows.filter((row) => row.status !== "open").map((row) => row.visitId);
-    if (openIds.length > 0) {
-      this.sqlRun(
-        `UPDATE buffered_visits SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE visit_id IN (${openIds.map(() => "?").join(",")})`,
-        ...openIds,
-      );
-    }
-    if (closedIds.length > 0) {
-      this.sqlRun(
-        `DELETE FROM buffered_visits WHERE visit_id IN (${closedIds.map(() => "?").join(",")})`,
-        ...closedIds,
-      );
-    }
+    const ids = rows.map((row) => row.visitId);
+    this.sqlRun(
+      `UPDATE buffered_visits SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE visit_id IN (${ids.map(() => "?").join(",")})`,
+      ...ids,
+    );
   }
 
   private markCustomEventRowsFlushed(rows: BufferedCustomEventRow[]): void {
     if (rows.length === 0) return;
     const ids = rows.map((row) => row.eventId);
     this.sqlRun(
-      `DELETE FROM buffered_custom_events WHERE event_id IN (${ids.map(() => "?").join(",")})`,
+      `UPDATE buffered_custom_events SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE event_id IN (${ids.map(() => "?").join(",")})`,
       ...ids,
     );
   }
