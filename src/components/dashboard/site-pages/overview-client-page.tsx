@@ -101,6 +101,7 @@ interface OverviewClientPageProps {
   locale: Locale;
   messages: AppMessages;
   siteId: string;
+  siteDomain: string;
   pathname: string;
 }
 
@@ -2120,6 +2121,7 @@ export function OverviewPagesSection({
   locale,
   messages,
   siteId,
+  siteDomain,
   pathname,
   filters,
   cardDataOverride,
@@ -2593,15 +2595,18 @@ export function OverviewPagesSection({
     );
   }, [normalizedPageCardSearchTerm, sortedPageCardRows]);
   const pageCardDefaultHostname = useMemo(() => {
+    const filteredHostname = sanitizeHostname(filters.hostname ?? "");
+    if (filteredHostname.length > 0) return filteredHostname;
+
+    const configuredHostname = sanitizeHostname(siteDomain);
+    if (configuredHostname.length > 0) return configuredHostname;
+
     for (const row of hostnameRows) {
       const hostname = sanitizeHostname(row.label);
       if (hostname.length > 0) return hostname;
     }
-    if (typeof globalThis.window !== "undefined") {
-      return sanitizeHostname(globalThis.window.location.hostname);
-    }
     return "";
-  }, [hostnameRows]);
+  }, [filters.hostname, hostnameRows, siteDomain]);
   const sourceCardTabMeta: Record<
     SourceCardTab,
     { label: string; columnLabel: string; mono: boolean; showIcon: boolean }
@@ -4550,6 +4555,7 @@ export function OverviewClientPage({
   locale,
   messages,
   siteId,
+  siteDomain,
   pathname,
 }: OverviewClientPageProps) {
   const searchParams = useLiveSearchParams();
@@ -4614,6 +4620,7 @@ export function OverviewClientPage({
         locale={locale}
         messages={messages}
         siteId={siteId}
+        siteDomain={siteDomain}
         pathname={pathname}
         filters={requestFilters}
       />

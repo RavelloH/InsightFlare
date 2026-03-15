@@ -31,6 +31,7 @@ export default async function OverviewPage({ params }: OverviewPageProps) {
       locale={resolvedLocale}
       messages={messages}
       siteId={context.activeSite.id}
+      siteDomain={context.activeSite.domain}
       pathname={pathname}
     />
   );

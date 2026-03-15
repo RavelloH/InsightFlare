@@ -18,6 +18,7 @@ interface RealtimeSummaryCardsSectionProps {
   locale: Locale;
   messages: AppMessages;
   siteId: string;
+  siteDomain: string;
   visits: RealtimeVisit[];
   filters: DashboardFilters;
 }
@@ -500,6 +501,7 @@ export function RealtimeSummaryCardsSection({
   locale,
   messages,
   siteId,
+  siteDomain,
   visits,
   filters,
 }: RealtimeSummaryCardsSectionProps) {
@@ -521,6 +523,7 @@ export function RealtimeSummaryCardsSection({
       locale={locale}
       messages={messages}
       siteId={siteId}
+      siteDomain={siteDomain}
       pathname=""
       filters={filters}
       cardDataOverride={cardDataOverride}

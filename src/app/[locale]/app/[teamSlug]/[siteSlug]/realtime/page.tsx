@@ -25,6 +25,7 @@ export default async function RealtimePage({ params }: RealtimePageProps) {
       locale={resolvedLocale}
       messages={messages}
       siteId={context.activeSite.id}
+      siteDomain={context.activeSite.domain}
     />
   );
 }

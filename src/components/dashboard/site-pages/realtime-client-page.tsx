@@ -23,6 +23,7 @@ interface RealtimeClientPageProps {
   locale: Locale;
   messages: AppMessages;
   siteId: string;
+  siteDomain: string;
 }
 
 type EffectiveMapTheme = "light" | "dark";
@@ -177,6 +178,7 @@ export function RealtimeClientPage({
   locale,
   messages,
   siteId,
+  siteDomain,
 }: RealtimeClientPageProps) {
   const searchParams = useLiveSearchParams();
   const realtime = useRealtimeChannel(siteId, {
@@ -584,6 +586,7 @@ export function RealtimeClientPage({
           locale={locale}
           messages={messages}
           siteId={siteId}
+          siteDomain={siteDomain}
           visits={realtime.visits}
           filters={requestFilters}
         />
