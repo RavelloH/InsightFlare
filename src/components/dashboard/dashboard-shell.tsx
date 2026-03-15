@@ -266,6 +266,15 @@ export function DashboardShell({
   const activeSiteId = hasActiveSite
     ? sites.find((site) => site.slug === resolvedActiveSiteSlug)?.id || ""
     : "";
+  const isRealtimeRoute = Boolean(
+    hasActiveSite &&
+      activeSiteBase &&
+      (livePathname === `${activeSiteBase}/realtime` ||
+        livePathname.startsWith(`${activeSiteBase}/realtime/`)),
+  );
+  const contentContainerClassName = isRealtimeRoute
+    ? "min-w-0 w-full"
+    : "mx-auto min-w-0 w-full max-w-[1400px] p-4 md:p-6";
   const mobileCurrentLevelName = hasActiveSite
     ? activeSiteName
     : activeTeamName;
@@ -517,7 +526,7 @@ export function DashboardShell({
               </AutoTransition>
             </AutoResizer>
           </div>
-          <div className="mx-auto min-w-0 w-full max-w-[1400px] p-4 md:p-6">
+          <div className={contentContainerClassName}>
             <PageTransition>{children}</PageTransition>
           </div>
         </SidebarInset>

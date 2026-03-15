@@ -1,4 +1,4 @@
-import type { RealtimeEvent } from "@/lib/realtime/types";
+import type { RealtimeEvent, RealtimeVisitorPoint } from "@/lib/realtime/types";
 
 // ---------------------------------------------------------------------------
 //  Realtime mock socket (existing)
@@ -10,6 +10,7 @@ type RealtimeSocketMessage =
       data: {
         activeNow: number;
         events: RealtimeEvent[];
+        points: RealtimeVisitorPoint[];
       };
     }
   | {
@@ -47,7 +48,7 @@ class MockRealtimeSocket implements RealtimeSocketLike {
 
   private readonly activeWindowMs: number;
   private readonly siteId: string;
-  private readonly visitors = new Map<string, number>();
+  private readonly visitors = new Map<string, RealtimeEvent>();
   private recentEvents: RealtimeEvent[] = [];
   private sequence = 0;
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -162,7 +163,11 @@ class MockRealtimeSocket implements RealtimeSocketLike {
     const events = this.recentEvents.slice(-160);
     this.emitMessage({
       type: "snapshot",
-      data: { activeNow, events },
+      data: {
+        activeNow,
+        events,
+        points: this.buildSnapshotPoints(),
+      },
     });
   }
 
@@ -185,14 +190,17 @@ class MockRealtimeSocket implements RealtimeSocketLike {
   private generateEvent(now: number): RealtimeEvent {
     const useExisting = this.visitors.size > 0 && Math.random() < 0.72;
     let visitorId = this.nextVisitorId();
+    let previousEvent: RealtimeEvent | null = null;
     if (useExisting) {
       const ids = Array.from(this.visitors.keys());
       visitorId = ids[randomInt(0, ids.length - 1)];
+      previousEvent = this.visitors.get(visitorId) ?? null;
     }
 
     const event = this.buildEvent({
       visitorId,
       eventAt: now,
+      previousEvent,
     });
     this.trackEvent(event);
     this.prune(now);
@@ -200,7 +208,7 @@ class MockRealtimeSocket implements RealtimeSocketLike {
   }
 
   private trackEvent(event: RealtimeEvent): void {
-    this.visitors.set(event.visitorId, event.eventAt);
+    this.visitors.set(event.visitorId, event);
     this.recentEvents.push(event);
   }
 
@@ -208,8 +216,8 @@ class MockRealtimeSocket implements RealtimeSocketLike {
     const cutoff = now - this.activeWindowMs;
 
     this.recentEvents = this.recentEvents.filter((item) => item.eventAt >= cutoff);
-    for (const [visitorId, eventAt] of this.visitors.entries()) {
-      if (eventAt < cutoff) {
+    for (const [visitorId, event] of this.visitors.entries()) {
+      if (event.eventAt < cutoff) {
         this.visitors.delete(visitorId);
       }
     }
@@ -230,10 +238,22 @@ class MockRealtimeSocket implements RealtimeSocketLike {
   private buildEvent(input: {
     visitorId: string;
     eventAt: number;
+    previousEvent?: RealtimeEvent | null;
   }): RealtimeEvent {
     const profile = findSiteProfile(this.siteId);
     const eventTypes = ["pageview", ...profile.eventNames.slice(0, 4)];
     const paths = profile.paths;
+    const previousEvent = input.previousEvent ?? null;
+    const country = previousEvent?.country || weightedPickCountry(Math.random, profile.topCountries);
+    const point =
+      previousEvent &&
+      Number.isFinite(previousEvent.latitude) &&
+      Number.isFinite(previousEvent.longitude)
+        ? {
+            latitude: Number(previousEvent.latitude),
+            longitude: Number(previousEvent.longitude),
+          }
+        : sampleGeoPointByCountry(Math.random, country);
 
     return {
       id: this.nextEventId(),
@@ -241,9 +261,30 @@ class MockRealtimeSocket implements RealtimeSocketLike {
       eventAt: input.eventAt,
       pathname: paths[randomInt(0, paths.length - 1)],
       visitorId: input.visitorId,
-      country: weightedPickCountry(Math.random, profile.topCountries),
-      browser: weightedPickLabel(Math.random, BROWSER_MARKET_WEIGHTS, "Chrome"),
+      country,
+      browser:
+        previousEvent?.browser ||
+        weightedPickLabel(Math.random, BROWSER_MARKET_WEIGHTS, "Chrome"),
+      latitude: point.latitude,
+      longitude: point.longitude,
     };
+  }
+
+  private buildSnapshotPoints(): RealtimeVisitorPoint[] {
+    const points: RealtimeVisitorPoint[] = [];
+    for (const event of Array.from(this.visitors.values()).sort((a, b) => b.eventAt - a.eventAt)) {
+      if (!Number.isFinite(event.latitude) || !Number.isFinite(event.longitude)) {
+        continue;
+      }
+      points.push({
+        visitorId: event.visitorId,
+        eventAt: event.eventAt,
+        latitude: Number(event.latitude),
+        longitude: Number(event.longitude),
+        country: event.country,
+      });
+    }
+    return points;
   }
 
   private clearTimers(): void {

@@ -5,6 +5,7 @@ import type {
   RealtimeConnectionState,
   RealtimeEvent,
   RealtimeSnapshot,
+  RealtimeVisitorPoint,
 } from "@/lib/realtime/types";
 
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
@@ -13,6 +14,7 @@ const RECONNECT_DELAY_MS = 2_000;
 const CONNECT_WATCHDOG_MS = 4_000;
 const ACTIVE_RECOMPUTE_INTERVAL_MS = 15_000;
 const MAX_RECENT_EVENTS = 20;
+const MAX_RENDERABLE_POINTS = 800;
 const PRESENCE_LEAVE_EVENT = "__presence_leave";
 
 const SOCKET_STATE = {
@@ -35,11 +37,18 @@ interface ChannelContext {
   connectWatchdog: ReturnType<typeof setTimeout> | null;
   reconnectFailures: number;
   state: RealtimeChannelState;
-  visitors: Map<string, number>;
+  visitors: Map<string, VisitorPresence>;
   snapshotBaseline: {
     value: number;
     at: number;
   };
+}
+
+interface VisitorPresence {
+  seenAt: number;
+  latitude: number | null;
+  longitude: number | null;
+  country: string;
 }
 
 const channels = new Map<string, ChannelContext>();
@@ -57,6 +66,7 @@ export function createIdleRealtimeChannelState(
     activeNow: 0,
     snapshotActiveNow: null,
     events: [],
+    points: [],
   };
 }
 
@@ -100,7 +110,7 @@ function getOrCreateChannel(siteId: string): ChannelContext {
     connectWatchdog: null,
     reconnectFailures: 0,
     state: createIdleRealtimeChannelState("connecting"),
-    visitors: new Map<string, number>(),
+    visitors: new Map<string, VisitorPresence>(),
     snapshotBaseline: {
       value: 0,
       at: 0,
@@ -255,11 +265,14 @@ function applySnapshot(channel: ChannelContext, payload: unknown): void {
   const now = Date.now();
 
   channel.state.events = mergeEvents(snapshot.events, [], MAX_RECENT_EVENTS);
-  for (const event of snapshot.events) {
-    if (!event.visitorId) continue;
-    const previous = channel.visitors.get(event.visitorId) ?? 0;
-    if (event.eventAt > previous) {
-      channel.visitors.set(event.visitorId, event.eventAt);
+  if (snapshot.points.length > 0) {
+    channel.visitors.clear();
+    for (const point of snapshot.points) {
+      upsertSnapshotPresence(channel, point);
+    }
+  } else {
+    for (const event of snapshot.events) {
+      upsertVisitorPresence(channel, event);
     }
   }
 
@@ -277,6 +290,8 @@ function applyEvent(channel: ChannelContext, payload: unknown): void {
   const event = normalizeRealtimeEvent(payload);
   if (!event) return;
 
+  channel.state.events = mergeEvents([event], channel.state.events, MAX_RECENT_EVENTS);
+
   if (event.eventType === PRESENCE_LEAVE_EVENT) {
     if (event.visitorId) {
       channel.visitors.delete(event.visitorId);
@@ -291,18 +306,14 @@ function applyEvent(channel: ChannelContext, payload: unknown): void {
     return;
   }
 
-  if (event.visitorId) {
-    channel.visitors.set(event.visitorId, event.eventAt);
-  }
-
-  channel.state.events = mergeEvents([event], channel.state.events, MAX_RECENT_EVENTS);
+  upsertVisitorPresence(channel, event);
   recomputeActiveNow(channel, event.eventAt || Date.now());
 }
 
 function recomputeActiveNow(channel: ChannelContext, now = Date.now()): void {
   const cutoff = now - ACTIVE_WINDOW_MS;
-  for (const [visitorId, seenAt] of channel.visitors.entries()) {
-    if (seenAt < cutoff) {
+  for (const [visitorId, presence] of channel.visitors.entries()) {
+    if (presence.seenAt < cutoff) {
       channel.visitors.delete(visitorId);
     }
   }
@@ -310,6 +321,7 @@ function recomputeActiveNow(channel: ChannelContext, now = Date.now()): void {
   const snapshotFresh = now - channel.snapshotBaseline.at <= ACTIVE_WINDOW_MS;
   const baseline = snapshotFresh ? channel.snapshotBaseline.value : 0;
   channel.state.activeNow = Math.max(baseline, channel.visitors.size);
+  channel.state.points = buildVisitorPoints(channel.visitors);
 }
 
 function setChannelStatus(
@@ -334,7 +346,73 @@ function cloneState(state: RealtimeChannelState): RealtimeChannelState {
     activeNow: state.activeNow,
     snapshotActiveNow: state.snapshotActiveNow,
     events: [...state.events],
+    points: [...state.points],
   };
+}
+
+function upsertVisitorPresence(channel: ChannelContext, event: RealtimeEvent): void {
+  if (!event.visitorId || event.eventType === PRESENCE_LEAVE_EVENT) {
+    return;
+  }
+
+  const previous = channel.visitors.get(event.visitorId);
+  if (previous && event.eventAt < previous.seenAt) {
+    return;
+  }
+
+  const hasCoordinates = isValidCoordinate(event.latitude, event.longitude);
+  channel.visitors.set(event.visitorId, {
+    seenAt: event.eventAt,
+    latitude: hasCoordinates
+      ? event.latitude
+      : (previous?.latitude ?? null),
+    longitude: hasCoordinates
+      ? event.longitude
+      : (previous?.longitude ?? null),
+    country: event.country || previous?.country || "",
+  });
+}
+
+function upsertSnapshotPresence(
+  channel: ChannelContext,
+  point: RealtimeVisitorPoint,
+): void {
+  if (!point.visitorId) return;
+
+  const previous = channel.visitors.get(point.visitorId);
+  if (previous && point.eventAt < previous.seenAt) {
+    return;
+  }
+
+  channel.visitors.set(point.visitorId, {
+    seenAt: point.eventAt,
+    latitude: point.latitude,
+    longitude: point.longitude,
+    country: point.country || previous?.country || "",
+  });
+}
+
+function buildVisitorPoints(
+  visitors: Map<string, VisitorPresence>,
+): RealtimeVisitorPoint[] {
+  const points: RealtimeVisitorPoint[] = [];
+  for (const [visitorId, presence] of visitors.entries()) {
+    if (!isValidCoordinate(presence.latitude, presence.longitude)) {
+      continue;
+    }
+    const latitude = Number(presence.latitude);
+    const longitude = Number(presence.longitude);
+    points.push({
+      visitorId,
+      eventAt: presence.seenAt,
+      latitude,
+      longitude,
+      country: presence.country,
+    });
+  }
+
+  points.sort((a, b) => b.eventAt - a.eventAt);
+  return points.slice(0, MAX_RENDERABLE_POINTS);
 }
 
 function mergeEvents(
@@ -362,6 +440,8 @@ function normalizeRealtimeEvent(payload: unknown): RealtimeEvent | null {
   const eventAt = Number(record.eventAt ?? record.event_at ?? Date.now());
   const visitorId = String(record.visitorId ?? record.visitor_id ?? "");
   const id = String(record.id ?? `${eventAt}-${visitorId}`);
+  const latitude = normalizeCoordinate(record.latitude, -90, 90);
+  const longitude = normalizeCoordinate(record.longitude, -180, 180);
 
   return {
     id,
@@ -371,12 +451,37 @@ function normalizeRealtimeEvent(payload: unknown): RealtimeEvent | null {
     visitorId,
     country: String(record.country ?? ""),
     browser: String(record.browser ?? ""),
+    latitude,
+    longitude,
   };
+}
+
+function normalizeCoordinate(
+  value: unknown,
+  min: number,
+  max: number,
+): number | null {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  if (numeric < min || numeric > max) return null;
+  return numeric;
+}
+
+function isValidCoordinate(
+  latitude: number | null,
+  longitude: number | null,
+): boolean {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  if (lat < -90 || lat > 90) return false;
+  if (lon < -180 || lon > 180) return false;
+  return true;
 }
 
 function normalizeRealtimeSnapshot(payload: unknown): RealtimeSnapshot {
   if (!payload || typeof payload !== "object") {
-    return { activeNow: null, events: [] };
+    return { activeNow: null, events: [], points: [] };
   }
 
   const record = payload as Record<string, unknown>;
@@ -384,13 +489,37 @@ function normalizeRealtimeSnapshot(payload: unknown): RealtimeSnapshot {
   const events = eventsRaw
     .map((item) => normalizeRealtimeEvent(item))
     .filter((item): item is RealtimeEvent => item !== null);
+  const pointsRaw = Array.isArray(record.points) ? record.points : [];
+  const points = pointsRaw
+    .map((item) => normalizeRealtimePoint(item))
+    .filter((item): item is RealtimeVisitorPoint => item !== null);
 
   const activeNowRaw = Number(record.activeNow);
   const activeNow = Number.isFinite(activeNowRaw) && activeNowRaw >= 0
     ? Math.floor(activeNowRaw)
     : null;
 
-  return { activeNow, events };
+  return { activeNow, events, points };
+}
+
+function normalizeRealtimePoint(payload: unknown): RealtimeVisitorPoint | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const visitorId = String(record.visitorId ?? record.visitor_id ?? "").trim();
+  if (!visitorId) return null;
+
+  const eventAt = Number(record.eventAt ?? record.event_at ?? Date.now());
+  const latitude = normalizeCoordinate(record.latitude, -90, 90);
+  const longitude = normalizeCoordinate(record.longitude, -180, 180);
+  if (latitude === null || longitude === null) return null;
+
+  return {
+    visitorId,
+    eventAt: Number.isFinite(eventAt) ? eventAt : Date.now(),
+    latitude,
+    longitude,
+    country: String(record.country ?? ""),
+  };
 }
 
 function decodeRealtimeEnvelope(data: unknown): {

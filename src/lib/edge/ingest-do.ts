@@ -43,6 +43,8 @@ interface RealtimeSnapshotRecord {
   visitorId: string;
   country: string;
   browser: string;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 interface StoredOpenVisit extends NormalizedVisitContext {
@@ -321,6 +323,8 @@ function toRealtimePayload(record: RealtimeSnapshotRecord): Record<string, unkno
     visitorId: record.visitorId,
     country: record.country,
     browser: record.browser,
+    latitude: record.latitude,
+    longitude: record.longitude,
   };
 }
 
@@ -800,6 +804,8 @@ export class IngestDurableObject extends DurableObject {
       visitorId: record.visitorId,
       country: record.country,
       browser: record.browser,
+      latitude: record.latitude,
+      longitude: record.longitude,
     });
   }
 
@@ -807,10 +813,10 @@ export class IngestDurableObject extends DurableObject {
     // Find the open visit matching this visitId (or the latest open visit for the session)
     const visitQuery = record.visitId
       ? `SELECT visit_id AS visitId, started_at AS startedAt, visitor_id AS visitorId, site_id AS siteId,
-                pathname, country, browser
+                pathname, country, browser, latitude, longitude
          FROM buffered_visits WHERE site_id = ? AND visit_id = ? AND status = 'open' LIMIT 1`
       : `SELECT visit_id AS visitId, started_at AS startedAt, visitor_id AS visitorId, site_id AS siteId,
-                pathname, country, browser
+                pathname, country, browser, latitude, longitude
          FROM buffered_visits WHERE site_id = ? AND session_id = ? AND status = 'open'
          ORDER BY started_at DESC LIMIT 1`;
     const visitBindings = record.visitId
@@ -820,6 +826,7 @@ export class IngestDurableObject extends DurableObject {
     const visit = this.sqlOne<{
       visitId: string; startedAt: number; visitorId: string; siteId: string;
       pathname: string; country: string; browser: string;
+      latitude: number | null; longitude: number | null;
     }>(visitQuery, ...visitBindings);
     if (!visit) return;
 
@@ -859,6 +866,8 @@ export class IngestDurableObject extends DurableObject {
         visitorId: visit.visitorId,
         country: visit.country,
         browser: visit.browser,
+        latitude: visit.latitude,
+        longitude: visit.longitude,
       });
     }
   }
@@ -877,6 +886,8 @@ export class IngestDurableObject extends DurableObject {
       visitorId: record.visitorId,
       country: record.country,
       browser: record.browser,
+      latitude: record.latitude,
+      longitude: record.longitude,
     });
   }
   private async getVisitContext(siteId: string, visitId: string): Promise<StoredOpenVisit | null> {
@@ -1111,7 +1122,9 @@ export class IngestDurableObject extends DurableObject {
           pathname,
           visitorId,
           country,
-          browser
+          browser,
+          latitude,
+          longitude
         FROM (
           SELECT
             visit_id AS id,
@@ -1120,7 +1133,9 @@ export class IngestDurableObject extends DurableObject {
             pathname,
             visitor_id AS visitorId,
             country,
-            browser
+            browser,
+            latitude,
+            longitude
           FROM buffered_visits
           WHERE started_at BETWEEN ? AND ?
           UNION ALL
@@ -1131,7 +1146,9 @@ export class IngestDurableObject extends DurableObject {
             COALESCE(v.pathname, '') AS pathname,
             COALESCE(v.visitor_id, '') AS visitorId,
             COALESCE(v.country, '') AS country,
-            COALESCE(v.browser, '') AS browser
+            COALESCE(v.browser, '') AS browser,
+            v.latitude AS latitude,
+            v.longitude AS longitude
           FROM buffered_custom_events e
           LEFT JOIN buffered_visits v
             ON v.site_id = e.site_id
@@ -1402,6 +1419,8 @@ export class IngestDurableObject extends DurableObject {
       country: string;
       browser: string;
       deviceType: string;
+      latitude: number | null;
+      longitude: number | null;
     }>(
       `
         SELECT
@@ -1414,7 +1433,9 @@ export class IngestDurableObject extends DurableObject {
           pathname,
           country,
           browser,
-          device_type AS deviceType
+          device_type AS deviceType,
+          latitude,
+          longitude
         FROM buffered_visits
         WHERE status = 'open'
           AND last_activity_at <= ?
@@ -1455,6 +1476,8 @@ export class IngestDurableObject extends DurableObject {
           visitorId: visit.visitorId,
           country: visit.country,
           browser: visit.browser,
+          latitude: visit.latitude,
+          longitude: visit.longitude,
         });
       }
     }

@@ -12,11 +12,22 @@ export interface RealtimeEvent {
   visitorId: string;
   country: string;
   browser: string;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface RealtimeSnapshot {
   activeNow: number | null;
   events: RealtimeEvent[];
+  points: RealtimeVisitorPoint[];
+}
+
+export interface RealtimeVisitorPoint {
+  visitorId: string;
+  eventAt: number;
+  latitude: number;
+  longitude: number;
+  country: string;
 }
 
 export interface RealtimeChannelState {
@@ -25,6 +36,7 @@ export interface RealtimeChannelState {
   activeNow: number;
   snapshotActiveNow: number | null;
   events: RealtimeEvent[];
+  points: RealtimeVisitorPoint[];
 }
 
 export interface RealtimeBroadcastMessage {
