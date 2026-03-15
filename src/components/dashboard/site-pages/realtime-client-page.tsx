@@ -434,7 +434,7 @@ export function RealtimeClientPage({
 
   return (
     <div className="space-y-6 pb-6">
-      <div className="relative h-[calc(100vh-10.5rem)] min-h-[560px] overflow-hidden">
+      <div className="relative h-[min(72svh,calc(100svh-10.5rem))] min-h-[18rem] sm:min-h-[22rem] overflow-hidden">
         <Map
           ref={mapRef}
           initialViewState={DEFAULT_VIEW_STATE}
