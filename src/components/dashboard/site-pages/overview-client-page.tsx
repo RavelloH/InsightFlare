@@ -151,7 +151,7 @@ function buildEmptyTrendData(
 ): Array<{
   timestampMs: number;
   views: number;
-  sessions: number;
+  visitors: number;
 }> {
   const stepMs = trendStepMs(window.interval);
   if (!Number.isFinite(stepMs) || stepMs <= 0) {
@@ -168,14 +168,14 @@ function buildEmptyTrendData(
   const points: Array<{
     timestampMs: number;
     views: number;
-    sessions: number;
+    visitors: number;
   }> = [];
 
   for (let bucket = fromBucket; bucket <= toBucket; bucket += stride) {
     points.push({
       timestampMs: bucket * stepMs,
       views: 0,
-      sessions: 0,
+      visitors: 0,
     });
   }
 
@@ -187,7 +187,7 @@ function buildEmptyTrendData(
     points.push({
       timestampMs: lastTimestampMs,
       views: 0,
-      sessions: 0,
+      visitors: 0,
     });
   }
 
@@ -199,12 +199,12 @@ function normalizeTrendData(
   points: Array<{
     timestampMs: number;
     views: number;
-    sessions: number;
+    visitors: number;
   }>,
 ): Array<{
   timestampMs: number;
   views: number;
-  sessions: number;
+  visitors: number;
 }> {
   const stepMs = trendStepMs(window.interval);
   if (!Number.isFinite(stepMs) || stepMs <= 0) {
@@ -213,31 +213,31 @@ function normalizeTrendData(
 
   const fromBucket = Math.floor(window.from / stepMs);
   const toBucket = Math.max(fromBucket, Math.floor(window.to / stepMs));
-  const byBucket = new Map<number, { views: number; sessions: number }>();
+  const byBucket = new Map<number, { views: number; visitors: number }>();
 
   for (const point of points) {
     const bucket = Math.floor(Number(point.timestampMs ?? 0) / stepMs);
     if (!Number.isFinite(bucket) || bucket < fromBucket || bucket > toBucket) {
       continue;
     }
-    const prev = byBucket.get(bucket) ?? { views: 0, sessions: 0 };
+    const prev = byBucket.get(bucket) ?? { views: 0, visitors: 0 };
     byBucket.set(bucket, {
       views: prev.views + Math.max(0, Number(point.views ?? 0)),
-      sessions: prev.sessions + Math.max(0, Number(point.sessions ?? 0)),
+      visitors: prev.visitors + Math.max(0, Number(point.visitors ?? 0)),
     });
   }
 
   const normalized: Array<{
     timestampMs: number;
     views: number;
-    sessions: number;
+    visitors: number;
   }> = [];
   for (let bucket = fromBucket; bucket <= toBucket; bucket += 1) {
     const value = byBucket.get(bucket);
     normalized.push({
       timestampMs: bucket * stepMs,
       views: value?.views ?? 0,
-      sessions: value?.sessions ?? 0,
+      visitors: value?.visitors ?? 0,
     });
   }
 
@@ -4504,6 +4504,15 @@ function OverviewTrendSection({
     trendHydrated,
     trendData.data,
   ]);
+  const visitorTrendChartData = useMemo(
+    () =>
+      trendDisplayData.map((point) => ({
+        timestampMs: point.timestampMs,
+        views: point.views,
+        sessions: point.visitors,
+      })),
+    [trendDisplayData],
+  );
   const showTrendOverlayLoading = loading && trendHydrated;
 
   return (
@@ -4520,9 +4529,9 @@ function OverviewTrendSection({
             <TrendChart
               locale={locale}
               interval={dataWindow.interval}
-              data={trendDisplayData}
+              data={visitorTrendChartData}
               viewsLabel={messages.common.views}
-              sessionsLabel={messages.common.sessions}
+              sessionsLabel={messages.common.visitors}
             />
           </div>
           <AutoTransition

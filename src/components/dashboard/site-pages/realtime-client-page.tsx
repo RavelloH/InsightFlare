@@ -14,6 +14,7 @@ import {
   RealtimeSummaryCardsSection,
   parseRealtimeCardFilters,
 } from "@/components/dashboard/site-pages/realtime-summary-cards-section";
+import { RealtimeTrafficTrendCard } from "@/components/dashboard/realtime-traffic-trend-card";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { useLiveSearchParams } from "@/lib/client-history";
 import type { Locale } from "@/lib/i18n/config";
@@ -582,14 +583,22 @@ export function RealtimeClientPage({
       </div>
 
       <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6">
-        <RealtimeSummaryCardsSection
-          locale={locale}
-          messages={messages}
-          siteId={siteId}
-          siteDomain={siteDomain}
-          visits={realtime.visits}
-          filters={requestFilters}
-        />
+        <div className="space-y-6">
+          <RealtimeTrafficTrendCard
+            locale={locale}
+            messages={messages}
+            hasConnected={realtime.hasConnected}
+            events={realtime.events}
+          />
+          <RealtimeSummaryCardsSection
+            locale={locale}
+            messages={messages}
+            siteId={siteId}
+            siteDomain={siteDomain}
+            visits={realtime.visits}
+            filters={requestFilters}
+          />
+        </div>
       </div>
     </div>
   );
