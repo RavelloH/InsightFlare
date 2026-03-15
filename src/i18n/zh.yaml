@@ -130,8 +130,11 @@ filters:
   clear: 清除
 realtime:
   title: 实时
-  subtitle: 实时接收最新访问事件。
+  subtitle: 实时接收最新访问事件，并滚动统计最近 30 分钟指标。
   activeNow: 当前在线
+  liveMetrics: 在线 / 30 分钟访客 / 30 分钟访问
+  visitors30m: 30 分钟访客
+  views30m: 30 分钟访问
   connected: 已连接
   connecting: 连接中
   disconnected: 未连接

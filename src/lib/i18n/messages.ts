@@ -129,6 +129,9 @@ export interface AppMessages {
     title: string;
     subtitle: string;
     activeNow: string;
+    liveMetrics: string;
+    visitors30m: string;
+    views30m: string;
     connected: string;
     connecting: string;
     disconnected: string;

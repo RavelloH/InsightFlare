@@ -130,8 +130,11 @@ filters:
   clear: Clear
 realtime:
   title: Realtime
-  subtitle: Live stream of incoming events.
+  subtitle: Live stream of incoming events and rolling 30-minute metrics.
   activeNow: Active now
+  liveMetrics: Active / 30m Visitors / 30m Views
+  visitors30m: 30m Visitors
+  views30m: 30m Views
   connected: Connected
   connecting: Connecting
   disconnected: Disconnected

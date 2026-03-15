@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -9,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { type DateRange } from "react-day-picker";
 import NumberFlow, { continuous } from "@number-flow/react";
 import { OverlayScrollbars } from "overlayscrollbars";
@@ -73,6 +72,10 @@ import {
 } from "@/components/ui/tooltip";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
+import {
+  RealtimeStatusDot,
+  realtimeStatusText,
+} from "@/components/dashboard/realtime-status-indicator";
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
 import {
   fetchDashboardFilterOptions,
@@ -98,6 +101,10 @@ import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 import { cn } from "@/lib/utils";
+import {
+  replaceUrlWithoutNavigation,
+  useLiveSearchParams,
+} from "@/lib/client-history";
 
 interface DashboardHeaderControlsProps {
   locale: Locale;
@@ -241,48 +248,6 @@ function formatDateSpan(locale: Locale, from?: number, to?: number): string {
     day: "numeric",
   });
   return `${formatter.format(new Date(from as number))} - ${formatter.format(new Date(to as number))}`;
-}
-
-function realtimeStatusText(
-  messages: AppMessages,
-  status: RealtimeConnectionState,
-): string {
-  if (status === "connected") return messages.realtime.connected;
-  if (status === "connecting") return messages.realtime.connecting;
-  if (status === "disconnected") return messages.realtime.reconnecting;
-  return messages.realtime.failed;
-}
-
-function RealtimeStatusDot({ status }: { status: RealtimeConnectionState }) {
-  return (
-    <AutoTransition
-      type="scale"
-      duration={0.14}
-      initial={false}
-      className="relative inline-flex size-4 items-center justify-center"
-    >
-      {status === "connected" ? (
-        <span key="connected" className="relative inline-flex size-4 items-center justify-center">
-          <span className="absolute inline-flex size-3 rounded-full bg-emerald-500/70 dark:bg-emerald-400/70 animate-ping" />
-          <span className="inline-flex size-2 rounded-full bg-emerald-500 dark:bg-emerald-400" />
-        </span>
-      ) : status === "connecting" ? (
-        <span key="connecting" className="relative inline-flex size-4 items-center justify-center">
-          <span className="inline-flex size-2 rounded-full bg-neutral-500 dark:bg-neutral-400 animate-pulse" />
-        </span>
-      ) : status === "disconnected" ? (
-        <span key="disconnected" className="relative inline-flex size-4 items-center justify-center">
-          <span className="absolute inline-flex size-3 rounded-full bg-amber-500/70 dark:bg-amber-400/70 animate-ping" />
-          <span className="inline-flex size-2 rounded-full bg-amber-500 dark:bg-amber-400" />
-        </span>
-      ) : (
-        <span key="failed" className="relative inline-flex size-4 items-center justify-center">
-          <span className="absolute inline-flex size-3 rounded-full bg-rose-500/70 dark:bg-rose-400/70 animate-ping" />
-          <span className="inline-flex size-2 rounded-full bg-rose-500 dark:bg-rose-400" />
-        </span>
-      )}
-    </AutoTransition>
-  );
 }
 
 function shiftTimeWindow(
@@ -996,8 +961,7 @@ export function DashboardHeaderControls({
   showControls,
   showFilterSheet,
 }: DashboardHeaderControlsProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || "/";
   const {
     range,
@@ -1137,11 +1101,9 @@ export function DashboardHeaderControls({
     const current = searchParams.toString();
     if (updated !== current) {
       const target = updated ? `${livePathname}?${updated}` : livePathname;
-      startTransition(() => {
-        router.replace(target, { scroll: false });
-      });
+      replaceUrlWithoutNavigation(target);
     }
-  }, [livePathname, router, searchParams]);
+  }, [livePathname, searchParams]);
 
   const clearAllFilterQueryValues = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -1156,11 +1118,9 @@ export function DashboardHeaderControls({
     const current = searchParams.toString();
     if (updated !== current) {
       const target = updated ? `${livePathname}?${updated}` : livePathname;
-      startTransition(() => {
-        router.replace(target, { scroll: false });
-      });
+      replaceUrlWithoutNavigation(target);
     }
-  }, [livePathname, router, searchParams]);
+  }, [livePathname, searchParams]);
 
   const queueOpenCustomDialog = () => {
     if (openCustomDialogTimeoutRef.current !== null) {

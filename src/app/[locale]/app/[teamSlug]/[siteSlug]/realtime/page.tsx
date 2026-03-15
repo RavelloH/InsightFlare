@@ -14,13 +14,15 @@ interface RealtimePageProps {
 
 export default async function RealtimePage({ params }: RealtimePageProps) {
   const { locale, teamSlug, siteSlug } = await params;
-  const messages = getMessages(resolveLocale(locale));
+  const resolvedLocale = resolveLocale(locale);
+  const messages = getMessages(resolvedLocale);
 
   const context = await getTeamSiteContext(teamSlug, siteSlug);
   if (!context) notFound();
 
   return (
     <RealtimeClientPage
+      locale={resolvedLocale}
       messages={messages}
       siteId={context.activeSite.id}
     />

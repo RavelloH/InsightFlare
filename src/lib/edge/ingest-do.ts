@@ -25,7 +25,6 @@ const RECENT_EVENT_RETENTION_MS = 30 * 60 * 1000;
 const RECENT_EVENT_QUERY_SCAN_LIMIT = 20_000;
 const ACTIVE_NOW_WINDOW_MS = 5 * 60 * 1000;
 const VISIT_TIMEOUT_MS = 12 * 60 * 60 * 1000;
-const WS_SNAPSHOT_EVENT_LIMIT = 200;
 const WS_PRESENCE_LEAVE_EVENT = "__presence_leave";
 const WRITE_BUDGET_PER_INVOCATION = 200;
 const D1_FLUSH_INTERVAL_MS = 60 * 1000;
@@ -39,10 +38,26 @@ interface RealtimeSnapshotRecord {
   id: string;
   eventType: string;
   eventAt: number;
+  visitId: string;
+  sessionId: string;
   pathname: string;
+  title: string;
+  hostname: string;
+  referrerUrl: string;
+  referrerHost: string;
   visitorId: string;
   country: string;
+  region: string;
+  regionCode: string;
+  city: string;
+  continent: string;
+  timezone: string;
+  organization: string;
   browser: string;
+  osVersion: string;
+  deviceType: string;
+  language: string;
+  screenSize: string;
   latitude: number | null;
   longitude: number | null;
 }
@@ -314,17 +329,107 @@ function toEventDataJson(input: unknown): string {
   }
 }
 
+function toRealtimeScreenSize(
+  width: number | null | undefined,
+  height: number | null | undefined,
+): string {
+  const safeWidth = Number(width);
+  const safeHeight = Number(height);
+  if (!Number.isFinite(safeWidth) || !Number.isFinite(safeHeight)) {
+    return "";
+  }
+  if (safeWidth <= 0 || safeHeight <= 0) {
+    return "";
+  }
+  return `${Math.round(safeWidth)}x${Math.round(safeHeight)}`;
+}
+
 function toRealtimePayload(record: RealtimeSnapshotRecord): Record<string, unknown> {
   return {
     id: record.id,
     eventType: record.eventType,
     eventAt: record.eventAt,
+    visitId: record.visitId,
+    sessionId: record.sessionId,
     pathname: record.pathname,
+    title: record.title,
+    hostname: record.hostname,
+    referrerUrl: record.referrerUrl,
+    referrerHost: record.referrerHost,
     visitorId: record.visitorId,
     country: record.country,
+    region: record.region,
+    regionCode: record.regionCode,
+    city: record.city,
+    continent: record.continent,
+    timezone: record.timezone,
+    organization: record.organization,
     browser: record.browser,
+    osVersion: record.osVersion,
+    deviceType: record.deviceType,
+    language: record.language,
+    screenSize: record.screenSize,
     latitude: record.latitude,
     longitude: record.longitude,
+  };
+}
+
+function toRealtimeVisitPayload(
+  visit: Pick<
+    VisitRow,
+    | "visitId"
+    | "visitorId"
+    | "sessionId"
+    | "startedAt"
+    | "pathname"
+    | "title"
+    | "hostname"
+    | "referrerUrl"
+    | "referrerHost"
+    | "country"
+    | "region"
+    | "regionCode"
+    | "city"
+    | "continent"
+    | "timezone"
+    | "asOrganization"
+    | "browser"
+    | "osVersion"
+    | "deviceType"
+    | "language"
+    | "screenWidth"
+    | "screenHeight"
+    | "latitude"
+    | "longitude"
+  > & {
+    lastActivityAt: number;
+  },
+): Record<string, unknown> {
+  return {
+    visitId: visit.visitId,
+    visitorId: visit.visitorId,
+    sessionId: visit.sessionId,
+    startedAt: visit.startedAt,
+    lastActivityAt: visit.lastActivityAt,
+    pathname: visit.pathname,
+    title: visit.title,
+    hostname: visit.hostname,
+    referrerUrl: visit.referrerUrl,
+    referrerHost: visit.referrerHost,
+    country: visit.country,
+    region: visit.region,
+    regionCode: visit.regionCode,
+    city: visit.city,
+    continent: visit.continent,
+    timezone: visit.timezone,
+    organization: visit.asOrganization,
+    browser: visit.browser,
+    osVersion: visit.osVersion,
+    deviceType: visit.deviceType,
+    language: visit.language,
+    screenSize: toRealtimeScreenSize(visit.screenWidth, visit.screenHeight),
+    latitude: visit.latitude,
+    longitude: visit.longitude,
   };
 }
 
@@ -800,10 +905,26 @@ export class IngestDurableObject extends DurableObject {
       id: record.visitId,
       eventType: "visit",
       eventAt: record.startedAt,
+      visitId: record.visitId,
+      sessionId: record.sessionId,
       pathname: record.pathname,
+      title: record.title,
+      hostname: record.hostname,
+      referrerUrl: record.referrerUrl,
+      referrerHost: record.referrerHost,
       visitorId: record.visitorId,
       country: record.country,
+      region: record.region,
+      regionCode: record.regionCode,
+      city: record.city,
+      continent: record.continent,
+      timezone: record.timezone,
+      organization: record.asOrganization,
       browser: record.browser,
+      osVersion: record.osVersion,
+      deviceType: record.deviceType,
+      language: record.language,
+      screenSize: toRealtimeScreenSize(record.screenWidth, record.screenHeight),
       latitude: record.latitude,
       longitude: record.longitude,
     });
@@ -813,10 +934,30 @@ export class IngestDurableObject extends DurableObject {
     // Find the open visit matching this visitId (or the latest open visit for the session)
     const visitQuery = record.visitId
       ? `SELECT visit_id AS visitId, started_at AS startedAt, visitor_id AS visitorId, site_id AS siteId,
-                pathname, country, browser, latitude, longitude
+                session_id AS sessionId, pathname, title, hostname,
+                referrer_url AS referrerUrl, referrer_host AS referrerHost,
+                country, region, region_code AS regionCode, city, continent, timezone,
+                as_organization AS organization, browser, os_version AS osVersion,
+                device_type AS deviceType, language,
+                CASE
+                  WHEN screen_width IS NOT NULL AND screen_height IS NOT NULL
+                    THEN CAST(screen_width AS TEXT) || 'x' || CAST(screen_height AS TEXT)
+                  ELSE ''
+                END AS screenSize,
+                latitude, longitude
          FROM buffered_visits WHERE site_id = ? AND visit_id = ? AND status = 'open' LIMIT 1`
       : `SELECT visit_id AS visitId, started_at AS startedAt, visitor_id AS visitorId, site_id AS siteId,
-                pathname, country, browser, latitude, longitude
+                session_id AS sessionId, pathname, title, hostname,
+                referrer_url AS referrerUrl, referrer_host AS referrerHost,
+                country, region, region_code AS regionCode, city, continent, timezone,
+                as_organization AS organization, browser, os_version AS osVersion,
+                device_type AS deviceType, language,
+                CASE
+                  WHEN screen_width IS NOT NULL AND screen_height IS NOT NULL
+                    THEN CAST(screen_width AS TEXT) || 'x' || CAST(screen_height AS TEXT)
+                  ELSE ''
+                END AS screenSize,
+                latitude, longitude
          FROM buffered_visits WHERE site_id = ? AND session_id = ? AND status = 'open'
          ORDER BY started_at DESC LIMIT 1`;
     const visitBindings = record.visitId
@@ -825,7 +966,12 @@ export class IngestDurableObject extends DurableObject {
 
     const visit = this.sqlOne<{
       visitId: string; startedAt: number; visitorId: string; siteId: string;
-      pathname: string; country: string; browser: string;
+      sessionId: string; pathname: string; title: string; hostname: string;
+      referrerUrl: string; referrerHost: string;
+      country: string; region: string; regionCode: string; city: string;
+      continent: string; timezone: string; organization: string;
+      browser: string; osVersion: string; deviceType: string;
+      language: string; screenSize: string;
       latitude: number | null; longitude: number | null;
     }>(visitQuery, ...visitBindings);
     if (!visit) return;
@@ -862,10 +1008,26 @@ export class IngestDurableObject extends DurableObject {
         id: `leave:${visit.visitId}`,
         eventType: WS_PRESENCE_LEAVE_EVENT,
         eventAt: leaveAt,
+        visitId: visit.visitId,
+        sessionId: visit.sessionId,
         pathname: visit.pathname,
+        title: visit.title,
+        hostname: visit.hostname,
+        referrerUrl: visit.referrerUrl,
+        referrerHost: visit.referrerHost,
         visitorId: visit.visitorId,
         country: visit.country,
+        region: visit.region,
+        regionCode: visit.regionCode,
+        city: visit.city,
+        continent: visit.continent,
+        timezone: visit.timezone,
+        organization: visit.organization,
         browser: visit.browser,
+        osVersion: visit.osVersion,
+        deviceType: visit.deviceType,
+        language: visit.language,
+        screenSize: visit.screenSize,
         latitude: visit.latitude,
         longitude: visit.longitude,
       });
@@ -882,10 +1044,26 @@ export class IngestDurableObject extends DurableObject {
       id: record.eventId,
       eventType: record.eventName,
       eventAt: record.eventAt,
+      visitId: record.visitId,
+      sessionId: record.sessionId,
       pathname: record.pathname,
+      title: record.title,
+      hostname: record.hostname,
+      referrerUrl: record.referrerUrl,
+      referrerHost: record.referrerHost,
       visitorId: record.visitorId,
       country: record.country,
+      region: record.region,
+      regionCode: record.regionCode,
+      city: record.city,
+      continent: record.continent,
+      timezone: record.timezone,
+      organization: record.asOrganization,
       browser: record.browser,
+      osVersion: record.osVersion,
+      deviceType: record.deviceType,
+      language: record.language,
+      screenSize: toRealtimeScreenSize(record.screenWidth, record.screenHeight),
       latitude: record.latitude,
       longitude: record.longitude,
     });
@@ -1112,17 +1290,50 @@ export class IngestDurableObject extends DurableObject {
     return (row?.count ?? 0) > 0;
   }
 
-  private readRecentRealtimeEvents(fromMs: number, toMs: number, limit: number): Array<Record<string, unknown>> {
+  private readRecentRealtimeEvents(
+    fromMs: number,
+    toMs: number,
+    limit?: number,
+  ): Array<Record<string, unknown>> {
+    const limitClause = typeof limit === "number" ? "\n        LIMIT ?\n      " : "";
+    const bindings: SqlBinding[] = [
+      fromMs,
+      toMs,
+      fromMs,
+      toMs,
+      fromMs,
+      toMs,
+    ];
+    if (typeof limit === "number") {
+      bindings.push(limit);
+    }
+
     const rows = this.sqlAll<RealtimeSnapshotRecord>(
       `
         SELECT
           id,
           eventType,
           eventAt,
+          visitId,
+          sessionId,
           pathname,
+          title,
+          hostname,
+          referrerUrl,
+          referrerHost,
           visitorId,
           country,
+          region,
+          regionCode,
+          city,
+          continent,
+          timezone,
+          organization,
           browser,
+          osVersion,
+          deviceType,
+          language,
+          screenSize,
           latitude,
           longitude
         FROM (
@@ -1130,10 +1341,30 @@ export class IngestDurableObject extends DurableObject {
             visit_id AS id,
             'visit' AS eventType,
             started_at AS eventAt,
+            visit_id AS visitId,
+            session_id AS sessionId,
             pathname,
+            title,
+            hostname,
+            referrer_url AS referrerUrl,
+            referrer_host AS referrerHost,
             visitor_id AS visitorId,
             country,
+            region,
+            region_code AS regionCode,
+            city,
+            continent,
+            timezone,
+            as_organization AS organization,
             browser,
+            os_version AS osVersion,
+            device_type AS deviceType,
+            language,
+            CASE
+              WHEN screen_width IS NOT NULL AND screen_height IS NOT NULL
+                THEN CAST(screen_width AS TEXT) || 'x' || CAST(screen_height AS TEXT)
+              ELSE ''
+            END AS screenSize,
             latitude,
             longitude
           FROM buffered_visits
@@ -1143,10 +1374,30 @@ export class IngestDurableObject extends DurableObject {
             event_id AS id,
             event_name AS eventType,
             occurred_at AS eventAt,
+            COALESCE(v.visit_id, '') AS visitId,
+            COALESCE(v.session_id, '') AS sessionId,
             COALESCE(v.pathname, '') AS pathname,
+            COALESCE(v.title, '') AS title,
+            COALESCE(v.hostname, '') AS hostname,
+            COALESCE(v.referrer_url, '') AS referrerUrl,
+            COALESCE(v.referrer_host, '') AS referrerHost,
             COALESCE(v.visitor_id, '') AS visitorId,
             COALESCE(v.country, '') AS country,
+            COALESCE(v.region, '') AS region,
+            COALESCE(v.region_code, '') AS regionCode,
+            COALESCE(v.city, '') AS city,
+            COALESCE(v.continent, '') AS continent,
+            COALESCE(v.timezone, '') AS timezone,
+            COALESCE(v.as_organization, '') AS organization,
             COALESCE(v.browser, '') AS browser,
+            COALESCE(v.os_version, '') AS osVersion,
+            COALESCE(v.device_type, '') AS deviceType,
+            COALESCE(v.language, '') AS language,
+            CASE
+              WHEN v.screen_width IS NOT NULL AND v.screen_height IS NOT NULL
+                THEN CAST(v.screen_width AS TEXT) || 'x' || CAST(v.screen_height AS TEXT)
+              ELSE ''
+            END AS screenSize,
             v.latitude AS latitude,
             v.longitude AS longitude
           FROM buffered_custom_events e
@@ -1154,17 +1405,110 @@ export class IngestDurableObject extends DurableObject {
             ON v.site_id = e.site_id
            AND v.visit_id = e.visit_id
           WHERE e.occurred_at BETWEEN ? AND ?
+          UNION ALL
+          SELECT
+            'leave:' || visit_id AS id,
+            '${WS_PRESENCE_LEAVE_EVENT}' AS eventType,
+            ended_at AS eventAt,
+            visit_id AS visitId,
+            session_id AS sessionId,
+            pathname,
+            title,
+            hostname,
+            referrer_url AS referrerUrl,
+            referrer_host AS referrerHost,
+            visitor_id AS visitorId,
+            country,
+            region,
+            region_code AS regionCode,
+            city,
+            continent,
+            timezone,
+            as_organization AS organization,
+            browser,
+            os_version AS osVersion,
+            device_type AS deviceType,
+            language,
+            CASE
+              WHEN screen_width IS NOT NULL AND screen_height IS NOT NULL
+                THEN CAST(screen_width AS TEXT) || 'x' || CAST(screen_height AS TEXT)
+              ELSE ''
+            END AS screenSize,
+            latitude,
+            longitude
+          FROM buffered_visits
+          WHERE status <> 'open'
+            AND ended_at IS NOT NULL
+            AND ended_at BETWEEN ? AND ?
         )
         ORDER BY eventAt DESC
-        LIMIT ?
+               , CASE
+                   WHEN eventType = '${WS_PRESENCE_LEAVE_EVENT}' THEN 0
+                   ELSE 1
+                 END DESC${limitClause}
       `,
-      fromMs,
-      toMs,
-      fromMs,
-      toMs,
-      limit,
+      ...bindings,
     );
     return rows.map((row) => toRealtimePayload(row));
+  }
+
+  private readActiveRealtimeVisits(cutoffMs: number): Array<Record<string, unknown>> {
+    const rows = this.sqlAll<
+      VisitRow & {
+        lastActivityAt: number;
+      }
+    >(
+      `
+        SELECT
+          visit_id AS visitId,
+          status,
+          site_id AS siteId,
+          visitor_id AS visitorId,
+          session_id AS sessionId,
+          started_at AS startedAt,
+          last_activity_at AS lastActivityAt,
+          pathname,
+          query_string AS queryString,
+          hash_fragment AS hashFragment,
+          hostname,
+          title,
+          referrer_url AS referrerUrl,
+          referrer_host AS referrerHost,
+          utm_source AS utmSource,
+          utm_medium AS utmMedium,
+          utm_campaign AS utmCampaign,
+          utm_term AS utmTerm,
+          utm_content AS utmContent,
+          is_eu AS isEU,
+          country,
+          region,
+          region_code AS regionCode,
+          city,
+          continent,
+          latitude,
+          longitude,
+          postal_code AS postalCode,
+          metro_code AS metroCode,
+          timezone,
+          as_organization AS asOrganization,
+          ua_raw AS uaRaw,
+          browser,
+          browser_version AS browserVersion,
+          os,
+          os_version AS osVersion,
+          device_type AS deviceType,
+          screen_width AS screenWidth,
+          screen_height AS screenHeight,
+          language
+        FROM buffered_visits
+        WHERE status = 'open'
+          AND last_activity_at >= ?
+        ORDER BY last_activity_at DESC, started_at DESC
+      `,
+      cutoffMs,
+    );
+
+    return rows.map((row) => toRealtimeVisitPayload(row));
   }
 
   private async pushInitialSnapshotToSocket(socket: WebSocket): Promise<void> {
@@ -1173,7 +1517,6 @@ export class IngestDurableObject extends DurableObject {
       const events = this.readRecentRealtimeEvents(
         Math.max(0, Date.now() - RECENT_EVENT_RETENTION_MS),
         Date.now(),
-        WS_SNAPSHOT_EVENT_LIMIT,
       );
       const activeNow = this.sqlOne<{ count: number }>(
         `
@@ -1184,13 +1527,14 @@ export class IngestDurableObject extends DurableObject {
         `,
         cutoffMs,
       )?.count ?? 0;
+      const visits = this.readActiveRealtimeVisits(cutoffMs);
 
       socket.send(JSON.stringify({
         type: "snapshot",
         data: {
           activeNow,
           events,
-          buffered: events.length,
+          visits,
         },
       }));
     } catch (error) {
@@ -1416,9 +1760,22 @@ export class IngestDurableObject extends DurableObject {
       startedAt: number;
       lastActivityAt: number;
       pathname: string;
+      title: string;
+      hostname: string;
+      referrerUrl: string;
+      referrerHost: string;
       country: string;
+      region: string;
+      regionCode: string;
+      city: string;
+      continent: string;
+      timezone: string;
+      organization: string;
       browser: string;
+      osVersion: string;
       deviceType: string;
+      language: string;
+      screenSize: string;
       latitude: number | null;
       longitude: number | null;
     }>(
@@ -1431,9 +1788,26 @@ export class IngestDurableObject extends DurableObject {
           started_at AS startedAt,
           last_activity_at AS lastActivityAt,
           pathname,
+          title,
+          hostname,
+          referrer_url AS referrerUrl,
+          referrer_host AS referrerHost,
           country,
+          region,
+          region_code AS regionCode,
+          city,
+          continent,
+          timezone,
+          as_organization AS organization,
           browser,
+          os_version AS osVersion,
           device_type AS deviceType,
+          language,
+          CASE
+            WHEN screen_width IS NOT NULL AND screen_height IS NOT NULL
+              THEN CAST(screen_width AS TEXT) || 'x' || CAST(screen_height AS TEXT)
+            ELSE ''
+          END AS screenSize,
           latitude,
           longitude
         FROM buffered_visits
@@ -1472,10 +1846,26 @@ export class IngestDurableObject extends DurableObject {
           id: `leave:${visit.visitId}`,
           eventType: WS_PRESENCE_LEAVE_EVENT,
           eventAt: now,
+          visitId: visit.visitId,
+          sessionId: visit.sessionId,
           pathname: visit.pathname,
+          title: visit.title,
+          hostname: visit.hostname,
+          referrerUrl: visit.referrerUrl,
+          referrerHost: visit.referrerHost,
           visitorId: visit.visitorId,
           country: visit.country,
+          region: visit.region,
+          regionCode: visit.regionCode,
+          city: visit.city,
+          continent: visit.continent,
+          timezone: visit.timezone,
+          organization: visit.organization,
           browser: visit.browser,
+          osVersion: visit.osVersion,
+          deviceType: visit.deviceType,
+          language: visit.language,
+          screenSize: visit.screenSize,
           latitude: visit.latitude,
           longitude: visit.longitude,
         });

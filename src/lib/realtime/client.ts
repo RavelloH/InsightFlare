@@ -5,17 +5,19 @@ import type {
   RealtimeConnectionState,
   RealtimeEvent,
   RealtimeSnapshot,
+  RealtimeVisit,
   RealtimeVisitorPoint,
 } from "@/lib/realtime/types";
 
+const RECORD_WINDOW_MS = 30 * 60 * 1000;
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 2_000;
 const CONNECT_WATCHDOG_MS = 4_000;
-const ACTIVE_RECOMPUTE_INTERVAL_MS = 15_000;
-const MAX_RECENT_EVENTS = 20;
+const RECORD_RECOMPUTE_INTERVAL_MS = 5_000;
 const MAX_RENDERABLE_POINTS = 800;
 const PRESENCE_LEAVE_EVENT = "__presence_leave";
+const VIEW_EVENT_TYPES = new Set(["visit", "pageview"]);
 
 const SOCKET_STATE = {
   CONNECTING: 0,
@@ -23,10 +25,12 @@ const SOCKET_STATE = {
 } as const;
 
 const USE_REALTIME_MOCK =
-  process.env.NEXT_PUBLIC_DEMO_MODE === "1" ||
-  process.env.NEXT_PUBLIC_REALTIME_MOCK === "1" ||
-  (process.env.NEXT_PUBLIC_REALTIME_MOCK !== "0" &&
-    process.env.NODE_ENV !== "production");
+  process.env.NEXT_PUBLIC_DEMO_MODE === "1"
+  || process.env.NEXT_PUBLIC_REALTIME_MOCK === "1"
+  || (
+    process.env.NEXT_PUBLIC_REALTIME_MOCK !== "0"
+    && process.env.NODE_ENV !== "production"
+  );
 
 interface ChannelContext {
   siteId: string;
@@ -37,18 +41,6 @@ interface ChannelContext {
   connectWatchdog: ReturnType<typeof setTimeout> | null;
   reconnectFailures: number;
   state: RealtimeChannelState;
-  visitors: Map<string, VisitorPresence>;
-  snapshotBaseline: {
-    value: number;
-    at: number;
-  };
-}
-
-interface VisitorPresence {
-  seenAt: number;
-  latitude: number | null;
-  longitude: number | null;
-  country: string;
 }
 
 const channels = new Map<string, ChannelContext>();
@@ -64,9 +56,12 @@ export function createIdleRealtimeChannelState(
     status,
     hasConnected: false,
     activeNow: 0,
+    visitorsLast30m: 0,
+    viewsLast30m: 0,
     snapshotActiveNow: null,
     events: [],
     points: [],
+    visits: [],
   };
 }
 
@@ -110,11 +105,6 @@ function getOrCreateChannel(siteId: string): ChannelContext {
     connectWatchdog: null,
     reconnectFailures: 0,
     state: createIdleRealtimeChannelState("connecting"),
-    visitors: new Map<string, VisitorPresence>(),
-    snapshotBaseline: {
-      value: 0,
-      at: 0,
-    },
   };
   channels.set(siteId, context);
   return context;
@@ -133,16 +123,14 @@ function releaseRealtimeChannel(siteId: string): void {
 
 function startChannel(channel: ChannelContext): void {
   channel.reconnectFailures = 0;
-  channel.visitors.clear();
-  channel.snapshotBaseline = { value: 0, at: 0 };
   channel.state = createIdleRealtimeChannelState("connecting");
   publishChannelState(channel);
 
   connect(channel);
   channel.cleanupTimer = setInterval(() => {
-    recomputeActiveNow(channel);
+    recomputeDerivedState(channel);
     publishChannelState(channel);
-  }, ACTIVE_RECOMPUTE_INTERVAL_MS);
+  }, RECORD_RECOMPUTE_INTERVAL_MS);
 }
 
 function stopChannel(channel: ChannelContext): void {
@@ -159,9 +147,11 @@ function stopChannel(channel: ChannelContext): void {
     channel.connectWatchdog = null;
   }
   if (
-    channel.socket &&
-    (channel.socket.readyState === SOCKET_STATE.OPEN ||
-      channel.socket.readyState === SOCKET_STATE.CONNECTING)
+    channel.socket
+    && (
+      channel.socket.readyState === SOCKET_STATE.OPEN
+      || channel.socket.readyState === SOCKET_STATE.CONNECTING
+    )
   ) {
     channel.socket.close();
   }
@@ -263,65 +253,31 @@ function attachSocketHandlers(channel: ChannelContext): void {
 function applySnapshot(channel: ChannelContext, payload: unknown): void {
   const snapshot = normalizeRealtimeSnapshot(payload);
   const now = Date.now();
+  const snapshotEvents = resolveSnapshotEvents(snapshot);
 
-  channel.state.events = mergeEvents(snapshot.events, [], MAX_RECENT_EVENTS);
-  if (snapshot.points.length > 0) {
-    channel.visitors.clear();
-    for (const point of snapshot.points) {
-      upsertSnapshotPresence(channel, point);
-    }
-  } else {
-    for (const event of snapshot.events) {
-      upsertVisitorPresence(channel, event);
-    }
-  }
-
+  channel.state.events = sortAndPruneEvents(snapshotEvents, now);
   channel.state.snapshotActiveNow = snapshot.activeNow;
-  if (snapshot.activeNow !== null) {
-    channel.snapshotBaseline = {
-      value: snapshot.activeNow,
-      at: now,
-    };
-  }
-  recomputeActiveNow(channel, now);
+  recomputeDerivedState(channel, now);
 }
 
 function applyEvent(channel: ChannelContext, payload: unknown): void {
   const event = normalizeRealtimeEvent(payload);
   if (!event) return;
 
-  channel.state.events = mergeEvents([event], channel.state.events, MAX_RECENT_EVENTS);
-
-  if (event.eventType === PRESENCE_LEAVE_EVENT) {
-    if (event.visitorId) {
-      channel.visitors.delete(event.visitorId);
-    }
-    if (
-      Date.now() - channel.snapshotBaseline.at <= ACTIVE_WINDOW_MS &&
-      channel.snapshotBaseline.value > 0
-    ) {
-      channel.snapshotBaseline.value -= 1;
-    }
-    recomputeActiveNow(channel, event.eventAt || Date.now());
-    return;
-  }
-
-  upsertVisitorPresence(channel, event);
-  recomputeActiveNow(channel, event.eventAt || Date.now());
+  channel.state.events = mergeEvents([event], channel.state.events, event.eventAt);
+  recomputeDerivedState(channel, event.eventAt || Date.now());
 }
 
-function recomputeActiveNow(channel: ChannelContext, now = Date.now()): void {
-  const cutoff = now - ACTIVE_WINDOW_MS;
-  for (const [visitorId, presence] of channel.visitors.entries()) {
-    if (presence.seenAt < cutoff) {
-      channel.visitors.delete(visitorId);
-    }
-  }
+function recomputeDerivedState(channel: ChannelContext, now = Date.now()): void {
+  const events = sortAndPruneEvents(channel.state.events, now);
+  const derived = buildDerivedState(events, now);
 
-  const snapshotFresh = now - channel.snapshotBaseline.at <= ACTIVE_WINDOW_MS;
-  const baseline = snapshotFresh ? channel.snapshotBaseline.value : 0;
-  channel.state.activeNow = Math.max(baseline, channel.visitors.size);
-  channel.state.points = buildVisitorPoints(channel.visitors);
+  channel.state.events = events;
+  channel.state.activeNow = derived.activeNow;
+  channel.state.visitorsLast30m = derived.visitorsLast30m;
+  channel.state.viewsLast30m = derived.viewsLast30m;
+  channel.state.points = derived.points;
+  channel.state.visits = derived.visits;
 }
 
 function setChannelStatus(
@@ -344,94 +300,242 @@ function cloneState(state: RealtimeChannelState): RealtimeChannelState {
     status: state.status,
     hasConnected: state.hasConnected,
     activeNow: state.activeNow,
+    visitorsLast30m: state.visitorsLast30m,
+    viewsLast30m: state.viewsLast30m,
     snapshotActiveNow: state.snapshotActiveNow,
     events: [...state.events],
     points: [...state.points],
+    visits: [...state.visits],
   };
 }
 
-function upsertVisitorPresence(channel: ChannelContext, event: RealtimeEvent): void {
-  if (!event.visitorId || event.eventType === PRESENCE_LEAVE_EVENT) {
-    return;
+function resolveSnapshotEvents(snapshot: RealtimeSnapshot): RealtimeEvent[] {
+  if (snapshot.events.length > 0) {
+    return snapshot.events;
   }
 
-  const previous = channel.visitors.get(event.visitorId);
-  if (previous && event.eventAt < previous.seenAt) {
-    return;
+  if (snapshot.visits.length > 0) {
+    return snapshot.visits.map((visit) => ({
+      id: `snapshot:${visit.visitId}:${visit.lastActivityAt}`,
+      eventType: "visit",
+      eventAt: visit.lastActivityAt,
+      visitId: visit.visitId,
+      sessionId: visit.sessionId,
+      pathname: visit.pathname,
+      title: visit.title,
+      hostname: visit.hostname,
+      referrerUrl: visit.referrerUrl,
+      referrerHost: visit.referrerHost,
+      visitorId: visit.visitorId,
+      country: visit.country,
+      region: visit.region,
+      regionCode: visit.regionCode,
+      city: visit.city,
+      continent: visit.continent,
+      timezone: visit.timezone,
+      organization: visit.organization,
+      browser: visit.browser,
+      osVersion: visit.osVersion,
+      deviceType: visit.deviceType,
+      language: visit.language,
+      screenSize: visit.screenSize,
+      latitude: visit.latitude,
+      longitude: visit.longitude,
+    }));
   }
 
-  const hasCoordinates = isValidCoordinate(event.latitude, event.longitude);
-  channel.visitors.set(event.visitorId, {
-    seenAt: event.eventAt,
-    latitude: hasCoordinates
-      ? event.latitude
-      : (previous?.latitude ?? null),
-    longitude: hasCoordinates
-      ? event.longitude
-      : (previous?.longitude ?? null),
-    country: event.country || previous?.country || "",
-  });
-}
-
-function upsertSnapshotPresence(
-  channel: ChannelContext,
-  point: RealtimeVisitorPoint,
-): void {
-  if (!point.visitorId) return;
-
-  const previous = channel.visitors.get(point.visitorId);
-  if (previous && point.eventAt < previous.seenAt) {
-    return;
-  }
-
-  channel.visitors.set(point.visitorId, {
-    seenAt: point.eventAt,
+  return snapshot.points.map((point) => ({
+    id: `snapshot-point:${point.visitorId}:${point.eventAt}`,
+    eventType: "visit",
+    eventAt: point.eventAt,
+    visitId: "",
+    sessionId: "",
+    pathname: "/",
+    title: "",
+    hostname: "",
+    referrerUrl: "",
+    referrerHost: "",
+    visitorId: point.visitorId,
+    country: point.country,
+    region: "",
+    regionCode: "",
+    city: "",
+    continent: "",
+    timezone: "",
+    organization: "",
+    browser: "",
+    osVersion: "",
+    deviceType: "",
+    language: "",
+    screenSize: "",
     latitude: point.latitude,
     longitude: point.longitude,
-    country: point.country || previous?.country || "",
-  });
+  }));
 }
 
-function buildVisitorPoints(
-  visitors: Map<string, VisitorPresence>,
-): RealtimeVisitorPoint[] {
+function buildDerivedState(
+  events: RealtimeEvent[],
+  now: number,
+): Pick<
+  RealtimeChannelState,
+  "activeNow" | "visitorsLast30m" | "viewsLast30m" | "points" | "visits"
+> {
+  const activeCutoff = now - ACTIVE_WINDOW_MS;
+  const latestVisitorEvents = new Map<string, RealtimeEvent>();
+  const visitsById = new Map<string, RealtimeVisit>();
+  const visitorsLast30m = new Set<string>();
+  let viewsLast30m = 0;
+
+  for (const event of events) {
+    upsertRecentVisit(visitsById, event);
+    if (event.visitorId) {
+      visitorsLast30m.add(event.visitorId);
+    }
+    if (VIEW_EVENT_TYPES.has(event.eventType)) {
+      viewsLast30m += 1;
+    }
+
+    if (!event.visitorId || event.eventAt < activeCutoff) continue;
+    const existing = latestVisitorEvents.get(event.visitorId);
+    if (!existing || compareRealtimeEventsDesc(event, existing) < 0) {
+      latestVisitorEvents.set(event.visitorId, event);
+    }
+  }
+
   const points: RealtimeVisitorPoint[] = [];
-  for (const [visitorId, presence] of visitors.entries()) {
-    if (!isValidCoordinate(presence.latitude, presence.longitude)) {
+  let activeNow = 0;
+  for (const event of latestVisitorEvents.values()) {
+    if (event.eventType === PRESENCE_LEAVE_EVENT) continue;
+    activeNow += 1;
+
+    if (!isValidCoordinate(event.latitude, event.longitude)) {
       continue;
     }
-    const latitude = Number(presence.latitude);
-    const longitude = Number(presence.longitude);
+
     points.push({
-      visitorId,
-      eventAt: presence.seenAt,
-      latitude,
-      longitude,
-      country: presence.country,
+      visitorId: event.visitorId,
+      eventAt: event.eventAt,
+      latitude: Number(event.latitude),
+      longitude: Number(event.longitude),
+      country: event.country,
     });
   }
 
-  points.sort((a, b) => b.eventAt - a.eventAt);
-  return points.slice(0, MAX_RENDERABLE_POINTS);
+  points.sort((left, right) => right.eventAt - left.eventAt);
+
+  return {
+    activeNow,
+    visitorsLast30m: visitorsLast30m.size,
+    viewsLast30m,
+    points: points.slice(0, MAX_RENDERABLE_POINTS),
+    visits: Array.from(visitsById.values()).sort(
+      (left, right) => right.lastActivityAt - left.lastActivityAt,
+    ),
+  };
+}
+
+function upsertRecentVisit(
+  visitsById: Map<string, RealtimeVisit>,
+  event: RealtimeEvent,
+): void {
+  if (!event.visitId) return;
+
+  const previous = visitsById.get(event.visitId);
+  if (!previous) {
+    visitsById.set(event.visitId, {
+      visitId: event.visitId,
+      visitorId: event.visitorId,
+      sessionId: event.sessionId,
+      startedAt: event.eventAt,
+      lastActivityAt: event.eventAt,
+      pathname: event.pathname,
+      title: event.title,
+      hostname: event.hostname,
+      referrerUrl: event.referrerUrl,
+      referrerHost: event.referrerHost,
+      country: event.country,
+      region: event.region,
+      regionCode: event.regionCode,
+      city: event.city,
+      continent: event.continent,
+      timezone: event.timezone,
+      organization: event.organization,
+      browser: event.browser,
+      osVersion: event.osVersion,
+      deviceType: event.deviceType,
+      language: event.language,
+      screenSize: event.screenSize,
+      latitude: event.latitude,
+      longitude: event.longitude,
+    });
+    return;
+  }
+
+  previous.startedAt = Math.min(previous.startedAt, event.eventAt);
+  previous.lastActivityAt = Math.max(previous.lastActivityAt, event.eventAt);
+  previous.visitorId ||= event.visitorId;
+  previous.sessionId ||= event.sessionId;
+  previous.pathname ||= event.pathname;
+  previous.title ||= event.title;
+  previous.hostname ||= event.hostname;
+  previous.referrerUrl ||= event.referrerUrl;
+  previous.referrerHost ||= event.referrerHost;
+  previous.country ||= event.country;
+  previous.region ||= event.region;
+  previous.regionCode ||= event.regionCode;
+  previous.city ||= event.city;
+  previous.continent ||= event.continent;
+  previous.timezone ||= event.timezone;
+  previous.organization ||= event.organization;
+  previous.browser ||= event.browser;
+  previous.osVersion ||= event.osVersion;
+  previous.deviceType ||= event.deviceType;
+  previous.language ||= event.language;
+  previous.screenSize ||= event.screenSize;
+  previous.latitude ??= event.latitude;
+  previous.longitude ??= event.longitude;
+}
+
+function sortAndPruneEvents(
+  events: RealtimeEvent[],
+  now = Date.now(),
+): RealtimeEvent[] {
+  const cutoff = now - RECORD_WINDOW_MS;
+  const deduped = new Map<string, RealtimeEvent>();
+
+  for (const event of events) {
+    if (!event.id) continue;
+    if (!Number.isFinite(event.eventAt) || event.eventAt < cutoff) continue;
+
+    const existing = deduped.get(event.id);
+    if (!existing || compareRealtimeEventsDesc(event, existing) < 0) {
+      deduped.set(event.id, event);
+    }
+  }
+
+  return Array.from(deduped.values()).sort(compareRealtimeEventsDesc);
 }
 
 function mergeEvents(
   next: RealtimeEvent[],
   previous: RealtimeEvent[],
-  limit: number,
+  now = Date.now(),
 ): RealtimeEvent[] {
-  const merged: RealtimeEvent[] = [];
-  const ids = new Set<string>();
-  const ordered = [...next, ...previous].sort((a, b) => b.eventAt - a.eventAt);
+  return sortAndPruneEvents([...next, ...previous], now);
+}
 
-  for (const event of ordered) {
-    if (!event.id || ids.has(event.id)) continue;
-    ids.add(event.id);
-    merged.push(event);
-    if (merged.length >= limit) break;
+function compareRealtimeEventsDesc(
+  left: Pick<RealtimeEvent, "eventAt" | "eventType">,
+  right: Pick<RealtimeEvent, "eventAt" | "eventType">,
+): number {
+  if (right.eventAt !== left.eventAt) {
+    return right.eventAt - left.eventAt;
   }
+  return realtimeEventPriority(right.eventType) - realtimeEventPriority(left.eventType);
+}
 
-  return merged;
+function realtimeEventPriority(eventType: string): number {
+  return eventType === PRESENCE_LEAVE_EVENT ? 0 : 1;
 }
 
 function normalizeRealtimeEvent(payload: unknown): RealtimeEvent | null {
@@ -447,10 +551,28 @@ function normalizeRealtimeEvent(payload: unknown): RealtimeEvent | null {
     id,
     eventType: String(record.eventType ?? record.event_type ?? ""),
     eventAt: Number.isFinite(eventAt) ? eventAt : Date.now(),
+    visitId: String(record.visitId ?? record.visit_id ?? ""),
+    sessionId: String(record.sessionId ?? record.session_id ?? ""),
     pathname: String(record.pathname ?? "/"),
+    title: String(record.title ?? ""),
+    hostname: String(record.hostname ?? ""),
+    referrerUrl: String(record.referrerUrl ?? record.referrer_url ?? ""),
+    referrerHost: String(record.referrerHost ?? record.referrer_host ?? ""),
     visitorId,
     country: String(record.country ?? ""),
+    region: String(record.region ?? ""),
+    regionCode: String(record.regionCode ?? record.region_code ?? ""),
+    city: String(record.city ?? ""),
+    continent: String(record.continent ?? ""),
+    timezone: String(record.timezone ?? ""),
+    organization: String(
+      record.organization ?? record.asOrganization ?? record.as_organization ?? "",
+    ),
     browser: String(record.browser ?? ""),
+    osVersion: String(record.osVersion ?? record.os_version ?? ""),
+    deviceType: String(record.deviceType ?? record.device_type ?? ""),
+    language: String(record.language ?? ""),
+    screenSize: String(record.screenSize ?? record.screen_size ?? ""),
     latitude,
     longitude,
   };
@@ -481,7 +603,7 @@ function isValidCoordinate(
 
 function normalizeRealtimeSnapshot(payload: unknown): RealtimeSnapshot {
   if (!payload || typeof payload !== "object") {
-    return { activeNow: null, events: [], points: [] };
+    return { activeNow: null, events: [], points: [], visits: [] };
   }
 
   const record = payload as Record<string, unknown>;
@@ -493,13 +615,17 @@ function normalizeRealtimeSnapshot(payload: unknown): RealtimeSnapshot {
   const points = pointsRaw
     .map((item) => normalizeRealtimePoint(item))
     .filter((item): item is RealtimeVisitorPoint => item !== null);
+  const visitsRaw = Array.isArray(record.visits) ? record.visits : [];
+  const visits = visitsRaw
+    .map((item) => normalizeRealtimeVisit(item))
+    .filter((item): item is RealtimeVisit => item !== null);
 
   const activeNowRaw = Number(record.activeNow);
   const activeNow = Number.isFinite(activeNowRaw) && activeNowRaw >= 0
     ? Math.floor(activeNowRaw)
     : null;
 
-  return { activeNow, events, points };
+  return { activeNow, events, points, visits };
 }
 
 function normalizeRealtimePoint(payload: unknown): RealtimeVisitorPoint | null {
@@ -519,6 +645,50 @@ function normalizeRealtimePoint(payload: unknown): RealtimeVisitorPoint | null {
     latitude,
     longitude,
     country: String(record.country ?? ""),
+  };
+}
+
+function normalizeRealtimeVisit(payload: unknown): RealtimeVisit | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const visitId = String(record.visitId ?? record.visit_id ?? "").trim();
+  const visitorId = String(record.visitorId ?? record.visitor_id ?? "").trim();
+  if (!visitId || !visitorId) return null;
+
+  const startedAt = Number(record.startedAt ?? record.started_at ?? Date.now());
+  const lastActivityAt = Number(
+    record.lastActivityAt ?? record.last_activity_at ?? record.eventAt ?? Date.now(),
+  );
+  const latitude = normalizeCoordinate(record.latitude, -90, 90);
+  const longitude = normalizeCoordinate(record.longitude, -180, 180);
+
+  return {
+    visitId,
+    visitorId,
+    sessionId: String(record.sessionId ?? record.session_id ?? ""),
+    startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
+    lastActivityAt: Number.isFinite(lastActivityAt) ? lastActivityAt : Date.now(),
+    pathname: String(record.pathname ?? "/"),
+    title: String(record.title ?? ""),
+    hostname: String(record.hostname ?? ""),
+    referrerUrl: String(record.referrerUrl ?? record.referrer_url ?? ""),
+    referrerHost: String(record.referrerHost ?? record.referrer_host ?? ""),
+    country: String(record.country ?? ""),
+    region: String(record.region ?? ""),
+    regionCode: String(record.regionCode ?? record.region_code ?? ""),
+    city: String(record.city ?? ""),
+    continent: String(record.continent ?? ""),
+    timezone: String(record.timezone ?? ""),
+    organization: String(
+      record.organization ?? record.asOrganization ?? record.as_organization ?? "",
+    ),
+    browser: String(record.browser ?? ""),
+    osVersion: String(record.osVersion ?? record.os_version ?? ""),
+    deviceType: String(record.deviceType ?? record.device_type ?? ""),
+    language: String(record.language ?? ""),
+    screenSize: String(record.screenSize ?? record.screen_size ?? ""),
+    latitude,
+    longitude,
   };
 }
 
