@@ -1196,7 +1196,7 @@ export function TeamManagementClient({
                             </div>
                           </AutoTransition>
 
-                          <div className="grid grid-cols-3 gap-x-4 gap-y-4 text-[11px]">
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-[11px] sm:grid-cols-3">
                             <div className="space-y-1">
                               <p className="text-muted-foreground">
                                 {messages.common.views}
