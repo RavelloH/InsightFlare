@@ -41,6 +41,7 @@
     "@number-flow/react": "^0.6.0",
     "@remixicon/react": "^4.9.0",
     "apache-arrow": "21.1.0",
+    "boring-avatars": "^2.0.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "i18n-iso-countries": "^7.14.0",

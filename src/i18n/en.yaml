@@ -130,7 +130,7 @@ filters:
   clear: Clear
 realtime:
   title: Realtime
-  subtitle: Live stream of incoming events and rolling 30-minute metrics.
+  subtitle: View traffic from the last 30 minutes.
   activeNow: Active now
   liveMetrics: Active / 30m Visitors / 30m Views
   visitors30m: 30m Visitors
@@ -141,6 +141,10 @@ realtime:
   reconnecting: Reconnecting
   failed: Failed
   recentEvents: Recent live events
+  enterPage: Enter page
+  leavePage: Exit page
+  viewPage: View page
+  customEvent: Event
 overview:
   title: Traffic Overview
   subtitle: Monitor high-level performance and audience behavior.

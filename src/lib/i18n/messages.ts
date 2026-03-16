@@ -138,6 +138,10 @@ export interface AppMessages {
     reconnecting: string;
     failed: string;
     recentEvents: string;
+    enterPage: string;
+    leavePage: string;
+    viewPage: string;
+    customEvent: string;
   };
   overview: {
     title: string;

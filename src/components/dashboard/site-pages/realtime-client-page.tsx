@@ -14,6 +14,7 @@ import {
   RealtimeSummaryCardsSection,
   parseRealtimeCardFilters,
 } from "@/components/dashboard/site-pages/realtime-summary-cards-section";
+import { RealtimeLogStreamCard } from "@/components/dashboard/realtime-log-stream-card";
 import { RealtimeTrafficTrendCard } from "@/components/dashboard/realtime-traffic-trend-card";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { useLiveSearchParams } from "@/lib/client-history";
@@ -585,6 +586,12 @@ export function RealtimeClientPage({
       <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6">
         <div className="space-y-6">
           <RealtimeTrafficTrendCard
+            locale={locale}
+            messages={messages}
+            hasConnected={realtime.hasConnected}
+            events={realtime.events}
+          />
+          <RealtimeLogStreamCard
             locale={locale}
             messages={messages}
             hasConnected={realtime.hasConnected}

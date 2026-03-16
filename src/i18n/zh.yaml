@@ -130,7 +130,7 @@ filters:
   clear: 清除
 realtime:
   title: 实时
-  subtitle: 实时接收最新访问事件，并滚动统计最近 30 分钟指标。
+  subtitle: 查看最近 30 分钟的访问情况
   activeNow: 当前在线
   liveMetrics: 在线 / 30 分钟访客 / 30 分钟访问
   visitors30m: 30 分钟访客
@@ -141,6 +141,10 @@ realtime:
   reconnecting: 重连中
   failed: 连接失败
   recentEvents: 实时事件
+  enterPage: 进入页面
+  leavePage: 退出页面
+  viewPage: 访问页面
+  customEvent: 事件
 overview:
   title: 访问总览
   subtitle: 查看核心指标与访问趋势。
