@@ -152,6 +152,9 @@ realtime:
   customEvent: Event
   detailsTitle: Event details
   detailsSection: Information
+  visitorHistorySection: Visitor activity
+  visitorHistorySubtitle: All records for this visitor in the current realtime window.
+  visitorHistoryEmpty: No additional records are available for this visitor yet.
   visitorId: Visitor ID
   sessionId: Session ID
   visitId: Visit ID

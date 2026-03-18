@@ -3,6 +3,7 @@
 import {
   memo,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -41,7 +42,7 @@ import {
 } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
-import type { RealtimeEvent } from "@/lib/realtime/types";
+import type { RealtimeEvent, RealtimeVisit } from "@/lib/realtime/types";
 import { cn } from "@/lib/utils";
 
 interface RealtimeLogStreamCardProps {
@@ -49,6 +50,7 @@ interface RealtimeLogStreamCardProps {
   messages: AppMessages;
   hasConnected: boolean;
   events: RealtimeEvent[];
+  visits: RealtimeVisit[];
 }
 
 const PRESENCE_LEAVE_EVENT = "__presence_leave";
@@ -101,6 +103,16 @@ type RealtimeEventDisplayData = {
   countryLabel: string;
   countryFlagCode: string | null;
   sourceLabel: string;
+};
+type RealtimeVisitorVisitHistory = {
+  visitId: string;
+  sessionId: string;
+  startedAt: number;
+  lastActivityAt: number;
+  pathname: string;
+  title: string;
+  hostname: string;
+  events: RealtimeEvent[];
 };
 type GeoTranslationCity = {
   name: string;
@@ -752,6 +764,69 @@ function resolveRealtimeEventDisplayData(
   };
 }
 
+function buildRealtimeVisitorVisitHistory(
+  selectedEvent: RealtimeEvent,
+  events: RealtimeEvent[],
+  visits: RealtimeVisit[],
+): RealtimeVisitorVisitHistory[] {
+  const visitorId = selectedEvent.visitorId.trim();
+  if (!visitorId) return [];
+
+  const visitById = new Map(
+    visits
+      .filter((visit) => visit.visitorId.trim() === visitorId)
+      .map((visit) => [visit.visitId, visit] as const),
+  );
+  const eventGroups = new Map<string, RealtimeEvent[]>();
+
+  for (const event of events) {
+    if (event.visitorId.trim() !== visitorId) continue;
+    const group = eventGroups.get(event.visitId) ?? [];
+    group.push(event);
+    eventGroups.set(event.visitId, group);
+  }
+
+  const visitIds = new Set<string>([
+    ...eventGroups.keys(),
+    ...visitById.keys(),
+  ]);
+
+  return [...visitIds]
+    .map((visitId) => {
+      const visit = visitById.get(visitId);
+      const visitEvents = [...(eventGroups.get(visitId) ?? [])].sort(
+        (left, right) => right.eventAt - left.eventAt,
+      );
+      const mostRecentEvent = visitEvents[0] ?? selectedEvent;
+      const oldestEvent = visitEvents[visitEvents.length - 1] ?? selectedEvent;
+
+      return {
+        visitId,
+        sessionId:
+          visit?.sessionId.trim()
+          || mostRecentEvent.sessionId.trim()
+          || selectedEvent.sessionId.trim(),
+        startedAt: visit?.startedAt ?? oldestEvent.eventAt,
+        lastActivityAt: visit?.lastActivityAt ?? mostRecentEvent.eventAt,
+        pathname:
+          visit?.pathname.trim()
+          || mostRecentEvent.pathname.trim()
+          || "/",
+        title:
+          visit?.title.trim()
+          || mostRecentEvent.title.trim()
+          || mostRecentEvent.pathname.trim()
+          || "/",
+        hostname:
+          visit?.hostname.trim()
+          || mostRecentEvent.hostname.trim()
+          || "",
+        events: visitEvents,
+      };
+    })
+    .sort((left, right) => right.lastActivityAt - left.lastActivityAt);
+}
+
 interface RealtimeLogStreamItemProps {
   event: RealtimeEvent;
   locale: Locale;
@@ -974,6 +1049,122 @@ function RealtimeLogStreamItem({
   );
 }
 
+function RealtimeVisitorHistorySection({
+  locale,
+  messages,
+  now,
+  event,
+  events,
+  visits,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  now: number;
+  event: RealtimeEvent;
+  events: RealtimeEvent[];
+  visits: RealtimeVisit[];
+}) {
+  const visitHistory = useMemo(
+    () => buildRealtimeVisitorVisitHistory(event, events, visits),
+    [event, events, visits],
+  );
+  const totalEventCount = visitHistory.reduce(
+    (sum, visit) => sum + visit.events.length,
+    0,
+  );
+
+  return (
+    <section className="space-y-2">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div className="space-y-1">
+          <h3 className="text-sm font-medium text-foreground">
+            {messages.realtime.visitorHistorySection}
+          </h3>
+          <p className="text-[11px] text-muted-foreground">
+            {messages.realtime.visitorHistorySubtitle}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center rounded-sm border border-border px-2 py-1">
+            {visitHistory.length} {messages.common.sessions}
+          </span>
+          <span className="inline-flex items-center rounded-sm border border-border px-2 py-1">
+            {totalEventCount} {messages.common.event}
+          </span>
+        </div>
+      </div>
+      {visitHistory.length === 0 ? (
+        <div className="flex min-h-24 items-center justify-center rounded-sm border border-dashed border-border text-[11px] text-muted-foreground">
+          {messages.realtime.visitorHistoryEmpty}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {visitHistory.map((visit) => (
+            <Card key={visit.visitId} size="sm">
+              <CardContent className="space-y-3 px-3 sm:px-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 space-y-1">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {visit.title}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                      <span className="truncate">
+                        {messages.common.path}: {visit.pathname}
+                      </span>
+                      <span className="truncate">
+                        {messages.common.hostname}: {visit.hostname || messages.common.unknown}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-mono text-[11px] text-foreground">
+                      {formatRelativeTime(locale, visit.lastActivityAt, now)}
+                    </p>
+                    <p className="font-mono text-[11px] text-muted-foreground">
+                      {shortDateTime(locale, visit.lastActivityAt)}
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-2 text-[11px] text-muted-foreground sm:grid-cols-3">
+                  <span>
+                    {messages.common.startedAt}: {formatDetailDateTime(locale, visit.startedAt)}
+                  </span>
+                  <span>
+                    {messages.realtime.visitId}: {visit.visitId}
+                  </span>
+                  <span>
+                    {messages.realtime.sessionId}: {visit.sessionId || messages.common.unknown}
+                  </span>
+                </div>
+                <div className="space-y-1.5 border-t border-border/70 pt-3">
+                  {visit.events.map((visitEvent) => (
+                    <div
+                      key={visitEvent.id}
+                      className="flex items-center justify-between gap-3 rounded-sm bg-muted/25 px-2 py-1.5"
+                    >
+                      <p className="min-w-0 truncate text-[11px] text-foreground">
+                        {formatLogTitle(
+                          locale,
+                          messages,
+                          visitEvent,
+                          classifyRealtimeLogEvent(visitEvent.eventType.trim()),
+                        )}
+                      </p>
+                      <p className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                        {shortDateTime(locale, visitEvent.eventAt)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function RealtimeLogEventDetailsDialog({
   locale,
   messages,
@@ -981,6 +1172,8 @@ function RealtimeLogEventDetailsDialog({
   event,
   open,
   onOpenChange,
+  events,
+  visits,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -988,6 +1181,8 @@ function RealtimeLogEventDetailsDialog({
   event: RealtimeEvent | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  events: RealtimeEvent[];
+  visits: RealtimeVisit[];
 }) {
   const translationBundle = useGeoStateTranslationBundle({
     locale,
@@ -1231,6 +1426,14 @@ function RealtimeLogEventDetailsDialog({
                 ))}
               </div>
             </section>
+            <RealtimeVisitorHistorySection
+              locale={locale}
+              messages={messages}
+              now={now}
+              event={event}
+              events={events}
+              visits={visits}
+            />
           </div>
         </LogStreamScrollbar>
       </DialogContent>
@@ -1243,6 +1446,7 @@ export function RealtimeLogStreamCard({
   messages,
   hasConnected,
   events,
+  visits,
 }: RealtimeLogStreamCardProps) {
   const reduceLogItemMotion = useReducedMotion() ?? false;
   const [now, setNow] = useState(() => Date.now());
@@ -1327,6 +1531,8 @@ export function RealtimeLogStreamCard({
         locale={locale}
         messages={messages}
         now={now}
+        events={events}
+        visits={visits}
         open={selectedEvent !== null}
         onOpenChange={(open) => {
           if (!open) {

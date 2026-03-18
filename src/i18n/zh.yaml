@@ -152,6 +152,9 @@ realtime:
   customEvent: 事件
   detailsTitle: 事件详情
   detailsSection: 信息
+  visitorHistorySection: 访客记录
+  visitorHistorySubtitle: 查看该访客在当前实时窗口内的全部访问记录。
+  visitorHistoryEmpty: 当前还没有更多该访客的访问记录。
   visitorId: 访客 ID
   sessionId: 会话 ID
   visitId: 访问 ID

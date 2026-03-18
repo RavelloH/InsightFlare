@@ -591,12 +591,13 @@ export function RealtimeClientPage({
             hasConnected={realtime.hasConnected}
             events={realtime.events}
           />
-          <RealtimeLogStreamCard
-            locale={locale}
-            messages={messages}
-            hasConnected={realtime.hasConnected}
-            events={realtime.events}
-          />
+              <RealtimeLogStreamCard
+                locale={locale}
+                messages={messages}
+                hasConnected={realtime.hasConnected}
+                events={realtime.events}
+                visits={realtime.visits}
+              />
           <RealtimeSummaryCardsSection
             locale={locale}
             messages={messages}

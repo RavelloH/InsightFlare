@@ -149,6 +149,9 @@ export interface AppMessages {
     customEvent: string;
     detailsTitle: string;
     detailsSection: string;
+    visitorHistorySection: string;
+    visitorHistorySubtitle: string;
+    visitorHistoryEmpty: string;
     visitorId: string;
     sessionId: string;
     visitId: string;
