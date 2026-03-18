@@ -1,7 +1,7 @@
 const LIGHT_TILE_UPSTREAMS = [
-  "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
   "https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-  "https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+  "https://basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
+  "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
 ] as const;
 
 const DARK_TILE_UPSTREAMS = [
