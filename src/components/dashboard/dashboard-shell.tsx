@@ -269,12 +269,24 @@ export function DashboardShell({
   const isRealtimeRoute = Boolean(
     hasActiveSite &&
       activeSiteBase &&
-      (livePathname === `${activeSiteBase}/realtime` ||
-        livePathname.startsWith(`${activeSiteBase}/realtime/`)),
+      (
+        livePathname === `${activeSiteBase}/realtime` ||
+        livePathname.startsWith(`${activeSiteBase}/realtime/`)
+      ),
   );
-  const contentContainerClassName = isRealtimeRoute
-    ? "min-w-0 w-full"
-    : "mx-auto min-w-0 w-full max-w-[1400px] p-4 md:p-6";
+  const isGeoRoute = Boolean(
+    hasActiveSite &&
+      activeSiteBase &&
+      (
+        livePathname === `${activeSiteBase}/geo` ||
+        livePathname.startsWith(`${activeSiteBase}/geo/`)
+      ),
+  );
+  const contentContainerClassName = isGeoRoute
+    ? "flex min-h-0 flex-1 min-w-0 w-full flex-col [&>[data-page-transition]]:h-full"
+    : isRealtimeRoute
+      ? "min-w-0 w-full"
+      : "mx-auto min-w-0 w-full max-w-[1400px] p-4 md:p-6";
   const mobileCurrentLevelName = hasActiveSite
     ? activeSiteName
     : activeTeamName;

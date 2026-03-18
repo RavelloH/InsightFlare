@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { GeoClientPage } from "@/components/dashboard/site-pages/geo-client-page";
-import { buildSitePath, getTeamSiteContext } from "@/lib/dashboard/server";
+import { getTeamSiteContext } from "@/lib/dashboard/server";
 import { resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 
@@ -20,19 +20,11 @@ export default async function GeoPage({ params }: GeoPageProps) {
   const context = await getTeamSiteContext(teamSlug, siteSlug);
   if (!context) notFound();
 
-  const pathname = buildSitePath(
-    resolvedLocale,
-    context.activeTeam.slug,
-    context.activeSite.slug,
-    "geo",
-  );
-
   return (
     <GeoClientPage
       locale={resolvedLocale}
       messages={messages}
       siteId={context.activeSite.id}
-      pathname={pathname}
     />
   );
 }
