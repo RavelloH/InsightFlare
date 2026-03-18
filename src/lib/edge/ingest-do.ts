@@ -29,10 +29,8 @@ const WS_PRESENCE_LEAVE_EVENT = "__presence_leave";
 const WRITE_BUDGET_PER_INVOCATION = 200;
 const D1_FLUSH_INTERVAL_MS = 60 * 1000;
 const D1_FLUSH_BATCH_SIZE = 100;
-const D1_FLUSH_IMMEDIATE_THRESHOLD = WRITE_BUDGET_PER_INVOCATION;
-const OPEN_VISIT_FLUSH_THRESHOLD = WRITE_BUDGET_PER_INVOCATION * 5;
 const TIMEOUT_FINALIZE_BATCH_SIZE = WRITE_BUDGET_PER_INVOCATION;
-const LOCAL_DEDUPE_RETENTION_MS = 48 * 60 * 60 * 1000;
+const FLUSHED_BUFFER_RETENTION_MS = RECENT_EVENT_RETENTION_MS;
 
 interface RealtimeSnapshotRecord {
   id: string;
@@ -506,7 +504,6 @@ export class IngestDurableObject extends DurableObject {
       await this.handleCustomEvent(record);
     }
 
-    await this.maybeFlushToD1();
     await this.ensureAlarm();
     return new Response("ok", { status: 202 });
   }
@@ -624,8 +621,34 @@ export class IngestDurableObject extends DurableObject {
         updated_at INTEGER NOT NULL
       )
     `);
-    sql.exec("DROP INDEX IF EXISTS idx_buffered_visits_dirty_updated");
-    sql.exec("DROP INDEX IF EXISTS idx_buffered_visits_status_last_activity");
+    sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_buffered_visits_dirty_updated
+      ON buffered_visits(dirty, updated_at, started_at)
+    `);
+    sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_buffered_visits_status_last_activity
+      ON buffered_visits(status, last_activity_at, started_at)
+    `);
+    sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_buffered_visits_site_session_status_started
+      ON buffered_visits(site_id, session_id, status, started_at)
+    `);
+    sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_buffered_visits_site_visit_status
+      ON buffered_visits(site_id, visit_id, status)
+    `);
+    sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_buffered_visits_site_visitor_status
+      ON buffered_visits(site_id, visitor_id, status)
+    `);
+    sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_buffered_visits_started_at
+      ON buffered_visits(started_at)
+    `);
+    sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_buffered_visits_ended_at
+      ON buffered_visits(status, ended_at)
+    `);
     sql.exec(CREATE_BUFFERED_CUSTOM_EVENTS_SQL);
     const eventColumns = sql.exec("PRAGMA table_info(buffered_custom_events)").toArray() as Array<{ name?: string }>;
     const hasLegacyEventContextColumns = eventColumns.some((row) =>
@@ -647,7 +670,14 @@ export class IngestDurableObject extends DurableObject {
       `);
       sql.exec("DROP TABLE buffered_custom_events_legacy");
     }
-    sql.exec("DROP INDEX IF EXISTS idx_buffered_custom_events_dirty_occurred");
+    sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_buffered_custom_events_dirty_occurred
+      ON buffered_custom_events(dirty, created_at, occurred_at)
+    `);
+    sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_buffered_custom_events_occurred
+      ON buffered_custom_events(occurred_at)
+    `);
   }
 
   private sqlAll<T>(query: string, ...bindings: SqlBinding[]): T[] {
@@ -664,23 +694,10 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private hasDirtyRows(): boolean {
-    const visits = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_visits WHERE dirty = 1");
-    if ((visits?.count ?? 0) > 0) return true;
-    const events = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_custom_events WHERE dirty = 1");
-    return (events?.count ?? 0) > 0;
-  }
-
-  private async maybeFlushToD1(): Promise<void> {
-    const visitCount = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_visits WHERE dirty = 1 AND status != 'open'")?.count ?? 0;
-    const eventCount = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_custom_events WHERE dirty = 1")?.count ?? 0;
-    const openVisitCount = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_visits WHERE dirty = 1 AND status = 'open'")?.count ?? 0;
-    if (
-      visitCount >= D1_FLUSH_IMMEDIATE_THRESHOLD ||
-      eventCount >= D1_FLUSH_IMMEDIATE_THRESHOLD ||
-      openVisitCount >= OPEN_VISIT_FLUSH_THRESHOLD
-    ) {
-      await this.flushPendingToD1();
-    }
+    const visits = this.sqlOne<{ ok: number }>("SELECT 1 AS ok FROM buffered_visits WHERE dirty = 1 LIMIT 1");
+    if (visits) return true;
+    const events = this.sqlOne<{ ok: number }>("SELECT 1 AS ok FROM buffered_custom_events WHERE dirty = 1 LIMIT 1");
+    return Boolean(events);
   }
   private async normalizeRecord(envelope: IngestEnvelopePayload): Promise<NormalizedIngestRecord | null> {
     const client = envelope.client ?? ({} as TrackerClientPayload);
@@ -1263,21 +1280,21 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private async ensureAlarm(): Promise<void> {
+    const now = Date.now();
     const existing = await this.doState.storage.getAlarm();
-    if (!existing) {
-      await this.doState.storage.setAlarm(Date.now() + D1_FLUSH_INTERVAL_MS);
+    if (!existing || existing <= now) {
+      await this.doState.storage.setAlarm(now + D1_FLUSH_INTERVAL_MS);
     }
   }
 
   private async hasOpenVisits(): Promise<boolean> {
-    const row = this.sqlOne<{ count: number }>("SELECT count(*) AS count FROM buffered_visits WHERE status = 'open' LIMIT 1");
-    return (row?.count ?? 0) > 0;
+    return this.sqlOne<{ ok: number }>("SELECT 1 AS ok FROM buffered_visits WHERE status = 'open' LIMIT 1") !== null;
   }
 
   private hasOpenVisitsForVisitor(siteId: string, visitorId: string): boolean {
-    const row = this.sqlOne<{ count: number }>(
+    const row = this.sqlOne<{ ok: number }>(
       `
-        SELECT count(*) AS count
+        SELECT 1 AS ok
         FROM buffered_visits
         WHERE site_id = ?
           AND visitor_id = ?
@@ -1287,7 +1304,7 @@ export class IngestDurableObject extends DurableObject {
       siteId,
       visitorId,
     );
-    return (row?.count ?? 0) > 0;
+    return row !== null;
   }
 
   private readRecentRealtimeEvents(
@@ -1656,11 +1673,8 @@ export class IngestDurableObject extends DurableObject {
 
       try {
         const statements = [
-          ...visitRows.map((row) => {
-            const sql = UPSERT_VISIT_SQL;
-            return this.doEnv.DB.prepare(sql).bind(...visitBindings(row));
-          }),
-          ...eventRows.map((row) => this.doEnv.DB.prepare(INSERT_CUSTOM_EVENT_SQL).bind(...customEventBindings(row))),
+          ...visitRows.map((row) => this.prepareVisitStatement(row)),
+          ...eventRows.map((row) => this.prepareCustomEventStatement(row)),
         ];
         if (statements.length > 0) {
           await this.doEnv.DB.batch(statements);
@@ -1668,11 +1682,8 @@ export class IngestDurableObject extends DurableObject {
         this.markVisitRowsFlushed(visitRows);
         this.markCustomEventRowsFlushed(eventRows);
       } catch (error) {
-        const message = clampString(String(error instanceof Error ? error.message : error), 400);
-        this.markVisitRowsFailed(visitRows, message);
-        this.markCustomEventRowsFailed(eventRows, message);
-        console.error("d1_flush_failed", error);
-        return;
+        console.error("d1_flush_batch_failed", error);
+        await this.flushRowsIndividually(visitRows, eventRows);
       }
 
       if (visitRows.length < D1_FLUSH_BATCH_SIZE && eventRows.length < D1_FLUSH_BATCH_SIZE) {
@@ -1688,6 +1699,7 @@ export class IngestDurableObject extends DurableObject {
       `UPDATE buffered_visits SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE visit_id IN (${ids.map(() => "?").join(",")})`,
       ...ids,
     );
+    this.deleteFlushedVisitRows(rows);
   }
 
   private markCustomEventRowsFlushed(rows: BufferedCustomEventRow[]): void {
@@ -1697,6 +1709,7 @@ export class IngestDurableObject extends DurableObject {
       `UPDATE buffered_custom_events SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE event_id IN (${ids.map(() => "?").join(",")})`,
       ...ids,
     );
+    this.deleteFlushedCustomEventRows(rows);
   }
 
   private markVisitRowsFailed(rows: BufferedVisitRow[], errorMessage: string): void {
@@ -1719,15 +1732,95 @@ export class IngestDurableObject extends DurableObject {
     );
   }
 
+  private prepareVisitStatement(row: BufferedVisitRow): D1PreparedStatement {
+    return this.doEnv.DB.prepare(UPSERT_VISIT_SQL).bind(...visitBindings(row));
+  }
+
+  private prepareCustomEventStatement(row: BufferedCustomEventRow): D1PreparedStatement {
+    return this.doEnv.DB.prepare(INSERT_CUSTOM_EVENT_SQL).bind(...customEventBindings(row));
+  }
+
+  private deleteFlushedVisitRows(rows: BufferedVisitRow[]): void {
+    const cutoffMs = Date.now() - FLUSHED_BUFFER_RETENTION_MS;
+    const ids = rows
+      .filter((row) => row.status === "timeout" || this.visitEndedBeforeRealtimeCutoff(row, cutoffMs))
+      .map((row) => row.visitId);
+    if (ids.length === 0) return;
+    this.sqlRun(
+      `DELETE FROM buffered_visits WHERE visit_id IN (${ids.map(() => "?").join(",")})`,
+      ...ids,
+    );
+  }
+
+  private deleteFlushedCustomEventRows(rows: BufferedCustomEventRow[]): void {
+    const cutoffMs = Date.now() - FLUSHED_BUFFER_RETENTION_MS;
+    const ids = rows
+      .filter((row) => row.occurredAt < cutoffMs)
+      .map((row) => row.eventId);
+    if (ids.length === 0) return;
+    this.sqlRun(
+      `DELETE FROM buffered_custom_events WHERE event_id IN (${ids.map(() => "?").join(",")})`,
+      ...ids,
+    );
+  }
+
+  private visitEndedBeforeRealtimeCutoff(
+    row: Pick<BufferedVisitRow, "status" | "startedAt" | "endedAt" | "finalizedAt">,
+    cutoffMs: number,
+  ): boolean {
+    if (row.status === "open") return false;
+    const eventAt = row.finalizedAt ?? row.endedAt ?? row.startedAt;
+    return eventAt < cutoffMs;
+  }
+
+  private async flushRowsIndividually(
+    visitRows: BufferedVisitRow[],
+    eventRows: BufferedCustomEventRow[],
+  ): Promise<void> {
+    for (const row of visitRows) {
+      await this.flushVisitRowIndividually(row);
+    }
+    for (const row of eventRows) {
+      await this.flushCustomEventRowIndividually(row);
+    }
+  }
+
+  private async flushVisitRowIndividually(row: BufferedVisitRow): Promise<void> {
+    try {
+      await this.doEnv.DB.batch([this.prepareVisitStatement(row)]);
+      this.markVisitRowsFlushed([row]);
+    } catch (error) {
+      const message = clampString(String(error instanceof Error ? error.message : error), 400);
+      this.markVisitRowsFailed([row], message);
+      console.error("d1_flush_visit_failed", row.visitId, error);
+    }
+  }
+
+  private async flushCustomEventRowIndividually(row: BufferedCustomEventRow): Promise<void> {
+    try {
+      await this.doEnv.DB.batch([this.prepareCustomEventStatement(row)]);
+      this.markCustomEventRowsFlushed([row]);
+    } catch (error) {
+      const message = clampString(String(error instanceof Error ? error.message : error), 400);
+      this.markCustomEventRowsFailed([row], message);
+      console.error("d1_flush_custom_event_failed", row.eventId, error);
+    }
+  }
+
   private async cleanupBufferedRows(): Promise<void> {
-    const visitCutoff = Date.now() - LOCAL_DEDUPE_RETENTION_MS;
+    const visitCutoff = Date.now() - FLUSHED_BUFFER_RETENTION_MS;
     const eventCutoff = visitCutoff;
     this.sqlRun(
       `
         DELETE FROM buffered_visits
         WHERE dirty = 0
-          AND status != 'open'
-          AND started_at < ?
+          AND (
+            status = 'timeout'
+            OR (
+              status != 'open'
+              AND COALESCE(finalized_at, ended_at, started_at) < ?
+            )
+          )
       `,
       visitCutoff,
     );
