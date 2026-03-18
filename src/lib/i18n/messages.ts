@@ -152,6 +152,11 @@ export interface AppMessages {
     visitorHistorySection: string;
     visitorHistorySubtitle: string;
     visitorHistoryEmpty: string;
+    visitorMapSection: string;
+    visitorMapSubtitle: string;
+    visitorMapUnavailable: string;
+    mapZoomIn: string;
+    mapZoomOut: string;
     visitorId: string;
     sessionId: string;
     visitId: string;

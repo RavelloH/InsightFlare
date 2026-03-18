@@ -155,6 +155,11 @@ realtime:
   visitorHistorySection: Visitor activity
   visitorHistorySubtitle: All records for this visitor in the current realtime window.
   visitorHistoryEmpty: No additional records are available for this visitor yet.
+  visitorMapSection: Visitor location
+  visitorMapSubtitle: Approximate location inferred from this event's coordinates.
+  visitorMapUnavailable: This event does not include usable coordinates.
+  mapZoomIn: Zoom in
+  mapZoomOut: Zoom out
   visitorId: Visitor ID
   sessionId: Session ID
   visitId: Visit ID

@@ -155,6 +155,11 @@ realtime:
   visitorHistorySection: 访客记录
   visitorHistorySubtitle: 查看该访客在当前实时窗口内的全部访问记录。
   visitorHistoryEmpty: 当前还没有更多该访客的访问记录。
+  visitorMapSection: 访客位置
+  visitorMapSubtitle: 根据当前事件里的经纬度展示该访客的大致位置。
+  visitorMapUnavailable: 当前事件没有可用的定位坐标。
+  mapZoomIn: 放大地图
+  mapZoomOut: 缩小地图
   visitorId: 访客 ID
   sessionId: 会话 ID
   visitId: 访问 ID

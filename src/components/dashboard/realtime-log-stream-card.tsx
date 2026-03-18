@@ -17,8 +17,11 @@ import {
 import { Icon } from "@iconify/react";
 import Avatar from "boring-avatars";
 import { RiGlobalLine } from "@remixicon/react";
+import { useTheme } from "next-themes";
 import { OverlayScrollbars } from "overlayscrollbars";
 import type { PartialOptions } from "overlayscrollbars";
+import type { StyleSpecification } from "maplibre-gl";
+import MapView, { type MapRef } from "react-map-gl/maplibre";
 import {
   Card,
   CardContent,
@@ -90,6 +93,12 @@ const GEO_TRANSLATION_API_LOCALE_BY_APP_LOCALE: Record<Locale, string | null> = 
   zh: "zh-CN",
 };
 const GEO_STATE_CODE_PATTERN = /^[A-Z0-9-]{1,16}$/;
+const DETAIL_MAP_HEIGHT_CLASS = "h-56 sm:h-64";
+const DETAIL_MAP_MIN_ZOOM = 1.5;
+const DETAIL_MAP_MAX_ZOOM = 14;
+const DETAIL_MAP_DEFAULT_ZOOM = DETAIL_MAP_MIN_ZOOM;
+
+type EffectiveMapTheme = "light" | "dark";
 
 type RealtimeLogEventKind = "enter" | "exit" | "view" | "custom";
 type RealtimeEventDisplayData = {
@@ -139,6 +148,44 @@ const geoStateTranslationCache = new Map<
   string,
   Promise<GeoStateTranslationBundle | null>
 >();
+
+function buildDetailRasterStyle(theme: EffectiveMapTheme): StyleSpecification {
+  const sourceId = `insightflare-realtime-detail-map-source-${theme}`;
+  const layerId = `insightflare-realtime-detail-map-layer-${theme}`;
+  const endpoint = `/api/map-tiles/{z}/{x}/{y}.png?theme=${theme}`;
+
+  return {
+    version: 8,
+    name: `insightflare-realtime-detail-map-${theme}`,
+    sources: {
+      [sourceId]: {
+        type: "raster",
+        tiles: [endpoint],
+        tileSize: 256,
+        attribution: "© OpenStreetMap contributors © CARTO",
+      },
+    },
+    layers: [
+      {
+        id: layerId,
+        type: "raster",
+        source: sourceId,
+        minzoom: 0,
+        maxzoom: 22,
+      },
+    ],
+  };
+}
+
+function hasValidCoordinate(
+  latitude: number | null | undefined,
+  longitude: number | null | undefined,
+): boolean {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+}
 
 function classifyRealtimeLogEvent(eventType: string): RealtimeLogEventKind {
   if (eventType === "visit") return "enter";
@@ -1165,6 +1212,106 @@ function RealtimeVisitorHistorySection({
   );
 }
 
+function RealtimeVisitorLocationMapSection({
+  messages,
+  event,
+}: {
+  messages: AppMessages;
+  event: RealtimeEvent;
+}) {
+  const mapRef = useRef<MapRef | null>(null);
+  const { resolvedTheme } = useTheme();
+  const effectiveMapTheme: EffectiveMapTheme =
+    resolvedTheme === "dark" ? "dark" : "light";
+  const mapStyle = useMemo(
+    () => buildDetailRasterStyle(effectiveMapTheme),
+    [effectiveMapTheme],
+  );
+  const hasLocation = hasValidCoordinate(event.latitude, event.longitude);
+
+  return (
+    <section className="space-y-2">
+      <div className="space-y-1">
+        <h3 className="text-sm font-medium text-foreground">
+          {messages.realtime.visitorMapSection}
+        </h3>
+        <p className="text-[11px] text-muted-foreground">
+          {messages.realtime.visitorMapSubtitle}
+        </p>
+      </div>
+      {hasLocation ? (
+        <div className="relative overflow-hidden rounded-sm border border-border/70">
+          <div className={DETAIL_MAP_HEIGHT_CLASS}>
+            <MapView
+              ref={mapRef}
+              key={`${effectiveMapTheme}:${event.latitude}:${event.longitude}`}
+              initialViewState={{
+                longitude: event.longitude as number,
+                latitude: event.latitude as number,
+                zoom: DETAIL_MAP_DEFAULT_ZOOM,
+                pitch: 0,
+                bearing: 0,
+              }}
+              minZoom={DETAIL_MAP_MIN_ZOOM}
+              maxZoom={DETAIL_MAP_MAX_ZOOM}
+              mapStyle={mapStyle}
+              attributionControl={false}
+              reuseMaps
+              interactive
+              dragPan={false}
+              dragRotate={false}
+              touchPitch={false}
+              keyboard={false}
+              scrollZoom
+              doubleClickZoom
+              touchZoomRotate
+              style={{ width: "100%", height: "100%" }}
+            />
+          </div>
+          <div className="absolute right-3 top-3 z-10 flex flex-col overflow-hidden rounded-sm border border-border/70 bg-background/92 shadow-sm backdrop-blur">
+            <button
+              type="button"
+              className="flex h-8 w-8 items-center justify-center text-sm text-foreground transition-colors hover:bg-muted"
+              onClick={() => {
+                mapRef.current?.getMap().zoomIn({ duration: 180 });
+              }}
+              aria-label={messages.realtime.mapZoomIn}
+              title={messages.realtime.mapZoomIn}
+            >
+              +
+            </button>
+            <div className="h-px bg-border/70" />
+            <button
+              type="button"
+              className="flex h-8 w-8 items-center justify-center text-sm text-foreground transition-colors hover:bg-muted"
+              onClick={() => {
+                mapRef.current?.getMap().zoomOut({ duration: 180 });
+              }}
+              aria-label={messages.realtime.mapZoomOut}
+              title={messages.realtime.mapZoomOut}
+            >
+              -
+            </button>
+          </div>
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="flex size-6 items-center justify-center rounded-full border border-background/80 bg-foreground/95 shadow-lg shadow-foreground/15">
+              <div className="size-2.5 rounded-full bg-background" />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className={cn(
+          "flex items-center justify-center rounded-sm border border-dashed border-border text-[11px] text-muted-foreground",
+          DETAIL_MAP_HEIGHT_CLASS,
+        )}
+        >
+          {messages.realtime.visitorMapUnavailable}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function RealtimeLogEventDetailsDialog({
   locale,
   messages,
@@ -1433,6 +1580,10 @@ function RealtimeLogEventDetailsDialog({
               event={event}
               events={events}
               visits={visits}
+            />
+            <RealtimeVisitorLocationMapSection
+              messages={messages}
+              event={event}
             />
           </div>
         </LogStreamScrollbar>
