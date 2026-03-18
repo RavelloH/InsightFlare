@@ -52,6 +52,7 @@ interface RealtimeSnapshotRecord {
   timezone: string;
   organization: string;
   browser: string;
+  os: string;
   osVersion: string;
   deviceType: string;
   language: string;
@@ -342,6 +343,15 @@ function toRealtimeScreenSize(
   return `${Math.round(safeWidth)}x${Math.round(safeHeight)}`;
 }
 
+function formatRealtimeOsLabel(os: string, osVersion: string): string {
+  const normalizedOs = os.trim();
+  const normalizedVersion = osVersion.trim();
+  if (normalizedOs && normalizedVersion) {
+    return `${normalizedOs} ${normalizedVersion}`;
+  }
+  return normalizedOs || normalizedVersion;
+}
+
 function toRealtimePayload(record: RealtimeSnapshotRecord): Record<string, unknown> {
   return {
     id: record.id,
@@ -363,7 +373,7 @@ function toRealtimePayload(record: RealtimeSnapshotRecord): Record<string, unkno
     timezone: record.timezone,
     organization: record.organization,
     browser: record.browser,
-    osVersion: record.osVersion,
+    osVersion: formatRealtimeOsLabel(record.os, record.osVersion),
     deviceType: record.deviceType,
     language: record.language,
     screenSize: record.screenSize,
@@ -392,6 +402,7 @@ function toRealtimeVisitPayload(
     | "timezone"
     | "asOrganization"
     | "browser"
+    | "os"
     | "osVersion"
     | "deviceType"
     | "language"
@@ -422,7 +433,7 @@ function toRealtimeVisitPayload(
     timezone: visit.timezone,
     organization: visit.asOrganization,
     browser: visit.browser,
-    osVersion: visit.osVersion,
+    osVersion: formatRealtimeOsLabel(visit.os, visit.osVersion),
     deviceType: visit.deviceType,
     language: visit.language,
     screenSize: toRealtimeScreenSize(visit.screenWidth, visit.screenHeight),
@@ -938,6 +949,7 @@ export class IngestDurableObject extends DurableObject {
       timezone: record.timezone,
       organization: record.asOrganization,
       browser: record.browser,
+      os: record.os,
       osVersion: record.osVersion,
       deviceType: record.deviceType,
       language: record.language,
@@ -954,7 +966,7 @@ export class IngestDurableObject extends DurableObject {
                 session_id AS sessionId, pathname, title, hostname,
                 referrer_url AS referrerUrl, referrer_host AS referrerHost,
                 country, region, region_code AS regionCode, city, continent, timezone,
-                as_organization AS organization, browser, os_version AS osVersion,
+                as_organization AS organization, browser, os, os_version AS osVersion,
                 device_type AS deviceType, language,
                 CASE
                   WHEN screen_width IS NOT NULL AND screen_height IS NOT NULL
@@ -967,7 +979,7 @@ export class IngestDurableObject extends DurableObject {
                 session_id AS sessionId, pathname, title, hostname,
                 referrer_url AS referrerUrl, referrer_host AS referrerHost,
                 country, region, region_code AS regionCode, city, continent, timezone,
-                as_organization AS organization, browser, os_version AS osVersion,
+                as_organization AS organization, browser, os, os_version AS osVersion,
                 device_type AS deviceType, language,
                 CASE
                   WHEN screen_width IS NOT NULL AND screen_height IS NOT NULL
@@ -987,7 +999,7 @@ export class IngestDurableObject extends DurableObject {
       referrerUrl: string; referrerHost: string;
       country: string; region: string; regionCode: string; city: string;
       continent: string; timezone: string; organization: string;
-      browser: string; osVersion: string; deviceType: string;
+      browser: string; os: string; osVersion: string; deviceType: string;
       language: string; screenSize: string;
       latitude: number | null; longitude: number | null;
     }>(visitQuery, ...visitBindings);
@@ -1041,6 +1053,7 @@ export class IngestDurableObject extends DurableObject {
         timezone: visit.timezone,
         organization: visit.organization,
         browser: visit.browser,
+        os: visit.os,
         osVersion: visit.osVersion,
         deviceType: visit.deviceType,
         language: visit.language,
@@ -1077,6 +1090,7 @@ export class IngestDurableObject extends DurableObject {
       timezone: record.timezone,
       organization: record.asOrganization,
       browser: record.browser,
+      os: record.os,
       osVersion: record.osVersion,
       deviceType: record.deviceType,
       language: record.language,
@@ -1347,6 +1361,7 @@ export class IngestDurableObject extends DurableObject {
           timezone,
           organization,
           browser,
+          os,
           osVersion,
           deviceType,
           language,
@@ -1374,6 +1389,7 @@ export class IngestDurableObject extends DurableObject {
             timezone,
             as_organization AS organization,
             browser,
+            os,
             os_version AS osVersion,
             device_type AS deviceType,
             language,
@@ -1407,6 +1423,7 @@ export class IngestDurableObject extends DurableObject {
             COALESCE(v.timezone, '') AS timezone,
             COALESCE(v.as_organization, '') AS organization,
             COALESCE(v.browser, '') AS browser,
+            COALESCE(v.os, '') AS os,
             COALESCE(v.os_version, '') AS osVersion,
             COALESCE(v.device_type, '') AS deviceType,
             COALESCE(v.language, '') AS language,
@@ -1443,6 +1460,7 @@ export class IngestDurableObject extends DurableObject {
             timezone,
             as_organization AS organization,
             browser,
+            os,
             os_version AS osVersion,
             device_type AS deviceType,
             language,
@@ -1856,6 +1874,7 @@ export class IngestDurableObject extends DurableObject {
       timezone: string;
       organization: string;
       browser: string;
+      os: string;
       osVersion: string;
       deviceType: string;
       language: string;
@@ -1884,6 +1903,7 @@ export class IngestDurableObject extends DurableObject {
           timezone,
           as_organization AS organization,
           browser,
+          os,
           os_version AS osVersion,
           device_type AS deviceType,
           language,
@@ -1946,6 +1966,7 @@ export class IngestDurableObject extends DurableObject {
           timezone: visit.timezone,
           organization: visit.organization,
           browser: visit.browser,
+          os: visit.os,
           osVersion: visit.osVersion,
           deviceType: visit.deviceType,
           language: visit.language,
