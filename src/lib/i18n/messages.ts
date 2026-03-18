@@ -18,6 +18,7 @@ export interface AppMessages {
     settings: string;
   };
   common: {
+    id: string;
     views: string;
     sessions: string;
     visitors: string;
@@ -28,6 +29,7 @@ export interface AppMessages {
     path: string;
     title: string;
     hostname: string;
+    referrerHost: string;
     entryPage: string;
     exitPage: string;
     referrer: string;
@@ -41,8 +43,11 @@ export interface AppMessages {
     deviceType: string;
     country: string;
     region: string;
+    regionCode: string;
     city: string;
     continent: string;
+    latitude: string;
+    longitude: string;
     continentLabels: Record<string, string>;
     timezone: string;
     organization: string;
@@ -142,6 +147,13 @@ export interface AppMessages {
     leavePage: string;
     viewPage: string;
     customEvent: string;
+    detailsTitle: string;
+    detailsSection: string;
+    visitorId: string;
+    sessionId: string;
+    visitId: string;
+    eventType: string;
+    eventTime: string;
   };
   overview: {
     title: string;

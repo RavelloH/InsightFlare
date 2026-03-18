@@ -12,6 +12,7 @@ navigation:
   browsers: 浏览器
   settings: 设置
 common:
+  id: ID
   views: 浏览量
   sessions: 会话数
   visitors: 访客数
@@ -22,6 +23,7 @@ common:
   path: 路径
   title: 标题
   hostname: 主机名
+  referrerHost: 来源主机
   entryPage: 入口页面
   exitPage: 出口页面
   referrer: 来源
@@ -35,8 +37,11 @@ common:
   deviceType: 设备类型
   country: 国家
   region: 地区
+  regionCode: 地区代码
   city: 城市
   continent: 大陆
+  latitude: 纬度
+  longitude: 经度
   continentLabels:
     AF: 非洲
     AN: 南极洲
@@ -145,6 +150,13 @@ realtime:
   leavePage: 退出页面
   viewPage: 访问页面
   customEvent: 事件
+  detailsTitle: 事件详情
+  detailsSection: 信息
+  visitorId: 访客 ID
+  sessionId: 会话 ID
+  visitId: 访问 ID
+  eventType: 事件类型
+  eventTime: 事件时间
 overview:
   title: 访问总览
   subtitle: 查看核心指标与访问趋势。

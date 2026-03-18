@@ -12,6 +12,7 @@ navigation:
   browsers: Browsers
   settings: Settings
 common:
+  id: ID
   views: Views
   sessions: Sessions
   visitors: Visitors
@@ -22,6 +23,7 @@ common:
   path: Path
   title: Title
   hostname: Hostname
+  referrerHost: Referrer Host
   entryPage: Entry Page
   exitPage: Exit Page
   referrer: Referrer
@@ -35,8 +37,11 @@ common:
   deviceType: Device Type
   country: Country
   region: Region
+  regionCode: Region Code
   city: City
   continent: Continent
+  latitude: Latitude
+  longitude: Longitude
   continentLabels:
     AF: Africa
     AN: Antarctica
@@ -145,6 +150,13 @@ realtime:
   leavePage: Exit page
   viewPage: View page
   customEvent: Event
+  detailsTitle: Event details
+  detailsSection: Information
+  visitorId: Visitor ID
+  sessionId: Session ID
+  visitId: Visit ID
+  eventType: Event type
+  eventTime: Event time
 overview:
   title: Traffic Overview
   subtitle: Monitor high-level performance and audience behavior.

@@ -11,7 +11,6 @@ import {
 import { Icon } from "@iconify/react";
 import Avatar from "boring-avatars";
 import { RiGlobalLine } from "@remixicon/react";
-import { motion, useReducedMotion } from "motion/react";
 import { OverlayScrollbars } from "overlayscrollbars";
 import type { PartialOptions } from "overlayscrollbars";
 import {
@@ -20,11 +19,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
 import {
+  resolveContinentLabel,
   resolveCountryFlagCode,
   resolveCountryLabel,
+  resolveLanguageLabel,
 } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -68,18 +75,41 @@ const PANEL_SCROLLBAR_OPTIONS = {
     autoHideSuspend: false,
   },
 } satisfies PartialOptions;
-const LOG_STREAM_ITEM_TRANSITION = {
-  duration: 0.2,
-  ease: [0.22, 1, 0.36, 1],
-} as const;
-const LOG_STREAM_SLOT_TRANSITION = {
-  duration: 0.24,
-  ease: [0.22, 1, 0.36, 1],
-} as const;
-const LOG_STREAM_ITEM_GAP_PX = 8;
+const GEO_VALUE_SEPARATOR = "::";
+const GEO_TRANSLATION_API_BASE_URL = "https://locale.ravelloh.com";
+const GEO_TRANSLATION_API_LOCALE_BY_APP_LOCALE: Record<Locale, string | null> = {
+  en: null,
+  zh: "zh-CN",
+};
+const GEO_STATE_CODE_PATTERN = /^[A-Z0-9-]{1,16}$/;
 
 type RealtimeLogEventKind = "enter" | "exit" | "view" | "custom";
-type IncomingInsertionPhase = "idle" | "measuring" | "shifting" | "revealing";
+type RealtimeEventDisplayData = {
+  kind: RealtimeLogEventKind;
+  title: string;
+  avatarSeed: string;
+  browserLabel: string;
+  browserIconKey: string;
+  osLabel: string;
+  osIconKey: string;
+  countryLabel: string;
+  countryFlagCode: string | null;
+  sourceLabel: string;
+};
+type GeoTranslationCity = {
+  name: string;
+  nameDefault: string;
+  nativeName: string;
+};
+type GeoStateTranslationBundle = {
+  stateName: string;
+  cities: GeoTranslationCity[];
+};
+
+const geoStateTranslationCache = new Map<
+  string,
+  Promise<GeoStateTranslationBundle | null>
+>();
 
 function classifyRealtimeLogEvent(eventType: string): RealtimeLogEventKind {
   if (eventType === "visit") return "enter";
@@ -440,6 +470,271 @@ function formatRelativeTime(locale: Locale, timestamp: number, now: number): str
   return formatter.format(diffDays, "day");
 }
 
+function formatDetailDateTime(locale: Locale, value: number): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "--";
+  return new Intl.DateTimeFormat(intlLocale(locale), {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
+}
+
+function formatCoordinateValue(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return value.toFixed(4);
+}
+
+function normalizeDetailLabel(value: string, unknownLabel: string): string {
+  const normalized = value.trim();
+  return normalized || unknownLabel;
+}
+
+function resolveGeoTranslationApiLocale(locale: Locale): string | null {
+  return GEO_TRANSLATION_API_LOCALE_BY_APP_LOCALE[locale] ?? null;
+}
+
+function normalizeGeoTranslationLookupValue(value: string): string {
+  return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
+}
+
+function isSameGeoLabel(left: string, right: string): boolean {
+  const normalizedLeft = normalizeGeoTranslationLookupValue(left);
+  const normalizedRight = normalizeGeoTranslationLookupValue(right);
+  return Boolean(
+    normalizedLeft && normalizedRight && normalizedLeft === normalizedRight,
+  );
+}
+
+function parseGeoStateTranslationBundle(
+  payload: unknown,
+): GeoStateTranslationBundle | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as {
+    state?: unknown;
+    cities?: unknown;
+  };
+
+  const state =
+    record.state && typeof record.state === "object"
+      ? (record.state as Record<string, unknown>)
+      : null;
+  const stateName = typeof state?.name === "string" ? state.name.trim() : "";
+
+  const cities = Array.isArray(record.cities)
+    ? record.cities.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const city = entry as Record<string, unknown>;
+        const name = typeof city.name === "string" ? city.name.trim() : "";
+        const nameDefault =
+          typeof city.name_default === "string" ? city.name_default.trim() : "";
+        const nativeName =
+          typeof city.native === "string" ? city.native.trim() : "";
+        if (!name && !nameDefault && !nativeName) return [];
+        return [{ name, nameDefault, nativeName }];
+      })
+    : [];
+
+  return {
+    stateName,
+    cities,
+  };
+}
+
+async function fetchGeoStateTranslationBundle(
+  apiLocale: string,
+  countryCode: string,
+  stateCode: string,
+): Promise<GeoStateTranslationBundle | null> {
+  const normalizedCountry = countryCode.trim().toUpperCase();
+  const normalizedState = stateCode.trim().toUpperCase();
+  if (
+    !normalizedCountry ||
+    !normalizedState ||
+    !GEO_STATE_CODE_PATTERN.test(normalizedState)
+  ) {
+    return null;
+  }
+
+  const cacheKey = `${apiLocale}::${normalizedCountry}::${normalizedState}`;
+  const cached = geoStateTranslationCache.get(cacheKey);
+  if (cached) return cached;
+
+  const request = fetch(
+    `${GEO_TRANSLATION_API_BASE_URL}/${encodeURIComponent(apiLocale)}/${encodeURIComponent(normalizedCountry)}/${encodeURIComponent(normalizedState)}/`,
+    {
+      method: "GET",
+      cache: "force-cache",
+    },
+  )
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const payload = (await response.json()) as unknown;
+      return parseGeoStateTranslationBundle(payload);
+    })
+    .catch(() => null);
+
+  geoStateTranslationCache.set(cacheKey, request);
+  return request;
+}
+
+function resolveLocalizedCityName(
+  bundle: GeoStateTranslationBundle | null,
+  cityNameDefault: string,
+): string | null {
+  if (!bundle) return null;
+  const target = normalizeGeoTranslationLookupValue(cityNameDefault);
+  if (!target) return null;
+
+  for (const city of bundle.cities) {
+    const localized = normalizeGeoTranslationLookupValue(city.name);
+    const fallback = normalizeGeoTranslationLookupValue(city.nameDefault);
+    const nativeName = normalizeGeoTranslationLookupValue(city.nativeName);
+    if (target === fallback || target === localized || target === nativeName) {
+      return city.name || city.nameDefault || city.nativeName || null;
+    }
+  }
+
+  return null;
+}
+
+function useGeoStateTranslationBundle({
+  locale,
+  countryCode,
+  stateCode,
+  enabled,
+}: {
+  locale: Locale;
+  countryCode: string;
+  stateCode: string;
+  enabled: boolean;
+}): GeoStateTranslationBundle | null {
+  const [bundle, setBundle] = useState<GeoStateTranslationBundle | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      setBundle(null);
+      return;
+    }
+
+    const apiLocale = resolveGeoTranslationApiLocale(locale);
+    if (!apiLocale) {
+      setBundle(null);
+      return;
+    }
+
+    const normalizedCountry = countryCode.trim().toUpperCase();
+    const normalizedState = stateCode.trim().toUpperCase();
+    if (
+      !normalizedCountry ||
+      !normalizedState ||
+      !GEO_STATE_CODE_PATTERN.test(normalizedState)
+    ) {
+      setBundle(null);
+      return;
+    }
+
+    let active = true;
+    fetchGeoStateTranslationBundle(
+      apiLocale,
+      normalizedCountry,
+      normalizedState,
+    ).then((nextBundle) => {
+      if (!active) return;
+      setBundle(nextBundle);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [countryCode, enabled, locale, stateCode]);
+
+  return bundle;
+}
+
+function formatLocalizedGeoValue(
+  localizedValue: string,
+  rawValue: string,
+  unknownLabel: string,
+): string {
+  const normalizedLocalized = normalizeDetailLabel(localizedValue, unknownLabel);
+  const normalizedRaw = normalizeDetailLabel(rawValue, unknownLabel);
+  if (
+    normalizedRaw === unknownLabel ||
+    isSameGeoLabel(normalizedLocalized, normalizedRaw)
+  ) {
+    return normalizedLocalized;
+  }
+  return `${normalizedLocalized} (${normalizedRaw})`;
+}
+
+function resolveRealtimeRegionLabel(
+  rawValue: string,
+  messages: AppMessages,
+): string {
+  const normalized = rawValue.trim();
+  if (!normalized) return messages.common.unknown;
+
+  const segments = normalized
+    .split(GEO_VALUE_SEPARATOR)
+    .map((segment) => segment.trim());
+  if (segments.length < 3) {
+    return normalizeDetailLabel(normalized, messages.common.unknown);
+  }
+
+  const rawStateName = segments.slice(2).join(GEO_VALUE_SEPARATOR).trim();
+  return normalizeDetailLabel(rawStateName, messages.common.unknown);
+}
+
+function resolveRealtimeCityLabel(
+  rawValue: string,
+  messages: AppMessages,
+): string {
+  const normalized = rawValue.trim();
+  if (!normalized) return messages.common.unknown;
+
+  const segments = normalized
+    .split(GEO_VALUE_SEPARATOR)
+    .map((segment) => segment.trim());
+  if (segments.length < 3) {
+    return normalizeDetailLabel(normalized, messages.common.unknown);
+  }
+
+  const rawCity = segments.length >= 4
+    ? segments.slice(3).join(GEO_VALUE_SEPARATOR).trim()
+    : segments.slice(2).join(GEO_VALUE_SEPARATOR).trim();
+  return normalizeDetailLabel(rawCity, messages.common.unknown);
+}
+
+function resolveRealtimeEventDisplayData(
+  locale: Locale,
+  messages: AppMessages,
+  event: RealtimeEvent,
+): RealtimeEventDisplayData {
+  const kind = classifyRealtimeLogEvent(event.eventType.trim());
+  const { label: countryLabel, code: countryCode } = resolveCountryLabel(
+    event.country,
+    locale,
+    messages.common.unknown,
+  );
+
+  return {
+    kind,
+    title: formatLogTitle(locale, messages, event, kind),
+    avatarSeed: event.visitorId.trim() || event.sessionId.trim() || event.id,
+    browserLabel: event.browser.trim() || messages.common.unknown,
+    browserIconKey: resolveBrowserIconKey(event.browser),
+    osLabel: event.osVersion.trim() || messages.common.unknown,
+    osIconKey: resolveOsIconKey(event.osVersion),
+    countryLabel,
+    countryFlagCode: resolveCountryFlagCode(countryCode, locale),
+    sourceLabel: event.referrerHost.trim() || messages.overview.direct,
+  };
+}
+
 interface RealtimeLogStreamItemProps {
   event: RealtimeEvent;
   locale: Locale;
@@ -466,6 +761,50 @@ function areRealtimeLogStreamItemPropsEqual(
     && previousProps.event.referrerHost === nextProps.event.referrerHost;
 }
 
+function RealtimeEventDetailValue({
+  icon,
+  value,
+  mono = false,
+}: {
+  icon?: ReactNode;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <span className={cn(
+      "inline-flex max-w-full items-center gap-2 break-words text-[11px] text-foreground sm:justify-end",
+      mono && "font-mono",
+    )}
+    >
+      {icon ? (
+        <span className="inline-flex size-4 shrink-0 items-center justify-center">
+          {icon}
+        </span>
+      ) : null}
+      <span className="min-w-0 break-all sm:text-right">{value}</span>
+    </span>
+  );
+}
+
+function RealtimeEventDetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="grid items-start gap-1 px-4 py-3 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-center sm:gap-4">
+      <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+        {label}
+      </p>
+      <div className="min-w-0 text-left text-[11px] text-foreground sm:self-center sm:text-right">
+        {value}
+      </div>
+    </div>
+  );
+}
+
 const RealtimeLogStreamItemCard = memo(
   function RealtimeLogStreamItemCard({
     event,
@@ -473,20 +812,17 @@ const RealtimeLogStreamItemCard = memo(
     messages,
     now,
   }: RealtimeLogStreamItemProps) {
-    const kind = classifyRealtimeLogEvent(event.eventType.trim());
-    const avatarSeed =
-      event.visitorId.trim() || event.sessionId.trim() || event.id;
-    const browserLabel = event.browser.trim() || messages.common.unknown;
-    const browserIconKey = resolveBrowserIconKey(event.browser);
-    const osLabel = event.osVersion.trim() || messages.common.unknown;
-    const osIconKey = resolveOsIconKey(event.osVersion);
-    const { label: countryLabel, code: countryCode } = resolveCountryLabel(
-      event.country,
-      locale,
-      messages.common.unknown,
-    );
-    const countryFlagCode = resolveCountryFlagCode(countryCode, locale);
-    const sourceLabel = event.referrerHost.trim() || messages.overview.direct;
+    const {
+      avatarSeed,
+      browserLabel,
+      browserIconKey,
+      countryFlagCode,
+      countryLabel,
+      osIconKey,
+      osLabel,
+      sourceLabel,
+      title,
+    } = resolveRealtimeEventDisplayData(locale, messages, event);
 
     return (
       <Card size="sm">
@@ -504,7 +840,7 @@ const RealtimeLogStreamItemCard = memo(
             <div className="flex min-w-0 flex-1 items-stretch justify-between gap-4">
               <div className="min-w-0 space-y-2">
                 <p className="min-w-0 truncate text-sm font-medium text-foreground">
-                  {formatLogTitle(locale, messages, event, kind)}
+                  {title}
                 </p>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
                   <MetaItem
@@ -577,22 +913,300 @@ function RealtimeLogStreamItem({
   locale,
   messages,
   now,
-}: RealtimeLogStreamItemProps) {
+  onSelect,
+}: RealtimeLogStreamItemProps & {
+  onSelect: (event: RealtimeEvent) => void;
+}) {
+  const title = formatLogTitle(
+    locale,
+    messages,
+    event,
+    classifyRealtimeLogEvent(event.eventType.trim()),
+  );
+
   return (
     <div role="listitem">
-      <RealtimeLogStreamItemCard
-        event={event}
-        locale={locale}
-        messages={messages}
-        now={now}
-      />
+      <button
+        type="button"
+        className="block w-full rounded-none text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => {
+          onSelect(event);
+        }}
+        aria-label={title}
+      >
+        <RealtimeLogStreamItemCard
+          event={event}
+          locale={locale}
+          messages={messages}
+          now={now}
+        />
+      </button>
     </div>
   );
 }
 
-function haveSameEventOrder(left: RealtimeEvent[], right: RealtimeEvent[]): boolean {
-  if (left.length !== right.length) return false;
-  return left.every((event, index) => event.id === right[index]?.id);
+function RealtimeLogEventDetailsDialog({
+  locale,
+  messages,
+  now,
+  event,
+  open,
+  onOpenChange,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  now: number;
+  event: RealtimeEvent | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const translationBundle = useGeoStateTranslationBundle({
+    locale,
+    countryCode: event?.country ?? "",
+    stateCode: event?.regionCode ?? "",
+    enabled: open && Boolean(event),
+  });
+
+  if (!event) return null;
+
+  const {
+    browserIconKey,
+    browserLabel,
+    countryFlagCode,
+    countryLabel,
+    osIconKey,
+    osLabel,
+    sourceLabel,
+  } = resolveRealtimeEventDisplayData(locale, messages, event);
+  const continentLabel = resolveContinentLabel(
+    event.continent,
+    messages.common.unknown,
+    messages.common.continentLabels,
+  );
+  const regionLabel = resolveRealtimeRegionLabel(event.region, messages);
+  const cityLabel = resolveRealtimeCityLabel(event.city, messages);
+  const localizedRegionLabel =
+    translationBundle?.stateName.trim() || regionLabel;
+  const localizedCityLabel =
+    resolveLocalizedCityName(translationBundle, cityLabel) || cityLabel;
+  const languageLabel = resolveLanguageLabel(
+    event.language,
+    locale,
+    messages.common.unknown,
+  ).label;
+  const detailRows = [
+    {
+      label: messages.common.id,
+      value: <RealtimeEventDetailValue value={event.id.trim() || messages.common.unknown} mono />,
+    },
+    {
+      label: messages.realtime.visitorId,
+      value: <RealtimeEventDetailValue value={event.visitorId.trim() || messages.common.unknown} mono />,
+    },
+    {
+      label: messages.realtime.sessionId,
+      value: <RealtimeEventDetailValue value={event.sessionId.trim() || messages.common.unknown} mono />,
+    },
+    {
+      label: messages.realtime.visitId,
+      value: <RealtimeEventDetailValue value={event.visitId.trim() || messages.common.unknown} mono />,
+    },
+    {
+      label: messages.realtime.eventType,
+      value: <RealtimeEventDetailValue value={event.eventType.trim() || messages.common.unknown} mono />,
+    },
+    {
+      label: messages.realtime.eventTime,
+      value: <RealtimeEventDetailValue value={formatDetailDateTime(locale, event.eventAt)} mono />,
+    },
+    {
+      label: messages.common.title,
+      value: <RealtimeEventDetailValue value={event.title.trim() || messages.common.unknown} />,
+    },
+    {
+      label: messages.common.path,
+      value: <RealtimeEventDetailValue value={event.pathname.trim() || "/"} mono />,
+    },
+    {
+      label: messages.common.hostname,
+      value: <RealtimeEventDetailValue value={event.hostname.trim() || messages.common.unknown} mono />,
+    },
+    {
+      label: messages.common.browser,
+      value: (
+        <RealtimeEventDetailValue
+          icon={(
+            <LogoIcon
+              src={`${BROWSER_ICON_DIR}/${browserIconKey}.svg`}
+              fallbackSrc={`${BROWSER_ICON_DIR}/${UNKNOWN_ICON_KEY}.svg`}
+              invertInDark={BROWSER_APPLE_ICON_KEYS.has(browserIconKey)}
+            />
+          )}
+          value={browserLabel}
+        />
+      ),
+    },
+    {
+      label: messages.common.operatingSystem,
+      value: (
+        <RealtimeEventDetailValue
+          icon={(
+            <LogoIcon
+              src={`${OS_ICON_DIR}/${osIconKey}.svg`}
+              fallbackSrc={`${OS_ICON_DIR}/${UNKNOWN_ICON_KEY}.svg`}
+              invertInDark={OS_APPLE_ICON_KEYS.has(osIconKey)}
+            />
+          )}
+          value={osLabel}
+        />
+      ),
+    },
+    {
+      label: messages.common.deviceType,
+      value: <RealtimeEventDetailValue value={event.deviceType.trim() || messages.common.unknown} />,
+    },
+    {
+      label: messages.common.country,
+      value: (
+        <RealtimeEventDetailValue
+          icon={countryFlagCode ? (
+            <Icon
+              icon={`flagpack:${countryFlagCode.toLowerCase()}`}
+              style={{ width: 16, height: 12 }}
+              className="block shrink-0"
+            />
+          ) : (
+            <RiGlobalLine className="size-3.5 text-muted-foreground" />
+          )}
+          value={
+            event.country.trim() && event.country.trim() !== countryLabel
+              ? `${countryLabel} (${event.country.trim()})`
+              : countryLabel
+          }
+        />
+      ),
+    },
+    {
+      label: messages.common.region,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatLocalizedGeoValue(
+            localizedRegionLabel,
+            regionLabel,
+            messages.common.unknown,
+          )}
+        />
+      ),
+    },
+    {
+      label: messages.common.regionCode,
+      value: <RealtimeEventDetailValue value={event.regionCode.trim() || messages.common.unknown} mono />,
+    },
+    {
+      label: messages.common.city,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatLocalizedGeoValue(
+            localizedCityLabel,
+            cityLabel,
+            messages.common.unknown,
+          )}
+        />
+      ),
+    },
+    {
+      label: messages.common.continent,
+      value: (
+        <RealtimeEventDetailValue
+          value={
+            event.continent.trim() && event.continent.trim() !== continentLabel
+              ? `${continentLabel} (${event.continent.trim()})`
+              : continentLabel
+          }
+        />
+      ),
+    },
+    {
+      label: messages.common.timezone,
+      value: <RealtimeEventDetailValue value={event.timezone.trim() || messages.common.unknown} mono />,
+    },
+    {
+      label: messages.common.referrerHost,
+      value: <RealtimeEventDetailValue value={event.referrerHost.trim() || messages.overview.direct} mono />,
+    },
+    {
+      label: messages.common.referrer,
+      value: (
+        <RealtimeEventDetailValue
+          icon={(
+            <DomainOrUrlIcon
+              label={sourceLabel}
+              unknownLabel={messages.overview.direct}
+            />
+          )}
+          value={event.referrerUrl.trim() || sourceLabel}
+          mono
+        />
+      ),
+    },
+    {
+      label: messages.common.screenSize,
+      value: <RealtimeEventDetailValue value={event.screenSize.trim() || messages.common.unknown} mono />,
+    },
+    {
+      label: messages.common.language,
+      value: <RealtimeEventDetailValue value={languageLabel} mono />,
+    },
+    {
+      label: messages.common.organization,
+      value: <RealtimeEventDetailValue value={event.organization.trim() || messages.common.unknown} />,
+    },
+    {
+      label: messages.common.latitude,
+      value: <RealtimeEventDetailValue value={formatCoordinateValue(event.latitude)} mono />,
+    },
+    {
+      label: messages.common.longitude,
+      value: <RealtimeEventDetailValue value={formatCoordinateValue(event.longitude)} mono />,
+    },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl gap-0 p-0">
+        <DialogHeader className="border-b px-4 py-4 sm:px-5">
+          <DialogTitle>{messages.realtime.detailsTitle}</DialogTitle>
+        </DialogHeader>
+        <LogStreamScrollbar
+          className="max-h-[min(78vh,44rem)]"
+          syncKey={event.id}
+        >
+          <div className="space-y-4 p-4 sm:p-5">
+            <RealtimeLogStreamItemCard
+              event={event}
+              locale={locale}
+              messages={messages}
+              now={now}
+            />
+            <section className="space-y-2">
+              <h3 className="text-sm font-medium text-foreground">
+                {messages.realtime.detailsSection}
+              </h3>
+              <div className="divide-y divide-border/70 ring-1 ring-foreground/10">
+                {detailRows.map((row) => (
+                  <RealtimeEventDetailRow
+                    key={row.label}
+                    label={row.label}
+                    value={row.value}
+                  />
+                ))}
+              </div>
+            </section>
+          </div>
+        </LogStreamScrollbar>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export function RealtimeLogStreamCard({
@@ -603,27 +1217,11 @@ export function RealtimeLogStreamCard({
 }: RealtimeLogStreamCardProps) {
   const [now, setNow] = useState(() => Date.now());
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_EVENTS);
-  const [displayedEvents, setDisplayedEvents] = useState<RealtimeEvent[]>([]);
-  const [queuedEvents, setQueuedEvents] = useState<RealtimeEvent[]>([]);
-  const [incomingEvent, setIncomingEvent] = useState<RealtimeEvent | null>(null);
-  const [incomingPhase, setIncomingPhase] = useState<IncomingInsertionPhase>("idle");
-  const [incomingSlotHeight, setIncomingSlotHeight] = useState(0);
-  const reduceMotion = useReducedMotion();
-  const incomingMeasureRef = useRef<HTMLDivElement | null>(null);
-  const incomingEventRef = useRef<RealtimeEvent | null>(null);
-  const desiredVisibleEventsRef = useRef<RealtimeEvent[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<RealtimeEvent | null>(null);
 
   const visibleEvents = events.slice(0, visibleCount);
   const hasMoreEvents = visibleCount < events.length;
   const isInitialLoading = !hasConnected && visibleEvents.length === 0;
-
-  useEffect(() => {
-    desiredVisibleEventsRef.current = visibleEvents;
-  }, [visibleEvents]);
-
-  useEffect(() => {
-    incomingEventRef.current = incomingEvent;
-  }, [incomingEvent]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -642,155 +1240,6 @@ export function RealtimeLogStreamCard({
     });
   }, [events.length]);
 
-  useEffect(() => {
-    if (visibleEvents.length === 0) {
-      if (displayedEvents.length > 0) setDisplayedEvents([]);
-      if (queuedEvents.length > 0) setQueuedEvents([]);
-      if (incomingEvent) setIncomingEvent(null);
-      if (incomingPhase !== "idle") setIncomingPhase("idle");
-      if (incomingSlotHeight !== 0) setIncomingSlotHeight(0);
-      return;
-    }
-
-    const displayedIds = new Set(displayedEvents.map((event) => event.id));
-    const queuedIds = new Set(queuedEvents.map((event) => event.id));
-    const knownIds = new Set(displayedIds);
-    for (const queuedId of queuedIds) knownIds.add(queuedId);
-    if (incomingEvent) knownIds.add(incomingEvent.id);
-
-    if (displayedEvents.length === 0 && knownIds.size === 0) {
-      if (!haveSameEventOrder(displayedEvents, visibleEvents)) {
-        setDisplayedEvents(visibleEvents);
-      }
-      return;
-    }
-
-    const firstKnownIndex = visibleEvents.findIndex((event) => knownIds.has(event.id));
-    if (firstKnownIndex === -1) {
-      if (!haveSameEventOrder(displayedEvents, visibleEvents)) {
-        setDisplayedEvents(visibleEvents);
-      }
-      if (queuedEvents.length > 0) setQueuedEvents([]);
-      if (incomingEvent) setIncomingEvent(null);
-      if (incomingPhase !== "idle") setIncomingPhase("idle");
-      if (incomingSlotHeight !== 0) setIncomingSlotHeight(0);
-      return;
-    }
-
-    const nextTopIncoming = visibleEvents
-      .slice(0, firstKnownIndex)
-      .filter((event) => !knownIds.has(event.id));
-    if (nextTopIncoming.length > 0) {
-      setQueuedEvents((previous) => {
-        const previousIds = new Set(previous.map((event) => event.id));
-        const additions = [...nextTopIncoming]
-          .reverse()
-          .filter((event) => !previousIds.has(event.id) && incomingEvent?.id !== event.id);
-        if (additions.length === 0) return previous;
-        return [...previous, ...additions];
-      });
-    }
-
-    const retainedDisplayed = visibleEvents
-      .slice(firstKnownIndex)
-      .filter((event) => displayedIds.has(event.id));
-    const tailMissing = visibleEvents
-      .slice(firstKnownIndex)
-      .filter((event) => !knownIds.has(event.id));
-    const nextDisplayedEvents = [...retainedDisplayed, ...tailMissing];
-    if (!haveSameEventOrder(displayedEvents, nextDisplayedEvents)) {
-      setDisplayedEvents(nextDisplayedEvents);
-    }
-  }, [
-    displayedEvents,
-    incomingEvent,
-    incomingPhase,
-    incomingSlotHeight,
-    queuedEvents,
-    visibleEvents,
-  ]);
-
-  useEffect(() => {
-    if (incomingEvent || queuedEvents.length === 0) return;
-    const [nextIncomingEvent, ...remainingQueuedEvents] = queuedEvents;
-    setQueuedEvents(remainingQueuedEvents);
-    setIncomingEvent(nextIncomingEvent);
-    setIncomingPhase("measuring");
-    setIncomingSlotHeight(0);
-  }, [incomingEvent, queuedEvents]);
-
-  useEffect(() => {
-    if (!incomingEvent) return;
-    const measureNode = incomingMeasureRef.current;
-    if (!measureNode) return;
-
-    const updateHeight = () => {
-      const nextHeight = Math.ceil(measureNode.getBoundingClientRect().height);
-      if (nextHeight <= 0) return;
-      setIncomingSlotHeight((previous) =>
-        previous === nextHeight ? previous : nextHeight,
-      );
-    };
-
-    updateHeight();
-    const resizeObserver = new ResizeObserver(() => {
-      updateHeight();
-    });
-    resizeObserver.observe(measureNode);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [incomingEvent, locale, messages]);
-
-  useEffect(() => {
-    if (incomingPhase !== "measuring" || incomingSlotHeight <= 0) return;
-    const frameId = window.requestAnimationFrame(() => {
-      setIncomingPhase("shifting");
-    });
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [incomingPhase, incomingSlotHeight]);
-
-  useEffect(() => {
-    if (incomingPhase !== "shifting") return;
-    const timeoutId = window.setTimeout(() => {
-      setIncomingPhase("revealing");
-    }, reduceMotion ? 0 : LOG_STREAM_SLOT_TRANSITION.duration * 1000);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [incomingPhase, reduceMotion]);
-
-  useEffect(() => {
-    if (incomingPhase !== "revealing") return;
-    const timeoutId = window.setTimeout(() => {
-      const nextIncomingEvent = incomingEventRef.current;
-      if (!nextIncomingEvent) return;
-
-      const desiredVisibleEvents = desiredVisibleEventsRef.current;
-      const desiredVisibleIds = new Set(
-        desiredVisibleEvents.map((event) => event.id),
-      );
-
-      setDisplayedEvents((previous) => {
-        const mergedIds = new Set<string>();
-        for (const event of [nextIncomingEvent, ...previous]) {
-          if (!desiredVisibleIds.has(event.id) || mergedIds.has(event.id)) continue;
-          mergedIds.add(event.id);
-        }
-        return desiredVisibleEvents.filter((event) => mergedIds.has(event.id));
-      });
-      setIncomingEvent(null);
-      setIncomingPhase("idle");
-      setIncomingSlotHeight(0);
-    }, reduceMotion ? 0 : LOG_STREAM_ITEM_TRANSITION.duration * 1000);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [incomingPhase, reduceMotion]);
-
   const loadMoreEvents = () => {
     if (!hasMoreEvents) return;
     setVisibleCount((previous) =>
@@ -799,93 +1248,59 @@ export function RealtimeLogStreamCard({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{messages.realtime.recentEvents}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {isInitialLoading ? (
-          <div className="flex min-h-56 items-center justify-center text-muted-foreground">
-            <span className="inline-flex items-center gap-2">
-              <Spinner className="size-3.5" />
-              {messages.common.loading}
-            </span>
-          </div>
-        ) : displayedEvents.length === 0 && !incomingEvent ? (
-          <div className="flex min-h-56 items-center justify-center text-muted-foreground">
-            {messages.common.noData}
-          </div>
-        ) : (
-          <LogStreamScrollbar
-            className="max-h-[30rem]"
-            syncKey={`${displayedEvents.length}:${events.length}:${incomingEvent?.id ?? "none"}:${incomingPhase}:${incomingSlotHeight}`}
-            onReachEnd={hasMoreEvents ? loadMoreEvents : null}
-          >
-            <div className="relative p-1">
-              {incomingEvent ? (
-                <>
-                  <div
-                    ref={incomingMeasureRef}
-                    className="pointer-events-none invisible absolute inset-x-1 top-1"
-                    aria-hidden="true"
-                  >
-                    <div style={{ paddingBottom: LOG_STREAM_ITEM_GAP_PX }}>
-                      <RealtimeLogStreamItemCard
-                        event={incomingEvent}
-                        locale={locale}
-                        messages={messages}
-                        now={now}
-                      />
-                    </div>
-                  </div>
-                  <motion.div
-                    className="pointer-events-none absolute inset-x-1 top-1 z-10"
-                    initial={false}
-                    animate={
-                      incomingPhase === "revealing"
-                        ? { opacity: 1, y: 0 }
-                        : { opacity: 0, y: reduceMotion ? 0 : 8 }
-                    }
-                    transition={reduceMotion ? { duration: 0 } : LOG_STREAM_ITEM_TRANSITION}
-                  >
-                    <div style={{ paddingBottom: LOG_STREAM_ITEM_GAP_PX }}>
-                      <RealtimeLogStreamItemCard
-                        event={incomingEvent}
-                        locale={locale}
-                        messages={messages}
-                        now={now}
-                      />
-                    </div>
-                  </motion.div>
-                  <motion.div
-                    aria-hidden="true"
-                    className="overflow-hidden"
-                    initial={false}
-                    animate={{
-                      height:
-                        incomingPhase === "shifting" || incomingPhase === "revealing"
-                          ? incomingSlotHeight
-                          : 0,
-                    }}
-                    transition={reduceMotion ? { duration: 0 } : LOG_STREAM_SLOT_TRANSITION}
-                  />
-                </>
-              ) : null}
-              <div className="space-y-2" role="list">
-                {displayedEvents.map((event) => (
-                  <RealtimeLogStreamItem
-                    key={event.id}
-                    event={event}
-                    locale={locale}
-                    messages={messages}
-                    now={now}
-                  />
-                ))}
-              </div>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>{messages.realtime.recentEvents}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isInitialLoading ? (
+            <div className="flex min-h-56 items-center justify-center text-muted-foreground">
+              <span className="inline-flex items-center gap-2">
+                <Spinner className="size-3.5" />
+                {messages.common.loading}
+              </span>
             </div>
-          </LogStreamScrollbar>
-        )}
-      </CardContent>
-    </Card>
+          ) : visibleEvents.length === 0 ? (
+            <div className="flex min-h-56 items-center justify-center text-muted-foreground">
+              {messages.common.noData}
+            </div>
+          ) : (
+            <LogStreamScrollbar
+              className="max-h-[30rem]"
+              syncKey={`${visibleEvents.length}:${events.length}`}
+              onReachEnd={hasMoreEvents ? loadMoreEvents : null}
+            >
+              <div className="p-1">
+                <div className="space-y-2" role="list">
+                  {visibleEvents.map((event) => (
+                    <RealtimeLogStreamItem
+                      key={event.id}
+                      event={event}
+                      locale={locale}
+                      messages={messages}
+                      now={now}
+                      onSelect={setSelectedEvent}
+                    />
+                  ))}
+                </div>
+              </div>
+            </LogStreamScrollbar>
+          )}
+        </CardContent>
+      </Card>
+      <RealtimeLogEventDetailsDialog
+        event={selectedEvent}
+        locale={locale}
+        messages={messages}
+        now={now}
+        open={selectedEvent !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedEvent(null);
+          }
+        }}
+      />
+    </>
   );
 }
