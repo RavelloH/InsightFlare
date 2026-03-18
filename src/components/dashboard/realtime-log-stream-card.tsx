@@ -8,6 +8,11 @@ import {
   type ReactNode,
   type SyntheticEvent,
 } from "react";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+} from "motion/react";
 import { Icon } from "@iconify/react";
 import Avatar from "boring-avatars";
 import { RiGlobalLine } from "@remixicon/react";
@@ -25,6 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Clickable } from "@/components/ui/clickable";
 import { Spinner } from "@/components/ui/spinner";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
 import {
@@ -105,6 +111,17 @@ type GeoStateTranslationBundle = {
   stateName: string;
   cities: GeoTranslationCity[];
 };
+
+const LOG_STREAM_ITEM_LAYOUT_TRANSITION = {
+  layout: {
+    duration: 0.34,
+    ease: [0.22, 1, 0.36, 1],
+  },
+  opacity: {
+    duration: 0.18,
+    ease: [0.22, 1, 0.36, 1],
+  },
+} as const;
 
 const geoStateTranslationCache = new Map<
   string,
@@ -825,7 +842,7 @@ const RealtimeLogStreamItemCard = memo(
     } = resolveRealtimeEventDisplayData(locale, messages, event);
 
     return (
-      <Card size="sm">
+      <Card size="sm" className="w-full">
         <CardContent className="px-3">
           <div className="flex items-start gap-3">
             <div className="shrink-0 self-center">
@@ -914,8 +931,10 @@ function RealtimeLogStreamItem({
   messages,
   now,
   onSelect,
+  reduceMotion,
 }: RealtimeLogStreamItemProps & {
   onSelect: (event: RealtimeEvent) => void;
+  reduceMotion: boolean;
 }) {
   const title = formatLogTitle(
     locale,
@@ -925,14 +944,24 @@ function RealtimeLogStreamItem({
   );
 
   return (
-    <div role="listitem">
-      <button
-        type="button"
-        className="block w-full rounded-none text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    <motion.li
+      layout={reduceMotion ? false : "position"}
+      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10 }}
+      transition={LOG_STREAM_ITEM_LAYOUT_TRANSITION}
+      className="list-none"
+    >
+      <Clickable
+        className="block w-full rounded-none text-left focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => {
           onSelect(event);
         }}
+        enableHoverScale={false}
+        tapScale={0.985}
+        duration={0.14}
         aria-label={title}
+        title={title}
       >
         <RealtimeLogStreamItemCard
           event={event}
@@ -940,8 +969,8 @@ function RealtimeLogStreamItem({
           messages={messages}
           now={now}
         />
-      </button>
-    </div>
+      </Clickable>
+    </motion.li>
   );
 }
 
@@ -1215,6 +1244,7 @@ export function RealtimeLogStreamCard({
   hasConnected,
   events,
 }: RealtimeLogStreamCardProps) {
+  const reduceLogItemMotion = useReducedMotion() ?? false;
   const [now, setNow] = useState(() => Date.now());
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_EVENTS);
   const [selectedEvent, setSelectedEvent] = useState<RealtimeEvent | null>(null);
@@ -1272,18 +1302,21 @@ export function RealtimeLogStreamCard({
               onReachEnd={hasMoreEvents ? loadMoreEvents : null}
             >
               <div className="p-1">
-                <div className="space-y-2" role="list">
-                  {visibleEvents.map((event) => (
-                    <RealtimeLogStreamItem
-                      key={event.id}
-                      event={event}
-                      locale={locale}
-                      messages={messages}
-                      now={now}
-                      onSelect={setSelectedEvent}
-                    />
-                  ))}
-                </div>
+                <ul className="m-0 list-none space-y-2 p-0">
+                  <AnimatePresence initial={false} mode="popLayout">
+                    {visibleEvents.map((event) => (
+                      <RealtimeLogStreamItem
+                        key={event.id}
+                        event={event}
+                        locale={locale}
+                        messages={messages}
+                        now={now}
+                        onSelect={setSelectedEvent}
+                        reduceMotion={reduceLogItemMotion}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </ul>
               </div>
             </LogStreamScrollbar>
           )}
