@@ -39,7 +39,7 @@ interface RealtimeLogStreamCardProps {
 }
 
 const PRESENCE_LEAVE_EVENT = "__presence_leave";
-const RELATIVE_TIME_REFRESH_MS = 15_000;
+const RELATIVE_TIME_REFRESH_MS = 1_000;
 const INITIAL_VISIBLE_EVENTS = 24;
 const LOAD_MORE_STEP = 24;
 const LOAD_MORE_THRESHOLD_PX = 160;
@@ -308,16 +308,24 @@ function DomainOrUrlIcon({
 function MetaItem({
   icon,
   label,
+  hideLabelOnMobile = false,
 }: {
   icon: ReactNode;
   label: string;
+  hideLabelOnMobile?: boolean;
 }) {
   return (
-    <span className="inline-flex max-w-full items-center gap-1.5 text-[11px] text-muted-foreground">
+    <span
+      className="inline-flex max-w-full items-center gap-1.5 text-[11px] text-muted-foreground"
+      aria-label={hideLabelOnMobile ? label : undefined}
+      title={hideLabelOnMobile ? label : undefined}
+    >
       <span className="inline-flex size-4 shrink-0 items-center justify-center">
         {icon}
       </span>
-      <span className="truncate">{label}</span>
+      <span className={cn(hideLabelOnMobile ? "hidden sm:inline sm:truncate" : "truncate")}>
+        {label}
+      </span>
     </span>
   );
 }
@@ -493,7 +501,7 @@ const RealtimeLogStreamItemCard = memo(
                 aria-hidden="true"
               />
             </div>
-            <div className="flex min-w-0 flex-1 items-start justify-between gap-4">
+            <div className="flex min-w-0 flex-1 items-stretch justify-between gap-4">
               <div className="min-w-0 space-y-2">
                 <p className="min-w-0 truncate text-sm font-medium text-foreground">
                   {formatLogTitle(locale, messages, event, kind)}
@@ -508,6 +516,7 @@ const RealtimeLogStreamItemCard = memo(
                       />
                     )}
                     label={browserLabel}
+                    hideLabelOnMobile
                   />
                   <MetaItem
                     icon={(
@@ -518,6 +527,7 @@ const RealtimeLogStreamItemCard = memo(
                       />
                     )}
                     label={osLabel}
+                    hideLabelOnMobile
                   />
                   <MetaItem
                     icon={countryFlagCode ? (
@@ -527,9 +537,10 @@ const RealtimeLogStreamItemCard = memo(
                         className="block shrink-0"
                       />
                     ) : (
-                      <RiGlobalLine className="size-3.5 text-muted-foreground" />
-                    )}
+                        <RiGlobalLine className="size-3.5 text-muted-foreground" />
+                      )}
                     label={countryLabel}
+                    hideLabelOnMobile
                   />
                   <MetaItem
                     icon={(
@@ -542,13 +553,15 @@ const RealtimeLogStreamItemCard = memo(
                   />
                 </div>
               </div>
-              <div className="shrink-0 text-right">
-                <p className="font-mono text-[11px] text-foreground">
-                  {formatRelativeTime(locale, event.eventAt, now)}
-                </p>
-                <p className="font-mono text-[11px] text-muted-foreground">
-                  {shortDateTime(locale, event.eventAt)}
-                </p>
+              <div className="shrink-0 self-stretch">
+                <div className="flex h-full min-w-[7.5rem] flex-col items-end justify-between text-right">
+                  <p className="font-mono text-[11px] text-foreground">
+                    {formatRelativeTime(locale, event.eventAt, now)}
+                  </p>
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    {shortDateTime(locale, event.eventAt)}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
