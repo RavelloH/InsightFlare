@@ -7,7 +7,7 @@ navigation:
   sessions: Sessions
   events: Events
   visitors: Visitors
-  geo: Geo
+  geo: Location
   devices: Devices
   browsers: Browsers
   settings: Settings
@@ -199,8 +199,8 @@ visitors:
   title: Visitors
   subtitle: Visitor-level breakdown and recency.
 geo:
-  title: Geo
-  subtitle: Traffic distribution by country.
+  title: Location Analysis
+  subtitle: Study traffic performance for any location.
 devices:
   title: Devices
   subtitle: Device type distribution.

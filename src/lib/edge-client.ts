@@ -297,9 +297,26 @@ export interface OverviewGeoPointsData {
     longitude: number;
     timestampMs: number;
     country: string;
+    region?: string;
+    regionCode?: string;
+    city?: string;
   }>;
   countryCounts: Array<{
     country: string;
+    views: number;
+    sessions: number;
+    visitors: number;
+  }>;
+  regionCounts: Array<{
+    value: string;
+    label: string;
+    views: number;
+    sessions: number;
+    visitors: number;
+  }>;
+  cityCounts: Array<{
+    value: string;
+    label: string;
     views: number;
     sessions: number;
     visitors: number;
@@ -312,6 +329,17 @@ export interface OverviewTabData {
     label: string;
     views: number;
     sessions: number;
+  }>;
+}
+
+export interface OverviewGeoTabData {
+  ok: boolean;
+  data: Array<{
+    value: string;
+    label: string;
+    views: number;
+    sessions: number;
+    visitors: number;
   }>;
 }
 

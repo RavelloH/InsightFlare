@@ -7,7 +7,7 @@ navigation:
   sessions: 会话
   events: 事件
   visitors: 访客
-  geo: 地区
+  geo: 位置
   devices: 设备
   browsers: 浏览器
   settings: 设置
@@ -199,8 +199,8 @@ visitors:
   title: 访客分析
   subtitle: 访客级别明细与最近活跃情况。
 geo:
-  title: 地区分析
-  subtitle: 按国家查看访问分布。
+  title: 位置分析
+  subtitle: 研究任意地点的访问效果
 devices:
   title: 设备分析
   subtitle: 按设备类型查看访问分布。

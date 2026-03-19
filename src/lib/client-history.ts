@@ -40,6 +40,19 @@ export function replaceUrlWithoutNavigation(target: string): void {
   window.dispatchEvent(new Event(URL_STATE_CHANGE_EVENT));
 }
 
+export function pushUrlWithoutNavigation(target: string): void {
+  if (typeof window === "undefined") return;
+
+  const nextUrl = new URL(target, window.location.href);
+  const nextLocation = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+  const currentLocation = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
+  if (nextLocation === currentLocation) return;
+
+  window.history.pushState(window.history.state, "", nextLocation);
+  window.dispatchEvent(new Event(URL_STATE_CHANGE_EVENT));
+}
+
 export function useLiveSearchParams(): URLSearchParams {
   const search = useSyncExternalStore(
     subscribeToUrlState,

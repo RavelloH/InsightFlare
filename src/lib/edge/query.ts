@@ -1,6 +1,10 @@
 import type { Env } from "./types";
 import { ONE_DAY_MS, ONE_HOUR_MS, coerceNumber } from "./utils";
 import { requireSession } from "./session-auth";
+import {
+  buildLocalityLocationValue,
+  buildRegionLocationValue,
+} from "@/lib/dashboard/geo-location";
 
 const RETENTION_DAYS = 365;
 const PRIVATE_CACHE_HEADERS = {
@@ -83,6 +87,14 @@ interface DimensionRow {
   sessions: number;
 }
 
+interface GeoTabRow {
+  value: string;
+  label: string;
+  views: number;
+  sessions: number;
+  visitors: number;
+}
+
 interface PageRow {
   pathname: string;
   query: string;
@@ -110,6 +122,9 @@ interface GeoPointRow {
   longitude: number;
   timestampMs: number;
   country: string;
+  region: string;
+  regionCode: string;
+  city: string;
 }
 
 interface GeoCountryCountRow {
@@ -119,9 +134,19 @@ interface GeoCountryCountRow {
   visitors: number;
 }
 
+interface GeoDimensionCountRow {
+  value: string;
+  label: string;
+  views: number;
+  sessions: number;
+  visitors: number;
+}
+
 interface GeoPointAggregate {
   points: GeoPointRow[];
   countryCounts: GeoCountryCountRow[];
+  regionCounts: GeoDimensionCountRow[];
+  cityCounts: GeoDimensionCountRow[];
 }
 
 interface ClientDimensionTabs {
@@ -133,12 +158,12 @@ interface ClientDimensionTabs {
 }
 
 interface GeoDimensionTabs {
-  country: DimensionRow[];
-  region: DimensionRow[];
-  city: DimensionRow[];
-  continent: DimensionRow[];
-  timezone: DimensionRow[];
-  organization: DimensionRow[];
+  country: GeoTabRow[];
+  region: GeoTabRow[];
+  city: GeoTabRow[];
+  continent: GeoTabRow[];
+  timezone: GeoTabRow[];
+  organization: GeoTabRow[];
 }
 
 interface PublicSiteEnvelope {
@@ -403,6 +428,16 @@ function mapTabs(rows: DimensionRow[]) {
   }));
 }
 
+function mapGeoTabs(rows: GeoTabRow[]) {
+  return rows.map((row) => ({
+    value: row.value,
+    label: row.label,
+    views: row.views,
+    sessions: row.sessions,
+    visitors: row.visitors,
+  }));
+}
+
 function mapReferrers(rows: ReferrerRow[]) {
   return rows.map((row) => ({
     referrer: row.referrer,
@@ -517,6 +552,10 @@ interface DimensionAccumulator {
   sessions: Set<string>;
 }
 
+interface GeoDimensionAccumulator extends DimensionAccumulator {
+  visitors: Set<string>;
+}
+
 function addDimensionValue(
   buckets: Map<string, DimensionAccumulator>,
   rawValue: string,
@@ -542,6 +581,67 @@ function finalizeDimensionBuckets(
     }))
     .sort((left, right) => right.views - left.views || right.sessions - left.sessions || left.value.localeCompare(right.value))
     .slice(0, limit);
+}
+
+function addGeoDimensionValue(
+  buckets: Map<string, GeoDimensionAccumulator>,
+  rawValue: string,
+  sessionId: string,
+  visitorId: string,
+): void {
+  const value = rawValue.trim();
+  if (!value) return;
+  const bucket = buckets.get(value) ?? {
+    views: 0,
+    sessions: new Set<string>(),
+    visitors: new Set<string>(),
+  };
+  bucket.views += 1;
+  if (sessionId) bucket.sessions.add(sessionId);
+  if (visitorId) bucket.visitors.add(visitorId);
+  buckets.set(value, bucket);
+}
+
+function finalizeGeoDimensionBuckets(
+  buckets: Map<string, GeoDimensionAccumulator>,
+  limit: number,
+  labelResolver?: (value: string) => string,
+): GeoTabRow[] {
+  return [...buckets.entries()]
+    .map(([value, bucket]) => ({
+      value,
+      label: labelResolver ? labelResolver(value) : value,
+      views: bucket.views,
+      sessions: bucket.sessions.size,
+      visitors: bucket.visitors.size,
+    }))
+    .sort((left, right) =>
+      right.views - left.views ||
+      right.sessions - left.sessions ||
+      right.visitors - left.visitors ||
+      left.label.localeCompare(right.label),
+    )
+    .slice(0, limit);
+}
+
+function geoTabLabel(value: string, tab: OverviewGeoTabKey): string {
+  const parsed = parseGeoFilterValue(value);
+  if (tab === "country") {
+    return parsed?.country || value;
+  }
+  if (tab === "region") {
+    return parsed?.regionName || parsed?.regionCode || parsed?.country || value;
+  }
+  if (tab === "city") {
+    return (
+      parsed?.city ||
+      parsed?.regionName ||
+      parsed?.regionCode ||
+      parsed?.country ||
+      value
+    );
+  }
+  return value;
 }
 
 async function resolvePrivateSite(
@@ -1567,7 +1667,8 @@ async function handleOverviewGeoTab(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = withoutGeoFilter(parseFilters(url));
+  const rawFilters = parseFilters(url);
+  const filters = tab === "country" ? withoutGeoFilter(rawFilters) : rawFilters;
   const limit = parseLimit(url, 100, 200);
   const tabs = await buildOverviewGeoDimensionTabs(
     env,
@@ -1578,7 +1679,7 @@ async function handleOverviewGeoTab(
   );
   return jsonResponse({
     ok: true,
-    data: mapTabs(tabs[tab]),
+    data: mapGeoTabs(tabs[tab]),
   });
 }
 
@@ -1710,7 +1811,9 @@ async function handleOverviewGeoPoints(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = withoutGeoFilter(parseFilters(url));
+  const filters = parseBooleanSearchParam(url, "applyGeoFilter")
+    ? parseFilters(url)
+    : withoutGeoFilter(parseFilters(url));
   const limit = parseLimit(url, 5000, 20000);
   const aggregate = await queryGeoPointAggregate(
     env,
@@ -1723,6 +1826,8 @@ async function handleOverviewGeoPoints(
     ok: true,
     data: aggregate.points,
     countryCounts: aggregate.countryCounts,
+    regionCounts: aggregate.regionCounts,
+    cityCounts: aggregate.cityCounts,
   });
 }
 
@@ -2252,6 +2357,7 @@ async function queryGeoPointsFromD1(
   limit: number,
 ): Promise<GeoPointAggregate> {
   const filter = buildVisitFilterSql(filters);
+  const parsedGeo = parseGeoFilterValue(filters.geo);
   const pointsSql = `
 WITH
 ${buildVisitSourceCte()},
@@ -2264,7 +2370,10 @@ SELECT
   latitude,
   longitude,
   started_at AS timestampMs,
-  country
+  country,
+  region,
+  region_code AS regionCode,
+  city
 FROM filtered_visits
 WHERE
   latitude IS NOT NULL
@@ -2283,9 +2392,17 @@ LIMIT ?
     longitude: Number(row.longitude ?? 0),
     timestampMs: Number(row.timestampMs ?? 0),
     country: String(row.country ?? ""),
+    region: String(row.region ?? ""),
+    regionCode: String(row.regionCode ?? ""),
+    city: String(row.city ?? ""),
   }));
 
-  const countrySql = `
+  const countryCounts: GeoCountryCountRow[] = [];
+  const regionCounts: GeoDimensionCountRow[] = [];
+  const cityCounts: GeoDimensionCountRow[] = [];
+
+  if (!parsedGeo?.country) {
+    const countrySql = `
 WITH
 ${buildVisitSourceCte()},
 filtered_visits AS (
@@ -2306,20 +2423,142 @@ GROUP BY country
 ORDER BY views DESC, sessions DESC, country ASC
 LIMIT 300
 `;
-  const countryCounts = (await queryD1All<Record<string, unknown>>(
-    env,
-    countrySql,
-    [...visitSourceBindings(siteId, window), ...filter.bindings],
-  )).map((row) => ({
-    country: String(row.country ?? ""),
-    views: Number(row.views ?? 0),
-    sessions: Number(row.sessions ?? 0),
-    visitors: Number(row.visitors ?? 0),
-  }));
+    countryCounts.push(
+      ...(await queryD1All<Record<string, unknown>>(
+        env,
+        countrySql,
+        [...visitSourceBindings(siteId, window), ...filter.bindings],
+      )).map((row) => ({
+        country: String(row.country ?? ""),
+        views: Number(row.views ?? 0),
+        sessions: Number(row.sessions ?? 0),
+        visitors: Number(row.visitors ?? 0),
+      })),
+    );
+  } else if (!parsedGeo.regionCode && !parsedGeo.regionName) {
+    const regionSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    country,
+    region,
+    region_code AS regionCode,
+    session_id AS sessionId,
+    visitor_id AS visitorId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  country,
+  regionCode,
+  region,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors
+FROM filtered_visits
+WHERE
+  TRIM(COALESCE(country, '')) != ''
+  AND (
+    TRIM(COALESCE(regionCode, '')) != ''
+    OR TRIM(COALESCE(region, '')) != ''
+  )
+GROUP BY country, regionCode, region
+ORDER BY views DESC, sessions DESC, region ASC, regionCode ASC
+LIMIT 400
+`;
+    regionCounts.push(
+      ...(await queryD1All<Record<string, unknown>>(
+        env,
+        regionSql,
+        [...visitSourceBindings(siteId, window), ...filter.bindings],
+      ))
+        .map((row) => {
+          const country = String(row.country ?? "").trim().toUpperCase();
+          const regionCode = String(row.regionCode ?? "").trim().toUpperCase();
+          const regionName = String(row.region ?? "").trim() || regionCode;
+          const value = buildRegionLocationValue(
+            country,
+            regionCode || regionName,
+            regionName || regionCode,
+          );
+          if (!value) return null;
+          return {
+            value,
+            label: regionName || regionCode,
+            views: Number(row.views ?? 0),
+            sessions: Number(row.sessions ?? 0),
+            visitors: Number(row.visitors ?? 0),
+          };
+        })
+        .filter((row): row is GeoDimensionCountRow => Boolean(row)),
+    );
+  } else {
+    const citySql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    country,
+    region,
+    region_code AS regionCode,
+    city,
+    session_id AS sessionId,
+    visitor_id AS visitorId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  country,
+  regionCode,
+  region,
+  city,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors
+FROM filtered_visits
+WHERE
+  TRIM(COALESCE(country, '')) != ''
+  AND TRIM(COALESCE(city, '')) != ''
+GROUP BY country, regionCode, region, city
+ORDER BY views DESC, sessions DESC, city ASC
+LIMIT 600
+`;
+    cityCounts.push(
+      ...(await queryD1All<Record<string, unknown>>(
+        env,
+        citySql,
+        [...visitSourceBindings(siteId, window), ...filter.bindings],
+      ))
+        .map((row) => {
+          const country = String(row.country ?? "").trim().toUpperCase();
+          const regionCode = String(row.regionCode ?? "").trim().toUpperCase();
+          const regionName = String(row.region ?? "").trim() || regionCode;
+          const city = String(row.city ?? "").trim();
+          const value = buildLocalityLocationValue(
+            country,
+            regionCode || null,
+            regionName || null,
+            city,
+          );
+          if (!value || !city) return null;
+          return {
+            value,
+            label: city,
+            views: Number(row.views ?? 0),
+            sessions: Number(row.sessions ?? 0),
+            visitors: Number(row.visitors ?? 0),
+          };
+        })
+        .filter((row): row is GeoDimensionCountRow => Boolean(row)),
+    );
+  }
 
   return {
     points,
     countryCounts,
+    regionCounts,
+    cityCounts,
   };
 }
 
@@ -2468,6 +2707,7 @@ ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
     session_id AS sessionId,
+    visitor_id AS visitorId,
     country,
     ${regionValueExpr()} AS region,
     ${cityValueExpr()} AS city,
@@ -2477,7 +2717,7 @@ filtered_visits AS (
   FROM visit_source
   ${filter.clause}
 )
-SELECT sessionId, country, region, city, continent, timezone, asOrganization
+SELECT sessionId, visitorId, country, region, city, continent, timezone, asOrganization
 FROM filtered_visits
 `;
   const rows = await queryD1All<Record<string, unknown>>(
@@ -2486,30 +2726,42 @@ FROM filtered_visits
     [...visitSourceBindings(siteId, window), ...filter.bindings],
   );
 
-  const country = new Map<string, DimensionAccumulator>();
-  const region = new Map<string, DimensionAccumulator>();
-  const city = new Map<string, DimensionAccumulator>();
-  const continent = new Map<string, DimensionAccumulator>();
-  const timezone = new Map<string, DimensionAccumulator>();
-  const organization = new Map<string, DimensionAccumulator>();
+  const country = new Map<string, GeoDimensionAccumulator>();
+  const region = new Map<string, GeoDimensionAccumulator>();
+  const city = new Map<string, GeoDimensionAccumulator>();
+  const continent = new Map<string, GeoDimensionAccumulator>();
+  const timezone = new Map<string, GeoDimensionAccumulator>();
+  const organization = new Map<string, GeoDimensionAccumulator>();
 
   for (const row of rows) {
     const sessionId = String(row.sessionId ?? "");
-    addDimensionValue(country, String(row.country ?? ""), sessionId);
-    addDimensionValue(region, String(row.region ?? ""), sessionId);
-    addDimensionValue(city, String(row.city ?? ""), sessionId);
-    addDimensionValue(continent, String(row.continent ?? ""), sessionId);
-    addDimensionValue(timezone, String(row.timezone ?? ""), sessionId);
-    addDimensionValue(organization, String(row.asOrganization ?? ""), sessionId);
+    const visitorId = String(row.visitorId ?? "");
+    addGeoDimensionValue(country, String(row.country ?? ""), sessionId, visitorId);
+    addGeoDimensionValue(region, String(row.region ?? ""), sessionId, visitorId);
+    addGeoDimensionValue(city, String(row.city ?? ""), sessionId, visitorId);
+    addGeoDimensionValue(continent, String(row.continent ?? ""), sessionId, visitorId);
+    addGeoDimensionValue(timezone, String(row.timezone ?? ""), sessionId, visitorId);
+    addGeoDimensionValue(
+      organization,
+      String(row.asOrganization ?? ""),
+      sessionId,
+      visitorId,
+    );
   }
 
   return {
-    country: finalizeDimensionBuckets(country, limit),
-    region: finalizeDimensionBuckets(region, limit),
-    city: finalizeDimensionBuckets(city, limit),
-    continent: finalizeDimensionBuckets(continent, limit),
-    timezone: finalizeDimensionBuckets(timezone, limit),
-    organization: finalizeDimensionBuckets(organization, limit),
+    country: finalizeGeoDimensionBuckets(country, limit, (value) =>
+      geoTabLabel(value, "country"),
+    ),
+    region: finalizeGeoDimensionBuckets(region, limit, (value) =>
+      geoTabLabel(value, "region"),
+    ),
+    city: finalizeGeoDimensionBuckets(city, limit, (value) =>
+      geoTabLabel(value, "city"),
+    ),
+    continent: finalizeGeoDimensionBuckets(continent, limit),
+    timezone: finalizeGeoDimensionBuckets(timezone, limit),
+    organization: finalizeGeoDimensionBuckets(organization, limit),
   };
 }
 

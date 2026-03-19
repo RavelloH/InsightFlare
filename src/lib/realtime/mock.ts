@@ -3400,11 +3400,15 @@ function generateDemoClientDimensionTabs(
 function generateDemoGeoDimensionTabs(
   siteId: string,
   params: Record<string, string | number>,
+  options?: {
+    ignoreGeo?: boolean;
+  },
 ): Record<string, unknown> {
   const limit = parseDemoLimit(params.limit, 100, 1, 500);
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
-  const filters = withoutDemoGeoFilter(parseDemoFilters(params));
+  const rawFilters = parseDemoFilters(params);
+  const filters = options?.ignoreGeo ? withoutDemoGeoFilter(rawFilters) : rawFilters;
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
   const tabs = collectGeoTabs(dataset, filtered, limit);
@@ -3422,7 +3426,11 @@ function generateDemoGeoPoints(
   const limit = parseDemoLimit(params.limit, 5000, 50, 20_000);
   const from = parseDemoNumber(params.from, Math.max(0, Date.now() - 24 * 3600 * 1000));
   const to = parseDemoNumber(params.to, Date.now());
-  const filters = withoutDemoGeoFilter(parseDemoFilters(params));
+  const rawFilters = parseDemoFilters(params);
+  const filters = parseDemoBoolean(params.applyGeoFilter)
+    ? rawFilters
+    : withoutDemoGeoFilter(rawFilters);
+  const parsedGeo = parseDemoGeoFilterValue(filters.geo);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
   const orderedVisits = [...filtered.visits].sort((left, right) => right.startedAt - left.startedAt);
@@ -3452,6 +3460,69 @@ function generateDemoGeoPoints(
     }))
     .sort((left, right) => right.views - left.views || left.country.localeCompare(right.country));
 
+  const regionBuckets = new Map<
+    string,
+    { label: string; views: number; sessions: Set<string>; visitors: Set<string> }
+  >();
+  const cityBuckets = new Map<
+    string,
+    { label: string; views: number; sessions: Set<string>; visitors: Set<string> }
+  >();
+
+  for (const visit of filtered.visits) {
+    if (visit.region) {
+      const regionBucket = regionBuckets.get(visit.region) ?? {
+        label: parseDemoRegionLabel(visit.region)?.regionName || visit.region,
+        views: 0,
+        sessions: new Set<string>(),
+        visitors: new Set<string>(),
+      };
+      regionBucket.views += dataset.viewWeight;
+      regionBucket.sessions.add(visit.sessionId);
+      regionBucket.visitors.add(visit.visitorId);
+      regionBuckets.set(visit.region, regionBucket);
+    }
+
+    if (visit.city) {
+      const cityBucket = cityBuckets.get(visit.city) ?? {
+        label: parseDemoCityLabel(visit.city)?.cityName || visit.city,
+        views: 0,
+        sessions: new Set<string>(),
+        visitors: new Set<string>(),
+      };
+      cityBucket.views += dataset.viewWeight;
+      cityBucket.sessions.add(visit.sessionId);
+      cityBucket.visitors.add(visit.visitorId);
+      cityBuckets.set(visit.city, cityBucket);
+    }
+  }
+
+  const regionCounts =
+    parsedGeo?.country && !parsedGeo.regionCode && !parsedGeo.regionName
+      ? Array.from(regionBuckets.entries())
+          .map(([value, bucket]) => ({
+            value,
+            label: bucket.label,
+            views: Math.max(0, Math.round(bucket.views)),
+            sessions: Math.max(0, Math.round(weightedSessionCount(dataset, bucket.sessions))),
+            visitors: Math.max(0, Math.round(weightedVisitorCount(dataset, bucket.visitors))),
+          }))
+          .sort((left, right) => right.views - left.views || left.label.localeCompare(right.label))
+      : [];
+
+  const cityCounts =
+    parsedGeo?.country && (parsedGeo.regionCode || parsedGeo.regionName)
+      ? Array.from(cityBuckets.entries())
+          .map(([value, bucket]) => ({
+            value,
+            label: bucket.label,
+            views: Math.max(0, Math.round(bucket.views)),
+            sessions: Math.max(0, Math.round(weightedSessionCount(dataset, bucket.sessions))),
+            visitors: Math.max(0, Math.round(weightedVisitorCount(dataset, bucket.visitors))),
+          }))
+          .sort((left, right) => right.views - left.views || left.label.localeCompare(right.label))
+      : [];
+
   return {
     ok: true,
     data: orderedVisits.slice(0, limit).map((visit) => ({
@@ -3459,8 +3530,13 @@ function generateDemoGeoPoints(
       longitude: visit.longitude,
       timestampMs: visit.startedAt,
       country: visit.country,
+      region: visit.region,
+      regionCode: visit.regionCode,
+      city: visit.city,
     })),
     countryCounts,
+    regionCounts,
+    cityCounts,
   };
 }
 
@@ -3532,7 +3608,9 @@ function generateDemoOverviewGeoTab(
     | "timezone"
     | "organization",
 ): Record<string, unknown> {
-  const payload = generateDemoGeoDimensionTabs(siteId, params) as {
+  const payload = generateDemoGeoDimensionTabs(siteId, params, {
+    ignoreGeo: tab === "country",
+  }) as {
     ok: boolean;
     tabs?: Record<string, unknown>;
   };

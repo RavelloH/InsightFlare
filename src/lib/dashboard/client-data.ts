@@ -34,6 +34,12 @@ export type OverviewClientDimensionTabsData =
   OverviewClientDimensionTabsResponse["tabs"];
 export type OverviewGeoDimensionTabsData = OverviewGeoDimensionTabsResponse["tabs"];
 export type OverviewTabRows = OverviewTabData["data"];
+export type OverviewGeoTabRows = Array<{
+  value: string;
+  label: string;
+  views: number;
+  sessions: number;
+}>;
 
 function emptyOverview(): OverviewData {
   return {
@@ -99,6 +105,8 @@ function emptyOverviewGeoPoints(): OverviewGeoPointsData {
     ok: true,
     data: [],
     countryCounts: [],
+    regionCounts: [],
+    cityCounts: [],
   };
 }
 
@@ -262,6 +270,7 @@ export async function fetchOverviewGeoPoints(
   filters?: DashboardFilters,
   options?: {
     limit?: number;
+    applyGeoFilter?: boolean;
   },
 ): Promise<OverviewGeoPointsData> {
   return fetchPrivateJson<OverviewGeoPointsData>(
@@ -272,6 +281,7 @@ export async function fetchOverviewGeoPoints(
         from: window.from,
         to: window.to,
         limit: options?.limit ?? 5000,
+        ...(options?.applyGeoFilter ? { applyGeoFilter: 1 } : {}),
       },
       filters,
     ),
@@ -284,11 +294,32 @@ export async function fetchOverviewGeoPoints(
             longitude: Number((row as { longitude?: unknown }).longitude ?? 0),
             timestampMs: Number((row as { timestampMs?: unknown }).timestampMs ?? 0),
             country: String((row as { country?: unknown }).country ?? ""),
+            region: String((row as { region?: unknown }).region ?? ""),
+            regionCode: String((row as { regionCode?: unknown }).regionCode ?? ""),
+            city: String((row as { city?: unknown }).city ?? ""),
           }))
         : [],
       countryCounts: Array.isArray(payload.countryCounts)
         ? payload.countryCounts.map((row) => ({
             country: String((row as { country?: unknown }).country ?? ""),
+            views: Number((row as { views?: unknown }).views ?? 0),
+            sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
+            visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
+          }))
+        : [],
+      regionCounts: Array.isArray(payload.regionCounts)
+        ? payload.regionCounts.map((row) => ({
+            value: String((row as { value?: unknown }).value ?? ""),
+            label: String((row as { label?: unknown }).label ?? ""),
+            views: Number((row as { views?: unknown }).views ?? 0),
+            sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
+            visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
+          }))
+        : [],
+      cityCounts: Array.isArray(payload.cityCounts)
+        ? payload.cityCounts.map((row) => ({
+            value: String((row as { value?: unknown }).value ?? ""),
+            label: String((row as { label?: unknown }).label ?? ""),
             views: Number((row as { views?: unknown }).views ?? 0),
             sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
             visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
@@ -391,7 +422,7 @@ export async function fetchOverviewGeoDimensionTab(
   options?: {
     limit?: number;
   },
-): Promise<OverviewTabRows> {
+): Promise<OverviewGeoTabRows> {
   const payload = await fetchPrivateJson<OverviewTabData>(
     `/api/private/overview-geo-${tab}`,
     withFilters(
@@ -404,7 +435,27 @@ export async function fetchOverviewGeoDimensionTab(
       filters,
     ),
   ).catch(() => emptyOverviewTab());
-  return payload.data ?? [];
+  return Array.isArray(payload.data)
+    ? payload.data.map((row) => ({
+        value: String((row as { label?: unknown }).label ?? ""),
+        label:
+          tab === "region"
+            ? String((row as { label?: unknown }).label ?? "")
+                .split("::")
+                .map((segment) => segment.trim())
+                .filter((segment) => segment.length > 0)[2] ||
+              String((row as { label?: unknown }).label ?? "")
+            : tab === "city"
+              ? String((row as { label?: unknown }).label ?? "")
+                  .split("::")
+                  .map((segment) => segment.trim())
+                  .filter((segment) => segment.length > 0)[3] ||
+                String((row as { label?: unknown }).label ?? "")
+              : String((row as { label?: unknown }).label ?? ""),
+        views: Number((row as { views?: unknown }).views ?? 0),
+        sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
+      }))
+    : [];
 }
 
 export async function fetchDashboardFilterOptions(
