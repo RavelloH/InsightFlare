@@ -4,6 +4,8 @@ const WIKIDATA_API_ENDPOINT = "https://www.wikidata.org/w/api.php";
 const DEFAULT_WIKI_LANGUAGE = "en";
 const CACHE_CONTROL_HEADER =
   "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
+const WIKIMEDIA_USER_AGENT =
+  "InsightFlare/0.1 (+https://insight.ravelloh.com)";
 
 interface WikidataTerm {
   value?: string;
@@ -157,6 +159,7 @@ async function fetchWikidataEntity(
   const response = await fetch(url, {
     headers: {
       accept: "application/json",
+      "user-agent": WIKIMEDIA_USER_AGENT,
     },
     next: {
       revalidate: 60 * 60 * 24,
@@ -181,6 +184,7 @@ async function fetchWikipediaSummary(
   const response = await fetch(endpoint, {
     headers: {
       accept: "application/json",
+      "user-agent": WIKIMEDIA_USER_AGENT,
       ...(acceptLanguage ? { "accept-language": acceptLanguage } : {}),
     },
     next: {
@@ -297,7 +301,8 @@ export async function GET(request: Request): Promise<Response> {
       },
       wikipedia,
     });
-  } catch {
+  } catch (error) {
+    console.error("[wiki-summary] upstream request failed", error);
     return jsonResponse(
       {
         ok: false,
