@@ -9,6 +9,7 @@ import {
 import { OverlayScrollbars } from "overlayscrollbars";
 import type { PartialOptions } from "overlayscrollbars";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -146,6 +147,7 @@ export function GeoCountryStatsPanel({
       ),
     [sort.key, sortedEntries],
   );
+  const hasVisibleContent = sortedEntries.length > 0;
 
   const tableHeader = (
     <TableRow className="hover:bg-transparent">
@@ -236,41 +238,43 @@ export function GeoCountryStatsPanel({
           data-overlayscrollbars-initialize
         >
           <div className="space-y-3 py-3">
-          {onBack ? (
-            <div className="px-4">
-              <Button variant="ghost" size="xs" onClick={onBack}>
-                <RiArrowLeftSLine className="size-3.5" />
-                <span>{locale === "zh" ? "返回上一级" : "Back"}</span>
-              </Button>
-            </div>
-          ) : null}
-
-          {currentLocationInfo && currentLocationInfo.lines.length > 0 ? (
-            <div className="border-y border-border/70 px-4 py-3">
-              <div className="space-y-1">
-                {currentLocationInfo.lines.map((line) => (
-                  <div
-                    key={line}
-                    className="text-xl leading-tight font-semibold tracking-tight text-foreground"
-                  >
-                    {line}
-                  </div>
-                ))}
+            {onBack ? (
+              <div className="px-4">
+                <Button variant="ghost" size="xs" onClick={onBack}>
+                  <RiArrowLeftSLine className="size-3.5" />
+                  <span>{locale === "zh" ? "返回上一级" : "Back"}</span>
+                </Button>
               </div>
-            </div>
-          ) : null}
+            ) : null}
 
-          <DataTableSwitch
-            loading={loading}
-            hasContent={sortedEntries.length > 0}
-            loadingLabel={messages.common.loading}
-            emptyLabel={messages.common.noData}
-            colSpan={3}
-            contentKey={`${sort.key}-${sort.direction}-${selectedEntryKey ?? "none"}`}
-            header={tableHeader}
-            rows={rows}
-          />
-        </div>
+            {currentLocationInfo && currentLocationInfo.lines.length > 0 ? (
+              <AutoResizer initial className="w-full">
+                <div className="border-y border-border/70 px-4 py-3">
+                  <div className="space-y-1">
+                    {currentLocationInfo.lines.map((line) => (
+                      <div
+                        key={line}
+                        className="text-2xl leading-tight font-semibold tracking-tight text-foreground sm:text-[1.9rem]"
+                      >
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </AutoResizer>
+            ) : null}
+
+            <DataTableSwitch
+              loading={loading}
+              hasContent={hasVisibleContent}
+              loadingLabel={messages.common.loading}
+              emptyLabel={messages.common.noData}
+              colSpan={3}
+              contentKey={`${sort.key}-${sort.direction}-${selectedEntryKey ?? "none"}`}
+              header={tableHeader}
+              rows={rows}
+            />
+          </div>
         </div>
       </Card>
     </aside>

@@ -1,12 +1,12 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react";
 import type { MapViewState } from "@deck.gl/core";
 import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
 import isoCountries from "i18n-iso-countries";
 import type { Feature, GeoJSON, Geometry } from "geojson";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, animate, motion } from "motion/react";
 import { useTheme } from "next-themes";
 import type { StyleSpecification } from "maplibre-gl";
 import Map, { type MapRef, useControl } from "react-map-gl/maplibre";
@@ -159,6 +159,7 @@ const MAP_ACCENT_RGB: [number, number, number] = [34, 197, 154];
 const MAP_POINT_ALPHA_VISIBLE = 112;
 const CLUSTER_RADIUS_PX = 26;
 const CLUSTER_ZOOM_STEP = 0.25;
+const CLUSTER_CROSSFADE_DURATION_S = 0.22;
 const EMPTY_COUNTRY_FEATURES = {
   type: "FeatureCollection",
   features: [],
@@ -267,46 +268,70 @@ function computeInitialViewState(points: GeoPoint[]): MapViewState {
   };
 }
 
-function focusZoomForLevel(level: GeoLocationLevel): number {
-  if (level === "country") return 2.85;
-  if (level === "region") return 5.15;
-  return 8.35;
+function focusZoomForLevel(level: GeoLocationLevel, childCount = 0): number {
+  if (level === "country") {
+    if (childCount <= 8) return 4.6;
+    if (childCount <= 20) return 4.05;
+    if (childCount <= 40) return 3.45;
+    return 2.95;
+  }
+  if (level === "region") {
+    if (childCount <= 12) return 7.55;
+    if (childCount <= 40) return 6.85;
+    if (childCount <= 120) return 6.1;
+    return 5.45;
+  }
+  return 9.7;
 }
 
 function focusZoomRangeForLevel(
   level: GeoLocationLevel,
 ): { min: number; max: number } {
   if (level === "country") {
-    return { min: 2.4, max: 4.1 };
+    return { min: 2.45, max: 5.15 };
   }
   if (level === "region") {
-    return { min: 4.4, max: 6.8 };
+    return { min: 4.8, max: 8.25 };
   }
-  return { min: 7.4, max: 10.2 };
+  return { min: 8.3, max: 11.4 };
+}
+
+function resolveAdaptiveFocusZoom(
+  points: GeoPoint[],
+  level: GeoLocationLevel,
+  childCount: number,
+): number {
+  const pointViewState = computeInitialViewState(points);
+  const fallbackZoom = focusZoomForLevel(level, childCount);
+  const { min, max } = focusZoomRangeForLevel(level);
+  const pointZoom = clamp(Number(pointViewState.zoom ?? fallbackZoom), min, max);
+
+  if (points.length === 0) return fallbackZoom;
+  if (points.length === 1) {
+    return clamp(fallbackZoom * 0.82 + pointZoom * 0.18, min, max);
+  }
+
+  const weight = clamp(Math.log2(points.length + 1) / 3.6, 0.22, 1);
+  return clamp(fallbackZoom * (1 - weight) + pointZoom * weight, min, max);
 }
 
 function resolveFocusedViewState(
   points: GeoPoint[],
   location: ParsedGeoLocation | null,
   focus: GeoLocationFocusResponse | null,
+  childCount = 0,
 ): MapViewState {
   const pointViewState = computeInitialViewState(points);
   if (!location) return pointViewState;
 
-  const fallbackZoom = focusZoomForLevel(location.level);
-  const { min, max } = focusZoomRangeForLevel(location.level);
-  const constrainedPointZoom = clamp(
-    Number(pointViewState.zoom ?? fallbackZoom),
-    min,
-    max,
-  );
+  const adaptiveZoom = resolveAdaptiveFocusZoom(points, location.level, childCount);
 
   if (focus?.center) {
     return {
       ...DEFAULT_VIEW_STATE,
       latitude: focus.center.latitude,
       longitude: focus.center.longitude,
-      zoom: fallbackZoom,
+      zoom: adaptiveZoom,
     };
   }
 
@@ -321,7 +346,7 @@ function resolveFocusedViewState(
     ...DEFAULT_VIEW_STATE,
     latitude,
     longitude,
-    zoom: constrainedPointZoom,
+    zoom: adaptiveZoom,
   };
 }
 
@@ -355,6 +380,8 @@ function animateMapTransition(
   targetViewState: MapViewState,
   targetLocation: ParsedGeoLocation | null,
   animationKeyRef: { current: number },
+  onStart: () => void,
+  onComplete: (zoom: number) => void,
 ) {
   const animationKey = ++animationKeyRef.current;
   const minimumZoom = 0.75;
@@ -374,6 +401,7 @@ function animateMapTransition(
   }
 
   map.stop();
+  onStart();
   if (targetLocation) {
     map.easeTo({
       center: targetCenter,
@@ -381,6 +409,11 @@ function animateMapTransition(
       duration: 950,
       essential: true,
     });
+    map.once("moveend", () =>
+      runStep(() => {
+        onComplete(targetZoom);
+      }),
+    );
     return;
   }
 
@@ -407,10 +440,37 @@ function animateMapTransition(
             duration: 850,
             essential: true,
           });
+          map.once("moveend", () =>
+            runStep(() => {
+              onComplete(targetZoom);
+            }),
+          );
         }),
       );
     }),
   );
+}
+
+function isAncestorLocation(
+  currentLocation: ParsedGeoLocation | null,
+  nextLocation: ParsedGeoLocation | null,
+): boolean {
+  if (!currentLocation) return nextLocation === null;
+  if (!nextLocation) return true;
+  if (currentLocation.countryCode !== nextLocation.countryCode) return false;
+
+  if (nextLocation.level === "country") {
+    return currentLocation.level === "region" || currentLocation.level === "locality";
+  }
+
+  if (nextLocation.level === "region") {
+    return (
+      currentLocation.level === "locality" &&
+      currentLocation.regionCode === nextLocation.regionCode
+    );
+  }
+
+  return false;
 }
 
 function resolveCountryFeatureKey(
@@ -592,6 +652,7 @@ function clusterGeoPoints(points: GeoPoint[], zoom: number): ClusteredGeoPoint[]
       count: bucket.count,
     });
   }
+  clusters.sort((a, b) => a.id.localeCompare(b.id));
   return clusters;
 }
 
@@ -638,11 +699,7 @@ function pickLocaleGeoLabel(
 ): string {
   if (!record) return "";
   if (locale === "zh") {
-    return (
-      String(record.name ?? "").trim() ||
-      String(record.name_default ?? "").trim() ||
-      String(record.native ?? "").trim()
-    );
+    return String(record.name ?? "").trim();
   }
 
   return (
@@ -893,7 +950,7 @@ async function fetchGeoLocaleBundle(
               stateCode,
               canonicalRegionName,
             ),
-            label: pickLocaleGeoLabel(locale, stateRecord) || canonicalRegionName,
+            label: pickLocaleGeoLabel(locale, stateRecord) || unknownLabel,
           };
         }),
       ),
@@ -937,7 +994,7 @@ async function fetchGeoLocaleBundle(
                 canonicalRegionName,
                 canonicalLocalityName,
               ),
-              label: pickLocaleGeoLabel(locale, city) || canonicalLocalityName,
+              label: pickLocaleGeoLabel(locale, city) || unknownLabel,
             };
           })
         : [],
@@ -1068,8 +1125,10 @@ export function GeoClientPage({
   const [geoDirectoryEntries, setGeoDirectoryEntries] = useState<
     GeoDirectoryEntry[] | null
   >(null);
+  const [isMapMoving, setIsMapMoving] = useState(false);
   const mapRef = useRef<MapRef | null>(null);
   const mapAnimationKeyRef = useRef(0);
+  const hasClusterCrossfadeInitialized = useRef(false);
 
   useEffect(() => {
     setMounted(true);
@@ -1110,8 +1169,6 @@ export function GeoClientPage({
   useEffect(() => {
     let active = true;
     setLoading(true);
-    setLocationFocus(null);
-    setGeoDirectoryEntries(null);
 
     const dimensionTab = !requestedLocation
       ? null
@@ -1133,43 +1190,67 @@ export function GeoClientPage({
     ])
       .then(([nextGeoPoints, nextGeoTabRows, nextGeoLocaleBundle]) => {
         if (!active) return;
-        const nextPoints = resolveGeoPoints(nextGeoPoints, requestedLocation);
+        const isReturningToAncestor = isAncestorLocation(
+          activeLocation,
+          requestedLocation,
+        );
+        const canUseFastReturnFocus =
+          isReturningToAncestor &&
+          (!requestedLocation || Boolean(nextGeoLocaleBundle.focus?.center));
         const nextViewState = resolveFocusedViewState(
-          nextPoints,
+          canUseFastReturnFocus
+            ? []
+            : resolveGeoPoints(nextGeoPoints, requestedLocation),
           requestedLocation,
           nextGeoLocaleBundle.focus,
+          nextGeoLocaleBundle.directoryEntries.length,
         );
-        setGeoPointsData(nextGeoPoints);
-        setGeoTabRows(nextGeoTabRows);
-        setLocationFocus(nextGeoLocaleBundle.focus);
-        setGeoDirectoryEntries(nextGeoLocaleBundle.directoryEntries);
-        setActiveLocation(requestedLocation);
+        const commitNextState = (resolvedZoom?: number) => {
+          if (!active) return;
+          startTransition(() => {
+            setGeoPointsData(nextGeoPoints);
+            setGeoTabRows(nextGeoTabRows);
+            setLocationFocus(nextGeoLocaleBundle.focus);
+            setGeoDirectoryEntries(nextGeoLocaleBundle.directoryEntries);
+            setActiveLocation(requestedLocation);
+            setCurrentZoom(
+              normalizeClusterZoom(
+                resolvedZoom ?? nextViewState.zoom ?? DEFAULT_VIEW_STATE.zoom,
+              ),
+            );
+            setIsMapMoving(false);
+            setLoading(false);
+          });
+        };
         const map = mapRef.current;
-        if (map) {
+        if (map && requestedLocation?.canonical !== activeLocation?.canonical) {
           animateMapTransition(
             map,
             nextViewState,
             requestedLocation,
             mapAnimationKeyRef,
+            () => {
+              setIsMapMoving(true);
+            },
+            (zoom) => {
+              commitNextState(zoom);
+            },
           );
+        } else {
+          commitNextState(nextViewState.zoom ?? DEFAULT_VIEW_STATE.zoom);
         }
       })
       .catch(() => {
         if (!active) return;
-        setGeoPointsData(emptyOverviewGeoPoints());
-        setGeoTabRows([]);
-        setLocationFocus(null);
-        setGeoDirectoryEntries([]);
-      })
-      .finally(() => {
-        if (!active) return;
+        setIsMapMoving(false);
         setLoading(false);
-      });
+      })
 
     return () => {
       active = false;
     };
   }, [
+    activeLocation?.canonical,
     locale,
     requestedLocation?.canonical,
     requestFilters,
@@ -1187,8 +1268,14 @@ export function GeoClientPage({
   );
 
   const initialViewState = useMemo(
-    () => resolveFocusedViewState(points, activeLocation, locationFocus),
-    [activeLocation, locationFocus, points],
+    () =>
+      resolveFocusedViewState(
+        points,
+        activeLocation,
+        locationFocus,
+        geoDirectoryEntries?.length ?? 0,
+      ),
+    [activeLocation, geoDirectoryEntries?.length, locationFocus, points],
   );
   const effectiveMapTheme: EffectiveMapTheme =
     mounted && resolvedTheme === "dark" ? "dark" : "light";
@@ -1197,16 +1284,50 @@ export function GeoClientPage({
     [effectiveMapTheme],
   );
 
-  useEffect(() => {
-    setCurrentZoom(
-      normalizeClusterZoom(initialViewState.zoom ?? DEFAULT_VIEW_STATE.zoom),
-    );
-  }, [initialViewState.zoom]);
-
   const clusteredPoints = useMemo(
     () => clusterGeoPoints(points, currentZoom),
     [currentZoom, points],
   );
+  const [incomingClusters, setIncomingClusters] = useState<ClusteredGeoPoint[]>(
+    () => clusteredPoints,
+  );
+  const [outgoingClusters, setOutgoingClusters] = useState<ClusteredGeoPoint[]>([]);
+  const [clusterFadeProgress, setClusterFadeProgress] = useState(1);
+  const incomingClustersRef = useRef<ClusteredGeoPoint[]>(clusteredPoints);
+  useEffect(() => {
+    if (!hasClusterCrossfadeInitialized.current) {
+      hasClusterCrossfadeInitialized.current = true;
+      incomingClustersRef.current = clusteredPoints;
+      setIncomingClusters(clusteredPoints);
+      setOutgoingClusters([]);
+      setClusterFadeProgress(1);
+      return;
+    }
+
+    const previousIncoming = incomingClustersRef.current;
+    incomingClustersRef.current = clusteredPoints;
+
+    setOutgoingClusters(previousIncoming);
+    setIncomingClusters(clusteredPoints);
+    setClusterFadeProgress(0);
+
+    const controls = animate(0, 1, {
+      duration: CLUSTER_CROSSFADE_DURATION_S,
+      ease: "easeInOut",
+      onUpdate: (value) => {
+        setClusterFadeProgress(value);
+      },
+      onComplete: () => {
+        setOutgoingClusters([]);
+      },
+    });
+
+    return () => {
+      controls.stop();
+    };
+  }, [clusteredPoints]);
+  const incomingAlpha = Math.round(MAP_POINT_ALPHA_VISIBLE * clusterFadeProgress);
+  const outgoingAlpha = Math.round(MAP_POINT_ALPHA_VISIBLE * (1 - clusterFadeProgress));
   const countryCountMap = useMemo(() => {
     const map = new globalThis.Map<string, CountryCount>();
     for (const row of geoPointsData.countryCounts) {
@@ -1222,21 +1343,48 @@ export function GeoClientPage({
     return map;
   }, [geoPointsData.countryCounts]);
 
-  const showCountryHover = !activeLocation;
+  const showCountryHover = !activeLocation && !isMapMoving;
   const layers = useMemo(() => {
-    const nextLayers: MapboxOverlayProps["layers"] = [
+    const nextLayers: Array<
+      ScatterplotLayer<ClusteredGeoPoint> | GeoJsonLayer<Record<string, unknown>>
+    > = [];
+
+    const createPointLayer = (
+      id: string,
+      data: ClusteredGeoPoint[],
+      alpha: number,
+    ): ScatterplotLayer<ClusteredGeoPoint> =>
       new ScatterplotLayer<ClusteredGeoPoint>({
-        id: "geo-page-clustered-points",
-        data: clusteredPoints,
-        getFillColor: withAlpha(MAP_ACCENT_RGB, MAP_POINT_ALPHA_VISIBLE),
+        id,
+        data,
+        getFillColor: withAlpha(MAP_ACCENT_RGB, alpha),
         getPosition: (item) => [item.longitude, item.latitude],
         getRadius: (item) => computeClusterPointRadius(item.count, currentZoom),
         radiusUnits: "pixels",
         radiusMinPixels: 2,
         radiusMaxPixels: 32,
         pickable: false,
-      }),
-    ];
+      });
+
+    if (outgoingClusters.length > 0 && outgoingAlpha > 0) {
+      nextLayers.push(
+        createPointLayer(
+          "geo-page-clustered-points-outgoing",
+          outgoingClusters,
+          outgoingAlpha,
+        ),
+      );
+    }
+
+    if (incomingClusters.length > 0 && incomingAlpha > 0) {
+      nextLayers.push(
+        createPointLayer(
+          "geo-page-clustered-points-incoming",
+          incomingClusters,
+          incomingAlpha,
+        ),
+      );
+    }
 
     if (showCountryHover) {
       nextLayers.push(
@@ -1281,10 +1429,13 @@ export function GeoClientPage({
 
     return nextLayers;
   }, [
-    clusteredPoints,
     countryGeoJson,
     currentZoom,
     hoveredCountryKey,
+    incomingAlpha,
+    incomingClusters,
+    outgoingAlpha,
+    outgoingClusters,
     showCountryHover,
   ]);
 
@@ -1296,8 +1447,8 @@ export function GeoClientPage({
         messages.common.unknown,
       ).label;
     }
-    return hoveredCountryName.trim() || messages.common.unknown;
-  }, [hoveredCountryCode, hoveredCountryName, locale, messages.common.unknown]);
+    return messages.common.unknown;
+  }, [hoveredCountryCode, locale, messages.common.unknown]);
   const hoveredCountryCounts =
     hoveredCountryCode ? countryCountMap.get(hoveredCountryCode) : null;
   const hoveredViewsText = numberFormat(
@@ -1364,7 +1515,7 @@ export function GeoClientPage({
         const fallback = fallbackMap.get(entry.key);
         return {
           key: entry.key,
-          label: entry.label || source?.label || messages.common.unknown,
+          label: entry.label || messages.common.unknown,
           views: Number(source?.views ?? fallback?.views ?? 0),
           sessions: Number(source?.sessions ?? fallback?.sessions ?? 0),
           visitors: Number(source?.visitors ?? fallback?.visitors ?? 0),
@@ -1406,15 +1557,10 @@ export function GeoClientPage({
           messages.common.unknown,
         ).label,
       activeLocation.level !== "country"
-        ? locationFocus?.region?.label ||
-          activeLocation.regionName ||
-          activeLocation.regionCode ||
-          messages.common.unknown
+        ? locationFocus?.region?.label || messages.common.unknown
         : null,
       activeLocation.level === "locality"
-        ? locationFocus?.locality?.label ||
-          activeLocation.localityName ||
-          messages.common.unknown
+        ? locationFocus?.locality?.label || messages.common.unknown
         : null,
     ].filter((value, index, array): value is string => {
       const normalized = String(value ?? "").trim();
@@ -1481,7 +1627,13 @@ export function GeoClientPage({
           maxPitch={0}
           dragRotate={false}
           pitchWithRotate={false}
-          onMove={(event) => {
+          onLoad={(event) => {
+            setCurrentZoom(
+              normalizeClusterZoom(event.target.getZoom() ?? DEFAULT_VIEW_STATE.zoom),
+            );
+            setIsMapMoving(false);
+          }}
+          onZoom={(event) => {
             const nextZoom = normalizeClusterZoom(event.viewState.zoom);
             setCurrentZoom((previous) =>
               Math.abs(previous - nextZoom) > 0.0001 ? nextZoom : previous,
