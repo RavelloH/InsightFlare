@@ -1,6 +1,14 @@
 "use client";
 
-import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  startTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { MapViewState } from "@deck.gl/core";
 import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
@@ -86,6 +94,27 @@ interface GeoDirectoryEntry {
   label: string;
 }
 
+interface GeoInvestigationRow {
+  label: string;
+  value: ReactNode;
+  fullWidth?: boolean;
+}
+
+interface GeoInvestigationInfo {
+  headline: string;
+  context?: string | null;
+  population?: number | null;
+  wikidataId?: string | null;
+  rows: GeoInvestigationRow[];
+}
+
+interface GeoWikiSummary {
+  title: string;
+  description: string | null;
+  extract: string | null;
+  pageUrl: string | null;
+}
+
 interface GeoLocationFocusResponse {
   ok: boolean;
   center?: {
@@ -106,30 +135,74 @@ interface GeoLocationFocusResponse {
 }
 
 interface LocaleCountryRecord {
+  id?: number;
   code?: string;
+  iso3?: string;
+  numeric_code?: string;
   name?: string;
   name_default?: string;
   native?: string;
+  capital?: string;
+  phonecode?: string;
+  currency?: string;
+  currency_name?: string;
+  currency_symbol?: string;
+  tld?: string;
+  population?: number | string;
+  gdp?: number | string;
+  region?: string;
+  subregion?: string;
+  nationality?: string;
+  timezones?: Array<{
+    zoneName?: string;
+    gmtOffset?: number;
+    gmtOffsetName?: string;
+    abbreviation?: string;
+    tzName?: string;
+  }>;
   latitude?: string | number;
   longitude?: string | number;
+  emoji?: string;
+  emojiU?: string;
 }
 
 interface LocaleStateRecord {
+  id?: number;
   code?: string;
   iso2?: string;
+  iso3166_2?: string;
+  fips_code?: string;
   name?: string;
   name_default?: string;
   native?: string;
+  type?: string;
+  level?: string | number | null;
+  parent_id?: string | number | null;
+  population?: number | string | null;
   latitude?: string | number;
   longitude?: string | number;
+  timezone?: string;
+  wikiDataId?: string | null;
+  country_code?: string;
 }
 
 interface LocaleCityRecord {
+  id?: number;
   name?: string;
   name_default?: string;
   native?: string;
+  type?: string;
+  level?: string | number | null;
+  parent_id?: string | number | null;
+  population?: number | string | null;
   latitude?: string | number;
   longitude?: string | number;
+  timezone?: string;
+  wikiDataId?: string | null;
+  country_code?: string;
+  state_code?: string;
+  state_id?: number;
+  country_id?: number;
 }
 
 interface LocaleCountryPayload {
@@ -169,8 +242,15 @@ const MAP_VIEWPORT_RENDER_ISOLATION_STYLE = {
   transform: "translateZ(0)",
   willChange: "transform",
 } as const;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+// World Bank, World, GDP per capita (current US$), most recent value for 2024.
+const WORLD_GDP_PER_CAPITA_USD_2024 = 13_631.2;
 const LOCALE_LOCATION_API_BASE = "https://locale.ravelloh.com/zh-CN";
 const GEO_STATE_CODE_PATTERN = /^[A-Z0-9-]{1,16}$/;
+const geoWikiSummaryCache = new globalThis.Map<
+  string,
+  Promise<GeoWikiSummary | null>
+>();
 const localeCountryPayloadCache = new globalThis.Map<
   string,
   Promise<LocaleCountryPayload | null>
@@ -709,6 +789,380 @@ function pickLocaleGeoLabel(
   );
 }
 
+function geoInvestigationLabels(locale: Locale) {
+  return {
+    capital: locale === "zh" ? "首都" : "Capital",
+    population: locale === "zh" ? "人口" : "Population",
+    gdp: "GDP",
+    gdpPerCapita: locale === "zh" ? "人均 GDP" : "GDP per capita",
+    marketPenetration: locale === "zh" ? "市场渗透率" : "Market Penetration",
+    region: locale === "zh" ? "所属区域" : "Region",
+    currency: locale === "zh" ? "货币" : "Currency",
+    phonecode: locale === "zh" ? "电话区号" : "Phone code",
+    timezone: locale === "zh" ? "时区" : "Timezone",
+    type: locale === "zh" ? "类型" : "Type",
+    iso: "ISO",
+    coordinates: locale === "zh" ? "坐标" : "Coordinates",
+    unavailable: locale === "zh" ? "暂无" : "N/A",
+  };
+}
+
+function parseGeoMetricNumber(
+  value: string | number | null | undefined,
+): number | null {
+  const numeric =
+    typeof value === "number" ? value : Number(String(value ?? "").trim());
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function formatGeoDetailValue(
+  value: string | number | null | undefined,
+  locale: Locale,
+): string {
+  const labels = geoInvestigationLabels(locale);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return labels.unavailable;
+    return numberFormat(locale, value);
+  }
+  const normalized = String(value ?? "").trim();
+  return normalized || labels.unavailable;
+}
+
+function formatGeoPopulation(
+  locale: Locale,
+  value: string | number | null | undefined,
+): string {
+  const numeric = parseGeoMetricNumber(value);
+  if (numeric === null) {
+    return geoInvestigationLabels(locale).unavailable;
+  }
+  return numberFormat(locale, numeric);
+}
+
+function formatGeoGdp(
+  locale: Locale,
+  value: string | number | null | undefined,
+): string {
+  const numeric = parseGeoMetricNumber(value);
+  if (numeric === null) {
+    return geoInvestigationLabels(locale).unavailable;
+  }
+  return locale === "zh"
+    ? `${numberFormat(locale, numeric)} 百万美元`
+    : `${numberFormat(locale, numeric)} million USD`;
+}
+
+function formatGeoGdpPerCapita(
+  locale: Locale,
+  gdpMillionUsd: string | number | null | undefined,
+  population: string | number | null | undefined,
+): string {
+  const gdp = parseGeoMetricNumber(gdpMillionUsd);
+  const residents = parseGeoMetricNumber(population);
+  if (gdp === null || residents === null) {
+    return geoInvestigationLabels(locale).unavailable;
+  }
+  const value = (gdp * 1_000_000) / residents;
+  const formatted = numberFormat(locale, Math.round(value));
+  const ratio = value / WORLD_GDP_PER_CAPITA_USD_2024;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return locale === "zh" ? `${formatted} 美元/人` : `${formatted} USD/person`;
+  }
+
+  const deltaPercent = ((value - WORLD_GDP_PER_CAPITA_USD_2024) / WORLD_GDP_PER_CAPITA_USD_2024) * 100;
+  if (Math.abs(deltaPercent) < 0.5) {
+    return locale === "zh"
+      ? `${formatted} 美元/人（接近全球平均）`
+      : `${formatted} USD/person (near the world average)`;
+  }
+
+  const percentText = numberFormat(locale, Math.round(Math.abs(deltaPercent)));
+  return deltaPercent > 0
+    ? locale === "zh"
+      ? `${formatted} 美元/人（高于平均 ${percentText}%）`
+      : `${formatted} USD/person (${percentText}% above average)`
+    : locale === "zh"
+      ? `${formatted} 美元/人（低于平均 ${percentText}%）`
+      : `${formatted} USD/person (${percentText}% below average)`;
+}
+
+function resolveWindowDayCount(from: number, to: number): number {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+    return 1;
+  }
+  return Math.max(1, Math.ceil((to - from) / DAY_IN_MS));
+}
+
+function formatGeoMarketPenetration(
+  locale: Locale,
+  visitors: number,
+  population: number | null | undefined,
+): ReactNode {
+  if (!Number.isFinite(population) || !population || population <= 0) {
+    return geoInvestigationLabels(locale).unavailable;
+  }
+
+  const perMille = (Math.max(0, visitors) / population) * 1000;
+  const formatted = new Intl.NumberFormat(locale === "zh" ? "zh-CN" : "en-US", {
+    minimumFractionDigits: perMille > 0 && perMille < 1 ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(perMille);
+
+  return (
+    <span>
+      {formatted}
+      <span className="text-[0.72em] align-[0.08em]">‰</span>
+    </span>
+  );
+}
+
+function buildGeoMarketPenetrationLabel(
+  locale: Locale,
+  dayCount: number,
+): string {
+  const base = geoInvestigationLabels(locale).marketPenetration;
+  return locale === "zh"
+    ? `${base}(${dayCount}天)`
+    : `${base} (${dayCount} days)`;
+}
+
+function formatGeoCoordinates(
+  locale: Locale,
+  latitude: string | number | null | undefined,
+  longitude: string | number | null | undefined,
+): string {
+  const lat = parseCoordinate(latitude);
+  const lon = parseCoordinate(longitude);
+  if (lat === null || lon === null) {
+    return geoInvestigationLabels(locale).unavailable;
+  }
+  return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+}
+
+function formatGeoCurrency(locale: Locale, country: LocaleCountryRecord): string {
+  const code = String(country.currency ?? "").trim();
+  const symbol = String(country.currency_symbol ?? "").trim();
+  const name = String(country.currency_name ?? "").trim();
+  if (symbol && code) return `${symbol} ${code}`;
+  if (code) return code;
+  if (name) return name;
+  return geoInvestigationLabels(locale).unavailable;
+}
+
+function formatGeoPhoneCode(locale: Locale, country: LocaleCountryRecord): string {
+  const code = String(country.phonecode ?? "").trim();
+  if (!code) return geoInvestigationLabels(locale).unavailable;
+  return code.startsWith("+") ? code : `+${code}`;
+}
+
+function formatGeoRegion(locale: Locale, country: LocaleCountryRecord): string {
+  const region = String(country.region ?? "").trim();
+  const subregion = String(country.subregion ?? "").trim();
+  if (region && subregion && region !== subregion) return `${region} / ${subregion}`;
+  if (region) return region;
+  if (subregion) return subregion;
+  return geoInvestigationLabels(locale).unavailable;
+}
+
+function formatGeoType(locale: Locale, value: string | null | undefined): string {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return geoInvestigationLabels(locale).unavailable;
+
+  if (locale !== "zh") {
+    return normalized
+      .split(/[\s_-]+/)
+      .filter((token) => token.length > 0)
+      .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+      .join(" ");
+  }
+
+  const labels: Record<string, string> = {
+    country: "国家",
+    state: "州",
+    province: "省",
+    prefecture: "地级市",
+    city: "市",
+    county: "县",
+    district: "区",
+    town: "镇",
+    village: "村",
+    municipality: "市镇",
+    territory: "地区",
+    section: "片区",
+    adm1: "一级行政区",
+    adm2: "二级行政区",
+    adm3: "三级行政区",
+    adm4: "四级行政区",
+    adm5: "五级行政区",
+  };
+
+  return (
+    labels[normalized] ??
+    String(value ?? "").trim() ??
+    geoInvestigationLabels(locale).unavailable
+  );
+}
+
+function formatGeoTimezoneSummary(
+  locale: Locale,
+  value:
+    | string
+    | null
+    | undefined
+    | Array<{
+        zoneName?: string;
+        gmtOffsetName?: string;
+        abbreviation?: string;
+      }>,
+): string {
+  const labels = geoInvestigationLabels(locale);
+  if (typeof value === "string") {
+    return value.trim() || labels.unavailable;
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    return labels.unavailable;
+  }
+  return locale === "zh" ? `${value.length} 个时区` : `${value.length} timezones`;
+}
+
+function buildGeoInvestigationRow(
+  label: string,
+  value: ReactNode,
+  fullWidth = false,
+): GeoInvestigationRow {
+  return { label, value, fullWidth };
+}
+
+function buildCountryGeoInvestigation(
+  payload: LocaleCountryPayload | null,
+  locale: Locale,
+): GeoInvestigationInfo | null {
+  const country = payload?.country;
+  if (!country) return null;
+  const labels = geoInvestigationLabels(locale);
+  const population = parseGeoMetricNumber(country.population);
+  const headline =
+    pickLocaleGeoLabel(locale, country) ||
+    resolveCountryLabel(String(country.code ?? "").trim(), locale, labels.unavailable)
+      .label;
+
+  return {
+    headline,
+    context: null,
+    population,
+    wikidataId: null,
+    rows: [
+      buildGeoInvestigationRow(
+        labels.capital,
+        formatGeoDetailValue(country.capital, locale),
+      ),
+      buildGeoInvestigationRow(
+        labels.currency,
+        formatGeoCurrency(locale, country),
+      ),
+      buildGeoInvestigationRow(
+        labels.population,
+        formatGeoPopulation(locale, country.population),
+      ),
+      buildGeoInvestigationRow(labels.gdp, formatGeoGdp(locale, country.gdp)),
+      buildGeoInvestigationRow(
+        labels.gdpPerCapita,
+        formatGeoGdpPerCapita(locale, country.gdp, country.population),
+        true,
+      ),
+      buildGeoInvestigationRow(
+        labels.phonecode,
+        formatGeoPhoneCode(locale, country),
+      ),
+      buildGeoInvestigationRow(
+        labels.region,
+        formatGeoRegion(locale, country),
+        true,
+      ),
+    ],
+  };
+}
+
+function buildStateGeoInvestigation(
+  payload: LocaleStatePayload | null,
+  locale: Locale,
+): GeoInvestigationInfo | null {
+  const state = payload?.state;
+  if (!state) return null;
+  const labels = geoInvestigationLabels(locale);
+  return {
+    headline: pickLocaleGeoLabel(locale, state) || labels.unavailable,
+    context: payload?.country ? pickLocaleGeoLabel(locale, payload.country) : null,
+    population: parseGeoMetricNumber(state.population),
+    wikidataId: String(state.wikiDataId ?? "").trim() || null,
+    rows: [
+      buildGeoInvestigationRow(
+        labels.type,
+        formatGeoType(locale, state.type),
+      ),
+      buildGeoInvestigationRow(
+        labels.population,
+        formatGeoPopulation(locale, state.population),
+      ),
+      buildGeoInvestigationRow(
+        labels.timezone,
+        formatGeoTimezoneSummary(locale, state.timezone),
+        true,
+      ),
+      buildGeoInvestigationRow(
+        labels.iso,
+        formatGeoDetailValue(state.iso3166_2, locale),
+      ),
+    ],
+  };
+}
+
+function buildLocalityGeoInvestigation(
+  payload: LocaleStatePayload | null,
+  location: ParsedGeoLocation,
+  locale: Locale,
+): GeoInvestigationInfo | null {
+  if (location.level !== "locality" || !location.localityName) return null;
+  const locality =
+    payload?.cities?.find((record) =>
+      matchesLocalityRecord(record, location.localityName ?? ""),
+    ) ?? null;
+  if (!locality) return null;
+
+  const labels = geoInvestigationLabels(locale);
+  const contextParts = [
+    payload?.country ? pickLocaleGeoLabel(locale, payload.country) : "",
+    payload?.state ? pickLocaleGeoLabel(locale, payload.state) : "",
+  ].filter((value) => value.length > 0);
+
+  return {
+    headline: pickLocaleGeoLabel(locale, locality) || labels.unavailable,
+    context: contextParts.length > 0 ? contextParts.join(" / ") : null,
+    population: parseGeoMetricNumber(locality.population),
+    wikidataId: String(locality.wikiDataId ?? "").trim() || null,
+    rows: [
+      buildGeoInvestigationRow(
+        labels.type,
+        formatGeoType(locale, locality.type),
+      ),
+      buildGeoInvestigationRow(
+        labels.population,
+        formatGeoPopulation(locale, locality.population),
+      ),
+      buildGeoInvestigationRow(
+        labels.timezone,
+        formatGeoTimezoneSummary(locale, locality.timezone),
+        true,
+      ),
+      buildGeoInvestigationRow(
+        labels.coordinates,
+        formatGeoCoordinates(locale, locality.latitude, locality.longitude),
+        true,
+      ),
+    ],
+  };
+}
+
 async function fetchLocaleCountryCodes(): Promise<string[] | null> {
   if (localeCountryCodesRequest) return localeCountryCodesRequest;
 
@@ -787,6 +1241,55 @@ async function fetchLocaleStatePayload(
     .catch(() => null);
 
   localeStatePayloadCache.set(cacheKey, request);
+  return request;
+}
+
+async function fetchGeoWikiSummary(
+  wikidataId: string,
+  locale: Locale,
+): Promise<GeoWikiSummary | null> {
+  const normalizedId = String(wikidataId ?? "").trim().toUpperCase();
+  if (!/^Q\d+$/.test(normalizedId)) return null;
+
+  const cacheKey = `${locale}:${normalizedId}`;
+  const cached = geoWikiSummaryCache.get(cacheKey);
+  if (cached) return cached;
+
+  const request = fetch(
+    `/api/wiki-summary?wikidataId=${encodeURIComponent(normalizedId)}&locale=${encodeURIComponent(locale)}`,
+    {
+      method: "GET",
+      cache: "force-cache",
+    },
+  )
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        wikipedia?: {
+          title?: string;
+          description?: string | null;
+          extract?: string | null;
+          pageUrl?: string | null;
+        } | null;
+      };
+      if (!payload?.ok || !payload.wikipedia) return null;
+
+      const title = String(payload.wikipedia.title ?? "").trim();
+      const description = String(payload.wikipedia.description ?? "").trim();
+      const extract = String(payload.wikipedia.extract ?? "").trim();
+      const pageUrl = String(payload.wikipedia.pageUrl ?? "").trim();
+
+      return {
+        title,
+        description: description || null,
+        extract: extract || null,
+        pageUrl: pageUrl || null,
+      } satisfies GeoWikiSummary;
+    })
+    .catch(() => null);
+
+  geoWikiSummaryCache.set(cacheKey, request);
   return request;
 }
 
@@ -904,6 +1407,7 @@ async function fetchGeoLocaleBundle(
 ): Promise<{
   focus: GeoLocationFocusResponse | null;
   directoryEntries: GeoDirectoryEntry[];
+  investigation: GeoInvestigationInfo | null;
 }> {
   if (!location) {
     const countryCodes = await fetchLocaleCountryCodes();
@@ -915,6 +1419,7 @@ async function fetchGeoLocaleBundle(
           label: resolveCountryLabel(countryCode, locale, unknownLabel).label,
         })),
       ),
+      investigation: null,
     };
   }
 
@@ -954,11 +1459,12 @@ async function fetchGeoLocaleBundle(
           };
         }),
       ),
+      investigation: buildCountryGeoInvestigation(countryPayload, locale),
     };
   }
 
   if (!location.regionCode) {
-    return { focus: null, directoryEntries: [] };
+    return { focus: null, directoryEntries: [], investigation: null };
   }
 
   const statePayload = await fetchLocaleStatePayload(
@@ -999,6 +1505,10 @@ async function fetchGeoLocaleBundle(
           })
         : [],
     ),
+    investigation:
+      location.level === "locality"
+        ? buildLocalityGeoInvestigation(statePayload, location, locale)
+        : buildStateGeoInvestigation(statePayload, locale),
   };
 }
 
@@ -1122,6 +1632,9 @@ export function GeoClientPage({
   const [locationFocus, setLocationFocus] = useState<GeoLocationFocusResponse | null>(
     null,
   );
+  const [geoInvestigation, setGeoInvestigation] =
+    useState<GeoInvestigationInfo | null>(null);
+  const [geoWikiSummary, setGeoWikiSummary] = useState<GeoWikiSummary | null>(null);
   const [geoDirectoryEntries, setGeoDirectoryEntries] = useState<
     GeoDirectoryEntry[] | null
   >(null);
@@ -1141,6 +1654,38 @@ export function GeoClientPage({
       setHoveredCountryName("");
     }
   }, [activeLocation]);
+
+  useEffect(() => {
+    let active = true;
+    const wikidataId = geoInvestigation?.wikidataId ?? null;
+
+    if (
+      !wikidataId ||
+      !activeLocation ||
+      activeLocation.level === "country"
+    ) {
+      setGeoWikiSummary(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    setGeoWikiSummary(null);
+
+    fetchGeoWikiSummary(wikidataId, locale).then((summary) => {
+      if (!active) return;
+      setGeoWikiSummary(summary);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    activeLocation?.canonical,
+    activeLocation?.level,
+    geoInvestigation?.wikidataId,
+    locale,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -1211,6 +1756,7 @@ export function GeoClientPage({
             setGeoPointsData(nextGeoPoints);
             setGeoTabRows(nextGeoTabRows);
             setLocationFocus(nextGeoLocaleBundle.focus);
+            setGeoInvestigation(nextGeoLocaleBundle.investigation);
             setGeoDirectoryEntries(nextGeoLocaleBundle.directoryEntries);
             setActiveLocation(requestedLocation);
             setCurrentZoom(
@@ -1546,6 +2092,49 @@ export function GeoClientPage({
 
   const selectedEntryKey =
     activeLocation?.level === "locality" ? activeLocation.canonical : null;
+  const investigationRows = useMemo(() => {
+    if (!geoInvestigation) return null;
+
+    const derivedRows = [...geoInvestigation.rows];
+    const marketPenetrationVisitors =
+      activeLocation?.level === "locality"
+        ? Math.max(
+            0,
+            Number(
+              statsEntries.find((entry) => entry.key === activeLocation.canonical)
+                ?.visitors ?? 0,
+            ),
+          )
+        : statsEntries.reduce(
+            (sum, entry) => sum + Math.max(0, Number(entry.visitors ?? 0)),
+            0,
+          );
+
+    derivedRows.push(
+      buildGeoInvestigationRow(
+        buildGeoMarketPenetrationLabel(
+          locale,
+          resolveWindowDayCount(window.from, window.to),
+        ),
+        formatGeoMarketPenetration(
+          locale,
+          marketPenetrationVisitors,
+          geoInvestigation.population,
+        ),
+        true,
+      ),
+    );
+
+    return derivedRows;
+  }, [
+    geoInvestigation,
+    locale,
+    activeLocation?.canonical,
+    activeLocation?.level,
+    statsEntries,
+    window.from,
+    window.to,
+  ]);
   const currentLocationInfo = useMemo(() => {
     if (!activeLocation) return null;
 
@@ -1663,6 +2252,8 @@ export function GeoClientPage({
         loading={loading}
         columnLabel={statsColumnLabel}
         currentLocationInfo={currentLocationInfo}
+        investigationRows={investigationRows}
+        wikiSummary={geoWikiSummary}
         entries={statsEntries}
         selectedEntryKey={selectedEntryKey}
         onSelectEntry={handleSelectEntry}

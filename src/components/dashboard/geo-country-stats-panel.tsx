@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   RiArrowDownSLine,
-  RiArrowLeftSLine,
+  RiExternalLinkLine,
+  RiArrowLeftLine,
+  RiInformationLine,
   RiArrowUpSLine,
 } from "@remixicon/react";
 import { OverlayScrollbars } from "overlayscrollbars";
 import type { PartialOptions } from "overlayscrollbars";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { AutoResizer } from "@/components/ui/auto-resizer";
-import { Button } from "@/components/ui/button";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card } from "@/components/ui/card";
+import { Clickable } from "@/components/ui/clickable";
 import {
   TableCell,
   TableHead,
@@ -30,6 +33,17 @@ interface GeoCountryStatsPanelProps {
   currentLocationInfo?: {
     lines: string[];
   } | null;
+  wikiSummary?: {
+    title: string;
+    description: string | null;
+    extract: string | null;
+    pageUrl: string | null;
+  } | null;
+  investigationRows?: Array<{
+    label: string;
+    value: ReactNode;
+    fullWidth?: boolean;
+  }> | null;
   entries: Array<{
     key: string;
     label: string;
@@ -53,8 +67,6 @@ const PANEL_SCROLLBAR_OPTIONS = {
   scrollbars: {
     theme: "os-theme-insightflare",
     autoHide: "move",
-    autoHideDelay: 420,
-    autoHideSuspend: false,
   },
 } satisfies PartialOptions;
 
@@ -64,6 +76,8 @@ export function GeoCountryStatsPanel({
   loading,
   columnLabel,
   currentLocationInfo,
+  wikiSummary,
+  investigationRows,
   entries,
   selectedEntryKey,
   onSelectEntry,
@@ -77,20 +91,22 @@ export function GeoCountryStatsPanel({
     direction: "desc",
   });
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
+  const scrollbarsRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(null);
 
   useEffect(() => {
     const host = scrollHostRef.current;
     if (!host) return;
 
     const existing = OverlayScrollbars(host);
-    const instance =
-      existing ?? OverlayScrollbars(host, PANEL_SCROLLBAR_OPTIONS);
+    const instance = existing ?? OverlayScrollbars(host, PANEL_SCROLLBAR_OPTIONS);
+    scrollbarsRef.current = instance;
 
-    if (existing) {
-      existing.options(PANEL_SCROLLBAR_OPTIONS);
-    }
+    instance.options(PANEL_SCROLLBAR_OPTIONS);
 
     return () => {
+      if (scrollbarsRef.current === instance) {
+        scrollbarsRef.current = null;
+      }
       if (!existing) {
         instance.destroy();
       }
@@ -148,6 +164,42 @@ export function GeoCountryStatsPanel({
     [sort.key, sortedEntries],
   );
   const hasVisibleContent = sortedEntries.length > 0;
+  const hasTopSectionContent = Boolean(
+    onBack || (currentLocationInfo && currentLocationInfo.lines.length > 0),
+  );
+  const geoInvestigationNotice =
+    locale === "zh"
+      ? "这些数据来源于网络，可能存在错误。"
+      : "This data comes from the web and may contain errors.";
+  const topSectionTransitionKey = useMemo(() => {
+    const linesKey =
+      currentLocationInfo?.lines.map((line) => line.trim()).join("|") ?? "";
+    const rowsKey =
+      investigationRows?.map((row) => row.label.trim()).join("|") ?? "";
+    const wikiKey = [
+      wikiSummary?.title,
+      wikiSummary?.description,
+      wikiSummary?.extract,
+      wikiSummary?.pageUrl,
+    ]
+      .map((value) => String(value ?? "").trim())
+      .filter((value) => value.length > 0)
+      .join("|");
+    return `${onBack ? "back" : "root"}::${linesKey}::${rowsKey}::${wikiKey}`;
+  }, [currentLocationInfo?.lines, investigationRows, onBack, wikiSummary]);
+
+  useEffect(() => {
+    scrollbarsRef.current?.update(true);
+  }, [
+    hasTopSectionContent,
+    investigationRows,
+    loading,
+    onBack,
+    sortedEntries.length,
+    wikiSummary?.description,
+    wikiSummary?.extract,
+    wikiSummary?.pageUrl,
+  ]);
 
   const tableHeader = (
     <TableRow className="hover:bg-transparent">
@@ -231,49 +283,124 @@ export function GeoCountryStatsPanel({
 
   return (
     <aside className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[44svh] p-3 sm:inset-y-0 sm:right-0 sm:left-auto sm:h-full sm:w-[23.5rem]">
-      <Card className="pointer-events-auto h-full border-x-0 border-y border-border/70 bg-background/75 py-0 ring-0 backdrop-blur-xl">
+      <Card className="pointer-events-auto h-full overflow-hidden border-x-0 border-y border-border/70 bg-background/75 py-0 ring-0 backdrop-blur-xl">
         <div
           ref={scrollHostRef}
           className="h-full overflow-hidden"
           data-overlayscrollbars-initialize
         >
-          <div className="space-y-3 py-3">
-            {onBack ? (
-              <div className="px-4">
-                <Button variant="ghost" size="xs" onClick={onBack}>
-                  <RiArrowLeftSLine className="size-3.5" />
-                  <span>{locale === "zh" ? "返回上一级" : "Back"}</span>
-                </Button>
-              </div>
-            ) : null}
-
-            {currentLocationInfo && currentLocationInfo.lines.length > 0 ? (
-              <AutoResizer initial className="w-full">
-                <div className="border-y border-border/70 px-4 py-3">
-                  <div className="space-y-1">
-                    {currentLocationInfo.lines.map((line) => (
-                      <div
-                        key={line}
-                        className="text-2xl leading-tight font-semibold tracking-tight text-foreground sm:text-[1.9rem]"
-                      >
-                        {line}
+          <div className="min-h-full">
+            <AutoResizer initial className="shrink-0">
+              <AutoTransition initial>
+                <div
+                  key={topSectionTransitionKey}
+                  className={cn(hasTopSectionContent ? "py-3" : "py-0")}
+                >
+                  <div className="space-y-3">
+                    {onBack ? (
+                      <div className="px-4">
+                        <Clickable
+                          onClick={onBack}
+                          hoverScale={1.05}
+                          tapScale={0.98}
+                          aria-label={locale === "zh" ? "返回上一级" : "Back"}
+                          className={cn(
+                            "peer/menu-button group/menu-button flex h-8 w-full items-center justify-start gap-2 overflow-hidden rounded-none p-2 text-left text-xs outline-hidden transition-[width,height,padding]",
+                            "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                            "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                            "active:bg-sidebar-accent active:text-sidebar-accent-foreground",
+                            "[&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+                          )}
+                        >
+                          <RiArrowLeftLine />
+                          <span>{locale === "zh" ? "返回上一级" : "Back"}</span>
+                        </Clickable>
                       </div>
-                    ))}
+                    ) : null}
+
+                    {currentLocationInfo && currentLocationInfo.lines.length > 0 ? (
+                      <div className="border-y border-border/70 px-4 py-3">
+                      <div className="space-y-1">
+                        {currentLocationInfo.lines.map((line) => (
+                          <div
+                            key={line}
+                            className="text-2xl leading-tight font-semibold tracking-tight text-foreground sm:text-[1.9rem]"
+                            >
+                              {line}
+                          </div>
+                        ))}
+                      </div>
+                      {wikiSummary?.description ? (
+                        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                          {wikiSummary.description}
+                        </p>
+                      ) : null}
+                        {((investigationRows && investigationRows.length > 0) ||
+                          wikiSummary?.extract ||
+                          wikiSummary?.pageUrl) ? (
+                          <div className="mt-3 space-y-3">
+                            {investigationRows && investigationRows.length > 0 ? (
+                              <dl className="grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2">
+                                {investigationRows.map((row, index) => (
+                                  <div
+                                    key={`${row.label}-${index}`}
+                                    className={cn("min-w-0", row.fullWidth && "sm:col-span-2")}
+                                  >
+                                    <dt className="text-[11px] leading-4 text-muted-foreground">
+                                      {row.label}
+                                    </dt>
+                                    <dd className="mt-0.5 break-words text-sm leading-5 font-medium whitespace-pre-line text-foreground">
+                                      {row.value}
+                                    </dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            ) : null}
+                            {wikiSummary?.extract ? (
+                              <p className="text-sm leading-6 text-foreground/80">
+                                {wikiSummary.extract}
+                              </p>
+                            ) : null}
+                            {wikiSummary?.pageUrl ? (
+                              <a
+                                href={wikiSummary.pageUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground transition-colors hover:text-primary"
+                              >
+                                {locale === "zh" ? "查看维基百科" : "View on Wikipedia"}
+                                <RiExternalLinkLine className="size-3.5 shrink-0" />
+                              </a>
+                            ) : null}
+                            <p className="text-[11px] leading-4 text-muted-foreground">
+                              <span className="mr-1.5 inline-flex h-4 align-top items-center">
+                                <RiInformationLine className="size-3.5" />
+                              </span>
+                              {geoInvestigationNotice}
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
-              </AutoResizer>
-            ) : null}
+              </AutoTransition>
+            </AutoResizer>
 
-            <DataTableSwitch
-              loading={loading}
-              hasContent={hasVisibleContent}
-              loadingLabel={messages.common.loading}
-              emptyLabel={messages.common.noData}
-              colSpan={3}
-              contentKey={`${sort.key}-${sort.direction}-${selectedEntryKey ?? "none"}`}
-              header={tableHeader}
-              rows={rows}
-            />
+            <AutoResizer initial className="shrink-0">
+              <div className="py-3">
+                <DataTableSwitch
+                  loading={loading}
+                  hasContent={hasVisibleContent}
+                  loadingLabel={messages.common.loading}
+                  emptyLabel={messages.common.noData}
+                  colSpan={3}
+                  contentKey={`${sort.key}-${sort.direction}-${selectedEntryKey ?? "none"}`}
+                  header={tableHeader}
+                  rows={rows}
+                />
+              </div>
+            </AutoResizer>
           </div>
         </div>
       </Card>
