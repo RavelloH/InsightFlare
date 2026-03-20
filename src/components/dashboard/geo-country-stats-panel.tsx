@@ -29,6 +29,7 @@ interface GeoCountryStatsPanelProps {
   locale: Locale;
   messages: AppMessages;
   loading: boolean;
+  stacked?: boolean;
   columnLabel: string;
   currentLocationInfo?: {
     lines: string[];
@@ -74,6 +75,7 @@ export function GeoCountryStatsPanel({
   locale,
   messages,
   loading,
+  stacked = false,
   columnLabel,
   currentLocationInfo,
   wikiSummary,
@@ -94,6 +96,12 @@ export function GeoCountryStatsPanel({
   const scrollbarsRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(null);
 
   useEffect(() => {
+    if (stacked) {
+      scrollbarsRef.current?.destroy();
+      scrollbarsRef.current = null;
+      return;
+    }
+
     const host = scrollHostRef.current;
     if (!host) return;
 
@@ -111,7 +119,7 @@ export function GeoCountryStatsPanel({
         instance.destroy();
       }
     };
-  }, []);
+  }, [stacked]);
 
   const toggleSort = (key: SortKey) => {
     setSort((previous) =>
@@ -189,6 +197,7 @@ export function GeoCountryStatsPanel({
   }, [currentLocationInfo?.lines, investigationRows, onBack, wikiSummary]);
 
   useEffect(() => {
+    if (stacked) return;
     scrollbarsRef.current?.update(true);
   }, [
     hasTopSectionContent,
@@ -196,6 +205,7 @@ export function GeoCountryStatsPanel({
     loading,
     onBack,
     sortedEntries.length,
+    stacked,
     wikiSummary?.description,
     wikiSummary?.extract,
     wikiSummary?.pageUrl,
@@ -281,12 +291,22 @@ export function GeoCountryStatsPanel({
     );
   });
 
+  const wrapperClassName = stacked
+    ? "relative z-0 w-full"
+    : "pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[44svh] p-3 sm:inset-y-0 sm:right-0 sm:left-auto sm:h-full sm:w-[23.5rem]";
+  const cardClassName = stacked
+    ? "pointer-events-auto border border-border/70 bg-background/90 py-0 shadow-sm"
+    : "pointer-events-auto h-full overflow-hidden border-x-0 border-y border-border/70 bg-background/75 py-0 ring-0 backdrop-blur-xl";
+  const scrollHostClassName = stacked
+    ? "overflow-visible"
+    : "h-full overflow-hidden";
+
   return (
-    <aside className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[44svh] p-3 sm:inset-y-0 sm:right-0 sm:left-auto sm:h-full sm:w-[23.5rem]">
-      <Card className="pointer-events-auto h-full overflow-hidden border-x-0 border-y border-border/70 bg-background/75 py-0 ring-0 backdrop-blur-xl">
+    <aside className={wrapperClassName}>
+      <Card className={cardClassName}>
         <div
           ref={scrollHostRef}
-          className="h-full overflow-hidden"
+          className={scrollHostClassName}
           data-overlayscrollbars-initialize
         >
           <div className="min-h-full">

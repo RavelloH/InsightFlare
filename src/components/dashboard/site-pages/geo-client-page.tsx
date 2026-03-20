@@ -236,7 +236,6 @@ const CLUSTER_ZOOM_STEP = 0.25;
 const CLUSTER_CROSSFADE_DURATION_S = 0.22;
 const GEO_MAP_EDGE_PADDING_PX = 24;
 const GEO_MAP_DESKTOP_PANEL_WIDTH_PX = 376;
-const GEO_MAP_MOBILE_PANEL_HEIGHT_RATIO = 0.44;
 const EMPTY_COUNTRY_FEATURES = {
   type: "FeatureCollection",
   features: [],
@@ -254,17 +253,10 @@ function resolveGeoMapPadding(isMobile: boolean): {
   left: number;
 } {
   if (isMobile) {
-    const viewportHeight =
-      typeof window === "undefined" ? 720 : window.innerHeight;
-    const bottomPanelHeight = clamp(
-      Math.round(viewportHeight * GEO_MAP_MOBILE_PANEL_HEIGHT_RATIO),
-      220,
-      420,
-    );
     return {
       top: GEO_MAP_EDGE_PADDING_PX,
       right: GEO_MAP_EDGE_PADDING_PX,
-      bottom: bottomPanelHeight + GEO_MAP_EDGE_PADDING_PX,
+      bottom: GEO_MAP_EDGE_PADDING_PX,
       left: GEO_MAP_EDGE_PADDING_PX,
     };
   }
@@ -2257,12 +2249,24 @@ export function GeoClientPage({
     statsEntries.length > 0 ? (key: string) => updateLocation(key) : undefined;
 
   const shouldRenderMap = mounted;
-
-  return (
-    <div
-      className="relative h-full min-h-0 overflow-hidden"
-      style={MAP_VIEWPORT_RENDER_ISOLATION_STYLE}
-    >
+  const statsPanel = (
+    <GeoCountryStatsPanel
+      locale={locale}
+      messages={messages}
+      loading={loading}
+      stacked={isMobile}
+      columnLabel={statsColumnLabel}
+      currentLocationInfo={currentLocationInfo}
+      investigationRows={investigationRows}
+      wikiSummary={geoWikiSummary}
+      entries={statsEntries}
+      selectedEntryKey={selectedEntryKey}
+      onSelectEntry={handleSelectEntry}
+      onBack={handleBack}
+    />
+  );
+  const mapViewport = (
+    <>
       {shouldRenderMap ? (
         <Map
           ref={mapRef}
@@ -2294,6 +2298,7 @@ export function GeoClientPage({
       )}
 
       <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-background via-background/60 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-background via-background/70 to-transparent sm:h-40" />
 
       <div className="pointer-events-none absolute left-4 top-4 z-10 max-w-[min(26rem,calc(100%-2rem))] sm:max-w-[calc(100%-25.5rem)] md:left-6 md:top-6">
         <div className="space-y-1">
@@ -2303,20 +2308,6 @@ export function GeoClientPage({
           <p className="text-sm text-foreground/75">{messages.geo.subtitle}</p>
         </div>
       </div>
-
-      <GeoCountryStatsPanel
-        locale={locale}
-        messages={messages}
-        loading={loading}
-        columnLabel={statsColumnLabel}
-        currentLocationInfo={currentLocationInfo}
-        investigationRows={investigationRows}
-        wikiSummary={geoWikiSummary}
-        entries={statsEntries}
-        selectedEntryKey={selectedEntryKey}
-        onSelectEntry={handleSelectEntry}
-        onBack={handleBack}
-      />
 
       <AnimatePresence>
         {showCountryToolbar ? (
@@ -2435,7 +2426,33 @@ export function GeoClientPage({
           </motion.div>
         ) : null}
       </AnimatePresence>
+    </>
+  );
 
+  if (isMobile) {
+    return (
+      <div className="space-y-6 pb-6">
+        <div
+          className="relative h-[min(68svh,calc(100svh-10.5rem))] min-h-[19rem] overflow-hidden"
+          style={MAP_VIEWPORT_RENDER_ISOLATION_STYLE}
+        >
+          {mapViewport}
+        </div>
+
+        <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6">
+          {statsPanel}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="relative h-full min-h-0 overflow-hidden"
+      style={MAP_VIEWPORT_RENDER_ISOLATION_STYLE}
+    >
+      {mapViewport}
+      {statsPanel}
     </div>
   );
 }
