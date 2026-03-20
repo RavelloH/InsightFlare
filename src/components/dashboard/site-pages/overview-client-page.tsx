@@ -76,6 +76,11 @@ import {
   fetchTrend,
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
+import {
+  buildLocalityLocationValue,
+  buildRegionLocationValue,
+  canonicalizeGeoLocationValue,
+} from "@/lib/dashboard/geo-location";
 import type { OverviewData, TrendData } from "@/lib/edge-client";
 import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
@@ -882,17 +887,7 @@ function isGeoLocationTab(tab: GeoDimensionCardTab): tab is GeoLocationTab {
 }
 
 function canonicalizeGeoFilterValue(raw: string | null | undefined): string | null {
-  const normalized = String(raw ?? "").trim();
-  if (!normalized) return null;
-  const segments = normalized
-    .split(GEO_REGION_VALUE_SEPARATOR)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
-  if (segments.length === 0) return null;
-  const country = segments[0]?.toUpperCase();
-  if (!country) return null;
-  if (segments.length === 1) return country;
-  return [country, ...segments.slice(1)].join(GEO_REGION_VALUE_SEPARATOR);
+  return canonicalizeGeoLocationValue(raw);
 }
 
 function resolveGeoLocationHighlightValue(tab: GeoLocationTab, geoFilterValue: string | null): string | null {
@@ -960,7 +955,11 @@ function resolveGeoRegionBreadcrumbData(
   return {
     displayLabel: hasRegion ? `${countryLabel} > ${regionLabel}` : countryLabel,
     filterValue: hasRegion
-      ? `${countryCode}${GEO_REGION_VALUE_SEPARATOR}${effectiveStateCode}${GEO_REGION_VALUE_SEPARATOR}${effectiveStateName}`
+      ? buildRegionLocationValue(
+          countryCode,
+          effectiveStateCode,
+          effectiveStateName,
+        )
       : countryCode || countryLabel,
     breadcrumb: {
       countryLabel,
@@ -1045,7 +1044,12 @@ function resolveGeoCityBreadcrumbData(
         : `${countryLabel} > ${regionLabel} > ${cityLabel}`,
     filterValue:
       countryCode && effectiveCity
-        ? `${countryCode}${GEO_REGION_VALUE_SEPARATOR}${effectiveStateCode}${GEO_REGION_VALUE_SEPARATOR}${effectiveStateName}${GEO_REGION_VALUE_SEPARATOR}${effectiveCity}`
+        ? buildLocalityLocationValue(
+            countryCode,
+            effectiveStateCode,
+            effectiveStateName,
+            effectiveCity,
+          )
         : effectiveCity,
     breadcrumb: {
       countryLabel,
@@ -1096,7 +1100,14 @@ function resolveGeoLocationQueryValue(
 
   if (tab === "region") {
     if (segments.length >= 3) {
-      return `${segments[0].toUpperCase()}${GEO_REGION_VALUE_SEPARATOR}${segments[1]}${GEO_REGION_VALUE_SEPARATOR}${segments.slice(2).join(GEO_REGION_VALUE_SEPARATOR)}`;
+      const regionName = segments.slice(2).join(GEO_REGION_VALUE_SEPARATOR).trim();
+      return (
+        buildRegionLocationValue(
+          segments[0] || "",
+          segments[1] || regionName,
+          regionName || segments[1] || "",
+        ) || null
+      );
     }
     const breadcrumb = row.regionBreadcrumb;
     if (!breadcrumb) return null;
@@ -1110,11 +1121,25 @@ function resolveGeoLocationQueryValue(
     ) {
       return null;
     }
-    return `${breadcrumb.countryCode.toUpperCase()}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.stateCode}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.regionLabel}`;
+    return (
+      buildRegionLocationValue(
+        breadcrumb.countryCode,
+        breadcrumb.stateCode,
+        breadcrumb.regionLabel,
+      ) || null
+    );
   }
 
   if (segments.length >= 4) {
-    return `${segments[0].toUpperCase()}${GEO_REGION_VALUE_SEPARATOR}${segments[1]}${GEO_REGION_VALUE_SEPARATOR}${segments[2]}${GEO_REGION_VALUE_SEPARATOR}${segments.slice(3).join(GEO_REGION_VALUE_SEPARATOR)}`;
+    const cityName = segments.slice(3).join(GEO_REGION_VALUE_SEPARATOR).trim();
+    return (
+      buildLocalityLocationValue(
+        segments[0] || "",
+        segments[1] || segments[2] || "",
+        segments[2] || segments[1] || "",
+        cityName,
+      ) || null
+    );
   }
 
   const breadcrumb = row.cityBreadcrumb;
@@ -1128,7 +1153,14 @@ function resolveGeoLocationQueryValue(
       return country;
     }
     if (breadcrumb.hideCity) return country;
-    return `${country}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.cityNameDefault}`;
+    return (
+      buildLocalityLocationValue(
+        country,
+        "",
+        "",
+        breadcrumb.cityNameDefault,
+      ) || country
+    );
   }
   if (
     normalizeGeoTranslationLookupValue(breadcrumb.cityNameDefault) ===
@@ -1138,7 +1170,23 @@ function resolveGeoLocationQueryValue(
   ) {
     return null;
   }
-  return `${breadcrumb.countryCode.toUpperCase()}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.stateCode}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.regionLabel}${GEO_REGION_VALUE_SEPARATOR}${breadcrumb.cityNameDefault}`;
+  return (
+    buildLocalityLocationValue(
+      breadcrumb.countryCode,
+      breadcrumb.stateCode,
+      breadcrumb.regionLabel,
+      breadcrumb.cityNameDefault,
+    ) || null
+  );
+}
+
+function resolveGeoDimensionRowRawValue(item: {
+  label?: string;
+  value?: string;
+}): string {
+  const rawValue = typeof item.value === "string" ? item.value.trim() : "";
+  if (rawValue) return rawValue;
+  return String(item.label || "").trim();
 }
 
 const UMAMI_BROWSER_ICON_PREFIX = "umami-browser:";
@@ -2871,7 +2919,7 @@ export function OverviewPagesSection({
 
     const regionRows: PageCardRow[] = (resolvedGeoDimensionCardTabData.region ?? []).map(
       (item, index) => {
-        const value = String(item.label || "");
+        const value = resolveGeoDimensionRowRawValue(item);
         const regionData = resolveGeoRegionBreadcrumbData(
           value,
           locale,
@@ -2893,7 +2941,7 @@ export function OverviewPagesSection({
     );
     const cityRows: PageCardRow[] = (resolvedGeoDimensionCardTabData.city ?? []).map(
       (item, index) => {
-        const value = String(item.label || "");
+        const value = resolveGeoDimensionRowRawValue(item);
         const cityData = resolveGeoCityBreadcrumbData(
           value,
           locale,

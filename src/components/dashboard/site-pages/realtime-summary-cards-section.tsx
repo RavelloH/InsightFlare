@@ -6,13 +6,17 @@ import {
   type OverviewPagesSectionCardData,
 } from "@/components/dashboard/site-pages/overview-client-page";
 import type { OverviewTabRows } from "@/lib/dashboard/client-data";
+import {
+  buildLocalityLocationValue,
+  buildRegionLocationValue,
+  parseGeoLocationValue,
+} from "@/lib/dashboard/geo-location";
 import type { DashboardFilters } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type { RealtimeVisit } from "@/lib/realtime/types";
 
 const DIRECT_REFERRER_FILTER_VALUE = "__direct__";
-const GEO_VALUE_SEPARATOR = "::";
 
 interface RealtimeSummaryCardsSectionProps {
   locale: Locale;
@@ -100,68 +104,51 @@ function buildSessionBoundaries(
   );
 }
 
-function normalizeGeoFilterValue(value: string | null | undefined): string | null {
-  const normalized = String(value ?? "").trim();
-  if (!normalized) return null;
-  const segments = normalized
-    .split(GEO_VALUE_SEPARATOR)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
-  if (segments.length === 0) return null;
-  const country = segments[0]?.toUpperCase();
-  if (!country) return null;
-  return [country, ...segments.slice(1)].join(GEO_VALUE_SEPARATOR);
+function resolveParsedRegionValue(value: string | null | undefined): string {
+  const parsed = parseGeoLocationValue(value);
+  if (!parsed?.regionCode && !parsed?.regionName) return "";
+  return buildRegionLocationValue(
+    parsed.countryCode,
+    parsed.regionCode ?? parsed.regionName ?? "",
+    parsed.regionName ?? parsed.regionCode ?? "",
+  );
+}
+
+function resolveParsedLocalityValue(value: string | null | undefined): string {
+  const parsed = parseGeoLocationValue(value);
+  if (parsed?.level !== "locality" || !parsed.localityName) return "";
+  return buildLocalityLocationValue(
+    parsed.countryCode,
+    parsed.regionCode ?? parsed.regionName ?? "",
+    parsed.regionName ?? parsed.regionCode ?? "",
+    parsed.localityName,
+  );
 }
 
 function resolveVisitRegionValue(visit: RealtimeVisit): string {
-  const encoded = normalizeGeoFilterValue(visit.region);
-  if (encoded) {
-    const segments = encoded.split(GEO_VALUE_SEPARATOR);
-    if (segments.length >= 3) {
-      return [
-        segments[0] || "",
-        segments[1] || "",
-        segments.slice(2).join(GEO_VALUE_SEPARATOR).trim(),
-      ].join(GEO_VALUE_SEPARATOR);
-    }
-  }
+  const encodedRegion = resolveParsedRegionValue(visit.region);
+  if (encodedRegion) return encodedRegion;
+
+  const encodedCityRegion = resolveParsedRegionValue(visit.city);
+  if (encodedCityRegion) return encodedCityRegion;
 
   const country = visit.country.trim().toUpperCase();
-  const regionCode = visit.regionCode.trim();
-  const region = visit.region.trim();
-  if (!country && !regionCode && !region) return "";
-  return [
-    country,
-    regionCode || region,
-    region,
-  ].join(GEO_VALUE_SEPARATOR);
+  if (!country) return "";
+  return buildRegionLocationValue(country, visit.regionCode, visit.region);
 }
 
 function resolveVisitCityValue(visit: RealtimeVisit): string {
-  const encoded = normalizeGeoFilterValue(visit.city);
-  if (encoded) {
-    const segments = encoded.split(GEO_VALUE_SEPARATOR);
-    if (segments.length >= 4) {
-      return [
-        segments[0] || "",
-        segments[1] || "",
-        segments[2] || "",
-        segments.slice(3).join(GEO_VALUE_SEPARATOR).trim(),
-      ].join(GEO_VALUE_SEPARATOR);
-    }
-  }
+  const encodedCity = resolveParsedLocalityValue(visit.city);
+  if (encodedCity) return encodedCity;
 
   const country = visit.country.trim().toUpperCase();
-  const regionCode = visit.regionCode.trim();
-  const region = visit.region.trim();
-  const city = visit.city.trim();
-  if (!country && !regionCode && !region && !city) return "";
-  return [
+  if (!country) return "";
+  return buildLocalityLocationValue(
     country,
-    regionCode || region,
-    region,
-    city,
-  ].join(GEO_VALUE_SEPARATOR);
+    visit.regionCode,
+    visit.region,
+    visit.city,
+  );
 }
 
 function matchesSourceLink(
@@ -189,24 +176,30 @@ function matchesSourceLink(
 }
 
 function matchesGeoFilter(visit: RealtimeVisit, filterValue: string): boolean {
-  const normalized = normalizeGeoFilterValue(filterValue);
-  if (!normalized) return false;
+  const parsedFilter = parseGeoLocationValue(filterValue);
+  if (!parsedFilter) return false;
 
-  const segments = normalized.split(GEO_VALUE_SEPARATOR);
-  if (segments.length === 1) {
-    return equalsCaseInsensitive(visit.country, segments[0] || "");
-  }
-  if (segments.length === 2 || segments.length === 3) {
-    return equalsCaseInsensitive(resolveVisitRegionValue(visit), normalized);
-  }
-  if (segments.length >= 4) {
-    return equalsCaseInsensitive(resolveVisitCityValue(visit), normalized);
+  if (parsedFilter.level === "country") {
+    return equalsCaseInsensitive(visit.country, parsedFilter.countryCode);
   }
 
-  return (
-    equalsTrimmed(visit.country, filterValue)
-    || equalsTrimmed(visit.region, filterValue)
-    || equalsTrimmed(visit.city, filterValue)
+  if (parsedFilter.level === "region") {
+    return equalsCaseInsensitive(
+      resolveVisitRegionValue(visit),
+      parsedFilter.canonical,
+    );
+  }
+
+  if (!parsedFilter.regionCode && !parsedFilter.regionName) {
+    return (
+      equalsCaseInsensitive(visit.country, parsedFilter.countryCode)
+      && equalsCaseInsensitive(visit.city, parsedFilter.localityName ?? "")
+    );
+  }
+
+  return equalsCaseInsensitive(
+    resolveVisitCityValue(visit),
+    parsedFilter.canonical,
   );
 }
 

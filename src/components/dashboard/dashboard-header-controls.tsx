@@ -90,6 +90,7 @@ import {
   type RangePreset,
   type TimeWindow,
 } from "@/lib/dashboard/query-state";
+import { parseGeoLocationValue } from "@/lib/dashboard/geo-location";
 import {
   resolveContinentLabel,
   resolveCountryLabel,
@@ -422,7 +423,6 @@ function FilterActiveCountBadge({ count }: { count: number }) {
 }
 
 const DIRECT_REFERRER_FILTER_VALUE = "__direct__";
-const GEO_FILTER_SEGMENT_SEPARATOR = "::";
 
 function omitFilterKey(
   filters: DashboardFilters,
@@ -436,13 +436,11 @@ function omitFilterKey(
 function inferGeoOptionGroup(
   value: string,
 ): DashboardFilterOptionData["group"] | undefined {
-  const segments = value
-    .split(GEO_FILTER_SEGMENT_SEPARATOR)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
-  if (segments.length <= 1) return "country";
-  if (segments.length === 3) return "region";
-  if (segments.length >= 4) return "city";
+  const parsed = parseGeoLocationValue(value);
+  if (!parsed) return undefined;
+  if (parsed.level === "country") return "country";
+  if (parsed.level === "region") return "region";
+  if (parsed.level === "locality") return "city";
   return undefined;
 }
 
@@ -452,29 +450,31 @@ function formatGeoOptionLabel(
   messages: AppMessages,
   group?: DashboardFilterOptionData["group"],
 ): string {
-  const segments = value
-    .split(GEO_FILTER_SEGMENT_SEPARATOR)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
-  if (segments.length === 0) return messages.common.unknown;
+  const parsed = parseGeoLocationValue(value);
+  if (!parsed) return messages.common.unknown;
 
-  const countryCode = segments[0] || "";
+  const countryCode = parsed.countryCode;
   const countryLabel = resolveCountryLabel(
     countryCode,
     locale,
     messages.common.unknown,
   ).label;
 
-  if ((group ?? inferGeoOptionGroup(value)) === "country" || segments.length === 1) {
+  const effectiveGroup = group ?? inferGeoOptionGroup(value);
+  if (effectiveGroup === "country" || parsed.level === "country") {
     return countryLabel;
   }
 
-  const regionLabel = segments[2] || segments[1] || messages.common.unknown;
-  if ((group ?? inferGeoOptionGroup(value)) === "region" || segments.length === 3) {
+  const regionLabel =
+    parsed.regionName || parsed.regionCode || messages.common.unknown;
+  if (effectiveGroup === "region" || parsed.level === "region") {
     return `${countryLabel} / ${regionLabel}`;
   }
 
-  const cityLabel = segments[3] || messages.common.unknown;
+  const cityLabel = parsed.localityName || messages.common.unknown;
+  if (!parsed.regionCode && !parsed.regionName) {
+    return `${countryLabel} / ${cityLabel}`;
+  }
   return `${countryLabel} / ${regionLabel} / ${cityLabel}`;
 }
 

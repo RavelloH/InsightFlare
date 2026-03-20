@@ -4,6 +4,7 @@ import { requireSession } from "./session-auth";
 import {
   buildLocalityLocationValue,
   buildRegionLocationValue,
+  parseGeoLocationValue,
 } from "@/lib/dashboard/geo-location";
 
 const RETENTION_DAYS = 365;
@@ -798,7 +799,6 @@ function visitSourceBindingsForSites(siteIds: string[], window: QueryWindow): Ar
   return [...siteIds, window.fromMs, window.toMs, ...siteIds, window.fromMs, window.toMs];
 }
 
-const GEO_SEGMENT_SEPARATOR = "::";
 const DIRECT_REFERRER_FILTER_VALUE = "__direct__";
 
 interface ParsedGeoFilter {
@@ -809,34 +809,16 @@ interface ParsedGeoFilter {
 }
 
 function parseGeoFilterValue(value: string | undefined): ParsedGeoFilter | null {
-  const normalized = String(value ?? "").trim();
-  if (!normalized) return null;
-  const segments = normalized
-    .split(GEO_SEGMENT_SEPARATOR)
-    .map((segment) => segment.trim());
-  const country = (segments[0] || "").toUpperCase();
-  if (!country) return null;
-
-  if (segments.length === 1) {
-    return { country };
-  }
-
-  if (segments.length === 2) {
-    const city = segments[1] || "";
-    return city ? { country, city } : { country };
-  }
-
-  const regionCode = segments[1] || "";
-  const regionName = segments[2] || "";
-  const city = segments.length >= 4
-    ? segments.slice(3).join(GEO_SEGMENT_SEPARATOR).trim()
-    : "";
+  const parsed = parseGeoLocationValue(value);
+  if (!parsed) return null;
 
   return {
-    country,
-    ...(regionCode ? { regionCode } : {}),
-    ...(regionName ? { regionName } : {}),
-    ...(city ? { city } : {}),
+    country: parsed.countryCode,
+    ...(parsed.regionCode ? { regionCode: parsed.regionCode } : {}),
+    ...(parsed.regionName ? { regionName: parsed.regionName } : {}),
+    ...(parsed.level === "locality" && parsed.localityName
+      ? { city: parsed.localityName }
+      : {}),
   };
 }
 

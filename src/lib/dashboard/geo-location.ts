@@ -1,4 +1,5 @@
 export const GEO_LOCATION_SEPARATOR = "::";
+const GEO_COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/;
 
 export type GeoLocationLevel = "country" | "region" | "locality";
 
@@ -76,7 +77,7 @@ export function canonicalizeGeoLocationValue(
   if (segments.length === 0) return null;
 
   const countryCode = upperSegment(segments[0]);
-  if (!countryCode) return null;
+  if (!GEO_COUNTRY_CODE_PATTERN.test(countryCode)) return null;
 
   if (segments.length === 1) {
     return countryCode;

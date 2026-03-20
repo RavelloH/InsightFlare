@@ -37,6 +37,7 @@ import {
 import { Clickable } from "@/components/ui/clickable";
 import { Spinner } from "@/components/ui/spinner";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
+import { parseGeoLocationValue } from "@/lib/dashboard/geo-location";
 import {
   resolveContinentLabel,
   resolveCountryFlagCode,
@@ -86,7 +87,6 @@ const PANEL_SCROLLBAR_OPTIONS = {
     autoHideSuspend: false,
   },
 } satisfies PartialOptions;
-const GEO_VALUE_SEPARATOR = "::";
 const GEO_TRANSLATION_API_BASE_URL = "https://locale.ravelloh.com";
 const GEO_TRANSLATION_API_LOCALE_BY_APP_LOCALE: Record<Locale, string | null> = {
   en: null,
@@ -751,38 +751,25 @@ function resolveRealtimeRegionLabel(
   rawValue: string,
   messages: AppMessages,
 ): string {
-  const normalized = rawValue.trim();
-  if (!normalized) return messages.common.unknown;
-
-  const segments = normalized
-    .split(GEO_VALUE_SEPARATOR)
-    .map((segment) => segment.trim());
-  if (segments.length < 3) {
-    return normalizeDetailLabel(normalized, messages.common.unknown);
+  const parsed = parseGeoLocationValue(rawValue);
+  if (!parsed?.regionName && !parsed?.regionCode) {
+    return normalizeDetailLabel(rawValue.trim(), messages.common.unknown);
   }
-
-  const rawStateName = segments.slice(2).join(GEO_VALUE_SEPARATOR).trim();
-  return normalizeDetailLabel(rawStateName, messages.common.unknown);
+  return normalizeDetailLabel(
+    parsed.regionName || parsed.regionCode || "",
+    messages.common.unknown,
+  );
 }
 
 function resolveRealtimeCityLabel(
   rawValue: string,
   messages: AppMessages,
 ): string {
-  const normalized = rawValue.trim();
-  if (!normalized) return messages.common.unknown;
-
-  const segments = normalized
-    .split(GEO_VALUE_SEPARATOR)
-    .map((segment) => segment.trim());
-  if (segments.length < 3) {
-    return normalizeDetailLabel(normalized, messages.common.unknown);
+  const parsed = parseGeoLocationValue(rawValue);
+  if (!parsed?.localityName) {
+    return normalizeDetailLabel(rawValue.trim(), messages.common.unknown);
   }
-
-  const rawCity = segments.length >= 4
-    ? segments.slice(3).join(GEO_VALUE_SEPARATOR).trim()
-    : segments.slice(2).join(GEO_VALUE_SEPARATOR).trim();
-  return normalizeDetailLabel(rawCity, messages.common.unknown);
+  return normalizeDetailLabel(parsed.localityName, messages.common.unknown);
 }
 
 function resolveRealtimeEventDisplayData(
