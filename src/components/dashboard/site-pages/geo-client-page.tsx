@@ -22,6 +22,7 @@ import { GeoCountryStatsPanel } from "@/components/dashboard/geo-country-stats-p
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { pushUrlWithoutNavigation, useLiveSearchParams } from "@/lib/client-history";
 import {
   fetchOverviewGeoDimensionTab,
@@ -233,6 +234,9 @@ const MAP_POINT_ALPHA_VISIBLE = 112;
 const CLUSTER_RADIUS_PX = 26;
 const CLUSTER_ZOOM_STEP = 0.25;
 const CLUSTER_CROSSFADE_DURATION_S = 0.22;
+const GEO_MAP_EDGE_PADDING_PX = 24;
+const GEO_MAP_DESKTOP_PANEL_WIDTH_PX = 376;
+const GEO_MAP_MOBILE_PANEL_HEIGHT_RATIO = 0.44;
 const EMPTY_COUNTRY_FEATURES = {
   type: "FeatureCollection",
   features: [],
@@ -242,6 +246,36 @@ const MAP_VIEWPORT_RENDER_ISOLATION_STYLE = {
   transform: "translateZ(0)",
   willChange: "transform",
 } as const;
+
+function resolveGeoMapPadding(isMobile: boolean): {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+} {
+  if (isMobile) {
+    const viewportHeight =
+      typeof window === "undefined" ? 720 : window.innerHeight;
+    const bottomPanelHeight = clamp(
+      Math.round(viewportHeight * GEO_MAP_MOBILE_PANEL_HEIGHT_RATIO),
+      220,
+      420,
+    );
+    return {
+      top: GEO_MAP_EDGE_PADDING_PX,
+      right: GEO_MAP_EDGE_PADDING_PX,
+      bottom: bottomPanelHeight + GEO_MAP_EDGE_PADDING_PX,
+      left: GEO_MAP_EDGE_PADDING_PX,
+    };
+  }
+
+  return {
+    top: GEO_MAP_EDGE_PADDING_PX,
+    right: GEO_MAP_DESKTOP_PANEL_WIDTH_PX + GEO_MAP_EDGE_PADDING_PX,
+    bottom: GEO_MAP_EDGE_PADDING_PX,
+    left: GEO_MAP_EDGE_PADDING_PX,
+  };
+}
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 // World Bank, World, GDP per capita (current US$), most recent value for 2024.
 const WORLD_GDP_PER_CAPITA_USD_2024 = 13_631.2;
@@ -1597,6 +1631,7 @@ export function GeoClientPage({
   messages,
   siteId,
 }: GeoClientPageProps) {
+  const isMobile = useIsMobile();
   const { window, filters } = useDashboardQuery();
   const searchParams = useLiveSearchParams();
   const requestedLocation = useMemo(
@@ -1646,6 +1681,22 @@ export function GeoClientPage({
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+
+    const applyPadding = () => {
+      const map = mapRef.current?.getMap();
+      if (!map) return;
+      map.setPadding(resolveGeoMapPadding(isMobile));
+    };
+
+    applyPadding();
+    globalThis.window.addEventListener("resize", applyPadding);
+    return () => {
+      globalThis.window.removeEventListener("resize", applyPadding);
+    };
+  }, [isMobile, mounted]);
 
   useEffect(() => {
     if (activeLocation) {
@@ -1965,6 +2016,12 @@ export function GeoClientPage({
               previous === nextName ? previous : nextName,
             );
           },
+          onClick: (info) => {
+            const feature = (info.object as CountryFeature | undefined) ?? null;
+            const nextCode = resolveCountryCodeFromFeature(feature);
+            if (!nextCode) return;
+            updateLocation(nextCode);
+          },
           updateTriggers: {
             getLineColor: hoveredCountryKey,
             getLineWidth: hoveredCountryKey,
@@ -2180,7 +2237,7 @@ export function GeoClientPage({
       ? "国家/地区"
       : messages.common.country;
 
-  const updateLocation = (nextLocation: string | null) => {
+  function updateLocation(nextLocation: string | null) {
     if (typeof globalThis.window === "undefined") return;
     const nextParams = new URLSearchParams(searchParams.toString());
     if (nextLocation) {
@@ -2191,7 +2248,7 @@ export function GeoClientPage({
     const query = nextParams.toString();
     const nextTarget = `${globalThis.window.location.pathname}${query ? `?${query}` : ""}${globalThis.window.location.hash}`;
     pushUrlWithoutNavigation(nextTarget);
-  };
+  }
 
   const handleBack = activeLocation
     ? () => updateLocation(parentGeoLocationValue(activeLocation))
@@ -2217,6 +2274,7 @@ export function GeoClientPage({
           dragRotate={false}
           pitchWithRotate={false}
           onLoad={(event) => {
+            event.target.setPadding(resolveGeoMapPadding(isMobile));
             setCurrentZoom(
               normalizeClusterZoom(event.target.getZoom() ?? DEFAULT_VIEW_STATE.zoom),
             );
