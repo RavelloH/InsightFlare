@@ -85,6 +85,7 @@ import { useRealtimeChannel } from "@/hooks/use-realtime-channel";
 import { intlLocale } from "@/lib/dashboard/format";
 import {
   normalizeCustomDateRange,
+  type CustomTimeRange,
   type DashboardFilters,
   type DashboardInterval,
   type RangePreset,
@@ -1007,6 +1008,9 @@ export function DashboardHeaderControls({
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const [mobileFilterDrawerOpen, setMobileFilterDrawerOpen] = useState(false);
   const [mobileTimeDrawerOpen, setMobileTimeDrawerOpen] = useState(false);
+  const [periodForwardStack, setPeriodForwardStack] = useState<
+    CustomTimeRange[]
+  >([]);
   const openCustomDialogTimeoutRef = useRef<
     ReturnType<typeof globalThis.setTimeout> | null
   >(null);
@@ -1033,7 +1037,8 @@ export function DashboardHeaderControls({
     window.to,
     "previous",
   );
-  const nextPeriodRange = shiftTimeWindow(window.from, window.to, "next");
+  const inferredNextPeriodRange = shiftTimeWindow(window.from, window.to, "next");
+  const nextPeriodRange = periodForwardStack[0] ?? inferredNextPeriodRange;
   const previousPeriodLabel = messages.dashboardHeader.previousPeriod;
   const nextPeriodLabel = messages.dashboardHeader.nextPeriod;
   const mobileTimeLabel = messages.common.time;
@@ -1091,6 +1096,10 @@ export function DashboardHeaderControls({
     setUiFilters(queryFilters);
   }, [queryFilters, setUiFilters]);
 
+  useEffect(() => {
+    setPeriodForwardStack([]);
+  }, [siteId]);
+
   const setFilterQueryValue = useCallback((key: FilterQueryKey, rawValue: string) => {
     const params = new URLSearchParams(searchParams.toString());
     const normalized = normalizeFilterInputValue(rawValue);
@@ -1136,6 +1145,7 @@ export function DashboardHeaderControls({
     value: RangePreset,
     source: "desktop" | "mobile" = "desktop",
   ) => {
+    setPeriodForwardStack([]);
     setRange(value);
     if (value !== "custom") return;
     setPendingCustomRange(selectedDateRange);
@@ -1150,9 +1160,27 @@ export function DashboardHeaderControls({
     setDashboardInterval(value);
   };
 
-  const handleShiftPeriod = (nextRange: { from: number; to: number } | null) => {
-    if (!nextRange) return;
-    setCustomRange(nextRange);
+  const handleShiftToPreviousPeriod = () => {
+    if (!previousPeriodRange) return;
+    setPeriodForwardStack((current) => [
+      {
+        from: window.from,
+        to: window.to,
+      },
+      ...current,
+    ]);
+    setCustomRange(previousPeriodRange);
+  };
+
+  const handleShiftToNextPeriod = () => {
+    if (periodForwardStack.length > 0) {
+      const [nextRange, ...rest] = periodForwardStack;
+      setPeriodForwardStack(rest);
+      setCustomRange(nextRange);
+      return;
+    }
+    if (!inferredNextPeriodRange) return;
+    setCustomRange(inferredNextPeriodRange);
   };
 
   if (!showControls) return null;
@@ -1244,9 +1272,7 @@ export function DashboardHeaderControls({
                       variant="outline"
                       className="flex-1 justify-center gap-1"
                       disabled={!previousPeriodRange}
-                      onClick={() => {
-                        handleShiftPeriod(previousPeriodRange);
-                      }}
+                      onClick={handleShiftToPreviousPeriod}
                     >
                       <RiArrowLeftSLine className="size-4" />
                       <span>{previousPeriodLabel}</span>
@@ -1256,9 +1282,7 @@ export function DashboardHeaderControls({
                       variant="outline"
                       className="flex-1 justify-center gap-1"
                       disabled={!nextPeriodRange}
-                      onClick={() => {
-                        handleShiftPeriod(nextPeriodRange);
-                      }}
+                      onClick={handleShiftToNextPeriod}
                     >
                       <span>{nextPeriodLabel}</span>
                       <RiArrowRightSLine className="size-4" />
@@ -1393,9 +1417,7 @@ export function DashboardHeaderControls({
                   size="icon"
                   disabled={!previousPeriodRange}
                   aria-label={previousPeriodLabel}
-                  onClick={() => {
-                    handleShiftPeriod(previousPeriodRange);
-                  }}
+                  onClick={handleShiftToPreviousPeriod}
                 >
                   <RiArrowLeftSLine className="size-4" />
                 </Button>
@@ -1411,9 +1433,7 @@ export function DashboardHeaderControls({
                   size="icon"
                   disabled={!nextPeriodRange}
                   aria-label={nextPeriodLabel}
-                  onClick={() => {
-                    handleShiftPeriod(nextPeriodRange);
-                  }}
+                  onClick={handleShiftToNextPeriod}
                 >
                   <RiArrowRightSLine className="size-4" />
                 </Button>
@@ -1537,6 +1557,7 @@ export function DashboardHeaderControls({
             <Button
               onClick={() => {
                 if (!pendingNormalized) return;
+                setPeriodForwardStack([]);
                 setCustomRange(pendingNormalized);
                 setCustomDialogOpen(false);
               }}
