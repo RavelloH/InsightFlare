@@ -1750,7 +1750,7 @@ function formatUtcOffset(offsetMinutes: number): string {
 
 function formatLocalTimeDeltaLabel(
   deltaMinutes: number,
-  locale: Locale,
+  template: string,
 ): string {
   const sign = deltaMinutes >= 0 ? "+" : "-";
   const absolute = Math.abs(deltaMinutes);
@@ -1759,10 +1759,7 @@ function formatLocalTimeDeltaLabel(
     .padStart(2, "0");
   const minutes = (absolute % 60).toString().padStart(2, "0");
   const delta = `${sign}${hours}:${minutes}`;
-  if (locale === "zh") {
-    return `较本地 ${delta}`;
-  }
-  return `${delta} vs local`;
+  return formatI18nTemplate(template, { delta });
 }
 
 function resolveTimezoneDisplayLabel(params: {
@@ -1770,6 +1767,7 @@ function resolveTimezoneDisplayLabel(params: {
   locale: Locale;
   unknownLabel: string;
   timestampMs: number;
+  timezoneDeltaVsLocal: string;
 }): string {
   const normalized = normalizeDimensionLabel(params.value, params.unknownLabel);
   if (normalized === params.unknownLabel) return normalized;
@@ -1797,7 +1795,7 @@ function resolveTimezoneDisplayLabel(params: {
     const localOffsetMinutes = -date.getTimezoneOffset();
     const localDelta = offsetMinutes - localOffsetMinutes;
     const prefix = localizedName || normalized;
-    return `${prefix} (${formatUtcOffset(offsetMinutes)}, ${formatLocalTimeDeltaLabel(localDelta, params.locale)})`;
+    return `${prefix} (${formatUtcOffset(offsetMinutes)}, ${formatLocalTimeDeltaLabel(localDelta, params.timezoneDeltaVsLocal)})`;
   }
   if (localizedName) return localizedName;
   return normalized;
@@ -2799,18 +2797,18 @@ export function OverviewPagesSection({
     { label: string; columnLabel: string; mono: boolean }
   > = {
     country: {
-      label: locale === "zh" ? "国家/地区" : messages.common.country,
-      columnLabel: locale === "zh" ? "国家/地区" : messages.common.country,
+      label: messages.geo.countryLabel,
+      columnLabel: messages.geo.countryLabel,
       mono: false,
     },
     region: {
-      label: locale === "zh" ? "州/省" : messages.common.region,
-      columnLabel: locale === "zh" ? "州/省" : messages.common.region,
+      label: messages.geo.regionLabel,
+      columnLabel: messages.geo.regionLabel,
       mono: false,
     },
     city: {
-      label: locale === "zh" ? "市/县" : messages.common.city,
-      columnLabel: locale === "zh" ? "市/县" : messages.common.city,
+      label: messages.geo.cityLabel,
+      columnLabel: messages.geo.cityLabel,
       mono: false,
     },
     continent: {
@@ -2993,6 +2991,7 @@ export function OverviewPagesSection({
             locale,
             unknownLabel: messages.common.unknown,
             timestampMs: timezoneReferenceTimestampMs,
+            timezoneDeltaVsLocal: messages.geo.timezoneDeltaVsLocal,
           }),
       }),
       organization: toRows(resolvedGeoDimensionCardTabData.organization ?? []),
@@ -3002,6 +3001,7 @@ export function OverviewPagesSection({
     locale,
     messages.common.continentLabels,
     messages.common.unknown,
+    messages.geo.timezoneDeltaVsLocal,
     timezoneReferenceTimestampMs,
   ]);
   const activeClientDimensionTabMeta =

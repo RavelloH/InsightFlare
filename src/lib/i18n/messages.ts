@@ -133,6 +133,7 @@ export interface AppMessages {
   realtime: {
     title: string;
     subtitle: string;
+    logTitleSeparator: string;
     activeNow: string;
     liveMetrics: string;
     visitors30m: string;
@@ -205,6 +206,37 @@ export interface AppMessages {
   geo: {
     title: string;
     subtitle: string;
+    mapTitle: string;
+    countryLabel: string;
+    regionLabel: string;
+    cityLabel: string;
+    back: string;
+    viewOnWikipedia: string;
+    investigationNotice: string;
+    timezoneDeltaVsLocal: string;
+    investigation: {
+      capital: string;
+      population: string;
+      gdp: string;
+      gdpPerCapita: string;
+      marketPenetration: string;
+      region: string;
+      currency: string;
+      phonecode: string;
+      timezone: string;
+      type: string;
+      iso: string;
+      coordinates: string;
+      unavailable: string;
+      gdpValue: string;
+      gdpPerCapitaValue: string;
+      gdpPerCapitaNearAverage: string;
+      gdpPerCapitaAboveAverage: string;
+      gdpPerCapitaBelowAverage: string;
+      marketPenetrationWindow: string;
+      timezoneCount: string;
+      typeLabels: Record<string, string>;
+    };
   };
   devices: {
     title: string;

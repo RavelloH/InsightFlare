@@ -205,12 +205,11 @@ function eventTitlePrefix(
 }
 
 function formatLogTitle(
-  locale: Locale,
   messages: AppMessages,
   event: RealtimeEvent,
   kind: RealtimeLogEventKind,
 ): string {
-  const separator = locale === "zh" ? "：" : ":";
+  const separator = messages.realtime.logTitleSeparator;
   const prefix = eventTitlePrefix(messages, kind);
   const pathname = event.pathname.trim() || "/";
   const content = kind === "custom"
@@ -786,7 +785,7 @@ function resolveRealtimeEventDisplayData(
 
   return {
     kind,
-    title: formatLogTitle(locale, messages, event, kind),
+    title: formatLogTitle(messages, event, kind),
     avatarSeed: event.visitorId.trim() || event.sessionId.trim() || event.id,
     browserLabel: event.browser.trim() || messages.common.unknown,
     browserIconKey: resolveBrowserIconKey(event.browser),
@@ -1046,7 +1045,6 @@ function RealtimeLogStreamItem({
   reduceMotion: boolean;
 }) {
   const title = formatLogTitle(
-    locale,
     messages,
     event,
     classifyRealtimeLogEvent(event.eventType.trim()),
@@ -1178,7 +1176,6 @@ function RealtimeVisitorHistorySection({
                     >
                       <p className="min-w-0 truncate text-[11px] text-foreground">
                         {formatLogTitle(
-                          locale,
                           messages,
                           visitEvent,
                           classifyRealtimeLogEvent(visitEvent.eventType.trim()),

@@ -175,10 +175,7 @@ export function GeoCountryStatsPanel({
   const hasTopSectionContent = Boolean(
     onBack || (currentLocationInfo && currentLocationInfo.lines.length > 0),
   );
-  const geoInvestigationNotice =
-    locale === "zh"
-      ? "这些数据来源于网络，可能存在错误。"
-      : "This data comes from the web and may contain errors.";
+  const geoInvestigationNotice = messages.geo.investigationNotice;
   const topSectionTransitionKey = useMemo(() => {
     const linesKey =
       currentLocationInfo?.lines.map((line) => line.trim()).join("|") ?? "";
@@ -323,7 +320,7 @@ export function GeoCountryStatsPanel({
                           onClick={onBack}
                           hoverScale={1.05}
                           tapScale={0.98}
-                          aria-label={locale === "zh" ? "返回上一级" : "Back"}
+                          aria-label={messages.geo.back}
                           className={cn(
                             "peer/menu-button group/menu-button flex h-8 w-full items-center justify-start gap-2 overflow-hidden rounded-none p-2 text-left text-xs outline-hidden transition-[width,height,padding]",
                             "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -333,7 +330,7 @@ export function GeoCountryStatsPanel({
                           )}
                         >
                           <RiArrowLeftLine />
-                          <span>{locale === "zh" ? "返回上一级" : "Back"}</span>
+                          <span>{messages.geo.back}</span>
                         </Clickable>
                       </div>
                     ) : null}
@@ -388,7 +385,7 @@ export function GeoCountryStatsPanel({
                                 rel="noreferrer"
                                 className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground transition-colors hover:text-primary"
                               >
-                                {locale === "zh" ? "查看维基百科" : "View on Wikipedia"}
+                                {messages.geo.viewOnWikipedia}
                                 <RiExternalLinkLine className="size-3.5 shrink-0" />
                               </a>
                             ) : null}

@@ -136,6 +136,7 @@ filters:
 realtime:
   title: 实时
   subtitle: 查看最近 30 分钟的访问情况
+  logTitleSeparator: "："
   activeNow: 当前在线
   liveMetrics: 在线 / 30 分钟访客 / 30 分钟访问
   visitors30m: 30 分钟访客
@@ -201,6 +202,53 @@ visitors:
 geo:
   title: 位置分析
   subtitle: 研究任意地点的访问效果
+  mapTitle: 请求地理分布
+  countryLabel: 国家/地区
+  regionLabel: 州/省
+  cityLabel: 市/县
+  back: 返回上一级
+  viewOnWikipedia: 查看维基百科
+  investigationNotice: 这些数据来源于网络，可能存在错误。
+  timezoneDeltaVsLocal: 较本地 {delta}
+  investigation:
+    capital: 首都
+    population: 人口
+    gdp: GDP
+    gdpPerCapita: 人均 GDP
+    marketPenetration: 市场渗透率
+    region: 所属区域
+    currency: 货币
+    phonecode: 电话区号
+    timezone: 时区
+    type: 类型
+    iso: ISO
+    coordinates: 坐标
+    unavailable: 暂无
+    gdpValue: "{value} 百万美元"
+    gdpPerCapitaValue: "{value} 美元/人"
+    gdpPerCapitaNearAverage: "{value} 美元/人（接近全球平均）"
+    gdpPerCapitaAboveAverage: "{value} 美元/人（高于平均 {percent}%）"
+    gdpPerCapitaBelowAverage: "{value} 美元/人（低于平均 {percent}%）"
+    marketPenetrationWindow: "{label}({days}天)"
+    timezoneCount: "{count} 个时区"
+    typeLabels:
+      country: 国家
+      state: 州
+      province: 省
+      prefecture: 地级市
+      city: 市
+      county: 县
+      district: 区
+      town: 镇
+      village: 村
+      municipality: 市镇
+      territory: 地区
+      section: 片区
+      adm1: 一级行政区
+      adm2: 二级行政区
+      adm3: 三级行政区
+      adm4: 四级行政区
+      adm5: 五级行政区
 devices:
   title: 设备分析
   subtitle: 按设备类型查看访问分布。

@@ -136,6 +136,7 @@ filters:
 realtime:
   title: Realtime
   subtitle: View traffic from the last 30 minutes.
+  logTitleSeparator: ":"
   activeNow: Active now
   liveMetrics: Active / 30m Visitors / 30m Views
   visitors30m: 30m Visitors
@@ -201,6 +202,53 @@ visitors:
 geo:
   title: Location Analysis
   subtitle: Study traffic performance for any location.
+  mapTitle: Request Geo Distribution
+  countryLabel: Country
+  regionLabel: Region
+  cityLabel: City
+  back: Back
+  viewOnWikipedia: View on Wikipedia
+  investigationNotice: This data comes from the web and may contain errors.
+  timezoneDeltaVsLocal: "{delta} vs local"
+  investigation:
+    capital: Capital
+    population: Population
+    gdp: GDP
+    gdpPerCapita: GDP per capita
+    marketPenetration: Market Penetration
+    region: Region
+    currency: Currency
+    phonecode: Phone code
+    timezone: Timezone
+    type: Type
+    iso: ISO
+    coordinates: Coordinates
+    unavailable: N/A
+    gdpValue: "{value} million USD"
+    gdpPerCapitaValue: "{value} USD/person"
+    gdpPerCapitaNearAverage: "{value} USD/person (near the world average)"
+    gdpPerCapitaAboveAverage: "{value} USD/person ({percent}% above average)"
+    gdpPerCapitaBelowAverage: "{value} USD/person ({percent}% below average)"
+    marketPenetrationWindow: "{label} ({days} days)"
+    timezoneCount: "{count} timezones"
+    typeLabels:
+      country: Country
+      state: State
+      province: Province
+      prefecture: Prefecture
+      city: City
+      county: County
+      district: District
+      town: Town
+      village: Village
+      municipality: Municipality
+      territory: Territory
+      section: Section
+      adm1: Admin Level 1
+      adm2: Admin Level 2
+      adm3: Admin Level 3
+      adm4: Admin Level 4
+      adm5: Admin Level 5
 devices:
   title: Devices
   subtitle: Device type distribution.

@@ -686,7 +686,7 @@ export function OverviewGeoPointsMapCard({
     outgoingClusters,
   ]);
 
-  const title = locale === "zh" ? "请求地理分布" : "Request Geo Distribution";
+  const title = messages.geo.mapTitle;
   const hoveredCountryLabel = useMemo(() => {
     if (hoveredCountryCode) {
       return resolveCountryLabel(
