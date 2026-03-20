@@ -3,6 +3,7 @@ import type {
   DashboardFilterOptionsData,
   DimensionData,
   OverviewData,
+  OverviewGeoTabData,
   OverviewTabData,
   OverviewClientDimensionTabsData as OverviewClientDimensionTabsResponse,
   OverviewGeoDimensionTabsData as OverviewGeoDimensionTabsResponse,
@@ -123,6 +124,10 @@ function emptyDimension(): DimensionData {
 }
 
 function emptyOverviewTab(): OverviewTabData {
+  return { ok: true, data: [] };
+}
+
+function emptyOverviewGeoTab(): OverviewGeoTabData {
   return { ok: true, data: [] };
 }
 
@@ -423,7 +428,7 @@ export async function fetchOverviewGeoDimensionTab(
     limit?: number;
   },
 ): Promise<OverviewGeoTabRows> {
-  const payload = await fetchPrivateJson<OverviewTabData>(
+  const payload = await fetchPrivateJson<OverviewGeoTabData>(
     `/api/private/overview-geo-${tab}`,
     withFilters(
       {
@@ -434,24 +439,35 @@ export async function fetchOverviewGeoDimensionTab(
       },
       filters,
     ),
-  ).catch(() => emptyOverviewTab());
+  ).catch(() => emptyOverviewGeoTab());
   return Array.isArray(payload.data)
     ? payload.data.map((row) => ({
-        value: String((row as { label?: unknown }).label ?? ""),
+        value:
+          String((row as { value?: unknown }).value ?? "").trim() ||
+          String((row as { label?: unknown }).label ?? "").trim(),
         label:
           tab === "region"
-            ? String((row as { label?: unknown }).label ?? "")
+            ? (
+                String((row as { label?: unknown }).label ?? "").trim() ||
+                String((row as { value?: unknown }).value ?? "").trim()
+              )
                 .split("::")
                 .map((segment) => segment.trim())
                 .filter((segment) => segment.length > 0)[2] ||
-              String((row as { label?: unknown }).label ?? "")
+              String((row as { label?: unknown }).label ?? "").trim() ||
+              String((row as { value?: unknown }).value ?? "").trim()
             : tab === "city"
-              ? String((row as { label?: unknown }).label ?? "")
+              ? (
+                  String((row as { label?: unknown }).label ?? "").trim() ||
+                  String((row as { value?: unknown }).value ?? "").trim()
+                )
                   .split("::")
                   .map((segment) => segment.trim())
                   .filter((segment) => segment.length > 0)[3] ||
-                String((row as { label?: unknown }).label ?? "")
-              : String((row as { label?: unknown }).label ?? ""),
+                String((row as { label?: unknown }).label ?? "").trim() ||
+                String((row as { value?: unknown }).value ?? "").trim()
+              : String((row as { label?: unknown }).label ?? "").trim() ||
+                String((row as { value?: unknown }).value ?? "").trim(),
         views: Number((row as { views?: unknown }).views ?? 0),
         sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
       }))
