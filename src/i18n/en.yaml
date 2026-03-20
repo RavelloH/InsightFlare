@@ -16,7 +16,6 @@ common:
   views: Views
   sessions: Sessions
   visitors: Visitors
-  bounces: Bounces
   bounceRate: Bounce Rate
   avgDuration: Avg. Duration
   page: Page
@@ -60,7 +59,6 @@ common:
   timezone: Timezone
   organization: Organization
   screenSize: Screen Size
-  duration: Duration
   loading: Loading
   noData: No data
   unknown: Unknown
@@ -81,7 +79,6 @@ common:
   cycle: Cycle
   close: Close
 ranges:
-  title: Time Range
   last30m: 30m
   last1h: 1h
   today: Today
@@ -98,7 +95,6 @@ ranges:
   allTime: All Time
   custom: Custom Range
 intervals:
-  title: Interval
   minute: Minute
   hour: Hour
   day: Day
@@ -126,11 +122,9 @@ dashboardHeader:
   nextPeriod: Next period
   customSelectionSummary: "Selected range: {from} to {to} ({days} days)"
 filters:
-  title: Filters
   country: Country
   device: Device
   browser: Browser
-  eventType: Event
   all: All
   clear: Clear
 realtime:
@@ -139,11 +133,8 @@ realtime:
   logTitleSeparator: ":"
   activeNow: Active now
   liveMetrics: Active / 30m Visitors / 30m Views
-  visitors30m: 30m Visitors
-  views30m: 30m Views
   connected: Connected
   connecting: Connecting
-  disconnected: Disconnected
   reconnecting: Reconnecting
   failed: Failed
   recentEvents: Recent live events
@@ -170,14 +161,8 @@ overview:
   title: Traffic Overview
   subtitle: Monitor high-level performance and audience behavior.
   trendTitle: Traffic Trend
-  engagementTitle: Engagement Detail
-  compositionTitle: Metric Composition
-  eventTypesTitle: Event Types
-  sessionDurationTitle: Session Duration
   topPages: Top Pages
   topReferrers: Top Referrers
-  recentSessions: Recent Sessions
-  recentEvents: Recent Events
   sourceTab: Source
   sourceDomainColumn: Source (Domain)
   sourceLinkTab: Source Link
@@ -276,8 +261,6 @@ siteSettings:
   queryHashGroupDescription: Control how query strings, URL hashes, and Do Not Track are handled.
   trackQueryParamsLabel: Track Query Parameters
   trackHashLabel: Track URL Hash
-  rulesGroupTitle: Domain and Path Rules
-  rulesGroupDescription: Matching rules block event reporting.
   domainWhitelistTitle: Domain Whitelist
   domainWhitelistDescription: Events are sent only when the current hostname is in this list.
   domainWhitelistLabel: Domain Whitelist (one per line)
@@ -292,8 +275,6 @@ siteSettings:
     /admin
     /private
   pathBlacklistHint: Uses startsWith prefix matching; matched paths are not reported.
-  privacyGroupTitle: Do Not Track
-  privacyGroupDescription: Control whether events are still sent when the browser enables DNT.
   ignoreDoNotTrackLabel: Ignore Browser Do Not Track
   booleanOn: On
   booleanOff: Off
@@ -363,8 +344,6 @@ teamSelect:
   createFailed: Failed to create team. Please try again.
   createSuccess: Team created.
 teamManagement:
-  title: Team Management
-  subtitle: Manage sites, base settings, and member access for this team.
   stats:
     sites: Sites
     members: Members
@@ -383,19 +362,9 @@ teamManagement:
     title: Site Dashboard
     subtitle: Aggregated traffic view across all sites in this team.
     aggregateTitle: Total Visits
-    fromLabel: Start time
-    toLabel: End time
-    applyRange: Apply Range
-    invalidRange: Please choose a valid range where start is earlier than end.
     pagesPerSession: Pages / Session
     noSites: No site is available under this team.
     openAnalytics: Open analytics
-    columns:
-      name: Display Name
-      domain: Domain
-      slug: Slug
-      createdAt: Created
-      action: Action
   settings:
     title: Settings
     subtitle: Update this team's display name and slug.
@@ -414,7 +383,6 @@ teamManagement:
     add: Add member
     adding: Adding...
     remove: Remove
-    removing: Removing...
     noMembers: No members found for this team.
     columns:
       name: Name

@@ -25,6 +25,7 @@
     "cf:secret:session-secret": "wrangler secret put DASHBOARD_SESSION_SECRET --config wrangler.toml",
     "cf:tail": "wrangler tail --config wrangler.toml",
     "typecheck": "next typegen && tsc --noEmit -p tsconfig.json",
+    "check:i18n": "tsx scripts/check-i18n.ts",
     "d1:migrate:local": "wrangler d1 migrations apply insightflare --config wrangler.toml --local",
     "d1:migrate:remote": "wrangler d1 migrations apply insightflare --config wrangler.toml --remote",
     "d1:migration:create": "wrangler d1 migrations create insightflare --config wrangler.toml"

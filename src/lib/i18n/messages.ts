@@ -22,7 +22,6 @@ export interface AppMessages {
     views: string;
     sessions: string;
     visitors: string;
-    bounces: string;
     bounceRate: string;
     avgDuration: string;
     page: string;
@@ -52,7 +51,6 @@ export interface AppMessages {
     timezone: string;
     organization: string;
     screenSize: string;
-    duration: string;
     loading: string;
     noData: string;
     unknown: string;
@@ -74,7 +72,6 @@ export interface AppMessages {
     close: string;
   };
   ranges: {
-    title: string;
     last30m: string;
     last1h: string;
     today: string;
@@ -92,7 +89,6 @@ export interface AppMessages {
     custom: string;
   };
   intervals: {
-    title: string;
     minute: string;
     hour: string;
     day: string;
@@ -122,11 +118,9 @@ export interface AppMessages {
     customSelectionSummary: string;
   };
   filters: {
-    title: string;
     country: string;
     device: string;
     browser: string;
-    eventType: string;
     all: string;
     clear: string;
   };
@@ -136,11 +130,8 @@ export interface AppMessages {
     logTitleSeparator: string;
     activeNow: string;
     liveMetrics: string;
-    visitors30m: string;
-    views30m: string;
     connected: string;
     connecting: string;
-    disconnected: string;
     reconnecting: string;
     failed: string;
     recentEvents: string;
@@ -168,14 +159,8 @@ export interface AppMessages {
     title: string;
     subtitle: string;
     trendTitle: string;
-    engagementTitle: string;
-    compositionTitle: string;
-    eventTypesTitle: string;
-    sessionDurationTitle: string;
     topPages: string;
     topReferrers: string;
-    recentSessions: string;
-    recentEvents: string;
     sourceTab: string;
     sourceDomainColumn: string;
     sourceLinkTab: string;
@@ -267,8 +252,6 @@ export interface AppMessages {
     queryHashGroupDescription: string;
     trackQueryParamsLabel: string;
     trackHashLabel: string;
-    rulesGroupTitle: string;
-    rulesGroupDescription: string;
     domainWhitelistTitle: string;
     domainWhitelistDescription: string;
     domainWhitelistLabel: string;
@@ -279,8 +262,6 @@ export interface AppMessages {
     pathBlacklistLabel: string;
     pathBlacklistPlaceholder: string;
     pathBlacklistHint: string;
-    privacyGroupTitle: string;
-    privacyGroupDescription: string;
     ignoreDoNotTrackLabel: string;
     booleanOn: string;
     booleanOff: string;
@@ -356,8 +337,6 @@ export interface AppMessages {
     createSuccess: string;
   };
   teamManagement: {
-    title: string;
-    subtitle: string;
     stats: {
       sites: string;
       members: string;
@@ -378,20 +357,9 @@ export interface AppMessages {
       title: string;
       subtitle: string;
       aggregateTitle: string;
-      fromLabel: string;
-      toLabel: string;
-      applyRange: string;
-      invalidRange: string;
       pagesPerSession: string;
       noSites: string;
       openAnalytics: string;
-      columns: {
-        name: string;
-        domain: string;
-        slug: string;
-        createdAt: string;
-        action: string;
-      };
     };
     settings: {
       title: string;
@@ -412,7 +380,6 @@ export interface AppMessages {
       add: string;
       adding: string;
       remove: string;
-      removing: string;
       noMembers: string;
       columns: {
         name: string;

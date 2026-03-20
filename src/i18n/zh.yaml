@@ -16,7 +16,6 @@ common:
   views: 浏览量
   sessions: 会话数
   visitors: 访客数
-  bounces: 跳出数
   bounceRate: 跳出率
   avgDuration: 平均停留
   page: 页面
@@ -60,7 +59,6 @@ common:
   timezone: 时区
   organization: 运营商组织
   screenSize: 屏幕大小
-  duration: 时长
   loading: 加载中
   noData: 暂无数据
   unknown: 未知
@@ -81,7 +79,6 @@ common:
   cycle: 周期
   close: 关闭
 ranges:
-  title: 时间范围
   last30m: 30分钟
   last1h: 1小时
   today: 今天
@@ -98,7 +95,6 @@ ranges:
   allTime: 所有时间
   custom: 自定义时间段
 intervals:
-  title: 时间间隔
   minute: 分钟
   hour: 小时
   day: 日
@@ -126,11 +122,9 @@ dashboardHeader:
   nextPeriod: 下个周期
   customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）"
 filters:
-  title: 筛选
   country: 国家
   device: 设备
   browser: 浏览器
-  eventType: 事件
   all: 全部
   clear: 清除
 realtime:
@@ -139,11 +133,8 @@ realtime:
   logTitleSeparator: "："
   activeNow: 当前在线
   liveMetrics: 在线 / 30 分钟访客 / 30 分钟访问
-  visitors30m: 30 分钟访客
-  views30m: 30 分钟访问
   connected: 已连接
   connecting: 连接中
-  disconnected: 未连接
   reconnecting: 重连中
   failed: 连接失败
   recentEvents: 实时事件
@@ -170,14 +161,8 @@ overview:
   title: 访问总览
   subtitle: 查看核心指标与访问趋势。
   trendTitle: 访问趋势
-  engagementTitle: 互动细分趋势
-  compositionTitle: 指标占比
-  eventTypesTitle: 事件类型分布
-  sessionDurationTitle: 会话时长分布
   topPages: 热门页面
   topReferrers: 热门来源
-  recentSessions: 最近会话
-  recentEvents: 最近事件
   sourceTab: 来源
   sourceDomainColumn: 来源（域名）
   sourceLinkTab: 来源链接
@@ -276,8 +261,6 @@ siteSettings:
   queryHashGroupDescription: 控制 URL 查询参数、Hash 与 Do Not Track 的处理方式。
   trackQueryParamsLabel: 开启查询参数跟踪
   trackHashLabel: 开启 Hash 跟踪
-  rulesGroupTitle: 域名与路径规则
-  rulesGroupDescription: 命中规则时将阻止事件上报。
   domainWhitelistTitle: 域名白名单
   domainWhitelistDescription: 仅当当前域名命中白名单时才会上报事件。
   domainWhitelistLabel: 域名白名单（每行一个）
@@ -292,8 +275,6 @@ siteSettings:
     /admin
     /private
   pathBlacklistHint: 采用 startsWith 前缀匹配；命中后不发送采集事件。
-  privacyGroupTitle: Do Not Track 设置
-  privacyGroupDescription: 浏览器开启 DNT 时是否仍继续上报事件。
   ignoreDoNotTrackLabel: 忽略浏览器 Do Not Track
   booleanOn: 开启
   booleanOff: 关闭
@@ -363,8 +344,6 @@ teamSelect:
   createFailed: 创建失败，请稍后重试。
   createSuccess: 团队已创建。
 teamManagement:
-  title: 团队管理
-  subtitle: 管理该团队下的站点、基础设置和成员权限。
   stats:
     sites: 站点
     members: 成员
@@ -383,19 +362,9 @@ teamManagement:
     title: 仪表盘
     subtitle: 聚合查看该团队下所有站点的访问表现。
     aggregateTitle: 总访问量
-    fromLabel: 开始时间
-    toLabel: 结束时间
-    applyRange: 应用时间范围
-    invalidRange: 请选择有效时间范围（开始时间需早于结束时间）。
     pagesPerSession: 每会话页面数
     noSites: 当前团队还没有站点。
     openAnalytics: 查看分析
-    columns:
-      name: 显示名
-      domain: 域名
-      slug: Slug
-      createdAt: 创建时间
-      action: 操作
   settings:
     title: 团队设置
     subtitle: 更新团队显示名和 slug。
@@ -414,7 +383,6 @@ teamManagement:
     add: 添加成员
     adding: 添加中...
     remove: 移除
-    removing: 移除中...
     noMembers: 当前团队暂无成员。
     columns:
       name: 名称
