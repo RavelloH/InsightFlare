@@ -119,8 +119,8 @@ function calcSitePercent(
   feature: CaniuseFeatureDetail,
   browserData: BrowserVersionBreakdownData,
 ): number {
-  let totalViews = 0;
-  let supportedViews = 0;
+  let totalVisitors = 0;
+  let supportedVisitors = 0;
 
   for (const siteBrowser of browserData.data) {
     const caniuseBrowser = feature.support.browsers.find(
@@ -129,18 +129,18 @@ function calcSitePercent(
 
     for (const version of siteBrowser.versions) {
       if (version.isOther || version.isUnknown) continue;
-      totalViews += version.views;
+      totalVisitors += version.visitors;
 
       if (!caniuseBrowser) continue;
 
       const vk = extractVersionKey(version.label, siteBrowser.browser);
       const status = caniuseBrowser.stats[vk];
       const base = parseBaseStatus(status);
-      supportedViews += version.views * supportWeight(base);
+      supportedVisitors += version.visitors * supportWeight(base);
     }
   }
 
-  return totalViews > 0 ? supportedViews / totalViews : 0;
+  return totalVisitors > 0 ? supportedVisitors / totalVisitors : 0;
 }
 
 const SPEC_STATUS_LABELS: Record<string, string> = {
@@ -332,12 +332,12 @@ export function CanIUseCompatCard({
   const siteSupport = useMemo(() => {
     if (!featureDetail || !browserData.data.length) return null;
 
-    let totalViews = 0;
-    let supportedViews = 0;
+    let totalVisitors = 0;
+    let supportedVisitors = 0;
     const perBrowser: {
       browser: string;
       support: number;
-      views: number;
+      visitors: number;
       status: string;
       firstFullVersion: string | null;
       firstPartialVersion: string | null;
@@ -350,13 +350,13 @@ export function CanIUseCompatCard({
         (b) => b.browser === siteBrowser.browser,
       );
 
-      let browserSupported = 0;
-      let browserTotal = 0;
+      let browserSupportedVisitors = 0;
+      let browserTotalVisitors = 0;
 
       for (const version of siteBrowser.versions) {
         if (version.isOther || version.isUnknown) continue;
-        totalViews += version.views;
-        browserTotal += version.views;
+        totalVisitors += version.visitors;
+        browserTotalVisitors += version.visitors;
 
         if (!caniuseBrowser) continue;
 
@@ -365,15 +365,17 @@ export function CanIUseCompatCard({
         const base = parseBaseStatus(status);
         const w = supportWeight(base);
 
-        supportedViews += version.views * w;
-        browserSupported += version.views * w;
+        supportedVisitors += version.visitors * w;
+        browserSupportedVisitors += version.visitors * w;
       }
 
       if (caniuseBrowser) {
         perBrowser.push({
           browser: siteBrowser.browser,
-          support: browserTotal > 0 ? browserSupported / browserTotal : 0,
-          views: siteBrowser.views,
+          support: browserTotalVisitors > 0
+            ? browserSupportedVisitors / browserTotalVisitors
+            : 0,
+          visitors: siteBrowser.visitors,
           status: parseBaseStatus(caniuseBrowser.current_status),
           firstFullVersion: caniuseBrowser.first_full_version,
           firstPartialVersion: caniuseBrowser.first_partial_version,
@@ -383,12 +385,12 @@ export function CanIUseCompatCard({
       }
     }
 
-    const sorted = perBrowser.sort((a, b) => b.views - a.views);
+    const sorted = perBrowser.sort((a, b) => b.visitors - a.visitors);
     const desktop = sorted.filter((b) => b.type === "desktop");
     const mobile = sorted.filter((b) => b.type !== "desktop");
 
     return {
-      sitePercent: totalViews > 0 ? supportedViews / totalViews : 0,
+      sitePercent: totalVisitors > 0 ? supportedVisitors / totalVisitors : 0,
       globalFullPercent: featureDetail.usage.fully_supported / 100,
       globalPartialPercent: featureDetail.usage.partially_supported / 100,
       desktop,
@@ -594,7 +596,7 @@ export function CanIUseCompatCard({
                                 {percentFormat(locale, b.support)}
                               </span>
                               <span className="text-right font-mono text-[11px] text-muted-foreground tabular-nums">
-                                {numberFormat(locale, b.views)} {messages.common.views}
+                                {numberFormat(locale, b.visitors)} {messages.common.visitors}
                               </span>
                               <span
                                 className={cn(

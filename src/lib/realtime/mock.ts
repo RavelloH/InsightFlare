@@ -2090,6 +2090,7 @@ interface DemoFilteredFacts {
 interface DemoDimensionRow {
   label: string;
   views: number;
+  visitors: number;
   sessions: number;
 }
 
@@ -2963,23 +2964,38 @@ function aggregateDimensionRowsFromVisits(
   visits: DemoVisitFact[],
   limit: number,
   getLabel: (visit: DemoVisitFact) => string,
+  sortMetric: "views" | "visitors" = "views",
 ): DemoDimensionRow[] {
-  const buckets = new Map<string, { views: number; sessions: Set<string> }>();
+  const buckets = new Map<
+    string,
+    { views: number; sessions: Set<string>; visitors: Set<string> }
+  >();
   for (const visit of visits) {
     const label = String(getLabel(visit) || "").trim();
     if (!label) continue;
-    const bucket = buckets.get(label) ?? { views: 0, sessions: new Set<string>() };
+    const bucket = buckets.get(label) ?? {
+      views: 0,
+      sessions: new Set<string>(),
+      visitors: new Set<string>(),
+    };
     bucket.views += dataset.viewWeight;
     bucket.sessions.add(visit.sessionId);
+    bucket.visitors.add(visit.visitorId);
     buckets.set(label, bucket);
   }
   return Array.from(buckets.entries())
     .map(([label, bucket]) => ({
       label,
       views: Math.max(0, Math.round(bucket.views)),
+      visitors: Math.max(0, Math.round(weightedVisitorCount(dataset, bucket.visitors))),
       sessions: Math.max(0, Math.round(weightedSessionCount(dataset, bucket.sessions))),
     }))
-    .sort((left, right) => right.views - left.views || right.sessions - left.sessions || left.label.localeCompare(right.label))
+    .sort((left, right) =>
+      right[sortMetric] - left[sortMetric]
+      || right.views - left.views
+      || right.sessions - left.sessions
+      || left.label.localeCompare(right.label)
+    )
     .slice(0, limit);
 }
 
@@ -3002,19 +3018,29 @@ function aggregateSessionEdgeRows(
       edges.set(visit.sessionId, { at: visit.startedAt, value: visit.pathname });
     }
   }
-  const buckets = new Map<string, { views: number; sessions: Set<string> }>();
+  const buckets = new Map<
+    string,
+    { views: number; sessions: Set<string>; visitors: Set<string> }
+  >();
   for (const [sessionId, edge] of edges.entries()) {
     const value = edge.value.trim();
     if (!value) continue;
-    const bucket = buckets.get(value) ?? { views: 0, sessions: new Set<string>() };
+    const bucket = buckets.get(value) ?? {
+      views: 0,
+      sessions: new Set<string>(),
+      visitors: new Set<string>(),
+    };
     bucket.views += dataset.sessions.get(sessionId)?.weight ?? 0;
     bucket.sessions.add(sessionId);
+    const visitorId = dataset.sessions.get(sessionId)?.visitorId;
+    if (visitorId) bucket.visitors.add(visitorId);
     buckets.set(value, bucket);
   }
   return Array.from(buckets.entries())
     .map(([label, bucket]) => ({
       label,
       views: Math.max(0, Math.round(bucket.views)),
+      visitors: Math.max(0, Math.round(weightedVisitorCount(dataset, bucket.visitors))),
       sessions: Math.max(0, Math.round(weightedSessionCount(dataset, bucket.sessions))),
     }))
     .sort((left, right) => right.views - left.views || right.sessions - left.sessions || left.label.localeCompare(right.label))
@@ -3272,13 +3298,54 @@ function generateDemoShareTrend(
   const stepMs = demoIntervalStepMs(interval);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
+  const labelForVisit = (visit: DemoVisitFact) =>
+    String(options.getLabel(visit) ?? "").trim();
+  const visitorLabels = new Map<string, string>();
+  const bucketVisitorLabels = new Map<number, Map<string, string>>();
 
-  const topRows = aggregateDimensionRowsFromVisits(
-    dataset,
-    filtered.visits,
-    limit,
-    options.getLabel,
-  );
+  for (const visit of filtered.visits) {
+    const label = labelForVisit(visit);
+    visitorLabels.set(visit.visitorId, label);
+
+    const bucket = Math.floor(visit.startedAt / stepMs);
+    const labelsForBucket = bucketVisitorLabels.get(bucket) ?? new Map<string, string>();
+    labelsForBucket.set(visit.visitorId, label);
+    bucketVisitorLabels.set(bucket, labelsForBucket);
+  }
+
+  const overallBuckets = new Map<
+    string,
+    { views: number; visitors: Set<string>; sessions: Set<string> }
+  >();
+  for (const visit of filtered.visits) {
+    const label = visitorLabels.get(visit.visitorId) ?? "";
+    if (!label) continue;
+
+    const bucket = overallBuckets.get(label) ?? {
+      views: 0,
+      visitors: new Set<string>(),
+      sessions: new Set<string>(),
+    };
+    bucket.views += dataset.viewWeight;
+    bucket.visitors.add(visit.visitorId);
+    bucket.sessions.add(visit.sessionId);
+    overallBuckets.set(label, bucket);
+  }
+
+  const topRows = Array.from(overallBuckets.entries())
+    .map(([label, bucket]) => ({
+      label,
+      views: Math.max(0, Math.round(bucket.views)),
+      visitors: Math.max(0, Math.round(weightedVisitorCount(dataset, bucket.visitors))),
+      sessions: Math.max(0, Math.round(weightedSessionCount(dataset, bucket.sessions))),
+    }))
+    .sort((left, right) =>
+      right.visitors - left.visitors
+      || right.views - left.views
+      || right.sessions - left.sessions
+      || left.label.localeCompare(right.label)
+    )
+    .slice(0, limit);
   const topLabels = topRows.map((row) => row.label);
   const topLabelSet = new Set(topLabels);
   const usedKeys = new Set<string>([DEMO_SHARE_TREND_OTHER_KEY]);
@@ -3287,6 +3354,7 @@ function generateDemoShareTrend(
     key: string;
     label: string;
     views: number;
+    visitors: number;
     sessions: number;
     isOther?: boolean;
   }> = topRows.map((row) => {
@@ -3300,25 +3368,40 @@ function generateDemoShareTrend(
       key,
       label: row.label,
       views: row.views,
+      visitors: row.visitors,
       sessions: row.sessions,
     };
   });
 
   const otherSessions = new Set<string>();
+  const otherVisitors = new Set<string>();
   let otherViews = 0;
   for (const visit of filtered.visits) {
-    const label = String(options.getLabel(visit) ?? "").trim();
+    const label = visitorLabels.get(visit.visitorId) ?? "";
     if (label && topLabelSet.has(label)) continue;
     otherViews += dataset.viewWeight;
     otherSessions.add(visit.sessionId);
+    otherVisitors.add(visit.visitorId);
   }
 
-  if (otherViews > 0) {
+  let hasBucketOther = false;
+  for (const labelsForBucket of bucketVisitorLabels.values()) {
+    for (const label of labelsForBucket.values()) {
+      if (!label || !topLabelSet.has(label)) {
+        hasBucketOther = true;
+        break;
+      }
+    }
+    if (hasBucketOther) break;
+  }
+
+  if (otherVisitors.size > 0 || hasBucketOther) {
     keyByLabel.set(DEMO_SHARE_TREND_OTHER_LABEL, DEMO_SHARE_TREND_OTHER_KEY);
     series.push({
       key: DEMO_SHARE_TREND_OTHER_KEY,
       label: DEMO_SHARE_TREND_OTHER_LABEL,
       views: Math.max(0, Math.round(otherViews)),
+      visitors: Math.max(0, Math.round(weightedVisitorCount(dataset, otherVisitors))),
       sessions: Math.max(0, Math.round(weightedSessionCount(dataset, otherSessions))),
       isOther: true,
     });
@@ -3337,8 +3420,10 @@ function generateDemoShareTrend(
     bucket,
     timestampMs: bucket * stepMs,
     totalViews: 0,
+    totalVisitors: 0,
     totalSessions: 0,
     viewsBySeries: Object.fromEntries(series.map((item) => [item.key, 0])),
+    visitorsBySeries: Object.fromEntries(series.map((item) => [item.key, 0])),
     sessionsBySeries: Object.fromEntries(series.map((item) => [item.key, 0])),
   });
 
@@ -3348,18 +3433,21 @@ function generateDemoShareTrend(
       bucket: number;
       timestampMs: number;
       totalViews: number;
+      totalVisitors: number;
       totalSessions: number;
       viewsBySeries: Record<string, number>;
+      visitorsBySeries: Record<string, number>;
       sessionsBySeries: Record<string, number>;
       sessionSets: Map<string, Set<string>>;
+      visitorSets: Map<string, Set<string>>;
     }
   >();
 
   for (const visit of filtered.visits) {
     const bucket = Math.floor(visit.startedAt / stepMs);
-    const rawLabel = String(options.getLabel(visit) ?? "").trim();
-    const label = rawLabel && topLabelSet.has(rawLabel)
-      ? rawLabel
+    const bucketLabel = bucketVisitorLabels.get(bucket)?.get(visit.visitorId) ?? "";
+    const label = bucketLabel && topLabelSet.has(bucketLabel)
+      ? bucketLabel
       : DEMO_SHARE_TREND_OTHER_LABEL;
     const key = keyByLabel.get(label);
     if (!key) continue;
@@ -3367,6 +3455,7 @@ function generateDemoShareTrend(
     const point = bucketMap.get(bucket) ?? {
       ...createEmptyPoint(bucket),
       sessionSets: new Map<string, Set<string>>(),
+      visitorSets: new Map<string, Set<string>>(),
     };
     point.viewsBySeries[key] += dataset.viewWeight;
     point.totalViews += dataset.viewWeight;
@@ -3374,18 +3463,30 @@ function generateDemoShareTrend(
     const sessionSet = point.sessionSets.get(key) ?? new Set<string>();
     sessionSet.add(visit.sessionId);
     point.sessionSets.set(key, sessionSet);
+
+    const visitorSet = point.visitorSets.get(key) ?? new Set<string>();
+    visitorSet.add(visit.visitorId);
+    point.visitorSets.set(key, visitorSet);
     bucketMap.set(bucket, point);
   }
 
   for (const point of bucketMap.values()) {
+    let totalVisitors = 0;
     let totalSessions = 0;
     for (const seriesItem of series) {
+      const visitorSet = point.visitorSets.get(seriesItem.key) ?? new Set<string>();
+      const visitors = Math.max(
+        0,
+        Math.round(weightedVisitorCount(dataset, visitorSet)),
+      );
       const sessionSet = point.sessionSets.get(seriesItem.key) ?? new Set<string>();
       const sessions = Math.max(
         0,
         Math.round(weightedSessionCount(dataset, sessionSet)),
       );
+      point.visitorsBySeries[seriesItem.key] = visitors;
       point.sessionsBySeries[seriesItem.key] = sessions;
+      totalVisitors += visitors;
       totalSessions += sessions;
       point.viewsBySeries[seriesItem.key] = Math.max(
         0,
@@ -3393,6 +3494,7 @@ function generateDemoShareTrend(
       );
     }
     point.totalViews = Math.max(0, Math.round(point.totalViews));
+    point.totalVisitors = totalVisitors;
     point.totalSessions = totalSessions;
   }
 
@@ -3406,8 +3508,10 @@ function generateDemoShareTrend(
         bucket: existing.bucket,
         timestampMs: existing.timestampMs,
         totalViews: existing.totalViews,
+        totalVisitors: existing.totalVisitors,
         totalSessions: existing.totalSessions,
         viewsBySeries: existing.viewsBySeries,
+        visitorsBySeries: existing.visitorsBySeries,
         sessionsBySeries: existing.sessionsBySeries,
       });
     } else {
@@ -3439,7 +3543,7 @@ function generateDemoBrowserEngineTrend(
 ): Record<string, unknown> {
   return generateDemoShareTrend(siteId, params, {
     fallbackKeyBase: "engine",
-    getLabel: (visit) => browserEngineLabel(visit.browser),
+    getLabel: (visit) => browserEngineLabel(visit.browser, visit.osVersion),
   });
 }
 
@@ -3462,15 +3566,18 @@ function generateDemoBrowserVersionBreakdown(
     filtered.visits,
     browserLimit,
     (visit) => visit.browser,
+    "visitors",
   ).map((browserRow) => {
     const versionRows = aggregateDimensionRowsFromVisits(
       dataset,
       filtered.visits.filter((visit) => visit.browser === browserRow.label),
       999,
       (visit) => visit.browserVersion || DEMO_BROWSER_VERSION_UNKNOWN_TOKEN,
+      "visitors",
     );
     const versions = [];
     let otherViews = 0;
+    let otherVisitors = 0;
     let otherSessions = 0;
 
     for (let index = 0; index < versionRows.length; index += 1) {
@@ -3482,20 +3589,23 @@ function generateDemoBrowserVersionBreakdown(
             : createDemoShareTrendSeriesKey(row.label, new Set(["other", "unknown"]), "version"),
           label: row.label === DEMO_BROWSER_VERSION_UNKNOWN_TOKEN ? "Unknown" : row.label,
           views: row.views,
+          visitors: row.visitors,
           sessions: row.sessions,
           isUnknown: row.label === DEMO_BROWSER_VERSION_UNKNOWN_TOKEN || undefined,
         });
       } else {
         otherViews += row.views;
+        otherVisitors += row.visitors;
         otherSessions += row.sessions;
       }
     }
 
-    if (otherViews > 0) {
+    if (otherVisitors > 0) {
       versions.push({
         key: "other",
         label: DEMO_SHARE_TREND_OTHER_LABEL,
         views: otherViews,
+        visitors: otherVisitors,
         sessions: otherSessions,
         isOther: true,
       });
@@ -3504,6 +3614,7 @@ function generateDemoBrowserVersionBreakdown(
     return {
       browser: browserRow.label,
       views: browserRow.views,
+      visitors: browserRow.visitors,
       sessions: browserRow.sessions,
       versions,
     };
@@ -3527,6 +3638,7 @@ function generateDemoBrowserCrossDimension(
     key: string;
     label: string;
     views: number;
+    visitors: number;
     sessions: number;
     isOther?: boolean;
     isUnknown?: boolean;
@@ -3535,18 +3647,21 @@ function generateDemoBrowserCrossDimension(
     key: string;
     label: string;
     views: number;
+    visitors: number;
     sessions: number;
     isOther?: boolean;
     cells: Array<{
       key: string;
       label: string;
       views: number;
+      visitors: number;
       sessions: number;
       isOther?: boolean;
       isUnknown?: boolean;
     }>;
   }>;
   totalViews: number;
+  totalVisitors: number;
   totalSessions: number;
 } {
   const topBrowsers = aggregateDimensionRowsFromVisits(
@@ -3554,13 +3669,15 @@ function generateDemoBrowserCrossDimension(
     filtered.visits,
     browserLimit,
     (visit) => visit.browser,
-  ).filter((row) => row.label.trim().length > 0 && row.views > 0);
+    "visitors",
+  ).filter((row) => row.label.trim().length > 0 && row.visitors > 0);
 
   if (topBrowsers.length === 0) {
     return {
       columns: [],
       rows: [],
       totalViews: 0,
+      totalVisitors: 0,
       totalSessions: 0,
     };
   }
@@ -3573,13 +3690,15 @@ function generateDemoBrowserCrossDimension(
       const label = String(getDimension(visit) || "").trim();
       return label || DEMO_BROWSER_CROSS_UNKNOWN_TOKEN;
     },
-  ).filter((row) => row.views > 0);
+    "visitors",
+  ).filter((row) => row.visitors > 0);
 
   if (topDimensions.length === 0) {
     return {
       columns: [],
       rows: [],
       totalViews: 0,
+      totalVisitors: 0,
       totalSessions: 0,
     };
   }
@@ -3590,11 +3709,15 @@ function generateDemoBrowserCrossDimension(
     string,
     {
       views: number;
+      visitors: Set<string>;
       sessions: Set<string>;
-      cells: Map<string, { views: number; sessions: Set<string> }>;
+      cells: Map<string, { views: number; visitors: Set<string>; sessions: Set<string> }>;
     }
   >();
-  const columnBuckets = new Map<string, { views: number; sessions: Set<string> }>();
+  const columnBuckets = new Map<
+    string,
+    { views: number; visitors: Set<string>; sessions: Set<string> }
+  >();
 
   for (const visit of filtered.visits) {
     const browser = String(visit.browser || "").trim();
@@ -3611,25 +3734,31 @@ function generateDemoBrowserCrossDimension(
 
     const rowBucket = rowBuckets.get(browserBucket) ?? {
       views: 0,
+      visitors: new Set<string>(),
       sessions: new Set<string>(),
-      cells: new Map<string, { views: number; sessions: Set<string> }>(),
+      cells: new Map<string, { views: number; visitors: Set<string>; sessions: Set<string> }>(),
     };
     rowBucket.views += dataset.viewWeight;
+    rowBucket.visitors.add(visit.visitorId);
     rowBucket.sessions.add(visit.sessionId);
     const cellBucket = rowBucket.cells.get(dimensionBucket) ?? {
       views: 0,
+      visitors: new Set<string>(),
       sessions: new Set<string>(),
     };
     cellBucket.views += dataset.viewWeight;
+    cellBucket.visitors.add(visit.visitorId);
     cellBucket.sessions.add(visit.sessionId);
     rowBucket.cells.set(dimensionBucket, cellBucket);
     rowBuckets.set(browserBucket, rowBucket);
 
     const columnBucket = columnBuckets.get(dimensionBucket) ?? {
       views: 0,
+      visitors: new Set<string>(),
       sessions: new Set<string>(),
     };
     columnBucket.views += dataset.viewWeight;
+    columnBucket.visitors.add(visit.visitorId);
     columnBucket.sessions.add(visit.sessionId);
     columnBuckets.set(dimensionBucket, columnBucket);
   }
@@ -3641,6 +3770,7 @@ function generateDemoBrowserCrossDimension(
       key: string;
       label: string;
       views: number;
+      visitors: number;
       sessions: number;
       isOther?: boolean;
       isUnknown?: boolean;
@@ -3653,6 +3783,7 @@ function generateDemoBrowserCrossDimension(
           key: "unknown",
           label: "Unknown",
           views: row.views,
+          visitors: row.visitors,
           sessions: row.sessions,
           isUnknown: true,
         },
@@ -3665,6 +3796,7 @@ function generateDemoBrowserCrossDimension(
         key: createDemoShareTrendSeriesKey(row.label, columnKeySet, fallbackKeyBase),
         label: row.label,
         views: row.views,
+        visitors: row.visitors,
         sessions: row.sessions,
       },
     };
@@ -3673,6 +3805,7 @@ function generateDemoBrowserCrossDimension(
   if (columnBuckets.has(DEMO_BROWSER_CROSS_OTHER_DIMENSION_TOKEN)) {
     const otherColumn = columnBuckets.get(DEMO_BROWSER_CROSS_OTHER_DIMENSION_TOKEN) ?? {
       views: 0,
+      visitors: new Set<string>(),
       sessions: new Set<string>(),
     };
     columnDescriptors.push({
@@ -3681,6 +3814,10 @@ function generateDemoBrowserCrossDimension(
         key: "other",
         label: DEMO_SHARE_TREND_OTHER_LABEL,
         views: Math.max(0, Math.round(otherColumn.views)),
+        visitors: Math.max(
+          0,
+          Math.round(weightedVisitorCount(dataset, otherColumn.visitors)),
+        ),
         sessions: Math.max(0, Math.round(weightedSessionCount(dataset, otherColumn.sessions))),
         isOther: true,
       },
@@ -3694,6 +3831,7 @@ function generateDemoBrowserCrossDimension(
       key: string;
       label: string;
       views: number;
+      visitors: number;
       sessions: number;
       isOther?: boolean;
     };
@@ -3703,6 +3841,7 @@ function generateDemoBrowserCrossDimension(
       key: createDemoShareTrendSeriesKey(row.label, rowKeySet, "browser"),
       label: row.label,
       views: row.views,
+      visitors: row.visitors,
       sessions: row.sessions,
     },
   }));
@@ -3710,8 +3849,9 @@ function generateDemoBrowserCrossDimension(
   if (rowBuckets.has(DEMO_BROWSER_CROSS_OTHER_BROWSER_TOKEN)) {
     const otherRow = rowBuckets.get(DEMO_BROWSER_CROSS_OTHER_BROWSER_TOKEN) ?? {
       views: 0,
+      visitors: new Set<string>(),
       sessions: new Set<string>(),
-      cells: new Map<string, { views: number; sessions: Set<string> }>(),
+      cells: new Map<string, { views: number; visitors: Set<string>; sessions: Set<string> }>(),
     };
     rowDescriptors.push({
       bucket: DEMO_BROWSER_CROSS_OTHER_BROWSER_TOKEN,
@@ -3719,6 +3859,7 @@ function generateDemoBrowserCrossDimension(
         key: "other",
         label: DEMO_SHARE_TREND_OTHER_LABEL,
         views: Math.max(0, Math.round(otherRow.views)),
+        visitors: Math.max(0, Math.round(weightedVisitorCount(dataset, otherRow.visitors))),
         sessions: Math.max(0, Math.round(weightedSessionCount(dataset, otherRow.sessions))),
         isOther: true,
       },
@@ -3735,6 +3876,10 @@ function generateDemoBrowserCrossDimension(
           key: column.item.key,
           label: column.item.label,
           views: Math.max(0, Math.round(cell?.views ?? 0)),
+          visitors: Math.max(
+            0,
+            Math.round(weightedVisitorCount(dataset, cell?.visitors ?? new Set<string>())),
+          ),
           sessions: Math.max(
             0,
             Math.round(weightedSessionCount(dataset, cell?.sessions ?? new Set<string>())),
@@ -3747,18 +3892,22 @@ function generateDemoBrowserCrossDimension(
       return {
         ...row.item,
         views: Math.max(0, Math.round(rowBucket?.views ?? row.item.views)),
+        visitors: rowBucket
+          ? Math.max(0, Math.round(weightedVisitorCount(dataset, rowBucket.visitors)))
+          : row.item.visitors,
         sessions: rowBucket
           ? Math.max(0, Math.round(weightedSessionCount(dataset, rowBucket.sessions)))
           : row.item.sessions,
         cells,
       };
     })
-    .filter((row) => row.views > 0);
+    .filter((row) => row.visitors > 0);
 
   return {
     columns,
     rows,
     totalViews: rows.reduce((sum, row) => sum + row.views, 0),
+    totalVisitors: rows.reduce((sum, row) => sum + row.visitors, 0),
     totalSessions: rows.reduce((sum, row) => sum + row.sessions, 0),
   };
 }

@@ -206,10 +206,10 @@ export function ShareTrendCard({
       trendData.data.map((point) => {
         const row: Record<string, number> = {
           timestampMs: point.timestampMs,
-          totalViews: point.totalViews,
+          totalVisitors: point.totalVisitors,
         };
         for (const series of chartSeries) {
-          row[series.key] = Number(point.viewsBySeries[series.key] ?? 0);
+          row[series.key] = Number(point.visitorsBySeries[series.key] ?? 0);
         }
         return row;
       }),
@@ -277,8 +277,8 @@ export function ShareTrendCard({
                         const row = payload as unknown as Record<string, number>;
                         const seriesKey = String(name ?? "");
                         const numeric = Math.max(0, Number(row[seriesKey] ?? value ?? 0));
-                        const totalViews = Math.max(0, Number(row.totalViews ?? 0));
-                        const share = totalViews > 0 ? numeric / totalViews : 0;
+                        const totalVisitors = Math.max(0, Number(row.totalVisitors ?? 0));
+                        const share = totalVisitors > 0 ? numeric / totalVisitors : 0;
                         const currentSeries = chartSeries.find((item) => item.key === seriesKey);
                         return (
                           <div className="flex w-full items-center gap-3">

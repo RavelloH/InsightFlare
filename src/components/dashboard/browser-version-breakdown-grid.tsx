@@ -85,7 +85,7 @@ function buildVersionCardData(
         ? "var(--muted-foreground)"
         : DONUT_COLORS[index % DONUT_COLORS.length],
       displayLabel: versionDisplayLabel(slice, browser.browser, messages),
-      share: browser.views > 0 ? slice.views / browser.views : 0,
+      share: browser.visitors > 0 ? slice.visitors / browser.visitors : 0,
     })),
   }));
 }
@@ -118,7 +118,7 @@ function BrowserVersionDonutCard({
           {browser.browser}
         </CardTitle>
         <CardDescription>
-          {numberFormat(locale, browser.views)} {messages.common.views}
+          {numberFormat(locale, browser.visitors)} {messages.common.visitors}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -142,7 +142,7 @@ function BrowserVersionDonutCard({
                         <div className="font-medium">{item.displayLabel}</div>
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-muted-foreground">
-                            {numberFormat(locale, item.views)} {messages.common.views}
+                            {numberFormat(locale, item.visitors)} {messages.common.visitors}
                           </span>
                           <span className="font-mono font-medium tabular-nums text-foreground">
                             {percentFormat(locale, item.share)}
@@ -154,7 +154,7 @@ function BrowserVersionDonutCard({
                 />
                 <Pie
                   data={browser.versions}
-                  dataKey="views"
+                  dataKey="visitors"
                   nameKey="displayLabel"
                   innerRadius={44}
                   outerRadius={66}
@@ -173,10 +173,10 @@ function BrowserVersionDonutCard({
 
             <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center">
               <span className="text-base font-medium tabular-nums text-foreground">
-                {numberFormat(locale, browser.views)}
+                {numberFormat(locale, browser.visitors)}
               </span>
               <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                {messages.common.views}
+                {messages.common.visitors}
               </span>
             </div>
           </div>
@@ -197,7 +197,7 @@ function BrowserVersionDonutCard({
                   </span>
                 </div>
                 <span className="text-right font-mono text-foreground tabular-nums">
-                  {numberFormat(locale, version.views)}
+                  {numberFormat(locale, version.visitors)}
                 </span>
                 <span className="text-right font-mono text-[11px] text-muted-foreground tabular-nums">
                   {percentFormat(locale, version.share)}

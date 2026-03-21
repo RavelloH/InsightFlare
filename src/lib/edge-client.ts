@@ -204,6 +204,7 @@ export interface BrowserTrendSeries {
   key: string;
   label: string;
   views: number;
+  visitors: number;
   sessions: number;
   isOther?: boolean;
 }
@@ -212,8 +213,10 @@ export interface BrowserTrendPoint {
   bucket: number;
   timestampMs: number;
   totalViews: number;
+  totalVisitors: number;
   totalSessions: number;
   viewsBySeries: Record<string, number>;
+  visitorsBySeries: Record<string, number>;
   sessionsBySeries: Record<string, number>;
 }
 
@@ -228,6 +231,7 @@ export interface BrowserVersionSlice {
   key: string;
   label: string;
   views: number;
+  visitors: number;
   sessions: number;
   isOther?: boolean;
   isUnknown?: boolean;
@@ -236,6 +240,7 @@ export interface BrowserVersionSlice {
 export interface BrowserVersionBreakdownBrowser {
   browser: string;
   views: number;
+  visitors: number;
   sessions: number;
   versions: BrowserVersionSlice[];
 }
@@ -249,6 +254,7 @@ export interface BrowserCrossBreakdownItem {
   key: string;
   label: string;
   views: number;
+  visitors: number;
   sessions: number;
   isOther?: boolean;
   isUnknown?: boolean;
@@ -262,6 +268,7 @@ export interface BrowserCrossBreakdownDimensionData {
   columns: BrowserCrossBreakdownItem[];
   rows: BrowserCrossBreakdownRow[];
   totalViews: number;
+  totalVisitors: number;
   totalSessions: number;
 }
 

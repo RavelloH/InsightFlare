@@ -58,11 +58,13 @@ interface BrowserCrossDisplayDimension {
     label: string;
     displayLabel: string;
     views: number;
+    visitors: number;
     sessions: number;
     share: number;
     cells: BrowserCrossDisplayItem[];
   }>;
   totalViews: number;
+  totalVisitors: number;
   totalSessions: number;
 }
 
@@ -71,6 +73,7 @@ function emptyBrowserCrossBreakdown(): BrowserCrossBreakdownData {
     columns: [],
     rows: [],
     totalViews: 0,
+    totalVisitors: 0,
     totalSessions: 0,
   };
 
@@ -107,14 +110,16 @@ function buildCrossDisplayDimension(
   return {
     columns,
     totalViews: data.totalViews,
+    totalVisitors: data.totalVisitors,
     totalSessions: data.totalSessions,
     rows: data.rows.map((row) => ({
       key: row.key,
       label: row.label,
       displayLabel: crossItemLabel(row, messages),
       views: row.views,
+      visitors: row.visitors,
       sessions: row.sessions,
-      share: data.totalViews > 0 ? row.views / data.totalViews : 0,
+      share: data.totalVisitors > 0 ? row.visitors / data.totalVisitors : 0,
       cells: row.cells.map((cell) => {
         const column = columnByKey.get(cell.key);
         return {
@@ -164,10 +169,16 @@ function BrowserCrossStackedBarCard({
           browser: shortenLabel(row.displayLabel),
           browserFullLabel: row.displayLabel,
         };
+        const rowSegmentVisitors = row.cells.reduce(
+          (sum, cell) => sum + cell.visitors,
+          0,
+        );
 
         for (const cell of row.cells) {
-          entry[cell.key] = row.views > 0 ? cell.views / row.views : 0;
-          entry[`${cell.key}Views`] = cell.views;
+          entry[cell.key] = rowSegmentVisitors > 0
+            ? cell.visitors / rowSegmentVisitors
+            : 0;
+          entry[`${cell.key}Visitors`] = cell.visitors;
         }
 
         return entry;
@@ -248,9 +259,9 @@ function BrowserCrossStackedBarCard({
                               (column) => column.key === seriesKey,
                             );
                             const share = Math.max(0, Number(item.value ?? 0));
-                            const views = Math.max(
+                            const visitors = Math.max(
                               0,
-                              Number(row[`${seriesKey}Views`] ?? 0),
+                              Number(row[`${seriesKey}Visitors`] ?? 0),
                             );
 
                             return (
@@ -271,7 +282,7 @@ function BrowserCrossStackedBarCard({
                                   </span>
                                 </span>
                                 <span className="ml-auto min-w-[7.5rem] shrink-0 whitespace-nowrap text-right font-mono text-foreground tabular-nums">
-                                  {numberFormat(locale, views)} · {percentFormat(locale, share)}
+                                  {numberFormat(locale, visitors)} · {percentFormat(locale, share)}
                                 </span>
                               </div>
                             );

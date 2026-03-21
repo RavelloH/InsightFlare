@@ -87,6 +87,7 @@ interface BrowserTrendSeriesRow {
   key: string;
   label: string;
   views: number;
+  visitors: number;
   sessions: number;
   isOther?: boolean;
 }
@@ -95,6 +96,7 @@ interface BrowserTrendBucketRow {
   bucket: number;
   label: string;
   views: number;
+  visitors: number;
   sessions: number;
 }
 
@@ -102,8 +104,10 @@ interface BrowserTrendPointRow {
   bucket: number;
   timestampMs: number;
   totalViews: number;
+  totalVisitors: number;
   totalSessions: number;
   viewsBySeries: Record<string, number>;
+  visitorsBySeries: Record<string, number>;
   sessionsBySeries: Record<string, number>;
 }
 
@@ -111,6 +115,7 @@ interface BrowserVersionAggregateRow {
   browser: string;
   version: string;
   views: number;
+  visitors: number;
   sessions: number;
 }
 
@@ -118,6 +123,7 @@ interface BrowserVersionSliceRow {
   key: string;
   label: string;
   views: number;
+  visitors: number;
   sessions: number;
   isOther?: boolean;
   isUnknown?: boolean;
@@ -126,6 +132,7 @@ interface BrowserVersionSliceRow {
 interface BrowserVersionBreakdownRow {
   browser: string;
   views: number;
+  visitors: number;
   sessions: number;
   versions: BrowserVersionSliceRow[];
 }
@@ -134,6 +141,7 @@ interface BrowserCrossBreakdownItemRow {
   key: string;
   label: string;
   views: number;
+  visitors: number;
   sessions: number;
   isOther?: boolean;
   isUnknown?: boolean;
@@ -147,6 +155,7 @@ interface BrowserCrossBreakdownDimensionDataRow {
   columns: BrowserCrossBreakdownItemRow[];
   rows: BrowserCrossBreakdownDimensionRow[];
   totalViews: number;
+  totalVisitors: number;
   totalSessions: number;
 }
 
@@ -154,6 +163,7 @@ interface BrowserCrossAggregateRow {
   browser: string;
   dimension: string;
   views: number;
+  visitors: number;
   sessions: number;
 }
 
@@ -1258,6 +1268,7 @@ ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
     TRIM(COALESCE(browser, '')) AS browser,
+    visitor_id AS visitorId,
     session_id AS sessionId
   FROM visit_source
   ${filter.clause}
@@ -1265,11 +1276,12 @@ filtered_visits AS (
 SELECT
   browser,
   count(*) AS views,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
   count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
 FROM filtered_visits
 WHERE browser != ''
 GROUP BY browser
-ORDER BY views DESC, sessions DESC, browser ASC
+ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
 ${normalizedBrowserLimit ? "LIMIT ?" : ""}
 `;
   const topBrowsers = (await queryD1All<Record<string, unknown>>(
@@ -1283,8 +1295,9 @@ ${normalizedBrowserLimit ? "LIMIT ?" : ""}
   )).map((row) => ({
     browser: String(row.browser ?? "").trim(),
     views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
     sessions: Number(row.sessions ?? 0),
-  })).filter((row) => row.browser.length > 0 && row.views > 0);
+  })).filter((row) => row.browser.length > 0 && row.visitors > 0);
 
   if (topBrowsers.length === 0) {
     return [];
@@ -1299,6 +1312,7 @@ filtered_visits AS (
   SELECT
     TRIM(COALESCE(browser, '')) AS browser,
     ${browserMajorVersionExpr()} AS browserVersion,
+    visitor_id AS visitorId,
     session_id AS sessionId
   FROM visit_source
   ${filter.clause}
@@ -1310,11 +1324,12 @@ SELECT
     ELSE '${BROWSER_VERSION_UNKNOWN_TOKEN}'
   END AS version,
   count(*) AS views,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
   count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
 FROM filtered_visits
 WHERE browser != '' AND browser IN (${topBrowserPlaceholders})
 GROUP BY browser, version
-ORDER BY browser ASC, views DESC, sessions DESC, version ASC
+ORDER BY browser ASC, visitors DESC, views DESC, sessions DESC, version ASC
 `;
   const versionRows = (await queryD1All<Record<string, unknown>>(
     env,
@@ -1324,9 +1339,10 @@ ORDER BY browser ASC, views DESC, sessions DESC, version ASC
     browser: String(row.browser ?? "").trim(),
     version: String(row.version ?? "").trim(),
     views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
     sessions: Number(row.sessions ?? 0),
   } satisfies BrowserVersionAggregateRow)).filter((row) =>
-    row.browser.length > 0 && row.views > 0
+    row.browser.length > 0 && row.visitors > 0
   );
 
   const versionsByBrowser = new Map<string, BrowserVersionAggregateRow[]>();
@@ -1341,6 +1357,7 @@ ORDER BY browser ASC, views DESC, sessions DESC, version ASC
     const usedKeys = new Set<string>(["other", "unknown"]);
     const versions: BrowserVersionSliceRow[] = [];
     let otherViews = 0;
+    let otherVisitors = 0;
     let otherSessions = 0;
 
     for (let index = 0; index < rows.length; index += 1) {
@@ -1351,6 +1368,7 @@ ORDER BY browser ASC, views DESC, sessions DESC, version ASC
             key: "unknown",
             label: "Unknown",
             views: row.views,
+            visitors: row.visitors,
             sessions: row.sessions,
             isUnknown: true,
           });
@@ -1359,6 +1377,7 @@ ORDER BY browser ASC, views DESC, sessions DESC, version ASC
             key: shareTrendSeriesKey(row.version, usedKeys, "version"),
             label: row.version,
             views: row.views,
+            visitors: row.visitors,
             sessions: row.sessions,
           });
         }
@@ -1366,14 +1385,16 @@ ORDER BY browser ASC, views DESC, sessions DESC, version ASC
       }
 
       otherViews += row.views;
+      otherVisitors += row.visitors;
       otherSessions += row.sessions;
     }
 
-    if (otherViews > 0) {
+    if (otherVisitors > 0) {
       versions.push({
         key: "other",
         label: SHARE_TREND_OTHER_LABEL,
         views: otherViews,
+        visitors: otherVisitors,
         sessions: otherSessions,
         isOther: true,
       });
@@ -1382,6 +1403,7 @@ ORDER BY browser ASC, views DESC, sessions DESC, version ASC
     return {
       browser: browserRow.browser,
       views: browserRow.views,
+      visitors: browserRow.visitors,
       sessions: browserRow.sessions,
       versions,
     };
@@ -1409,6 +1431,7 @@ ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
     ${browserExpr} AS browser,
+    visitor_id AS visitorId,
     session_id AS sessionId
   FROM visit_source
   ${filter.clause}
@@ -1416,11 +1439,12 @@ filtered_visits AS (
 SELECT
   browser,
   count(*) AS views,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
   count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
 FROM filtered_visits
 WHERE browser != ''
 GROUP BY browser
-ORDER BY views DESC, sessions DESC, browser ASC
+ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
 LIMIT ?
 `;
   const topBrowsers = (await queryD1All<Record<string, unknown>>(
@@ -1430,14 +1454,16 @@ LIMIT ?
   )).map((row) => ({
     browser: String(row.browser ?? "").trim(),
     views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
     sessions: Number(row.sessions ?? 0),
-  })).filter((row) => row.browser.length > 0 && row.views > 0);
+  })).filter((row) => row.browser.length > 0 && row.visitors > 0);
 
   if (topBrowsers.length === 0) {
     return {
       columns: [],
       rows: [],
       totalViews: 0,
+      totalVisitors: 0,
       totalSessions: 0,
     };
   }
@@ -1449,6 +1475,7 @@ filtered_visits AS (
   SELECT
     ${browserExpr} AS browser,
     ${normalizedDimensionExpr} AS dimension,
+    visitor_id AS visitorId,
     session_id AS sessionId
   FROM visit_source
   ${filter.clause}
@@ -1456,11 +1483,12 @@ filtered_visits AS (
 SELECT
   dimension,
   count(*) AS views,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
   count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
 FROM filtered_visits
 WHERE browser != ''
 GROUP BY dimension
-ORDER BY views DESC, sessions DESC, dimension ASC
+ORDER BY visitors DESC, views DESC, sessions DESC, dimension ASC
 LIMIT ?
 `;
   const topDimensions = (await queryD1All<Record<string, unknown>>(
@@ -1470,14 +1498,16 @@ LIMIT ?
   )).map((row) => ({
     dimension: String(row.dimension ?? "").trim() || BROWSER_CROSS_UNKNOWN_TOKEN,
     views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
     sessions: Number(row.sessions ?? 0),
-  })).filter((row) => row.views > 0);
+  })).filter((row) => row.visitors > 0);
 
   if (topDimensions.length === 0) {
     return {
       columns: [],
       rows: [],
       totalViews: 0,
+      totalVisitors: 0,
       totalSessions: 0,
     };
   }
@@ -1493,6 +1523,7 @@ filtered_visits AS (
   SELECT
     ${browserExpr} AS browser,
     ${normalizedDimensionExpr} AS dimension,
+    visitor_id AS visitorId,
     session_id AS sessionId
   FROM visit_source
   ${filter.clause}
@@ -1507,6 +1538,7 @@ normalized_visits AS (
       WHEN dimension IN (${topDimensionPlaceholders}) THEN dimension
       ELSE '${BROWSER_CROSS_OTHER_DIMENSION_TOKEN}'
     END AS dimensionBucket,
+    visitorId,
     sessionId
   FROM filtered_visits
   WHERE browser != ''
@@ -1515,6 +1547,7 @@ SELECT
   browserBucket AS browser,
   dimensionBucket AS dimension,
   count(*) AS views,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
   count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
 FROM normalized_visits
 GROUP BY browserBucket, dimensionBucket
@@ -1533,40 +1566,54 @@ ORDER BY browser ASC, dimension ASC
     browser: String(row.browser ?? "").trim(),
     dimension: String(row.dimension ?? "").trim(),
     views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
     sessions: Number(row.sessions ?? 0),
   } satisfies BrowserCrossAggregateRow)).filter((row) =>
-    row.browser.length > 0 && row.dimension.length > 0 && row.views > 0
+    row.browser.length > 0 && row.dimension.length > 0 && row.visitors > 0
   );
 
   const rowBuckets = new Map<
     string,
     {
       views: number;
+      visitors: number;
       sessions: number;
-      cells: Map<string, { views: number; sessions: number }>;
+      cells: Map<string, { views: number; visitors: number; sessions: number }>;
     }
   >();
-  const columnBuckets = new Map<string, { views: number; sessions: number }>();
+  const columnBuckets = new Map<
+    string,
+    { views: number; visitors: number; sessions: number }
+  >();
 
   for (const row of pairRows) {
     const rowBucket = rowBuckets.get(row.browser) ?? {
       views: 0,
+      visitors: 0,
       sessions: 0,
-      cells: new Map<string, { views: number; sessions: number }>(),
+      cells: new Map<string, { views: number; visitors: number; sessions: number }>(),
     };
     rowBucket.views += row.views;
+    rowBucket.visitors += row.visitors;
     rowBucket.sessions += row.sessions;
     const existingCell = rowBucket.cells.get(row.dimension) ?? {
       views: 0,
+      visitors: 0,
       sessions: 0,
     };
     existingCell.views += row.views;
+    existingCell.visitors += row.visitors;
     existingCell.sessions += row.sessions;
     rowBucket.cells.set(row.dimension, existingCell);
     rowBuckets.set(row.browser, rowBucket);
 
-    const columnBucket = columnBuckets.get(row.dimension) ?? { views: 0, sessions: 0 };
+    const columnBucket = columnBuckets.get(row.dimension) ?? {
+      views: 0,
+      visitors: 0,
+      sessions: 0,
+    };
     columnBucket.views += row.views;
+    columnBucket.visitors += row.visitors;
     columnBucket.sessions += row.sessions;
     columnBuckets.set(row.dimension, columnBucket);
   }
@@ -1583,6 +1630,7 @@ ORDER BY browser ASC, dimension ASC
           key: "unknown",
           label: "Unknown",
           views: row.views,
+          visitors: row.visitors,
           sessions: row.sessions,
           isUnknown: true,
         } satisfies BrowserCrossBreakdownItemRow,
@@ -1595,6 +1643,7 @@ ORDER BY browser ASC, dimension ASC
         key: shareTrendSeriesKey(row.dimension, columnKeySet, fallbackKeyBase),
         label: row.dimension,
         views: row.views,
+        visitors: row.visitors,
         sessions: row.sessions,
       } satisfies BrowserCrossBreakdownItemRow,
     };
@@ -1603,6 +1652,7 @@ ORDER BY browser ASC, dimension ASC
   if (columnBuckets.has(BROWSER_CROSS_OTHER_DIMENSION_TOKEN)) {
     const otherColumn = columnBuckets.get(BROWSER_CROSS_OTHER_DIMENSION_TOKEN) ?? {
       views: 0,
+      visitors: 0,
       sessions: 0,
     };
     columnDescriptors.push({
@@ -1611,6 +1661,7 @@ ORDER BY browser ASC, dimension ASC
         key: "other",
         label: SHARE_TREND_OTHER_LABEL,
         views: otherColumn.views,
+        visitors: otherColumn.visitors,
         sessions: otherColumn.sessions,
         isOther: true,
       } satisfies BrowserCrossBreakdownItemRow,
@@ -1627,6 +1678,7 @@ ORDER BY browser ASC, dimension ASC
       key: shareTrendSeriesKey(row.browser, rowKeySet, "browser"),
       label: row.browser,
       views: row.views,
+      visitors: row.visitors,
       sessions: row.sessions,
     } satisfies BrowserCrossBreakdownItemRow,
   }));
@@ -1634,8 +1686,9 @@ ORDER BY browser ASC, dimension ASC
   if (rowBuckets.has(BROWSER_CROSS_OTHER_BROWSER_TOKEN)) {
     const otherRow = rowBuckets.get(BROWSER_CROSS_OTHER_BROWSER_TOKEN) ?? {
       views: 0,
+      visitors: 0,
       sessions: 0,
-      cells: new Map<string, { views: number; sessions: number }>(),
+      cells: new Map<string, { views: number; visitors: number; sessions: number }>(),
     };
     rowDescriptors.push({
       bucket: BROWSER_CROSS_OTHER_BROWSER_TOKEN,
@@ -1643,6 +1696,7 @@ ORDER BY browser ASC, dimension ASC
         key: "other",
         label: SHARE_TREND_OTHER_LABEL,
         views: otherRow.views,
+        visitors: otherRow.visitors,
         sessions: otherRow.sessions,
         isOther: true,
       } satisfies BrowserCrossBreakdownItemRow,
@@ -1654,15 +1708,21 @@ ORDER BY browser ASC, dimension ASC
     .map((row) => {
       const bucket = rowBuckets.get(row.bucket) ?? {
         views: row.item.views,
+        visitors: row.item.visitors,
         sessions: row.item.sessions,
-        cells: new Map<string, { views: number; sessions: number }>(),
+        cells: new Map<string, { views: number; visitors: number; sessions: number }>(),
       };
       const cells = columnDescriptors.map((column) => {
-        const cell = bucket.cells.get(column.bucket) ?? { views: 0, sessions: 0 };
+        const cell = bucket.cells.get(column.bucket) ?? {
+          views: 0,
+          visitors: 0,
+          sessions: 0,
+        };
         return {
           key: column.item.key,
           label: column.item.label,
           views: cell.views,
+          visitors: cell.visitors,
           sessions: cell.sessions,
           ...(column.item.isOther ? { isOther: true } : {}),
           ...(column.item.isUnknown ? { isUnknown: true } : {}),
@@ -1672,16 +1732,18 @@ ORDER BY browser ASC, dimension ASC
       return {
         ...row.item,
         views: bucket.views,
+        visitors: bucket.visitors,
         sessions: bucket.sessions,
         cells,
       } satisfies BrowserCrossBreakdownDimensionRow;
     })
-    .filter((row) => row.views > 0);
+    .filter((row) => row.visitors > 0);
 
   return {
     columns,
     rows,
     totalViews: rows.reduce((sum, row) => sum + row.views, 0),
+    totalVisitors: rows.reduce((sum, row) => sum + row.visitors, 0),
     totalSessions: rows.reduce((sum, row) => sum + row.sessions, 0),
   };
 }
@@ -1748,19 +1810,51 @@ WITH
 ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
+    visit_id AS visitId,
+    started_at AS startedAt,
     ${labelExpr} AS labelValue,
+    visitor_id AS visitorId,
     session_id AS sessionId
   FROM visit_source
   ${filter.clause}
+),
+visitor_latest AS (
+  SELECT
+    visitorId,
+    labelValue AS assignedLabel
+  FROM (
+    SELECT
+      visitorId,
+      labelValue,
+      startedAt,
+      visitId,
+      ROW_NUMBER() OVER (
+        PARTITION BY visitorId
+        ORDER BY startedAt DESC, visitId DESC
+      ) AS rowNumber
+    FROM filtered_visits
+    WHERE visitorId != ''
+  )
+  WHERE rowNumber = 1
+),
+assigned_visits AS (
+  SELECT
+    visitor_latest.assignedLabel AS label,
+    filtered_visits.visitorId AS visitorId,
+    filtered_visits.sessionId AS sessionId
+  FROM visitor_latest
+  INNER JOIN filtered_visits
+    ON filtered_visits.visitorId = visitor_latest.visitorId
 )
 SELECT
-  labelValue AS label,
+  label,
   count(*) AS views,
+  count(DISTINCT visitorId) AS visitors,
   count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM filtered_visits
-WHERE labelValue != ''
-GROUP BY labelValue
-ORDER BY views DESC, sessions DESC, label ASC
+FROM assigned_visits
+WHERE label != ''
+GROUP BY label
+ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
 LIMIT ?
 `;
   const topRows = (await queryD1All<Record<string, unknown>>(
@@ -1770,13 +1864,14 @@ LIMIT ?
   )).map((row) => ({
     label: String(row.label ?? "").trim(),
     views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
     sessions: Number(row.sessions ?? 0),
-  })).filter((row) => row.label.length > 0 && row.views > 0);
+  })).filter((row) => row.label.length > 0 && row.visitors > 0);
 
   const topLabels = topRows.map((row) => row.label);
   const topLabelPlaceholders = topLabels.map(() => "?").join(", ");
-  const seriesCaseExpr = topLabels.length > 0
-    ? `CASE WHEN labelValue != '' AND labelValue IN (${topLabelPlaceholders}) THEN labelValue ELSE '${SHARE_TREND_OTHER_TOKEN}' END`
+  const assignmentCaseExpr = topLabels.length > 0
+    ? `CASE WHEN assignedLabel != '' AND assignedLabel IN (${topLabelPlaceholders}) THEN assignedLabel ELSE '${SHARE_TREND_OTHER_TOKEN}' END`
     : `'${SHARE_TREND_OTHER_TOKEN}'`;
 
   const seriesSql = `
@@ -1784,18 +1879,50 @@ WITH
 ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
+    visit_id AS visitId,
+    started_at AS startedAt,
     ${labelExpr} AS labelValue,
+    visitor_id AS visitorId,
     session_id AS sessionId
   FROM visit_source
   ${filter.clause}
+),
+visitor_latest AS (
+  SELECT
+    visitorId,
+    labelValue AS assignedLabel
+  FROM (
+    SELECT
+      visitorId,
+      labelValue,
+      startedAt,
+      visitId,
+      ROW_NUMBER() OVER (
+        PARTITION BY visitorId
+        ORDER BY startedAt DESC, visitId DESC
+      ) AS rowNumber
+    FROM filtered_visits
+    WHERE visitorId != ''
+  )
+  WHERE rowNumber = 1
+),
+assigned_visits AS (
+  SELECT
+    ${assignmentCaseExpr} AS label,
+    filtered_visits.visitorId AS visitorId,
+    filtered_visits.sessionId AS sessionId
+  FROM visitor_latest
+  INNER JOIN filtered_visits
+    ON filtered_visits.visitorId = visitor_latest.visitorId
 )
 SELECT
-  ${seriesCaseExpr} AS label,
+  label,
   count(*) AS views,
+  count(DISTINCT visitorId) AS visitors,
   count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM filtered_visits
+FROM assigned_visits
 GROUP BY label
-ORDER BY views DESC, sessions DESC, label ASC
+ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
 `;
   const seriesRows = (await queryD1All<Record<string, unknown>>(
     env,
@@ -1804,8 +1931,9 @@ ORDER BY views DESC, sessions DESC, label ASC
   )).map((row) => ({
     label: String(row.label ?? "").trim(),
     views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
     sessions: Number(row.sessions ?? 0),
-  })).filter((row) => row.label.length > 0 && row.views > 0);
+  })).filter((row) => row.label.length > 0 && row.visitors > 0);
 
   if (seriesRows.length === 0) {
     return {
@@ -1820,17 +1948,53 @@ ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
     CAST(started_at / ${bucketDivisor} AS INTEGER) AS bucket,
+    visit_id AS visitId,
+    started_at AS startedAt,
     ${labelExpr} AS labelValue,
+    visitor_id AS visitorId,
     session_id AS sessionId
   FROM visit_source
   ${filter.clause}
+),
+bucket_visitor_latest AS (
+  SELECT
+    bucket,
+    visitorId,
+    labelValue AS assignedLabel
+  FROM (
+    SELECT
+      bucket,
+      visitorId,
+      labelValue,
+      startedAt,
+      visitId,
+      ROW_NUMBER() OVER (
+        PARTITION BY bucket, visitorId
+        ORDER BY startedAt DESC, visitId DESC
+      ) AS rowNumber
+    FROM filtered_visits
+    WHERE visitorId != ''
+  )
+  WHERE rowNumber = 1
+),
+assigned_visits AS (
+  SELECT
+    filtered_visits.bucket AS bucket,
+    ${assignmentCaseExpr} AS label,
+    filtered_visits.visitorId AS visitorId,
+    filtered_visits.sessionId AS sessionId
+  FROM bucket_visitor_latest
+  INNER JOIN filtered_visits
+    ON filtered_visits.bucket = bucket_visitor_latest.bucket
+    AND filtered_visits.visitorId = bucket_visitor_latest.visitorId
 )
 SELECT
   bucket,
-  ${seriesCaseExpr} AS label,
+  label,
   count(*) AS views,
+  count(DISTINCT visitorId) AS visitors,
   count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM filtered_visits
+FROM assigned_visits
 GROUP BY bucket, label
 ORDER BY bucket ASC, label ASC
 `;
@@ -1842,6 +2006,7 @@ ORDER BY bucket ASC, label ASC
     bucket: Number(row.bucket ?? 0),
     label: String(row.label ?? "").trim(),
     views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
     sessions: Number(row.sessions ?? 0),
   } satisfies BrowserTrendBucketRow));
 
@@ -1854,25 +2019,42 @@ ORDER BY bucket ASC, label ASC
 
   for (const label of topLabels) {
     const row = seriesByLabel.get(label);
-    if (!row || row.views <= 0) continue;
+    if (!row || row.visitors <= 0) continue;
     const key = shareTrendSeriesKey(label, usedKeys, fallbackKeyBase);
     keyByLabel.set(label, key);
     series.push({
       key,
       label,
       views: row.views,
+      visitors: row.visitors,
       sessions: row.sessions,
     });
   }
 
   const otherRow = seriesByLabel.get(SHARE_TREND_OTHER_TOKEN);
-  if (otherRow && otherRow.views > 0) {
+  if (otherRow && otherRow.visitors > 0) {
     keyByLabel.set(SHARE_TREND_OTHER_TOKEN, SHARE_TREND_OTHER_KEY);
     series.push({
       key: SHARE_TREND_OTHER_KEY,
       label: SHARE_TREND_OTHER_LABEL,
       views: otherRow.views,
+      visitors: otherRow.visitors,
       sessions: otherRow.sessions,
+      isOther: true,
+    });
+  }
+
+  const hasBucketOther = bucketRows.some((row) =>
+    row.label === SHARE_TREND_OTHER_TOKEN && row.visitors > 0
+  );
+  if (!otherRow && hasBucketOther) {
+    keyByLabel.set(SHARE_TREND_OTHER_TOKEN, SHARE_TREND_OTHER_KEY);
+    series.push({
+      key: SHARE_TREND_OTHER_KEY,
+      label: SHARE_TREND_OTHER_LABEL,
+      views: 0,
+      visitors: 0,
+      sessions: 0,
       isOther: true,
     });
   }
@@ -1888,8 +2070,10 @@ ORDER BY bucket ASC, label ASC
     bucket,
     timestampMs: bucket * bucketDivisor,
     totalViews: 0,
+    totalVisitors: 0,
     totalSessions: 0,
     viewsBySeries: Object.fromEntries(series.map((item) => [item.key, 0])),
+    visitorsBySeries: Object.fromEntries(series.map((item) => [item.key, 0])),
     sessionsBySeries: Object.fromEntries(series.map((item) => [item.key, 0])),
   });
 
@@ -1899,8 +2083,10 @@ ORDER BY bucket ASC, label ASC
     if (!key) continue;
     const point = pointsByBucket.get(row.bucket) ?? createEmptyPoint(row.bucket);
     point.viewsBySeries[key] = row.views;
+    point.visitorsBySeries[key] = row.visitors;
     point.sessionsBySeries[key] = row.sessions;
     point.totalViews += row.views;
+    point.totalVisitors += row.visitors;
     point.totalSessions += row.sessions;
     pointsByBucket.set(row.bucket, point);
   }

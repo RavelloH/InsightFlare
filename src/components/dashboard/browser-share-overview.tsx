@@ -45,8 +45,8 @@ function ShareRadialCard({
   locale: Locale;
   messages: AppMessages;
 }) {
-  const totalViews = useMemo(
-    () => series.reduce((sum, s) => sum + s.views, 0),
+  const totalVisitors = useMemo(
+    () => series.reduce((sum, s) => sum + s.visitors, 0),
     [series],
   );
 
@@ -67,7 +67,7 @@ function ShareRadialCard({
   const chartData = useMemo(() => {
     const row: Record<string, number> = {};
     for (const s of series) {
-      row[s.key] = s.views;
+      row[s.key] = s.visitors;
     }
     return [row];
   }, [series]);
@@ -97,7 +97,7 @@ function ShareRadialCard({
                   const key = item.dataKey as string;
                   const value = (item.value as number) ?? 0;
                   const cfg = chartConfig[key];
-                  const share = totalViews > 0 ? value / totalViews : 0;
+                  const share = totalVisitors > 0 ? value / totalVisitors : 0;
 
                   return (
                     <div className="grid min-w-[10rem] gap-1 rounded-none border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
@@ -110,7 +110,7 @@ function ShareRadialCard({
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-muted-foreground">
-                          {numberFormat(locale, value)} {messages.common.views}
+                          {numberFormat(locale, value)} {messages.common.visitors}
                         </span>
                         <span className="font-mono font-medium tabular-nums">
                           {percentFormat(locale, share)}
@@ -137,10 +137,10 @@ function ShareRadialCard({
                         >
                           <div className="flex h-full flex-col items-center justify-end">
                             <span className="text-center text-[clamp(1rem,3cqi,1.75rem)] font-bold leading-tight text-foreground">
-                              {numberFormat(locale, totalViews)}
+                              {numberFormat(locale, totalVisitors)}
                             </span>
                             <span className="text-[clamp(0.625rem,1.5cqi,0.75rem)] text-muted-foreground">
-                              {messages.common.views}
+                              {messages.common.visitors}
                             </span>
                           </div>
                         </foreignObject>
@@ -168,7 +168,7 @@ function ShareRadialCard({
           {/* legend */}
           <div className="-mt-8 flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
             {series.map((s, i) => {
-              const share = totalViews > 0 ? s.views / totalViews : 0;
+              const share = totalVisitors > 0 ? s.visitors / totalVisitors : 0;
               return (
                 <div key={s.key} className="flex items-center gap-1.5 text-xs">
                   <span
