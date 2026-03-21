@@ -242,6 +242,7 @@ browsers:
   subtitle: Browser distribution and share.
   trendTitle: Browser Share Trend
   engineTrendTitle: Engine Share Trend
+  versionBreakdownTitle: Browser Version Breakdown
   trendSubtitle: Compare how each browser contributes across the selected window.
   topBrowserLabel: Top Browser
   shareLabel: Share

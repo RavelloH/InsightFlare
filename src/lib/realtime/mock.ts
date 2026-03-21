@@ -2051,6 +2051,7 @@ interface DemoVisitFact {
   referrerHost: string;
   referrerUrl: string;
   browser: string;
+  browserVersion: string;
   osVersion: string;
   deviceType: string;
   language: string;
@@ -2414,6 +2415,32 @@ function pickDemoBrowser(rng: () => number, deviceType: string): string {
   return weightedPickLabel(rng, adjusted, "Chrome");
 }
 
+function pickDemoBrowserVersion(rng: () => number, browser: string): string {
+  const normalized = browser.trim().toLowerCase();
+  if (normalized.includes("samsung internet")) {
+    return pickFromList(rng, ["27", "26", "25", "24"], "27");
+  }
+  if (normalized.includes("mobile safari") || normalized === "safari") {
+    return pickFromList(rng, ["18", "17", "16", "15"], "17");
+  }
+  if (normalized.includes("firefox")) {
+    return pickFromList(rng, ["137", "136", "135", "134"], "137");
+  }
+  if (normalized.includes("edge")) {
+    return pickFromList(rng, ["138", "137", "136", "135"], "138");
+  }
+  if (normalized.includes("opera")) {
+    return pickFromList(rng, ["117", "116", "115", "114"], "117");
+  }
+  if (normalized.includes("yandex")) {
+    return pickFromList(rng, ["25", "24", "23"], "25");
+  }
+  if (normalized.includes("uc browser")) {
+    return pickFromList(rng, ["16", "15", "14"], "16");
+  }
+  return pickFromList(rng, ["138", "137", "136", "135"], "138");
+}
+
 function pickDemoOsVersion(rng: () => number, deviceType: string): string {
   if (deviceType === "Mobile") return pickFromList(rng, DEMO_MOBILE_OS, "Android 15");
   if (deviceType === "Tablet") {
@@ -2688,6 +2715,7 @@ function buildDemoFactDataset(siteId: string, from: number, to: number): DemoFac
     const geo = pickDemoGeoContext(rng, country);
     const deviceType = pickDemoDeviceType(rng, profile);
     const browser = pickDemoBrowser(rng, deviceType);
+    const browserVersion = pickDemoBrowserVersion(rng, browser);
     const osVersion = pickDemoOsVersion(rng, deviceType);
     const language = pickDemoLanguage(rng, country);
     const screenSize = pickDemoScreenSize(rng, deviceType);
@@ -2745,6 +2773,7 @@ function buildDemoFactDataset(siteId: string, from: number, to: number): DemoFac
         referrerHost,
         referrerUrl,
         browser,
+        browserVersion,
         osVersion,
         deviceType,
         language,
@@ -3199,6 +3228,7 @@ function buildDemoTrendBuckets(
 
 const DEMO_SHARE_TREND_OTHER_KEY = "other";
 const DEMO_SHARE_TREND_OTHER_LABEL = "Other";
+const DEMO_BROWSER_VERSION_UNKNOWN_TOKEN = "__browser_version_unknown__";
 
 function createDemoShareTrendSeriesKey(
   label: string,
@@ -3408,6 +3438,78 @@ function generateDemoBrowserEngineTrend(
     fallbackKeyBase: "engine",
     getLabel: (visit) => browserEngineLabel(visit.browser),
   });
+}
+
+function generateDemoBrowserVersionBreakdown(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const rawBrowserLimit = parseDemoNumber(params.browserLimit, 0);
+  const browserLimit = Number.isFinite(rawBrowserLimit) && rawBrowserLimit > 0
+    ? Math.max(1, Math.floor(rawBrowserLimit))
+    : Number.MAX_SAFE_INTEGER;
+  const versionLimit = parseDemoLimit(params.versionLimit, 5, 1, 8);
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const browsers = aggregateDimensionRowsFromVisits(
+    dataset,
+    filtered.visits,
+    browserLimit,
+    (visit) => visit.browser,
+  ).map((browserRow) => {
+    const versionRows = aggregateDimensionRowsFromVisits(
+      dataset,
+      filtered.visits.filter((visit) => visit.browser === browserRow.label),
+      999,
+      (visit) => visit.browserVersion || DEMO_BROWSER_VERSION_UNKNOWN_TOKEN,
+    );
+    const versions = [];
+    let otherViews = 0;
+    let otherSessions = 0;
+
+    for (let index = 0; index < versionRows.length; index += 1) {
+      const row = versionRows[index];
+      if (index < versionLimit) {
+        versions.push({
+          key: row.label === DEMO_BROWSER_VERSION_UNKNOWN_TOKEN
+            ? "unknown"
+            : createDemoShareTrendSeriesKey(row.label, new Set(["other", "unknown"]), "version"),
+          label: row.label === DEMO_BROWSER_VERSION_UNKNOWN_TOKEN ? "Unknown" : row.label,
+          views: row.views,
+          sessions: row.sessions,
+          isUnknown: row.label === DEMO_BROWSER_VERSION_UNKNOWN_TOKEN || undefined,
+        });
+      } else {
+        otherViews += row.views;
+        otherSessions += row.sessions;
+      }
+    }
+
+    if (otherViews > 0) {
+      versions.push({
+        key: "other",
+        label: DEMO_SHARE_TREND_OTHER_LABEL,
+        views: otherViews,
+        sessions: otherSessions,
+        isOther: true,
+      });
+    }
+
+    return {
+      browser: browserRow.label,
+      views: browserRow.views,
+      sessions: browserRow.sessions,
+      versions,
+    };
+  });
+
+  return {
+    ok: true,
+    data: browsers,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -4347,6 +4449,9 @@ export function handleDemoRequest(options: {
   }
   if (path.includes("/overview")) {
     return generateDemoOverview(siteId, params);
+  }
+  if (path.includes("/browser-version-breakdown")) {
+    return generateDemoBrowserVersionBreakdown(siteId, params);
   }
   if (path.includes("/browser-trend")) {
     return generateDemoBrowserTrend(siteId, params);

@@ -232,6 +232,7 @@ export interface AppMessages {
     subtitle: string;
     trendTitle: string;
     engineTrendTitle: string;
+    versionBreakdownTitle: string;
     trendSubtitle: string;
     topBrowserLabel: string;
     shareLabel: string;

@@ -224,6 +224,27 @@ export interface BrowserTrendData {
   data: BrowserTrendPoint[];
 }
 
+export interface BrowserVersionSlice {
+  key: string;
+  label: string;
+  views: number;
+  sessions: number;
+  isOther?: boolean;
+  isUnknown?: boolean;
+}
+
+export interface BrowserVersionBreakdownBrowser {
+  browser: string;
+  views: number;
+  sessions: number;
+  versions: BrowserVersionSlice[];
+}
+
+export interface BrowserVersionBreakdownData {
+  ok: boolean;
+  data: BrowserVersionBreakdownBrowser[];
+}
+
 export interface PagesData {
   ok: boolean;
   data: Array<{
@@ -672,6 +693,29 @@ export async function fetchPrivateBrowserEngineTrend(params: {
         from: params.from,
         to: params.to,
         limit: params.limit ?? 5,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateBrowserVersionBreakdown(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  filters?: QueryFilters;
+  browserLimit?: number;
+  versionLimit?: number;
+}): Promise<BrowserVersionBreakdownData> {
+  return fetchEdgeJson<BrowserVersionBreakdownData>({
+    path: "/api/private/browser-version-breakdown",
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        browserLimit: params.browserLimit ?? 0,
+        versionLimit: params.versionLimit ?? 5,
       },
       params.filters,
     ),

@@ -1,4 +1,5 @@
 import type {
+  BrowserVersionBreakdownData,
   BrowserTrendData,
   DashboardFilterOption,
   DashboardFilterOptionsData,
@@ -558,6 +559,24 @@ export async function fetchBrowserEngineTrend(
     to: window.to,
     interval: window.interval,
     limit: options?.limit ?? 5,
+  }, filters));
+}
+
+export async function fetchBrowserVersionBreakdown(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+  options?: {
+    browserLimit?: number;
+    versionLimit?: number;
+  },
+): Promise<BrowserVersionBreakdownData> {
+  return fetchPrivateJson<BrowserVersionBreakdownData>("/api/private/browser-version-breakdown", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    browserLimit: options?.browserLimit ?? 0,
+    versionLimit: options?.versionLimit ?? 5,
   }, filters));
 }
 

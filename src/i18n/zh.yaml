@@ -242,6 +242,7 @@ browsers:
   subtitle: 按浏览器查看访问分布。
   trendTitle: 浏览器占比趋势
   engineTrendTitle: 内核占比趋势
+  versionBreakdownTitle: 浏览器版本分布
   trendSubtitle: 观察所选时间范围内各浏览器流量占比的变化。
   topBrowserLabel: 头部浏览器
   shareLabel: 占比

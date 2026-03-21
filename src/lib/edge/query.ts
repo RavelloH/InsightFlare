@@ -107,6 +107,29 @@ interface BrowserTrendPointRow {
   sessionsBySeries: Record<string, number>;
 }
 
+interface BrowserVersionAggregateRow {
+  browser: string;
+  version: string;
+  views: number;
+  sessions: number;
+}
+
+interface BrowserVersionSliceRow {
+  key: string;
+  label: string;
+  views: number;
+  sessions: number;
+  isOther?: boolean;
+  isUnknown?: boolean;
+}
+
+interface BrowserVersionBreakdownRow {
+  browser: string;
+  views: number;
+  sessions: number;
+  versions: BrowserVersionSliceRow[];
+}
+
 interface DimensionRow {
   value: string;
   views: number;
@@ -368,6 +391,7 @@ function intervalBucketMs(interval: Interval): number {
 const SHARE_TREND_OTHER_KEY = "other";
 const SHARE_TREND_OTHER_LABEL = "Other";
 const SHARE_TREND_OTHER_TOKEN = "__share_trend_other__";
+const BROWSER_VERSION_UNKNOWN_TOKEN = "__browser_version_unknown__";
 
 function shareTrendSeriesKey(
   label: string,
@@ -406,6 +430,11 @@ function formatPageLabel(pathname: string, query = "", hash = "", includeDetails
 function osVersionExpr(alias = ""): string {
   const prefix = alias ? `${alias}.` : "";
   return `trim(CASE WHEN ${prefix}os != '' AND ${prefix}os_version != '' THEN ${prefix}os || ' ' || ${prefix}os_version WHEN ${prefix}os != '' THEN ${prefix}os WHEN ${prefix}os_version != '' THEN ${prefix}os_version ELSE '' END)`;
+}
+
+function browserMajorVersionExpr(alias = ""): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `trim(CASE WHEN ${prefix}browser_version = '' THEN '' WHEN instr(${prefix}browser_version, '.') > 0 THEN substr(${prefix}browser_version, 1, instr(${prefix}browser_version, '.') - 1) ELSE ${prefix}browser_version END)`;
 }
 
 function screenSizeExpr(alias = ""): string {
@@ -1168,6 +1197,155 @@ async function queryBrowserEngineTrendFromD1(
   );
 }
 
+async function queryBrowserVersionBreakdownFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+  browserLimit: number,
+  versionLimit: number,
+): Promise<BrowserVersionBreakdownRow[]> {
+  const filter = buildVisitFilterSql(filters);
+  const normalizedBrowserLimit = Number.isFinite(browserLimit) && browserLimit > 0
+    ? Math.max(1, Math.floor(browserLimit))
+    : null;
+  const normalizedVersionLimit = Math.min(Math.max(1, versionLimit), 8);
+  const topBrowsersSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    TRIM(COALESCE(browser, '')) AS browser,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  browser,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM filtered_visits
+WHERE browser != ''
+GROUP BY browser
+ORDER BY views DESC, sessions DESC, browser ASC
+${normalizedBrowserLimit ? "LIMIT ?" : ""}
+`;
+  const topBrowsers = (await queryD1All<Record<string, unknown>>(
+    env,
+    topBrowsersSql,
+    [
+      ...visitSourceBindings(siteId, window),
+      ...filter.bindings,
+      ...(normalizedBrowserLimit ? [normalizedBrowserLimit] : []),
+    ],
+  )).map((row) => ({
+    browser: String(row.browser ?? "").trim(),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  })).filter((row) => row.browser.length > 0 && row.views > 0);
+
+  if (topBrowsers.length === 0) {
+    return [];
+  }
+
+  const topBrowserLabels = topBrowsers.map((row) => row.browser);
+  const topBrowserPlaceholders = topBrowserLabels.map(() => "?").join(", ");
+  const versionsSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    TRIM(COALESCE(browser, '')) AS browser,
+    ${browserMajorVersionExpr()} AS browserVersion,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  browser,
+  CASE
+    WHEN browserVersion != '' THEN browserVersion
+    ELSE '${BROWSER_VERSION_UNKNOWN_TOKEN}'
+  END AS version,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM filtered_visits
+WHERE browser != '' AND browser IN (${topBrowserPlaceholders})
+GROUP BY browser, version
+ORDER BY browser ASC, views DESC, sessions DESC, version ASC
+`;
+  const versionRows = (await queryD1All<Record<string, unknown>>(
+    env,
+    versionsSql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings, ...topBrowserLabels],
+  )).map((row) => ({
+    browser: String(row.browser ?? "").trim(),
+    version: String(row.version ?? "").trim(),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  } satisfies BrowserVersionAggregateRow)).filter((row) =>
+    row.browser.length > 0 && row.views > 0
+  );
+
+  const versionsByBrowser = new Map<string, BrowserVersionAggregateRow[]>();
+  for (const row of versionRows) {
+    const bucket = versionsByBrowser.get(row.browser) ?? [];
+    bucket.push(row);
+    versionsByBrowser.set(row.browser, bucket);
+  }
+
+  return topBrowsers.map((browserRow) => {
+    const rows = versionsByBrowser.get(browserRow.browser) ?? [];
+    const usedKeys = new Set<string>(["other", "unknown"]);
+    const versions: BrowserVersionSliceRow[] = [];
+    let otherViews = 0;
+    let otherSessions = 0;
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (index < normalizedVersionLimit) {
+        if (row.version === BROWSER_VERSION_UNKNOWN_TOKEN) {
+          versions.push({
+            key: "unknown",
+            label: "Unknown",
+            views: row.views,
+            sessions: row.sessions,
+            isUnknown: true,
+          });
+        } else {
+          versions.push({
+            key: shareTrendSeriesKey(row.version, usedKeys, "version"),
+            label: row.version,
+            views: row.views,
+            sessions: row.sessions,
+          });
+        }
+        continue;
+      }
+
+      otherViews += row.views;
+      otherSessions += row.sessions;
+    }
+
+    if (otherViews > 0) {
+      versions.push({
+        key: "other",
+        label: SHARE_TREND_OTHER_LABEL,
+        views: otherViews,
+        sessions: otherSessions,
+        isOther: true,
+      });
+    }
+
+    return {
+      browser: browserRow.browser,
+      views: browserRow.views,
+      sessions: browserRow.sessions,
+      versions,
+    };
+  });
+}
+
 async function queryShareTrendFromD1(
   env: Env,
   siteId: string,
@@ -1790,6 +1968,39 @@ async function handleBrowserEngineTrend(
   });
 }
 
+async function handleBrowserVersionBreakdown(
+  env: Env,
+  siteId: string,
+  url: URL,
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const rawBrowserLimit = coerceNumber(url.searchParams.get("browserLimit"), 0);
+  const browserLimit = Number.isFinite(rawBrowserLimit ?? NaN) && (rawBrowserLimit ?? 0) > 0
+    ? Math.max(1, Math.floor(rawBrowserLimit ?? 0))
+    : 0;
+  const versionLimit = Math.min(
+    8,
+    Math.max(
+      1,
+      Math.floor(coerceNumber(url.searchParams.get("versionLimit"), 5) ?? 5),
+    ),
+  );
+  const data = await queryBrowserVersionBreakdownFromD1(
+    env,
+    siteId,
+    window,
+    filters,
+    browserLimit,
+    versionLimit,
+  );
+  return jsonResponse({
+    ok: true,
+    data,
+  });
+}
+
 async function handlePages(
   env: Env,
   siteId: string,
@@ -2303,6 +2514,9 @@ async function routeQuery(
   if (pathname === "browser-trend") return handleBrowserTrend(env, siteId, url);
   if (pathname === "browser-engine-trend") {
     return handleBrowserEngineTrend(env, siteId, url);
+  }
+  if (pathname === "browser-version-breakdown") {
+    return handleBrowserVersionBreakdown(env, siteId, url);
   }
   if (pathname === "visitors") return handleVisitors(env, siteId, url);
   if (pathname === "countries") {
