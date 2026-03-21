@@ -249,6 +249,8 @@ browsers:
   topBrowserLabel: Top Browser
   shareLabel: Share
   otherLabel: Other
+  browserShareTitle: Browser Share
+  engineShareTitle: Engine Share
   caniuseTitle: Feature Compatibility
   caniuseSubtitle: Check browser support for web features based on your site's visitor data.
   caniuseSearchPlaceholder: Search web features...

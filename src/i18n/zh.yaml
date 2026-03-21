@@ -249,6 +249,8 @@ browsers:
   topBrowserLabel: 头部浏览器
   shareLabel: 占比
   otherLabel: 其他
+  browserShareTitle: 浏览器占比
+  engineShareTitle: 内核占比
   caniuseTitle: 特性兼容性
   caniuseSubtitle: 根据站点访客数据检查 Web 特性的浏览器支持情况。
   caniuseSearchPlaceholder: 搜索 Web 特性…

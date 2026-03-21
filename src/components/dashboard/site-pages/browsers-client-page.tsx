@@ -1,6 +1,7 @@
 "use client";
 
 import { PageHeading } from "@/components/dashboard/page-heading";
+import { BrowserShareOverview } from "@/components/dashboard/browser-share-overview";
 import { BrowserShareTrendCard } from "@/components/dashboard/browser-share-trend-card";
 import { BrowserEngineShareTrendCard } from "@/components/dashboard/browser-engine-share-trend-card";
 import { BrowserCrossBreakdownGrid } from "@/components/dashboard/browser-cross-breakdown-grid";
@@ -33,6 +34,14 @@ export function BrowsersClientPage({
       <PageHeading
         title={messages.browsers.title}
         subtitle={messages.browsers.subtitle}
+      />
+
+      <BrowserShareOverview
+        locale={locale}
+        messages={messages}
+        siteId={siteId}
+        window={window}
+        filters={filters}
       />
 
       <BrowserShareTrendCard

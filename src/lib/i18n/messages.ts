@@ -239,6 +239,8 @@ export interface AppMessages {
     topBrowserLabel: string;
     shareLabel: string;
     otherLabel: string;
+    browserShareTitle: string;
+    engineShareTitle: string;
     caniuseTitle: string;
     caniuseSubtitle: string;
     caniuseSearchPlaceholder: string;
