@@ -200,6 +200,30 @@ export interface TrendData {
   data: TrendPoint[];
 }
 
+export interface BrowserTrendSeries {
+  key: string;
+  label: string;
+  views: number;
+  sessions: number;
+  isOther?: boolean;
+}
+
+export interface BrowserTrendPoint {
+  bucket: number;
+  timestampMs: number;
+  totalViews: number;
+  totalSessions: number;
+  viewsBySeries: Record<string, number>;
+  sessionsBySeries: Record<string, number>;
+}
+
+export interface BrowserTrendData {
+  ok: boolean;
+  interval: "minute" | "hour" | "day" | "week" | "month";
+  series: BrowserTrendSeries[];
+  data: BrowserTrendPoint[];
+}
+
 export interface PagesData {
   ok: boolean;
   data: Array<{
@@ -608,21 +632,76 @@ export async function fetchPrivateDevices(params: {
   });
 }
 
-export async function fetchPrivateBrowsers(params: {
+export async function fetchPrivateBrowserTrend(params: {
   siteId: string;
   from: number;
   to: number;
+  interval?: "minute" | "hour" | "day" | "week" | "month";
+  filters?: QueryFilters;
+  limit?: number;
+}): Promise<BrowserTrendData> {
+  return fetchEdgeJson<BrowserTrendData>({
+    path: "/api/private/browser-trend",
+    params: withFilters(
+      {
+        interval: params.interval || "day",
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 5,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateBrowserEngineTrend(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  interval?: "minute" | "hour" | "day" | "week" | "month";
+  filters?: QueryFilters;
+  limit?: number;
+}): Promise<BrowserTrendData> {
+  return fetchEdgeJson<BrowserTrendData>({
+    path: "/api/private/browser-engine-trend",
+    params: withFilters(
+      {
+        interval: params.interval || "day",
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        limit: params.limit ?? 5,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateOverviewClientTab(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  tab: "browser" | "osVersion" | "deviceType" | "language" | "screenSize";
   limit?: number;
   filters?: QueryFilters;
-}): Promise<DimensionData> {
-  return fetchEdgeJson<DimensionData>({
-    path: "/api/private/browsers",
+}): Promise<OverviewTabData> {
+  const pathByTab = {
+    browser: "browser",
+    osVersion: "os-version",
+    deviceType: "device-type",
+    language: "language",
+    screenSize: "screen-size",
+  } as const;
+
+  return fetchEdgeJson<OverviewTabData>({
+    path: `/api/private/overview-client-${pathByTab[params.tab]}`,
     params: withFilters(
       {
         siteId: params.siteId,
         from: params.from,
         to: params.to,
-        limit: params.limit ?? 20,
+        limit: params.limit ?? 100,
       },
       params.filters,
     ),

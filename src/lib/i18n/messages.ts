@@ -230,6 +230,12 @@ export interface AppMessages {
   browsers: {
     title: string;
     subtitle: string;
+    trendTitle: string;
+    engineTrendTitle: string;
+    trendSubtitle: string;
+    topBrowserLabel: string;
+    shareLabel: string;
+    otherLabel: string;
   };
   siteSettings: {
     title: string;

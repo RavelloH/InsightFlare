@@ -6,6 +6,7 @@ import {
   buildRegionLocationValue,
   parseGeoLocationValue,
 } from "@/lib/dashboard/geo-location";
+import { browserEngineCaseSql } from "@/lib/browser-engine";
 
 const RETENTION_DAYS = 365;
 const PRIVATE_CACHE_HEADERS = {
@@ -80,6 +81,30 @@ interface OverviewAggregateRow {
 
 interface TrendAggregateRow extends OverviewAggregateRow {
   bucket: number;
+}
+
+interface BrowserTrendSeriesRow {
+  key: string;
+  label: string;
+  views: number;
+  sessions: number;
+  isOther?: boolean;
+}
+
+interface BrowserTrendBucketRow {
+  bucket: number;
+  label: string;
+  views: number;
+  sessions: number;
+}
+
+interface BrowserTrendPointRow {
+  bucket: number;
+  timestampMs: number;
+  totalViews: number;
+  totalSessions: number;
+  viewsBySeries: Record<string, number>;
+  sessionsBySeries: Record<string, number>;
 }
 
 interface DimensionRow {
@@ -338,6 +363,33 @@ function intervalBucketMs(interval: Interval): number {
   if (interval === "day") return ONE_DAY_MS;
   if (interval === "week") return 7 * ONE_DAY_MS;
   return 30 * ONE_DAY_MS;
+}
+
+const SHARE_TREND_OTHER_KEY = "other";
+const SHARE_TREND_OTHER_LABEL = "Other";
+const SHARE_TREND_OTHER_TOKEN = "__share_trend_other__";
+
+function shareTrendSeriesKey(
+  label: string,
+  usedKeys: Set<string>,
+  fallbackBase: string,
+): string {
+  const normalized = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const base = normalized || fallbackBase;
+  let candidate = base;
+  let suffix = 2;
+
+  while (usedKeys.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+
+  usedKeys.add(candidate);
+  return candidate;
 }
 
 function normalizePathname(pathname: string): string {
@@ -1070,6 +1122,243 @@ ORDER BY bucket ASC
   }));
 }
 
+async function queryBrowserTrendFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: DashboardFilters,
+  limit: number,
+): Promise<{
+  series: BrowserTrendSeriesRow[];
+  data: BrowserTrendPointRow[];
+}> {
+  return queryShareTrendFromD1(
+    env,
+    siteId,
+    window,
+    interval,
+    filters,
+    limit,
+    "TRIM(COALESCE(browser, ''))",
+    "browser",
+  );
+}
+
+async function queryBrowserEngineTrendFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: DashboardFilters,
+  limit: number,
+): Promise<{
+  series: BrowserTrendSeriesRow[];
+  data: BrowserTrendPointRow[];
+}> {
+  return queryShareTrendFromD1(
+    env,
+    siteId,
+    window,
+    interval,
+    filters,
+    limit,
+    browserEngineCaseSql("browser", "os"),
+    "engine",
+  );
+}
+
+async function queryShareTrendFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: DashboardFilters,
+  limit: number,
+  labelExpr: string,
+  fallbackKeyBase: string,
+): Promise<{
+  series: BrowserTrendSeriesRow[];
+  data: BrowserTrendPointRow[];
+}> {
+  const filter = buildVisitFilterSql(filters);
+  const bucketDivisor = intervalBucketMs(interval);
+  const normalizedLimit = Math.min(Math.max(1, limit), 8);
+  const topSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    ${labelExpr} AS labelValue,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  labelValue AS label,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM filtered_visits
+WHERE labelValue != ''
+GROUP BY labelValue
+ORDER BY views DESC, sessions DESC, label ASC
+LIMIT ?
+`;
+  const topRows = (await queryD1All<Record<string, unknown>>(
+    env,
+    topSql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings, normalizedLimit],
+  )).map((row) => ({
+    label: String(row.label ?? "").trim(),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  })).filter((row) => row.label.length > 0 && row.views > 0);
+
+  const topLabels = topRows.map((row) => row.label);
+  const topLabelPlaceholders = topLabels.map(() => "?").join(", ");
+  const seriesCaseExpr = topLabels.length > 0
+    ? `CASE WHEN labelValue != '' AND labelValue IN (${topLabelPlaceholders}) THEN labelValue ELSE '${SHARE_TREND_OTHER_TOKEN}' END`
+    : `'${SHARE_TREND_OTHER_TOKEN}'`;
+
+  const seriesSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    ${labelExpr} AS labelValue,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  ${seriesCaseExpr} AS label,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM filtered_visits
+GROUP BY label
+ORDER BY views DESC, sessions DESC, label ASC
+`;
+  const seriesRows = (await queryD1All<Record<string, unknown>>(
+    env,
+    seriesSql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings, ...topLabels],
+  )).map((row) => ({
+    label: String(row.label ?? "").trim(),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  })).filter((row) => row.label.length > 0 && row.views > 0);
+
+  if (seriesRows.length === 0) {
+    return {
+      series: [],
+      data: [],
+    };
+  }
+
+  const bucketSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    CAST(started_at / ${bucketDivisor} AS INTEGER) AS bucket,
+    ${labelExpr} AS labelValue,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  bucket,
+  ${seriesCaseExpr} AS label,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM filtered_visits
+GROUP BY bucket, label
+ORDER BY bucket ASC, label ASC
+`;
+  const bucketRows = (await queryD1All<Record<string, unknown>>(
+    env,
+    bucketSql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings, ...topLabels],
+  )).map((row) => ({
+    bucket: Number(row.bucket ?? 0),
+    label: String(row.label ?? "").trim(),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  } satisfies BrowserTrendBucketRow));
+
+  const seriesByLabel = new Map(
+    seriesRows.map((row) => [row.label, row] as const),
+  );
+  const usedKeys = new Set<string>([SHARE_TREND_OTHER_KEY]);
+  const series: BrowserTrendSeriesRow[] = [];
+  const keyByLabel = new Map<string, string>();
+
+  for (const label of topLabels) {
+    const row = seriesByLabel.get(label);
+    if (!row || row.views <= 0) continue;
+    const key = shareTrendSeriesKey(label, usedKeys, fallbackKeyBase);
+    keyByLabel.set(label, key);
+    series.push({
+      key,
+      label,
+      views: row.views,
+      sessions: row.sessions,
+    });
+  }
+
+  const otherRow = seriesByLabel.get(SHARE_TREND_OTHER_TOKEN);
+  if (otherRow && otherRow.views > 0) {
+    keyByLabel.set(SHARE_TREND_OTHER_TOKEN, SHARE_TREND_OTHER_KEY);
+    series.push({
+      key: SHARE_TREND_OTHER_KEY,
+      label: SHARE_TREND_OTHER_LABEL,
+      views: otherRow.views,
+      sessions: otherRow.sessions,
+      isOther: true,
+    });
+  }
+
+  if (series.length === 0) {
+    return {
+      series: [],
+      data: [],
+    };
+  }
+
+  const createEmptyPoint = (bucket: number): BrowserTrendPointRow => ({
+    bucket,
+    timestampMs: bucket * bucketDivisor,
+    totalViews: 0,
+    totalSessions: 0,
+    viewsBySeries: Object.fromEntries(series.map((item) => [item.key, 0])),
+    sessionsBySeries: Object.fromEntries(series.map((item) => [item.key, 0])),
+  });
+
+  const pointsByBucket = new Map<number, BrowserTrendPointRow>();
+  for (const row of bucketRows) {
+    const key = keyByLabel.get(row.label);
+    if (!key) continue;
+    const point = pointsByBucket.get(row.bucket) ?? createEmptyPoint(row.bucket);
+    point.viewsBySeries[key] = row.views;
+    point.sessionsBySeries[key] = row.sessions;
+    point.totalViews += row.views;
+    point.totalSessions += row.sessions;
+    pointsByBucket.set(row.bucket, point);
+  }
+
+  const fromBucket = Math.floor(window.fromMs / bucketDivisor);
+  const toBucket = Math.max(fromBucket, Math.floor(window.toMs / bucketDivisor));
+  const data: BrowserTrendPointRow[] = [];
+  for (let bucket = fromBucket; bucket <= toBucket; bucket += 1) {
+    data.push(pointsByBucket.get(bucket) ?? createEmptyPoint(bucket));
+  }
+
+  return {
+    series,
+    data,
+  };
+}
+
 async function queryTeamOverviewFromD1(
   env: Env,
   siteIds: string[],
@@ -1446,6 +1735,58 @@ async function handleTrend(env: Env, siteId: string, url: URL): Promise<Response
       interval,
       trend.source === "ae" ? "detail" : sourceLabel(window),
     ),
+  });
+}
+
+async function handleBrowserTrend(
+  env: Env,
+  siteId: string,
+  url: URL,
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const interval = parseInterval(url);
+  const limit = parseLimit(url, 5, 8);
+  const trend = await queryBrowserTrendFromD1(
+    env,
+    siteId,
+    window,
+    interval,
+    filters,
+    limit,
+  );
+  return jsonResponse({
+    ok: true,
+    interval,
+    series: trend.series,
+    data: trend.data,
+  });
+}
+
+async function handleBrowserEngineTrend(
+  env: Env,
+  siteId: string,
+  url: URL,
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const interval = parseInterval(url);
+  const limit = parseLimit(url, 5, 8);
+  const trend = await queryBrowserEngineTrendFromD1(
+    env,
+    siteId,
+    window,
+    interval,
+    filters,
+    limit,
+  );
+  return jsonResponse({
+    ok: true,
+    interval,
+    series: trend.series,
+    data: trend.data,
   });
 }
 
@@ -1959,15 +2300,16 @@ async function routeQuery(
   if (pathname === "pages") return handlePages(env, siteId, url, !options.publicMode);
   if (pathname === "referrers") return handleReferrers(env, siteId, url);
   if (options.publicMode) return notFound();
+  if (pathname === "browser-trend") return handleBrowserTrend(env, siteId, url);
+  if (pathname === "browser-engine-trend") {
+    return handleBrowserEngineTrend(env, siteId, url);
+  }
   if (pathname === "visitors") return handleVisitors(env, siteId, url);
   if (pathname === "countries") {
     return handleDimension(env, siteId, url, "country", { ignoreGeo: true });
   }
   if (pathname === "devices") {
     return handleDimension(env, siteId, url, "device_type");
-  }
-  if (pathname === "browsers") {
-    return handleDimension(env, siteId, url, "browser");
   }
   if (pathname === "event-types") return handleEventTypes(env, siteId, url);
   if (pathname === "filter-options") return handleFilterOptions(env, siteId, url);

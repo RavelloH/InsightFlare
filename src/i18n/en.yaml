@@ -240,6 +240,12 @@ devices:
 browsers:
   title: Browsers
   subtitle: Browser distribution and share.
+  trendTitle: Browser Share Trend
+  engineTrendTitle: Engine Share Trend
+  trendSubtitle: Compare how each browser contributes across the selected window.
+  topBrowserLabel: Top Browser
+  shareLabel: Share
+  otherLabel: Other
 siteSettings:
   title: Site Settings
   subtitle: Configure this site's basic information and lifecycle.

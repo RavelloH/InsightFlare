@@ -3,10 +3,10 @@ import { cache } from "react";
 import {
   type QueryFilters,
   fetchAdminMe,
-  fetchPrivateBrowsers,
   fetchPrivateCountries,
   fetchPrivateDevices,
   fetchPrivateEventTypes,
+  fetchPrivateOverviewClientTab,
   fetchAdminSites,
   fetchPrivateOverview,
   fetchPrivatePages,
@@ -372,6 +372,32 @@ function emptyDimension(): DimensionData {
   return { ok: true, data: [] };
 }
 
+async function loadBrowserDimensionFromClientTab(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  limit?: number;
+  filters?: DashboardFilters;
+}): Promise<DimensionData> {
+  const payload = await fetchPrivateOverviewClientTab({
+    siteId: params.siteId,
+    from: params.from,
+    to: params.to,
+    tab: "browser",
+    limit: params.limit,
+    filters: params.filters,
+  });
+
+  return {
+    ok: payload.ok,
+    data: payload.data.map((item) => ({
+      value: String(item.label ?? ""),
+      views: Number(item.views ?? 0),
+      sessions: Number(item.sessions ?? 0),
+    })),
+  };
+}
+
 export async function loadOverviewBundle(
   siteId: string,
   window: TimeWindow,
@@ -405,7 +431,7 @@ export async function loadOverviewBundle(
       fetchPrivateReferrers({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyReferrers()),
       fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
       fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
-      fetchPrivateBrowsers({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
+      loadBrowserDimensionFromClientTab({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
       fetchPrivateEventTypes({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
     ]);
 
@@ -469,7 +495,7 @@ export async function loadDevices(siteId: string, window: TimeWindow, filters?: 
 }
 
 export async function loadBrowsers(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
-  return fetchPrivateBrowsers({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyDimension());
+  return loadBrowserDimensionFromClientTab({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyDimension());
 }
 
 export async function loadEventTypes(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
@@ -480,7 +506,7 @@ export async function loadFilterOptions(siteId: string, window: TimeWindow): Pro
   const [countries, devices, browsers, eventTypes] = await Promise.all([
     fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
     fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
-    fetchPrivateBrowsers({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
+    loadBrowserDimensionFromClientTab({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
     fetchPrivateEventTypes({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
   ]);
 

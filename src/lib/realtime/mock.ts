@@ -3,6 +3,7 @@ import type {
   RealtimeVisit,
   RealtimeVisitorPoint,
 } from "@/lib/realtime/types";
+import { browserEngineLabel } from "@/lib/browser-engine";
 
 // ---------------------------------------------------------------------------
 //  Realtime mock socket (existing)
@@ -3196,6 +3197,219 @@ function buildDemoTrendBuckets(
   return rows;
 }
 
+const DEMO_SHARE_TREND_OTHER_KEY = "other";
+const DEMO_SHARE_TREND_OTHER_LABEL = "Other";
+
+function createDemoShareTrendSeriesKey(
+  label: string,
+  usedKeys: Set<string>,
+  fallbackBase: string,
+): string {
+  const normalized = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const base = normalized || fallbackBase;
+  let candidate = base;
+  let suffix = 2;
+
+  while (usedKeys.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+
+  usedKeys.add(candidate);
+  return candidate;
+}
+
+function generateDemoShareTrend(
+  siteId: string,
+  params: Record<string, string | number>,
+  options: {
+    fallbackKeyBase: string;
+    getLabel: (visit: DemoVisitFact) => string;
+  },
+): Record<string, unknown> {
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const interval = parseDemoInterval(params.interval);
+  const limit = parseDemoLimit(params.limit, 5, 1, 8);
+  const filters = parseDemoFilters(params);
+  const stepMs = demoIntervalStepMs(interval);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+
+  const topRows = aggregateDimensionRowsFromVisits(
+    dataset,
+    filtered.visits,
+    limit,
+    options.getLabel,
+  );
+  const topLabels = topRows.map((row) => row.label);
+  const topLabelSet = new Set(topLabels);
+  const usedKeys = new Set<string>([DEMO_SHARE_TREND_OTHER_KEY]);
+  const keyByLabel = new Map<string, string>();
+  const series: Array<{
+    key: string;
+    label: string;
+    views: number;
+    sessions: number;
+    isOther?: boolean;
+  }> = topRows.map((row) => {
+    const key = createDemoShareTrendSeriesKey(
+      row.label,
+      usedKeys,
+      options.fallbackKeyBase,
+    );
+    keyByLabel.set(row.label, key);
+    return {
+      key,
+      label: row.label,
+      views: row.views,
+      sessions: row.sessions,
+    };
+  });
+
+  const otherSessions = new Set<string>();
+  let otherViews = 0;
+  for (const visit of filtered.visits) {
+    const label = String(options.getLabel(visit) ?? "").trim();
+    if (label && topLabelSet.has(label)) continue;
+    otherViews += dataset.viewWeight;
+    otherSessions.add(visit.sessionId);
+  }
+
+  if (otherViews > 0) {
+    keyByLabel.set(DEMO_SHARE_TREND_OTHER_LABEL, DEMO_SHARE_TREND_OTHER_KEY);
+    series.push({
+      key: DEMO_SHARE_TREND_OTHER_KEY,
+      label: DEMO_SHARE_TREND_OTHER_LABEL,
+      views: Math.max(0, Math.round(otherViews)),
+      sessions: Math.max(0, Math.round(weightedSessionCount(dataset, otherSessions))),
+      isOther: true,
+    });
+  }
+
+  if (series.length === 0) {
+    return {
+      ok: true,
+      interval,
+      series: [],
+      data: [],
+    };
+  }
+
+  const createEmptyPoint = (bucket: number) => ({
+    bucket,
+    timestampMs: bucket * stepMs,
+    totalViews: 0,
+    totalSessions: 0,
+    viewsBySeries: Object.fromEntries(series.map((item) => [item.key, 0])),
+    sessionsBySeries: Object.fromEntries(series.map((item) => [item.key, 0])),
+  });
+
+  const bucketMap = new Map<
+    number,
+    {
+      bucket: number;
+      timestampMs: number;
+      totalViews: number;
+      totalSessions: number;
+      viewsBySeries: Record<string, number>;
+      sessionsBySeries: Record<string, number>;
+      sessionSets: Map<string, Set<string>>;
+    }
+  >();
+
+  for (const visit of filtered.visits) {
+    const bucket = Math.floor(visit.startedAt / stepMs);
+    const rawLabel = String(options.getLabel(visit) ?? "").trim();
+    const label = rawLabel && topLabelSet.has(rawLabel)
+      ? rawLabel
+      : DEMO_SHARE_TREND_OTHER_LABEL;
+    const key = keyByLabel.get(label);
+    if (!key) continue;
+
+    const point = bucketMap.get(bucket) ?? {
+      ...createEmptyPoint(bucket),
+      sessionSets: new Map<string, Set<string>>(),
+    };
+    point.viewsBySeries[key] += dataset.viewWeight;
+    point.totalViews += dataset.viewWeight;
+
+    const sessionSet = point.sessionSets.get(key) ?? new Set<string>();
+    sessionSet.add(visit.sessionId);
+    point.sessionSets.set(key, sessionSet);
+    bucketMap.set(bucket, point);
+  }
+
+  for (const point of bucketMap.values()) {
+    let totalSessions = 0;
+    for (const seriesItem of series) {
+      const sessionSet = point.sessionSets.get(seriesItem.key) ?? new Set<string>();
+      const sessions = Math.max(
+        0,
+        Math.round(weightedSessionCount(dataset, sessionSet)),
+      );
+      point.sessionsBySeries[seriesItem.key] = sessions;
+      totalSessions += sessions;
+      point.viewsBySeries[seriesItem.key] = Math.max(
+        0,
+        Math.round(point.viewsBySeries[seriesItem.key] ?? 0),
+      );
+    }
+    point.totalViews = Math.max(0, Math.round(point.totalViews));
+    point.totalSessions = totalSessions;
+  }
+
+  const fromBucket = Math.floor(from / stepMs);
+  const toBucket = Math.max(fromBucket, Math.floor(to / stepMs));
+  const data = [];
+  for (let bucket = fromBucket; bucket <= toBucket; bucket += 1) {
+    const existing = bucketMap.get(bucket);
+    if (existing) {
+      data.push({
+        bucket: existing.bucket,
+        timestampMs: existing.timestampMs,
+        totalViews: existing.totalViews,
+        totalSessions: existing.totalSessions,
+        viewsBySeries: existing.viewsBySeries,
+        sessionsBySeries: existing.sessionsBySeries,
+      });
+    } else {
+      data.push(createEmptyPoint(bucket));
+    }
+  }
+
+  return {
+    ok: true,
+    interval,
+    series,
+    data,
+  };
+}
+
+function generateDemoBrowserTrend(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  return generateDemoShareTrend(siteId, params, {
+    fallbackKeyBase: "browser",
+    getLabel: (visit) => visit.browser,
+  });
+}
+
+function generateDemoBrowserEngineTrend(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  return generateDemoShareTrend(siteId, params, {
+    fallbackKeyBase: "engine",
+    getLabel: (visit) => browserEngineLabel(visit.browser),
+  });
+}
+
 // ---------------------------------------------------------------------------
 //  Data generators (integration-based)
 // ---------------------------------------------------------------------------
@@ -3359,8 +3573,6 @@ function generateDemoDimension(
   let rows: DemoDimensionRow[] = [];
   if (dimensionType === "countries") {
     rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.country);
-  } else if (dimensionType === "browsers") {
-    rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.browser);
   } else if (dimensionType === "devices") {
     rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.deviceType);
   } else if (dimensionType === "event-types") {
@@ -4136,6 +4348,12 @@ export function handleDemoRequest(options: {
   if (path.includes("/overview")) {
     return generateDemoOverview(siteId, params);
   }
+  if (path.includes("/browser-trend")) {
+    return generateDemoBrowserTrend(siteId, params);
+  }
+  if (path.includes("/browser-engine-trend")) {
+    return generateDemoBrowserEngineTrend(siteId, params);
+  }
   if (path.includes("/trend")) {
     return generateDemoTrend(siteId, params);
   }
@@ -4153,9 +4371,6 @@ export function handleDemoRequest(options: {
   }
   if (path.includes("/devices")) {
     return generateDemoDimension(siteId, "devices", params);
-  }
-  if (path.includes("/browsers")) {
-    return generateDemoDimension(siteId, "browsers", params);
   }
   if (path.includes("/event-types")) {
     return generateDemoDimension(siteId, "event-types", params);

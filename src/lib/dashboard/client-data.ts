@@ -1,4 +1,5 @@
 import type {
+  BrowserTrendData,
   DashboardFilterOption,
   DashboardFilterOptionsData,
   DimensionData,
@@ -526,12 +527,37 @@ export async function fetchDevices(siteId: string, window: TimeWindow, filters?:
   }, filters));
 }
 
-export async function fetchBrowsers(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
-  return fetchPrivateJson<DimensionData>("/api/private/browsers", withFilters({
+export async function fetchBrowserTrend(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+  options?: {
+    limit?: number;
+  },
+): Promise<BrowserTrendData> {
+  return fetchPrivateJson<BrowserTrendData>("/api/private/browser-trend", withFilters({
     siteId,
     from: window.from,
     to: window.to,
-    limit: 100,
+    interval: window.interval,
+    limit: options?.limit ?? 5,
+  }, filters));
+}
+
+export async function fetchBrowserEngineTrend(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+  options?: {
+    limit?: number;
+  },
+): Promise<BrowserTrendData> {
+  return fetchPrivateJson<BrowserTrendData>("/api/private/browser-engine-trend", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    interval: window.interval,
+    limit: options?.limit ?? 5,
   }, filters));
 }
 
@@ -545,10 +571,10 @@ export async function fetchEventTypes(siteId: string, window: TimeWindow, filter
 }
 
 export async function loadFilterOptions(siteId: string, window: TimeWindow): Promise<FilterOptions> {
-  const [countries, devices, browsers, eventTypes] = await Promise.all([
+  const [countries, devices, browserRows, eventTypes] = await Promise.all([
     fetchCountries(siteId, window).catch(() => emptyDimension()),
     fetchDevices(siteId, window).catch(() => emptyDimension()),
-    fetchBrowsers(siteId, window).catch(() => emptyDimension()),
+    fetchOverviewClientDimensionTab(siteId, window, "browser").catch(() => []),
     fetchEventTypes(siteId, window).catch(() => emptyDimension()),
   ]);
 
@@ -558,7 +584,7 @@ export async function loadFilterOptions(siteId: string, window: TimeWindow): Pro
   return {
     countries: uniq(countries.data.map((item) => item.value)),
     devices: uniq(devices.data.map((item) => item.value)),
-    browsers: uniq(browsers.data.map((item) => item.value)),
+    browsers: uniq(browserRows.map((item) => item.label)),
     eventTypes: uniq(eventTypes.data.map((item) => item.value)),
   };
 }
