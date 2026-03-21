@@ -1,4 +1,5 @@
 import type {
+  BrowserCrossBreakdownData,
   BrowserVersionBreakdownData,
   BrowserTrendData,
   DashboardFilterOption,
@@ -577,6 +578,26 @@ export async function fetchBrowserVersionBreakdown(
     to: window.to,
     browserLimit: options?.browserLimit ?? 0,
     versionLimit: options?.versionLimit ?? 5,
+  }, filters));
+}
+
+export async function fetchBrowserCrossBreakdown(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+  options?: {
+    browserLimit?: number;
+    osLimit?: number;
+    deviceTypeLimit?: number;
+  },
+): Promise<BrowserCrossBreakdownData> {
+  return fetchPrivateJson<BrowserCrossBreakdownData>("/api/private/browser-cross-breakdown", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    browserLimit: options?.browserLimit ?? 8,
+    osLimit: options?.osLimit ?? 6,
+    deviceTypeLimit: options?.deviceTypeLimit ?? 5,
   }, filters));
 }
 

@@ -3,6 +3,7 @@
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { BrowserShareTrendCard } from "@/components/dashboard/browser-share-trend-card";
 import { BrowserEngineShareTrendCard } from "@/components/dashboard/browser-engine-share-trend-card";
+import { BrowserCrossBreakdownGrid } from "@/components/dashboard/browser-cross-breakdown-grid";
 import { BrowserVersionBreakdownGrid } from "@/components/dashboard/browser-version-breakdown-grid";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
@@ -50,6 +51,14 @@ export function BrowsersClientPage({
       />
 
       <BrowserVersionBreakdownGrid
+        locale={locale}
+        messages={messages}
+        siteId={siteId}
+        window={window}
+        filters={filters}
+      />
+
+      <BrowserCrossBreakdownGrid
         locale={locale}
         messages={messages}
         siteId={siteId}

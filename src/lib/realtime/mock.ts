@@ -3229,6 +3229,9 @@ function buildDemoTrendBuckets(
 const DEMO_SHARE_TREND_OTHER_KEY = "other";
 const DEMO_SHARE_TREND_OTHER_LABEL = "Other";
 const DEMO_BROWSER_VERSION_UNKNOWN_TOKEN = "__browser_version_unknown__";
+const DEMO_BROWSER_CROSS_UNKNOWN_TOKEN = "__browser_cross_unknown__";
+const DEMO_BROWSER_CROSS_OTHER_BROWSER_TOKEN = "__browser_cross_other_browser__";
+const DEMO_BROWSER_CROSS_OTHER_DIMENSION_TOKEN = "__browser_cross_other_dimension__";
 
 function createDemoShareTrendSeriesKey(
   label: string,
@@ -3509,6 +3512,288 @@ function generateDemoBrowserVersionBreakdown(
   return {
     ok: true,
     data: browsers,
+  };
+}
+
+function generateDemoBrowserCrossDimension(
+  dataset: DemoFactDataset,
+  filtered: DemoFilteredFacts,
+  browserLimit: number,
+  dimensionLimit: number,
+  fallbackKeyBase: string,
+  getDimension: (visit: DemoVisitFact) => string,
+): {
+  columns: Array<{
+    key: string;
+    label: string;
+    views: number;
+    sessions: number;
+    isOther?: boolean;
+    isUnknown?: boolean;
+  }>;
+  rows: Array<{
+    key: string;
+    label: string;
+    views: number;
+    sessions: number;
+    isOther?: boolean;
+    cells: Array<{
+      key: string;
+      label: string;
+      views: number;
+      sessions: number;
+      isOther?: boolean;
+      isUnknown?: boolean;
+    }>;
+  }>;
+  totalViews: number;
+  totalSessions: number;
+} {
+  const topBrowsers = aggregateDimensionRowsFromVisits(
+    dataset,
+    filtered.visits,
+    browserLimit,
+    (visit) => visit.browser,
+  ).filter((row) => row.label.trim().length > 0 && row.views > 0);
+
+  if (topBrowsers.length === 0) {
+    return {
+      columns: [],
+      rows: [],
+      totalViews: 0,
+      totalSessions: 0,
+    };
+  }
+
+  const topDimensions = aggregateDimensionRowsFromVisits(
+    dataset,
+    filtered.visits.filter((visit) => String(visit.browser || "").trim().length > 0),
+    dimensionLimit,
+    (visit) => {
+      const label = String(getDimension(visit) || "").trim();
+      return label || DEMO_BROWSER_CROSS_UNKNOWN_TOKEN;
+    },
+  ).filter((row) => row.views > 0);
+
+  if (topDimensions.length === 0) {
+    return {
+      columns: [],
+      rows: [],
+      totalViews: 0,
+      totalSessions: 0,
+    };
+  }
+
+  const browserSet = new Set(topBrowsers.map((row) => row.label));
+  const dimensionSet = new Set(topDimensions.map((row) => row.label));
+  const rowBuckets = new Map<
+    string,
+    {
+      views: number;
+      sessions: Set<string>;
+      cells: Map<string, { views: number; sessions: Set<string> }>;
+    }
+  >();
+  const columnBuckets = new Map<string, { views: number; sessions: Set<string> }>();
+
+  for (const visit of filtered.visits) {
+    const browser = String(visit.browser || "").trim();
+    if (!browser) continue;
+
+    const rawDimension = String(getDimension(visit) || "").trim();
+    const dimension = rawDimension || DEMO_BROWSER_CROSS_UNKNOWN_TOKEN;
+    const browserBucket = browserSet.has(browser)
+      ? browser
+      : DEMO_BROWSER_CROSS_OTHER_BROWSER_TOKEN;
+    const dimensionBucket = dimensionSet.has(dimension)
+      ? dimension
+      : DEMO_BROWSER_CROSS_OTHER_DIMENSION_TOKEN;
+
+    const rowBucket = rowBuckets.get(browserBucket) ?? {
+      views: 0,
+      sessions: new Set<string>(),
+      cells: new Map<string, { views: number; sessions: Set<string> }>(),
+    };
+    rowBucket.views += dataset.viewWeight;
+    rowBucket.sessions.add(visit.sessionId);
+    const cellBucket = rowBucket.cells.get(dimensionBucket) ?? {
+      views: 0,
+      sessions: new Set<string>(),
+    };
+    cellBucket.views += dataset.viewWeight;
+    cellBucket.sessions.add(visit.sessionId);
+    rowBucket.cells.set(dimensionBucket, cellBucket);
+    rowBuckets.set(browserBucket, rowBucket);
+
+    const columnBucket = columnBuckets.get(dimensionBucket) ?? {
+      views: 0,
+      sessions: new Set<string>(),
+    };
+    columnBucket.views += dataset.viewWeight;
+    columnBucket.sessions.add(visit.sessionId);
+    columnBuckets.set(dimensionBucket, columnBucket);
+  }
+
+  const columnKeySet = new Set<string>(["other", "unknown"]);
+  const columnDescriptors: Array<{
+    bucket: string;
+    item: {
+      key: string;
+      label: string;
+      views: number;
+      sessions: number;
+      isOther?: boolean;
+      isUnknown?: boolean;
+    };
+  }> = topDimensions.map((row) => {
+    if (row.label === DEMO_BROWSER_CROSS_UNKNOWN_TOKEN) {
+      return {
+        bucket: row.label,
+        item: {
+          key: "unknown",
+          label: "Unknown",
+          views: row.views,
+          sessions: row.sessions,
+          isUnknown: true,
+        },
+      };
+    }
+
+    return {
+      bucket: row.label,
+      item: {
+        key: createDemoShareTrendSeriesKey(row.label, columnKeySet, fallbackKeyBase),
+        label: row.label,
+        views: row.views,
+        sessions: row.sessions,
+      },
+    };
+  });
+
+  if (columnBuckets.has(DEMO_BROWSER_CROSS_OTHER_DIMENSION_TOKEN)) {
+    const otherColumn = columnBuckets.get(DEMO_BROWSER_CROSS_OTHER_DIMENSION_TOKEN) ?? {
+      views: 0,
+      sessions: new Set<string>(),
+    };
+    columnDescriptors.push({
+      bucket: DEMO_BROWSER_CROSS_OTHER_DIMENSION_TOKEN,
+      item: {
+        key: "other",
+        label: DEMO_SHARE_TREND_OTHER_LABEL,
+        views: Math.max(0, Math.round(otherColumn.views)),
+        sessions: Math.max(0, Math.round(weightedSessionCount(dataset, otherColumn.sessions))),
+        isOther: true,
+      },
+    });
+  }
+
+  const rowKeySet = new Set<string>(["other"]);
+  const rowDescriptors: Array<{
+    bucket: string;
+    item: {
+      key: string;
+      label: string;
+      views: number;
+      sessions: number;
+      isOther?: boolean;
+    };
+  }> = topBrowsers.map((row) => ({
+    bucket: row.label,
+    item: {
+      key: createDemoShareTrendSeriesKey(row.label, rowKeySet, "browser"),
+      label: row.label,
+      views: row.views,
+      sessions: row.sessions,
+    },
+  }));
+
+  if (rowBuckets.has(DEMO_BROWSER_CROSS_OTHER_BROWSER_TOKEN)) {
+    const otherRow = rowBuckets.get(DEMO_BROWSER_CROSS_OTHER_BROWSER_TOKEN) ?? {
+      views: 0,
+      sessions: new Set<string>(),
+      cells: new Map<string, { views: number; sessions: Set<string> }>(),
+    };
+    rowDescriptors.push({
+      bucket: DEMO_BROWSER_CROSS_OTHER_BROWSER_TOKEN,
+      item: {
+        key: "other",
+        label: DEMO_SHARE_TREND_OTHER_LABEL,
+        views: Math.max(0, Math.round(otherRow.views)),
+        sessions: Math.max(0, Math.round(weightedSessionCount(dataset, otherRow.sessions))),
+        isOther: true,
+      },
+    });
+  }
+
+  const columns = columnDescriptors.map((column) => column.item);
+  const rows = rowDescriptors
+    .map((row) => {
+      const rowBucket = rowBuckets.get(row.bucket);
+      const cells = columnDescriptors.map((column) => {
+        const cell = rowBucket?.cells.get(column.bucket);
+        return {
+          key: column.item.key,
+          label: column.item.label,
+          views: Math.max(0, Math.round(cell?.views ?? 0)),
+          sessions: Math.max(
+            0,
+            Math.round(weightedSessionCount(dataset, cell?.sessions ?? new Set<string>())),
+          ),
+          ...(column.item.isOther ? { isOther: true } : {}),
+          ...(column.item.isUnknown ? { isUnknown: true } : {}),
+        };
+      });
+
+      return {
+        ...row.item,
+        views: Math.max(0, Math.round(rowBucket?.views ?? row.item.views)),
+        sessions: rowBucket
+          ? Math.max(0, Math.round(weightedSessionCount(dataset, rowBucket.sessions)))
+          : row.item.sessions,
+        cells,
+      };
+    })
+    .filter((row) => row.views > 0);
+
+  return {
+    columns,
+    rows,
+    totalViews: rows.reduce((sum, row) => sum + row.views, 0),
+    totalSessions: rows.reduce((sum, row) => sum + row.sessions, 0),
+  };
+}
+
+function generateDemoBrowserCrossBreakdown(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const browserLimit = parseDemoLimit(params.browserLimit, 8, 1, 12);
+  const osLimit = parseDemoLimit(params.osLimit, 6, 1, 8);
+  const deviceTypeLimit = parseDemoLimit(params.deviceTypeLimit, 5, 1, 8);
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+
+  return {
+    ok: true,
+    operatingSystem: generateDemoBrowserCrossDimension(
+      dataset,
+      filtered,
+      browserLimit,
+      osLimit,
+      "os",
+      (visit) => visit.osVersion.split(" ")[0] || visit.osVersion,
+    ),
+    deviceType: generateDemoBrowserCrossDimension(
+      dataset,
+      filtered,
+      browserLimit,
+      deviceTypeLimit,
+      "device",
+      (visit) => visit.deviceType,
+    ),
   };
 }
 
@@ -4449,6 +4734,9 @@ export function handleDemoRequest(options: {
   }
   if (path.includes("/overview")) {
     return generateDemoOverview(siteId, params);
+  }
+  if (path.includes("/browser-cross-breakdown")) {
+    return generateDemoBrowserCrossBreakdown(siteId, params);
   }
   if (path.includes("/browser-version-breakdown")) {
     return generateDemoBrowserVersionBreakdown(siteId, params);

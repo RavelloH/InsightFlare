@@ -245,6 +245,32 @@ export interface BrowserVersionBreakdownData {
   data: BrowserVersionBreakdownBrowser[];
 }
 
+export interface BrowserCrossBreakdownItem {
+  key: string;
+  label: string;
+  views: number;
+  sessions: number;
+  isOther?: boolean;
+  isUnknown?: boolean;
+}
+
+export interface BrowserCrossBreakdownRow extends BrowserCrossBreakdownItem {
+  cells: BrowserCrossBreakdownItem[];
+}
+
+export interface BrowserCrossBreakdownDimensionData {
+  columns: BrowserCrossBreakdownItem[];
+  rows: BrowserCrossBreakdownRow[];
+  totalViews: number;
+  totalSessions: number;
+}
+
+export interface BrowserCrossBreakdownData {
+  ok: boolean;
+  operatingSystem: BrowserCrossBreakdownDimensionData;
+  deviceType: BrowserCrossBreakdownDimensionData;
+}
+
 export interface PagesData {
   ok: boolean;
   data: Array<{
@@ -716,6 +742,31 @@ export async function fetchPrivateBrowserVersionBreakdown(params: {
         to: params.to,
         browserLimit: params.browserLimit ?? 0,
         versionLimit: params.versionLimit ?? 5,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateBrowserCrossBreakdown(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  filters?: QueryFilters;
+  browserLimit?: number;
+  osLimit?: number;
+  deviceTypeLimit?: number;
+}): Promise<BrowserCrossBreakdownData> {
+  return fetchEdgeJson<BrowserCrossBreakdownData>({
+    path: "/api/private/browser-cross-breakdown",
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        browserLimit: params.browserLimit ?? 8,
+        osLimit: params.osLimit ?? 6,
+        deviceTypeLimit: params.deviceTypeLimit ?? 5,
       },
       params.filters,
     ),

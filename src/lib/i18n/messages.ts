@@ -233,6 +233,8 @@ export interface AppMessages {
     trendTitle: string;
     engineTrendTitle: string;
     versionBreakdownTitle: string;
+    osBreakdownTitle: string;
+    deviceTypeBreakdownTitle: string;
     trendSubtitle: string;
     topBrowserLabel: string;
     shareLabel: string;

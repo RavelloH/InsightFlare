@@ -243,6 +243,8 @@ browsers:
   trendTitle: 浏览器占比趋势
   engineTrendTitle: 内核占比趋势
   versionBreakdownTitle: 浏览器版本分布
+  osBreakdownTitle: 浏览器 × 系统
+  deviceTypeBreakdownTitle: 浏览器 × 设备类型
   trendSubtitle: 观察所选时间范围内各浏览器流量占比的变化。
   topBrowserLabel: 头部浏览器
   shareLabel: 占比

@@ -130,6 +130,33 @@ interface BrowserVersionBreakdownRow {
   versions: BrowserVersionSliceRow[];
 }
 
+interface BrowserCrossBreakdownItemRow {
+  key: string;
+  label: string;
+  views: number;
+  sessions: number;
+  isOther?: boolean;
+  isUnknown?: boolean;
+}
+
+interface BrowserCrossBreakdownDimensionRow extends BrowserCrossBreakdownItemRow {
+  cells: BrowserCrossBreakdownItemRow[];
+}
+
+interface BrowserCrossBreakdownDimensionDataRow {
+  columns: BrowserCrossBreakdownItemRow[];
+  rows: BrowserCrossBreakdownDimensionRow[];
+  totalViews: number;
+  totalSessions: number;
+}
+
+interface BrowserCrossAggregateRow {
+  browser: string;
+  dimension: string;
+  views: number;
+  sessions: number;
+}
+
 interface DimensionRow {
   value: string;
   views: number;
@@ -285,6 +312,18 @@ function parseBooleanSearchParam(url: URL, key: string): boolean {
   return value === "1" || value === "true" || value === "yes";
 }
 
+function parseQueryLimit(
+  url: URL,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const value = Math.floor(coerceNumber(url.searchParams.get(key), fallback) ?? fallback);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, value));
+}
+
 function normalizeFilterValue(value: string | null): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim().slice(0, 120);
@@ -392,6 +431,9 @@ const SHARE_TREND_OTHER_KEY = "other";
 const SHARE_TREND_OTHER_LABEL = "Other";
 const SHARE_TREND_OTHER_TOKEN = "__share_trend_other__";
 const BROWSER_VERSION_UNKNOWN_TOKEN = "__browser_version_unknown__";
+const BROWSER_CROSS_UNKNOWN_TOKEN = "__browser_cross_unknown__";
+const BROWSER_CROSS_OTHER_BROWSER_TOKEN = "__browser_cross_other_browser__";
+const BROWSER_CROSS_OTHER_DIMENSION_TOKEN = "__browser_cross_other_dimension__";
 
 function shareTrendSeriesKey(
   label: string,
@@ -1346,6 +1388,345 @@ ORDER BY browser ASC, views DESC, sessions DESC, version ASC
   });
 }
 
+async function queryBrowserCrossDimensionFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+  browserLimit: number,
+  dimensionLimit: number,
+  dimensionExpr: string,
+  fallbackKeyBase: string,
+): Promise<BrowserCrossBreakdownDimensionDataRow> {
+  const filter = buildVisitFilterSql(filters);
+  const normalizedBrowserLimit = Math.min(Math.max(1, browserLimit), 12);
+  const normalizedDimensionLimit = Math.min(Math.max(1, dimensionLimit), 8);
+  const browserExpr = "TRIM(COALESCE(browser, ''))";
+  const normalizedDimensionExpr = `CASE WHEN ${dimensionExpr} != '' THEN ${dimensionExpr} ELSE '${BROWSER_CROSS_UNKNOWN_TOKEN}' END`;
+  const topBrowsersSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    ${browserExpr} AS browser,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  browser,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM filtered_visits
+WHERE browser != ''
+GROUP BY browser
+ORDER BY views DESC, sessions DESC, browser ASC
+LIMIT ?
+`;
+  const topBrowsers = (await queryD1All<Record<string, unknown>>(
+    env,
+    topBrowsersSql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings, normalizedBrowserLimit],
+  )).map((row) => ({
+    browser: String(row.browser ?? "").trim(),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  })).filter((row) => row.browser.length > 0 && row.views > 0);
+
+  if (topBrowsers.length === 0) {
+    return {
+      columns: [],
+      rows: [],
+      totalViews: 0,
+      totalSessions: 0,
+    };
+  }
+
+  const topDimensionsSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    ${browserExpr} AS browser,
+    ${normalizedDimensionExpr} AS dimension,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  dimension,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM filtered_visits
+WHERE browser != ''
+GROUP BY dimension
+ORDER BY views DESC, sessions DESC, dimension ASC
+LIMIT ?
+`;
+  const topDimensions = (await queryD1All<Record<string, unknown>>(
+    env,
+    topDimensionsSql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings, normalizedDimensionLimit],
+  )).map((row) => ({
+    dimension: String(row.dimension ?? "").trim() || BROWSER_CROSS_UNKNOWN_TOKEN,
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  })).filter((row) => row.views > 0);
+
+  if (topDimensions.length === 0) {
+    return {
+      columns: [],
+      rows: [],
+      totalViews: 0,
+      totalSessions: 0,
+    };
+  }
+
+  const topBrowserLabels = topBrowsers.map((row) => row.browser);
+  const topDimensionLabels = topDimensions.map((row) => row.dimension);
+  const topBrowserPlaceholders = topBrowserLabels.map(() => "?").join(", ");
+  const topDimensionPlaceholders = topDimensionLabels.map(() => "?").join(", ");
+  const pairsSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    ${browserExpr} AS browser,
+    ${normalizedDimensionExpr} AS dimension,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+),
+normalized_visits AS (
+  SELECT
+    CASE
+      WHEN browser IN (${topBrowserPlaceholders}) THEN browser
+      ELSE '${BROWSER_CROSS_OTHER_BROWSER_TOKEN}'
+    END AS browserBucket,
+    CASE
+      WHEN dimension IN (${topDimensionPlaceholders}) THEN dimension
+      ELSE '${BROWSER_CROSS_OTHER_DIMENSION_TOKEN}'
+    END AS dimensionBucket,
+    sessionId
+  FROM filtered_visits
+  WHERE browser != ''
+)
+SELECT
+  browserBucket AS browser,
+  dimensionBucket AS dimension,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM normalized_visits
+GROUP BY browserBucket, dimensionBucket
+ORDER BY browser ASC, dimension ASC
+`;
+  const pairRows = (await queryD1All<Record<string, unknown>>(
+    env,
+    pairsSql,
+    [
+      ...visitSourceBindings(siteId, window),
+      ...filter.bindings,
+      ...topBrowserLabels,
+      ...topDimensionLabels,
+    ],
+  )).map((row) => ({
+    browser: String(row.browser ?? "").trim(),
+    dimension: String(row.dimension ?? "").trim(),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  } satisfies BrowserCrossAggregateRow)).filter((row) =>
+    row.browser.length > 0 && row.dimension.length > 0 && row.views > 0
+  );
+
+  const rowBuckets = new Map<
+    string,
+    {
+      views: number;
+      sessions: number;
+      cells: Map<string, { views: number; sessions: number }>;
+    }
+  >();
+  const columnBuckets = new Map<string, { views: number; sessions: number }>();
+
+  for (const row of pairRows) {
+    const rowBucket = rowBuckets.get(row.browser) ?? {
+      views: 0,
+      sessions: 0,
+      cells: new Map<string, { views: number; sessions: number }>(),
+    };
+    rowBucket.views += row.views;
+    rowBucket.sessions += row.sessions;
+    const existingCell = rowBucket.cells.get(row.dimension) ?? {
+      views: 0,
+      sessions: 0,
+    };
+    existingCell.views += row.views;
+    existingCell.sessions += row.sessions;
+    rowBucket.cells.set(row.dimension, existingCell);
+    rowBuckets.set(row.browser, rowBucket);
+
+    const columnBucket = columnBuckets.get(row.dimension) ?? { views: 0, sessions: 0 };
+    columnBucket.views += row.views;
+    columnBucket.sessions += row.sessions;
+    columnBuckets.set(row.dimension, columnBucket);
+  }
+
+  const columnKeySet = new Set<string>(["other", "unknown"]);
+  const columnDescriptors: Array<{
+    bucket: string;
+    item: BrowserCrossBreakdownItemRow;
+  }> = topDimensions.map((row) => {
+    if (row.dimension === BROWSER_CROSS_UNKNOWN_TOKEN) {
+      return {
+        bucket: row.dimension,
+        item: {
+          key: "unknown",
+          label: "Unknown",
+          views: row.views,
+          sessions: row.sessions,
+          isUnknown: true,
+        } satisfies BrowserCrossBreakdownItemRow,
+      };
+    }
+
+    return {
+      bucket: row.dimension,
+      item: {
+        key: shareTrendSeriesKey(row.dimension, columnKeySet, fallbackKeyBase),
+        label: row.dimension,
+        views: row.views,
+        sessions: row.sessions,
+      } satisfies BrowserCrossBreakdownItemRow,
+    };
+  });
+
+  if (columnBuckets.has(BROWSER_CROSS_OTHER_DIMENSION_TOKEN)) {
+    const otherColumn = columnBuckets.get(BROWSER_CROSS_OTHER_DIMENSION_TOKEN) ?? {
+      views: 0,
+      sessions: 0,
+    };
+    columnDescriptors.push({
+      bucket: BROWSER_CROSS_OTHER_DIMENSION_TOKEN,
+      item: {
+        key: "other",
+        label: SHARE_TREND_OTHER_LABEL,
+        views: otherColumn.views,
+        sessions: otherColumn.sessions,
+        isOther: true,
+      } satisfies BrowserCrossBreakdownItemRow,
+    });
+  }
+
+  const rowKeySet = new Set<string>(["other"]);
+  const rowDescriptors: Array<{
+    bucket: string;
+    item: BrowserCrossBreakdownItemRow;
+  }> = topBrowsers.map((row) => ({
+    bucket: row.browser,
+    item: {
+      key: shareTrendSeriesKey(row.browser, rowKeySet, "browser"),
+      label: row.browser,
+      views: row.views,
+      sessions: row.sessions,
+    } satisfies BrowserCrossBreakdownItemRow,
+  }));
+
+  if (rowBuckets.has(BROWSER_CROSS_OTHER_BROWSER_TOKEN)) {
+    const otherRow = rowBuckets.get(BROWSER_CROSS_OTHER_BROWSER_TOKEN) ?? {
+      views: 0,
+      sessions: 0,
+      cells: new Map<string, { views: number; sessions: number }>(),
+    };
+    rowDescriptors.push({
+      bucket: BROWSER_CROSS_OTHER_BROWSER_TOKEN,
+      item: {
+        key: "other",
+        label: SHARE_TREND_OTHER_LABEL,
+        views: otherRow.views,
+        sessions: otherRow.sessions,
+        isOther: true,
+      } satisfies BrowserCrossBreakdownItemRow,
+    });
+  }
+
+  const columns = columnDescriptors.map((column) => column.item);
+  const rows = rowDescriptors
+    .map((row) => {
+      const bucket = rowBuckets.get(row.bucket) ?? {
+        views: row.item.views,
+        sessions: row.item.sessions,
+        cells: new Map<string, { views: number; sessions: number }>(),
+      };
+      const cells = columnDescriptors.map((column) => {
+        const cell = bucket.cells.get(column.bucket) ?? { views: 0, sessions: 0 };
+        return {
+          key: column.item.key,
+          label: column.item.label,
+          views: cell.views,
+          sessions: cell.sessions,
+          ...(column.item.isOther ? { isOther: true } : {}),
+          ...(column.item.isUnknown ? { isUnknown: true } : {}),
+        } satisfies BrowserCrossBreakdownItemRow;
+      });
+
+      return {
+        ...row.item,
+        views: bucket.views,
+        sessions: bucket.sessions,
+        cells,
+      } satisfies BrowserCrossBreakdownDimensionRow;
+    })
+    .filter((row) => row.views > 0);
+
+  return {
+    columns,
+    rows,
+    totalViews: rows.reduce((sum, row) => sum + row.views, 0),
+    totalSessions: rows.reduce((sum, row) => sum + row.sessions, 0),
+  };
+}
+
+async function queryBrowserCrossBreakdownFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+  browserLimit: number,
+  osLimit: number,
+  deviceTypeLimit: number,
+): Promise<{
+  operatingSystem: BrowserCrossBreakdownDimensionDataRow;
+  deviceType: BrowserCrossBreakdownDimensionDataRow;
+}> {
+  const [operatingSystem, deviceType] = await Promise.all([
+    queryBrowserCrossDimensionFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      browserLimit,
+      osLimit,
+      "TRIM(COALESCE(os, ''))",
+      "os",
+    ),
+    queryBrowserCrossDimensionFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      browserLimit,
+      deviceTypeLimit,
+      "TRIM(COALESCE(device_type, ''))",
+      "device",
+    ),
+  ]);
+
+  return {
+    operatingSystem,
+    deviceType,
+  };
+}
+
 async function queryShareTrendFromD1(
   env: Env,
   siteId: string,
@@ -2001,6 +2382,33 @@ async function handleBrowserVersionBreakdown(
   });
 }
 
+async function handleBrowserCrossBreakdown(
+  env: Env,
+  siteId: string,
+  url: URL,
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const browserLimit = parseQueryLimit(url, "browserLimit", 8, 1, 12);
+  const osLimit = parseQueryLimit(url, "osLimit", 6, 1, 8);
+  const deviceTypeLimit = parseQueryLimit(url, "deviceTypeLimit", 5, 1, 8);
+  const data = await queryBrowserCrossBreakdownFromD1(
+    env,
+    siteId,
+    window,
+    filters,
+    browserLimit,
+    osLimit,
+    deviceTypeLimit,
+  );
+  return jsonResponse({
+    ok: true,
+    operatingSystem: data.operatingSystem,
+    deviceType: data.deviceType,
+  });
+}
+
 async function handlePages(
   env: Env,
   siteId: string,
@@ -2517,6 +2925,9 @@ async function routeQuery(
   }
   if (pathname === "browser-version-breakdown") {
     return handleBrowserVersionBreakdown(env, siteId, url);
+  }
+  if (pathname === "browser-cross-breakdown") {
+    return handleBrowserCrossBreakdown(env, siteId, url);
   }
   if (pathname === "visitors") return handleVisitors(env, siteId, url);
   if (pathname === "countries") {

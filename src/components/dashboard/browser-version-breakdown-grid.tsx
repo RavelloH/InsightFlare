@@ -181,13 +181,10 @@ function BrowserVersionDonutCard({
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_max-content_max-content] items-center gap-x-3 gap-y-2">
             {browser.versions.map((version) => (
-              <div
-                key={version.key}
-                className="grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-x-3"
-              >
-                <div className="inline-flex min-w-0 items-center gap-2 overflow-hidden">
+              <>
+                <div key={version.key} className="inline-flex min-w-0 items-center gap-2 overflow-hidden">
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
                     style={{ backgroundColor: version.color }}
@@ -199,10 +196,13 @@ function BrowserVersionDonutCard({
                     {version.displayLabel}
                   </span>
                 </div>
-                <span className="shrink-0 whitespace-nowrap text-right font-mono text-foreground tabular-nums">
+                <span className="text-right font-mono text-foreground tabular-nums">
+                  {numberFormat(locale, version.views)}
+                </span>
+                <span className="text-right font-mono text-[11px] text-muted-foreground tabular-nums">
                   {percentFormat(locale, version.share)}
                 </span>
-              </div>
+              </>
             ))}
           </div>
         </div>

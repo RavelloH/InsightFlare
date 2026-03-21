@@ -243,6 +243,8 @@ browsers:
   trendTitle: Browser Share Trend
   engineTrendTitle: Engine Share Trend
   versionBreakdownTitle: Browser Version Breakdown
+  osBreakdownTitle: Browser x Operating System
+  deviceTypeBreakdownTitle: Browser x Device Type
   trendSubtitle: Compare how each browser contributes across the selected window.
   topBrowserLabel: Top Browser
   shareLabel: Share
