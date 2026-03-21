@@ -239,6 +239,18 @@ export interface AppMessages {
     topBrowserLabel: string;
     shareLabel: string;
     otherLabel: string;
+    caniuseTitle: string;
+    caniuseSubtitle: string;
+    caniuseSearchPlaceholder: string;
+    caniuseHotFeatures: string;
+    caniuseTrendingFeatures: string;
+    caniuseSiteSupport: string;
+    caniuseGlobalSupport: string;
+    caniuseClearSelection: string;
+    caniuseNoMatch: string;
+    caniuseFullSupport: string;
+    caniusePartialSupport: string;
+    caniuseNoSupport: string;
   };
   siteSettings: {
     title: string;

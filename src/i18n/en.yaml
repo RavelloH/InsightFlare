@@ -249,6 +249,18 @@ browsers:
   topBrowserLabel: Top Browser
   shareLabel: Share
   otherLabel: Other
+  caniuseTitle: Feature Compatibility
+  caniuseSubtitle: Check browser support for web features based on your site's visitor data.
+  caniuseSearchPlaceholder: Search web features...
+  caniuseHotFeatures: Popular Features
+  caniuseTrendingFeatures: Recently Changed
+  caniuseSiteSupport: Your Site
+  caniuseGlobalSupport: Global
+  caniuseClearSelection: Clear
+  caniuseNoMatch: No matching features found.
+  caniuseFullSupport: Full Support
+  caniusePartialSupport: Partial Support
+  caniuseNoSupport: No Support
 siteSettings:
   title: Site Settings
   subtitle: Configure this site's basic information and lifecycle.
