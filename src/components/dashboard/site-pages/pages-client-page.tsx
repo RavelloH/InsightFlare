@@ -11,7 +11,7 @@ import { PageHeading } from "@/components/dashboard/page-heading";
 import { TopItemsChart } from "@/components/dashboard/top-items-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
-import { fetchPages, loadFilterOptions, type FilterOptions, emptyPagesData } from "@/lib/dashboard/client-data";
+import { fetchPages, emptyPagesData } from "@/lib/dashboard/client-data";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -25,31 +25,20 @@ interface PagesClientPageProps {
   pathname: string;
 }
 
-const EMPTY_FILTER_OPTIONS: FilterOptions = {
-  countries: [],
-  devices: [],
-  browsers: [],
-  eventTypes: [],
-};
-
-export function PagesClientPage({ locale, messages, siteId, pathname }: PagesClientPageProps) {
-  const { range, filters, window } = useDashboardQuery();
+export function PagesClientPage({ locale, messages, siteId }: PagesClientPageProps) {
+  const { filters, window } = useDashboardQuery();
   const [pages, setPages] = useState<PagesData>(emptyPagesData());
-  const [filterOptions, setFilterOptions] = useState<FilterOptions>(EMPTY_FILTER_OPTIONS);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
 
-    Promise.all([
-      fetchPages(siteId, window, filters).catch(() => emptyPagesData()),
-      loadFilterOptions(siteId, window).catch(() => EMPTY_FILTER_OPTIONS),
-    ])
-      .then(([nextPages, nextFilterOptions]) => {
+    fetchPages(siteId, window, filters)
+      .catch(() => emptyPagesData())
+      .then((nextPages) => {
         if (!active) return;
         setPages(nextPages);
-        setFilterOptions(nextFilterOptions);
       })
       .finally(() => {
         if (!active) return;

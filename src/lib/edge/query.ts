@@ -3119,9 +3119,6 @@ async function routeQuery(
   if (pathname === "countries") {
     return handleDimension(env, siteId, url, "country", { ignoreGeo: true });
   }
-  if (pathname === "devices") {
-    return handleDimension(env, siteId, url, "device_type");
-  }
   if (pathname === "event-types") return handleEventTypes(env, siteId, url);
   if (pathname === "filter-options") return handleFilterOptions(env, siteId, url);
   if (pathname === "overview-page-path") {

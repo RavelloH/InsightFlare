@@ -18,13 +18,6 @@ import type {
 } from "@/lib/edge-client";
 import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
 
-export interface FilterOptions {
-  countries: string[];
-  devices: string[];
-  browsers: string[];
-  eventTypes: string[];
-}
-
 export type DashboardFilterOptionData = DashboardFilterOption;
 
 export interface OverviewBundle {
@@ -520,15 +513,6 @@ export async function fetchCountries(siteId: string, window: TimeWindow, filters
   }, filters));
 }
 
-export async function fetchDevices(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
-  return fetchPrivateJson<DimensionData>("/api/private/devices", withFilters({
-    siteId,
-    from: window.from,
-    to: window.to,
-    limit: 100,
-  }, filters));
-}
-
 export async function fetchBrowserTrend(
   siteId: string,
   window: TimeWindow,
@@ -608,25 +592,6 @@ export async function fetchEventTypes(siteId: string, window: TimeWindow, filter
     to: window.to,
     limit: 100,
   }, filters));
-}
-
-export async function loadFilterOptions(siteId: string, window: TimeWindow): Promise<FilterOptions> {
-  const [countries, devices, browserRows, eventTypes] = await Promise.all([
-    fetchCountries(siteId, window).catch(() => emptyDimension()),
-    fetchDevices(siteId, window).catch(() => emptyDimension()),
-    fetchOverviewClientDimensionTab(siteId, window, "browser").catch(() => []),
-    fetchEventTypes(siteId, window).catch(() => emptyDimension()),
-  ]);
-
-  const uniq = (values: string[]) =>
-    Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))).sort();
-
-  return {
-    countries: uniq(countries.data.map((item) => item.value)),
-    devices: uniq(devices.data.map((item) => item.value)),
-    browsers: uniq(browserRows.map((item) => item.label)),
-    eventTypes: uniq(eventTypes.data.map((item) => item.value)),
-  };
 }
 
 export async function loadOverviewBundle(

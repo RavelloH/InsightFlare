@@ -665,27 +665,6 @@ export async function fetchPrivateCountries(params: {
   });
 }
 
-export async function fetchPrivateDevices(params: {
-  siteId: string;
-  from: number;
-  to: number;
-  limit?: number;
-  filters?: QueryFilters;
-}): Promise<DimensionData> {
-  return fetchEdgeJson<DimensionData>({
-    path: "/api/private/devices",
-    params: withFilters(
-      {
-        siteId: params.siteId,
-        from: params.from,
-        to: params.to,
-        limit: params.limit ?? 20,
-      },
-      params.filters,
-    ),
-  });
-}
-
 export async function fetchPrivateBrowserTrend(params: {
   siteId: string;
   from: number;

@@ -4,7 +4,6 @@ import {
   type QueryFilters,
   fetchAdminMe,
   fetchPrivateCountries,
-  fetchPrivateDevices,
   fetchPrivateEventTypes,
   fetchPrivateOverviewClientTab,
   fetchAdminSites,
@@ -34,13 +33,6 @@ export interface TimeWindow {
 }
 
 export type DashboardFilters = QueryFilters;
-
-export interface FilterOptions {
-  countries: string[];
-  devices: string[];
-  browsers: string[];
-  eventTypes: string[];
-}
 
 export interface SiteWithSlug extends SiteData {
   slug: string;
@@ -409,14 +401,13 @@ export async function loadOverviewBundle(
   pages: PagesData;
   referrers: ReferrersData;
   countries: DimensionData;
-  devices: DimensionData;
   browsers: DimensionData;
   eventTypes: DimensionData;
 }> {
   const previousTo = Math.max(window.from - 1, 0);
   const previousFrom = Math.max(previousTo - (window.to - window.from), 0);
 
-  const [overview, pages, referrers, countries, devices, browsers, eventTypes] =
+  const [overview, pages, referrers, countries, browsers, eventTypes] =
     await Promise.all([
       fetchPrivateOverview({
         siteId,
@@ -430,7 +421,6 @@ export async function loadOverviewBundle(
       fetchPrivatePages({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyPages()),
       fetchPrivateReferrers({ siteId, from: window.from, to: window.to, filters }).catch(() => emptyReferrers()),
       fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
-      fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
       loadBrowserDimensionFromClientTab({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
       fetchPrivateEventTypes({ siteId, from: window.from, to: window.to, limit: 12, filters }).catch(() => emptyDimension()),
     ]);
@@ -468,7 +458,6 @@ export async function loadOverviewBundle(
     pages,
     referrers,
     countries,
-    devices,
     browsers,
     eventTypes,
   };
@@ -490,33 +479,10 @@ export async function loadCountries(siteId: string, window: TimeWindow, filters?
   return fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyDimension());
 }
 
-export async function loadDevices(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
-  return fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyDimension());
-}
-
 export async function loadBrowsers(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
   return loadBrowserDimensionFromClientTab({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyDimension());
 }
 
 export async function loadEventTypes(siteId: string, window: TimeWindow, filters?: DashboardFilters): Promise<DimensionData> {
   return fetchPrivateEventTypes({ siteId, from: window.from, to: window.to, limit: 100, filters }).catch(() => emptyDimension());
-}
-
-export async function loadFilterOptions(siteId: string, window: TimeWindow): Promise<FilterOptions> {
-  const [countries, devices, browsers, eventTypes] = await Promise.all([
-    fetchPrivateCountries({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
-    fetchPrivateDevices({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
-    loadBrowserDimensionFromClientTab({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
-    fetchPrivateEventTypes({ siteId, from: window.from, to: window.to, limit: 100 }).catch(() => emptyDimension()),
-  ]);
-
-  const uniq = (values: string[]) =>
-    Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))).sort();
-
-  return {
-    countries: uniq(countries.data.map((item) => item.value)),
-    devices: uniq(devices.data.map((item) => item.value)),
-    browsers: uniq(browsers.data.map((item) => item.value)),
-    eventTypes: uniq(eventTypes.data.map((item) => item.value)),
-  };
 }

@@ -11,7 +11,7 @@ import { PageHeading } from "@/components/dashboard/page-heading";
 import { TopItemsChart } from "@/components/dashboard/top-items-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
-import { fetchVisitors, loadFilterOptions, type FilterOptions, emptyVisitorsData } from "@/lib/dashboard/client-data";
+import { fetchVisitors, emptyVisitorsData } from "@/lib/dashboard/client-data";
 import { numberFormat, shortDateTime } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -25,31 +25,20 @@ interface VisitorsClientPageProps {
   pathname: string;
 }
 
-const EMPTY_FILTER_OPTIONS: FilterOptions = {
-  countries: [],
-  devices: [],
-  browsers: [],
-  eventTypes: [],
-};
-
-export function VisitorsClientPage({ locale, messages, siteId, pathname }: VisitorsClientPageProps) {
-  const { range, filters, window } = useDashboardQuery();
+export function VisitorsClientPage({ locale, messages, siteId }: VisitorsClientPageProps) {
+  const { filters, window } = useDashboardQuery();
   const [visitors, setVisitors] = useState<VisitorsData>(emptyVisitorsData());
-  const [filterOptions, setFilterOptions] = useState<FilterOptions>(EMPTY_FILTER_OPTIONS);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
 
-    Promise.all([
-      fetchVisitors(siteId, window, filters).catch(() => emptyVisitorsData()),
-      loadFilterOptions(siteId, window).catch(() => EMPTY_FILTER_OPTIONS),
-    ])
-      .then(([nextVisitors, nextFilterOptions]) => {
+    fetchVisitors(siteId, window, filters)
+      .catch(() => emptyVisitorsData())
+      .then((nextVisitors) => {
         if (!active) return;
         setVisitors(nextVisitors);
-        setFilterOptions(nextFilterOptions);
       })
       .finally(() => {
         if (!active) return;
