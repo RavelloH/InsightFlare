@@ -1,7 +1,9 @@
 import type {
   BrowserCrossBreakdownData,
+  BrowserCrossBreakdownDimensionData,
   BrowserVersionBreakdownData,
   BrowserTrendData,
+  ClientDimensionKey,
   DashboardFilterOption,
   DashboardFilterOptionsData,
   DimensionData,
@@ -511,6 +513,53 @@ export async function fetchCountries(siteId: string, window: TimeWindow, filters
     to: window.to,
     limit: 100,
   }, filters));
+}
+
+export async function fetchClientDimensionTrend(
+  siteId: string,
+  window: TimeWindow,
+  dimension: ClientDimensionKey,
+  filters?: DashboardFilters,
+  options?: {
+    limit?: number;
+  },
+): Promise<BrowserTrendData> {
+  return fetchPrivateJson<BrowserTrendData>("/api/private/client-dimension-trend", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
+    interval: window.interval,
+    dimension,
+    limit: options?.limit ?? 5,
+  }, filters));
+}
+
+export async function fetchClientCrossBreakdown(
+  siteId: string,
+  window: TimeWindow,
+  primaryDimension: ClientDimensionKey,
+  secondaryDimension: ClientDimensionKey,
+  filters?: DashboardFilters,
+  options?: {
+    primaryLimit?: number;
+    secondaryLimit?: number;
+  },
+): Promise<BrowserCrossBreakdownDimensionData> {
+  return fetchPrivateJson<BrowserCrossBreakdownDimensionData>(
+    "/api/private/client-cross-breakdown",
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        primaryDimension,
+        secondaryDimension,
+        primaryLimit: options?.primaryLimit ?? 5,
+        secondaryLimit: options?.secondaryLimit ?? 6,
+      },
+      filters,
+    ),
+  );
 }
 
 export async function fetchBrowserTrend(

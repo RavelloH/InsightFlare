@@ -236,7 +236,34 @@ geo:
       adm5: 五级行政区
 devices:
   title: 设备分析
-  subtitle: 按设备类型查看访问分布。
+  subtitle: 从设备类型、系统和屏幕尺寸观察访客结构。
+  deviceShareTitle: 设备类型占比
+  osShareTitle: 操作系统占比
+  deviceTrendTitle: 设备类型趋势
+  osTrendTitle: 操作系统趋势
+  screenDistributionTitle: 屏幕尺寸分布
+  screenDistributionSubtitle: 识别最常见的视口尺寸和响应式断点。
+  topScreenSizesTitle: 头部屏幕尺寸
+  topSizesCoverageLabel: 头部尺寸覆盖率
+  screenBucketTitle: 断点分桶
+  screenBucketSubtitle: 按视口宽度聚合，方便排定响应式适配优先级。
+  browserByDeviceTitle: 设备类型 × 浏览器
+  osByDeviceTitle: 设备类型 × 操作系统
+  priorityTitle: 适配优先级
+  prioritySubtitle: 根据当前访客结构整理出优先测试的设备组合。
+  dominantSegmentLabel: 主导设备段
+  dominantOsLabel: 主导系统
+  responsiveFocusLabel: 响应式重点
+  testMatrixTitle: 首测矩阵
+  shareLabel: 占比
+  otherLabel: 其他
+  screenBucketLabels:
+    phoneCompact: 小屏手机
+    phone: 手机
+    tablet: 平板
+    laptop: 笔记本
+    desktopWide: 宽屏桌面
+    unclassified: 未归类
 browsers:
   title: 浏览器分析
   subtitle: 按浏览器查看访问分布。

@@ -167,6 +167,14 @@ interface BrowserCrossAggregateRow {
   sessions: number;
 }
 
+interface ClientCrossAggregateRow {
+  primary: string;
+  secondary: string;
+  views: number;
+  visitors: number;
+  sessions: number;
+}
+
 interface DimensionRow {
   value: string;
   views: number;
@@ -234,6 +242,14 @@ interface GeoPointAggregate {
   regionCounts: GeoDimensionCountRow[];
   cityCounts: GeoDimensionCountRow[];
 }
+
+type ClientDimensionKey =
+  | "browser"
+  | "operatingSystem"
+  | "osVersion"
+  | "deviceType"
+  | "language"
+  | "screenSize";
 
 interface ClientDimensionTabs {
   browser: DimensionRow[];
@@ -444,6 +460,9 @@ const BROWSER_VERSION_UNKNOWN_TOKEN = "__browser_version_unknown__";
 const BROWSER_CROSS_UNKNOWN_TOKEN = "__browser_cross_unknown__";
 const BROWSER_CROSS_OTHER_BROWSER_TOKEN = "__browser_cross_other_browser__";
 const BROWSER_CROSS_OTHER_DIMENSION_TOKEN = "__browser_cross_other_dimension__";
+const CLIENT_CROSS_UNKNOWN_TOKEN = "__client_cross_unknown__";
+const CLIENT_CROSS_OTHER_PRIMARY_TOKEN = "__client_cross_other_primary__";
+const CLIENT_CROSS_OTHER_SECONDARY_TOKEN = "__client_cross_other_secondary__";
 
 function shareTrendSeriesKey(
   label: string,
@@ -492,6 +511,46 @@ function browserMajorVersionExpr(alias = ""): string {
 function screenSizeExpr(alias = ""): string {
   const prefix = alias ? `${alias}.` : "";
   return `CASE WHEN ${prefix}screen_width > 0 AND ${prefix}screen_height > 0 THEN CAST(${prefix}screen_width AS TEXT) || 'x' || CAST(${prefix}screen_height AS TEXT) ELSE '' END`;
+}
+
+function clientDimensionDefinition(
+  dimension: ClientDimensionKey,
+  alias = "",
+): { labelExpr: string; fallbackKeyBase: string } {
+  if (dimension === "browser") {
+    return {
+      labelExpr: `TRIM(COALESCE(${alias ? `${alias}.` : ""}browser, ''))`,
+      fallbackKeyBase: "browser",
+    };
+  }
+  if (dimension === "operatingSystem") {
+    return {
+      labelExpr: `TRIM(COALESCE(${alias ? `${alias}.` : ""}os, ''))`,
+      fallbackKeyBase: "os",
+    };
+  }
+  if (dimension === "osVersion") {
+    return {
+      labelExpr: osVersionExpr(alias),
+      fallbackKeyBase: "os-version",
+    };
+  }
+  if (dimension === "deviceType") {
+    return {
+      labelExpr: `TRIM(COALESCE(${alias ? `${alias}.` : ""}device_type, ''))`,
+      fallbackKeyBase: "device",
+    };
+  }
+  if (dimension === "language") {
+    return {
+      labelExpr: `TRIM(COALESCE(${alias ? `${alias}.` : ""}language, ''))`,
+      fallbackKeyBase: "language",
+    };
+  }
+  return {
+    labelExpr: screenSizeExpr(alias),
+    fallbackKeyBase: "screen",
+  };
 }
 
 function siteQueryHeaders(options: SiteQueryResponseOptions): Record<string, string> {
@@ -1804,7 +1863,7 @@ async function queryShareTrendFromD1(
 }> {
   const filter = buildVisitFilterSql(filters);
   const bucketDivisor = intervalBucketMs(interval);
-  const normalizedLimit = Math.min(Math.max(1, limit), 8);
+  const normalizedLimit = Math.min(Math.max(1, limit), 12);
   const topSql = `
 WITH
 ${buildVisitSourceCte()},
@@ -2101,6 +2160,380 @@ ORDER BY bucket ASC, label ASC
   return {
     series,
     data,
+  };
+}
+
+async function queryClientDimensionTrendFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: DashboardFilters,
+  dimension: ClientDimensionKey,
+  limit: number,
+): Promise<{
+  series: BrowserTrendSeriesRow[];
+  data: BrowserTrendPointRow[];
+}> {
+  const definition = clientDimensionDefinition(dimension);
+  return queryShareTrendFromD1(
+    env,
+    siteId,
+    window,
+    interval,
+    filters,
+    limit,
+    definition.labelExpr,
+    definition.fallbackKeyBase,
+  );
+}
+
+async function queryClientCrossDimensionFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+  primaryLimit: number,
+  secondaryLimit: number,
+  primaryDimension: ClientDimensionKey,
+  secondaryDimension: ClientDimensionKey,
+): Promise<BrowserCrossBreakdownDimensionDataRow> {
+  const filter = buildVisitFilterSql(filters);
+  const normalizedPrimaryLimit = Math.min(Math.max(1, primaryLimit), 12);
+  const normalizedSecondaryLimit = Math.min(Math.max(1, secondaryLimit), 8);
+  const primaryDefinition = clientDimensionDefinition(primaryDimension);
+  const secondaryDefinition = clientDimensionDefinition(secondaryDimension);
+  const primaryExpr = primaryDefinition.labelExpr;
+  const normalizedSecondaryExpr = `CASE WHEN ${secondaryDefinition.labelExpr} != '' THEN ${secondaryDefinition.labelExpr} ELSE '${CLIENT_CROSS_UNKNOWN_TOKEN}' END`;
+
+  const topPrimarySql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    ${primaryExpr} AS primaryValue,
+    visitor_id AS visitorId,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  primaryValue,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM filtered_visits
+WHERE primaryValue != ''
+GROUP BY primaryValue
+ORDER BY visitors DESC, views DESC, sessions DESC, primaryValue ASC
+LIMIT ?
+`;
+  const topPrimaryRows = (await queryD1All<Record<string, unknown>>(
+    env,
+    topPrimarySql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings, normalizedPrimaryLimit],
+  )).map((row) => ({
+    value: String(row.primaryValue ?? "").trim(),
+    views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  })).filter((row) => row.value.length > 0 && row.visitors > 0);
+
+  if (topPrimaryRows.length === 0) {
+    return {
+      columns: [],
+      rows: [],
+      totalViews: 0,
+      totalVisitors: 0,
+      totalSessions: 0,
+    };
+  }
+
+  const topSecondarySql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    ${primaryExpr} AS primaryValue,
+    ${normalizedSecondaryExpr} AS secondaryValue,
+    visitor_id AS visitorId,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  secondaryValue,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM filtered_visits
+WHERE primaryValue != ''
+GROUP BY secondaryValue
+ORDER BY visitors DESC, views DESC, sessions DESC, secondaryValue ASC
+LIMIT ?
+`;
+  const topSecondaryRows = (await queryD1All<Record<string, unknown>>(
+    env,
+    topSecondarySql,
+    [...visitSourceBindings(siteId, window), ...filter.bindings, normalizedSecondaryLimit],
+  )).map((row) => ({
+    value: String(row.secondaryValue ?? "").trim() || CLIENT_CROSS_UNKNOWN_TOKEN,
+    views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  })).filter((row) => row.visitors > 0);
+
+  if (topSecondaryRows.length === 0) {
+    return {
+      columns: [],
+      rows: [],
+      totalViews: 0,
+      totalVisitors: 0,
+      totalSessions: 0,
+    };
+  }
+
+  const topPrimaryLabels = topPrimaryRows.map((row) => row.value);
+  const topSecondaryLabels = topSecondaryRows.map((row) => row.value);
+  const topPrimaryPlaceholders = topPrimaryLabels.map(() => "?").join(", ");
+  const topSecondaryPlaceholders = topSecondaryLabels.map(() => "?").join(", ");
+  const pairsSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    ${primaryExpr} AS primaryValue,
+    ${normalizedSecondaryExpr} AS secondaryValue,
+    visitor_id AS visitorId,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+),
+normalized_visits AS (
+  SELECT
+    CASE
+      WHEN primaryValue IN (${topPrimaryPlaceholders}) THEN primaryValue
+      ELSE '${CLIENT_CROSS_OTHER_PRIMARY_TOKEN}'
+    END AS primaryBucket,
+    CASE
+      WHEN secondaryValue IN (${topSecondaryPlaceholders}) THEN secondaryValue
+      ELSE '${CLIENT_CROSS_OTHER_SECONDARY_TOKEN}'
+    END AS secondaryBucket,
+    visitorId,
+    sessionId
+  FROM filtered_visits
+  WHERE primaryValue != ''
+)
+SELECT
+  primaryBucket AS primaryValue,
+  secondaryBucket AS secondaryValue,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+FROM normalized_visits
+GROUP BY primaryBucket, secondaryBucket
+ORDER BY primaryValue ASC, secondaryValue ASC
+`;
+  const pairRows = (await queryD1All<Record<string, unknown>>(
+    env,
+    pairsSql,
+    [
+      ...visitSourceBindings(siteId, window),
+      ...filter.bindings,
+      ...topPrimaryLabels,
+      ...topSecondaryLabels,
+    ],
+  )).map((row) => ({
+    primary: String(row.primaryValue ?? "").trim(),
+    secondary: String(row.secondaryValue ?? "").trim(),
+    views: Number(row.views ?? 0),
+    visitors: Number(row.visitors ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  } satisfies ClientCrossAggregateRow)).filter((row) =>
+    row.primary.length > 0 && row.secondary.length > 0 && row.visitors > 0
+  );
+
+  const rowBuckets = new Map<
+    string,
+    {
+      views: number;
+      visitors: number;
+      sessions: number;
+      cells: Map<string, { views: number; visitors: number; sessions: number }>;
+    }
+  >();
+  const columnBuckets = new Map<
+    string,
+    { views: number; visitors: number; sessions: number }
+  >();
+
+  for (const row of pairRows) {
+    const rowBucket = rowBuckets.get(row.primary) ?? {
+      views: 0,
+      visitors: 0,
+      sessions: 0,
+      cells: new Map<string, { views: number; visitors: number; sessions: number }>(),
+    };
+    rowBucket.views += row.views;
+    rowBucket.visitors += row.visitors;
+    rowBucket.sessions += row.sessions;
+    const existingCell = rowBucket.cells.get(row.secondary) ?? {
+      views: 0,
+      visitors: 0,
+      sessions: 0,
+    };
+    existingCell.views += row.views;
+    existingCell.visitors += row.visitors;
+    existingCell.sessions += row.sessions;
+    rowBucket.cells.set(row.secondary, existingCell);
+    rowBuckets.set(row.primary, rowBucket);
+
+    const columnBucket = columnBuckets.get(row.secondary) ?? {
+      views: 0,
+      visitors: 0,
+      sessions: 0,
+    };
+    columnBucket.views += row.views;
+    columnBucket.visitors += row.visitors;
+    columnBucket.sessions += row.sessions;
+    columnBuckets.set(row.secondary, columnBucket);
+  }
+
+  const columnKeySet = new Set<string>(["other", "unknown"]);
+  const columnDescriptors: Array<{
+    bucket: string;
+    item: BrowserCrossBreakdownItemRow;
+  }> = topSecondaryRows.map((row) => {
+    if (row.value === CLIENT_CROSS_UNKNOWN_TOKEN) {
+      return {
+        bucket: row.value,
+        item: {
+          key: "unknown",
+          label: "Unknown",
+          views: row.views,
+          visitors: row.visitors,
+          sessions: row.sessions,
+          isUnknown: true,
+        } satisfies BrowserCrossBreakdownItemRow,
+      };
+    }
+
+    return {
+      bucket: row.value,
+      item: {
+        key: shareTrendSeriesKey(
+          row.value,
+          columnKeySet,
+          secondaryDefinition.fallbackKeyBase,
+        ),
+        label: row.value,
+        views: row.views,
+        visitors: row.visitors,
+        sessions: row.sessions,
+      } satisfies BrowserCrossBreakdownItemRow,
+    };
+  });
+
+  if (columnBuckets.has(CLIENT_CROSS_OTHER_SECONDARY_TOKEN)) {
+    const otherColumn = columnBuckets.get(CLIENT_CROSS_OTHER_SECONDARY_TOKEN) ?? {
+      views: 0,
+      visitors: 0,
+      sessions: 0,
+    };
+    columnDescriptors.push({
+      bucket: CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
+      item: {
+        key: "other",
+        label: SHARE_TREND_OTHER_LABEL,
+        views: otherColumn.views,
+        visitors: otherColumn.visitors,
+        sessions: otherColumn.sessions,
+        isOther: true,
+      } satisfies BrowserCrossBreakdownItemRow,
+    });
+  }
+
+  const rowKeySet = new Set<string>(["other"]);
+  const rowDescriptors: Array<{
+    bucket: string;
+    item: BrowserCrossBreakdownItemRow;
+  }> = topPrimaryRows.map((row) => ({
+    bucket: row.value,
+    item: {
+      key: shareTrendSeriesKey(
+        row.value,
+        rowKeySet,
+        primaryDefinition.fallbackKeyBase,
+      ),
+      label: row.value,
+      views: row.views,
+      visitors: row.visitors,
+      sessions: row.sessions,
+    } satisfies BrowserCrossBreakdownItemRow,
+  }));
+
+  if (rowBuckets.has(CLIENT_CROSS_OTHER_PRIMARY_TOKEN)) {
+    const otherRow = rowBuckets.get(CLIENT_CROSS_OTHER_PRIMARY_TOKEN) ?? {
+      views: 0,
+      visitors: 0,
+      sessions: 0,
+      cells: new Map<string, { views: number; visitors: number; sessions: number }>(),
+    };
+    rowDescriptors.push({
+      bucket: CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
+      item: {
+        key: "other",
+        label: SHARE_TREND_OTHER_LABEL,
+        views: otherRow.views,
+        visitors: otherRow.visitors,
+        sessions: otherRow.sessions,
+        isOther: true,
+      } satisfies BrowserCrossBreakdownItemRow,
+    });
+  }
+
+  const columns = columnDescriptors.map((column) => column.item);
+  const rows = rowDescriptors
+    .map((row) => {
+      const bucket = rowBuckets.get(row.bucket) ?? {
+        views: row.item.views,
+        visitors: row.item.visitors,
+        sessions: row.item.sessions,
+        cells: new Map<string, { views: number; visitors: number; sessions: number }>(),
+      };
+      const cells = columnDescriptors.map((column) => {
+        const cell = bucket.cells.get(column.bucket) ?? {
+          views: 0,
+          visitors: 0,
+          sessions: 0,
+        };
+        return {
+          key: column.item.key,
+          label: column.item.label,
+          views: cell.views,
+          visitors: cell.visitors,
+          sessions: cell.sessions,
+          ...(column.item.isOther ? { isOther: true } : {}),
+          ...(column.item.isUnknown ? { isUnknown: true } : {}),
+        } satisfies BrowserCrossBreakdownItemRow;
+      });
+
+      return {
+        ...row.item,
+        views: bucket.views,
+        visitors: bucket.visitors,
+        sessions: bucket.sessions,
+        cells,
+      } satisfies BrowserCrossBreakdownDimensionRow;
+    })
+    .filter((row) => row.visitors > 0);
+
+  return {
+    columns,
+    rows,
+    totalViews: rows.reduce((sum, row) => sum + row.views, 0),
+    totalVisitors: rows.reduce((sum, row) => sum + row.visitors, 0),
+    totalSessions: rows.reduce((sum, row) => sum + row.sessions, 0),
   };
 }
 
@@ -2492,7 +2925,7 @@ async function handleBrowserTrend(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilters(url);
   const interval = parseInterval(url);
-  const limit = parseLimit(url, 5, 8);
+  const limit = parseLimit(url, 5, 12);
   const trend = await queryBrowserTrendFromD1(
     env,
     siteId,
@@ -2593,6 +3026,69 @@ async function handleBrowserCrossBreakdown(
     operatingSystem: data.operatingSystem,
     deviceType: data.deviceType,
   });
+}
+
+async function handleClientDimensionTrend(
+  env: Env,
+  siteId: string,
+  url: URL,
+): Promise<Response> {
+  const dimension = parseClientDimensionKey(url.searchParams.get("dimension"));
+  if (!dimension) return badRequest("Invalid client dimension");
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const interval = parseInterval(url);
+  const limit = parseLimit(url, 5, 8);
+  const trend = await queryClientDimensionTrendFromD1(
+    env,
+    siteId,
+    window,
+    interval,
+    filters,
+    dimension,
+    limit,
+  );
+  return jsonResponse({
+    ok: true,
+    interval,
+    series: trend.series,
+    data: trend.data,
+  });
+}
+
+async function handleClientCrossBreakdown(
+  env: Env,
+  siteId: string,
+  url: URL,
+): Promise<Response> {
+  const primaryDimension = parseClientDimensionKey(
+    url.searchParams.get("primaryDimension"),
+  );
+  if (!primaryDimension) return badRequest("Invalid primary dimension");
+  const secondaryDimension = parseClientDimensionKey(
+    url.searchParams.get("secondaryDimension"),
+  );
+  if (!secondaryDimension) return badRequest("Invalid secondary dimension");
+  if (primaryDimension === secondaryDimension) {
+    return badRequest("Primary and secondary dimensions must differ");
+  }
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const primaryLimit = parseQueryLimit(url, "primaryLimit", 5, 1, 12);
+  const secondaryLimit = parseQueryLimit(url, "secondaryLimit", 6, 1, 8);
+  const data = await queryClientCrossDimensionFromD1(
+    env,
+    siteId,
+    window,
+    filters,
+    primaryLimit,
+    secondaryLimit,
+    primaryDimension,
+    secondaryDimension,
+  );
+  return jsonResponse(data);
 }
 
 async function handlePages(
@@ -2705,12 +3201,7 @@ async function handleEventTypes(
 
 type OverviewPageTabKey = "path" | "title" | "hostname" | "entry" | "exit";
 type OverviewSourceTabKey = "domain" | "link";
-type OverviewClientTabKey =
-  | "browser"
-  | "osVersion"
-  | "deviceType"
-  | "language"
-  | "screenSize";
+type OverviewClientTabKey = Exclude<ClientDimensionKey, "operatingSystem">;
 type OverviewGeoTabKey =
   | "country"
   | "region"
@@ -2718,6 +3209,21 @@ type OverviewGeoTabKey =
   | "continent"
   | "timezone"
   | "organization";
+
+function parseClientDimensionKey(value: string | null): ClientDimensionKey | null {
+  const normalized = String(value ?? "").trim();
+  if (
+    normalized === "browser"
+    || normalized === "operatingSystem"
+    || normalized === "osVersion"
+    || normalized === "deviceType"
+    || normalized === "language"
+    || normalized === "screenSize"
+  ) {
+    return normalized as ClientDimensionKey;
+  }
+  return null;
+}
 
 async function handleOverviewPageTab(
   env: Env,
@@ -3114,6 +3620,12 @@ async function routeQuery(
   }
   if (pathname === "browser-cross-breakdown") {
     return handleBrowserCrossBreakdown(env, siteId, url);
+  }
+  if (pathname === "client-dimension-trend") {
+    return handleClientDimensionTrend(env, siteId, url);
+  }
+  if (pathname === "client-cross-breakdown") {
+    return handleClientCrossBreakdown(env, siteId, url);
   }
   if (pathname === "visitors") return handleVisitors(env, siteId, url);
   if (pathname === "countries") {

@@ -226,6 +226,34 @@ export interface AppMessages {
   devices: {
     title: string;
     subtitle: string;
+    deviceShareTitle: string;
+    osShareTitle: string;
+    deviceTrendTitle: string;
+    osTrendTitle: string;
+    screenDistributionTitle: string;
+    screenDistributionSubtitle: string;
+    topScreenSizesTitle: string;
+    topSizesCoverageLabel: string;
+    screenBucketTitle: string;
+    screenBucketSubtitle: string;
+    browserByDeviceTitle: string;
+    osByDeviceTitle: string;
+    priorityTitle: string;
+    prioritySubtitle: string;
+    dominantSegmentLabel: string;
+    dominantOsLabel: string;
+    responsiveFocusLabel: string;
+    testMatrixTitle: string;
+    shareLabel: string;
+    otherLabel: string;
+    screenBucketLabels: {
+      phoneCompact: string;
+      phone: string;
+      tablet: string;
+      laptop: string;
+      desktopWide: string;
+      unclassified: string;
+    };
   };
   browsers: {
     title: string;

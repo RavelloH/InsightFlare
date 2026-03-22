@@ -3258,6 +3258,17 @@ const DEMO_BROWSER_VERSION_UNKNOWN_TOKEN = "__browser_version_unknown__";
 const DEMO_BROWSER_CROSS_UNKNOWN_TOKEN = "__browser_cross_unknown__";
 const DEMO_BROWSER_CROSS_OTHER_BROWSER_TOKEN = "__browser_cross_other_browser__";
 const DEMO_BROWSER_CROSS_OTHER_DIMENSION_TOKEN = "__browser_cross_other_dimension__";
+const DEMO_CLIENT_CROSS_UNKNOWN_TOKEN = "__client_cross_unknown__";
+const DEMO_CLIENT_CROSS_OTHER_PRIMARY_TOKEN = "__client_cross_other_primary__";
+const DEMO_CLIENT_CROSS_OTHER_SECONDARY_TOKEN = "__client_cross_other_secondary__";
+
+type DemoClientDimensionKey =
+  | "browser"
+  | "operatingSystem"
+  | "osVersion"
+  | "deviceType"
+  | "language"
+  | "screenSize";
 
 function createDemoShareTrendSeriesKey(
   label: string,
@@ -3282,6 +3293,69 @@ function createDemoShareTrendSeriesKey(
   return candidate;
 }
 
+function demoOperatingSystemLabel(osVersion: string): string {
+  return String(osVersion ?? "").trim().split(/\s+/)[0] ?? "";
+}
+
+function parseDemoClientDimensionKey(
+  value: string | number | undefined,
+): DemoClientDimensionKey | null {
+  const normalized = String(value ?? "").trim();
+  if (
+    normalized === "browser"
+    || normalized === "operatingSystem"
+    || normalized === "osVersion"
+    || normalized === "deviceType"
+    || normalized === "language"
+    || normalized === "screenSize"
+  ) {
+    return normalized as DemoClientDimensionKey;
+  }
+  return null;
+}
+
+function demoClientDimensionMeta(
+  dimension: DemoClientDimensionKey,
+): {
+  fallbackKeyBase: string;
+  getLabel: (visit: DemoVisitFact) => string;
+} {
+  if (dimension === "browser") {
+    return {
+      fallbackKeyBase: "browser",
+      getLabel: (visit) => visit.browser,
+    };
+  }
+  if (dimension === "operatingSystem") {
+    return {
+      fallbackKeyBase: "os",
+      getLabel: (visit) => demoOperatingSystemLabel(visit.osVersion),
+    };
+  }
+  if (dimension === "osVersion") {
+    return {
+      fallbackKeyBase: "os-version",
+      getLabel: (visit) => visit.osVersion,
+    };
+  }
+  if (dimension === "deviceType") {
+    return {
+      fallbackKeyBase: "device",
+      getLabel: (visit) => visit.deviceType,
+    };
+  }
+  if (dimension === "language") {
+    return {
+      fallbackKeyBase: "language",
+      getLabel: (visit) => visit.language,
+    };
+  }
+  return {
+    fallbackKeyBase: "screen",
+    getLabel: (visit) => visit.screenSize,
+  };
+}
+
 function generateDemoShareTrend(
   siteId: string,
   params: Record<string, string | number>,
@@ -3293,7 +3367,7 @@ function generateDemoShareTrend(
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
   const interval = parseDemoInterval(params.interval);
-  const limit = parseDemoLimit(params.limit, 5, 1, 8);
+  const limit = parseDemoLimit(params.limit, 5, 1, 12);
   const filters = parseDemoFilters(params);
   const stepMs = demoIntervalStepMs(interval);
   const dataset = buildDemoFactDataset(siteId, from, to);
@@ -3544,6 +3618,27 @@ function generateDemoBrowserEngineTrend(
   return generateDemoShareTrend(siteId, params, {
     fallbackKeyBase: "engine",
     getLabel: (visit) => browserEngineLabel(visit.browser, visit.osVersion),
+  });
+}
+
+function generateDemoClientDimensionTrend(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const dimension = parseDemoClientDimensionKey(params.dimension);
+  if (!dimension) {
+    return {
+      ok: true,
+      interval: parseDemoInterval(params.interval),
+      series: [],
+      data: [],
+    };
+  }
+
+  const meta = demoClientDimensionMeta(dimension);
+  return generateDemoShareTrend(siteId, params, {
+    fallbackKeyBase: meta.fallbackKeyBase,
+    getLabel: meta.getLabel,
   });
 }
 
@@ -3944,6 +4039,336 @@ function generateDemoBrowserCrossBreakdown(
       (visit) => visit.deviceType,
     ),
   };
+}
+
+function generateDemoClientCrossDimensionData(
+  dataset: DemoFactDataset,
+  filtered: DemoFilteredFacts,
+  primaryLimit: number,
+  secondaryLimit: number,
+  primaryDimension: DemoClientDimensionKey,
+  secondaryDimension: DemoClientDimensionKey,
+): {
+  columns: Array<{
+    key: string;
+    label: string;
+    views: number;
+    visitors: number;
+    sessions: number;
+    isOther?: boolean;
+    isUnknown?: boolean;
+  }>;
+  rows: Array<{
+    key: string;
+    label: string;
+    views: number;
+    visitors: number;
+    sessions: number;
+    isOther?: boolean;
+    cells: Array<{
+      key: string;
+      label: string;
+      views: number;
+      visitors: number;
+      sessions: number;
+      isOther?: boolean;
+      isUnknown?: boolean;
+    }>;
+  }>;
+  totalViews: number;
+  totalVisitors: number;
+  totalSessions: number;
+} {
+  const primaryMeta = demoClientDimensionMeta(primaryDimension);
+  const secondaryMeta = demoClientDimensionMeta(secondaryDimension);
+  const topPrimary = aggregateDimensionRowsFromVisits(
+    dataset,
+    filtered.visits,
+    primaryLimit,
+    (visit) => primaryMeta.getLabel(visit),
+    "visitors",
+  ).filter((row) => row.label.trim().length > 0 && row.visitors > 0);
+
+  if (topPrimary.length === 0) {
+    return {
+      columns: [],
+      rows: [],
+      totalViews: 0,
+      totalVisitors: 0,
+      totalSessions: 0,
+    };
+  }
+
+  const topSecondary = aggregateDimensionRowsFromVisits(
+    dataset,
+    filtered.visits.filter((visit) => String(primaryMeta.getLabel(visit) || "").trim().length > 0),
+    secondaryLimit,
+    (visit) => {
+      const label = String(secondaryMeta.getLabel(visit) || "").trim();
+      return label || DEMO_CLIENT_CROSS_UNKNOWN_TOKEN;
+    },
+    "visitors",
+  ).filter((row) => row.visitors > 0);
+
+  if (topSecondary.length === 0) {
+    return {
+      columns: [],
+      rows: [],
+      totalViews: 0,
+      totalVisitors: 0,
+      totalSessions: 0,
+    };
+  }
+
+  const primarySet = new Set(topPrimary.map((row) => row.label));
+  const secondarySet = new Set(topSecondary.map((row) => row.label));
+  const rowBuckets = new Map<
+    string,
+    {
+      views: number;
+      visitors: Set<string>;
+      sessions: Set<string>;
+      cells: Map<string, { views: number; visitors: Set<string>; sessions: Set<string> }>;
+    }
+  >();
+  const columnBuckets = new Map<
+    string,
+    { views: number; visitors: Set<string>; sessions: Set<string> }
+  >();
+
+  for (const visit of filtered.visits) {
+    const rawPrimary = String(primaryMeta.getLabel(visit) || "").trim();
+    if (!rawPrimary) continue;
+
+    const rawSecondary = String(secondaryMeta.getLabel(visit) || "").trim();
+    const secondary = rawSecondary || DEMO_CLIENT_CROSS_UNKNOWN_TOKEN;
+    const primaryBucket = primarySet.has(rawPrimary)
+      ? rawPrimary
+      : DEMO_CLIENT_CROSS_OTHER_PRIMARY_TOKEN;
+    const secondaryBucket = secondarySet.has(secondary)
+      ? secondary
+      : DEMO_CLIENT_CROSS_OTHER_SECONDARY_TOKEN;
+
+    const rowBucket = rowBuckets.get(primaryBucket) ?? {
+      views: 0,
+      visitors: new Set<string>(),
+      sessions: new Set<string>(),
+      cells: new Map<string, { views: number; visitors: Set<string>; sessions: Set<string> }>(),
+    };
+    rowBucket.views += dataset.viewWeight;
+    rowBucket.visitors.add(visit.visitorId);
+    rowBucket.sessions.add(visit.sessionId);
+    const cellBucket = rowBucket.cells.get(secondaryBucket) ?? {
+      views: 0,
+      visitors: new Set<string>(),
+      sessions: new Set<string>(),
+    };
+    cellBucket.views += dataset.viewWeight;
+    cellBucket.visitors.add(visit.visitorId);
+    cellBucket.sessions.add(visit.sessionId);
+    rowBucket.cells.set(secondaryBucket, cellBucket);
+    rowBuckets.set(primaryBucket, rowBucket);
+
+    const columnBucket = columnBuckets.get(secondaryBucket) ?? {
+      views: 0,
+      visitors: new Set<string>(),
+      sessions: new Set<string>(),
+    };
+    columnBucket.views += dataset.viewWeight;
+    columnBucket.visitors.add(visit.visitorId);
+    columnBucket.sessions.add(visit.sessionId);
+    columnBuckets.set(secondaryBucket, columnBucket);
+  }
+
+  const columnKeySet = new Set<string>(["other", "unknown"]);
+  const columnDescriptors: Array<{
+    bucket: string;
+    item: {
+      key: string;
+      label: string;
+      views: number;
+      visitors: number;
+      sessions: number;
+      isOther?: boolean;
+      isUnknown?: boolean;
+    };
+  }> = topSecondary.map((row) => {
+    if (row.label === DEMO_CLIENT_CROSS_UNKNOWN_TOKEN) {
+      return {
+        bucket: row.label,
+        item: {
+          key: "unknown",
+          label: "Unknown",
+          views: row.views,
+          visitors: row.visitors,
+          sessions: row.sessions,
+          isUnknown: true,
+        },
+      };
+    }
+
+    return {
+      bucket: row.label,
+      item: {
+        key: createDemoShareTrendSeriesKey(
+          row.label,
+          columnKeySet,
+          secondaryMeta.fallbackKeyBase,
+        ),
+        label: row.label,
+        views: row.views,
+        visitors: row.visitors,
+        sessions: row.sessions,
+      },
+    };
+  });
+
+  if (columnBuckets.has(DEMO_CLIENT_CROSS_OTHER_SECONDARY_TOKEN)) {
+    const otherColumn = columnBuckets.get(DEMO_CLIENT_CROSS_OTHER_SECONDARY_TOKEN) ?? {
+      views: 0,
+      visitors: new Set<string>(),
+      sessions: new Set<string>(),
+    };
+    columnDescriptors.push({
+      bucket: DEMO_CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
+      item: {
+        key: "other",
+        label: DEMO_SHARE_TREND_OTHER_LABEL,
+        views: Math.max(0, Math.round(otherColumn.views)),
+        visitors: Math.max(
+          0,
+          Math.round(weightedVisitorCount(dataset, otherColumn.visitors)),
+        ),
+        sessions: Math.max(0, Math.round(weightedSessionCount(dataset, otherColumn.sessions))),
+        isOther: true,
+      },
+    });
+  }
+
+  const rowKeySet = new Set<string>(["other"]);
+  const rowDescriptors: Array<{
+    bucket: string;
+    item: {
+      key: string;
+      label: string;
+      views: number;
+      visitors: number;
+      sessions: number;
+      isOther?: boolean;
+    };
+  }> = topPrimary.map((row) => ({
+    bucket: row.label,
+    item: {
+      key: createDemoShareTrendSeriesKey(
+        row.label,
+        rowKeySet,
+        primaryMeta.fallbackKeyBase,
+      ),
+      label: row.label,
+      views: row.views,
+      visitors: row.visitors,
+      sessions: row.sessions,
+    },
+  }));
+
+  if (rowBuckets.has(DEMO_CLIENT_CROSS_OTHER_PRIMARY_TOKEN)) {
+    const otherRow = rowBuckets.get(DEMO_CLIENT_CROSS_OTHER_PRIMARY_TOKEN) ?? {
+      views: 0,
+      visitors: new Set<string>(),
+      sessions: new Set<string>(),
+      cells: new Map<string, { views: number; visitors: Set<string>; sessions: Set<string> }>(),
+    };
+    rowDescriptors.push({
+      bucket: DEMO_CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
+      item: {
+        key: "other",
+        label: DEMO_SHARE_TREND_OTHER_LABEL,
+        views: Math.max(0, Math.round(otherRow.views)),
+        visitors: Math.max(0, Math.round(weightedVisitorCount(dataset, otherRow.visitors))),
+        sessions: Math.max(0, Math.round(weightedSessionCount(dataset, otherRow.sessions))),
+        isOther: true,
+      },
+    });
+  }
+
+  const columns = columnDescriptors.map((column) => column.item);
+  const rows = rowDescriptors
+    .map((row) => {
+      const rowBucket = rowBuckets.get(row.bucket);
+      const cells = columnDescriptors.map((column) => {
+        const cell = rowBucket?.cells.get(column.bucket);
+        return {
+          key: column.item.key,
+          label: column.item.label,
+          views: Math.max(0, Math.round(cell?.views ?? 0)),
+          visitors: Math.max(
+            0,
+            Math.round(weightedVisitorCount(dataset, cell?.visitors ?? new Set<string>())),
+          ),
+          sessions: Math.max(
+            0,
+            Math.round(weightedSessionCount(dataset, cell?.sessions ?? new Set<string>())),
+          ),
+          ...(column.item.isOther ? { isOther: true } : {}),
+          ...(column.item.isUnknown ? { isUnknown: true } : {}),
+        };
+      });
+
+      return {
+        ...row.item,
+        views: Math.max(0, Math.round(rowBucket?.views ?? row.item.views)),
+        visitors: rowBucket
+          ? Math.max(0, Math.round(weightedVisitorCount(dataset, rowBucket.visitors)))
+          : row.item.visitors,
+        sessions: rowBucket
+          ? Math.max(0, Math.round(weightedSessionCount(dataset, rowBucket.sessions)))
+          : row.item.sessions,
+        cells,
+      };
+    })
+    .filter((row) => row.visitors > 0);
+
+  return {
+    columns,
+    rows,
+    totalViews: rows.reduce((sum, row) => sum + row.views, 0),
+    totalVisitors: rows.reduce((sum, row) => sum + row.visitors, 0),
+    totalSessions: rows.reduce((sum, row) => sum + row.sessions, 0),
+  };
+}
+
+function generateDemoClientCrossBreakdown(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const primaryDimension = parseDemoClientDimensionKey(params.primaryDimension);
+  const secondaryDimension = parseDemoClientDimensionKey(params.secondaryDimension);
+  if (!primaryDimension || !secondaryDimension || primaryDimension === secondaryDimension) {
+    return {
+      columns: [],
+      rows: [],
+      totalViews: 0,
+      totalVisitors: 0,
+      totalSessions: 0,
+    };
+  }
+
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const primaryLimit = parseDemoLimit(params.primaryLimit, 5, 1, 12);
+  const secondaryLimit = parseDemoLimit(params.secondaryLimit, 6, 1, 8);
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+
+  return generateDemoClientCrossDimensionData(
+    dataset,
+    filtered,
+    primaryLimit,
+    secondaryLimit,
+    primaryDimension,
+    secondaryDimension,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -4895,6 +5320,12 @@ export function handleDemoRequest(options: {
   }
   if (path.includes("/browser-engine-trend")) {
     return generateDemoBrowserEngineTrend(siteId, params);
+  }
+  if (path.includes("/client-dimension-trend")) {
+    return generateDemoClientDimensionTrend(siteId, params);
+  }
+  if (path.includes("/client-cross-breakdown")) {
+    return generateDemoClientCrossBreakdown(siteId, params);
   }
   if (path.includes("/trend")) {
     return generateDemoTrend(siteId, params);

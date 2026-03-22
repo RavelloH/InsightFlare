@@ -54,6 +54,7 @@ interface ShareTrendCardProps {
   title: string;
   fetchTrend: ShareTrendFetcher;
   limit?: number;
+  otherLabel?: string;
 }
 
 function emptyTrendData(interval: DashboardInterval): BrowserTrendData {
@@ -108,9 +109,9 @@ function tooltipDateFormat(localeCode: string, interval: DashboardInterval): Int
 
 function seriesDisplayLabel(
   series: BrowserTrendSeries,
-  messages: AppMessages,
+  otherLabel: string,
 ): string {
-  return series.isOther ? messages.browsers.otherLabel : series.label;
+  return series.isOther ? otherLabel : series.label;
 }
 
 export function ShareTrendCard({
@@ -122,6 +123,7 @@ export function ShareTrendCard({
   title,
   fetchTrend,
   limit = 5,
+  otherLabel = messages.browsers.otherLabel,
 }: ShareTrendCardProps) {
   const [loading, setLoading] = useState(true);
   const [hydrated, setHydrated] = useState(false);
@@ -183,12 +185,12 @@ export function ShareTrendCard({
     () =>
       trendData.series.map((series, index) => ({
         ...series,
-        displayLabel: seriesDisplayLabel(series, messages),
+        displayLabel: seriesDisplayLabel(series, otherLabel),
         color: series.isOther
           ? "var(--muted-foreground)"
           : CHART_COLORS[index % CHART_COLORS.length],
       })),
-    [messages, trendData.series],
+    [otherLabel, trendData.series],
   );
   const chartConfig = useMemo(
     () =>

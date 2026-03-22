@@ -236,7 +236,34 @@ geo:
       adm5: Admin Level 5
 devices:
   title: Devices
-  subtitle: Device type distribution.
+  subtitle: Understand visitors by device type, operating system, and screen size.
+  deviceShareTitle: Device Type Share
+  osShareTitle: Operating System Share
+  deviceTrendTitle: Device Type Trend
+  osTrendTitle: Operating System Trend
+  screenDistributionTitle: Screen Size Distribution
+  screenDistributionSubtitle: Surface the most common viewports and responsive breakpoints.
+  topScreenSizesTitle: Top Screen Sizes
+  topSizesCoverageLabel: Top size coverage
+  screenBucketTitle: Breakpoint Buckets
+  screenBucketSubtitle: Group viewports by width to prioritize responsive work.
+  browserByDeviceTitle: Device Type x Browser
+  osByDeviceTitle: Device Type x Operating System
+  priorityTitle: Adaptation Priority
+  prioritySubtitle: Turn current visitor structure into a focused device test matrix.
+  dominantSegmentLabel: Dominant Segment
+  dominantOsLabel: Dominant OS
+  responsiveFocusLabel: Responsive Focus
+  testMatrixTitle: Test Matrix
+  shareLabel: Share
+  otherLabel: Other
+  screenBucketLabels:
+    phoneCompact: Compact Phone
+    phone: Phone
+    tablet: Tablet
+    laptop: Laptop
+    desktopWide: Wide Desktop
+    unclassified: Unclassified
 browsers:
   title: Browsers
   subtitle: Browser distribution and share.

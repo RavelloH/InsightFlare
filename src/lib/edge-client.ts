@@ -200,6 +200,14 @@ export interface TrendData {
   data: TrendPoint[];
 }
 
+export type ClientDimensionKey =
+  | "browser"
+  | "operatingSystem"
+  | "osVersion"
+  | "deviceType"
+  | "language"
+  | "screenSize";
+
 export interface BrowserTrendSeries {
   key: string;
   label: string;
@@ -659,6 +667,58 @@ export async function fetchPrivateCountries(params: {
         from: params.from,
         to: params.to,
         limit: params.limit ?? 20,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateClientDimensionTrend(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  dimension: ClientDimensionKey;
+  interval?: "minute" | "hour" | "day" | "week" | "month";
+  filters?: QueryFilters;
+  limit?: number;
+}): Promise<BrowserTrendData> {
+  return fetchEdgeJson<BrowserTrendData>({
+    path: "/api/private/client-dimension-trend",
+    params: withFilters(
+      {
+        interval: params.interval || "day",
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        dimension: params.dimension,
+        limit: params.limit ?? 5,
+      },
+      params.filters,
+    ),
+  });
+}
+
+export async function fetchPrivateClientCrossBreakdown(params: {
+  siteId: string;
+  from: number;
+  to: number;
+  primaryDimension: ClientDimensionKey;
+  secondaryDimension: ClientDimensionKey;
+  filters?: QueryFilters;
+  primaryLimit?: number;
+  secondaryLimit?: number;
+}): Promise<BrowserCrossBreakdownDimensionData> {
+  return fetchEdgeJson<BrowserCrossBreakdownDimensionData>({
+    path: "/api/private/client-cross-breakdown",
+    params: withFilters(
+      {
+        siteId: params.siteId,
+        from: params.from,
+        to: params.to,
+        primaryDimension: params.primaryDimension,
+        secondaryDimension: params.secondaryDimension,
+        primaryLimit: params.primaryLimit ?? 5,
+        secondaryLimit: params.secondaryLimit ?? 6,
       },
       params.filters,
     ),
