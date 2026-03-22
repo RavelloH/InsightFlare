@@ -308,7 +308,7 @@ export function ShareTrendCard({
                   <Area
                     key={series.key}
                     dataKey={series.key}
-                    type="natural"
+                    type="monotone"
                     fill={`var(--color-${series.key})`}
                     fillOpacity={series.isOther ? 0.18 : 0.42}
                     stroke={`var(--color-${series.key})`}
