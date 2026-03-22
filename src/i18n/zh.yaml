@@ -243,10 +243,12 @@ devices:
   osTrendTitle: 操作系统趋势
   screenDistributionTitle: 屏幕尺寸分布
   screenDistributionSubtitle: 识别最常见的视口尺寸和响应式断点。
-  topScreenSizesTitle: 头部屏幕尺寸
   topSizesCoverageLabel: 头部尺寸覆盖率
   screenBucketTitle: 断点分桶
-  screenBucketSubtitle: 按视口宽度聚合，方便排定响应式适配优先级。
+  screenPreviewTitle: 屏幕预览
+  selectedViewportLabel: 当前视口
+  openSiteLabel: 打开站点
+  previewUnavailableLabel: 当前没有可预览的屏幕尺寸。
   browserByDeviceTitle: 设备类型 × 浏览器
   osByDeviceTitle: 设备类型 × 操作系统
   priorityTitle: 适配优先级

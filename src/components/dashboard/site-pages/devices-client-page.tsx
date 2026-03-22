@@ -14,6 +14,7 @@ interface DevicesClientPageProps {
   locale: Locale;
   messages: AppMessages;
   siteId: string;
+  siteDomain: string;
   pathname: string;
 }
 
@@ -21,6 +22,7 @@ export function DevicesClientPage({
   locale,
   messages,
   siteId,
+  siteDomain,
 }: DevicesClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
     filters: DashboardFilters;
@@ -66,6 +68,7 @@ export function DevicesClientPage({
         locale={locale}
         messages={messages}
         siteId={siteId}
+        siteDomain={siteDomain}
         window={window}
         filters={filters}
       />

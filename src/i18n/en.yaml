@@ -243,10 +243,12 @@ devices:
   osTrendTitle: Operating System Trend
   screenDistributionTitle: Screen Size Distribution
   screenDistributionSubtitle: Surface the most common viewports and responsive breakpoints.
-  topScreenSizesTitle: Top Screen Sizes
   topSizesCoverageLabel: Top size coverage
   screenBucketTitle: Breakpoint Buckets
-  screenBucketSubtitle: Group viewports by width to prioritize responsive work.
+  screenPreviewTitle: Screen Preview
+  selectedViewportLabel: Selected viewport
+  openSiteLabel: Open site
+  previewUnavailableLabel: No previewable screen sizes are available right now.
   browserByDeviceTitle: Device Type x Browser
   osByDeviceTitle: Device Type x Operating System
   priorityTitle: Adaptation Priority

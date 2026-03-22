@@ -232,10 +232,12 @@ export interface AppMessages {
     osTrendTitle: string;
     screenDistributionTitle: string;
     screenDistributionSubtitle: string;
-    topScreenSizesTitle: string;
     topSizesCoverageLabel: string;
     screenBucketTitle: string;
-    screenBucketSubtitle: string;
+    screenPreviewTitle: string;
+    selectedViewportLabel: string;
+    openSiteLabel: string;
+    previewUnavailableLabel: string;
     browserByDeviceTitle: string;
     osByDeviceTitle: string;
     priorityTitle: string;

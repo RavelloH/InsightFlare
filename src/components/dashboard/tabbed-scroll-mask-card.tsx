@@ -35,6 +35,7 @@ interface TabbedScrollMaskCardProps<T extends string = string> {
   tabs: TabbedScrollMaskCardTab<T>[];
   children: ReactNode;
   headerRight?: ReactNode;
+  headerHidden?: boolean;
   syncKey?: string | number | boolean | null;
   className?: string;
   tabsListClassName?: string;
@@ -48,6 +49,7 @@ export function TabbedScrollMaskCard<T extends string = string>({
   tabs,
   children,
   headerRight,
+  headerHidden = false,
   syncKey,
   className,
   tabsListClassName,
@@ -154,38 +156,40 @@ export function TabbedScrollMaskCard<T extends string = string>({
 
   return (
     <Card className={cn("gap-0 py-0 overflow-hidden", className)}>
-      <div className="border-b">
-        <Tabs
-          value={value}
-          onValueChange={(next) => onValueChange(next as T)}
-          className="gap-0"
-        >
-          <div className="flex items-center gap-1 px-2 py-1">
-            <div className="no-scrollbar min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
-              <TabsList
-                variant="line"
-                className={cn(
-                  "h-10 w-max min-w-max justify-start gap-1 border-0 px-0",
-                  tabsListClassName,
-                )}
-              >
-                {tabs.map((tab) => (
-                  <TabsTrigger
-                    key={tab.value}
-                    value={tab.value}
-                    className={cn("h-8 flex-none px-3 text-xs", tabTriggerClassName)}
-                  >
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
+      {headerHidden ? null : (
+        <div className="border-b">
+          <Tabs
+            value={value}
+            onValueChange={(next) => onValueChange(next as T)}
+            className="gap-0"
+          >
+            <div className="flex items-center gap-1 px-2 py-1">
+              <div className="no-scrollbar min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+                <TabsList
+                  variant="line"
+                  className={cn(
+                    "h-10 w-max min-w-max justify-start gap-1 border-0 px-0",
+                    tabsListClassName,
+                  )}
+                >
+                  {tabs.map((tab) => (
+                    <TabsTrigger
+                      key={tab.value}
+                      value={tab.value}
+                      className={cn("h-8 flex-none px-3 text-xs", tabTriggerClassName)}
+                    >
+                      {tab.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </div>
+              {headerRight ? (
+                <div className="shrink-0">{headerRight}</div>
+              ) : null}
             </div>
-            {headerRight ? (
-              <div className="shrink-0">{headerRight}</div>
-            ) : null}
-          </div>
-        </Tabs>
-      </div>
+          </Tabs>
+        </div>
+      )}
 
       <div className={cn("relative max-h-[60vh]", viewportClassName)}>
         <div

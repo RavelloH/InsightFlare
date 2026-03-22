@@ -32,6 +32,7 @@ export default async function DevicesPage({ params }: DevicesPageProps) {
       locale={resolvedLocale}
       messages={messages}
       siteId={context.activeSite.id}
+      siteDomain={context.activeSite.domain}
       pathname={pathname}
     />
   );
