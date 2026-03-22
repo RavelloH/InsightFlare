@@ -1,6 +1,7 @@
 import type {
   BrowserCrossBreakdownData,
   BrowserCrossBreakdownDimensionData,
+  BrowserRadarData,
   BrowserVersionBreakdownData,
   BrowserTrendData,
   ClientDimensionKey,
@@ -631,6 +632,18 @@ export async function fetchBrowserCrossBreakdown(
     browserLimit: options?.browserLimit ?? 8,
     osLimit: options?.osLimit ?? 6,
     deviceTypeLimit: options?.deviceTypeLimit ?? 5,
+  }, filters));
+}
+
+export async function fetchBrowserRadar(
+  siteId: string,
+  window: TimeWindow,
+  filters?: DashboardFilters,
+): Promise<BrowserRadarData> {
+  return fetchPrivateJson<BrowserRadarData>("/api/private/browser-radar", withFilters({
+    siteId,
+    from: window.from,
+    to: window.to,
   }, filters));
 }
 

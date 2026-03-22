@@ -292,6 +292,14 @@ browsers:
   caniuseFullSupport: Full Support
   caniusePartialSupport: Partial Support
   caniuseNoSupport: No Support
+  radarTitle: Browser Performance Radar
+  radarSubtitle: Compare top browsers across behavioral metrics.
+  radarDuration: Duration
+  radarEngagement: Engagement
+  radarDepth: Depth
+  radarLoyalty: Loyalty
+  radarFrequency: Frequency
+  radarTraffic: Traffic
 siteSettings:
   title: Site Settings
   subtitle: Configure this site's basic information and lifecycle.

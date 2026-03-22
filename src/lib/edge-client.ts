@@ -286,6 +286,33 @@ export interface BrowserCrossBreakdownData {
   deviceType: BrowserCrossBreakdownDimensionData;
 }
 
+export interface BrowserRadarMetrics {
+  /** Average session duration in ms */
+  duration: number;
+  /** Non-bounce rate (0..1) */
+  engagement: number;
+  /** Average pages per session */
+  depth: number;
+  /** Return visitor rate (0..1) */
+  loyalty: number;
+  /** Average sessions per visitor */
+  frequency: number;
+  /** Visitor share of total (0..1) */
+  traffic: number;
+}
+
+export interface BrowserRadarItem {
+  browser: string;
+  visitors: number;
+  sessions: number;
+  metrics: BrowserRadarMetrics;
+}
+
+export interface BrowserRadarData {
+  ok: boolean;
+  data: BrowserRadarItem[];
+}
+
 export interface PagesData {
   ok: boolean;
   data: Array<{

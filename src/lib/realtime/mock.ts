@@ -4041,6 +4041,120 @@ function generateDemoBrowserCrossBreakdown(
   };
 }
 
+function generateDemoBrowserRadar(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+
+  const topBrowsers = aggregateDimensionRowsFromVisits(
+    dataset,
+    filtered.visits,
+    999,
+    (visit) => visit.browser,
+    "visitors",
+  ).filter((row) => row.label.trim().length > 0 && row.visitors > 0);
+
+  if (topBrowsers.length === 0) {
+    return { ok: true, data: [] };
+  }
+
+  const totalVisitors = topBrowsers.reduce((sum, b) => sum + b.visitors, 0);
+  const globalFrequency =
+    filtered.visitors.size > 0
+      ? filtered.sessions.size / filtered.visitors.size
+      : 1;
+
+  const data = topBrowsers.map((browserRow) => {
+    const browserVisits = filtered.visits.filter(
+      (v) => v.browser === browserRow.label,
+    );
+
+    // session-level aggregation
+    const sessionMap = new Map<
+      string,
+      { visitCount: number; totalDuration: number }
+    >();
+    for (const v of browserVisits) {
+      const entry = sessionMap.get(v.sessionId) ?? {
+        visitCount: 0,
+        totalDuration: 0,
+      };
+      entry.visitCount += 1;
+      entry.totalDuration += Math.max(0, v.durationMs);
+      sessionMap.set(v.sessionId, entry);
+    }
+    const sessions = sessionMap.size;
+    const bounces = Array.from(sessionMap.values()).filter(
+      (s) => s.visitCount === 1,
+    ).length;
+    const totalDuration = Array.from(sessionMap.values()).reduce(
+      (sum, s) => sum + s.totalDuration,
+      0,
+    );
+    const totalPages = Array.from(sessionMap.values()).reduce(
+      (sum, s) => sum + s.visitCount,
+      0,
+    );
+
+    // visitor-level aggregation
+    const visitorSessionMap = new Map<string, Set<string>>();
+    for (const v of browserVisits) {
+      const set = visitorSessionMap.get(v.visitorId) ?? new Set<string>();
+      set.add(v.sessionId);
+      visitorSessionMap.set(v.visitorId, set);
+    }
+    const visitors = visitorSessionMap.size;
+    const returningVisitors = Array.from(visitorSessionMap.values()).filter(
+      (s) => s.size > 1,
+    ).length;
+
+    const avgDuration = sessions > 0 ? totalDuration / sessions : 0;
+    const engagement =
+      sessions > 0
+        ? Number(((sessions - bounces) / sessions).toFixed(6))
+        : 0;
+    const depth = sessions > 0 ? totalPages / sessions : 0;
+    const loyalty =
+      visitors > 0
+        ? Number((returningVisitors / visitors).toFixed(6))
+        : 0;
+    // Use site-wide frequency ratio as base with per-browser deterministic
+    // variation: demo assigns random browsers per session so per-browser
+    // raw frequency is always ~1.  Real data does not have this problem.
+    let nameHash = 0;
+    for (let i = 0; i < browserRow.label.length; i++) {
+      nameHash = ((nameHash << 5) - nameHash + browserRow.label.charCodeAt(i)) | 0;
+    }
+    const variation = 0.75 + (Math.abs(nameHash) % 100) / 200; // 0.75 – 1.25
+    const frequency = globalFrequency * variation;
+    const traffic =
+      totalVisitors > 0
+        ? Number((browserRow.visitors / totalVisitors).toFixed(6))
+        : 0;
+
+    return {
+      browser: browserRow.label,
+      visitors: browserRow.visitors,
+      sessions: browserRow.sessions,
+      metrics: {
+        duration: avgDuration,
+        engagement,
+        depth,
+        loyalty,
+        frequency,
+        traffic,
+      },
+    };
+  });
+
+  return { ok: true, data };
+}
+
 function generateDemoClientCrossDimensionData(
   dataset: DemoFactDataset,
   filtered: DemoFilteredFacts,
@@ -5314,6 +5428,9 @@ export function handleDemoRequest(options: {
   }
   if (path.includes("/browser-version-breakdown")) {
     return generateDemoBrowserVersionBreakdown(siteId, params);
+  }
+  if (path.includes("/browser-radar")) {
+    return generateDemoBrowserRadar(siteId, params);
   }
   if (path.includes("/browser-trend")) {
     return generateDemoBrowserTrend(siteId, params);

@@ -292,6 +292,14 @@ browsers:
   caniuseFullSupport: 完全支持
   caniusePartialSupport: 部分支持
   caniuseNoSupport: 不支持
+  radarTitle: 浏览器行为雷达图
+  radarSubtitle: 对比主流浏览器在多项行为指标上的表现
+  radarDuration: 停留时长
+  radarEngagement: 互动率
+  radarDepth: 浏览深度
+  radarLoyalty: 回访率
+  radarFrequency: 访问频次
+  radarTraffic: 流量占比
 siteSettings:
   title: 站点设置
   subtitle: 管理当前站点的基础信息与生命周期。

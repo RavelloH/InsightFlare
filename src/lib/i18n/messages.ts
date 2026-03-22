@@ -283,6 +283,14 @@ export interface AppMessages {
     caniuseFullSupport: string;
     caniusePartialSupport: string;
     caniuseNoSupport: string;
+    radarTitle: string;
+    radarSubtitle: string;
+    radarDuration: string;
+    radarEngagement: string;
+    radarDepth: string;
+    radarLoyalty: string;
+    radarFrequency: string;
+    radarTraffic: string;
   };
   siteSettings: {
     title: string;
