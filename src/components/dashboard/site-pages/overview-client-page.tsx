@@ -290,7 +290,7 @@ interface MetricAreaPoint {
 }
 
 type PageCardTab = "path" | "title" | "hostname" | "entry" | "exit";
-type PageCardSortKey = "views" | "sessions";
+type PageCardSortKey = "views" | "visitors";
 type PageCardNavigableTab = "path" | "hostname" | "entry" | "exit";
 type SourceCardTab = "domain" | "link";
 type ClientDimensionCardTab =
@@ -343,7 +343,7 @@ interface PageCardRow {
   label: string;
   rawLabel?: string;
   views: number;
-  sessions: number;
+  visitors: number;
   mono: boolean;
   iconName?: string | null;
   filterValue?: string;
@@ -374,7 +374,7 @@ interface SourceCardRow {
   filterValue: string;
   targetUrl: string | null;
   views: number;
-  sessions: number;
+  visitors: number;
   mono: boolean;
 }
 
@@ -2520,7 +2520,7 @@ export function OverviewPagesSection({
         key: String(item.label || "/"),
         label: String(item.label || "/"),
         views: Math.max(0, Number(item.views || 0)),
-        sessions: Math.max(0, Number(item.sessions || 0)),
+        visitors: Math.max(0, Number(item.visitors || 0)),
         mono: true,
       })),
     [resolvedPageCardTabData.path],
@@ -2535,7 +2535,7 @@ export function OverviewPagesSection({
           key: label,
           label,
           views: Math.max(0, Number(item.views || 0)),
-          sessions: Math.max(0, Number(item.sessions || 0)),
+          visitors: Math.max(0, Number(item.visitors || 0)),
           mono: false,
         };
       }),
@@ -2551,7 +2551,7 @@ export function OverviewPagesSection({
           key: label,
           label,
           views: Math.max(0, Number(item.views || 0)),
-          sessions: Math.max(0, Number(item.sessions || 0)),
+          visitors: Math.max(0, Number(item.visitors || 0)),
           mono: true,
         };
       }),
@@ -2565,7 +2565,7 @@ export function OverviewPagesSection({
           key: label,
           label,
           views: Math.max(0, Number(item.views || 0)),
-          sessions: Math.max(0, Number(item.sessions || 0)),
+          visitors: Math.max(0, Number(item.visitors || 0)),
           mono: true,
         };
       }),
@@ -2579,7 +2579,7 @@ export function OverviewPagesSection({
           key: label,
           label,
           views: Math.max(0, Number(item.views || 0)),
-          sessions: Math.max(0, Number(item.sessions || 0)),
+          visitors: Math.max(0, Number(item.visitors || 0)),
           mono: true,
         };
       }),
@@ -2683,7 +2683,7 @@ export function OverviewPagesSection({
         filterValue,
         targetUrl: domain ? toAbsoluteHttpsUrl(domain) : null,
         views: Math.max(0, Number(item.views || 0)),
-        sessions: Math.max(0, Number(item.sessions || 0)),
+        visitors: Math.max(0, Number(item.visitors || 0)),
         mono: true,
       };
     });
@@ -2699,7 +2699,7 @@ export function OverviewPagesSection({
         filterValue,
         targetUrl,
         views: Math.max(0, Number(item.views || 0)),
-        sessions: Math.max(0, Number(item.sessions || 0)),
+        visitors: Math.max(0, Number(item.visitors || 0)),
         mono: true,
       };
     });
@@ -2719,8 +2719,8 @@ export function OverviewPagesSection({
         (left[sourceCardSort.key] - right[sourceCardSort.key]) * direction;
       if (primary !== 0) return primary;
       if (right.views !== left.views) return right.views - left.views;
-      if (right.sessions !== left.sessions)
-        return right.sessions - left.sessions;
+      if (right.visitors !== left.visitors)
+        return right.visitors - left.visitors;
       return left.label.localeCompare(right.label);
     });
   }, [
@@ -2831,7 +2831,7 @@ export function OverviewPagesSection({
     Record<ClientDimensionCardTab, PageCardRow[]>
   >(() => {
     const toRows = (
-      rows: Array<{ label: string; views: number; sessions: number }>,
+      rows: Array<{ label: string; views: number; visitors: number }>,
       options?: {
         mono?: boolean;
         screenSize?: boolean;
@@ -2856,7 +2856,7 @@ export function OverviewPagesSection({
           label,
           rawLabel: rawValue.trim() || rawLabel,
           views: Math.max(0, Number(item.views || 0)),
-          sessions: Math.max(0, Number(item.sessions || 0)),
+          visitors: Math.max(0, Number(item.visitors || 0)),
           mono: options?.mono ?? false,
           iconName: options?.resolveIconName?.(rawLabel) ?? null,
           filterValue,
@@ -2887,7 +2887,7 @@ export function OverviewPagesSection({
     Record<GeoDimensionCardTab, PageCardRow[]>
   >(() => {
     const toRows = (
-      rows: Array<{ label: string; views: number; sessions: number }>,
+      rows: Array<{ label: string; views: number; visitors: number }>,
       options?: {
         transformLabel?: (value: string) => string;
         resolveIconName?: (value: string) => string | null;
@@ -2908,7 +2908,7 @@ export function OverviewPagesSection({
           label,
           rawLabel: originalValue.trim() || rawLabel,
           views: Math.max(0, Number(item.views || 0)),
-          sessions: Math.max(0, Number(item.sessions || 0)),
+          visitors: Math.max(0, Number(item.visitors || 0)),
           mono: false,
           iconName: options?.resolveIconName?.(rawLabel) ?? null,
           filterValue: options?.resolveFilterValue?.(originalValue) ?? rawLabel,
@@ -2929,7 +2929,7 @@ export function OverviewPagesSection({
           label: regionData.displayLabel,
           rawLabel: value.trim() || regionData.filterValue,
           views: Math.max(0, Number(item.views || 0)),
-          sessions: Math.max(0, Number(item.sessions || 0)),
+          visitors: Math.max(0, Number(item.visitors || 0)),
           mono: false,
           iconName: null,
           filterValue: regionData.filterValue,
@@ -2951,7 +2951,7 @@ export function OverviewPagesSection({
           label: cityData.displayLabel,
           rawLabel: value.trim() || cityData.filterValue,
           views: Math.max(0, Number(item.views || 0)),
-          sessions: Math.max(0, Number(item.sessions || 0)),
+          visitors: Math.max(0, Number(item.visitors || 0)),
           mono: false,
           iconName: null,
           filterValue: cityData.filterValue,
@@ -3018,8 +3018,8 @@ export function OverviewPagesSection({
           direction;
         if (primary !== 0) return primary;
         if (right.views !== left.views) return right.views - left.views;
-        if (right.sessions !== left.sessions)
-          return right.sessions - left.sessions;
+        if (right.visitors !== left.visitors)
+          return right.visitors - left.visitors;
         return left.label.localeCompare(right.label);
       },
     );
@@ -3038,8 +3038,8 @@ export function OverviewPagesSection({
           direction;
         if (primary !== 0) return primary;
         if (right.views !== left.views) return right.views - left.views;
-        if (right.sessions !== left.sessions)
-          return right.sessions - left.sessions;
+        if (right.visitors !== left.visitors)
+          return right.visitors - left.visitors;
         return left.label.localeCompare(right.label);
       },
     );
@@ -3415,14 +3415,14 @@ export function OverviewPagesSection({
             type="button"
             className={cn(
               "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
-              pageCardSort.key === "sessions"
+              pageCardSort.key === "visitors"
                 ? "text-foreground"
                 : "text-muted-foreground",
             )}
-            onClick={() => togglePageCardSort("sessions")}
+            onClick={() => togglePageCardSort("visitors")}
           >
-            {messages.common.sessions}
-            {renderSortIndicator("sessions")}
+            {messages.common.visitors}
+            {renderSortIndicator("visitors")}
           </button>
         </div>
       </TableHead>
@@ -3499,7 +3499,7 @@ export function OverviewPagesSection({
               </TableCell>
               <TableCell className="p-0">
                 <div className="px-4 py-2 text-right">
-                  {numberFormat(locale, item.sessions)}
+                  {numberFormat(locale, item.visitors)}
                 </div>
               </TableCell>
             </AnimatedDataTableRow>
@@ -3535,14 +3535,14 @@ export function OverviewPagesSection({
             type="button"
             className={cn(
               "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
-              sourceCardSort.key === "sessions"
+              sourceCardSort.key === "visitors"
                 ? "text-foreground"
                 : "text-muted-foreground",
             )}
-            onClick={() => toggleSourceCardSort("sessions")}
+            onClick={() => toggleSourceCardSort("visitors")}
           >
-            {messages.common.sessions}
-            {renderSourceSortIndicator("sessions")}
+            {messages.common.visitors}
+            {renderSourceSortIndicator("visitors")}
           </button>
         </div>
       </TableHead>
@@ -3610,7 +3610,7 @@ export function OverviewPagesSection({
               </TableCell>
               <TableCell className="p-0">
                 <div className="px-4 py-2 text-right">
-                  {numberFormat(locale, item.sessions)}
+                  {numberFormat(locale, item.visitors)}
                 </div>
               </TableCell>
             </AnimatedDataTableRow>
@@ -3698,14 +3698,14 @@ export function OverviewPagesSection({
             type="button"
             className={cn(
               "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
-              clientDimensionCardSort.key === "sessions"
+              clientDimensionCardSort.key === "visitors"
                 ? "text-foreground"
                 : "text-muted-foreground",
             )}
-            onClick={() => toggleClientDimensionCardSort("sessions")}
+            onClick={() => toggleClientDimensionCardSort("visitors")}
           >
-            {messages.common.sessions}
-            {renderClientDimensionSortIndicator("sessions")}
+            {messages.common.visitors}
+            {renderClientDimensionSortIndicator("visitors")}
           </button>
         </div>
       </TableHead>
@@ -3766,7 +3766,7 @@ export function OverviewPagesSection({
               </TableCell>
               <TableCell className="p-0">
                 <div className="px-4 py-2 text-right">
-                  {numberFormat(locale, item.sessions)}
+                  {numberFormat(locale, item.visitors)}
                 </div>
               </TableCell>
             </AnimatedDataTableRow>
@@ -3862,14 +3862,14 @@ export function OverviewPagesSection({
             type="button"
             className={cn(
               "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
-              geoDimensionCardSort.key === "sessions"
+              geoDimensionCardSort.key === "visitors"
                 ? "text-foreground"
                 : "text-muted-foreground",
             )}
-            onClick={() => toggleGeoDimensionCardSort("sessions")}
+            onClick={() => toggleGeoDimensionCardSort("visitors")}
           >
-            {messages.common.sessions}
-            {renderGeoDimensionSortIndicator("sessions")}
+            {messages.common.visitors}
+            {renderGeoDimensionSortIndicator("visitors")}
           </button>
         </div>
       </TableHead>
@@ -4001,7 +4001,7 @@ export function OverviewPagesSection({
               </TableCell>
               <TableCell className="p-0">
                 <div className="px-4 py-2 text-right">
-                  {numberFormat(locale, item.sessions)}
+                  {numberFormat(locale, item.visitors)}
                 </div>
               </TableCell>
             </AnimatedDataTableRow>

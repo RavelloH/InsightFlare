@@ -179,6 +179,7 @@ interface DimensionRow {
   value: string;
   views: number;
   sessions: number;
+  visitors: number;
 }
 
 interface GeoTabRow {
@@ -201,6 +202,7 @@ interface ReferrerRow {
   referrer: string;
   views: number;
   sessions: number;
+  visitors: number;
 }
 
 interface VisitorRow {
@@ -618,6 +620,7 @@ function mapTabs(rows: DimensionRow[]) {
     label: row.value,
     views: row.views,
     sessions: row.sessions,
+    visitors: row.visitors,
   }));
 }
 
@@ -743,6 +746,7 @@ function mapGeoRowsToFilterOptions(
 interface DimensionAccumulator {
   views: number;
   sessions: Set<string>;
+  visitors: Set<string>;
 }
 
 interface GeoDimensionAccumulator extends DimensionAccumulator {
@@ -753,12 +757,14 @@ function addDimensionValue(
   buckets: Map<string, DimensionAccumulator>,
   rawValue: string,
   sessionId: string,
+  visitorId?: string,
 ): void {
   const value = rawValue.trim();
   if (!value) return;
-  const bucket = buckets.get(value) ?? { views: 0, sessions: new Set<string>() };
+  const bucket = buckets.get(value) ?? { views: 0, sessions: new Set<string>(), visitors: new Set<string>() };
   bucket.views += 1;
   if (sessionId) bucket.sessions.add(sessionId);
+  if (visitorId) bucket.visitors.add(visitorId);
   buckets.set(value, bucket);
 }
 
@@ -771,6 +777,7 @@ function finalizeDimensionBuckets(
       value,
       views: bucket.views,
       sessions: bucket.sessions.size,
+      visitors: bucket.visitors.size,
     }))
     .sort((left, right) => right.views - left.views || right.sessions - left.sessions || left.value.localeCompare(right.value))
     .slice(0, limit);
@@ -3426,6 +3433,7 @@ async function handleOverviewSourceTab(
       label: row.referrer,
       views: row.views,
       sessions: row.sessions,
+      visitors: row.visitors,
     })),
   });
 }
@@ -3904,11 +3912,12 @@ dimension_rollup AS (
   SELECT
     COALESCE(${selectExpr}, '') AS value,
     count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
   FROM filtered_visits
   GROUP BY value
 )
-SELECT value, views, sessions
+SELECT value, views, sessions, visitors
 FROM dimension_rollup
 ORDER BY views DESC, sessions DESC, value ASC
 LIMIT ?
@@ -3921,6 +3930,7 @@ LIMIT ?
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
   }));
 }
 
@@ -3946,6 +3956,12 @@ session_edges AS (
   SELECT
     fv.session_id AS session_id,
     (
+      SELECT COALESCE(fv2.visitor_id, '')
+      FROM filtered_visits fv2
+      WHERE fv2.session_id = fv.session_id
+      LIMIT 1
+    ) AS visitor_id,
+    (
       SELECT COALESCE(fv2.pathname, '')
       FROM filtered_visits fv2
       WHERE fv2.session_id = fv.session_id
@@ -3959,7 +3975,8 @@ session_edges AS (
 SELECT
   value,
   count(*) AS views,
-  count(*) AS sessions
+  count(*) AS sessions,
+  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
 FROM session_edges
 GROUP BY value
 ORDER BY views DESC, value ASC
@@ -3973,6 +3990,7 @@ LIMIT ?
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
   }));
 }
 
@@ -4017,6 +4035,7 @@ WITH
 ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
+    visitor_id AS visitorId,
     session_id AS sessionId,
     started_at AS startedAt,
     pathname,
@@ -4025,7 +4044,7 @@ filtered_visits AS (
   FROM visit_source
   ${filter.clause}
 )
-SELECT sessionId, startedAt, pathname, title, hostname
+SELECT visitorId, sessionId, startedAt, pathname, title, hostname
 FROM filtered_visits
 `;
   const rows = await queryD1All<Record<string, unknown>>(
@@ -4039,14 +4058,17 @@ FROM filtered_visits
   const hostname = new Map<string, DimensionAccumulator>();
   const entryBySession = new Map<string, { at: number; value: string }>();
   const exitBySession = new Map<string, { at: number; value: string }>();
+  const visitorBySession = new Map<string, string>();
 
   for (const row of rows) {
     const sessionId = String(row.sessionId ?? "");
+    const visitorId = String(row.visitorId ?? "");
     const startedAt = Number(row.startedAt ?? 0);
-    addDimensionValue(path, String(row.pathname ?? ""), sessionId);
-    addDimensionValue(title, String(row.title ?? ""), sessionId);
-    addDimensionValue(hostname, String(row.hostname ?? ""), sessionId);
+    addDimensionValue(path, String(row.pathname ?? ""), sessionId, visitorId);
+    addDimensionValue(title, String(row.title ?? ""), sessionId, visitorId);
+    addDimensionValue(hostname, String(row.hostname ?? ""), sessionId, visitorId);
     if (!sessionId) continue;
+    if (visitorId) visitorBySession.set(sessionId, visitorId);
     const pathname = String(row.pathname ?? "").trim();
     if (!pathname) continue;
     const entry = entryBySession.get(sessionId);
@@ -4062,10 +4084,10 @@ FROM filtered_visits
   const entry = new Map<string, DimensionAccumulator>();
   const exit = new Map<string, DimensionAccumulator>();
   for (const [sessionId, edge] of entryBySession.entries()) {
-    addDimensionValue(entry, edge.value, sessionId);
+    addDimensionValue(entry, edge.value, sessionId, visitorBySession.get(sessionId));
   }
   for (const [sessionId, edge] of exitBySession.entries()) {
-    addDimensionValue(exit, edge.value, sessionId);
+    addDimensionValue(exit, edge.value, sessionId, visitorBySession.get(sessionId));
   }
 
   return {
@@ -4098,7 +4120,8 @@ filtered_visits AS (
 SELECT
   COALESCE(${keyExpr}, '') AS referrer,
   count(*) AS views,
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
+  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
 FROM filtered_visits
 GROUP BY referrer
 ORDER BY views DESC, sessions DESC, referrer ASC
@@ -4112,6 +4135,7 @@ LIMIT ?
     referrer: String(row.referrer ?? ""),
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
   }));
 }
 
@@ -4386,6 +4410,7 @@ event_with_context AS (
     e.event_id,
     e.event_name,
     COALESCE(vs.session_id, '') AS session_id,
+    COALESCE(vs.visitor_id, '') AS visitor_id,
     COALESCE(vs.country, '') AS country,
     COALESCE(vs.region, '') AS region,
     COALESCE(vs.region_code, '') AS region_code,
@@ -4416,11 +4441,12 @@ event_rollup AS (
   SELECT
     COALESCE(event_name, '') AS value,
     count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
   FROM filtered_events
   GROUP BY value
 )
-SELECT value, views, sessions
+SELECT value, views, sessions, visitors
 FROM event_rollup
 WHERE TRIM(value) != ''
 ORDER BY views DESC, sessions DESC, value ASC
@@ -4434,6 +4460,7 @@ LIMIT ?
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
   }));
 }
 

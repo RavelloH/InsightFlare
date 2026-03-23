@@ -3054,11 +3054,11 @@ function collectPageDataAndTabs(
 ): {
   data: Array<{ pathname: string; views: number; sessions: number }>;
   tabs: {
-    path: Array<{ label: string; views: number; sessions: number }>;
-    title: Array<{ label: string; views: number; sessions: number }>;
-    hostname: Array<{ label: string; views: number; sessions: number }>;
-    entry: Array<{ label: string; views: number; sessions: number }>;
-    exit: Array<{ label: string; views: number; sessions: number }>;
+    path: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+    title: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+    hostname: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+    entry: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+    exit: Array<{ label: string; views: number; sessions: number; visitors: number }>;
   };
 } {
   const pathRows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.pathname);
@@ -3074,11 +3074,11 @@ function collectPageDataAndTabs(
       sessions: row.sessions,
     })),
     tabs: {
-      path: pathRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-      title: titleRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-      hostname: hostRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-      entry: entryRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-      exit: exitRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+      path: pathRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+      title: titleRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+      hostname: hostRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+      entry: entryRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+      exit: exitRows.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
     },
   };
 }
@@ -3091,7 +3091,7 @@ function collectReferrerRows(
     includeFullUrl?: boolean;
     directValue?: string;
   },
-): Array<{ referrer: string; views: number; sessions: number }> {
+): Array<{ referrer: string; views: number; sessions: number; visitors: number }> {
   const includeFullUrl = options?.includeFullUrl ?? false;
   const directValue = options?.directValue ?? "(direct)";
   const rows = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => {
@@ -3104,6 +3104,7 @@ function collectReferrerRows(
     referrer: row.label,
     views: row.views,
     sessions: row.sessions,
+    visitors: row.visitors,
   }));
 }
 
@@ -3112,11 +3113,11 @@ function collectClientTabs(
   filtered: DemoFilteredFacts,
   limit: number,
 ): {
-  browser: Array<{ label: string; views: number; sessions: number }>;
-  osVersion: Array<{ label: string; views: number; sessions: number }>;
-  deviceType: Array<{ label: string; views: number; sessions: number }>;
-  language: Array<{ label: string; views: number; sessions: number }>;
-  screenSize: Array<{ label: string; views: number; sessions: number }>;
+  browser: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+  osVersion: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+  deviceType: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+  language: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+  screenSize: Array<{ label: string; views: number; sessions: number; visitors: number }>;
 } {
   const browser = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.browser);
   const osVersion = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.osVersion);
@@ -3124,11 +3125,11 @@ function collectClientTabs(
   const language = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.language);
   const screenSize = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.screenSize);
   return {
-    browser: browser.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-    osVersion: osVersion.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-    deviceType: deviceType.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-    language: language.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-    screenSize: screenSize.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    browser: browser.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+    osVersion: osVersion.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+    deviceType: deviceType.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+    language: language.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+    screenSize: screenSize.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
   };
 }
 
@@ -3137,12 +3138,12 @@ function collectGeoTabs(
   filtered: DemoFilteredFacts,
   limit: number,
 ): {
-  country: Array<{ label: string; views: number; sessions: number }>;
-  region: Array<{ label: string; views: number; sessions: number }>;
-  city: Array<{ label: string; views: number; sessions: number }>;
-  continent: Array<{ label: string; views: number; sessions: number }>;
-  timezone: Array<{ label: string; views: number; sessions: number }>;
-  organization: Array<{ label: string; views: number; sessions: number }>;
+  country: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+  region: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+  city: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+  continent: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+  timezone: Array<{ label: string; views: number; sessions: number; visitors: number }>;
+  organization: Array<{ label: string; views: number; sessions: number; visitors: number }>;
 } {
   const country = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.country);
   const region = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.region);
@@ -3151,12 +3152,12 @@ function collectGeoTabs(
   const timezone = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.timezone);
   const organization = aggregateDimensionRowsFromVisits(dataset, filtered.visits, limit, (visit) => visit.organization);
   return {
-    country: country.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-    region: region.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-    city: city.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-    continent: continent.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-    timezone: timezone.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
-    organization: organization.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions })),
+    country: country.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+    region: region.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+    city: city.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+    continent: continent.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+    timezone: timezone.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
+    organization: organization.map((row) => ({ label: row.label, views: row.views, sessions: row.sessions, visitors: row.visitors })),
   };
 }
 
@@ -4864,6 +4865,7 @@ function generateDemoOverviewSourceTab(
       label: String(item.referrer ?? ""),
       views: Number(item.views ?? 0),
       sessions: Number(item.sessions ?? 0),
+      visitors: Number(item.visitors ?? 0),
     })),
   };
 }

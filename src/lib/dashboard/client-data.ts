@@ -39,6 +39,7 @@ export type OverviewGeoTabRows = Array<{
   label: string;
   views: number;
   sessions: number;
+  visitors: number;
 }>;
 
 function emptyOverview(): OverviewData {
@@ -469,6 +470,7 @@ export async function fetchOverviewGeoDimensionTab(
                 String((row as { value?: unknown }).value ?? "").trim(),
         views: Number((row as { views?: unknown }).views ?? 0),
         sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
+        visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
       }))
     : [];
 }

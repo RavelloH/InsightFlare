@@ -30,6 +30,7 @@ interface RealtimeSummaryCardsSectionProps {
 interface SessionBoundary {
   entryPath: string;
   exitPath: string;
+  visitorId: string;
 }
 
 function normalizeRealtimeFilterValue(
@@ -99,6 +100,7 @@ function buildSessionBoundaries(
       {
         entryPath: value.entryVisit.pathname.trim() || "/",
         exitPath: value.exitVisit.pathname.trim() || "/",
+        visitorId: value.entryVisit.visitorId.trim(),
       },
     ]),
   );
@@ -319,6 +321,7 @@ function aggregateVisitRows(
     label: string;
     views: number;
     sessionIds: Set<string>;
+    visitorIds: Set<string>;
   }>();
 
   for (const visit of visits) {
@@ -328,6 +331,7 @@ function aggregateVisitRows(
       label: value,
       views: 0,
       sessionIds: new Set<string>(),
+      visitorIds: new Set<string>(),
     };
 
     bucket.label = options.resolveLabel
@@ -335,6 +339,8 @@ function aggregateVisitRows(
       : (value || options.emptyLabel);
     bucket.views += 1;
     bucket.sessionIds.add(sessionKeyOf(visit));
+    const visitorId = visit.visitorId.trim();
+    if (visitorId) bucket.visitorIds.add(visitorId);
     buckets.set(key, bucket);
   }
 
@@ -343,6 +349,7 @@ function aggregateVisitRows(
       label: bucket.label || key,
       views: bucket.views,
       sessions: bucket.sessionIds.size,
+      visitors: bucket.visitorIds.size,
     }))
     .sort((left, right) => {
       if (right.views !== left.views) return right.views - left.views;
@@ -365,6 +372,7 @@ function aggregateSessionBoundaryRows(
     label: string;
     views: number;
     sessionIds: Set<string>;
+    visitorIds: Set<string>;
   }>();
 
   for (const sessionKey of sessionKeys) {
@@ -377,6 +385,7 @@ function aggregateSessionBoundaryRows(
       label: value,
       views: 0,
       sessionIds: new Set<string>(),
+      visitorIds: new Set<string>(),
     };
 
     bucket.label = options.resolveLabel
@@ -384,6 +393,8 @@ function aggregateSessionBoundaryRows(
       : (value || options.emptyLabel);
     bucket.views += 1;
     bucket.sessionIds.add(sessionKey);
+    const visitorId = boundary.visitorId;
+    if (visitorId) bucket.visitorIds.add(visitorId);
     buckets.set(key, bucket);
   }
 
@@ -392,6 +403,7 @@ function aggregateSessionBoundaryRows(
       label: bucket.label,
       views: bucket.views,
       sessions: bucket.sessionIds.size,
+      visitors: bucket.visitorIds.size,
     }))
     .sort((left, right) => {
       if (right.views !== left.views) return right.views - left.views;

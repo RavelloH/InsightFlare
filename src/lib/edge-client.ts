@@ -442,6 +442,7 @@ export interface OverviewTabData {
     label: string;
     views: number;
     sessions: number;
+    visitors: number;
   }>;
 }
 
