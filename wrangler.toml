@@ -51,7 +51,7 @@ id = "YOUR_KV_ID" # 改成你自己的 KV 命名空间 ID
 # environment above, which intentionally leaves R2 unbound.
 
 [env.ravelloh]
-name = "ravelloh"
+name = "insightflare-demo"
 
 [env.ravelloh.vars]
 SESSION_WINDOW_MINUTES = "30"
