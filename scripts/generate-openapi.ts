@@ -5,7 +5,10 @@ import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import YAML from "yaml";
 
+import { createScriptLogger } from "./shared/logger";
+
 const ROOT = resolve(import.meta.dirname, "..");
+const rlog = createScriptLogger();
 
 function getAppVersion(): string {
   const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
@@ -3646,8 +3649,8 @@ function main() {
     // Files are valid even if formatting fails.
   }
 
-  console.log(`Generated ${yamlPath}`);
-  console.log(`Generated ${jsonPath}`);
+  rlog.success(`Generated ${yamlPath}`);
+  rlog.success(`Generated ${jsonPath}`);
 }
 
 main();

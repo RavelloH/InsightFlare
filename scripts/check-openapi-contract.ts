@@ -1,11 +1,17 @@
-#!/usr/bin/env node
+#!/usr/bin/env tsx
+/* eslint-disable @typescript-eslint/ban-ts-comment -- legacy contract walker migrated from JS; keep runtime logic stable while script structure is unified. */
+// @ts-nocheck
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import process from "node:process";
+
+import { createScriptLogger } from "./shared/logger";
 
 const root = resolve(import.meta.dirname, "..");
 const openapiPath = resolve(root, "docs", "openapi.json");
 const skillsPath = resolve(root, "docs", "skills.json");
+const rlog = createScriptLogger();
 
 const openapi = JSON.parse(readFileSync(openapiPath, "utf8"));
 const skills = JSON.parse(readFileSync(skillsPath, "utf8"));
@@ -456,14 +462,14 @@ if (skills.endpoints !== undefined) {
 }
 
 if (issues.length > 0) {
-  console.error("OpenAPI contract check failed:");
+  rlog.error("OpenAPI contract check failed:");
   for (const issue of issues) {
-    console.error(`- ${issue}`);
+    rlog.error(`- ${issue}`);
   }
   process.exit(1);
 }
 
-console.log(
+rlog.success(
   `OpenAPI contract check passed (${operations.length} operations, ${
     Object.keys(openapi.components?.schemas ?? {}).length
   } schemas).`,

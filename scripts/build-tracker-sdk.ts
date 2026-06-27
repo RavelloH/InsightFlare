@@ -6,23 +6,18 @@
  * Placeholder strings (__IF_*__) survive minification and are replaced at serve time.
  */
 import * as esbuild from "esbuild";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { writeFileSync } from "fs";
 import { dirname, resolve } from "path";
-import Rlog from "rlog-js";
 import { fileURLToPath } from "url";
+
+import { createScriptLogger } from "./shared/logger";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const entry = resolve(root, "src/tracker/sdk.ts");
 
-const logsDir = resolve(root, "logs");
-if (!existsSync(logsDir)) {
-  mkdirSync(logsDir, { recursive: true });
-}
-
-const rlog = new Rlog({
-  logFilePath: resolve(logsDir, "build-sdk.log"),
-  enableColorfulOutput: true,
+const rlog = createScriptLogger({
+  logFile: "build-sdk.log",
 });
 
 const commonOpts: esbuild.BuildOptions = {

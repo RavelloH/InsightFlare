@@ -2,21 +2,14 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import Rlog from "rlog-js";
-
+import { createScriptLogger } from "./shared/logger";
 import { checkEnvironmentVariables } from "./check-env";
 import { applyWranglerEnvOverrides } from "./wrangler-env-overrides";
 
 const startedAt = Date.now();
 
-const logsDir = path.join(process.cwd(), "logs");
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
-}
-
-const rlog = new Rlog({
-  logFilePath: path.join(logsDir, "prebuild.log"),
-  enableColorfulOutput: true,
+const rlog = createScriptLogger({
+  logFile: "prebuild.log",
 });
 
 function log(

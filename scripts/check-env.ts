@@ -3,9 +3,9 @@
 
 import { randomBytes } from "node:crypto";
 
-import Rlog from "rlog-js";
+import { createScriptLogger } from "./shared/logger";
 
-const rlog = new Rlog();
+const rlog = createScriptLogger();
 
 // 计算香农熵
 function calculateShannonEntropy(str: string): number {

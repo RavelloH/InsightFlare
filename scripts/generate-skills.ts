@@ -4,8 +4,11 @@ import { execSync } from "child_process";
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
+import { createScriptLogger } from "./shared/logger";
+
 const ROOT = resolve(import.meta.dirname, "..");
 const OUTPUT_PATH = resolve(ROOT, "docs/skills.json");
+const rlog = createScriptLogger();
 
 function getAppVersion(): string {
   const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
@@ -120,7 +123,7 @@ function generate() {
   } catch {
     // File remains valid JSON if formatting fails.
   }
-  console.log(`Generated ${OUTPUT_PATH}`);
+  rlog.success(`Generated ${OUTPUT_PATH}`);
 }
 
 generate();
