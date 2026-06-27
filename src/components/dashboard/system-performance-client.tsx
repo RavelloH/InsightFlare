@@ -216,15 +216,24 @@ function SystemMetricCell({
           {label}
         </p>
       </div>
-      <p
-        className={cn(
-          "mt-3 min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground tabular-nums",
-          tone === "warning" && "text-destructive",
-          tone === "good" && "text-primary",
-        )}
+      <AutoTransition
+        transitionKey={value}
+        initial={false}
+        duration={0.2}
+        type="fade"
+        presenceMode="wait"
       >
-        {value}
-      </p>
+        <p
+          key={value}
+          className={cn(
+            "mt-3 min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground tabular-nums",
+            tone === "warning" && "text-destructive",
+            tone === "good" && "text-primary",
+          )}
+        >
+          {value}
+        </p>
+      </AutoTransition>
       <p className="mt-3 min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground">
         {detail}
       </p>
@@ -649,15 +658,24 @@ function DoDiagnosticCell({
       <p className="min-w-0 truncate text-[11px] uppercase text-muted-foreground">
         {label}
       </p>
-      <p
-        className={cn(
-          "mt-2 min-w-0 truncate font-mono text-xl leading-7 font-semibold tabular-nums",
-          tone === "warning" && "text-destructive",
-          tone === "good" && "text-primary",
-        )}
+      <AutoTransition
+        transitionKey={value}
+        initial={false}
+        duration={0.2}
+        type="fade"
+        presenceMode="wait"
       >
-        {value}
-      </p>
+        <p
+          key={value}
+          className={cn(
+            "mt-2 min-w-0 truncate font-mono text-xl leading-7 font-semibold tabular-nums",
+            tone === "warning" && "text-destructive",
+            tone === "good" && "text-primary",
+          )}
+        >
+          {value}
+        </p>
+      </AutoTransition>
       {detail ? (
         <p className="mt-2 min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground">
           {detail}
@@ -679,14 +697,23 @@ function DoDiagnosticKv({
   return (
     <div className="flex items-center justify-between gap-3 border bg-card px-3 py-2">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span
-        className={cn(
-          "font-mono text-xs tabular-nums",
-          tone === "warning" && "text-destructive",
-        )}
+      <AutoTransition
+        transitionKey={value}
+        initial={false}
+        duration={0.2}
+        type="fade"
+        presenceMode="wait"
       >
-        {value}
-      </span>
+        <span
+          key={value}
+          className={cn(
+            "font-mono text-xs tabular-nums",
+            tone === "warning" && "text-destructive",
+          )}
+        >
+          {value}
+        </span>
+      </AutoTransition>
     </div>
   );
 }
@@ -1069,29 +1096,62 @@ export function SystemPerformanceClient({
             <div className="grid grid-cols-3 gap-px overflow-hidden border bg-border/70">
               <div className="bg-card p-3">
                 <div className="text-xs text-muted-foreground">{t.open}</div>
-                <div className="mt-2 font-mono text-xl font-semibold tabular-nums">
-                  {openVisits
-                    ? formatMetricNumber(locale, openVisits.total)
-                    : "--"}
-                </div>
+                <AutoTransition
+                  transitionKey={openVisits ? "data" : "empty"}
+                  initial={false}
+                  duration={0.2}
+                  type="fade"
+                  presenceMode="wait"
+                >
+                  <div
+                    key={openVisits ? "data" : "empty"}
+                    className="mt-2 font-mono text-xl font-semibold tabular-nums"
+                  >
+                    {openVisits
+                      ? formatMetricNumber(locale, openVisits.total)
+                      : "--"}
+                  </div>
+                </AutoTransition>
               </div>
               <div className="bg-card p-3">
                 <div className="text-xs text-muted-foreground">{t.stale}</div>
-                <div className="mt-2 font-mono text-xl font-semibold tabular-nums">
-                  {openVisits
-                    ? formatMetricNumber(locale, openVisits.stale)
-                    : "--"}
-                </div>
+                <AutoTransition
+                  transitionKey={openVisits ? "data" : "empty"}
+                  initial={false}
+                  duration={0.2}
+                  type="fade"
+                  presenceMode="wait"
+                >
+                  <div
+                    key={openVisits ? "data" : "empty"}
+                    className="mt-2 font-mono text-xl font-semibold tabular-nums"
+                  >
+                    {openVisits
+                      ? formatMetricNumber(locale, openVisits.stale)
+                      : "--"}
+                  </div>
+                </AutoTransition>
               </div>
               <div className="bg-card p-3">
                 <div className="text-xs text-muted-foreground">
                   {t.timedOut}
                 </div>
-                <div className="mt-2 font-mono text-xl font-semibold tabular-nums">
-                  {openVisits
-                    ? formatMetricNumber(locale, openVisits.timedOut)
-                    : "--"}
-                </div>
+                <AutoTransition
+                  transitionKey={openVisits ? "data" : "empty"}
+                  initial={false}
+                  duration={0.2}
+                  type="fade"
+                  presenceMode="wait"
+                >
+                  <div
+                    key={openVisits ? "data" : "empty"}
+                    className="mt-2 font-mono text-xl font-semibold tabular-nums"
+                  >
+                    {openVisits
+                      ? formatMetricNumber(locale, openVisits.timedOut)
+                      : "--"}
+                  </div>
+                </AutoTransition>
               </div>
             </div>
             <div className="space-y-2 text-sm">
@@ -1139,19 +1199,46 @@ export function SystemPerformanceClient({
                 <div className="text-xs text-muted-foreground">
                   {t.trustedSamples}
                 </div>
-                <div className="mt-2 font-mono text-xl font-semibold tabular-nums">
-                  {summary
-                    ? formatMetricNumber(locale, summary.trustedLatencySamples)
-                    : "--"}
-                </div>
+                <AutoTransition
+                  transitionKey={summary ? "data" : "empty"}
+                  initial={false}
+                  duration={0.2}
+                  type="fade"
+                  presenceMode="wait"
+                >
+                  <div
+                    key={summary ? "data" : "empty"}
+                    className="mt-2 font-mono text-xl font-semibold tabular-nums"
+                  >
+                    {summary
+                      ? formatMetricNumber(
+                          locale,
+                          summary.trustedLatencySamples,
+                        )
+                      : "--"}
+                  </div>
+                </AutoTransition>
               </div>
               <div className="bg-card p-3">
                 <div className="text-xs text-muted-foreground">
                   {t.avgLatency}
                 </div>
-                <div className="mt-2 font-mono text-xl font-semibold tabular-nums">
-                  {summary ? formatLatency(locale, summary.avgLatencyMs) : "--"}
-                </div>
+                <AutoTransition
+                  transitionKey={summary ? "data" : "empty"}
+                  initial={false}
+                  duration={0.2}
+                  type="fade"
+                  presenceMode="wait"
+                >
+                  <div
+                    key={summary ? "data" : "empty"}
+                    className="mt-2 font-mono text-xl font-semibold tabular-nums"
+                  >
+                    {summary
+                      ? formatLatency(locale, summary.avgLatencyMs)
+                      : "--"}
+                  </div>
+                </AutoTransition>
               </div>
             </div>
             <div className="space-y-2 text-sm">

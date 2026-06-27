@@ -192,16 +192,25 @@ function HealthCell({
           {label}
         </p>
       </div>
-      <p
-        className={cn(
-          "mt-3 min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground tabular-nums",
-          tone === "good" && "text-primary",
-          tone === "warning" && "text-amber-500",
-          tone === "danger" && "text-destructive",
-        )}
+      <AutoTransition
+        transitionKey={value}
+        initial={false}
+        duration={0.2}
+        type="fade"
+        presenceMode="wait"
       >
-        {value}
-      </p>
+        <p
+          key={value}
+          className={cn(
+            "mt-3 min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground tabular-nums",
+            tone === "good" && "text-primary",
+            tone === "warning" && "text-amber-500",
+            tone === "danger" && "text-destructive",
+          )}
+        >
+          {value}
+        </p>
+      </AutoTransition>
       <p className="mt-3 min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground">
         {detail}
       </p>
@@ -898,17 +907,25 @@ export function ScheduledTasksClient({
               disabled={replacingRows}
               onClick={() => setRefreshNonce((value) => value + 1)}
             >
-              {replacingRows ? (
-                <>
-                  <Spinner className="size-4" />
-                  {messages.common.loading}
-                </>
-              ) : (
-                <>
-                  <RiRefreshLine className="size-4" />
-                  {t.refresh}
-                </>
-              )}
+              <AutoTransition className="inline-flex items-center gap-2">
+                {replacingRows ? (
+                  <span
+                    key="loading"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <Spinner className="size-4" />
+                    {messages.common.loading}
+                  </span>
+                ) : (
+                  <span
+                    key="refresh"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <RiRefreshLine className="size-4" />
+                    {t.refresh}
+                  </span>
+                )}
+              </AutoTransition>
             </Button>
           </>
         }
