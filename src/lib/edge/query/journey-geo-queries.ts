@@ -67,6 +67,7 @@ export async function queryGeoPointsFromD1(
 ): Promise<GeoPointAggregate> {
   const filter = buildVisitFilterSql(filters);
   const parsedGeo = parseGeoFilterValue(filters.geo);
+  const coordinateClause = filter.clause ? "AND" : "WHERE";
   const pointsSql = `
 WITH
 ${buildVisitSourceCte()},
@@ -82,7 +83,7 @@ filtered_visits AS (
     COUNT(*) AS point_count
   FROM visit_source
   ${filter.clause}
-  WHERE
+  ${coordinateClause}
     latitude IS NOT NULL
     AND longitude IS NOT NULL
     AND ABS(latitude) <= 90

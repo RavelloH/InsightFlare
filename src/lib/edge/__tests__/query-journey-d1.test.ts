@@ -640,6 +640,10 @@ describe("edge journey geo D1 queries", () => {
       cityCounts: [],
     });
     expect(calls[0].bindings).toEqual([...visitBindings(window), "it", 25]);
+    expect(calls[0].sql).not.toContain(
+      "WHERE LOWER(TRIM(COALESCE(country, ''))) = ?\n  WHERE",
+    );
+    expect(calls[0].sql).toContain("AND\n    latitude IS NOT NULL");
     expect(calls[1].sql).toContain("GROUP BY country");
   });
 
