@@ -1,6 +1,6 @@
 {
   "api": "InsightFlare Analytics API",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Privacy-focused web analytics platform.",
   "baseUrl": "https://insight.ravelloh.com",
   "openapiUrl": "/.well-known/openapi.json",

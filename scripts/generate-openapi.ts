@@ -1,9 +1,16 @@
 #!/usr/bin/env tsx
 
 import { execSync } from "child_process";
-import { writeFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import YAML from "yaml";
+
+const ROOT = resolve(import.meta.dirname, "..");
+
+function getAppVersion(): string {
+  const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
+  return pkg.version;
+}
 
 type HttpMethod = "get" | "post" | "patch" | "delete";
 
@@ -2914,7 +2921,7 @@ function responseExampleFor(schemaName: string | null, operationId: string) {
   const examples: Record<string, unknown> = {
     HealthResponse: { status: "healthy", timestamp: sampleGeneratedAt },
     RootDiscoveryResponse: success({
-      version: "1.0.0",
+      version: getAppVersion(),
       service: "InsightFlare Analytics API",
       links: {
         self: "/api/v1",
@@ -2942,7 +2949,7 @@ function responseExampleFor(schemaName: string | null, operationId: string) {
       ],
     }),
     CapabilitiesResponse: success({
-      apiVersion: "1.0.0",
+      apiVersion: getAppVersion(),
       features: {
         sites: true,
         tracking: true,
@@ -3426,7 +3433,7 @@ function buildSpec(): OpenAPISpec {
       title: "InsightFlare API",
       description:
         "Privacy-focused web analytics API. Authenticated endpoints require an API key passed as a Bearer token in the Authorization header. All timestamps in query parameters and response objects are ISO 8601 date-time strings unless the field name explicitly ends with `Ms`. Fields ending with `Ms` represent millisecond values, such as durations or Unix timestamps depending on context. Analytics ranges use [from, to) semantics. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time. The default timeZone is UTC.\n\nThis OpenAPI document describes the behavior of the InsightFlare origin API. Depending on deployment configuration, upstream infrastructure, proxies, gateways, or edge providers may return additional HTTP responses before requests reach the API origin, such as 429 Too Many Requests. These responses are outside the standard API error envelope and are not part of the stable API contract.",
-      version: "1.0.0",
+      version: getAppVersion(),
       contact: {
         name: "InsightFlare",
         url: "https://github.com/ravelloh/InsightFlare",

@@ -1,16 +1,21 @@
 #!/usr/bin/env tsx
 
 import { execSync } from "child_process";
-import { writeFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const OUTPUT_PATH = resolve(ROOT, "docs/skills.json");
 
+function getAppVersion(): string {
+  const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
+  return pkg.version;
+}
+
 function generate() {
   const manifest = {
     api: "InsightFlare Analytics API",
-    version: "1.0.0",
+    version: getAppVersion(),
     description: "Privacy-focused web analytics platform.",
     baseUrl: "https://insight.ravelloh.com",
     openapiUrl: "/.well-known/openapi.json",
