@@ -51,6 +51,7 @@ describe("dashboard query-state helpers", () => {
       expect(finestIntervalForRange(0, 45 * MINUTE_MS)).toBe("minute");
       expect(finestIntervalForRange(0, 2 * HOUR_MS)).toBe("hour");
       expect(finestIntervalForRange(0, 30 * DAY_MS)).toBe("day");
+      expect(finestIntervalForRange(0, 90 * DAY_MS + 12 * HOUR_MS)).toBe("day");
       expect(finestIntervalForRange(0, 91 * DAY_MS)).toBe("month");
 
       expect(clampIntervalForRange(undefined, 0, 45 * MINUTE_MS)).toBe(
@@ -137,7 +138,7 @@ describe("dashboard query-state helpers", () => {
       expect(resolveTimeWindow("90d", now, { timeZone: "UTC" })).toMatchObject({
         from: Date.UTC(2026, 4, 26) - 90 * DAY_MS,
         to: now,
-        interval: "month",
+        interval: "day",
       });
       expect(resolveTimeWindow("6m", now, { timeZone: "UTC" })).toMatchObject({
         from: Date.UTC(2025, 10, 1),

@@ -109,7 +109,6 @@ const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 const YEAR_MS = 366 * DAY_MS;
-const NINETY_DAYS_MS = 90 * DAY_MS;
 
 function normalizeFilterValue(
   value: string | null | undefined,
@@ -298,10 +297,10 @@ export function allowedIntervalsForRange(
 ): DashboardInterval[] {
   const span = spanMs(from, to);
   const allowed = INTERVAL_ORDER.filter((interval) => {
-    if (interval === "minute") return span <= HOUR_MS;
-    if (interval === "hour") return span <= 7 * DAY_MS;
-    if (interval === "day") return span <= 90 * DAY_MS;
-    if (interval === "week") return span <= YEAR_MS;
+    if (interval === "minute") return span < HOUR_MS + MINUTE_MS;
+    if (interval === "hour") return span < 8 * DAY_MS;
+    if (interval === "day") return span < 91 * DAY_MS;
+    if (interval === "week") return span < YEAR_MS + DAY_MS;
     return true;
   });
 
@@ -315,7 +314,7 @@ export function finestIntervalForRange(
   const span = spanMs(from, to);
   if (span <= HOUR_MS) return "minute";
   if (span <= DAY_MS) return "hour";
-  if (span <= NINETY_DAYS_MS) return "day";
+  if (span < 91 * DAY_MS) return "day";
   return "month";
 }
 
