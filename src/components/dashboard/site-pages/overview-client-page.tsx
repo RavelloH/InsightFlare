@@ -282,14 +282,23 @@ function normalizeTrendData(
 }
 
 function metricCellBorderClasses(index: number): string {
+  // Mobile (1-col): top border for all except first
   const mobileHasTop = index >= 1;
-  const wideHasLeft = index % 3 !== 0;
-  const wideHasTop = index >= 3;
+  // md (2-col): left border on odd indices, top border for row 2+
+  const mdHasLeft = index % 2 !== 0;
+  const mdHasTop = index >= 2;
+  // lg (3-col): left border on col 2/3, top border for row 2+
+  const lgHasLeft = index % 3 !== 0;
+  const lgHasTop = index >= 3;
 
   return cn(
     mobileHasTop ? "border-t" : "",
-    wideHasLeft ? "sm:border-l" : "sm:border-l-0",
-    wideHasTop ? "sm:border-t" : "sm:border-t-0",
+    // md (2-col): reset mobile top for row 2+, apply left + top
+    mdHasTop ? "md:border-t" : "md:border-t-0",
+    mdHasLeft ? "md:border-l" : "md:border-l-0",
+    // lg (3-col): override md borders
+    lgHasTop ? "lg:border-t" : "lg:border-t-0",
+    lgHasLeft ? "lg:border-l" : "lg:border-l-0",
   );
 }
 
@@ -4499,7 +4508,7 @@ export function OverviewMetricsSection({
   return (
     <Card className="gap-0 py-0">
       <CardContent className="px-0">
-        <section className="grid grid-cols-1 sm:grid-cols-3">
+        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
           {metrics.map((item, index) => {
             const hasDelta =
               typeof item.delta === "number" && Number.isFinite(item.delta);
