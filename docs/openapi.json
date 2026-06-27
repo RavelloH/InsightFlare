@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "InsightFlare API",
-    "description": "Privacy-focused web analytics API. Authenticated endpoints require an API key passed as a Bearer token in the Authorization header. All API times are ISO 8601 strings and analytics ranges use [from, to) semantics. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time. The default timeZone is UTC.",
+    "description": "Privacy-focused web analytics API. Authenticated endpoints require an API key passed as a Bearer token in the Authorization header. All timestamps in query parameters and response objects are ISO 8601 date-time strings unless the field name explicitly ends with `Ms`. Fields ending with `Ms` represent millisecond values, such as durations or Unix timestamps depending on context. Analytics ranges use [from, to) semantics. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time. The default timeZone is UTC.\n\nThis OpenAPI document describes the behavior of the InsightFlare origin API. Depending on deployment configuration, upstream infrastructure, proxies, gateways, or edge providers may return additional HTTP responses before requests reach the API origin, such as 429 Too Many Requests. These responses are outside the standard API error envelope and are not part of the stable API contract.",
     "version": "1.0.0",
     "contact": {
       "name": "InsightFlare",
@@ -13,6 +13,11 @@
       "url": "https://github.com/ravelloh/InsightFlare/blob/main/LICENSE"
     }
   },
+  "externalDocs": {
+    "description": "InsightFlare API documentation",
+    "url": "https://insight.ravelloh.com/docs"
+  },
+  "x-possible-upstream-responses": [429],
   "servers": [
     {
       "url": "https://insight.ravelloh.com",
@@ -120,7 +125,8 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "x-required-scopes": []
       }
     },
     "/collect": {
@@ -202,7 +208,8 @@
           "413": {
             "$ref": "#/components/responses/PayloadTooLarge"
           }
-        }
+        },
+        "x-required-scopes": []
       }
     },
     "/api/v1": {
@@ -252,7 +259,8 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "x-required-scopes": []
       }
     },
     "/api/v1/token": {
@@ -307,7 +315,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "x-required-scopes": []
       }
     },
     "/api/v1/token/check": {
@@ -376,7 +385,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "x-required-scopes": []
       }
     },
     "/api/v1/capabilities": {
@@ -440,7 +450,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "x-required-scopes": []
       }
     },
     "/api/v1/team": {
@@ -484,7 +495,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "x-required-scopes": ["site:read"]
       }
     },
     "/api/v1/team/usage": {
@@ -521,7 +533,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "x-required-scopes": ["site:read"]
       }
     },
     "/api/v1/team/analytics/overview": {
@@ -532,73 +545,22 @@
         "tags": ["Analytics"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
-            "name": "metrics",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "views",
-                  "sessions",
-                  "visitors",
-                  "bounces",
-                  "bounceRate",
-                  "avgDurationMs",
-                  "viewsPerSession",
-                  "events"
-                ]
-              }
-            },
-            "description": "Comma-separated metrics to include."
+            "$ref": "#/components/parameters/MetricsQueryParam"
           }
         ],
         "responses": {
@@ -647,7 +609,8 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/team/analytics/timeseries": {
@@ -658,83 +621,25 @@
         "tags": ["Analytics"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "interval",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["minute", "hour", "day", "week", "month"],
-              "default": "day"
-            },
-            "description": "Time bucket granularity."
+            "$ref": "#/components/parameters/IntervalQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
-            "name": "metrics",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "views",
-                  "sessions",
-                  "visitors",
-                  "bounces",
-                  "bounceRate",
-                  "avgDurationMs",
-                  "viewsPerSession",
-                  "events"
-                ]
-              }
-            },
-            "description": "Comma-separated metrics to include."
+            "$ref": "#/components/parameters/MetricsQueryParam"
           }
         ],
         "responses": {
@@ -784,7 +689,8 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/team/analytics/sites": {
@@ -795,63 +701,19 @@
         "tags": ["Analytics"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "metrics",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "views",
-                  "sessions",
-                  "visitors",
-                  "bounces",
-                  "bounceRate",
-                  "avgDurationMs",
-                  "viewsPerSession",
-                  "events"
-                ]
-              }
-            },
-            "description": "Comma-separated metrics to include."
+            "$ref": "#/components/parameters/MetricsQueryParam"
           }
         ],
         "responses": {
@@ -906,13 +768,14 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/team/analytics/breakdowns/{dimension}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/dimension"
+          "$ref": "#/components/parameters/DimensionPathParam"
         }
       ],
       "get": {
@@ -922,73 +785,22 @@
         "tags": ["Analytics"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
-            "name": "metrics",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "views",
-                  "sessions",
-                  "visitors",
-                  "bounces",
-                  "bounceRate",
-                  "avgDurationMs",
-                  "viewsPerSession",
-                  "events"
-                ]
-              }
-            },
-            "description": "Comma-separated metrics to include."
+            "$ref": "#/components/parameters/MetricsQueryParam"
           },
           {
             "name": "limit",
@@ -1051,7 +863,8 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites": {
@@ -1113,7 +926,8 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "x-required-scopes": ["site:read"]
       },
       "post": {
         "operationId": "createSite",
@@ -1211,13 +1025,14 @@
           "409": {
             "$ref": "#/components/responses/Conflict"
           }
-        }
+        },
+        "x-required-scopes": ["site:write"]
       }
     },
     "/api/v1/sites/{siteId}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -1279,7 +1094,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site:read"]
       },
       "patch": {
         "operationId": "updateSite",
@@ -1368,7 +1184,8 @@
           "409": {
             "$ref": "#/components/responses/Conflict"
           }
-        }
+        },
+        "x-required-scopes": ["site:write"]
       },
       "delete": {
         "operationId": "deleteSite",
@@ -1388,13 +1205,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site:write"]
       }
     },
     "/api/v1/sites/{siteId}/tracking": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -1445,7 +1263,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site_config:read"]
       },
       "patch": {
         "operationId": "updateTrackingSettings",
@@ -1521,13 +1340,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site_config:write"]
       }
     },
     "/api/v1/sites/{siteId}/tracking/script": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -1571,13 +1391,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site_config:read"]
       }
     },
     "/api/v1/sites/{siteId}/privacy": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -1623,7 +1444,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site_config:read"]
       },
       "patch": {
         "operationId": "updatePrivacySettings",
@@ -1690,13 +1512,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site_config:write"]
       }
     },
     "/api/v1/sites/{siteId}/sharing": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -1739,7 +1562,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site_config:read"]
       },
       "patch": {
         "operationId": "updateSharingSettings",
@@ -1806,13 +1630,14 @@
           "409": {
             "$ref": "#/components/responses/Conflict"
           }
-        }
+        },
+        "x-required-scopes": ["site_config:write"]
       }
     },
     "/api/v1/sites/{siteId}/analytics/schema": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -1835,28 +1660,48 @@
                       "data": {
                         "metrics": [
                           {
+                            "id": "views",
                             "key": "views",
                             "label": "Views",
                             "type": "integer",
-                            "description": "Total page views."
+                            "description": "Total page views.",
+                            "unit": "count",
+                            "aggregation": "sum",
+                            "filterable": false,
+                            "sortable": true
                           },
                           {
+                            "id": "bounceRate",
                             "key": "bounceRate",
                             "label": "Bounce rate",
                             "type": "rate",
-                            "description": "Single-page session rate as a 0-1 ratio."
+                            "description": "Single-page session rate as a 0-1 ratio.",
+                            "unit": "ratio",
+                            "aggregation": "ratio",
+                            "filterable": false,
+                            "sortable": true
                           }
                         ],
                         "dimensions": [
                           {
+                            "id": "page.path",
                             "key": "page.path",
                             "label": "Page path",
-                            "type": "string"
+                            "description": "Normalized page path from the tracked URL.",
+                            "type": "string",
+                            "filterable": true,
+                            "groupable": true,
+                            "sortable": true
                           },
                           {
+                            "id": "geo.country",
                             "key": "geo.country",
                             "label": "Country",
-                            "type": "string"
+                            "description": "Visitor country inferred from request metadata.",
+                            "type": "string",
+                            "filterable": true,
+                            "groupable": true,
+                            "sortable": true
                           }
                         ],
                         "filters": ["page.path", "geo.country"],
@@ -1891,13 +1736,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/analytics/overview": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -1907,73 +1753,22 @@
         "tags": ["Analytics"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
-            "name": "metrics",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "views",
-                  "sessions",
-                  "visitors",
-                  "bounces",
-                  "bounceRate",
-                  "avgDurationMs",
-                  "viewsPerSession",
-                  "events"
-                ]
-              }
-            },
-            "description": "Comma-separated metrics to include."
+            "$ref": "#/components/parameters/MetricsQueryParam"
           }
         ],
         "responses": {
@@ -2025,13 +1820,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/analytics/timeseries": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -2041,83 +1837,25 @@
         "tags": ["Analytics"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "interval",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["minute", "hour", "day", "week", "month"],
-              "default": "day"
-            },
-            "description": "Time bucket granularity."
+            "$ref": "#/components/parameters/IntervalQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
-            "name": "metrics",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "views",
-                  "sessions",
-                  "visitors",
-                  "bounces",
-                  "bounceRate",
-                  "avgDurationMs",
-                  "viewsPerSession",
-                  "events"
-                ]
-              }
-            },
-            "description": "Comma-separated metrics to include."
+            "$ref": "#/components/parameters/MetricsQueryParam"
           }
         ],
         "responses": {
@@ -2170,16 +1908,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/analytics/breakdowns/{dimension}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/dimension"
+          "$ref": "#/components/parameters/DimensionPathParam"
         }
       ],
       "get": {
@@ -2189,73 +1928,22 @@
         "tags": ["Analytics"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
-            "name": "metrics",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "views",
-                  "sessions",
-                  "visitors",
-                  "bounces",
-                  "bounceRate",
-                  "avgDurationMs",
-                  "viewsPerSession",
-                  "events"
-                ]
-              }
-            },
-            "description": "Comma-separated metrics to include."
+            "$ref": "#/components/parameters/MetricsQueryParam"
           },
           {
             "name": "limit",
@@ -2322,13 +2010,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/analytics/cross-breakdowns": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -2338,50 +2027,19 @@
         "tags": ["Analytics"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
             "name": "primary",
@@ -2466,13 +2124,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/analytics/compare": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -2482,50 +2141,19 @@
         "tags": ["Analytics"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
             "name": "compare",
@@ -2598,13 +2226,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/analytics/explore": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "post": {
@@ -2706,13 +2335,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/analytics/retention/cohorts": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -2722,60 +2352,22 @@
         "tags": ["Analytics"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "interval",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["minute", "hour", "day", "week", "month"],
-              "default": "day"
-            },
-            "description": "Time bucket granularity."
+            "$ref": "#/components/parameters/IntervalQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           }
         ],
         "responses": {
@@ -2833,13 +2425,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/event-types": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -2849,40 +2442,16 @@
         "tags": ["Events"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
             "name": "limit",
@@ -2950,16 +2519,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/event-types/{eventName}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/eventName"
+          "$ref": "#/components/parameters/EventNamePathParam"
         }
       ],
       "get": {
@@ -2969,50 +2539,19 @@
         "tags": ["Events"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "interval",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["minute", "hour", "day", "week", "month"],
-              "default": "day"
-            },
-            "description": "Time bucket granularity."
+            "$ref": "#/components/parameters/IntervalQueryParam"
           }
         ],
         "responses": {
@@ -3075,13 +2614,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/events": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -3091,70 +2631,25 @@
         "tags": ["Events"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000,
-              "default": 100
-            },
-            "description": "Maximum number of results."
+            "$ref": "#/components/parameters/LimitQueryParam"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 512
-            },
-            "description": "Opaque pagination cursor from the previous response."
+            "$ref": "#/components/parameters/CursorQueryParam"
           },
           {
             "name": "sort",
@@ -3227,13 +2722,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/events/summary": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -3243,50 +2739,19 @@
         "tags": ["Events"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           }
         ],
         "responses": {
@@ -3330,13 +2795,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/events/timeseries": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -3346,60 +2812,22 @@
         "tags": ["Events"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "interval",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["minute", "hour", "day", "week", "month"],
-              "default": "day"
-            },
-            "description": "Time bucket granularity."
+            "$ref": "#/components/parameters/IntervalQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
             "name": "eventName",
@@ -3461,13 +2889,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/events/search": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "post": {
@@ -3565,16 +2994,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/events/{eventId}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/eventId"
+          "$ref": "#/components/parameters/EventIdPathParam"
         }
       ],
       "get": {
@@ -3624,13 +3054,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/event-fields/values": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -3640,40 +3071,16 @@
         "tags": ["Events"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
             "name": "eventName",
@@ -3765,13 +3172,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/visitors": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -3781,70 +3189,25 @@
         "tags": ["Visitors"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000,
-              "default": 100
-            },
-            "description": "Maximum number of results."
+            "$ref": "#/components/parameters/LimitQueryParam"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 512
-            },
-            "description": "Opaque pagination cursor from the previous response."
+            "$ref": "#/components/parameters/CursorQueryParam"
           },
           {
             "name": "sort",
@@ -3919,16 +3282,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/visitors/{visitorId}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/visitorId"
+          "$ref": "#/components/parameters/VisitorIdPathParam"
         }
       ],
       "get": {
@@ -3980,16 +3344,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/visitors/{visitorId}/sessions": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/visitorId"
+          "$ref": "#/components/parameters/VisitorIdPathParam"
         }
       ],
       "get": {
@@ -3999,60 +3364,22 @@
         "tags": ["Visitors"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000,
-              "default": 100
-            },
-            "description": "Maximum number of results."
+            "$ref": "#/components/parameters/LimitQueryParam"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 512
-            },
-            "description": "Opaque pagination cursor from the previous response."
+            "$ref": "#/components/parameters/CursorQueryParam"
           }
         ],
         "responses": {
@@ -4108,16 +3435,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/visitors/{visitorId}/events": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/visitorId"
+          "$ref": "#/components/parameters/VisitorIdPathParam"
         }
       ],
       "get": {
@@ -4127,60 +3455,22 @@
         "tags": ["Visitors"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000,
-              "default": 100
-            },
-            "description": "Maximum number of results."
+            "$ref": "#/components/parameters/LimitQueryParam"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 512
-            },
-            "description": "Opaque pagination cursor from the previous response."
+            "$ref": "#/components/parameters/CursorQueryParam"
           }
         ],
         "responses": {
@@ -4235,13 +3525,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/sessions": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -4251,70 +3542,25 @@
         "tags": ["Sessions"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000,
-              "default": 100
-            },
-            "description": "Maximum number of results."
+            "$ref": "#/components/parameters/LimitQueryParam"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 512
-            },
-            "description": "Opaque pagination cursor from the previous response."
+            "$ref": "#/components/parameters/CursorQueryParam"
           },
           {
             "name": "sort",
@@ -4388,16 +3634,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/sessions/{sessionId}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/sessionId"
+          "$ref": "#/components/parameters/SessionIdPathParam"
         }
       ],
       "get": {
@@ -4448,16 +3695,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/sessions/{sessionId}/events": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/sessionId"
+          "$ref": "#/components/parameters/SessionIdPathParam"
         }
       ],
       "get": {
@@ -4467,60 +3715,22 @@
         "tags": ["Sessions"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000,
-              "default": 100
-            },
-            "description": "Maximum number of results."
+            "$ref": "#/components/parameters/LimitQueryParam"
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 512
-            },
-            "description": "Opaque pagination cursor from the previous response."
+            "$ref": "#/components/parameters/CursorQueryParam"
           }
         ],
         "responses": {
@@ -4575,13 +3785,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/funnels": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -4591,40 +3802,16 @@
         "tags": ["Funnels"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           }
         ],
         "responses": {
@@ -4687,7 +3874,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       },
       "post": {
         "operationId": "createFunnel",
@@ -4794,49 +3982,26 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site:write"]
       }
     },
     "/api/v1/sites/{siteId}/funnels/analysis": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "name": "from",
-          "in": "query",
-          "schema": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+          "$ref": "#/components/parameters/FromQueryParam"
         },
         {
-          "name": "to",
-          "in": "query",
-          "schema": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+          "$ref": "#/components/parameters/ToQueryParam"
         },
         {
-          "name": "preset",
-          "in": "query",
-          "schema": {
-            "$ref": "#/components/schemas/Preset"
-          },
-          "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+          "$ref": "#/components/parameters/PresetQueryParam"
         },
         {
-          "name": "timeZone",
-          "in": "query",
-          "schema": {
-            "type": "string",
-            "maxLength": 80,
-            "default": "UTC"
-          },
-          "description": "IANA time zone used to resolve presets. Defaults to UTC."
+          "$ref": "#/components/parameters/TimeZoneQueryParam"
         }
       ],
       "post": {
@@ -4946,16 +4111,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/funnels/{funnelId}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/funnelId"
+          "$ref": "#/components/parameters/FunnelIdPathParam"
         }
       ],
       "get": {
@@ -5018,7 +4184,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       },
       "patch": {
         "operationId": "updateFunnel",
@@ -5113,7 +4280,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site:write"]
       },
       "delete": {
         "operationId": "deleteFunnel",
@@ -5133,16 +4301,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["site:write"]
       }
     },
     "/api/v1/sites/{siteId}/funnels/{funnelId}/analysis": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/funnelId"
+          "$ref": "#/components/parameters/FunnelIdPathParam"
         }
       ],
       "get": {
@@ -5152,40 +4321,16 @@
         "tags": ["Funnels"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           }
         ],
         "responses": {
@@ -5287,13 +4432,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/performance/summary": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -5303,50 +4449,19 @@
         "tags": ["Performance"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           }
         ],
         "responses": {
@@ -5390,13 +4505,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/performance/timeseries": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -5406,60 +4522,22 @@
         "tags": ["Performance"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "interval",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["minute", "hour", "day", "week", "month"],
-              "default": "day"
-            },
-            "description": "Time bucket granularity."
+            "$ref": "#/components/parameters/IntervalQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           }
         ],
         "responses": {
@@ -5513,16 +4591,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/performance/breakdowns/{dimension}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         },
         {
-          "$ref": "#/components/parameters/dimension"
+          "$ref": "#/components/parameters/DimensionPathParam"
         }
       ],
       "get": {
@@ -5532,50 +4611,19 @@
         "tags": ["Performance"],
         "parameters": [
           {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/FromQueryParam"
           },
           {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/ToQueryParam"
           },
           {
-            "name": "preset",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/Preset"
-            },
-            "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+            "$ref": "#/components/parameters/PresetQueryParam"
           },
           {
-            "name": "timeZone",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 80,
-              "default": "UTC"
-            },
-            "description": "IANA time zone used to resolve presets. Defaults to UTC."
+            "$ref": "#/components/parameters/TimeZoneQueryParam"
           },
           {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "$ref": "#/components/schemas/FilterObject"
-            },
-            "description": "Simple equality filters as filter[field]=value."
+            "$ref": "#/components/parameters/FilterQueryParam"
           },
           {
             "name": "metric",
@@ -5629,13 +4677,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/realtime/active-visitors": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -5677,13 +4726,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/realtime/events": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -5750,13 +4800,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/realtime/sessions": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -5824,13 +4875,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/sites/{siteId}/realtime/snapshot": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/siteId"
+          "$ref": "#/components/parameters/SiteIdPathParam"
         }
       ],
       "get": {
@@ -5899,7 +4951,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     },
     "/api/v1/batch": {
@@ -6018,7 +5071,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "x-required-scopes": ["analytics:read"]
       }
     }
   },
@@ -6269,7 +5323,7 @@
       },
       "ComplexFilter": {
         "type": "object",
-        "description": "Advanced filter rule for explore and search endpoints. Operators: eq equals; neq does not equal; in is one of; notIn is not one of; contains includes substring; startsWith/endsWith match string edges; gt/gte/lt/lte compare ordered values; exists/notExists ignore value.",
+        "description": "Advanced filter rule for explore and search endpoints. For eq, neq, contains, startsWith, and endsWith, use a scalar value. For in and notIn, use an array value. For gt, gte, lt, and lte, use a number or ISO 8601 date-time string depending on the field. For exists and notExists, value may be omitted.",
         "required": ["field", "op"],
         "properties": {
           "field": {
@@ -6296,45 +5350,102 @@
               "notExists"
             ]
           },
-          "value": {}
+          "value": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
         }
       },
       "MetricDefinition": {
         "type": "object",
         "description": "Metric available for analytics queries.",
-        "required": ["key", "label", "type", "description"],
+        "required": ["id", "key", "label", "type", "description"],
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "key": {
             "type": "string"
           },
           "label": {
             "type": "string"
           },
-          "type": {
-            "type": "string",
-            "enum": ["integer", "rate", "duration_ms"]
-          },
           "description": {
             "type": "string"
+          },
+          "unit": {
+            "type": "string",
+            "enum": ["count", "ratio", "milliseconds"]
+          },
+          "type": {
+            "type": "string",
+            "enum": ["integer", "number", "rate"]
+          },
+          "aggregation": {
+            "type": "string",
+            "enum": ["sum", "average", "ratio", "derived"]
+          },
+          "filterable": {
+            "type": "boolean"
+          },
+          "sortable": {
+            "type": "boolean"
           }
         }
       },
       "DimensionDefinition": {
         "type": "object",
         "description": "Dimension available for analytics breakdowns and filters.",
-        "required": ["key", "label", "type"],
+        "required": ["id", "key", "label", "type"],
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "key": {
             "type": "string"
           },
           "label": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "type": {
             "type": "string"
           },
-          "description": {
-            "type": "string"
+          "filterable": {
+            "type": "boolean"
+          },
+          "groupable": {
+            "type": "boolean"
+          },
+          "sortable": {
+            "type": "boolean"
           }
         }
       },
@@ -6929,7 +6040,8 @@
           },
           "visitorTokenMode": {
             "type": "string",
-            "enum": ["daily"]
+            "enum": ["daily", "weekly", "monthly", "session", "none"],
+            "description": "Visitor token rotation mode. The current runtime behavior uses daily tokens; additional values are reserved for compatible future configuration."
           },
           "dataRetentionDays": {
             "type": "integer",
@@ -7705,7 +6817,34 @@
             ]
           },
           "value": {
-            "description": "Comparison value. Required unless op is exists or notExists."
+            "description": "Comparison value. Required unless op is exists or notExists.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -8733,7 +7872,7 @@
       }
     },
     "parameters": {
-      "siteId": {
+      "SiteIdPathParam": {
         "name": "siteId",
         "in": "path",
         "required": true,
@@ -8743,7 +7882,7 @@
         },
         "description": "Site UUID."
       },
-      "dimension": {
+      "DimensionPathParam": {
         "name": "dimension",
         "in": "path",
         "required": true,
@@ -8753,7 +7892,7 @@
         },
         "description": "Stable analytics dimension key."
       },
-      "eventName": {
+      "EventNamePathParam": {
         "name": "eventName",
         "in": "path",
         "required": true,
@@ -8763,7 +7902,7 @@
         },
         "description": "Event name."
       },
-      "eventId": {
+      "EventIdPathParam": {
         "name": "eventId",
         "in": "path",
         "required": true,
@@ -8773,27 +7912,27 @@
         },
         "description": "Event UUID."
       },
-      "visitorId": {
+      "VisitorIdPathParam": {
         "name": "visitorId",
         "in": "path",
         "required": true,
         "schema": {
           "type": "string",
-          "format": "uuid"
+          "maxLength": 160
         },
-        "description": "Visitor UUID."
+        "description": "Opaque visitor identifier."
       },
-      "sessionId": {
+      "SessionIdPathParam": {
         "name": "sessionId",
         "in": "path",
         "required": true,
         "schema": {
           "type": "string",
-          "format": "uuid"
+          "maxLength": 160
         },
-        "description": "Session UUID."
+        "description": "Opaque session identifier."
       },
-      "funnelId": {
+      "FunnelIdPathParam": {
         "name": "funnelId",
         "in": "path",
         "required": true,
@@ -8802,6 +7941,105 @@
           "format": "uuid"
         },
         "description": "Funnel UUID."
+      },
+      "FromQueryParam": {
+        "name": "from",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "description": "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+      },
+      "ToQueryParam": {
+        "name": "to",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "description": "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+      },
+      "PresetQueryParam": {
+        "name": "preset",
+        "in": "query",
+        "schema": {
+          "$ref": "#/components/schemas/Preset"
+        },
+        "description": "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time."
+      },
+      "TimeZoneQueryParam": {
+        "name": "timeZone",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "maxLength": 80,
+          "default": "UTC"
+        },
+        "description": "IANA time zone used to resolve presets. Defaults to UTC."
+      },
+      "IntervalQueryParam": {
+        "name": "interval",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "enum": ["minute", "hour", "day", "week", "month"],
+          "default": "day"
+        },
+        "description": "Time bucket granularity."
+      },
+      "MetricsQueryParam": {
+        "name": "metrics",
+        "in": "query",
+        "style": "form",
+        "explode": false,
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "views",
+              "sessions",
+              "visitors",
+              "bounces",
+              "bounceRate",
+              "avgDurationMs",
+              "viewsPerSession",
+              "events"
+            ]
+          }
+        },
+        "description": "Comma-separated metrics to include."
+      },
+      "FilterQueryParam": {
+        "name": "filter",
+        "in": "query",
+        "style": "deepObject",
+        "explode": true,
+        "schema": {
+          "$ref": "#/components/schemas/FilterObject"
+        },
+        "description": "Simple equality filters as filter[field]=value."
+      },
+      "LimitQueryParam": {
+        "name": "limit",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        },
+        "description": "Maximum number of results."
+      },
+      "CursorQueryParam": {
+        "name": "cursor",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "description": "Opaque pagination cursor from the previous response."
       }
     },
     "responses": {

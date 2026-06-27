@@ -16,11 +16,14 @@ interface Operation {
   parameters?: unknown[];
   requestBody?: unknown;
   responses: Record<string, unknown>;
+  "x-required-scopes"?: string[];
 }
 
 interface OpenAPISpec {
   openapi: string;
   info: Record<string, unknown>;
+  externalDocs?: Record<string, unknown>;
+  "x-possible-upstream-responses"?: number[];
   servers: Array<{ url: string; description: string }>;
   security: Array<Record<string, unknown>>;
   tags: Array<{ name: string; description: string }>;
@@ -40,6 +43,10 @@ const json = "application/json";
 
 function ref(name: string) {
   return { $ref: `#/components/schemas/${name}` };
+}
+
+function parameterRef(name: string) {
+  return { $ref: `#/components/parameters/${name}` };
 }
 
 function response(description: string, schema: string, example?: unknown) {
@@ -172,8 +179,35 @@ function errorResponses(...codes: string[]) {
   return map;
 }
 
+function requiredScopesForOperation(input: Operation): string[] {
+  if (input.security && input.security.length === 0) return [];
+  if (input["x-required-scopes"]) return input["x-required-scopes"];
+
+  const [tag] = input.tags;
+  const isWrite = /^(create|update|delete)/i.test(input.operationId);
+
+  if (tag === "Analytics" || tag === "Events" || tag === "Visitors") {
+    return ["analytics:read"];
+  }
+  if (tag === "Sessions" || tag === "Performance" || tag === "Realtime") {
+    return ["analytics:read"];
+  }
+  if (tag === "Batch") return ["analytics:read"];
+  if (tag === "Sites") return isWrite ? ["site:write"] : ["site:read"];
+  if (tag === "Settings") {
+    return isWrite ? ["site_config:write"] : ["site_config:read"];
+  }
+  if (tag === "Funnels") return isWrite ? ["site:write"] : ["analytics:read"];
+  if (tag === "Team") return ["site:read"];
+
+  return [];
+}
+
 function op(input: Operation): Operation {
-  return input;
+  return {
+    ...input,
+    "x-required-scopes": requiredScopesForOperation(input),
+  };
 }
 
 function queryParam(name: string, schema: unknown, description: string) {
@@ -181,95 +215,25 @@ function queryParam(name: string, schema: unknown, description: string) {
 }
 
 function timeParams(includeInterval = false) {
-  const defaultHint =
-    " If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time.";
   return [
-    queryParam(
-      "from",
-      { type: "string", format: "date-time" },
-      `Inclusive ISO 8601 start time.${defaultHint}`,
-    ),
-    queryParam(
-      "to",
-      { type: "string", format: "date-time" },
-      `Exclusive ISO 8601 end time.${defaultHint}`,
-    ),
-    queryParam(
-      "preset",
-      ref("Preset"),
-      `Named time range preset. Mutually exclusive with from and to.${defaultHint}`,
-    ),
-    queryParam(
-      "timeZone",
-      { type: "string", maxLength: 80, default: "UTC" },
-      "IANA time zone used to resolve presets. Defaults to UTC.",
-    ),
-    ...(includeInterval
-      ? [
-          queryParam(
-            "interval",
-            {
-              type: "string",
-              enum: ["minute", "hour", "day", "week", "month"],
-              default: "day",
-            },
-            "Time bucket granularity.",
-          ),
-        ]
-      : []),
+    parameterRef("FromQueryParam"),
+    parameterRef("ToQueryParam"),
+    parameterRef("PresetQueryParam"),
+    parameterRef("TimeZoneQueryParam"),
+    ...(includeInterval ? [parameterRef("IntervalQueryParam")] : []),
   ];
 }
 
 function filterParam() {
-  return {
-    name: "filter",
-    in: "query",
-    style: "deepObject",
-    explode: true,
-    schema: ref("FilterObject"),
-    description: "Simple equality filters as filter[field]=value.",
-  };
+  return parameterRef("FilterQueryParam");
 }
 
 function metricParam() {
-  return {
-    name: "metrics",
-    in: "query",
-    style: "form",
-    explode: false,
-    schema: {
-      type: "array",
-      items: {
-        type: "string",
-        enum: [
-          "views",
-          "sessions",
-          "visitors",
-          "bounces",
-          "bounceRate",
-          "avgDurationMs",
-          "viewsPerSession",
-          "events",
-        ],
-      },
-    },
-    description: "Comma-separated metrics to include.",
-  };
+  return parameterRef("MetricsQueryParam");
 }
 
 function cursorParams() {
-  return [
-    queryParam(
-      "limit",
-      { type: "integer", minimum: 1, maximum: 1000, default: 100 },
-      "Maximum number of results.",
-    ),
-    queryParam(
-      "cursor",
-      { type: "string", maxLength: 512 },
-      "Opaque pagination cursor from the previous response.",
-    ),
-  ];
+  return [parameterRef("LimitQueryParam"), parameterRef("CursorQueryParam")];
 }
 
 function sortParam() {
@@ -625,7 +589,7 @@ function buildSchemas(): Record<string, unknown> {
     ComplexFilter: {
       type: "object",
       description:
-        "Advanced filter rule for explore and search endpoints. Operators: eq equals; neq does not equal; in is one of; notIn is not one of; contains includes substring; startsWith/endsWith match string edges; gt/gte/lt/lte compare ordered values; exists/notExists ignore value.",
+        "Advanced filter rule for explore and search endpoints. For eq, neq, contains, startsWith, and endsWith, use a scalar value. For in and notIn, use an array value. For gt, gte, lt, and lte, use a number or ISO 8601 date-time string depending on the field. For exists and notExists, value may be omitted.",
       required: ["field", "op"],
       properties: {
         field: {
@@ -653,29 +617,57 @@ function buildSchemas(): Record<string, unknown> {
             "notExists",
           ],
         },
-        value: {},
+        value: {
+          oneOf: [
+            { type: "string" },
+            { type: "number" },
+            { type: "boolean" },
+            {
+              type: "array",
+              items: {
+                oneOf: [
+                  { type: "string" },
+                  { type: "number" },
+                  { type: "boolean" },
+                ],
+              },
+            },
+          ],
+        },
       },
     },
     MetricDefinition: {
       type: "object",
       description: "Metric available for analytics queries.",
-      required: ["key", "label", "type", "description"],
+      required: ["id", "key", "label", "type", "description"],
       properties: {
+        id: { type: "string" },
         key: { type: "string" },
         label: { type: "string" },
-        type: { type: "string", enum: ["integer", "rate", "duration_ms"] },
         description: { type: "string" },
+        unit: { type: "string", enum: ["count", "ratio", "milliseconds"] },
+        type: { type: "string", enum: ["integer", "number", "rate"] },
+        aggregation: {
+          type: "string",
+          enum: ["sum", "average", "ratio", "derived"],
+        },
+        filterable: { type: "boolean" },
+        sortable: { type: "boolean" },
       },
     },
     DimensionDefinition: {
       type: "object",
       description: "Dimension available for analytics breakdowns and filters.",
-      required: ["key", "label", "type"],
+      required: ["id", "key", "label", "type"],
       properties: {
+        id: { type: "string" },
         key: { type: "string" },
         label: { type: "string" },
-        type: { type: "string" },
         description: { type: "string" },
+        type: { type: "string" },
+        filterable: { type: "boolean" },
+        groupable: { type: "boolean" },
+        sortable: { type: "boolean" },
       },
     },
     SiteAccess: {
@@ -942,7 +934,12 @@ function buildSchemas(): Record<string, unknown> {
         respectDoNotTrack: { type: "boolean" },
         anonymizeIp: { type: "boolean" },
         euMode: { type: "boolean" },
-        visitorTokenMode: { type: "string", enum: ["daily"] },
+        visitorTokenMode: {
+          type: "string",
+          enum: ["daily", "weekly", "monthly", "session", "none"],
+          description:
+            "Visitor token rotation mode. The current runtime behavior uses daily tokens; additional values are reserved for compatible future configuration.",
+        },
         dataRetentionDays: { type: "integer", minimum: 1 },
       },
     },
@@ -1346,6 +1343,21 @@ function buildSchemas(): Record<string, unknown> {
         value: {
           description:
             "Comparison value. Required unless op is exists or notExists.",
+          oneOf: [
+            { type: "string" },
+            { type: "number" },
+            { type: "boolean" },
+            {
+              type: "array",
+              items: {
+                oneOf: [
+                  { type: "string" },
+                  { type: "number" },
+                  { type: "boolean" },
+                ],
+              },
+            },
+          ],
         },
       },
       additionalProperties: false,
@@ -1849,12 +1861,13 @@ function buildSchemas(): Record<string, unknown> {
 }
 
 function buildPaths(): OpenAPISpec["paths"] {
-  const siteParam = { $ref: "#/components/parameters/siteId" };
-  const dimensionParam = { $ref: "#/components/parameters/dimension" };
-  const eventNameParam = { $ref: "#/components/parameters/eventName" };
-  const eventIdParam = { $ref: "#/components/parameters/eventId" };
-  const visitorIdParam = { $ref: "#/components/parameters/visitorId" };
-  const sessionIdParam = { $ref: "#/components/parameters/sessionId" };
+  const siteParam = parameterRef("SiteIdPathParam");
+  const dimensionParam = parameterRef("DimensionPathParam");
+  const eventNameParam = parameterRef("EventNamePathParam");
+  const eventIdParam = parameterRef("EventIdPathParam");
+  const visitorIdParam = parameterRef("VisitorIdPathParam");
+  const sessionIdParam = parameterRef("SessionIdPathParam");
+  const funnelIdParam = parameterRef("FunnelIdPathParam");
 
   return {
     "/healthz": {
@@ -2646,7 +2659,7 @@ function buildPaths(): OpenAPISpec["paths"] {
       }),
     },
     "/api/v1/sites/{siteId}/funnels/{funnelId}": {
-      parameters: [siteParam, { $ref: "#/components/parameters/funnelId" }],
+      parameters: [siteParam, funnelIdParam],
       get: op({
         operationId: "getFunnel",
         summary: "Get funnel",
@@ -2680,7 +2693,7 @@ function buildPaths(): OpenAPISpec["paths"] {
       }),
     },
     "/api/v1/sites/{siteId}/funnels/{funnelId}/analysis": {
-      parameters: [siteParam, { $ref: "#/components/parameters/funnelId" }],
+      parameters: [siteParam, funnelIdParam],
       get: op({
         operationId: "getFunnelAnalysis",
         summary: "Get funnel analysis",
@@ -3003,21 +3016,49 @@ function responseExampleFor(schemaName: string | null, operationId: string) {
     AnalyticsSchemaResponse: success({
       metrics: [
         {
+          id: "views",
           key: "views",
           label: "Views",
           type: "integer",
           description: "Total page views.",
+          unit: "count",
+          aggregation: "sum",
+          filterable: false,
+          sortable: true,
         },
         {
+          id: "bounceRate",
           key: "bounceRate",
           label: "Bounce rate",
           type: "rate",
           description: "Single-page session rate as a 0-1 ratio.",
+          unit: "ratio",
+          aggregation: "ratio",
+          filterable: false,
+          sortable: true,
         },
       ],
       dimensions: [
-        { key: "page.path", label: "Page path", type: "string" },
-        { key: "geo.country", label: "Country", type: "string" },
+        {
+          id: "page.path",
+          key: "page.path",
+          label: "Page path",
+          description: "Normalized page path from the tracked URL.",
+          type: "string",
+          filterable: true,
+          groupable: true,
+          sortable: true,
+        },
+        {
+          id: "geo.country",
+          key: "geo.country",
+          label: "Country",
+          description: "Visitor country inferred from request metadata.",
+          type: "string",
+          filterable: true,
+          groupable: true,
+          sortable: true,
+        },
       ],
       filters: ["page.path", "geo.country"],
       operators: ["eq", "in", "startsWith"],
@@ -3384,7 +3425,7 @@ function buildSpec(): OpenAPISpec {
     info: {
       title: "InsightFlare API",
       description:
-        "Privacy-focused web analytics API. Authenticated endpoints require an API key passed as a Bearer token in the Authorization header. All API times are ISO 8601 strings and analytics ranges use [from, to) semantics. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time. The default timeZone is UTC.",
+        "Privacy-focused web analytics API. Authenticated endpoints require an API key passed as a Bearer token in the Authorization header. All timestamps in query parameters and response objects are ISO 8601 date-time strings unless the field name explicitly ends with `Ms`. Fields ending with `Ms` represent millisecond values, such as durations or Unix timestamps depending on context. Analytics ranges use [from, to) semantics. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time. The default timeZone is UTC.\n\nThis OpenAPI document describes the behavior of the InsightFlare origin API. Depending on deployment configuration, upstream infrastructure, proxies, gateways, or edge providers may return additional HTTP responses before requests reach the API origin, such as 429 Too Many Requests. These responses are outside the standard API error envelope and are not part of the stable API contract.",
       version: "1.0.0",
       contact: {
         name: "InsightFlare",
@@ -3395,6 +3436,11 @@ function buildSpec(): OpenAPISpec {
         url: "https://github.com/ravelloh/InsightFlare/blob/main/LICENSE",
       },
     },
+    externalDocs: {
+      description: "InsightFlare API documentation",
+      url: "https://insight.ravelloh.com/docs",
+    },
+    "x-possible-upstream-responses": [429],
     servers: [
       { url: "https://insight.ravelloh.com", description: "Production" },
     ],
@@ -3431,54 +3477,135 @@ function buildSpec(): OpenAPISpec {
         },
       },
       parameters: {
-        siteId: {
+        SiteIdPathParam: {
           name: "siteId",
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },
           description: "Site UUID.",
         },
-        dimension: {
+        DimensionPathParam: {
           name: "dimension",
           in: "path",
           required: true,
           schema: { type: "string", maxLength: 120 },
           description: "Stable analytics dimension key.",
         },
-        eventName: {
+        EventNamePathParam: {
           name: "eventName",
           in: "path",
           required: true,
           schema: { type: "string", maxLength: 120 },
           description: "Event name.",
         },
-        eventId: {
+        EventIdPathParam: {
           name: "eventId",
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },
           description: "Event UUID.",
         },
-        visitorId: {
+        VisitorIdPathParam: {
           name: "visitorId",
           in: "path",
           required: true,
-          schema: { type: "string", format: "uuid" },
-          description: "Visitor UUID.",
+          schema: { type: "string", maxLength: 160 },
+          description: "Opaque visitor identifier.",
         },
-        sessionId: {
+        SessionIdPathParam: {
           name: "sessionId",
           in: "path",
           required: true,
-          schema: { type: "string", format: "uuid" },
-          description: "Session UUID.",
+          schema: { type: "string", maxLength: 160 },
+          description: "Opaque session identifier.",
         },
-        funnelId: {
+        FunnelIdPathParam: {
           name: "funnelId",
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },
           description: "Funnel UUID.",
+        },
+        FromQueryParam: {
+          name: "from",
+          in: "query",
+          schema: { type: "string", format: "date-time" },
+          description:
+            "Inclusive ISO 8601 start time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time.",
+        },
+        ToQueryParam: {
+          name: "to",
+          in: "query",
+          schema: { type: "string", format: "date-time" },
+          description:
+            "Exclusive ISO 8601 end time. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time.",
+        },
+        PresetQueryParam: {
+          name: "preset",
+          in: "query",
+          schema: ref("Preset"),
+          description:
+            "Named time range preset. Mutually exclusive with from and to. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time.",
+        },
+        TimeZoneQueryParam: {
+          name: "timeZone",
+          in: "query",
+          schema: { type: "string", maxLength: 80, default: "UTC" },
+          description:
+            "IANA time zone used to resolve presets. Defaults to UTC.",
+        },
+        IntervalQueryParam: {
+          name: "interval",
+          in: "query",
+          schema: {
+            type: "string",
+            enum: ["minute", "hour", "day", "week", "month"],
+            default: "day",
+          },
+          description: "Time bucket granularity.",
+        },
+        MetricsQueryParam: {
+          name: "metrics",
+          in: "query",
+          style: "form",
+          explode: false,
+          schema: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: [
+                "views",
+                "sessions",
+                "visitors",
+                "bounces",
+                "bounceRate",
+                "avgDurationMs",
+                "viewsPerSession",
+                "events",
+              ],
+            },
+          },
+          description: "Comma-separated metrics to include.",
+        },
+        FilterQueryParam: {
+          name: "filter",
+          in: "query",
+          style: "deepObject",
+          explode: true,
+          schema: ref("FilterObject"),
+          description: "Simple equality filters as filter[field]=value.",
+        },
+        LimitQueryParam: {
+          name: "limit",
+          in: "query",
+          schema: { type: "integer", minimum: 1, maximum: 1000, default: 100 },
+          description: "Maximum number of results.",
+        },
+        CursorQueryParam: {
+          name: "cursor",
+          in: "query",
+          schema: { type: "string", maxLength: 512 },
+          description: "Opaque pagination cursor from the previous response.",
         },
       },
       responses: {

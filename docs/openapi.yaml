@@ -1,12 +1,23 @@
 openapi: 3.1.0
 info:
   title: InsightFlare API
-  description:
-    Privacy-focused web analytics API. Authenticated endpoints require
-    an API key passed as a Bearer token in the Authorization header. All API
-    times are ISO 8601 strings and analytics ranges use [from, to) semantics. If
-    from, to, and preset are omitted, analytics endpoints default to the last 7
-    days ending at request time. The default timeZone is UTC.
+  description: >-
+    Privacy-focused web analytics API. Authenticated endpoints require an API
+    key passed as a Bearer token in the Authorization header. All timestamps in
+    query parameters and response objects are ISO 8601 date-time strings unless
+    the field name explicitly ends with `Ms`. Fields ending with `Ms` represent
+    millisecond values, such as durations or Unix timestamps depending on
+    context. Analytics ranges use [from, to) semantics. If from, to, and preset
+    are omitted, analytics endpoints default to the last 7 days ending at
+    request time. The default timeZone is UTC.
+
+
+    This OpenAPI document describes the behavior of the InsightFlare origin API.
+    Depending on deployment configuration, upstream infrastructure, proxies,
+    gateways, or edge providers may return additional HTTP responses before
+    requests reach the API origin, such as 429 Too Many Requests. These
+    responses are outside the standard API error envelope and are not part of
+    the stable API contract.
   version: 1.0.0
   contact:
     name: InsightFlare
@@ -14,6 +25,11 @@ info:
   license:
     name: MIT
     url: https://github.com/ravelloh/InsightFlare/blob/main/LICENSE
+externalDocs:
+  description: InsightFlare API documentation
+  url: https://insight.ravelloh.com/docs
+x-possible-upstream-responses:
+  - 429
 servers:
   - url: https://insight.ravelloh.com
     description: Production
@@ -76,6 +92,7 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalError"
+      x-required-scopes: []
   /collect:
     post:
       operationId: collectEvent
@@ -139,6 +156,7 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
+      x-required-scopes: []
   /api/v1:
     get:
       operationId: getApiRoot
@@ -177,6 +195,7 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalError"
+      x-required-scopes: []
   /api/v1/token:
     get:
       operationId: getToken
@@ -219,6 +238,7 @@ paths:
                       generatedAt: 2026-06-26T12:00:00Z
         "401":
           $ref: "#/components/responses/Unauthorized"
+      x-required-scopes: []
   /api/v1/token/check:
     post:
       operationId: checkToken
@@ -264,6 +284,7 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+      x-required-scopes: []
   /api/v1/capabilities:
     get:
       operationId: getCapabilities
@@ -313,6 +334,7 @@ paths:
                       generatedAt: 2026-06-26T12:00:00Z
         "401":
           $ref: "#/components/responses/Unauthorized"
+      x-required-scopes: []
   /api/v1/team:
     get:
       operationId: getTeam
@@ -344,6 +366,8 @@ paths:
                       generatedAt: 2026-06-26T12:00:00Z
         "401":
           $ref: "#/components/responses/Unauthorized"
+      x-required-scopes:
+        - site:read
   /api/v1/team/usage:
     get:
       operationId: getTeamUsage
@@ -369,6 +393,8 @@ paths:
                       generatedAt: 2026-06-26T12:00:00Z
         "401":
           $ref: "#/components/responses/Unauthorized"
+      x-required-scopes:
+        - site:read
   /api/v1/team/analytics/overview:
     get:
       operationId: getTeamAnalyticsOverview
@@ -377,64 +403,12 @@ paths:
       tags:
         - Analytics
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
-        - name: metrics
-          in: query
-          style: form
-          explode: false
-          schema:
-            type: array
-            items:
-              type: string
-              enum:
-                - views
-                - sessions
-                - visitors
-                - bounces
-                - bounceRate
-                - avgDurationMs
-                - viewsPerSession
-                - events
-          description: Comma-separated metrics to include.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - $ref: "#/components/parameters/MetricsQueryParam"
       responses:
         "200":
           description: Successful response
@@ -468,6 +442,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+      x-required-scopes:
+        - analytics:read
   /api/v1/team/analytics/timeseries:
     get:
       operationId: getTeamAnalyticsTimeseries
@@ -476,76 +452,13 @@ paths:
       tags:
         - Analytics
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: interval
-          in: query
-          schema:
-            type: string
-            enum:
-              - minute
-              - hour
-              - day
-              - week
-              - month
-            default: day
-          description: Time bucket granularity.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
-        - name: metrics
-          in: query
-          style: form
-          explode: false
-          schema:
-            type: array
-            items:
-              type: string
-              enum:
-                - views
-                - sessions
-                - visitors
-                - bounces
-                - bounceRate
-                - avgDurationMs
-                - viewsPerSession
-                - events
-          description: Comma-separated metrics to include.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/IntervalQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - $ref: "#/components/parameters/MetricsQueryParam"
       responses:
         "200":
           description: Successful response
@@ -575,6 +488,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+      x-required-scopes:
+        - analytics:read
   /api/v1/team/analytics/sites:
     get:
       operationId: getTeamAnalyticsSites
@@ -583,57 +498,11 @@ paths:
       tags:
         - Analytics
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: metrics
-          in: query
-          style: form
-          explode: false
-          schema:
-            type: array
-            items:
-              type: string
-              enum:
-                - views
-                - sessions
-                - visitors
-                - bounces
-                - bounceRate
-                - avgDurationMs
-                - viewsPerSession
-                - events
-          description: Comma-separated metrics to include.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/MetricsQueryParam"
       responses:
         "200":
           description: Successful response
@@ -666,10 +535,12 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+      x-required-scopes:
+        - analytics:read
   /api/v1/team/analytics/breakdowns/{dimension}:
     parameters:
       - &a5
-        $ref: "#/components/parameters/dimension"
+        $ref: "#/components/parameters/DimensionPathParam"
     get:
       operationId: getTeamAnalyticsBreakdown
       summary: Get team analytics breakdown
@@ -677,64 +548,12 @@ paths:
       tags:
         - Analytics
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
-        - name: metrics
-          in: query
-          style: form
-          explode: false
-          schema:
-            type: array
-            items:
-              type: string
-              enum:
-                - views
-                - sessions
-                - visitors
-                - bounces
-                - bounceRate
-                - avgDurationMs
-                - viewsPerSession
-                - events
-          description: Comma-separated metrics to include.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - $ref: "#/components/parameters/MetricsQueryParam"
         - name: limit
           in: query
           schema:
@@ -772,6 +591,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites:
     get:
       operationId: listSites
@@ -818,6 +639,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+      x-required-scopes:
+        - site:read
     post:
       operationId: createSite
       summary: Create site
@@ -869,10 +692,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
+      x-required-scopes:
+        - site:write
   /api/v1/sites/{siteId}:
     parameters:
       - &a3
-        $ref: "#/components/parameters/siteId"
+        $ref: "#/components/parameters/SiteIdPathParam"
     get:
       operationId: getSite
       summary: Get site
@@ -900,6 +725,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site:read
     patch:
       operationId: updateSite
       summary: Update site
@@ -945,6 +772,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+      x-required-scopes:
+        - site:write
     delete:
       operationId: deleteSite
       summary: Delete site
@@ -960,6 +789,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site:write
   /api/v1/sites/{siteId}/tracking:
     parameters:
       - *a3
@@ -1002,6 +833,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site_config:read
     patch:
       operationId: updateTrackingSettings
       summary: Update tracking settings
@@ -1061,6 +894,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site_config:write
   /api/v1/sites/{siteId}/tracking/script:
     parameters:
       - *a3
@@ -1095,6 +930,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site_config:read
   /api/v1/sites/{siteId}/privacy:
     parameters:
       - *a3
@@ -1130,6 +967,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site_config:read
     patch:
       operationId: updatePrivacySettings
       summary: Update privacy settings
@@ -1176,6 +1015,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site_config:write
   /api/v1/sites/{siteId}/sharing:
     parameters:
       - *a3
@@ -1208,6 +1049,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site_config:read
     patch:
       operationId: updateSharingSettings
       summary: Update sharing settings
@@ -1253,6 +1096,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+      x-required-scopes:
+        - site_config:write
   /api/v1/sites/{siteId}/analytics/schema:
     parameters:
       - *a3
@@ -1275,21 +1120,41 @@ paths:
                   value:
                     data:
                       metrics:
-                        - key: views
+                        - id: views
+                          key: views
                           label: Views
                           type: integer
                           description: Total page views.
-                        - key: bounceRate
+                          unit: count
+                          aggregation: sum
+                          filterable: false
+                          sortable: true
+                        - id: bounceRate
+                          key: bounceRate
                           label: Bounce rate
                           type: rate
                           description: Single-page session rate as a 0-1 ratio.
+                          unit: ratio
+                          aggregation: ratio
+                          filterable: false
+                          sortable: true
                       dimensions:
-                        - key: page.path
+                        - id: page.path
+                          key: page.path
                           label: Page path
+                          description: Normalized page path from the tracked URL.
                           type: string
-                        - key: geo.country
+                          filterable: true
+                          groupable: true
+                          sortable: true
+                        - id: geo.country
+                          key: geo.country
                           label: Country
+                          description: Visitor country inferred from request metadata.
                           type: string
+                          filterable: true
+                          groupable: true
+                          sortable: true
                       filters:
                         - page.path
                         - geo.country
@@ -1319,6 +1184,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/analytics/overview:
     parameters:
       - *a3
@@ -1329,64 +1196,12 @@ paths:
       tags:
         - Analytics
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
-        - name: metrics
-          in: query
-          style: form
-          explode: false
-          schema:
-            type: array
-            items:
-              type: string
-              enum:
-                - views
-                - sessions
-                - visitors
-                - bounces
-                - bounceRate
-                - avgDurationMs
-                - viewsPerSession
-                - events
-          description: Comma-separated metrics to include.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - $ref: "#/components/parameters/MetricsQueryParam"
       responses:
         "200":
           description: Successful response
@@ -1411,6 +1226,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/analytics/timeseries:
     parameters:
       - *a3
@@ -1421,76 +1238,13 @@ paths:
       tags:
         - Analytics
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: interval
-          in: query
-          schema:
-            type: string
-            enum:
-              - minute
-              - hour
-              - day
-              - week
-              - month
-            default: day
-          description: Time bucket granularity.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
-        - name: metrics
-          in: query
-          style: form
-          explode: false
-          schema:
-            type: array
-            items:
-              type: string
-              enum:
-                - views
-                - sessions
-                - visitors
-                - bounces
-                - bounceRate
-                - avgDurationMs
-                - viewsPerSession
-                - events
-          description: Comma-separated metrics to include.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/IntervalQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - $ref: "#/components/parameters/MetricsQueryParam"
       responses:
         "200":
           description: Successful response
@@ -1522,6 +1276,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/analytics/breakdowns/{dimension}:
     parameters:
       - *a3
@@ -1533,64 +1289,12 @@ paths:
       tags:
         - Analytics
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
-        - name: metrics
-          in: query
-          style: form
-          explode: false
-          schema:
-            type: array
-            items:
-              type: string
-              enum:
-                - views
-                - sessions
-                - visitors
-                - bounces
-                - bounceRate
-                - avgDurationMs
-                - viewsPerSession
-                - events
-          description: Comma-separated metrics to include.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - $ref: "#/components/parameters/MetricsQueryParam"
         - name: limit
           in: query
           schema:
@@ -1631,6 +1335,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/analytics/cross-breakdowns:
     parameters:
       - *a3
@@ -1643,46 +1349,11 @@ paths:
       tags:
         - Analytics
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
         - name: primary
           in: query
           schema:
@@ -1734,6 +1405,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/analytics/compare:
     parameters:
       - *a3
@@ -1744,46 +1417,11 @@ paths:
       tags:
         - Analytics
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
         - name: compare
           in: query
           schema:
@@ -1827,6 +1465,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/analytics/explore:
     parameters:
       - *a3
@@ -1899,6 +1539,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/analytics/retention/cohorts:
     parameters:
       - *a3
@@ -1909,58 +1551,12 @@ paths:
       tags:
         - Analytics
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: interval
-          in: query
-          schema:
-            type: string
-            enum:
-              - minute
-              - hour
-              - day
-              - week
-              - month
-            default: day
-          description: Time bucket granularity.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/IntervalQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
       responses:
         "200":
           description: Successful response
@@ -1995,6 +1591,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/event-types:
     parameters:
       - *a3
@@ -2005,39 +1603,10 @@ paths:
       tags:
         - Events
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
         - name: limit
           in: query
           schema:
@@ -2079,10 +1648,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/event-types/{eventName}:
     parameters:
       - *a3
-      - $ref: "#/components/parameters/eventName"
+      - $ref: "#/components/parameters/EventNamePathParam"
     get:
       operationId: getEventType
       summary: Get event type
@@ -2090,51 +1661,11 @@ paths:
       tags:
         - Events
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: interval
-          in: query
-          schema:
-            type: string
-            enum:
-              - minute
-              - hour
-              - day
-              - week
-              - month
-            default: day
-          description: Time bucket granularity.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/IntervalQueryParam"
       responses:
         "200":
           description: Successful response
@@ -2182,6 +1713,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/events:
     parameters:
       - *a3
@@ -2192,60 +1725,13 @@ paths:
       tags:
         - Events
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 1000
-            default: 100
-          description: Maximum number of results.
-        - name: cursor
-          in: query
-          schema:
-            type: string
-            maxLength: 512
-          description: Opaque pagination cursor from the previous response.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - $ref: "#/components/parameters/LimitQueryParam"
+        - $ref: "#/components/parameters/CursorQueryParam"
         - name: sort
           in: query
           schema:
@@ -2294,6 +1780,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/events/summary:
     parameters:
       - *a3
@@ -2304,46 +1792,11 @@ paths:
       tags:
         - Events
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
       responses:
         "200":
           description: Successful response
@@ -2372,6 +1825,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/events/timeseries:
     parameters:
       - *a3
@@ -2382,58 +1837,12 @@ paths:
       tags:
         - Events
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: interval
-          in: query
-          schema:
-            type: string
-            enum:
-              - minute
-              - hour
-              - day
-              - week
-              - month
-            default: day
-          description: Time bucket granularity.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/IntervalQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
         - name: eventName
           in: query
           schema:
@@ -2471,6 +1880,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/events/search:
     parameters:
       - *a3
@@ -2529,10 +1940,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/events/{eventId}:
     parameters:
       - *a3
-      - $ref: "#/components/parameters/eventId"
+      - $ref: "#/components/parameters/EventIdPathParam"
     get:
       operationId: getEvent
       summary: Get event
@@ -2560,6 +1973,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/event-fields/values:
     parameters:
       - *a3
@@ -2570,39 +1985,10 @@ paths:
       tags:
         - Events
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
         - name: eventName
           in: query
           schema:
@@ -2665,6 +2051,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/visitors:
     parameters:
       - *a3
@@ -2675,60 +2063,13 @@ paths:
       tags:
         - Visitors
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 1000
-            default: 100
-          description: Maximum number of results.
-        - name: cursor
-          in: query
-          schema:
-            type: string
-            maxLength: 512
-          description: Opaque pagination cursor from the previous response.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - $ref: "#/components/parameters/LimitQueryParam"
+        - $ref: "#/components/parameters/CursorQueryParam"
         - name: sort
           in: query
           schema:
@@ -2779,11 +2120,13 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/visitors/{visitorId}:
     parameters:
       - *a3
       - &a8
-        $ref: "#/components/parameters/visitorId"
+        $ref: "#/components/parameters/VisitorIdPathParam"
     get:
       operationId: getVisitor
       summary: Get visitor
@@ -2811,6 +2154,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/visitors/{visitorId}/sessions:
     parameters:
       - *a3
@@ -2822,53 +2167,12 @@ paths:
       tags:
         - Visitors
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 1000
-            default: 100
-          description: Maximum number of results.
-        - name: cursor
-          in: query
-          schema:
-            type: string
-            maxLength: 512
-          description: Opaque pagination cursor from the previous response.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/LimitQueryParam"
+        - $ref: "#/components/parameters/CursorQueryParam"
       responses:
         "200":
           description: Successful response
@@ -2906,6 +2210,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/visitors/{visitorId}/events:
     parameters:
       - *a3
@@ -2917,53 +2223,12 @@ paths:
       tags:
         - Visitors
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 1000
-            default: 100
-          description: Maximum number of results.
-        - name: cursor
-          in: query
-          schema:
-            type: string
-            maxLength: 512
-          description: Opaque pagination cursor from the previous response.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/LimitQueryParam"
+        - $ref: "#/components/parameters/CursorQueryParam"
       responses:
         "200":
           description: Successful response
@@ -2992,6 +2257,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/sessions:
     parameters:
       - *a3
@@ -3002,60 +2269,13 @@ paths:
       tags:
         - Sessions
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 1000
-            default: 100
-          description: Maximum number of results.
-        - name: cursor
-          in: query
-          schema:
-            type: string
-            maxLength: 512
-          description: Opaque pagination cursor from the previous response.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - $ref: "#/components/parameters/LimitQueryParam"
+        - $ref: "#/components/parameters/CursorQueryParam"
         - name: sort
           in: query
           schema:
@@ -3096,11 +2316,13 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/sessions/{sessionId}:
     parameters:
       - *a3
       - &a10
-        $ref: "#/components/parameters/sessionId"
+        $ref: "#/components/parameters/SessionIdPathParam"
     get:
       operationId: getSession
       summary: Get session
@@ -3128,6 +2350,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/sessions/{sessionId}/events:
     parameters:
       - *a3
@@ -3139,53 +2363,12 @@ paths:
       tags:
         - Sessions
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 1000
-            default: 100
-          description: Maximum number of results.
-        - name: cursor
-          in: query
-          schema:
-            type: string
-            maxLength: 512
-          description: Opaque pagination cursor from the previous response.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/LimitQueryParam"
+        - $ref: "#/components/parameters/CursorQueryParam"
       responses:
         "200":
           description: Successful response
@@ -3214,6 +2397,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/funnels:
     parameters:
       - *a3
@@ -3224,39 +2409,10 @@ paths:
       tags:
         - Funnels
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
       responses:
         "200":
           description: Successful response
@@ -3297,6 +2453,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
     post:
       operationId: createFunnel
       summary: Create funnel
@@ -3346,40 +2504,15 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site:write
   /api/v1/sites/{siteId}/funnels/analysis:
     parameters:
       - *a3
-      - name: from
-        in: query
-        schema:
-          type: string
-          format: date-time
-        description:
-          Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-          analytics endpoints default to the last 7 days ending at request time.
-      - name: to
-        in: query
-        schema:
-          type: string
-          format: date-time
-        description:
-          Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-          analytics endpoints default to the last 7 days ending at request time.
-      - name: preset
-        in: query
-        schema:
-          $ref: "#/components/schemas/Preset"
-        description:
-          Named time range preset. Mutually exclusive with from and to. If
-          from, to, and preset are omitted, analytics endpoints default to the
-          last 7 days ending at request time.
-      - name: timeZone
-        in: query
-        schema:
-          type: string
-          maxLength: 80
-          default: UTC
-        description: IANA time zone used to resolve presets. Defaults to UTC.
+      - $ref: "#/components/parameters/FromQueryParam"
+      - $ref: "#/components/parameters/ToQueryParam"
+      - $ref: "#/components/parameters/PresetQueryParam"
+      - $ref: "#/components/parameters/TimeZoneQueryParam"
     post:
       operationId: analyzeFunnel
       summary: Analyze funnel
@@ -3408,7 +2541,7 @@ paths:
                 default:
                   summary: analyzeFunnel
                   value:
-                    data: &a13
+                    data: &a14
                       steps:
                         - index: 0
                           label: Pricing
@@ -3447,10 +2580,13 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/funnels/{funnelId}:
     parameters:
       - *a3
-      - $ref: "#/components/parameters/funnelId"
+      - &a13
+        $ref: "#/components/parameters/FunnelIdPathParam"
     get:
       operationId: getFunnel
       summary: Get funnel
@@ -3478,6 +2614,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
     patch:
       operationId: updateFunnel
       summary: Update funnel
@@ -3519,6 +2657,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site:write
     delete:
       operationId: deleteFunnel
       summary: Delete funnel
@@ -3534,10 +2674,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - site:write
   /api/v1/sites/{siteId}/funnels/{funnelId}/analysis:
     parameters:
       - *a3
-      - $ref: "#/components/parameters/funnelId"
+      - *a13
     get:
       operationId: getFunnelAnalysis
       summary: Get funnel analysis
@@ -3545,39 +2687,10 @@ paths:
       tags:
         - Funnels
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
       responses:
         "200":
           description: Successful response
@@ -3591,7 +2704,7 @@ paths:
                   value:
                     data:
                       funnel: *a12
-                      analysis: *a13
+                      analysis: *a14
                     meta:
                       requestId: req_abc123
                       generatedAt: 2026-06-26T12:00:00Z
@@ -3604,6 +2717,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/performance/summary:
     parameters:
       - *a3
@@ -3614,46 +2729,11 @@ paths:
       tags:
         - Performance
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
       responses:
         "200":
           description: Successful response
@@ -3682,6 +2762,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/performance/timeseries:
     parameters:
       - *a3
@@ -3692,58 +2774,12 @@ paths:
       tags:
         - Performance
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: interval
-          in: query
-          schema:
-            type: string
-            enum:
-              - minute
-              - hour
-              - day
-              - week
-              - month
-            default: day
-          description: Time bucket granularity.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/IntervalQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
       responses:
         "200":
           description: Successful response
@@ -3776,6 +2812,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/performance/breakdowns/{dimension}:
     parameters:
       - *a3
@@ -3787,46 +2825,11 @@ paths:
       tags:
         - Performance
       parameters:
-        - name: from
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Inclusive ISO 8601 start time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-          description:
-            Exclusive ISO 8601 end time. If from, to, and preset are omitted,
-            analytics endpoints default to the last 7 days ending at request
-            time.
-        - name: preset
-          in: query
-          schema:
-            $ref: "#/components/schemas/Preset"
-          description:
-            Named time range preset. Mutually exclusive with from and to. If
-            from, to, and preset are omitted, analytics endpoints default to the
-            last 7 days ending at request time.
-        - name: timeZone
-          in: query
-          schema:
-            type: string
-            maxLength: 80
-            default: UTC
-          description: IANA time zone used to resolve presets. Defaults to UTC.
-        - name: filter
-          in: query
-          style: deepObject
-          explode: true
-          schema:
-            $ref: "#/components/schemas/FilterObject"
-          description: Simple equality filters as filter[field]=value.
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
         - name: metric
           in: query
           schema:
@@ -3865,6 +2868,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/realtime/active-visitors:
     parameters:
       - *a3
@@ -3896,6 +2901,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/realtime/events:
     parameters:
       - *a3
@@ -3937,6 +2944,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/realtime/sessions:
     parameters:
       - *a3
@@ -3978,6 +2987,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/realtime/snapshot:
     parameters:
       - *a3
@@ -4013,6 +3024,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/batch:
     post:
       operationId: batch
@@ -4083,6 +3096,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+      x-required-scopes:
+        - analytics:read
 components:
   schemas:
     Meta:
@@ -4301,10 +3316,11 @@ components:
     ComplexFilter:
       type: object
       description:
-        "Advanced filter rule for explore and search endpoints. Operators:
-        eq equals; neq does not equal; in is one of; notIn is not one of;
-        contains includes substring; startsWith/endsWith match string edges;
-        gt/gte/lt/lte compare ordered values; exists/notExists ignore value."
+        Advanced filter rule for explore and search endpoints. For eq, neq,
+        contains, startsWith, and endsWith, use a scalar value. For in and
+        notIn, use an array value. For gt, gte, lt, and lte, use a number or ISO
+        8601 date-time string depending on the field. For exists and notExists,
+        value may be omitted.
       required:
         - field
         - op
@@ -4332,44 +3348,83 @@ components:
             - lte
             - exists
             - notExists
-        value: {}
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: array
+              items:
+                oneOf:
+                  - type: string
+                  - type: number
+                  - type: boolean
     MetricDefinition:
       type: object
       description: Metric available for analytics queries.
       required:
+        - id
         - key
         - label
         - type
         - description
       properties:
+        id:
+          type: string
         key:
           type: string
         label:
           type: string
+        description:
+          type: string
+        unit:
+          type: string
+          enum:
+            - count
+            - ratio
+            - milliseconds
         type:
           type: string
           enum:
             - integer
+            - number
             - rate
-            - duration_ms
-        description:
+        aggregation:
           type: string
+          enum:
+            - sum
+            - average
+            - ratio
+            - derived
+        filterable:
+          type: boolean
+        sortable:
+          type: boolean
     DimensionDefinition:
       type: object
       description: Dimension available for analytics breakdowns and filters.
       required:
+        - id
         - key
         - label
         - type
       properties:
+        id:
+          type: string
         key:
           type: string
         label:
           type: string
-        type:
-          type: string
         description:
           type: string
+        type:
+          type: string
+        filterable:
+          type: boolean
+        groupable:
+          type: boolean
+        sortable:
+          type: boolean
     SiteAccess:
       type: object
       description: Sites this token may access.
@@ -4387,7 +3442,7 @@ components:
             restricted means only listed siteIds.
         siteIds:
           type: array
-          items: &a14
+          items: &a15
             type: string
             format: uuid
     Token:
@@ -4401,7 +3456,7 @@ components:
         - scopes
         - siteAccess
       properties:
-        id: *a14
+        id: *a15
         name:
           type: string
           maxLength: 120
@@ -4412,7 +3467,7 @@ components:
             - expired
             - revoked
           description: active can be used; expired passed expiresAt; revoked was disabled.
-        createdAt: &a15
+        createdAt: &a16
           type: string
           format: date-time
         expiresAt:
@@ -4431,7 +3486,7 @@ components:
             - id
             - name
           properties:
-            id: *a14
+            id: *a15
             name:
               type: string
               maxLength: 120
@@ -4473,7 +3528,7 @@ components:
               scope:
                 type: string
                 maxLength: 80
-              siteId: *a14
+              siteId: *a15
     TokenCheckResponse:
       description: Response envelope.
       allOf:
@@ -4491,7 +3546,7 @@ components:
                     properties:
                       scope:
                         type: string
-                      siteId: *a14
+                      siteId: *a15
                       allowed:
                         type: boolean
                       reason:
@@ -4618,11 +3673,11 @@ components:
     Team:
       type: object
       properties:
-        id: *a14
+        id: *a15
         name:
           type: string
           maxLength: 120
-        createdAt: *a15
+        createdAt: *a16
         links:
           $ref: "#/components/schemas/LinkMap"
     TeamResponse:
@@ -4646,15 +3701,15 @@ components:
         - sharing
         - links
       properties:
-        id: *a14
+        id: *a15
         name:
           type: string
           maxLength: 120
         domain:
           type: string
           maxLength: 255
-        createdAt: *a15
-        updatedAt: *a15
+        createdAt: *a16
+        updatedAt: *a16
         sharing:
           $ref: "#/components/schemas/SharingSettings"
         links:
@@ -4767,7 +3822,7 @@ components:
             data:
               type: object
               properties:
-                siteId: *a14
+                siteId: *a15
                 src:
                   type: string
                   format: uri
@@ -4787,6 +3842,14 @@ components:
           type: string
           enum:
             - daily
+            - weekly
+            - monthly
+            - session
+            - none
+          description:
+            Visitor token rotation mode. The current runtime behavior uses
+            daily tokens; additional values are reserved for compatible future
+            configuration.
         dataRetentionDays:
           type: integer
           minimum: 1
@@ -4864,7 +3927,7 @@ components:
                         - string
                         - "null"
                       format: date-time
-                    latestAvailableAt: *a15
+                    latestAvailableAt: *a16
                 links:
                   $ref: "#/components/schemas/LinkMap"
     OverviewMetrics:
@@ -4903,8 +3966,8 @@ components:
       type: object
       description: One time bucket of analytics metrics.
       properties:
-        start: *a15
-        end: *a15
+        start: *a16
+        end: *a16
         views:
           type: integer
         sessions:
@@ -5123,7 +4186,7 @@ components:
                   items:
                     type: object
                     properties:
-                      start: *a15
+                      start: *a16
                       size:
                         type: integer
                         minimum: 0
@@ -5182,11 +4245,11 @@ components:
       type: object
       additionalProperties: true
       properties:
-        id: *a14
+        id: *a15
         eventName:
           type: string
           maxLength: 120
-        occurredAt: *a15
+        occurredAt: *a16
     EventListResponse:
       description: Response envelope for paginated list results.
       allOf:
@@ -5328,6 +4391,16 @@ components:
             - notExists
         value:
           description: Comparison value. Required unless op is exists or notExists.
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: array
+              items:
+                oneOf:
+                  - type: string
+                  - type: number
+                  - type: boolean
       additionalProperties: false
     EventSearchRequest:
       type: object
@@ -5364,8 +4437,8 @@ components:
         visitorId:
           type: string
           maxLength: 160
-        firstSeenAt: *a15
-        lastSeenAt: *a15
+        firstSeenAt: *a16
+        lastSeenAt: *a16
         views:
           type: integer
           minimum: 0
@@ -5408,7 +4481,7 @@ components:
         visitorId:
           type: string
           maxLength: 160
-        startedAt: *a15
+        startedAt: *a16
         endedAt:
           type:
             - string
@@ -5476,8 +4549,8 @@ components:
       description: Performance metric point.
       additionalProperties: true
       properties:
-        start: *a15
-        end: *a15
+        start: *a16
+        end: *a16
         ttfb:
           type: number
           description: Time to first byte in milliseconds.
@@ -5648,8 +4721,8 @@ components:
         - createdAt
         - updatedAt
       properties:
-        id: *a14
-        siteId: *a14
+        id: *a15
+        siteId: *a15
         name:
           type: string
           maxLength: 200
@@ -5662,8 +4735,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FunnelStep"
-        createdAt: *a15
-        updatedAt: *a15
+        createdAt: *a16
+        updatedAt: *a16
         links:
           $ref: "#/components/schemas/LinkMap"
     FunnelResponse:
@@ -5886,7 +4959,7 @@ components:
           type: string
           enum:
             - healthy
-        timestamp: *a15
+        timestamp: *a16
     CollectPage:
       type: object
       description: Page context for a collect payload.
@@ -6057,7 +5130,7 @@ components:
       scheme: bearer
       description: API key passed as a Bearer token in the Authorization header.
   parameters:
-    siteId:
+    SiteIdPathParam:
       name: siteId
       in: path
       required: true
@@ -6065,7 +5138,7 @@ components:
         type: string
         format: uuid
       description: Site UUID.
-    dimension:
+    DimensionPathParam:
       name: dimension
       in: path
       required: true
@@ -6073,7 +5146,7 @@ components:
         type: string
         maxLength: 120
       description: Stable analytics dimension key.
-    eventName:
+    EventNamePathParam:
       name: eventName
       in: path
       required: true
@@ -6081,7 +5154,7 @@ components:
         type: string
         maxLength: 120
       description: Event name.
-    eventId:
+    EventIdPathParam:
       name: eventId
       in: path
       required: true
@@ -6089,23 +5162,23 @@ components:
         type: string
         format: uuid
       description: Event UUID.
-    visitorId:
+    VisitorIdPathParam:
       name: visitorId
       in: path
       required: true
       schema:
         type: string
-        format: uuid
-      description: Visitor UUID.
-    sessionId:
+        maxLength: 160
+      description: Opaque visitor identifier.
+    SessionIdPathParam:
       name: sessionId
       in: path
       required: true
       schema:
         type: string
-        format: uuid
-      description: Session UUID.
-    funnelId:
+        maxLength: 160
+      description: Opaque session identifier.
+    FunnelIdPathParam:
       name: funnelId
       in: path
       required: true
@@ -6113,28 +5186,119 @@ components:
         type: string
         format: uuid
       description: Funnel UUID.
+    FromQueryParam:
+      name: from
+      in: query
+      schema:
+        type: string
+        format: date-time
+      description:
+        Inclusive ISO 8601 start time. If from, to, and preset are omitted,
+        analytics endpoints default to the last 7 days ending at request time.
+    ToQueryParam:
+      name: to
+      in: query
+      schema:
+        type: string
+        format: date-time
+      description:
+        Exclusive ISO 8601 end time. If from, to, and preset are omitted,
+        analytics endpoints default to the last 7 days ending at request time.
+    PresetQueryParam:
+      name: preset
+      in: query
+      schema:
+        $ref: "#/components/schemas/Preset"
+      description:
+        Named time range preset. Mutually exclusive with from and to. If
+        from, to, and preset are omitted, analytics endpoints default to the
+        last 7 days ending at request time.
+    TimeZoneQueryParam:
+      name: timeZone
+      in: query
+      schema:
+        type: string
+        maxLength: 80
+        default: UTC
+      description: IANA time zone used to resolve presets. Defaults to UTC.
+    IntervalQueryParam:
+      name: interval
+      in: query
+      schema:
+        type: string
+        enum:
+          - minute
+          - hour
+          - day
+          - week
+          - month
+        default: day
+      description: Time bucket granularity.
+    MetricsQueryParam:
+      name: metrics
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum:
+            - views
+            - sessions
+            - visitors
+            - bounces
+            - bounceRate
+            - avgDurationMs
+            - viewsPerSession
+            - events
+      description: Comma-separated metrics to include.
+    FilterQueryParam:
+      name: filter
+      in: query
+      style: deepObject
+      explode: true
+      schema:
+        $ref: "#/components/schemas/FilterObject"
+      description: Simple equality filters as filter[field]=value.
+    LimitQueryParam:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+      description: Maximum number of results.
+    CursorQueryParam:
+      name: cursor
+      in: query
+      schema:
+        type: string
+        maxLength: 512
+      description: Opaque pagination cursor from the previous response.
   responses:
     BadRequest:
       description: Bad request
-      content: &a16
+      content: &a17
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     Unauthorized:
       description: Authentication failed
-      content: *a16
+      content: *a17
     Forbidden:
       description: Insufficient permissions
-      content: *a16
+      content: *a17
     NotFound:
       description: Resource not found
-      content: *a16
+      content: *a17
     Conflict:
       description: Conflict
-      content: *a16
+      content: *a17
     PayloadTooLarge:
       description: Payload too large
-      content: *a16
+      content: *a17
     InternalError:
       description: Internal error
-      content: *a16
+      content: *a17

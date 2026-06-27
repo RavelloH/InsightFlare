@@ -24,10 +24,11 @@
     }
   },
   "common_query_parameters": {
-    "description": "These parameters are available on all analytics query endpoints (queryName-based). They are not repeated per-endpoint for brevity.",
+    "description": "These parameters are available on analytics query endpoints. The OpenAPI document remains the source of truth for endpoint-specific parameters.",
     "time_window": {
-      "from": "Start timestamp in Unix milliseconds (required).",
-      "to": "End timestamp in Unix milliseconds (required).",
+      "from": "Inclusive ISO 8601 date-time string. Optional when preset is used.",
+      "to": "Exclusive ISO 8601 date-time string. Optional when preset is used.",
+      "preset": "Named time range preset such as last_7_days or last_30_days. Mutually exclusive with from/to.",
       "timeZone": "IANA timezone identifier (e.g. America/New_York). Defaults to UTC.",
       "tz": "Alias for timeZone."
     },
@@ -64,17 +65,17 @@
   "typical_workflow": [
     "1. Obtain an API key from the user (ask them, or direct them to dashboard → Settings → API Keys).",
     "2. Call GET /api/v1/sites to list available sites and get siteId values.",
-    "3. Use the siteId to query analytics: GET /api/v1/sites/{siteId}/analytics/overview?from=...&to=...",
-    "4. For time-series data, use the /trend endpoint with an interval parameter.",
-    "5. For multiple queries at once, use POST /api/v1/sites/{siteId}/analytics/batch.",
-    "6. For team-level summary, use GET /api/v1/team/dashboard."
+    "3. Use the siteId to query analytics: GET /api/v1/sites/{siteId}/analytics/overview?preset=last_7_days&timeZone=UTC.",
+    "4. For time-series data, use GET /api/v1/sites/{siteId}/analytics/timeseries with an interval parameter.",
+    "5. For multiple queries at once, use POST /api/v1/batch.",
+    "6. For team-level summary, use GET /api/v1/team/analytics/overview."
   ],
   "implementation_notes": [
-    "All timestamps are in Unix milliseconds (not seconds).",
+    "All timestamps in query parameters and response objects are ISO 8601 date-time strings unless the field name explicitly ends with Ms.",
     "The siteId parameter is a UUID. Obtain it from GET /api/v1/sites.",
-    "Pagination uses page/pageSize for visitors and sessions endpoints.",
-    "The /analytics/{queryName} path supports all query names listed in the endpoints above.",
-    "Rate limits are not currently enforced but may be added. Design for graceful 429 handling.",
+    "Pagination uses cursor/limit for visitors, sessions, and events endpoints.",
+    "Use the OpenAPI paths directly; analytics endpoints are explicit resources such as /analytics/overview, /analytics/timeseries, and /analytics/breakdowns/{dimension}.",
+    "Depending on deployment configuration, upstream infrastructure may return additional responses such as 429 before requests reach the API origin. Those responses are outside the stable API error envelope.",
     "For LLM agents: always ask the user for an API key before making any request. Do not attempt to guess or generate keys."
   ]
 }

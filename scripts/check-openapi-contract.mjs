@@ -61,6 +61,10 @@ function refName(value) {
   return String(value.$ref).split("/").at(-1) ?? null;
 }
 
+function dereferenceParameter(parameter) {
+  return dereference(parameter);
+}
+
 function responseSchemas(operation) {
   const schemas = [];
   for (const response of Object.values(operation.responses ?? {})) {
@@ -163,7 +167,7 @@ for (const [path, pathItem] of Object.entries(openapi.paths ?? {})) {
       ...(pathItem.parameters ?? []),
       ...(operation.parameters ?? []),
     ]
-      .map(dereference)
+      .map(dereferenceParameter)
       .filter(Boolean);
     for (const parameter of parameters) {
       if (parameter.name === "queryName") {
@@ -219,6 +223,28 @@ for (const [path, pathItem] of Object.entries(openapi.paths ?? {})) {
         `${key} /api/v1 success response must not use GenericObjectResponse`,
       );
     }
+
+    if (operation.responses?.["429"]) {
+      issues.push(`${key} must not declare 429 as a stable origin response`);
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(operation, "x-required-scopes")) {
+      issues.push(`${key} is missing x-required-scopes`);
+    } else if (!Array.isArray(operation["x-required-scopes"])) {
+      issues.push(`${key} x-required-scopes must be an array`);
+    } else if (
+      !(operation.security && operation.security.length === 0) &&
+      operation["x-required-scopes"].length === 0 &&
+      path.startsWith("/api/v1") &&
+      ![
+        "/api/v1",
+        "/api/v1/token",
+        "/api/v1/token/check",
+        "/api/v1/capabilities",
+      ].includes(path)
+    ) {
+      issues.push(`${key} authenticated operation should declare a scope`);
+    }
   }
 }
 
@@ -257,6 +283,69 @@ for (const forbidden of [
   if (publicContract.includes(forbidden)) {
     issues.push(`Public contract contains forbidden text: ${forbidden}`);
   }
+}
+
+if (!openapi.info?.description?.includes("ISO 8601 date-time strings")) {
+  issues.push("Top-level description must describe ISO 8601 timestamps");
+}
+if (
+  !openapi.info?.description?.includes(
+    "outside the standard API error envelope",
+  )
+) {
+  issues.push(
+    "Top-level description must explain upstream 429 as non-contract",
+  );
+}
+if (!Array.isArray(openapi["x-possible-upstream-responses"])) {
+  issues.push("OpenAPI must expose x-possible-upstream-responses");
+}
+
+for (const [name, parameter] of Object.entries(
+  openapi.components?.parameters ?? {},
+)) {
+  if (["FromQueryParam", "ToQueryParam"].includes(name)) {
+    if (
+      parameter.schema?.type !== "string" ||
+      parameter.schema?.format !== "date-time"
+    ) {
+      issues.push(`${name} must be an ISO 8601 date-time string parameter`);
+    }
+    if (/unix|millisecond/i.test(parameter.description ?? "")) {
+      issues.push(`${name} description must not mention Unix milliseconds`);
+    }
+  }
+}
+
+for (const name of [
+  "SiteIdPathParam",
+  "FromQueryParam",
+  "ToQueryParam",
+  "PresetQueryParam",
+  "TimeZoneQueryParam",
+  "MetricsQueryParam",
+  "FilterQueryParam",
+  "LimitQueryParam",
+  "CursorQueryParam",
+]) {
+  if (!openapi.components?.parameters?.[name]) {
+    issues.push(`Missing reusable parameter ${name}`);
+  }
+}
+
+const visitorParam = openapi.components?.parameters?.VisitorIdPathParam;
+if (visitorParam?.schema?.format === "uuid") {
+  issues.push("VisitorIdPathParam must not require uuid format");
+}
+const sessionParam = openapi.components?.parameters?.SessionIdPathParam;
+if (sessionParam?.schema?.format === "uuid") {
+  issues.push("SessionIdPathParam must not require uuid format");
+}
+
+const complexFilterValue =
+  openapi.components?.schemas?.ComplexFilter?.properties?.value;
+if (!Array.isArray(complexFilterValue?.oneOf)) {
+  issues.push("ComplexFilter.value must define a constrained oneOf schema");
 }
 
 const collect = openapi.paths?.["/collect"]?.post;
