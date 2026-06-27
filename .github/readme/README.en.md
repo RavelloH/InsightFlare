@@ -142,6 +142,21 @@ After filling in the variables, wait about 3 minutes for the deployment to finis
 
 ## Advanced Configuration
 
+### Connect AI Agents for Analysis
+
+InsightFlare exposes Skills for AI Agents. You can connect your InsightFlare deployment to agents such as OpenClaw, Codex, Claude Code, and others, so they can access InsightFlare data directly for analysis and report generation.  
+Send the following instruction to your Agent, replacing the domain with your deployed InsightFlare instance. Your Agent will guide you to the dashboard to create a dedicated API key for accessing InsightFlare data.
+
+```txt
+Read https://<your InsightFlare domain>/.well-known/skills.json, connect to this web analytics system, and guide me through authorization.
+```
+
+Then you can ask your Agent questions in natural language, for example:
+
+```txt
+"How did my site perform last month? Where did most visitors come from among the highest-traffic sites? Which pages were the most popular?"
+```
+
 ### Override Wrangler Configuration with Cloudflare Variables
 
 In Cloudflare build environments, you can use project variables and secrets to override deployment-specific values from `wrangler.toml`. `build:pre` reads these values before deployment, writes them into the active Wrangler config, and the following `wrangler deploy` uses the resolved config.
@@ -295,7 +310,7 @@ Set `NEXT_PUBLIC_DEMO_MODE=1` to make the development server automatically enabl
 | Command                           | Purpose                                     |
 | --------------------------------- | ------------------------------------------- |
 | `npm run dev`                     | Local dashboard development                 |
-| `npm run check`                   | Run typecheck + lint + format + i18n checks |
+| `npm run check`                   | Run typecheck + lint + format + i18n + tests + spec checks |
 | `npm run typecheck`               | TypeScript type checking                    |
 | `npm run lint` / `lint:fix`       | ESLint                                      |
 | `npm run format` / `format:check` | Prettier                                    |
