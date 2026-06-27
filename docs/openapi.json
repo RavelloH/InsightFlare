@@ -2334,7 +2334,7 @@
       "get": {
         "operationId": "getAnalyticsCrossBreakdown",
         "summary": "Get analytics cross breakdown",
-        "description": "Returns a two-dimensional analytics breakdown.",
+        "description": "Returns a two-dimensional analytics breakdown. Supports page, referrer, UTM, client, and geo dimensions. Session and event dimensions are not supported.",
         "tags": ["Analytics"],
         "parameters": [
           {
@@ -2390,7 +2390,7 @@
               "type": "string",
               "maxLength": 120
             },
-            "description": "Primary dimension."
+            "description": "Primary dimension (e.g. client.browser, geo.country, page.path)."
           },
           {
             "name": "secondary",
@@ -2399,7 +2399,7 @@
               "type": "string",
               "maxLength": 120
             },
-            "description": "Secondary dimension."
+            "description": "Secondary dimension (must differ from primary)."
           },
           {
             "name": "metric",
@@ -3694,6 +3694,15 @@
             "description": "Field path."
           },
           {
+            "name": "fieldValueType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["string", "number", "boolean", "null", "object", "array"]
+            },
+            "description": "Expected value type for the field."
+          },
+          {
             "name": "search",
             "in": "query",
             "schema": {
@@ -4810,11 +4819,6 @@
                 "default": {
                   "summary": "Analyze an ad-hoc funnel",
                   "value": {
-                    "timeRange": {
-                      "from": "2026-05-27T00:00:00Z",
-                      "to": "2026-06-26T00:00:00Z",
-                      "timeZone": "Asia/Shanghai"
-                    },
                     "steps": [
                       {
                         "type": "pageview",
@@ -4825,13 +4829,6 @@
                         "type": "event",
                         "value": "signup",
                         "label": "Signup"
-                      }
-                    ],
-                    "filters": [
-                      {
-                        "field": "geo.country",
-                        "op": "in",
-                        "value": ["US", "CA"]
                       }
                     ]
                   }
@@ -8080,24 +8077,15 @@
       },
       "FunnelAnalysisRequest": {
         "type": "object",
-        "description": "Request for ad-hoc funnel analysis.",
+        "description": "Request for ad-hoc funnel analysis. Use query parameters (from, to, preset, timeZone) for time range.",
         "required": ["steps"],
         "properties": {
-          "timeRange": {
-            "$ref": "#/components/schemas/TimeRangeInput"
-          },
           "steps": {
             "type": "array",
             "minItems": 2,
             "maxItems": 10,
             "items": {
               "$ref": "#/components/schemas/FunnelStepInput"
-            }
-          },
-          "filters": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ComplexFilter"
             }
           }
         },

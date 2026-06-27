@@ -6,6 +6,7 @@ import {
   parseLimit,
   parseQueryLimit,
   parseWindow,
+  resolveCrossBreakdownDimension,
   type ResponseContext,
 } from "@/lib/edge/query/core";
 import type { Env } from "@/lib/edge/types";
@@ -17,7 +18,7 @@ import {
   queryBrowserTrendFromD1,
   queryBrowserVersionBreakdownFromD1,
 } from "./browser";
-import { queryClientCrossDimensionFromD1 } from "./client-cross";
+import { queryCrossDimensionFromD1 } from "./client-cross";
 import { parseClientDimensionKey, parseUtmDimensionKey } from "./parsers";
 import { queryBrowserRadarFromD1, queryReferrerRadarFromD1 } from "./radar";
 import {
@@ -301,21 +302,19 @@ export async function handleReferrerDimensionTrend(
   });
 }
 
-export async function handleClientCrossBreakdown(
+export async function handleCrossBreakdown(
   env: Env,
   siteId: string,
   url: URL,
   ctx?: ResponseContext,
 ): Promise<Response> {
-  const primaryDimension = parseClientDimensionKey(
-    url.searchParams.get("primaryDimension"),
-  );
-  if (!primaryDimension) return badRequest("Invalid primary dimension");
-  const secondaryDimension = parseClientDimensionKey(
-    url.searchParams.get("secondaryDimension"),
-  );
-  if (!secondaryDimension) return badRequest("Invalid secondary dimension");
-  if (primaryDimension === secondaryDimension) {
+  const primaryRaw = url.searchParams.get("primaryDimension") || "";
+  const secondaryRaw = url.searchParams.get("secondaryDimension") || "";
+  const primaryDimension = resolveCrossBreakdownDimension(primaryRaw);
+  if (!primaryDimension) return badRequest("Unsupported primary dimension");
+  const secondaryDimension = resolveCrossBreakdownDimension(secondaryRaw);
+  if (!secondaryDimension) return badRequest("Unsupported secondary dimension");
+  if (primaryRaw === secondaryRaw) {
     return badRequest("Primary and secondary dimensions must differ");
   }
   const window = parseWindow(url);
@@ -323,7 +322,7 @@ export async function handleClientCrossBreakdown(
   const filters = parseFilters(url);
   const primaryLimit = parseQueryLimit(url, "primaryLimit", 5, 1, 12);
   const secondaryLimit = parseQueryLimit(url, "secondaryLimit", 6, 1, 8);
-  const data = await queryClientCrossDimensionFromD1(
+  const data = await queryCrossDimensionFromD1(
     env,
     siteId,
     window,

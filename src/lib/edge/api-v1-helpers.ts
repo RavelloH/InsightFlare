@@ -454,6 +454,28 @@ export function validateDimension(
   });
 }
 
+const UNSUPPORTED_CROSS_BREAKDOWN = new Set([
+  "session.entryPath",
+  "session.exitPath",
+  "event.name",
+]);
+
+export function validateCrossBreakdownDimension(
+  value: string,
+): AnalyticsDimension | Response {
+  const base = validateDimension(value);
+  if (base instanceof Response) return base;
+  if (UNSUPPORTED_CROSS_BREAKDOWN.has(value)) {
+    return jsonError(
+      "validation_failed",
+      "Dimension not supported for cross-breakdowns",
+      400,
+      { dimension: value },
+    );
+  }
+  return base;
+}
+
 export function parseFilter(url: URL): Record<string, string> | Response {
   const filters: Record<string, string> = {};
   for (const [key, value] of url.searchParams.entries()) {

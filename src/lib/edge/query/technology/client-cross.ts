@@ -3,7 +3,6 @@ import type {
   BrowserCrossBreakdownDimensionRow,
   BrowserCrossBreakdownItemRow,
   ClientCrossAggregateRow,
-  ClientDimensionKey,
   DashboardFilters,
   QueryWindow,
 } from "@/lib/edge/query/core";
@@ -13,7 +12,6 @@ import {
   CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
   CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
   CLIENT_CROSS_UNKNOWN_TOKEN,
-  clientDimensionDefinition,
   queryD1All,
   SHARE_TREND_OTHER_LABEL,
   shareTrendSeriesKey,
@@ -21,23 +19,26 @@ import {
 } from "@/lib/edge/query/core";
 import type { Env } from "@/lib/edge/types";
 
-export async function queryClientCrossDimensionFromD1(
+interface DimensionDefinition {
+  labelExpr: string;
+  fallbackKeyBase: string;
+}
+
+export async function queryCrossDimensionFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
   filters: DashboardFilters,
   primaryLimit: number,
   secondaryLimit: number,
-  primaryDimension: ClientDimensionKey,
-  secondaryDimension: ClientDimensionKey,
+  primaryDimension: DimensionDefinition,
+  secondaryDimension: DimensionDefinition,
 ): Promise<BrowserCrossBreakdownDimensionDataRow> {
   const filter = buildVisitFilterSql(filters);
   const normalizedPrimaryLimit = Math.min(Math.max(1, primaryLimit), 12);
   const normalizedSecondaryLimit = Math.min(Math.max(1, secondaryLimit), 8);
-  const primaryDefinition = clientDimensionDefinition(primaryDimension);
-  const secondaryDefinition = clientDimensionDefinition(secondaryDimension);
-  const primaryExpr = primaryDefinition.labelExpr;
-  const normalizedSecondaryExpr = `CASE WHEN ${secondaryDefinition.labelExpr} != '' THEN ${secondaryDefinition.labelExpr} ELSE '${CLIENT_CROSS_UNKNOWN_TOKEN}' END`;
+  const primaryExpr = primaryDimension.labelExpr;
+  const normalizedSecondaryExpr = `CASE WHEN ${secondaryDimension.labelExpr} != '' THEN ${secondaryDimension.labelExpr} ELSE '${CLIENT_CROSS_UNKNOWN_TOKEN}' END`;
 
   const topPrimarySql = `
 WITH
@@ -269,7 +270,7 @@ ORDER BY primaryValue ASC, secondaryValue ASC
         key: shareTrendSeriesKey(
           row.value,
           columnKeySet,
-          secondaryDefinition.fallbackKeyBase,
+          secondaryDimension.fallbackKeyBase,
         ),
         label: row.value,
         views: row.views,
@@ -310,7 +311,7 @@ ORDER BY primaryValue ASC, secondaryValue ASC
       key: shareTrendSeriesKey(
         row.value,
         rowKeySet,
-        primaryDefinition.fallbackKeyBase,
+        primaryDimension.fallbackKeyBase,
       ),
       label: row.value,
       views: row.views,

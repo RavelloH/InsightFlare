@@ -1359,6 +1359,14 @@ describe("api v1 gateway", () => {
     expect(response.status).toBe(400);
   });
 
+  it("rejects cross-breakdown with unsupported session dimension", async () => {
+    const { response } = await authed(
+      "/api/v1/sites/site-1/analytics/cross-breakdowns?primary=session.entryPath&secondary=client.browser&from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
+      [siteMatch("site-1", "Blog")],
+    );
+    expect(response.status).toBe(400);
+  });
+
   // ── additional coverage: analytics compare ──────────────────────
 
   it("returns comparison analytics", async () => {

@@ -11,8 +11,8 @@ import {
   handleBrowserRadar,
   handleBrowserTrend,
   handleBrowserVersionBreakdown,
-  handleClientCrossBreakdown,
   handleClientDimensionTrend,
+  handleCrossBreakdown,
   handleReferrerDimensionTrend,
   handleReferrerRadar,
   handleUtmDimensionTrend,
@@ -25,7 +25,7 @@ const queryMocks = vi.hoisted(() => ({
   queryBrowserRadarFromD1: vi.fn(),
   queryBrowserTrendFromD1: vi.fn(),
   queryBrowserVersionBreakdownFromD1: vi.fn(),
-  queryClientCrossDimensionFromD1: vi.fn(),
+  queryCrossDimensionFromD1: vi.fn(),
   queryClientDimensionTrendFromD1: vi.fn(),
   queryReferrerRadarFromD1: vi.fn(),
   queryReferrerTrendFromD1: vi.fn(),
@@ -41,7 +41,7 @@ vi.mock("@/lib/edge/query/technology/browser", () => ({
 }));
 
 vi.mock("@/lib/edge/query/technology/client-cross", () => ({
-  queryClientCrossDimensionFromD1: queryMocks.queryClientCrossDimensionFromD1,
+  queryCrossDimensionFromD1: queryMocks.queryCrossDimensionFromD1,
 }));
 
 vi.mock("@/lib/edge/query/technology/radar", () => ({
@@ -95,7 +95,7 @@ function expectNoQueryCalls() {
   expect(queryMocks.queryBrowserRadarFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryBrowserTrendFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryBrowserVersionBreakdownFromD1).not.toHaveBeenCalled();
-  expect(queryMocks.queryClientCrossDimensionFromD1).not.toHaveBeenCalled();
+  expect(queryMocks.queryCrossDimensionFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryClientDimensionTrendFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryReferrerRadarFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryReferrerTrendFromD1).not.toHaveBeenCalled();
@@ -141,8 +141,11 @@ describe("edge query technology handlers", () => {
     ["referrer dimension trend", handleReferrerDimensionTrend, {}],
     [
       "client cross breakdown",
-      handleClientCrossBreakdown,
-      { primaryDimension: "browser", secondaryDimension: "deviceType" },
+      handleCrossBreakdown,
+      {
+        primaryDimension: "client.browser",
+        secondaryDimension: "client.deviceType",
+      },
     ],
   ])("rejects invalid time windows for %s", async (_label, handler, params) => {
     const response = await handler(
@@ -536,29 +539,38 @@ describe("edge query technology handlers", () => {
   });
 
   it("rejects invalid or duplicate client cross breakdown dimensions", async () => {
-    const invalidPrimary = await handleClientCrossBreakdown(
+    const unsupportedPrimary = await handleCrossBreakdown(
       env,
       siteId,
-      testUrl({ primaryDimension: "country", secondaryDimension: "browser" }),
+      testUrl({
+        primaryDimension: "session.entryPath",
+        secondaryDimension: "client.browser",
+      }),
     );
-    const invalidSecondary = await handleClientCrossBreakdown(
+    const unsupportedSecondary = await handleCrossBreakdown(
       env,
       siteId,
-      testUrl({ primaryDimension: "browser", secondaryDimension: "country" }),
+      testUrl({
+        primaryDimension: "client.browser",
+        secondaryDimension: "event.name",
+      }),
     );
-    const duplicate = await handleClientCrossBreakdown(
+    const duplicate = await handleCrossBreakdown(
       env,
       siteId,
-      testUrl({ primaryDimension: "browser", secondaryDimension: "browser" }),
+      testUrl({
+        primaryDimension: "client.browser",
+        secondaryDimension: "client.browser",
+      }),
     );
 
-    expect(await responseJson(invalidPrimary)).toMatchObject({
+    expect(await responseJson(unsupportedPrimary)).toMatchObject({
       ok: false,
-      error: { message: "Invalid primary dimension" },
+      error: { message: "Unsupported primary dimension" },
     });
-    expect(await responseJson(invalidSecondary)).toMatchObject({
+    expect(await responseJson(unsupportedSecondary)).toMatchObject({
       ok: false,
-      error: { message: "Invalid secondary dimension" },
+      error: { message: "Unsupported secondary dimension" },
     });
     expect(await responseJson(duplicate)).toMatchObject({
       ok: false,
@@ -568,16 +580,14 @@ describe("edge query technology handlers", () => {
   });
 
   it("passes parsed client cross breakdown arguments and returns enveloped data", async () => {
-    queryMocks.queryClientCrossDimensionFromD1.mockResolvedValue(
-      emptyCrossData,
-    );
+    queryMocks.queryCrossDimensionFromD1.mockResolvedValue(emptyCrossData);
 
-    const response = await handleClientCrossBreakdown(
+    const response = await handleCrossBreakdown(
       env,
       siteId,
       testUrl({
-        primaryDimension: "browser",
-        secondaryDimension: "deviceType",
+        primaryDimension: "client.browser",
+        secondaryDimension: "client.deviceType",
         primaryLimit: "99",
         secondaryLimit: "0",
       }),
@@ -588,15 +598,15 @@ describe("edge query technology handlers", () => {
       ok: true,
       data: emptyCrossData,
     });
-    expect(queryMocks.queryClientCrossDimensionFromD1).toHaveBeenCalledWith(
+    expect(queryMocks.queryCrossDimensionFromD1).toHaveBeenCalledWith(
       env,
       siteId,
       parsedWindow(),
       expect.any(Object),
       12,
       1,
-      "browser",
-      "deviceType",
+      expect.objectContaining({ fallbackKeyBase: "browser" }),
+      expect.objectContaining({ fallbackKeyBase: "device" }),
     );
   });
 });

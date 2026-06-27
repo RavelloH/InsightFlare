@@ -47,6 +47,7 @@ import {
   parseTimeRange,
   requireScope,
   TIME_PRESETS,
+  validateCrossBreakdownDimension,
   validateDimension,
 } from "./api-v1-helpers";
 import {
@@ -1364,8 +1365,10 @@ async function handleAnalytics(
   }
   if (resource === "cross-breakdowns") {
     if (request.method !== "GET") return methodNotAllowed(request);
-    const primary = validateDimension(url.searchParams.get("primary") || "");
-    const secondary = validateDimension(
+    const primary = validateCrossBreakdownDimension(
+      url.searchParams.get("primary") || "",
+    );
+    const secondary = validateCrossBreakdownDimension(
       url.searchParams.get("secondary") || "",
     );
     if (primary instanceof Response) return primary;

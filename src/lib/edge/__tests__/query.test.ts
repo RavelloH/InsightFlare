@@ -1429,14 +1429,14 @@ describe("edge query handlers", () => {
     const clientCross = await privateQuery(
       privatePath(
         "client-cross-breakdown",
-        "primaryDimension=browser&secondaryDimension=deviceType",
+        "primaryDimension=client.browser&secondaryDimension=client.deviceType",
       ),
       env,
     );
     const invalidClientCross = await privateQuery(
       privatePath(
         "client-cross-breakdown",
-        "primaryDimension=browser&secondaryDimension=browser",
+        "primaryDimension=client.browser&secondaryDimension=client.browser",
       ),
       env,
     );

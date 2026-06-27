@@ -1528,17 +1528,16 @@ function buildSchemas(): Record<string, unknown> {
     },
     FunnelAnalysisRequest: {
       type: "object",
-      description: "Request for ad-hoc funnel analysis.",
+      description:
+        "Request for ad-hoc funnel analysis. Use query parameters (from, to, preset, timeZone) for time range.",
       required: ["steps"],
       properties: {
-        timeRange: ref("TimeRangeInput"),
         steps: {
           type: "array",
           minItems: 2,
           maxItems: 10,
           items: ref("FunnelStepInput"),
         },
-        filters: { type: "array", items: ref("ComplexFilter") },
       },
       additionalProperties: false,
     },
@@ -2243,7 +2242,8 @@ function buildPaths(): OpenAPISpec["paths"] {
       get: op({
         operationId: "getAnalyticsCrossBreakdown",
         summary: "Get analytics cross breakdown",
-        description: "Returns a two-dimensional analytics breakdown.",
+        description:
+          "Returns a two-dimensional analytics breakdown. Supports page, referrer, UTM, client, and geo dimensions. Session and event dimensions are not supported.",
         tags: ["Analytics"],
         parameters: [
           ...timeParams(),
@@ -2251,12 +2251,12 @@ function buildPaths(): OpenAPISpec["paths"] {
           queryParam(
             "primary",
             { type: "string", maxLength: 120 },
-            "Primary dimension.",
+            "Primary dimension (e.g. client.browser, geo.country, page.path).",
           ),
           queryParam(
             "secondary",
             { type: "string", maxLength: 120 },
-            "Secondary dimension.",
+            "Secondary dimension (must differ from primary).",
           ),
           queryParam(
             "metric",
@@ -2461,6 +2461,14 @@ function buildPaths(): OpenAPISpec["paths"] {
             "fieldPath",
             { type: "string", maxLength: 240 },
             "Field path.",
+          ),
+          queryParam(
+            "fieldValueType",
+            {
+              type: "string",
+              enum: ["string", "number", "boolean", "null", "object", "array"],
+            },
+            "Expected value type for the field.",
           ),
           queryParam(
             "search",
@@ -3266,9 +3274,7 @@ function requestExamplesFor(schemaName: string | null) {
       default: {
         summary: "Analyze an ad-hoc funnel",
         value: {
-          timeRange: sampleTimeRange,
           steps: funnelExample.steps,
-          filters: [{ field: "geo.country", op: "in", value: ["US", "CA"] }],
         },
       },
     },

@@ -13,6 +13,7 @@ import {
   SHARE_TREND_OTHER_LABEL,
   SHARE_TREND_OTHER_TOKEN,
 } from "@/lib/edge/query/core";
+import { clientDimensionDefinition } from "@/lib/edge/query/core";
 import {
   queryBrowserCrossBreakdownFromD1,
   queryBrowserCrossDimensionFromD1,
@@ -20,7 +21,7 @@ import {
   queryBrowserTrendFromD1,
   queryBrowserVersionBreakdownFromD1,
 } from "@/lib/edge/query/technology/browser";
-import { queryClientCrossDimensionFromD1 } from "@/lib/edge/query/technology/client-cross";
+import { queryCrossDimensionFromD1 } from "@/lib/edge/query/technology/client-cross";
 import {
   queryBrowserRadarFromD1,
   queryReferrerRadarFromD1,
@@ -589,15 +590,15 @@ describe("edge technology query coverage", () => {
       ],
     ]);
 
-    const result = await queryClientCrossDimensionFromD1(
+    const result = await queryCrossDimensionFromD1(
       env,
       siteId,
       window,
       {},
       3,
       2,
-      "browser",
-      "deviceType",
+      clientDimensionDefinition("browser"),
+      clientDimensionDefinition("deviceType"),
     );
 
     expect(result.columns).toEqual([
@@ -670,27 +671,27 @@ describe("edge technology query coverage", () => {
     ]);
 
     await expect(
-      queryClientCrossDimensionFromD1(
+      queryCrossDimensionFromD1(
         noPrimary.env,
         siteId,
         window,
         {},
         3,
         3,
-        "browser",
-        "deviceType",
+        clientDimensionDefinition("browser"),
+        clientDimensionDefinition("deviceType"),
       ),
     ).resolves.toEqual({ columns: [], rows: [], totalVisitors: 0 });
     await expect(
-      queryClientCrossDimensionFromD1(
+      queryCrossDimensionFromD1(
         noSecondary.env,
         siteId,
         window,
         {},
         3,
         3,
-        "browser",
-        "deviceType",
+        clientDimensionDefinition("browser"),
+        clientDimensionDefinition("deviceType"),
       ),
     ).resolves.toEqual({ columns: [], rows: [], totalVisitors: 0 });
 
@@ -738,15 +739,15 @@ describe("edge technology query coverage", () => {
     ]);
 
     await expect(
-      queryClientCrossDimensionFromD1(
+      queryCrossDimensionFromD1(
         env,
         siteId,
         window,
         {},
         2,
         1,
-        "deviceType",
-        "browser",
+        clientDimensionDefinition("deviceType"),
+        clientDimensionDefinition("browser"),
       ),
     ).resolves.toMatchObject({
       columns: [{ key: "chrome", label: "Chrome" }],
@@ -1190,15 +1191,15 @@ describe("edge technology query coverage", () => {
     ]);
 
     await expect(
-      queryClientCrossDimensionFromD1(
+      queryCrossDimensionFromD1(
         env,
         siteId,
         window,
         {},
         3,
         3,
-        "browser",
-        "deviceType",
+        clientDimensionDefinition("browser"),
+        clientDimensionDefinition("deviceType"),
       ),
     ).resolves.toEqual({
       columns: [

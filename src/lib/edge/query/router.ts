@@ -46,8 +46,8 @@ import {
   handleBrowserRadar,
   handleBrowserTrend,
   handleBrowserVersionBreakdown,
-  handleClientCrossBreakdown,
   handleClientDimensionTrend,
+  handleCrossBreakdown,
   handleReferrerDimensionTrend,
   handleReferrerRadar,
   handleUtmDimensionTrend,
@@ -159,7 +159,7 @@ export async function routeQuery(
     return handleUtmDimensionTrend(env, siteId, url, ctx);
   }
   if (pathname === "client-cross-breakdown") {
-    return handleClientCrossBreakdown(env, siteId, url, ctx);
+    return handleCrossBreakdown(env, siteId, url, ctx);
   }
   if (pathname === "utm-source") {
     return handleDimension(

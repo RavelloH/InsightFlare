@@ -1,3 +1,5 @@
+import { browserEngineCaseSql } from "@/lib/browser-engine";
+
 import {
   type ClientDimensionKey,
   DIRECT_REFERRER_FILTER_VALUE,
@@ -153,4 +155,105 @@ export function regionValueExpr(): string {
 
 export function cityValueExpr(): string {
   return "CASE WHEN TRIM(country) = '' AND TRIM(region_code) = '' AND TRIM(region) = '' AND TRIM(city) = '' THEN '' ELSE TRIM(country) || '::' || CASE WHEN TRIM(region_code) != '' THEN TRIM(region_code) ELSE TRIM(region) END || '::' || TRIM(region) || '::' || TRIM(city) END";
+}
+
+export function resolveCrossBreakdownDimension(
+  dimension: string,
+): { labelExpr: string; fallbackKeyBase: string } | null {
+  // ── page ──────────────────────────────────────────────────────────────
+  if (dimension === "page.path")
+    return {
+      labelExpr: "TRIM(COALESCE(pathname, ''))",
+      fallbackKeyBase: "page",
+    };
+  if (dimension === "page.title")
+    return { labelExpr: "TRIM(COALESCE(title, ''))", fallbackKeyBase: "title" };
+  if (dimension === "page.hostname")
+    return {
+      labelExpr: "TRIM(COALESCE(hostname, ''))",
+      fallbackKeyBase: "hostname",
+    };
+  if (dimension === "page.query")
+    return {
+      labelExpr: "TRIM(COALESCE(query_string, ''))",
+      fallbackKeyBase: "query",
+    };
+  if (dimension === "page.hash")
+    return {
+      labelExpr: "TRIM(COALESCE(hash_fragment, ''))",
+      fallbackKeyBase: "hash",
+    };
+
+  // ── session (requires session-level aggregation, not supported) ───────
+  if (dimension === "session.entryPath" || dimension === "session.exitPath")
+    return null;
+
+  // ── referrer ──────────────────────────────────────────────────────────
+  if (dimension === "referrer.domain")
+    return referrerDomainDimensionDefinition();
+  if (dimension === "referrer.url")
+    return {
+      labelExpr: "TRIM(COALESCE(referrer_url, ''))",
+      fallbackKeyBase: "referrer-url",
+    };
+
+  // ── utm ───────────────────────────────────────────────────────────────
+  if (dimension === "utm.source") return utmDimensionDefinition("source");
+  if (dimension === "utm.medium") return utmDimensionDefinition("medium");
+  if (dimension === "utm.campaign") return utmDimensionDefinition("campaign");
+  if (dimension === "utm.term") return utmDimensionDefinition("term");
+  if (dimension === "utm.content") return utmDimensionDefinition("content");
+
+  // ── client ────────────────────────────────────────────────────────────
+  if (dimension === "client.browser")
+    return clientDimensionDefinition("browser");
+  if (dimension === "client.browserVersion")
+    return {
+      labelExpr: "TRIM(COALESCE(browser_version, ''))",
+      fallbackKeyBase: "browser-version",
+    };
+  if (dimension === "client.browserEngine")
+    return {
+      labelExpr: browserEngineCaseSql("browser", "os"),
+      fallbackKeyBase: "engine",
+    };
+  if (dimension === "client.os")
+    return clientDimensionDefinition("operatingSystem");
+  if (dimension === "client.osVersion")
+    return clientDimensionDefinition("osVersion");
+  if (dimension === "client.deviceType")
+    return clientDimensionDefinition("deviceType");
+  if (dimension === "client.language")
+    return clientDimensionDefinition("language");
+  if (dimension === "client.screenSize")
+    return clientDimensionDefinition("screenSize");
+
+  // ── geo ───────────────────────────────────────────────────────────────
+  if (dimension === "geo.country")
+    return {
+      labelExpr: "TRIM(COALESCE(country, ''))",
+      fallbackKeyBase: "country",
+    };
+  if (dimension === "geo.region")
+    return { labelExpr: regionValueExpr(), fallbackKeyBase: "region" };
+  if (dimension === "geo.city")
+    return { labelExpr: cityValueExpr(), fallbackKeyBase: "city" };
+  if (dimension === "geo.continent")
+    return {
+      labelExpr: "TRIM(COALESCE(continent, ''))",
+      fallbackKeyBase: "continent",
+    };
+  if (dimension === "geo.timeZone")
+    return {
+      labelExpr: "TRIM(COALESCE(timezone, ''))",
+      fallbackKeyBase: "timezone",
+    };
+  if (dimension === "geo.organization")
+    return {
+      labelExpr: "TRIM(COALESCE(as_organization, ''))",
+      fallbackKeyBase: "organization",
+    };
+
+  // ── event (requires events table join, not supported) ─────────────────
+  return null;
 }
