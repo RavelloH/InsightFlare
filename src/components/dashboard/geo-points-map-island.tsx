@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 
+import { Spinner } from "@/components/ui/spinner";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -36,7 +37,7 @@ const GeoPointsMapClient = dynamic<GeoPointsMapIslandProps>(
 function GeoPointsMapFallback() {
   return (
     <div className="flex h-[460px] items-center justify-center overflow-hidden rounded-md border border-border/70 bg-muted/20">
-      <div className="size-6 animate-spin rounded-full border-2 border-border border-t-foreground" />
+      <Spinner className="size-6" />
     </div>
   );
 }
