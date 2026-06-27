@@ -18,7 +18,7 @@ info:
     requests reach the API origin, such as 429 Too Many Requests. These
     responses are outside the standard API error envelope and are not part of
     the stable API contract.
-  version: 0.1.0
+  version: 0.2.0
   contact:
     name: InsightFlare
     url: https://github.com/ravelloh/InsightFlare
@@ -179,7 +179,7 @@ paths:
                   summary: getApiRoot
                   value:
                     data:
-                      version: 0.1.0
+                      version: 0.2.0
                       service: InsightFlare Analytics API
                       links:
                         self: /api/v1
@@ -304,7 +304,7 @@ paths:
                   summary: getCapabilities
                   value:
                     data:
-                      apiVersion: 0.1.0
+                      apiVersion: 0.2.0
                       features:
                         sites: true
                         tracking: true

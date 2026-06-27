@@ -17,7 +17,7 @@ function generate() {
     api: "InsightFlare Analytics API",
     version: getAppVersion(),
     description: "Privacy-focused web analytics platform.",
-    baseUrl: "https://insight.ravelloh.com",
+    baseUrl: "${baseUrl}",
     openapiUrl: "/.well-known/openapi.json",
     discovery: {
       root: "/api/v1",

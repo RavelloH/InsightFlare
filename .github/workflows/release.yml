@@ -47,7 +47,18 @@ jobs:
           echo "file_path=$NEW_FILE" >> "$GITHUB_OUTPUT"
           echo "Detected release changelog: $NEW_FILE"
 
-      - name: Sync package versions
+      - name: Setup Node.js
+        if: steps.changelog.outputs.has_release == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.changelog.outputs.has_release == 'true'
+        run: npm ci
+
+      - name: Sync release artifacts
         if: steps.changelog.outputs.has_release == 'true'
         shell: bash
         run: |
@@ -83,16 +94,20 @@ jobs:
           updatePackageLock("package-lock.json");
           NODE
 
-          git add package.json package-lock.json
+          npm run generate:openapi
+          npm run generate:skills
+          node scripts/check-openapi-contract.mjs
+
+          git add package.json package-lock.json docs/openapi.json docs/openapi.yaml docs/skills.json
 
           if git diff --cached --quiet; then
-            echo "Package versions are already up to date."
+            echo "Release artifacts are already up to date."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore(release): sync package version to ${{ steps.changelog.outputs.version }} [skip ci]"
+          git commit -m "chore(release): sync release artifacts to ${{ steps.changelog.outputs.version }} [skip ci]"
           git push origin HEAD:${{ github.ref_name }}
 
       - name: Finalize release commit
