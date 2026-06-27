@@ -119,11 +119,11 @@ describe("edge query router", () => {
   });
 
   it("blocks all non-public routes before dispatching handlers", async () => {
-    const response = await route("pages-dashboard", true);
+    const response = await route("sessions", true);
 
     expect(response.status).toBe(404);
     await expect(response.text()).resolves.toBe("not-found");
-    expect(handlerMocks.pages.handlePagesDashboard).not.toHaveBeenCalled();
+    expect(handlerMocks.journeys.handleSessions).not.toHaveBeenCalled();
     expect(handlerMocks.core.notFound).toHaveBeenCalledTimes(1);
   });
 

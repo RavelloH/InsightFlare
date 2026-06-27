@@ -1,6 +1,7 @@
 import {
   DEMO_SITE_PROFILES,
   DEMO_TEAMS,
+  demoSitePublicSlug,
 } from "@/lib/realtime/demo-site-profiles";
 import { fnv1a, mulberry32, sFloat, sInt } from "@/lib/realtime/demo-utils";
 import { integrateViews } from "@/lib/realtime/mock/site-curves";
@@ -66,8 +67,8 @@ export function getDemoSites(teamId: string) {
     name: s.name,
     domain: s.domain,
     iconPath: s.iconPath,
-    publicEnabled: 0,
-    publicSlug: null,
+    publicEnabled: true,
+    publicSlug: demoSitePublicSlug(s),
     createdAt: now - 180 * 24 * 3600 * 1000,
     updatedAt: now - sInt(mulberry32(fnv1a(s.id)), 1, 14) * 24 * 3600 * 1000,
   }));

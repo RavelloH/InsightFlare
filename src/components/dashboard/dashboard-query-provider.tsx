@@ -52,12 +52,14 @@ interface DashboardQueryContextValue {
   timeZonePreference: string;
   browserTimeZone: string;
   setTimeZonePreference: (timeZone: string) => void;
+  maxRangeDays?: number;
 }
 
 interface DashboardQueryProviderProps {
   children: ReactNode;
   scopeKey?: string;
   initialTimeZonePreference?: string;
+  maxRangeDays?: number;
 }
 
 const STORAGE_KEY = "insightflare.dashboard.query.v2";
@@ -178,21 +180,46 @@ function buildInitialState(initialTimeZonePreference: string) {
   };
 }
 
+function clampCustomRangeToMaxDays(
+  range: CustomTimeRange | null,
+  maxRangeDays?: number,
+): CustomTimeRange | null {
+  if (!range || !maxRangeDays) return range;
+  const maxSpan = maxRangeDays * 24 * 60 * 60 * 1000;
+  if (range.to - range.from <= maxSpan) return range;
+  return {
+    from: Math.max(0, range.to - maxSpan),
+    to: range.to,
+  };
+}
+
+function clampPresetForMaxDays(
+  range: RangePreset,
+  maxRangeDays?: number,
+): RangePreset {
+  if (!maxRangeDays) return range;
+  if (range === "all") return "12m";
+  return range;
+}
+
 export function DashboardQueryProvider({
   children,
   scopeKey = "",
   initialTimeZonePreference = "",
+  maxRangeDays,
 }: DashboardQueryProviderProps) {
   const initial = useMemo(
     () => buildInitialState(initialTimeZonePreference),
     [initialTimeZonePreference],
   );
-  const [range, setRangeState] = useState<RangePreset>(initial.range);
+  const [range, setRangeState] = useState<RangePreset>(
+    clampPresetForMaxDays(initial.range, maxRangeDays),
+  );
   const [interval, setIntervalState] = useState<DashboardInterval>(
     initial.interval,
   );
   const [customRange, setCustomRangeState] = useState<CustomTimeRange | null>(
-    initial.customRange,
+    clampCustomRangeToMaxDays(initial.customRange, maxRangeDays),
   );
   const [uiFilters, setUiFiltersState] = useState<DashboardFilters>(
     initial.uiFilters,
@@ -209,12 +236,16 @@ export function DashboardQueryProvider({
 
   const windowState = useMemo(
     () =>
-      resolveTimeWindow(range, Date.now(), {
-        customRange: customRange || undefined,
-        interval,
-        timeZone,
-      }),
-    [range, customRange, interval, timeZone],
+      resolveTimeWindow(
+        clampPresetForMaxDays(range, maxRangeDays),
+        Date.now(),
+        {
+          customRange: customRange || undefined,
+          interval,
+          timeZone,
+        },
+      ),
+    [range, maxRangeDays, customRange, interval, timeZone],
   );
 
   useEffect(() => {
@@ -253,29 +284,38 @@ export function DashboardQueryProvider({
 
   const setRange = useCallback(
     (next: RangePreset) => {
+      const clampedNext = clampPresetForMaxDays(next, maxRangeDays);
       if (next === "custom" && !customRange) {
-        setRangeState(next);
+        setRangeState(clampedNext);
         return;
       }
-      const nextWindow = resolveTimeWindow(next, Date.now(), {
+      const nextWindow = resolveTimeWindow(clampedNext, Date.now(), {
         customRange: customRange || undefined,
         interval: null,
         timeZone,
       });
-      setRangeState(next);
+      setRangeState(clampedNext);
       setIntervalState(finestIntervalForRange(nextWindow.from, nextWindow.to));
     },
-    [customRange, timeZone],
+    [customRange, maxRangeDays, timeZone],
   );
 
-  const setCustomRange = useCallback((next: CustomTimeRange | null) => {
-    const normalized = normalizeCustomRange(next);
-    setCustomRangeState(normalized);
-    if (normalized) {
-      setRangeState("custom");
-      setIntervalState(finestIntervalForRange(normalized.from, normalized.to));
-    }
-  }, []);
+  const setCustomRange = useCallback(
+    (next: CustomTimeRange | null) => {
+      const normalized = clampCustomRangeToMaxDays(
+        normalizeCustomRange(next),
+        maxRangeDays,
+      );
+      setCustomRangeState(normalized);
+      if (normalized) {
+        setRangeState("custom");
+        setIntervalState(
+          finestIntervalForRange(normalized.from, normalized.to),
+        );
+      }
+    },
+    [maxRangeDays],
+  );
 
   const setInterval = useCallback((next: DashboardInterval) => {
     setIntervalState(next);
@@ -315,6 +355,7 @@ export function DashboardQueryProvider({
       timeZonePreference,
       browserTimeZone: detectedBrowserTimeZone,
       setTimeZonePreference,
+      maxRangeDays,
     }),
     [
       range,
@@ -331,6 +372,7 @@ export function DashboardQueryProvider({
       timeZonePreference,
       detectedBrowserTimeZone,
       setTimeZonePreference,
+      maxRangeDays,
     ],
   );
 
@@ -361,6 +403,7 @@ function useDashboardQueryContext(): DashboardQueryContextValue {
       timeZonePreference: "",
       browserTimeZone: "",
       setTimeZonePreference: () => {},
+      maxRangeDays: undefined,
     };
   }
   return context;

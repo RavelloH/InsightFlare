@@ -69,7 +69,10 @@ interface SiteSettingsClientPageProps {
     slug: string;
     name: string;
   }>;
-  site: Pick<SiteData, "id" | "name" | "domain" | "publicSlug">;
+  site: Pick<
+    SiteData,
+    "id" | "name" | "domain" | "publicEnabled" | "publicSlug"
+  >;
 }
 
 interface ActionResponse<T> {
@@ -111,6 +114,15 @@ function resolveSiteSlug(
   );
   if (candidate.length > 0) return candidate;
   return site.id.slice(0, 8);
+}
+
+function randomPublicSlug(): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const values = new Uint8Array(8);
+  crypto.getRandomValues(values);
+  return Array.from(values, (value) => alphabet[value % alphabet.length]).join(
+    "",
+  );
 }
 
 function formatSampleRateValue(value: number): string {
@@ -165,13 +177,20 @@ export function SettingsClientPage({
   const copy = messages.siteSettings;
   const [name, setName] = useState(site.name);
   const [domain, setDomain] = useState(site.domain);
+  const [publicEnabled, setPublicEnabled] = useState(
+    Boolean(site.publicEnabled),
+  );
   const [publicSlug, setPublicSlug] = useState(site.publicSlug || "");
   const [persistedName, setPersistedName] = useState(site.name);
   const [persistedDomain, setPersistedDomain] = useState(site.domain);
+  const [persistedPublicEnabled, setPersistedPublicEnabled] = useState(
+    Boolean(site.publicEnabled),
+  );
   const [persistedPublicSlug, setPersistedPublicSlug] = useState(
     site.publicSlug || "",
   );
   const [saving, setSaving] = useState(false);
+  const [savingPublicSharing, setSavingPublicSharing] = useState(false);
   const [savingTrackingStrength, setSavingTrackingStrength] = useState(false);
   const [savingQueryHash, setSavingQueryHash] = useState(false);
   const [savingPerformanceTracking, setSavingPerformanceTracking] =
@@ -214,6 +233,7 @@ export function SettingsClientPage({
   const [persistedSettings, setPersistedSettings] = useState(
     DEFAULT_SITE_SCRIPT_SETTINGS,
   );
+  const [origin, setOrigin] = useState("");
 
   const hasAutoTrackingChanges =
     autoTrackOutboundLinks !== persistedSettings.autoTrackOutboundLinks;
@@ -236,7 +256,10 @@ export function SettingsClientPage({
 
   const hasSiteInfoChanges =
     name.trim() !== persistedName.trim() ||
-    domain.trim() !== persistedDomain.trim() ||
+    domain.trim() !== persistedDomain.trim();
+
+  const hasPublicSharingChanges =
+    publicEnabled !== persistedPublicEnabled ||
     publicSlug.trim() !== persistedPublicSlug.trim();
 
   const hasTrackingStrengthChanges =
@@ -276,6 +299,10 @@ export function SettingsClientPage({
     setDomainWhitelistInput(formatListInput(normalized.domainWhitelist));
     setPathBlacklistInput(formatListInput(normalized.pathBlacklist));
   }
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -402,15 +429,12 @@ export function SettingsClientPage({
         siteId: site.id,
         name: name.trim(),
         domain: domain.trim(),
-        publicSlug: publicSlug.trim() || undefined,
       });
 
       setName(updated.name);
       setDomain(updated.domain);
-      setPublicSlug(updated.publicSlug || "");
       setPersistedName(updated.name);
       setPersistedDomain(updated.domain);
-      setPersistedPublicSlug(updated.publicSlug || "");
       toast.success(copy.toasts.saved);
 
       const nextSlug = resolveSiteSlug(updated);
@@ -429,6 +453,48 @@ export function SettingsClientPage({
       toast.error(message || copy.toasts.saveFailed);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSavePublicSharing() {
+    if (!hasPublicSharingChanges) return;
+
+    setSavingPublicSharing(true);
+    try {
+      const nextPublicSlug = publicEnabled
+        ? publicSlug.trim() || randomPublicSlug()
+        : publicSlug.trim();
+      const updated = await postJson<SiteData>("/api/admin/site", {
+        intent: "update",
+        siteId: site.id,
+        publicEnabled,
+        publicSlug: nextPublicSlug || undefined,
+      });
+
+      const updatedPublicEnabled = Boolean(updated.publicEnabled);
+      const updatedPublicSlug = updated.publicSlug || "";
+      setPublicEnabled(updatedPublicEnabled);
+      setPublicSlug(updatedPublicSlug);
+      setPersistedPublicEnabled(updatedPublicEnabled);
+      setPersistedPublicSlug(updatedPublicSlug);
+      toast.success(copy.toasts.saved);
+
+      const nextSlug = resolveSiteSlug(updated);
+      if (nextSlug !== currentSiteSlug) {
+        setCurrentSiteSlug(nextSlug);
+        navigateWithTransition(
+          router,
+          `/${locale}/app/${teamSlug}/${nextSlug}/settings`,
+        );
+      } else {
+        router.refresh();
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : copy.toasts.saveFailed;
+      toast.error(message || copy.toasts.saveFailed);
+    } finally {
+      setSavingPublicSharing(false);
     }
   }
 
@@ -613,6 +679,22 @@ export function SettingsClientPage({
     }
   }
 
+  async function handleCopyPublicLink() {
+    const link = publicLink;
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success(copy.copiedLink);
+    } catch {
+      toast.error(copy.toasts.saveFailed);
+    }
+  }
+
+  const publicLink =
+    publicEnabled && publicSlug.trim() && origin
+      ? `${origin}/${locale}/share/${encodeURIComponent(publicSlug.trim())}`
+      : "";
+
   return (
     <div className="space-y-6">
       <PageHeading title={copy.title} subtitle={copy.subtitle} />
@@ -667,24 +749,6 @@ export function SettingsClientPage({
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="site-settings-public-slug">
-                  {copy.publicSlugLabel}
-                </Label>
-                <Input
-                  id="site-settings-public-slug"
-                  value={publicSlug}
-                  onChange={(event) => setPublicSlug(event.target.value)}
-                  disabled={
-                    saving ||
-                    trackingSaving ||
-                    transferring ||
-                    deleting ||
-                    loadingSettings
-                  }
-                />
-              </div>
-
               <Button
                 type="submit"
                 className="mt-auto self-start"
@@ -712,6 +776,131 @@ export function SettingsClientPage({
                 </AutoTransition>
               </Button>
             </form>
+          </CardContent>
+        </Card>
+
+        <Card className="h-full order-3">
+          <CardHeader>
+            <CardTitle>{copy.publicSharingTitle}</CardTitle>
+            <CardDescription>{copy.publicSharingSubtitle}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex h-full flex-col gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="site-settings-public-enabled">
+                {copy.publicEnabledLabel}
+              </Label>
+              <Select
+                value={publicEnabled ? "true" : "false"}
+                onValueChange={(value) => {
+                  const enabled = value === "true";
+                  setPublicEnabled(enabled);
+                  if (enabled && !publicSlug.trim()) {
+                    setPublicSlug(randomPublicSlug());
+                  }
+                }}
+                disabled={
+                  saving ||
+                  savingPublicSharing ||
+                  trackingSaving ||
+                  transferring ||
+                  deleting
+                }
+              >
+                <SelectTrigger
+                  id="site-settings-public-enabled"
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="site-settings-public-slug">
+                {copy.publicSlugLabel}
+              </Label>
+              <Input
+                id="site-settings-public-slug"
+                value={publicSlug}
+                placeholder={copy.publicSlugPlaceholder}
+                onChange={(event) => setPublicSlug(event.target.value)}
+                disabled={
+                  saving ||
+                  savingPublicSharing ||
+                  trackingSaving ||
+                  transferring ||
+                  deleting
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                {copy.publicSlugHint}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="site-settings-public-link">
+                {copy.publicLinkLabel}
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="site-settings-public-link"
+                  value={publicLink}
+                  placeholder={
+                    publicEnabled
+                      ? copy.publicLinkHint
+                      : copy.publicDisabledHint
+                  }
+                  readOnly
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    void handleCopyPublicLink();
+                  }}
+                  disabled={!publicLink}
+                >
+                  {messages.teamManagement.publicLinks.copyLink}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {publicEnabled ? copy.publicLinkHint : copy.publicDisabledHint}
+              </p>
+            </div>
+
+            <Button
+              type="button"
+              className="mt-auto self-start"
+              onClick={() => {
+                void handleSavePublicSharing();
+              }}
+              disabled={
+                saving ||
+                savingPublicSharing ||
+                trackingSaving ||
+                transferring ||
+                deleting ||
+                !hasPublicSharingChanges
+              }
+            >
+              <AutoTransition className="inline-flex items-center gap-2">
+                {savingPublicSharing ? (
+                  <span
+                    key="saving-public-sharing"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <Spinner className="size-4" />
+                    {copy.saving}
+                  </span>
+                ) : (
+                  <span key="save-public-sharing">{copy.save}</span>
+                )}
+              </AutoTransition>
+            </Button>
           </CardContent>
         </Card>
 

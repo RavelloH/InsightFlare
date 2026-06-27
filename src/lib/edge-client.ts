@@ -21,6 +21,13 @@ export type * from "@/lib/edge-client-types";
 
 type HttpMethod = "GET" | "POST" | "PATCH";
 
+export interface PublicSiteData {
+  id: string;
+  slug: string;
+  name: string;
+  domain: string;
+}
+
 interface FetchEdgeOptions {
   method?: HttpMethod;
   path: string;
@@ -161,6 +168,17 @@ export async function fetchPublicOverview(
     ),
     isPublic: true,
   });
+}
+
+export async function fetchPublicSite(slug: string): Promise<PublicSiteData> {
+  const res = await fetchEdgeJson<{ ok: boolean; data: PublicSiteData }>({
+    path: `/api/public/${encodeURIComponent(slug)}/site`,
+    isPublic: true,
+  });
+  if (!res.ok || !res.data) {
+    throw new Error("Public site not found");
+  }
+  return res.data;
 }
 
 export async function fetchPublicTrend(

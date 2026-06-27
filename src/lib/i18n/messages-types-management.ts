@@ -6,7 +6,16 @@ export interface AppManagementMessages {
     editSubtitle: string;
     nameLabel: string;
     domainLabel: string;
+    publicSharingTitle: string;
+    publicSharingSubtitle: string;
+    publicEnabledLabel: string;
     publicSlugLabel: string;
+    publicSlugPlaceholder: string;
+    publicSlugHint: string;
+    publicLinkLabel: string;
+    publicLinkHint: string;
+    publicDisabledHint: string;
+    copiedLink: string;
     trackingStrengthGroupTitle: string;
     trackingStrengthDescription: string;
     trackingStrengthLabel: string;
@@ -205,6 +214,21 @@ export interface AppManagementMessages {
       title: string;
       subtitle: string;
       empty: string;
+      enabled: string;
+      disabled: string;
+      disabledHint: string;
+      viewSettings: string;
+      publicUrl: string;
+      copyLink: string;
+      linkCopied: string;
+      noSites: string;
+      columns: {
+        site: string;
+        domain: string;
+        publicUrl: string;
+        status: string;
+        action: string;
+      };
     };
     apiKeys: {
       title: string;

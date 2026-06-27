@@ -9,6 +9,7 @@ import {
 import {
   DEMO_SITE_PROFILES,
   type DemoSiteProfile,
+  demoSitePublicSlug,
   findSiteProfile,
 } from "@/lib/realtime/demo-site-profiles";
 import {
@@ -207,8 +208,8 @@ export function generateDemoTeamDashboard(
       name: site.name,
       domain: site.domain,
       iconPath: site.iconPath,
-      publicEnabled: 0,
-      publicSlug: null,
+      publicEnabled: true,
+      publicSlug: demoSitePublicSlug(site),
       createdAt: now - 180 * 24 * 3600 * 1000,
       updatedAt:
         now - sInt(mulberry32(fnv1a(site.id)), 1, 14) * 24 * 3600 * 1000,

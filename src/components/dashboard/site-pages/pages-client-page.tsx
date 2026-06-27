@@ -271,7 +271,7 @@ export function PagesClientPage({
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [appendError, setAppendError] = useState<string | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null);
   const latestRequestKeyRef = useRef("");
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
   const requestKey = useMemo(
@@ -358,12 +358,13 @@ export function PagesClientPage({
   }, [requestKey]);
 
   useEffect(() => {
-    const target = sentinelRef.current;
+    const target = sentinelNode;
     if (
       !target ||
       loadingInitial ||
       loadingMore ||
       appendError !== null ||
+      error !== null ||
       !meta.hasMore ||
       typeof IntersectionObserver === "undefined"
     ) {
@@ -385,10 +386,26 @@ export function PagesClientPage({
     );
 
     observer.observe(target);
+    const frameId = globalThis.requestAnimationFrame(() => {
+      const rect = target.getBoundingClientRect();
+      if (rect.top <= globalThis.innerHeight + 480 && rect.bottom >= -480) {
+        loadNextPage();
+      }
+    });
+
     return () => {
+      globalThis.cancelAnimationFrame(frameId);
       observer.disconnect();
     };
-  }, [appendError, loadingInitial, loadingMore, meta.hasMore]);
+  }, [
+    appendError,
+    error,
+    loadingInitial,
+    loadingMore,
+    meta.hasMore,
+    meta.nextPage,
+    sentinelNode,
+  ]);
 
   const shouldShowLoadMoreSkeletons =
     !loadingInitial && !error && items.length > 0 && meta.hasMore;
@@ -457,7 +474,7 @@ export function PagesClientPage({
                   ? Array.from({ length: 2 }, (_, index) => (
                       <div
                         key={`append-skeleton-${meta.nextPage ?? "pending"}-${index}`}
-                        ref={index === 0 ? sentinelRef : null}
+                        ref={index === 0 ? setSentinelNode : null}
                       >
                         <PageTrafficCardSkeleton />
                       </div>

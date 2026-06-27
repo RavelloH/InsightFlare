@@ -1,6 +1,7 @@
 import { withDashboardCache } from "@/lib/edge/dashboard-cache";
 import type { Env } from "@/lib/edge/types";
 
+import { jsonResponse } from "./core";
 import { fetchPublicSite, notAllowed, resolvePrivateSite } from "./core";
 import { routeQuery } from "./router";
 import { handleTeamDashboard } from "./team";
@@ -55,6 +56,17 @@ export async function handlePublicQuery(
   if (site instanceof Response) return site;
   const segments = url.pathname.split("/").filter(Boolean);
   const pathname = segments.slice(3).join("/");
+  if (pathname === "site") {
+    return jsonResponse({
+      ok: true,
+      data: {
+        slug: decodeURIComponent(segments[2] || ""),
+        name: site.name,
+        domain: site.domain,
+        id: site.id,
+      },
+    });
+  }
   return withDashboardCache(ctx, url, () =>
     routeQuery(env, site.id, pathname, url, { publicMode: true }, request),
   );

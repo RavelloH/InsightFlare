@@ -10,11 +10,38 @@ import { toQueryString } from "./client-utils";
 // fetches for the same URL. The map is cleared as soon as the request
 // settles so subsequent retries / re-fetches still hit the network.
 const inflightPrivateRequests = new Map<string, Promise<unknown>>();
+const PUBLIC_SITE_ID_PREFIX = "public:";
 
 function throwAbortError(): never {
   const error = new Error("Aborted");
   error.name = "AbortError";
   throw error;
+}
+
+function publicSlugFromParams(params?: PrivateRequestParams): string | null {
+  const siteId = params?.siteId;
+  if (typeof siteId !== "string") return null;
+  if (!siteId.startsWith(PUBLIC_SITE_ID_PREFIX)) return null;
+  const slug = siteId.slice(PUBLIC_SITE_ID_PREFIX.length).trim();
+  return slug.length > 0 ? slug : null;
+}
+
+function publicPathForPrivateRequest(path: string, slug: string): string {
+  const endpoint = path.replace(/^\/api\/private\/?/, "");
+  return `/api/public/${encodeURIComponent(slug)}/${endpoint}`;
+}
+
+function paramsWithoutSiteId(
+  params?: PrivateRequestParams,
+): PrivateRequestParams | undefined {
+  if (!params) return undefined;
+  const next = { ...params };
+  delete next.siteId;
+  return next;
+}
+
+export function publicDashboardSiteId(slug: string): string {
+  return `${PUBLIC_SITE_ID_PREFIX}${slug}`;
 }
 
 export async function fetchPrivateJson<T>(
@@ -25,14 +52,19 @@ export async function fetchPrivateJson<T>(
   if (options?.signal?.aborted) {
     throwAbortError();
   }
+  const publicSlug = publicSlugFromParams(params);
+  const requestPath = publicSlug
+    ? publicPathForPrivateRequest(path, publicSlug)
+    : path;
+  const requestParams = publicSlug ? paramsWithoutSiteId(params) : params;
   if (process.env.NEXT_PUBLIC_DEMO_MODE === "1") {
     const { handleDemoRequest } = await import("@/lib/realtime/mock");
     if (options?.signal?.aborted) {
       throwAbortError();
     }
-    return handleDemoRequest({ path, params }) as T;
+    return handleDemoRequest({ path: requestPath, params: requestParams }) as T;
   }
-  const url = `${path}${toQueryString(params)}`;
+  const url = `${requestPath}${toQueryString(requestParams)}`;
   const shouldDedupe = options?.dedupe !== false && !options?.signal;
   const existing = shouldDedupe
     ? (inflightPrivateRequests.get(url) as Promise<T> | undefined)
@@ -41,12 +73,12 @@ export async function fetchPrivateJson<T>(
   const promise = (async () => {
     const res = await fetch(url, {
       method: "GET",
-      credentials: "include",
+      credentials: publicSlug ? "omit" : "include",
       signal: options?.signal,
     });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Request failed (${res.status} ${path}): ${text}`);
+      throw new Error(`Request failed (${res.status} ${requestPath}): ${text}`);
     }
     return (await res.json()) as T;
   })();

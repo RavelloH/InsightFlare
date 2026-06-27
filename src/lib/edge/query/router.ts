@@ -53,6 +53,47 @@ import {
   handleUtmDimensionTrend,
 } from "./technology";
 
+const PUBLIC_QUERY_PATHS = new Set([
+  "overview",
+  "trend",
+  "pages",
+  "pages-dashboard",
+  "referrers",
+  "performance",
+  "countries",
+  "filter-options",
+  "page-hash",
+  "page-query",
+  "overview-page-path",
+  "overview-page-title",
+  "overview-page-hostname",
+  "overview-page-entry",
+  "overview-page-exit",
+  "overview-source-domain",
+  "overview-source-link",
+  "overview-client-browser",
+  "overview-client-os-version",
+  "overview-client-device-type",
+  "overview-client-language",
+  "overview-client-screen-size",
+  "overview-geo-country",
+  "overview-geo-region",
+  "overview-geo-city",
+  "overview-geo-continent",
+  "overview-geo-timezone",
+  "overview-geo-organization",
+  "overview-geo-points",
+  "browser-trend",
+  "browser-engine-trend",
+  "browser-version-breakdown",
+  "browser-cross-breakdown",
+  "browser-radar",
+  "referrer-radar",
+  "referrer-dimension-trend",
+  "client-dimension-trend",
+  "client-cross-breakdown",
+]);
+
 export async function routeQuery(
   env: Env,
   siteId: string,
@@ -80,7 +121,9 @@ export async function routeQuery(
       ctx,
     );
   }
-  if (options.publicMode) return notFound();
+  if (options.publicMode && !PUBLIC_QUERY_PATHS.has(pathname)) {
+    return notFound();
+  }
   if (pathname === "funnels") {
     return handleFunnel(env, siteId, url, ctx, request as Request);
   }

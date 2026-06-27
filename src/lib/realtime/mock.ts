@@ -1,4 +1,5 @@
 import { normalizeTimeZone } from "@/lib/dashboard/time-zone";
+import { findSiteProfileByPublicSlug } from "@/lib/realtime/demo-site-profiles";
 import {
   generateDemoDoDiagnostic,
   generateDemoScheduledTasks,
@@ -84,7 +85,13 @@ export function handleDemoRequest(options: {
   body?: unknown;
 }): unknown {
   const { path, method = "GET", params = {} } = options;
-  const siteId = String(params.siteId || "demo-site-001");
+  const publicRouteMatch = path.match(/\/api\/public\/([^/]+)\//);
+  const publicSiteProfile = publicRouteMatch
+    ? findSiteProfileByPublicSlug(publicRouteMatch[1] || "")
+    : null;
+  const siteId = String(
+    params.siteId || publicSiteProfile?.id || "demo-site-001",
+  );
   const teamId = String(params.teamId || "");
 
   // Write operations → read-only stub
@@ -151,6 +158,38 @@ export function handleDemoRequest(options: {
         },
       };
     }
+    if (path.includes("/admin/site")) {
+      const body =
+        options.body && typeof options.body === "object" ? options.body : {};
+      const siteBody = body as {
+        siteId?: unknown;
+        teamId?: unknown;
+        name?: unknown;
+        domain?: unknown;
+        publicEnabled?: unknown;
+        publicSlug?: unknown;
+      };
+      const existing =
+        getDemoSites(String(siteBody.teamId || getDemoTeams()[0].id))[0] ||
+        getDemoSites(getDemoTeams()[0].id)[0];
+      return {
+        ok: true,
+        data: {
+          ...existing,
+          id: String(siteBody.siteId || existing.id),
+          name: String(siteBody.name ?? existing.name),
+          domain: String(siteBody.domain ?? existing.domain),
+          publicEnabled:
+            typeof siteBody.publicEnabled === "boolean"
+              ? siteBody.publicEnabled
+              : existing.publicEnabled,
+          publicSlug:
+            typeof siteBody.publicSlug === "string"
+              ? siteBody.publicSlug
+              : existing.publicSlug,
+        },
+      };
+    }
     // Generic write → return empty success
     return { ok: true, data: {} };
   }
@@ -187,6 +226,22 @@ export function handleDemoRequest(options: {
   }
   if (path.includes("/admin/do-diagnostic")) {
     return generateDemoDoDiagnostic();
+  }
+
+  const publicSiteMatch = path.match(/\/api\/public\/([^/]+)\/site$/);
+  if (publicSiteMatch) {
+    const slug = decodeURIComponent(publicSiteMatch[1] || "demo-site");
+    const profile = publicSiteProfile ?? findSiteProfileByPublicSlug(slug);
+    if (!profile) return DEMO_NOT_FOUND_RESPONSE;
+    return {
+      ok: true,
+      data: {
+        id: profile.id,
+        slug,
+        name: profile.name,
+        domain: profile.domain,
+      },
+    };
   }
 
   // Analytics query routes
@@ -372,11 +427,68 @@ export function handleDemoRequest(options: {
   // Public routes — delegate to same generators
   const publicMatch = path.match(/\/api\/public\/[^/]+\/(.*)/);
   if (publicMatch) {
+    if (!publicSiteProfile) return DEMO_NOT_FOUND_RESPONSE;
     const subPath = publicMatch[1];
     if (subPath === "overview") return generateDemoOverview(siteId, params);
     if (subPath === "trend") return generateDemoTrend(siteId, params);
     if (subPath === "pages") return generateDemoPages(siteId, params);
     if (subPath === "referrers") return generateDemoReferrers(siteId, params);
+    if (subPath === "performance")
+      return generateDemoPerformance(siteId, params);
+    if (subPath === "countries")
+      return generateDemoDimension(siteId, "countries", params);
+    if (subPath === "filter-options")
+      return generateDemoFilterOptions(siteId, params);
+    if (subPath === "overview-geo-points")
+      return generateDemoGeoPoints(siteId, params);
+    if (subPath.startsWith("overview-client-")) {
+      if (subPath === "overview-client-browser") {
+        return generateDemoOverviewClientTab(siteId, params, "browser");
+      }
+      if (subPath === "overview-client-os-version") {
+        return generateDemoOverviewClientTab(siteId, params, "osVersion");
+      }
+      if (subPath === "overview-client-device-type") {
+        return generateDemoOverviewClientTab(siteId, params, "deviceType");
+      }
+      if (subPath === "overview-client-language") {
+        return generateDemoOverviewClientTab(siteId, params, "language");
+      }
+      if (subPath === "overview-client-screen-size") {
+        return generateDemoOverviewClientTab(siteId, params, "screenSize");
+      }
+    }
+    if (subPath.startsWith("overview-geo-")) {
+      const tab = subPath.replace("overview-geo-", "");
+      if (
+        tab === "country" ||
+        tab === "region" ||
+        tab === "city" ||
+        tab === "continent" ||
+        tab === "timezone" ||
+        tab === "organization"
+      ) {
+        return generateDemoOverviewGeoTab(siteId, params, tab);
+      }
+    }
+    if (subPath === "browser-trend")
+      return generateDemoBrowserTrend(siteId, params);
+    if (subPath === "browser-engine-trend")
+      return generateDemoBrowserEngineTrend(siteId, params);
+    if (subPath === "browser-version-breakdown")
+      return generateDemoBrowserVersionBreakdown(siteId, params);
+    if (subPath === "browser-cross-breakdown")
+      return generateDemoBrowserCrossBreakdown(siteId, params);
+    if (subPath === "browser-radar")
+      return generateDemoBrowserRadar(siteId, params);
+    if (subPath === "referrer-radar")
+      return generateDemoReferrerRadar(siteId, params);
+    if (subPath === "referrer-dimension-trend")
+      return generateDemoReferrerTrend(siteId, params);
+    if (subPath === "client-dimension-trend")
+      return generateDemoClientDimensionTrend(siteId, params);
+    if (subPath === "client-cross-breakdown")
+      return generateDemoClientCrossBreakdown(siteId, params);
     return DEMO_NOT_FOUND_RESPONSE;
   }
 

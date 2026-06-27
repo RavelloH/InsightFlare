@@ -27,8 +27,36 @@ export const DEMO_SITE_PROFILES: DemoSiteProfile[] = [
   ...DEMO_SITE_PROFILES_PART_3,
 ];
 
+function safeDemoSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function demoSitePublicSlug(profile: DemoSiteProfile): string {
+  return (
+    safeDemoSlug(profile.domain || profile.name || profile.id) ||
+    profile.id.slice(0, 8)
+  );
+}
+
 export function findSiteProfile(siteId: string): DemoSiteProfile {
   return (
     DEMO_SITE_PROFILES.find((s) => s.id === siteId) ?? DEMO_SITE_PROFILES[0]
+  );
+}
+
+export function findSiteProfileByPublicSlug(
+  slug: string,
+): DemoSiteProfile | null {
+  const normalized = safeDemoSlug(decodeURIComponent(slug));
+  return (
+    DEMO_SITE_PROFILES.find(
+      (profile) =>
+        demoSitePublicSlug(profile) === normalized ||
+        safeDemoSlug(profile.id) === normalized,
+    ) ?? null
   );
 }

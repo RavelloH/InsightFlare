@@ -511,4 +511,8 @@ export interface AppAnalyticsMessages {
     metricValueColumn: string;
     statusColumn: string;
   };
+  share: {
+    title: string;
+    poweredBy: string;
+  };
 }

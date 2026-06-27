@@ -49,6 +49,7 @@ export default async function SiteSettingsPage({
         id: context.activeSite.id,
         name: context.activeSite.name,
         domain: context.activeSite.domain,
+        publicEnabled: context.activeSite.publicEnabled,
         publicSlug: context.activeSite.publicSlug,
       }}
     />

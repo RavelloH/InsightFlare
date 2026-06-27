@@ -118,6 +118,7 @@ interface DashboardHeaderControlsProps {
   siteId?: string;
   showControls: boolean;
   showFilterSheet: boolean;
+  showRealtimeBadge?: boolean;
 }
 
 const FILTER_QUERY_KEYS = [
@@ -1015,6 +1016,7 @@ export function DashboardHeaderControls({
   siteId,
   showControls,
   showFilterSheet,
+  showRealtimeBadge: shouldShowRealtimeBadge = true,
 }: DashboardHeaderControlsProps) {
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || "/";
@@ -1028,6 +1030,7 @@ export function DashboardHeaderControls({
     setUiFilters,
     allowedIntervals,
     timeZone,
+    maxRangeDays,
   } = useDashboardQueryControls();
   const searchParamsKey = searchParams.toString();
   const queryFilters = useMemo(
@@ -1075,7 +1078,9 @@ export function DashboardHeaderControls({
   const realtimeSiteId =
     siteId || (USE_REALTIME_MOCK ? "local-mock-site" : undefined);
   const showRealtimeBadge =
-    showFilterSheet && (Boolean(siteId) || USE_REALTIME_MOCK);
+    shouldShowRealtimeBadge &&
+    showFilterSheet &&
+    (Boolean(siteId) || USE_REALTIME_MOCK);
   const realtime = useRealtimeChannel(realtimeSiteId, {
     enabled: showControls && showRealtimeBadge,
   });
@@ -1085,6 +1090,14 @@ export function DashboardHeaderControls({
 
   const orderedAllowedIntervals = INTERVAL_ORDER.filter((value) =>
     allowedIntervals.includes(value),
+  );
+  const rangeGroups = useMemo(
+    () =>
+      RANGE_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => !(maxRangeDays && item === "all")),
+      })).filter((group) => group.items.length > 0),
+    [maxRangeDays],
   );
   const rangeLabelText = rangeLabel(messages, range);
   const intervalLabelText = intervalLabel(messages, window.interval);
@@ -1278,7 +1291,7 @@ export function DashboardHeaderControls({
                 className={filterTriggerClassName}
                 style={filterTriggerStyle}
               >
-                <RiFilter3Line className="size-4" />
+                <RiFilter3Line className="size-4 text-muted-foreground" />
                 {messages.dashboardHeader.filters}
                 <FilterActiveCountBadge count={activeFilterCount} />
               </Button>
@@ -1367,7 +1380,7 @@ export function DashboardHeaderControls({
 
                 <div className="space-y-3">
                   <Label>{messages.dashboardHeader.range}</Label>
-                  {RANGE_GROUPS.map((group) => (
+                  {rangeGroups.map((group) => (
                     <div key={group.key} className="space-y-2">
                       <p className="text-[11px] text-muted-foreground">
                         {rangeGroupLabel(messages, group.key)}
@@ -1450,7 +1463,7 @@ export function DashboardHeaderControls({
                 className={filterTriggerClassName}
                 style={filterTriggerStyle}
               >
-                <RiFilter3Line className="size-4" />
+                <RiFilter3Line className="size-4 text-muted-foreground" />
                 {messages.dashboardHeader.filters}
                 <FilterActiveCountBadge count={activeFilterCount} />
               </Button>
@@ -1538,7 +1551,7 @@ export function DashboardHeaderControls({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
-              {RANGE_GROUPS.map((group, groupIndex) => (
+              {rangeGroups.map((group, groupIndex) => (
                 <div key={group.key}>
                   {groupIndex > 0 ? <DropdownMenuSeparator /> : null}
                   <DropdownMenuLabel>

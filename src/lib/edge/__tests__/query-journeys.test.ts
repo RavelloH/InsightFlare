@@ -149,6 +149,7 @@ describe("journey helper mappers", () => {
       region: "",
       regionCode: "",
       city: "",
+      pointCount: 1,
     });
   });
 

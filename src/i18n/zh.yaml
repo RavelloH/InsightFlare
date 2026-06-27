@@ -646,14 +646,26 @@ performance:
   pathsAnalyzedLabel: 已分析路径
   metricValueColumn: P75 数值
   statusColumn: 状态
+share:
+  title: "{siteName} - 分析数据"
+  poweredBy: powered by
 siteSettings:
   title: 站点设置
   subtitle: 管理当前站点的基础信息与生命周期。
   editTitle: 修改站点信息
-  editSubtitle: 更新站点名称、域名和公开 Slug。
+  editSubtitle: 更新站点名称和域名。
   nameLabel: 站点名称
   domainLabel: 域名
-  publicSlugLabel: 公开 Slug（可选）
+  publicSharingTitle: 公开分享
+  publicSharingSubtitle: 配置站点的公开访问链接，启用后任何人可通过链接查看分析数据。
+  publicEnabledLabel: 启用公开访问
+  publicSlugLabel: 公开 Slug
+  publicSlugPlaceholder: 例如 my-site
+  publicSlugHint: 自定义 URL 路径标识。留空将自动生成。
+  publicLinkLabel: 公开链接
+  publicLinkHint: 启用公开访问后，可通过此链接分享分析数据。
+  publicDisabledHint: 启用公开访问后将显示分享链接。
+  copiedLink: 链接已复制
   trackingStrengthGroupTitle: 跟踪强度
   trackingStrengthDescription: 选择脚本对访客标识与统计精度的处理方式。
   trackingStrengthLabel: 跟踪强度策略
@@ -844,6 +856,20 @@ teamManagement:
     title: 公开链接
     subtitle: 管理当前团队可公开访问的分享链接。
     empty: 当前团队还没有公开链接。
+    enabled: 已启用
+    disabled: 未启用
+    disabledHint: 未启用公开访问。前往站点设置开启。
+    viewSettings: 查看设置
+    publicUrl: 公开链接
+    copyLink: 复制链接
+    linkCopied: 链接已复制
+    noSites: 当前团队还没有站点。
+    columns:
+      site: 站点
+      domain: 域名
+      publicUrl: 公开链接
+      status: 状态
+      action: 操作
   apiKeys:
     title: API 密钥
     subtitle: 管理当前团队用于接口访问的密钥。

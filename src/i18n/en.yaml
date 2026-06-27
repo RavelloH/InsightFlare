@@ -668,14 +668,26 @@ performance:
   pathsAnalyzedLabel: Paths analyzed
   metricValueColumn: P75 value
   statusColumn: Status
+share:
+  title: "{siteName} - Analytics"
+  poweredBy: powered by
 siteSettings:
   title: Site Settings
   subtitle: Configure this site's basic information and lifecycle.
   editTitle: Update Site Info
-  editSubtitle: Keep display name, domain and public slug up to date.
+  editSubtitle: Keep display name and domain up to date.
   nameLabel: Site Name
   domainLabel: Domain
-  publicSlugLabel: Public Slug (optional)
+  publicSharingTitle: Public Sharing
+  publicSharingSubtitle: Configure this site's public access link. When enabled, anyone with the link can view analytics data.
+  publicEnabledLabel: Enable Public Access
+  publicSlugLabel: Public Slug
+  publicSlugPlaceholder: e.g. my-site
+  publicSlugHint: Customize the URL path identifier. Leave blank to generate one.
+  publicLinkLabel: Public Link
+  publicLinkHint: Share analytics data with this link after public access is enabled.
+  publicDisabledHint: The sharing link appears after public access is enabled.
+  copiedLink: Link copied
   trackingStrengthGroupTitle: Tracking Strength
   trackingStrengthDescription: Choose how aggressively the tracker identifies visitors.
   trackingStrengthLabel: Tracking Strength Mode
@@ -875,6 +887,20 @@ teamManagement:
     title: Public Links
     subtitle: Manage publicly accessible sharing links for this team.
     empty: No public link exists for this team.
+    enabled: Enabled
+    disabled: Disabled
+    disabledHint: Public access is disabled. Open site settings to enable it.
+    viewSettings: View Settings
+    publicUrl: Public Link
+    copyLink: Copy Link
+    linkCopied: Link copied
+    noSites: This team has no sites yet.
+    columns:
+      site: Site
+      domain: Domain
+      publicUrl: Public Link
+      status: Status
+      action: Action
   apiKeys:
     title: API Keys
     subtitle: Manage API access keys for this team.
