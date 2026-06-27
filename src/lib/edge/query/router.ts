@@ -59,9 +59,11 @@ const PUBLIC_QUERY_PATHS = new Set([
   "pages",
   "pages-dashboard",
   "referrers",
+  "retention",
   "performance",
   "countries",
   "filter-options",
+  "event-types",
   "page-hash",
   "page-query",
   "overview-page-path",
@@ -92,6 +94,12 @@ const PUBLIC_QUERY_PATHS = new Set([
   "referrer-dimension-trend",
   "client-dimension-trend",
   "client-cross-breakdown",
+  "utm-dimension-trend",
+  "utm-source",
+  "utm-medium",
+  "utm-campaign",
+  "utm-term",
+  "utm-content",
 ]);
 
 export async function routeQuery(

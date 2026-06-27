@@ -23,6 +23,8 @@ const SHARE_TABS = [
   "overview",
   "pages",
   "referrers",
+  "campaigns",
+  "retention",
   "geo",
   "devices",
   "browsers",

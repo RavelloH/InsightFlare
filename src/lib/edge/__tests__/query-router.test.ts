@@ -127,6 +127,25 @@ describe("edge query router", () => {
     expect(handlerMocks.core.notFound).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps campaign, retention, and page detail support queries available to public routes", async () => {
+    await expect(responseText("retention", true)).resolves.toBe("retention");
+    await expect(responseText("utm-source", true)).resolves.toBe("dimension");
+    await expect(responseText("utm-dimension-trend", true)).resolves.toBe(
+      "utm-dimension-trend",
+    );
+    await expect(responseText("event-types", true)).resolves.toBe(
+      "event-types",
+    );
+
+    expect(handlerMocks.journeys.handleRetention).toHaveBeenCalledTimes(1);
+    expect(handlerMocks.pages.handleDimension).toHaveBeenCalledTimes(1);
+    expect(
+      handlerMocks.technology.handleUtmDimensionTrend,
+    ).toHaveBeenCalledTimes(1);
+    expect(handlerMocks.events.handleEventTypes).toHaveBeenCalledTimes(1);
+    expect(handlerMocks.core.notFound).not.toHaveBeenCalled();
+  });
+
   it("routes private dashboard, event, journey, performance, and technology paths", async () => {
     await expect(responseText("pages-dashboard")).resolves.toBe(
       "pages-dashboard",
