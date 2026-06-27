@@ -418,7 +418,7 @@ export function SidebarSiteDetails({
                   locale,
                   teamSlug,
                   site.slug,
-                  isActive ? currentSection : undefined,
+                  currentSection,
                 )}
               >
                 <SiteBrandIcon
