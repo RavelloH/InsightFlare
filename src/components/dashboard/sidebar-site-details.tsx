@@ -60,11 +60,28 @@ interface SidebarSiteSummary {
   iconPath?: string;
 }
 
+type AnalyticsSection =
+  | "realtime"
+  | "pages"
+  | "referrers"
+  | "sessions"
+  | "events"
+  | "visitors"
+  | "geo"
+  | "devices"
+  | "browsers"
+  | "performance"
+  | "settings"
+  | "campaigns"
+  | "funnels"
+  | "retention";
+
 interface SidebarSiteDetailsProps {
   locale: Locale;
   teamId: string;
   teamSlug: string;
   activeSiteSlug?: string;
+  currentSection?: AnalyticsSection;
   sites: SidebarSiteSummary[];
   labels: {
     views: string;
@@ -88,8 +105,11 @@ function buildSitePath(
   locale: Locale,
   teamSlug: string,
   siteSlug: string,
+  section?: AnalyticsSection,
 ): string {
-  return `/${locale}/app/${teamSlug}/${siteSlug}`;
+  const base = `/${locale}/app/${teamSlug}/${siteSlug}`;
+  if (!section) return base;
+  return `${base}/${section}`;
 }
 
 function safeCount(value: number): number {
@@ -201,6 +221,7 @@ export function SidebarSiteDetails({
   teamId,
   teamSlug,
   activeSiteSlug,
+  currentSection,
   sites,
   labels,
   messages,
@@ -408,7 +429,14 @@ export function SidebarSiteDetails({
               tooltip={site.name}
               className="h-8 rounded-none"
             >
-              <Link href={buildSitePath(locale, teamSlug, site.slug)}>
+              <Link
+                href={buildSitePath(
+                  locale,
+                  teamSlug,
+                  site.slug,
+                  isActive ? currentSection : undefined,
+                )}
+              >
                 <SiteBrandIcon
                   siteId={site.id}
                   siteName={site.name}

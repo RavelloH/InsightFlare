@@ -326,6 +326,27 @@ export function DashboardShell({
   const mainLayoutSegments = visibleLayoutSegments(useSelectedLayoutSegments());
   const mainSiteSection = mainLayoutSegments[1] || "";
   const mainSiteSubSection = mainLayoutSegments[2] || "";
+  const validAnalyticsSections = [
+    "realtime",
+    "pages",
+    "referrers",
+    "sessions",
+    "events",
+    "visitors",
+    "geo",
+    "devices",
+    "browsers",
+    "performance",
+    "settings",
+    "campaigns",
+    "funnels",
+    "retention",
+  ] as const;
+  const currentAnalyticsSection = validAnalyticsSections.includes(
+    mainSiteSection as (typeof validAnalyticsSections)[number],
+  )
+    ? (mainSiteSection as (typeof validAnalyticsSections)[number])
+    : undefined;
   const routeState = parseSidebarRouteState(livePathname, activeTeamSlug);
   const hasManagementSections = Boolean(
     managementSections && managementSections.length > 0,
@@ -575,6 +596,7 @@ export function DashboardShell({
                         teamId={activeTeamId}
                         teamSlug={activeTeamSlug}
                         activeSiteSlug={resolvedActiveSiteSlug}
+                        currentSection={currentAnalyticsSection}
                         sites={sites.map((site) => ({
                           id: site.id,
                           slug: site.slug,
