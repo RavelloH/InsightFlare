@@ -2632,7 +2632,7 @@ function buildPaths(): OpenAPISpec["paths"] {
       }),
     },
     "/api/v1/sites/{siteId}/funnels/analysis": {
-      parameters: [siteParam],
+      parameters: [siteParam, ...timeParams()],
       post: op({
         operationId: "analyzeFunnel",
         summary: "Analyze funnel",

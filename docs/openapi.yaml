@@ -3349,6 +3349,37 @@ paths:
   /api/v1/sites/{siteId}/funnels/analysis:
     parameters:
       - *a3
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description:
+          Inclusive ISO 8601 start time. If from, to, and preset are omitted,
+          analytics endpoints default to the last 7 days ending at request time.
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description:
+          Exclusive ISO 8601 end time. If from, to, and preset are omitted,
+          analytics endpoints default to the last 7 days ending at request time.
+      - name: preset
+        in: query
+        schema:
+          $ref: "#/components/schemas/Preset"
+        description:
+          Named time range preset. Mutually exclusive with from and to. If
+          from, to, and preset are omitted, analytics endpoints default to the
+          last 7 days ending at request time.
+      - name: timeZone
+        in: query
+        schema:
+          type: string
+          maxLength: 80
+          default: UTC
+        description: IANA time zone used to resolve presets. Defaults to UTC.
     post:
       operationId: analyzeFunnel
       summary: Analyze funnel
