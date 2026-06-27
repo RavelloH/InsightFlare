@@ -1378,6 +1378,7 @@ describe("edge overview D1 queries and handlers", () => {
           region: "California",
           regionCode: "CA",
           city: "San Francisco",
+          pointCount: 1,
         },
       ],
       countryCounts: [{ country: "US", views: 7, sessions: 4, visitors: 3 }],

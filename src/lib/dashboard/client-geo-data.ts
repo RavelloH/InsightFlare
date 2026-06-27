@@ -70,6 +70,10 @@ export async function fetchOverviewGeoPoints(
               (row as { regionCode?: unknown }).regionCode ?? "",
             ),
             city: String((row as { city?: unknown }).city ?? ""),
+            pointCount: Math.max(
+              1,
+              Number((row as { pointCount?: unknown }).pointCount ?? 1),
+            ),
           }))
         : [],
       countryCounts: Array.isArray(payload.countryCounts)

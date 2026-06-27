@@ -91,6 +91,7 @@ describe("dashboard client geo data helpers", () => {
           region: "",
           regionCode: "IDF",
           city: "Paris",
+          pointCount: 1,
         },
       ],
       countryCounts: [{ country: "", views: 8, sessions: 4, visitors: 0 }],

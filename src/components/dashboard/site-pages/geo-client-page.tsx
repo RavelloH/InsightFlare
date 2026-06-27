@@ -76,6 +76,7 @@ interface GeoPoint {
   region?: string;
   regionCode?: string;
   city?: string;
+  pointCount?: number;
 }
 
 interface GeoDimensionCount {
@@ -336,6 +337,10 @@ function resolveGeoPoints(
         .trim()
         .toUpperCase(),
       city: String((item as { city?: unknown }).city ?? "").trim(),
+      pointCount: Math.max(
+        1,
+        Number((item as { pointCount?: unknown }).pointCount ?? 1),
+      ),
     }))
     .filter(
       (item) =>

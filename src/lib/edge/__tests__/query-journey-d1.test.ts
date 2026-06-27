@@ -350,6 +350,7 @@ describe("edge journey detail D1 queries", () => {
         region: "California",
         regionCode: "CA",
         city: "San Francisco",
+        pointCount: 1,
       },
     ]);
     expect(detail?.events.map((event) => event.id)).toEqual([
@@ -461,6 +462,7 @@ describe("edge journey detail D1 queries", () => {
         region: "",
         regionCode: "",
         city: "",
+        pointCount: 1,
       },
     ]);
 
@@ -595,6 +597,7 @@ describe("edge journey geo D1 queries", () => {
           region: "",
           regionCode: "",
           city: "",
+          pointCount: 1,
         },
       ],
       countryCounts: [],
@@ -629,6 +632,7 @@ describe("edge journey geo D1 queries", () => {
           region: "",
           regionCode: "",
           city: "",
+          pointCount: 1,
         },
       ],
       countryCounts: [{ country: "IT", views: 8, sessions: 4, visitors: 3 }],

@@ -32,6 +32,7 @@ export interface GeoClientMapPoint {
   region?: string;
   regionCode?: string;
   city?: string;
+  pointCount?: number;
 }
 
 export interface GeoClientMapCountryCount {
@@ -330,9 +331,11 @@ function clusterGeoPoints(
       sumLatitude: 0,
       sumLongitude: 0,
     };
-    bucket.count += 1;
-    bucket.sumLatitude += point.latitude;
-    bucket.sumLongitude += point.longitude;
+    // Use pointCount if available, otherwise count as 1
+    const pointWeight = point.pointCount ?? 1;
+    bucket.count += pointWeight;
+    bucket.sumLatitude += point.latitude * pointWeight;
+    bucket.sumLongitude += point.longitude * pointWeight;
     buckets.set(key, bucket);
   }
 

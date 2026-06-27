@@ -71,24 +71,34 @@ export async function queryGeoPointsFromD1(
 WITH
 ${buildVisitSourceCte()},
 filtered_visits AS (
-  SELECT *
+  SELECT
+    ROUND(latitude, 3) AS lat_bucket,
+    ROUND(longitude, 3) AS lon_bucket,
+    country,
+    region,
+    region_code AS regionCode,
+    city,
+    MAX(started_at) AS latest_at,
+    COUNT(*) AS point_count
   FROM visit_source
   ${filter.clause}
+  WHERE
+    latitude IS NOT NULL
+    AND longitude IS NOT NULL
+    AND ABS(latitude) <= 90
+    AND ABS(longitude) <= 180
+  GROUP BY lat_bucket, lon_bucket, country, region, region_code, city
 )
 SELECT
-  latitude,
-  longitude,
-  started_at AS timestampMs,
+  lat_bucket AS latitude,
+  lon_bucket AS longitude,
+  latest_at AS timestampMs,
   country,
   region,
-  region_code AS regionCode,
-  city
+  regionCode,
+  city,
+  point_count AS pointCount
 FROM filtered_visits
-WHERE
-  latitude IS NOT NULL
-  AND longitude IS NOT NULL
-  AND ABS(latitude) <= 90
-  AND ABS(longitude) <= 180
 ORDER BY timestampMs DESC
 LIMIT ?
 `;

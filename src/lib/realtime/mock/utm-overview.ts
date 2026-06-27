@@ -378,17 +378,51 @@ export function generateDemoGeoPoints(
           )
       : [];
 
+  // Aggregate points by rounded coordinates (3 decimal places, ~110m precision)
+  const aggregatedPoints = new Map<
+    string,
+    {
+      latitude: number;
+      longitude: number;
+      timestampMs: number;
+      country: string;
+      region: string;
+      regionCode: string;
+      city: string;
+      pointCount: number;
+    }
+  >();
+
+  for (const visit of orderedVisits) {
+    const latBucket = Math.round(visit.latitude * 1000) / 1000;
+    const lonBucket = Math.round(visit.longitude * 1000) / 1000;
+    const key = `${latBucket}:${lonBucket}:${visit.country}:${visit.region}:${visit.regionCode}:${visit.city}`;
+
+    const existing = aggregatedPoints.get(key);
+    if (existing) {
+      existing.pointCount += 1;
+      existing.timestampMs = Math.max(existing.timestampMs, visit.startedAt);
+    } else {
+      aggregatedPoints.set(key, {
+        latitude: latBucket,
+        longitude: lonBucket,
+        timestampMs: visit.startedAt,
+        country: visit.country,
+        region: visit.region,
+        regionCode: visit.regionCode,
+        city: visit.city,
+        pointCount: 1,
+      });
+    }
+  }
+
+  const sortedAggregated = [...aggregatedPoints.values()].sort(
+    (left, right) => right.timestampMs - left.timestampMs,
+  );
+
   return {
     ok: true,
-    data: orderedVisits.slice(0, limit).map((visit) => ({
-      latitude: visit.latitude,
-      longitude: visit.longitude,
-      timestampMs: visit.startedAt,
-      country: visit.country,
-      region: visit.region,
-      regionCode: visit.regionCode,
-      city: visit.city,
-    })),
+    data: sortedAggregated.slice(0, limit),
     countryCounts,
     regionCounts,
     cityCounts,

@@ -193,6 +193,7 @@ describe("edge journey helper branches", () => {
       region: "",
       regionCode: "",
       city: "",
+      pointCount: 1,
     });
 
     expect(

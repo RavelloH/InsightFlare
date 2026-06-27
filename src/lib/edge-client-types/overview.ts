@@ -94,6 +94,7 @@ export interface OverviewGeoPointsData {
     region?: string;
     regionCode?: string;
     city?: string;
+    pointCount?: number;
   }>;
   countryCounts: Array<{
     country: string;

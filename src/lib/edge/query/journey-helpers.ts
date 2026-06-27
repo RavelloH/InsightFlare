@@ -208,6 +208,7 @@ export function mapGeoPointRow(row: Record<string, unknown>): GeoPointRow {
     region: String(row.region ?? ""),
     regionCode: String(row.regionCode ?? ""),
     city: String(row.city ?? ""),
+    pointCount: Math.max(1, Number(row.pointCount ?? 1)),
   };
 }
 

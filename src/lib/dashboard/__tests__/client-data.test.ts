@@ -1190,6 +1190,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         region: "",
         regionCode: "CA",
         city: "",
+        pointCount: 1,
       });
       expect(mapped.countryCounts[0]).toEqual({
         country: "",

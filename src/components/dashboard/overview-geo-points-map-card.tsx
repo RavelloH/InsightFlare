@@ -93,6 +93,7 @@ export function OverviewGeoPointsMapCard({
         latitude: Number(item.latitude),
         longitude: Number(item.longitude),
         country: String(item.country ?? ""),
+        pointCount: Math.max(1, Number(item.pointCount ?? 1)),
       })),
     [geoPointsData.data],
   );

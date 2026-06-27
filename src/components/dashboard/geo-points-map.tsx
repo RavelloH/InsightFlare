@@ -24,6 +24,7 @@ export interface GeoPointsMapPoint {
   latitude: number;
   longitude: number;
   country: string;
+  pointCount?: number;
 }
 
 export interface GeoPointsMapCountryCount {
@@ -329,9 +330,11 @@ function clusterGeoPoints(
       sumLatitude: 0,
       sumLongitude: 0,
     };
-    bucket.count += 1;
-    bucket.sumLatitude += point.latitude;
-    bucket.sumLongitude += point.longitude;
+    // Use pointCount if available, otherwise count as 1
+    const pointWeight = point.pointCount ?? 1;
+    bucket.count += pointWeight;
+    bucket.sumLatitude += point.latitude * pointWeight;
+    bucket.sumLongitude += point.longitude * pointWeight;
     buckets.set(key, bucket);
   }
 

@@ -523,6 +523,7 @@ export interface GeoPointRow {
   region: string;
   regionCode: string;
   city: string;
+  pointCount: number;
 }
 
 export interface GeoCountryCountRow {
