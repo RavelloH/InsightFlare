@@ -8,7 +8,26 @@ import {
 import { SiteCreateInputSchema, SiteUpdateInputSchema } from "@/schemas/site";
 import { SiteConfigUpdateInputSchema } from "@/schemas/site-config";
 
+import {
+  buildTimeBuckets,
+  buildVisitFilterSql,
+  buildVisitSourceCte,
+  buildVisitSourceCteForSites,
+  parseFilters,
+  parseInterval,
+  PERFORMANCE_METRIC_COLUMNS,
+  type PerformanceMetricKey,
+  queryD1All,
+  type QueryWindow,
+  resolveCrossBreakdownDimension,
+  visitSourceBindings,
+  visitSourceBindingsForSites,
+} from "./query/core";
 import { normalizeFunnelSteps, queryFunnelAnalysis } from "./query/funnels";
+import {
+  queryPerformanceSummariesFromD1,
+  queryPerformanceTrendFromD1,
+} from "./query/performance";
 import { routeQuery } from "./query/router";
 import { handleTeamDashboardForTeam } from "./query/team";
 import {
@@ -29,6 +48,7 @@ import {
   type AnalyticsMetric,
   API_V1_VERSION,
   BATCH_MAX_REQUESTS,
+  type ComplexFilter,
   epochSecondsToIso,
   FILTER_OPERATORS,
   INTERVALS,
@@ -550,6 +570,568 @@ function normalizeBreakdownRows(value: unknown, metrics: AnalyticsMetric[]) {
   });
 }
 
+interface AnalyticsOrderBy {
+  field: string;
+  direction: "asc" | "desc";
+}
+
+function sqlWhereWithExtra(baseClause: string, extraClause: string): string {
+  if (!extraClause) return baseClause;
+  if (baseClause.trim()) return `${baseClause} AND ${extraClause}`;
+  return `WHERE ${extraClause}`;
+}
+
+function analyticsMetricSql(metric: AnalyticsMetric): string {
+  const sessions =
+    "COUNT(DISTINCT CASE WHEN scoped.session_id != '' THEN scoped.session_id ELSE NULL END)";
+  const bounces =
+    "COUNT(DISTINCT CASE WHEN bounced_sessions.session_id IS NOT NULL THEN scoped.session_id ELSE NULL END)";
+
+  if (metric === "views") return "COUNT(*)";
+  if (metric === "sessions") return sessions;
+  if (metric === "visitors") {
+    return "COUNT(DISTINCT CASE WHEN scoped.visitor_id != '' THEN scoped.visitor_id ELSE NULL END)";
+  }
+  if (metric === "bounces") return bounces;
+  if (metric === "bounceRate") {
+    return `CASE WHEN ${sessions} > 0 THEN CAST(${bounces} AS REAL) / ${sessions} ELSE 0 END`;
+  }
+  if (metric === "avgDurationMs") {
+    return `CASE WHEN ${sessions} > 0 THEN ROUND(COALESCE(SUM(CASE WHEN scoped.duration_ms IS NOT NULL AND scoped.duration_ms >= 0 THEN scoped.duration_ms ELSE 0 END), 0) / ${sessions}) ELSE 0 END`;
+  }
+  if (metric === "viewsPerSession") {
+    return `CASE WHEN ${sessions} > 0 THEN CAST(COUNT(*) AS REAL) / ${sessions} ELSE 0 END`;
+  }
+  return "COALESCE(SUM(event_rollup.event_count), 0)";
+}
+
+function validateAnalyticsDimensions(
+  dimensions: string[],
+  request: Request,
+): Response | null {
+  for (const dimension of dimensions) {
+    const valid = validateDimension(dimension);
+    if (valid instanceof Response) return valid;
+    if (!resolveCrossBreakdownDimension(dimension)) {
+      return jsonError(
+        "validation_failed",
+        "Unsupported dimension",
+        400,
+        { dimension },
+        request,
+      );
+    }
+  }
+  return null;
+}
+
+function parseExploreMetrics(value: unknown): AnalyticsMetric[] | Response {
+  if (value === undefined) return ["views"];
+  if (!Array.isArray(value) || value.length === 0 || value.length > 20) {
+    return jsonError("validation_failed", "Invalid metrics", 400, {
+      field: "metrics",
+    });
+  }
+  const invalid = value.find(
+    (metric) =>
+      typeof metric !== "string" ||
+      !ANALYTICS_METRICS.includes(metric as AnalyticsMetric),
+  );
+  if (invalid !== undefined) {
+    return jsonError("validation_failed", "Unknown metric", 400, {
+      metric: String(invalid),
+    });
+  }
+  return [...new Set(value)] as AnalyticsMetric[];
+}
+
+function parseExploreDimensions(value: unknown): string[] | Response {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 5) {
+    return jsonError("validation_failed", "Invalid dimensions", 400, {
+      field: "dimensions",
+    });
+  }
+  const invalid = value.find((dimension) => typeof dimension !== "string");
+  if (invalid !== undefined) {
+    return jsonError("validation_failed", "Invalid dimension", 400, {
+      dimension: String(invalid),
+    });
+  }
+  return [...new Set(value)] as string[];
+}
+
+function parseExploreOrderBy(value: unknown): AnalyticsOrderBy[] | Response {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 5) {
+    return jsonError("validation_failed", "Invalid orderBy", 400, {
+      field: "orderBy",
+    });
+  }
+  const orderBy: AnalyticsOrderBy[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      return jsonError("validation_failed", "Invalid orderBy", 400);
+    }
+    const record = item as Record<string, unknown>;
+    const field = typeof record.field === "string" ? record.field : "";
+    const direction = record.direction === "asc" ? "asc" : "desc";
+    if (!field) {
+      return jsonError("validation_failed", "Invalid orderBy field", 400);
+    }
+    orderBy.push({ field, direction });
+  }
+  return orderBy;
+}
+
+function parseExploreLimit(value: unknown): number | Response {
+  if (value === undefined) return 100;
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+    return jsonError("validation_failed", "Invalid limit", 400, {
+      field: "limit",
+    });
+  }
+  return limit;
+}
+
+function urlWithBodyTimeRange(url: URL, record: Record<string, unknown>): URL {
+  const timeRange =
+    record.timeRange && typeof record.timeRange === "object"
+      ? (record.timeRange as Record<string, unknown>)
+      : null;
+  if (!timeRange) return url;
+  const next = new URL(url.toString());
+  for (const key of ["from", "to", "preset", "timeZone"] as const) {
+    if (typeof timeRange[key] === "string") {
+      next.searchParams.set(key, timeRange[key]);
+    }
+  }
+  return next;
+}
+
+function complexFilterSql(
+  filters: ComplexFilter[],
+  request: Request,
+): { clause: string; bindings: Array<string | number> } | Response {
+  const clauses: string[] = [];
+  const bindings: Array<string | number> = [];
+  for (const filter of filters) {
+    const definition = resolveCrossBreakdownDimension(filter.field);
+    if (!definition) {
+      return jsonError(
+        "validation_failed",
+        "Unsupported filter field",
+        400,
+        { field: filter.field },
+        request,
+      );
+    }
+    const expr = definition.labelExpr;
+    const value = filter.value;
+    const bindScalar = (raw: unknown) => {
+      if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+      if (typeof raw === "boolean") return raw ? 1 : 0;
+      if (raw === null || raw === undefined) return "";
+      return String(raw);
+    };
+
+    if (filter.op === "exists") {
+      clauses.push(`TRIM(COALESCE(${expr}, '')) != ''`);
+      continue;
+    }
+    if (filter.op === "notExists") {
+      clauses.push(`TRIM(COALESCE(${expr}, '')) = ''`);
+      continue;
+    }
+    if (filter.op === "in" || filter.op === "notIn") {
+      const values = Array.isArray(value) ? value : [];
+      if (values.length === 0) {
+        clauses.push(filter.op === "in" ? "1 = 0" : "1 = 1");
+        continue;
+      }
+      clauses.push(
+        `${expr} ${filter.op === "in" ? "IN" : "NOT IN"} (${values
+          .map(() => "?")
+          .join(", ")})`,
+      );
+      bindings.push(...values.map(bindScalar));
+      continue;
+    }
+    if (filter.op === "contains") {
+      clauses.push(`${expr} LIKE ?`);
+      bindings.push(`%${bindScalar(value)}%`);
+      continue;
+    }
+    if (filter.op === "startsWith") {
+      clauses.push(`${expr} LIKE ?`);
+      bindings.push(`${bindScalar(value)}%`);
+      continue;
+    }
+    if (filter.op === "endsWith") {
+      clauses.push(`${expr} LIKE ?`);
+      bindings.push(`%${bindScalar(value)}`);
+      continue;
+    }
+    const operator =
+      filter.op === "neq"
+        ? "!="
+        : filter.op === "gt"
+          ? ">"
+          : filter.op === "gte"
+            ? ">="
+            : filter.op === "lt"
+              ? "<"
+              : filter.op === "lte"
+                ? "<="
+                : "=";
+    clauses.push(`${expr} ${operator} ?`);
+    bindings.push(bindScalar(value));
+  }
+  return { clause: clauses.join(" AND "), bindings };
+}
+
+async function queryAnalyticsAggregateRows(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+  url: URL,
+  request: Request,
+  options: {
+    dimensions: string[];
+    metrics: AnalyticsMetric[];
+    complexFilters?: ComplexFilter[];
+    limit: number;
+    orderBy?: AnalyticsOrderBy[];
+  },
+): Promise<Array<Record<string, unknown>> | Response> {
+  if (siteIds.length === 0) return [];
+  const invalidDimension = validateAnalyticsDimensions(
+    options.dimensions,
+    request,
+  );
+  if (invalidDimension) return invalidDimension;
+
+  const dimensionDefs = options.dimensions.map((dimension) => ({
+    dimension,
+    definition: resolveCrossBreakdownDimension(dimension)!,
+  }));
+  const filters = buildVisitFilterSql(parseFilters(url));
+  const complex = complexFilterSql(options.complexFilters ?? [], request);
+  if (complex instanceof Response) return complex;
+  const whereClause = sqlWhereWithExtra(filters.clause, complex.clause);
+  const sourceCte =
+    siteIds.length === 1
+      ? buildVisitSourceCte()
+      : buildVisitSourceCteForSites(siteIds.length);
+  const sourceBindings =
+    siteIds.length === 1
+      ? visitSourceBindings(siteIds[0]!, window)
+      : visitSourceBindingsForSites(siteIds, window);
+  const eventSitePlaceholders = siteIds.map(() => "?").join(", ");
+  const dimensionSelects = dimensionDefs.map(
+    ({ definition }, index) => `${definition.labelExpr} AS d${index}`,
+  );
+  const groupColumns = dimensionDefs.map((_, index) => `scoped.d${index}`);
+  const metricSelects = options.metrics.map(
+    (metric) => `${analyticsMetricSql(metric)} AS ${metric}`,
+  );
+  const selectColumns = [...groupColumns, ...metricSelects];
+  const allowedOrderFields = new Set([
+    ...options.metrics,
+    ...options.dimensions,
+  ]);
+  const orderBy = (options.orderBy ?? []).filter((item) =>
+    allowedOrderFields.has(item.field as AnalyticsMetric),
+  );
+  const orderSql =
+    orderBy.length > 0
+      ? orderBy
+          .map((item) => {
+            const dimensionIndex = options.dimensions.indexOf(item.field);
+            const column =
+              dimensionIndex >= 0 ? `scoped.d${dimensionIndex}` : item.field;
+            return `${column} ${item.direction.toUpperCase()}`;
+          })
+          .join(", ")
+      : options.metrics.length > 0
+        ? `${options.metrics[0]} DESC`
+        : groupColumns.join(", ");
+  const sql = `
+WITH
+${sourceCte},
+scoped AS (
+  SELECT
+    visit_source.*
+    ${dimensionSelects.length ? `,\n    ${dimensionSelects.join(",\n    ")}` : ""}
+  FROM visit_source
+  ${whereClause}
+),
+bounced_sessions AS (
+  SELECT session_id
+  FROM visit_source
+  WHERE session_id != ''
+  GROUP BY session_id
+  HAVING COUNT(*) = 1
+),
+event_rollup AS (
+  SELECT visit_id, COUNT(*) AS event_count
+  FROM custom_events
+  WHERE site_id IN (${eventSitePlaceholders}) AND occurred_at BETWEEN ? AND ?
+  GROUP BY visit_id
+)
+SELECT
+  ${selectColumns.join(",\n  ")}
+FROM scoped
+LEFT JOIN bounced_sessions ON bounced_sessions.session_id = scoped.session_id
+LEFT JOIN event_rollup ON event_rollup.visit_id = scoped.visit_id
+${groupColumns.length ? `GROUP BY ${groupColumns.join(", ")}` : ""}
+ORDER BY ${orderSql || "views DESC"}
+LIMIT ?
+`;
+  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...sourceBindings,
+    ...filters.bindings,
+    ...complex.bindings,
+    ...siteIds,
+    window.fromMs,
+    window.toMs,
+    options.limit,
+  ]);
+  return rows.map((row) => {
+    const out: Record<string, unknown> = {};
+    options.dimensions.forEach((dimension, index) => {
+      out[dimension] = String(row[`d${index}`] ?? "");
+    });
+    for (const metric of options.metrics) {
+      out[metric] = Number(row[metric] ?? 0);
+    }
+    return out;
+  });
+}
+
+async function queryTeamAnalyticsBreakdown(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+  url: URL,
+  request: Request,
+  dimension: AnalyticsDimension,
+  metrics: AnalyticsMetric[],
+): Promise<Array<Record<string, unknown>> | Response> {
+  const limit = parseExploreLimit(Number(url.searchParams.get("limit") ?? 100));
+  if (limit instanceof Response) return limit;
+  const rows = await queryAnalyticsAggregateRows(
+    env,
+    siteIds,
+    window,
+    url,
+    request,
+    {
+      dimensions: [dimension],
+      metrics,
+      limit,
+    },
+  );
+  if (rows instanceof Response) return rows;
+  return rows.map((row) => {
+    const normalized = normalizeUnknownDirect(row[dimension]);
+    const metricsOut: Record<string, unknown> = {};
+    for (const metric of metrics) metricsOut[metric] = row[metric];
+    return {
+      key: normalized.key,
+      label: normalized.label,
+      ...metricsOut,
+    };
+  });
+}
+
+function parsePerformanceMetric(url: URL): PerformanceMetricKey | Response {
+  const metric = url.searchParams.get("metric") || "lcp";
+  if (metric in PERFORMANCE_METRIC_COLUMNS)
+    return metric as PerformanceMetricKey;
+  return jsonError("validation_failed", "Invalid performance metric", 400, {
+    metric,
+  });
+}
+
+function performanceSummaryValue(row: {
+  p75: number | null;
+  avg: number | null;
+}): number | null {
+  return row.p75 ?? row.avg;
+}
+
+async function queryPerformanceSummaryData(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  url: URL,
+) {
+  const summaries = await queryPerformanceSummariesFromD1(
+    env,
+    siteId,
+    window,
+    parseFilters(url),
+  );
+  return {
+    ttfb: performanceSummaryValue(summaries.ttfb),
+    fcp: performanceSummaryValue(summaries.fcp),
+    lcp: performanceSummaryValue(summaries.lcp),
+    cls: performanceSummaryValue(summaries.cls),
+    inp: performanceSummaryValue(summaries.inp),
+    details: summaries,
+  };
+}
+
+async function queryPerformanceTimeseriesData(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  url: URL,
+) {
+  const filters = parseFilters(url);
+  const interval = parseInterval(url);
+  const buckets = buildTimeBuckets(window, interval);
+  const metricKeys = Object.keys(
+    PERFORMANCE_METRIC_COLUMNS,
+  ) as PerformanceMetricKey[];
+  const series = await Promise.all(
+    metricKeys.map((metric) =>
+      queryPerformanceTrendFromD1(
+        env,
+        siteId,
+        window,
+        interval,
+        filters,
+        metric,
+      ),
+    ),
+  );
+  const rows = new Map<number, Record<string, unknown>>();
+  for (const [metricIndex, points] of series.entries()) {
+    const metric = metricKeys[metricIndex]!;
+    for (const point of points) {
+      const bucket = buckets[point.bucket] ?? {
+        timestampMs: point.timestampMs,
+        toMs: point.timestampMs + 1,
+      };
+      const row =
+        rows.get(point.bucket) ??
+        ({
+          start: new Date(bucket.timestampMs).toISOString(),
+          end: new Date(bucket.toMs).toISOString(),
+        } satisfies Record<string, unknown>);
+      row[metric] = performanceSummaryValue(point);
+      rows.set(point.bucket, row);
+    }
+  }
+  return {
+    interval,
+    rows: [...rows.entries()]
+      .sort((left, right) => left[0] - right[0])
+      .map(([, row]) => row),
+  };
+}
+
+async function queryPerformanceBreakdownData(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  url: URL,
+  request: Request,
+  dimension: AnalyticsDimension,
+): Promise<Array<Record<string, unknown>> | Response> {
+  const metric = parsePerformanceMetric(url);
+  if (metric instanceof Response) return metric;
+  const definition = resolveCrossBreakdownDimension(dimension);
+  if (!definition) {
+    return jsonError(
+      "validation_failed",
+      "Unsupported performance breakdown dimension",
+      400,
+      { dimension },
+      request,
+    );
+  }
+  const filters = buildVisitFilterSql(parseFilters(url));
+  const whereClause = sqlWhereWithExtra(
+    filters.clause,
+    `${PERFORMANCE_METRIC_COLUMNS[metric]} IS NOT NULL`,
+  );
+  const limit = parseExploreLimit(Number(url.searchParams.get("limit") ?? 100));
+  if (limit instanceof Response) return limit;
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+scoped AS (
+  SELECT
+    ${definition.labelExpr} AS dimensionValue,
+    ${PERFORMANCE_METRIC_COLUMNS[metric]} AS metricValue
+  FROM visit_source
+  ${whereClause}
+),
+dimension_views AS (
+  SELECT dimensionValue, COUNT(*) AS views
+  FROM scoped
+  GROUP BY dimensionValue
+),
+ordered_values AS (
+  SELECT
+    dimensionValue,
+    metricValue,
+    ROW_NUMBER() OVER (PARTITION BY dimensionValue ORDER BY metricValue ASC) AS rowNum,
+    COUNT(*) OVER (PARTITION BY dimensionValue) AS sampleCount
+  FROM scoped
+),
+thresholds AS (
+  SELECT
+    dimensionValue,
+    sampleCount,
+    AVG(metricValue) AS avgValue,
+    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
+    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
+    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
+  FROM ordered_values
+  GROUP BY dimensionValue, sampleCount
+)
+SELECT
+  thresholds.dimensionValue AS dimensionValue,
+  dimension_views.views AS views,
+  thresholds.sampleCount AS samples,
+  thresholds.avgValue AS avg,
+  MIN(CASE WHEN ordered_values.rowNum >= thresholds.p50Rank THEN ordered_values.metricValue END) AS p50,
+  MIN(CASE WHEN ordered_values.rowNum >= thresholds.p75Rank THEN ordered_values.metricValue END) AS p75,
+  MIN(CASE WHEN ordered_values.rowNum >= thresholds.p95Rank THEN ordered_values.metricValue END) AS p95
+FROM thresholds
+JOIN ordered_values ON ordered_values.dimensionValue = thresholds.dimensionValue
+JOIN dimension_views ON dimension_views.dimensionValue = thresholds.dimensionValue
+GROUP BY thresholds.dimensionValue, thresholds.sampleCount, thresholds.avgValue, dimension_views.views
+ORDER BY p75 DESC, views DESC, thresholds.dimensionValue ASC
+LIMIT ?
+`;
+  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...filters.bindings,
+    limit,
+  ]);
+  return rows.map((row) => {
+    const normalized = normalizeUnknownDirect(row.dimensionValue);
+    const p75 = Number(row.p75 ?? 0);
+    return {
+      key: normalized.key,
+      label: normalized.label,
+      views: Number(row.views ?? 0),
+      [metric]: p75,
+      avg: Number(row.avg ?? 0),
+      p50: Number(row.p50 ?? 0),
+      p75,
+      p95: Number(row.p95 ?? 0),
+      samples: Number(row.samples ?? 0),
+    };
+  });
+}
+
 function normalizeTimeseriesRows(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.map((row) => {
@@ -815,6 +1397,25 @@ async function handleTeamAnalytics(
   const resource = path[2];
   const timeRange = parseTimeRange(url);
   if (timeRange instanceof Response) return timeRange;
+  if (resource === "breakdowns" && path[3]) {
+    const dimension = validateDimension(path[3]);
+    if (dimension instanceof Response) return dimension;
+    const metrics = parseMetrics(url.searchParams.get("metrics"));
+    if (metrics instanceof Response) return metrics;
+    const sites = await listSites(env, principal);
+    const internalUrl = buildInternalUrl(url, timeRange);
+    const rows = await queryTeamAnalyticsBreakdown(
+      env,
+      sites.map((site) => site.id),
+      toQueryWindow(timeRange),
+      internalUrl,
+      request,
+      dimension,
+      metrics,
+    );
+    if (rows instanceof Response) return rows;
+    return jsonList(rows, { request, meta: { timeRange, dimension, metrics } });
+  }
   const internalUrl = buildInternalUrl(url, timeRange);
   const dashboard = await handleTeamDashboardForTeam(
     env,
@@ -931,11 +1532,6 @@ async function handleTeamAnalytics(
       })),
       { request, meta: { timeRange } },
     );
-  }
-  if (resource === "breakdowns" && path[3]) {
-    const dimension = validateDimension(path[3]);
-    if (dimension instanceof Response) return dimension;
-    return jsonList([], { request, meta: { timeRange, dimension } });
   }
   return jsonError(
     "resource_not_found",
@@ -1404,16 +2000,44 @@ async function handleAnalytics(
     if (body instanceof Response) return body;
     const record =
       body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const bodyUrl = urlWithBodyTimeRange(url, record);
+    const exploreTimeRange = parseTimeRange(bodyUrl);
+    if (exploreTimeRange instanceof Response) return exploreTimeRange;
+    const metrics = parseExploreMetrics(record.metrics);
+    if (metrics instanceof Response) return metrics;
+    const dimensions = parseExploreDimensions(record.dimensions);
+    if (dimensions instanceof Response) return dimensions;
+    const invalidDimension = validateAnalyticsDimensions(dimensions, request);
+    if (invalidDimension) return invalidDimension;
     const complexFilters = parseComplexFilters(record.filters);
     if (complexFilters instanceof Response) return complexFilters;
+    const orderBy = parseExploreOrderBy(record.orderBy);
+    if (orderBy instanceof Response) return orderBy;
+    const limit = parseExploreLimit(record.limit);
+    if (limit instanceof Response) return limit;
+    const rows = await queryAnalyticsAggregateRows(
+      env,
+      [siteId],
+      toQueryWindow(exploreTimeRange),
+      buildInternalUrl(bodyUrl, exploreTimeRange),
+      request,
+      {
+        dimensions,
+        metrics,
+        complexFilters,
+        limit,
+        orderBy,
+      },
+    );
+    if (rows instanceof Response) return rows;
     return jsonSuccess(
       {
-        rows: [],
-        metrics: Array.isArray(record.metrics) ? record.metrics : [],
-        dimensions: Array.isArray(record.dimensions) ? record.dimensions : [],
+        rows,
+        metrics,
+        dimensions,
         filters: complexFilters,
       },
-      { request, meta: { timeRange } },
+      { request, meta: { timeRange: exploreTimeRange } },
     );
   }
   if (resource === "retention" && path[4] === "cohorts") {
@@ -1852,16 +2476,65 @@ async function handlePerformance(
   url: URL,
   principal: ApiKeyPrincipal,
   siteId: string,
+  path: string[],
 ): Promise<Response> {
   const site = await ensureAnalyticsAccess(request, env, principal, siteId);
   if (site instanceof Response) return site;
   if (request.method !== "GET") return methodNotAllowed(request);
   const timeRange = parseTimeRange(url);
   if (timeRange instanceof Response) return timeRange;
-  return runLegacyQuery(request, env, siteId, url, "performance", {
-    timeRange,
-    meta: { timeRange },
-  });
+  const filters = parseFilter(url);
+  if (filters instanceof Response) return filters;
+  const window = toQueryWindow(timeRange);
+  const internalUrl = buildInternalUrl(url, timeRange);
+  const resource = path[3] || "summary";
+  if (resource === "summary") {
+    const data = await queryPerformanceSummaryData(
+      env,
+      siteId,
+      window,
+      internalUrl,
+    );
+    return jsonSuccess(data, { request, meta: { timeRange } });
+  }
+  if (resource === "timeseries") {
+    const data = await queryPerformanceTimeseriesData(
+      env,
+      siteId,
+      window,
+      internalUrl,
+    );
+    return jsonList(data.rows, {
+      request,
+      meta: { timeRange, interval: data.interval },
+    });
+  }
+  if (resource === "breakdowns" && path[4]) {
+    const dimension = validateDimension(path[4]);
+    if (dimension instanceof Response) return dimension;
+    const metric = parsePerformanceMetric(url);
+    if (metric instanceof Response) return metric;
+    const rows = await queryPerformanceBreakdownData(
+      env,
+      siteId,
+      window,
+      internalUrl,
+      request,
+      dimension,
+    );
+    if (rows instanceof Response) return rows;
+    return jsonList(rows, {
+      request,
+      meta: { timeRange, dimension, metric },
+    });
+  }
+  return jsonError(
+    "resource_not_found",
+    "Resource not found",
+    404,
+    undefined,
+    request,
+  );
 }
 
 async function handleRealtime(
@@ -2055,7 +2728,7 @@ export async function handleApiV1(
     return handleFunnels(request, env, url, principal, siteId, path);
   }
   if (path[2] === "performance") {
-    return handlePerformance(request, env, url, principal, siteId);
+    return handlePerformance(request, env, url, principal, siteId, path);
   }
   if (path[2] === "realtime") {
     return handleRealtime(request, env, url, principal, siteId, path);

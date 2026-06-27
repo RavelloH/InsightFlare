@@ -30,7 +30,9 @@ describe(".well-known discovery routes", () => {
         },
       }),
     );
-    const body = await response.json();
+    const body = (await response.json()) as {
+      servers?: Array<{ url?: string }>;
+    };
 
     expect(body.servers).toEqual([
       expect.objectContaining({ url: "https://analytics.example.test" }),

@@ -1382,7 +1382,13 @@ describe("api v1 gateway", () => {
   it("returns explore analytics via POST", async () => {
     const { response } = await authed(
       "/api/v1/sites/site-1/analytics/explore?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
-      [siteMatch("site-1", "Blog")],
+      [
+        siteMatch("site-1", "Blog"),
+        {
+          includes: ["event_rollup", "GROUP BY scoped.d0"],
+          all: [{ d0: "/pricing", views: 5 }],
+        },
+      ],
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1399,6 +1405,9 @@ describe("api v1 gateway", () => {
     };
     expect(body.data.metrics).toEqual(["views"]);
     expect(body.data.dimensions).toEqual(["page.path"]);
+    expect(body.data).toMatchObject({
+      rows: [{ "page.path": "/pricing", views: 5 }],
+    });
   });
 
   it("rejects explore POST with invalid complex filters", async () => {
@@ -1831,16 +1840,63 @@ describe("api v1 gateway", () => {
   // ── additional coverage: performance ────────────────────────────
 
   it("returns performance data", async () => {
-    routeQueryMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ok: true, data: { ttfb: 100 } }), {
-        headers: { "content-type": "application/json" },
-      }),
-    );
     const { response } = await authed(
-      "/api/v1/sites/site-1/performance?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
-      [siteMatch("site-1", "Blog")],
+      "/api/v1/sites/site-1/performance/summary?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
+      [
+        siteMatch("site-1", "Blog"),
+        {
+          includes: ["metric_thresholds", "thresholds.metric"],
+          all: [
+            {
+              metric: "ttfb",
+              samples: 3,
+              avgValue: 110,
+              p50: 100,
+              p75: 120,
+              p95: 150,
+            },
+          ],
+        },
+      ],
     );
     expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { ttfb: 120, fcp: null, lcp: null, cls: null, inp: null },
+    });
+  });
+
+  it("returns performance breakdowns by documented dimension", async () => {
+    const { response } = await authed(
+      "/api/v1/sites/site-1/performance/breakdowns/page.path?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z&metric=lcp",
+      [
+        siteMatch("site-1", "Blog"),
+        {
+          includes: ["dimension_views", "thresholds.dimensionValue"],
+          all: [
+            {
+              dimensionValue: "/pricing",
+              views: 7,
+              samples: 4,
+              avg: 1500,
+              p50: 1200,
+              p75: 1800,
+              p95: 2100,
+            },
+          ],
+        },
+      ],
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: [
+        {
+          key: "/pricing",
+          label: "/pricing",
+          lcp: 1800,
+          samples: 4,
+        },
+      ],
+    });
   });
 
   it("rejects non-GET on performance endpoint", async () => {
@@ -1937,12 +1993,21 @@ describe("api v1 gateway", () => {
   // ── additional coverage: team sub-resources ─────────────────────
 
   it("returns team analytics breakdowns", async () => {
-    const matches = [teamSitesListMatch([{ id: "site-1", name: "One" }])];
+    const matches = [
+      sitesListMatch([{ id: "site-1", name: "One" }]),
+      {
+        includes: ["event_rollup"],
+        all: [{ d0: "US", views: 12, sessions: 8, visitors: 6 }],
+      },
+    ];
     const { response } = await authed(
       "/api/v1/team/analytics/breakdowns/geo.country?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
       matches,
     );
     expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: [{ key: "US", label: "US", views: 12, sessions: 8, visitors: 6 }],
+    });
   });
 
   it("returns 404 for unknown team analytics resource", async () => {
