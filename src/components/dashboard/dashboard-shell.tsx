@@ -326,7 +326,11 @@ export function DashboardShell({
   const mainLayoutSegments = visibleLayoutSegments(useSelectedLayoutSegments());
   const mainSiteSection = mainLayoutSegments[1] || "";
   const mainSiteSubSection = mainLayoutSegments[2] || "";
-  const validAnalyticsSections = [
+  const routeState = parseSidebarRouteState(livePathname, activeTeamSlug);
+
+  // Derive current analytics section from the live pathname directly
+  // (more reliable than useSelectedLayoutSegments which depends on layout nesting)
+  const VALID_ANALYTICS_SECTIONS = new Set([
     "realtime",
     "pages",
     "referrers",
@@ -341,13 +345,21 @@ export function DashboardShell({
     "campaigns",
     "funnels",
     "retention",
-  ] as const;
-  const currentAnalyticsSection = validAnalyticsSections.includes(
-    mainSiteSection as (typeof validAnalyticsSections)[number],
-  )
-    ? (mainSiteSection as (typeof validAnalyticsSections)[number])
-    : undefined;
-  const routeState = parseSidebarRouteState(livePathname, activeTeamSlug);
+  ]);
+  const currentAnalyticsSection = (() => {
+    if (routeState.mode !== "site" || !routeState.activeSiteSlug)
+      return undefined;
+    const segments = livePathname.split("/").filter((s) => s.length > 0);
+    const teamIndex = segments.findIndex(
+      (segment, index) =>
+        segment === activeTeamSlug &&
+        index > 0 &&
+        segments[index - 1] === "app",
+    );
+    const localPath = teamIndex >= 0 ? segments.slice(teamIndex + 1) : [];
+    const section = localPath[1] || "";
+    return VALID_ANALYTICS_SECTIONS.has(section) ? section : undefined;
+  })();
   const hasManagementSections = Boolean(
     managementSections && managementSections.length > 0,
   );

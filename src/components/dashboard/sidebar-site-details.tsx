@@ -60,28 +60,12 @@ interface SidebarSiteSummary {
   iconPath?: string;
 }
 
-type AnalyticsSection =
-  | "realtime"
-  | "pages"
-  | "referrers"
-  | "sessions"
-  | "events"
-  | "visitors"
-  | "geo"
-  | "devices"
-  | "browsers"
-  | "performance"
-  | "settings"
-  | "campaigns"
-  | "funnels"
-  | "retention";
-
 interface SidebarSiteDetailsProps {
   locale: Locale;
   teamId: string;
   teamSlug: string;
   activeSiteSlug?: string;
-  currentSection?: AnalyticsSection;
+  currentSection?: string;
   sites: SidebarSiteSummary[];
   labels: {
     views: string;
@@ -105,7 +89,7 @@ function buildSitePath(
   locale: Locale,
   teamSlug: string,
   siteSlug: string,
-  section?: AnalyticsSection,
+  section?: string,
 ): string {
   const base = `/${locale}/app/${teamSlug}/${siteSlug}`;
   if (!section) return base;
