@@ -69,6 +69,7 @@
     "boring-avatars": "^2.0.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "hono": "^4.12.27",
     "i18n-iso-countries": "^7.14.0",
     "maplibre-gl": "^5.24.0",
     "motion": "^12.40.0",
