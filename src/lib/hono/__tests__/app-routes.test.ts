@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { handlePrivateAdmin } from "@/lib/edge/admin";
+import { handleUsersAdmin } from "@/lib/edge/admin-users";
 import { handleAdminWs } from "@/lib/edge/admin-ws";
 import { handleApiV1 } from "@/lib/edge/api-v1";
 import { handlePrivateArchive } from "@/lib/edge/archive-query";
@@ -30,6 +31,13 @@ vi.mock("@/lib/edge/admin-ws", () => ({
 
 vi.mock("@/lib/edge/archive-query", () => ({
   handlePrivateArchive: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/admin-users", () => ({
+  handleAuthLoginAdmin: vi.fn(),
+  handleAuthMeAdmin: vi.fn(),
+  handleProfileAdmin: vi.fn(),
+  handleUsersAdmin: vi.fn(),
 }));
 
 vi.mock("@/lib/edge/collect", () => ({
@@ -106,6 +114,7 @@ describe("Hono API app routing", () => {
       new Response("script"),
     );
     vi.mocked(handlePrivateAdmin).mockResolvedValue(new Response("admin"));
+    vi.mocked(handleUsersAdmin).mockResolvedValue(new Response("admin"));
     vi.mocked(handlePrivateArchive).mockResolvedValue(new Response("archive"));
     vi.mocked(handlePrivateQuery).mockResolvedValue(
       new Response("private-query"),
@@ -228,7 +237,8 @@ describe("Hono API app routing", () => {
       executionCtx,
     );
 
-    expect(handlePrivateAdmin).toHaveBeenCalled();
+    expect(handleUsersAdmin).toHaveBeenCalled();
+    expect(handlePrivateAdmin).not.toHaveBeenCalled();
     expect(handlePrivateArchive).toHaveBeenCalled();
     expect(resolvePrivateSite).toHaveBeenCalled();
     expect(routeQuery).toHaveBeenCalledWith(
