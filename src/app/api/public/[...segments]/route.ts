@@ -10,3 +10,15 @@ export async function GET(request: Request): Promise<Response> {
   } = await resolveEdgeRuntime(request);
   return handlePublicQuery(requestWithCf, env, url, ctx);
 }
+
+export async function POST(request: Request): Promise<Response> {
+  return GET(request);
+}
+
+export async function PATCH(request: Request): Promise<Response> {
+  return GET(request);
+}
+
+export async function DELETE(request: Request): Promise<Response> {
+  return GET(request);
+}

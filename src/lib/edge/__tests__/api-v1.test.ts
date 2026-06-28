@@ -1088,6 +1088,23 @@ describe("api v1 gateway", () => {
     expect(body.data.publicSlug).toBe("my-blog");
   });
 
+  it("disables sharing and clears the public slug via PATCH", async () => {
+    const { response } = await authed(
+      "/api/v1/sites/site-1/sharing",
+      [siteMatch("site-1", "Blog")],
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ publicEnabled: false, publicSlug: "old-blog" }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { publicEnabled: false, publicSlug: null },
+    });
+  });
+
   it("returns 409 when sharing slug conflicts", async () => {
     vi.mocked(ensurePublicSlugAvailable).mockResolvedValueOnce(false);
     const { response } = await authed(
@@ -1304,6 +1321,127 @@ describe("api v1 gateway", () => {
       { scopes_json: JSON.stringify(["site:read"]) },
     );
     expect(response.status).toBe(403);
+  });
+
+  it("prevents restricted keys from reading and updating unauthorized sites", async () => {
+    const get = await authed(
+      "/api/v1/sites/site-1",
+      [siteMatch("site-1", "Blog")],
+      undefined,
+      { site_ids_json: JSON.stringify(["site-2"]) },
+    );
+    expect(get.response.status).toBe(404);
+
+    const patch = await authed(
+      "/api/v1/sites/site-1",
+      [siteMatch("site-1", "Blog")],
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Blocked" }),
+      },
+      { site_ids_json: JSON.stringify(["site-2"]) },
+    );
+    expect(patch.response.status).toBe(404);
+  });
+
+  it("prevents restricted keys from reading unauthorized analytics families", async () => {
+    const overrides = { site_ids_json: JSON.stringify(["site-2"]) };
+    const cases = [
+      "/api/v1/sites/site-1/analytics/overview?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
+      "/api/v1/sites/site-1/events?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
+      "/api/v1/sites/site-1/sessions?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
+      "/api/v1/sites/site-1/visitors?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
+      "/api/v1/sites/site-1/realtime/snapshot",
+    ];
+
+    for (const path of cases) {
+      const { response } = await authed(
+        path,
+        [siteMatch("site-1", "Blog")],
+        undefined,
+        overrides,
+      );
+      expect(response.status, path).toBe(404);
+    }
+  });
+
+  it("does not let batch bypass site restrictions or missing scopes", async () => {
+    const restricted = await authed(
+      "/api/v1/batch",
+      [siteMatch("site-1", "Blog")],
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requests: [
+            {
+              id: "overview",
+              method: "GET",
+              path: "/api/v1/sites/site-1/analytics/overview",
+              query: {
+                from: "2026-06-01T00:00:00Z",
+                to: "2026-06-02T00:00:00Z",
+              },
+            },
+          ],
+        }),
+      },
+      { site_ids_json: JSON.stringify(["site-2"]) },
+    );
+    expect(restricted.response.status).toBe(200);
+    await expect(restricted.response.json()).resolves.toMatchObject({
+      data: { responses: [{ id: "overview", status: 404 }] },
+      meta: { partialFailure: true },
+    });
+
+    const noAnalytics = await authed(
+      "/api/v1/batch",
+      [siteMatch("site-1", "Blog")],
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requests: [
+            {
+              id: "overview",
+              method: "GET",
+              path: "/api/v1/sites/site-1/analytics/overview",
+            },
+          ],
+        }),
+      },
+      { scopes_json: JSON.stringify(["site:read"]) },
+    );
+    expect(noAnalytics.response.status).toBe(200);
+    await expect(noAnalytics.response.json()).resolves.toMatchObject({
+      data: { responses: [{ id: "overview", status: 403 }] },
+      meta: { partialFailure: true },
+    });
+
+    const writeAttempt = await authed(
+      "/api/v1/batch",
+      [siteMatch("site-1", "Blog")],
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requests: [
+            {
+              id: "sharing",
+              method: "PATCH",
+              path: "/api/v1/sites/site-1/sharing",
+            },
+          ],
+        }),
+      },
+      { scopes_json: JSON.stringify(["site_config:read"]) },
+    );
+    expect(writeAttempt.response.status).toBe(200);
+    await expect(writeAttempt.response.json()).resolves.toMatchObject({
+      data: { responses: [{ id: "sharing", status: 400 }] },
+      meta: { partialFailure: true },
+    });
   });
 
   // ── additional coverage: analytics invalid interval ─────────────

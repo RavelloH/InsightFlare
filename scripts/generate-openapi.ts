@@ -887,17 +887,39 @@ function buildSchemas(): Record<string, unknown> {
       properties: {
         name: { type: "string", minLength: 1, maxLength: 120 },
         domain: { type: "string", minLength: 1, maxLength: 255 },
-        sharing: ref("SharingSettings"),
+        publicEnabled: {
+          type: "boolean",
+          default: false,
+          description: "Whether the public sharing link is enabled.",
+        },
+        publicSlug: {
+          type: "string",
+          maxLength: 120,
+          description:
+            "Optional public sharing slug when publicEnabled is true.",
+        },
       },
+      additionalProperties: false,
     },
     SiteUpdateInput: {
       type: "object",
-      description: "Partial update for site metadata and sharing settings.",
+      description:
+        "Partial update for site metadata and public sharing input fields.",
       properties: {
         name: { type: "string", minLength: 1, maxLength: 120 },
         domain: { type: "string", minLength: 1, maxLength: 255 },
-        sharing: ref("SharingSettings"),
+        publicEnabled: {
+          type: "boolean",
+          description: "Whether the public sharing link is enabled.",
+        },
+        publicSlug: {
+          type: "string",
+          maxLength: 120,
+          description:
+            "Optional public sharing slug when publicEnabled is true.",
+        },
       },
+      additionalProperties: false,
     },
     SiteResponse: envelope(ref("Site")),
     SiteListResponse: listEnvelope(ref("Site")),
@@ -3237,7 +3259,8 @@ function requestExamplesFor(schemaName: string | null) {
         value: {
           name: "Example Blog",
           domain: "example.com",
-          sharing: { publicEnabled: true, publicSlug: "example-blog" },
+          publicEnabled: true,
+          publicSlug: "example-blog",
         },
       },
     },
@@ -3246,7 +3269,7 @@ function requestExamplesFor(schemaName: string | null) {
         summary: "Update a site",
         value: {
           name: "Example Blog",
-          sharing: { publicEnabled: false, publicSlug: null },
+          publicEnabled: false,
         },
       },
     },

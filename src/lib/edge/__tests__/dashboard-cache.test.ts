@@ -107,10 +107,11 @@ describe("edge dashboard cache wrapper", () => {
   });
 
   it("does not cache non-OK responses and tolerates cache failures", async () => {
+    const put = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("caches", {
       open: vi.fn().mockResolvedValue({
         match: vi.fn().mockRejectedValue(new Error("read failed")),
-        put: vi.fn().mockResolvedValue(undefined),
+        put,
       }),
     });
     const generate = vi
@@ -126,5 +127,6 @@ describe("edge dashboard cache wrapper", () => {
     expect(response.status).toBe(500);
     expect(await response.text()).toBe("nope");
     expect(response.headers.get("x-edge-cache")).toBeNull();
+    expect(put).not.toHaveBeenCalled();
   });
 });
