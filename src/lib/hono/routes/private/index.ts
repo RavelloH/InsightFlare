@@ -2,9 +2,9 @@ import { Hono } from "hono";
 
 import { handlePrivateAdmin } from "@/lib/edge/admin";
 import { handlePrivateArchive } from "@/lib/edge/archive-query";
-import { handlePrivateQuery } from "@/lib/edge/query";
-import { DASHBOARD_QUERY_PATHS } from "@/lib/edge/query/router";
 import type { AppEnv } from "@/lib/hono/types";
+
+import { privateQueryRoutes } from "./query";
 
 function urlFor(request: Request): URL {
   return new URL(request.url);
@@ -50,22 +50,4 @@ privateRoutes.all("/archive/*", (c) =>
   handlePrivateArchive(c.req.raw, c.env, urlFor(c.req.raw)),
 );
 
-for (const path of DASHBOARD_QUERY_PATHS) {
-  privateRoutes.all(`/${path}`, (c) =>
-    handlePrivateQuery(
-      c.req.raw,
-      c.env,
-      urlFor(c.req.raw),
-      c.executionCtx as unknown as ExecutionContext,
-    ),
-  );
-}
-
-privateRoutes.all("/*", (c) =>
-  handlePrivateQuery(
-    c.req.raw,
-    c.env,
-    urlFor(c.req.raw),
-    c.executionCtx as unknown as ExecutionContext,
-  ),
-);
+privateRoutes.route("/", privateQueryRoutes);

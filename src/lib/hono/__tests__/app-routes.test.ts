@@ -13,6 +13,10 @@ import { handleLegacyArchiveFile } from "@/lib/edge/legacy-archive";
 import { handleLegacyAuthLogin } from "@/lib/edge/legacy-auth";
 import { handleMapTileRequest } from "@/lib/edge/map-tiles";
 import { handlePrivateQuery, handlePublicQuery } from "@/lib/edge/query";
+import type * as QueryCoreModule from "@/lib/edge/query/core";
+import { resolvePrivateSite } from "@/lib/edge/query/core";
+import type * as QueryRouterModule from "@/lib/edge/query/router";
+import { routeQuery } from "@/lib/edge/query/router";
 import { handleTrackerScriptRequest } from "@/lib/edge/script-endpoint";
 import apiApp from "@/lib/hono/app";
 
@@ -56,6 +60,22 @@ vi.mock("@/lib/edge/query", () => ({
   handlePublicQuery: vi.fn(),
 }));
 
+vi.mock("@/lib/edge/query/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof QueryCoreModule>();
+  return {
+    ...actual,
+    resolvePrivateSite: vi.fn(),
+  };
+});
+
+vi.mock("@/lib/edge/query/router", async (importOriginal) => {
+  const actual = await importOriginal<typeof QueryRouterModule>();
+  return {
+    ...actual,
+    routeQuery: vi.fn(),
+  };
+});
+
 vi.mock("@/lib/edge/api-v1", () => ({
   handleApiV1: vi.fn(),
 }));
@@ -89,6 +109,12 @@ describe("Hono API app routing", () => {
     vi.mocked(handlePrivateQuery).mockResolvedValue(
       new Response("private-query"),
     );
+    vi.mocked(resolvePrivateSite).mockResolvedValue({
+      id: "site-1",
+      name: "Site",
+      domain: "app.test",
+    });
+    vi.mocked(routeQuery).mockResolvedValue(new Response("private-query"));
     vi.mocked(handlePublicQuery).mockResolvedValue(
       new Response("public-query"),
     );
@@ -198,7 +224,16 @@ describe("Hono API app routing", () => {
 
     expect(handlePrivateAdmin).toHaveBeenCalled();
     expect(handlePrivateArchive).toHaveBeenCalled();
-    expect(handlePrivateQuery).toHaveBeenCalled();
+    expect(resolvePrivateSite).toHaveBeenCalled();
+    expect(routeQuery).toHaveBeenCalledWith(
+      env,
+      "site-1",
+      "overview",
+      new URL("https://app.test/api/private/overview"),
+      { publicMode: false },
+      expect.any(Request),
+    );
+    expect(handlePrivateQuery).not.toHaveBeenCalled();
     expect(handlePublicQuery).toHaveBeenCalled();
     expect(handleApiV1).toHaveBeenCalled();
   });
