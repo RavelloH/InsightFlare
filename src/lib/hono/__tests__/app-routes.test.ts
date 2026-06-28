@@ -14,7 +14,7 @@ import { handleLegacyAuthLogin } from "@/lib/edge/legacy-auth";
 import { handleMapTileRequest } from "@/lib/edge/map-tiles";
 import { handlePrivateQuery, handlePublicQuery } from "@/lib/edge/query";
 import type * as QueryCoreModule from "@/lib/edge/query/core";
-import { resolvePrivateSite } from "@/lib/edge/query/core";
+import { fetchPublicSite, resolvePrivateSite } from "@/lib/edge/query/core";
 import type * as QueryRouterModule from "@/lib/edge/query/router";
 import { routeQuery } from "@/lib/edge/query/router";
 import { handleTrackerScriptRequest } from "@/lib/edge/script-endpoint";
@@ -64,6 +64,7 @@ vi.mock("@/lib/edge/query/core", async (importOriginal) => {
   const actual = await importOriginal<typeof QueryCoreModule>();
   return {
     ...actual,
+    fetchPublicSite: vi.fn(),
     resolvePrivateSite: vi.fn(),
   };
 });
@@ -113,6 +114,11 @@ describe("Hono API app routing", () => {
       id: "site-1",
       name: "Site",
       domain: "app.test",
+    });
+    vi.mocked(fetchPublicSite).mockResolvedValue({
+      id: "public-site",
+      name: "Public Site",
+      domain: "public.test",
     });
     vi.mocked(routeQuery).mockResolvedValue(new Response("private-query"));
     vi.mocked(handlePublicQuery).mockResolvedValue(
@@ -234,7 +240,8 @@ describe("Hono API app routing", () => {
       expect.any(Request),
     );
     expect(handlePrivateQuery).not.toHaveBeenCalled();
-    expect(handlePublicQuery).toHaveBeenCalled();
+    expect(fetchPublicSite).toHaveBeenCalled();
+    expect(handlePublicQuery).not.toHaveBeenCalled();
     expect(handleApiV1).toHaveBeenCalled();
   });
 
