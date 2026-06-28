@@ -3,7 +3,7 @@ export const PRIVATE_CACHE_HEADERS = {
   vary: "authorization, cookie",
 };
 export const PUBLIC_CACHE_HEADERS = {
-  "cache-control": "public, max-age=60, s-maxage=60",
+  "cache-control": "public, max-age=300, s-maxage=300",
   "access-control-allow-origin": "*",
 };
 export const PUBLIC_PRIVACY = {

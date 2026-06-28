@@ -1,4 +1,4 @@
-// Edge-cache helper for read-only private dashboard queries.
+// Edge-cache helper for read-only dashboard and public share queries.
 //
 // Goal: hot dashboards (Devices, Browsers, Geo, etc.) currently fan out into
 // 10–20 D1 statements per page load and re-issue the same SQL on every
@@ -13,6 +13,13 @@
 
 const DASHBOARD_CACHE_NAME = "insightflare-dashboard-query";
 const DEFAULT_TTL_SECONDS = 60;
+const PUBLIC_QUERY_CACHE_NAME = "insightflare-public-query";
+export const PUBLIC_QUERY_CACHE_TTL_SECONDS = 300;
+export const PUBLIC_QUERY_CACHE_OPTIONS = {
+  ttlSeconds: PUBLIC_QUERY_CACHE_TTL_SECONDS,
+  cacheName: PUBLIC_QUERY_CACHE_NAME,
+  applyCacheHeadersOnBypass: true,
+} as const;
 
 function openCacheStorage(): CacheStorage | null {
   if (typeof globalThis !== "object" || !("caches" in globalThis)) {
@@ -25,11 +32,11 @@ function openCacheStorage(): CacheStorage | null {
   return maybeCaches;
 }
 
-async function openEdgeCache(): Promise<Cache | null> {
+async function openEdgeCache(cacheName: string): Promise<Cache | null> {
   const storage = openCacheStorage();
   if (!storage) return null;
   try {
-    return await storage.open(DASHBOARD_CACHE_NAME);
+    return await storage.open(cacheName);
   } catch {
     return null;
   }
@@ -51,7 +58,7 @@ function buildCacheKeyRequest(url: URL): Request {
 function withCacheControlHeaders(
   response: Response,
   ttlSeconds: number,
-  marker: "HIT" | "MISS",
+  marker?: "HIT" | "MISS",
 ): Response {
   const headers = new Headers(response.headers);
   headers.set(
@@ -60,7 +67,9 @@ function withCacheControlHeaders(
   );
   // Strip per-user vary so the edge can actually share the entry.
   headers.delete("vary");
-  headers.set("x-edge-cache", marker);
+  if (marker) {
+    headers.set("x-edge-cache", marker);
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -70,6 +79,8 @@ function withCacheControlHeaders(
 
 export interface DashboardCacheOptions {
   ttlSeconds?: number;
+  cacheName?: string;
+  applyCacheHeadersOnBypass?: boolean;
 }
 
 /**
@@ -90,9 +101,13 @@ export async function withDashboardCache(
     1,
     Math.floor(options.ttlSeconds ?? DEFAULT_TTL_SECONDS),
   );
-  const cache = await openEdgeCache();
+  const cache = await openEdgeCache(options.cacheName ?? DASHBOARD_CACHE_NAME);
   if (!cache) {
-    return generate();
+    const fresh = await generate();
+    if (options.applyCacheHeadersOnBypass && fresh.ok) {
+      return withCacheControlHeaders(fresh, ttlSeconds);
+    }
+    return fresh;
   }
   const cacheKey = buildCacheKeyRequest(url);
 

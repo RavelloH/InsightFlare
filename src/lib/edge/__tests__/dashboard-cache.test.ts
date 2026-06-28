@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { withDashboardCache } from "@/lib/edge/dashboard-cache";
+import {
+  PUBLIC_QUERY_CACHE_OPTIONS,
+  withDashboardCache,
+} from "@/lib/edge/dashboard-cache";
 
 describe("edge dashboard cache wrapper", () => {
   beforeEach(() => {
@@ -22,6 +25,23 @@ describe("edge dashboard cache wrapper", () => {
 
     expect(await response.text()).toBe("fresh");
     expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds public cache headers on bypass when requested", async () => {
+    const generate = vi.fn().mockResolvedValue(new Response("fresh"));
+
+    const response = await withDashboardCache(
+      undefined,
+      new URL("https://example.test/api/public/site/overview"),
+      generate,
+      PUBLIC_QUERY_CACHE_OPTIONS,
+    );
+
+    expect(await response.text()).toBe("fresh");
+    expect(response.headers.get("cache-control")).toBe(
+      "public, max-age=300, s-maxage=300",
+    );
+    expect(response.headers.get("x-edge-cache")).toBeNull();
   });
 
   it("returns cached responses with HIT headers when a cache entry exists", async () => {

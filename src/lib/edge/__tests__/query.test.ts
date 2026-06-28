@@ -12,6 +12,11 @@ vi.mock("@/lib/edge/session-auth", () => ({
 }));
 
 vi.mock("@/lib/edge/dashboard-cache", () => ({
+  PUBLIC_QUERY_CACHE_OPTIONS: {
+    ttlSeconds: 300,
+    cacheName: "insightflare-public-query",
+    applyCacheHeadersOnBypass: true,
+  },
   withDashboardCache: vi.fn(
     async (
       _ctx: ExecutionContext | undefined,
@@ -1877,7 +1882,7 @@ describe("edge query handlers", () => {
     });
 
     const overview = await publicQuery(publicPath("overview"), env);
-    const privateOnly = await publicQuery(publicPath("event-types"), env);
+    const privateOnly = await publicQuery(publicPath("events-summary"), env);
     const missingSlug = await publicQuery(
       `/api/public-sites/%20/overview?${windowParams}`,
       env,

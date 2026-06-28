@@ -15,11 +15,21 @@ const routeQueryMock = vi.fn();
 const handleTeamDashboardMock = vi.fn();
 
 vi.mock("@/lib/edge/dashboard-cache", () => ({
+  PUBLIC_QUERY_CACHE_OPTIONS: {
+    ttlSeconds: 300,
+    cacheName: "insightflare-public-query",
+    applyCacheHeadersOnBypass: true,
+  },
   withDashboardCache: withDashboardCacheMock,
 }));
 
 vi.mock("@/lib/edge/query/core", () => ({
   fetchPublicSite: fetchPublicSiteMock,
+  jsonResponse: (payload: unknown, status = 200) =>
+    new Response(JSON.stringify(payload), {
+      status,
+      headers: { "content-type": "application/json; charset=utf-8" },
+    }),
   notAllowed: () =>
     new Response(JSON.stringify({ ok: false, error: "Method Not Allowed" }), {
       status: 405,
@@ -254,6 +264,11 @@ describe("edge query entry handlers", () => {
       ctx,
       url,
       expect.any(Function),
+      {
+        ttlSeconds: 300,
+        cacheName: "insightflare-public-query",
+        applyCacheHeadersOnBypass: true,
+      },
     );
     expect(routeQueryMock).toHaveBeenCalledWith(
       env,
@@ -263,5 +278,34 @@ describe("edge query entry handlers", () => {
       { publicMode: true },
       edgeRequest,
     );
+  });
+
+  it("wraps public site metadata responses with public cache options", async () => {
+    const edgeRequest = request("/api/public-sites/public/site");
+    const url = new URL(edgeRequest.url);
+    const ctx = {} as ExecutionContext;
+
+    const response = await handlePublicQuery(edgeRequest, env, url, ctx);
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        slug: "public",
+        name: "Public",
+        domain: "public.example",
+        id: "site-public",
+      },
+    });
+    expect(withDashboardCacheMock).toHaveBeenCalledWith(
+      ctx,
+      url,
+      expect.any(Function),
+      {
+        ttlSeconds: 300,
+        cacheName: "insightflare-public-query",
+        applyCacheHeadersOnBypass: true,
+      },
+    );
+    expect(routeQueryMock).not.toHaveBeenCalled();
   });
 });

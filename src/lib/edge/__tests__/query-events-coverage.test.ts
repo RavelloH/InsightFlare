@@ -516,7 +516,7 @@ describe("edge query core event helper coverage", () => {
     );
 
     expect(response.headers.get("cache-control")).toBe(
-      "public, max-age=60, s-maxage=60",
+      "public, max-age=300, s-maxage=300",
     );
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
