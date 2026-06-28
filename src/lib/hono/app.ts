@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 
+import { handleHonoError } from "./middleware/error-boundary";
 import { adminWsRoutes } from "./routes/admin-ws";
 import { authRoutes } from "./routes/auth";
 import { collectRoutes } from "./routes/collect";
@@ -15,6 +16,8 @@ import { wellKnownRoutes } from "./routes/well-known";
 import type { AppEnv } from "./types";
 
 export const apiApp = new Hono<AppEnv>();
+
+apiApp.onError(handleHonoError);
 
 apiApp.route("/", healthRoutes);
 apiApp.route("/", wellKnownRoutes);
