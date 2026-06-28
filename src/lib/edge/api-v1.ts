@@ -2662,6 +2662,9 @@ export async function handleBatch(
   );
 }
 
+/**
+ * Compatibility wrapper. Production routing lives in src/lib/hono/routes.
+ */
 export async function handleApiV1(
   request: Request,
   env: Env,

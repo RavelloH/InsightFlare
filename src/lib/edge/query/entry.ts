@@ -9,6 +9,9 @@ import { fetchPublicSite, notAllowed, resolvePrivateSite } from "./core";
 import { routeQuery } from "./router";
 import { handleTeamDashboard } from "./team";
 
+/**
+ * Compatibility wrapper. Production routing lives in src/lib/hono/routes.
+ */
 export async function handlePrivateQuery(
   request: Request,
   env: Env,
@@ -48,6 +51,9 @@ export async function handlePrivateQuery(
   );
 }
 
+/**
+ * Compatibility wrapper. Production routing lives in src/lib/hono/routes.
+ */
 export async function handlePublicQuery(
   request: Request,
   env: Env,

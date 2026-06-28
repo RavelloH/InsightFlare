@@ -9,7 +9,7 @@ import {
 import type * as QueryCoreModule from "@/lib/edge/query/core";
 import { fetchPublicSite } from "@/lib/edge/query/core";
 import type * as QueryRouterModule from "@/lib/edge/query/router";
-import { routeQuery } from "@/lib/edge/query/router";
+import { dispatchQueryRoute } from "@/lib/edge/query/router";
 import { publicQueryRoutes } from "@/lib/hono/routes/public/query";
 import type { AppEnv } from "@/lib/hono/types";
 
@@ -39,7 +39,7 @@ vi.mock("@/lib/edge/query/router", async (importOriginal) => {
   const actual = await importOriginal<typeof QueryRouterModule>();
   return {
     ...actual,
-    routeQuery: vi.fn(),
+    dispatchQueryRoute: vi.fn(),
   };
 });
 
@@ -67,7 +67,7 @@ describe("Hono public query routes", () => {
       name: "Public Site",
       domain: "public.test",
     });
-    vi.mocked(routeQuery).mockResolvedValue(new Response("query"));
+    vi.mocked(dispatchQueryRoute).mockResolvedValue(new Response("query"));
   });
 
   it("returns public site metadata through the public cache wrapper", async () => {
@@ -97,7 +97,7 @@ describe("Hono public query routes", () => {
       expect.any(Function),
       PUBLIC_QUERY_CACHE_OPTIONS,
     );
-    expect(routeQuery).not.toHaveBeenCalled();
+    expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 
   it("routes public allowlist queries with publicMode and public cache options", async () => {
@@ -116,7 +116,7 @@ describe("Hono public query routes", () => {
       expect.any(Function),
       PUBLIC_QUERY_CACHE_OPTIONS,
     );
-    expect(routeQuery).toHaveBeenCalledWith(
+    expect(dispatchQueryRoute).toHaveBeenCalledWith(
       env,
       "site-1",
       "overview",
@@ -138,7 +138,7 @@ describe("Hono public query routes", () => {
     expect(response.status).toBe(405);
     expect(fetchPublicSite).not.toHaveBeenCalled();
     expect(withDashboardCache).not.toHaveBeenCalled();
-    expect(routeQuery).not.toHaveBeenCalled();
+    expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 
   it("does not enter cache when public site resolution fails", async () => {
@@ -156,11 +156,11 @@ describe("Hono public query routes", () => {
     expect(response.status).toBe(404);
     await expect(response.text()).resolves.toBe("missing");
     expect(withDashboardCache).not.toHaveBeenCalled();
-    expect(routeQuery).not.toHaveBeenCalled();
+    expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 
   it("keeps private-only endpoints behind the public query allowlist", async () => {
-    vi.mocked(routeQuery).mockResolvedValueOnce(
+    vi.mocked(dispatchQueryRoute).mockResolvedValueOnce(
       new Response("not found", { status: 404 }),
     );
     const app = createApp();
@@ -172,7 +172,7 @@ describe("Hono public query routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(routeQuery).toHaveBeenCalledWith(
+    expect(dispatchQueryRoute).toHaveBeenCalledWith(
       env,
       "site-1",
       "events-records",

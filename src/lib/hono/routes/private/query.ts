@@ -2,7 +2,10 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 
 import { notAllowed } from "@/lib/edge/query/core";
-import { DASHBOARD_QUERY_PATHS, routeQuery } from "@/lib/edge/query/router";
+import {
+  DASHBOARD_QUERY_PATHS,
+  dispatchQueryRoute,
+} from "@/lib/edge/query/router";
 import { handleTeamDashboard } from "@/lib/edge/query/team";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import {
@@ -22,7 +25,7 @@ function privateQuery(pathname: string) {
     if (!site) {
       throw new Error("private site context missing");
     }
-    return routeQuery(
+    return dispatchQueryRoute(
       c.env,
       site.id,
       pathname,

@@ -20,6 +20,9 @@ import {
 } from "./admin-users";
 import type { Env } from "./types";
 
+/**
+ * Compatibility wrapper. Production routing lives in src/lib/hono/routes.
+ */
 export async function handlePrivateAdmin(
   request: Request,
   env: Env,

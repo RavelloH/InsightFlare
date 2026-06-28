@@ -3,7 +3,10 @@ import { Hono } from "hono";
 
 import { PUBLIC_QUERY_CACHE_OPTIONS } from "@/lib/edge/dashboard-cache";
 import { jsonResponse } from "@/lib/edge/query/core";
-import { PUBLIC_QUERY_PATHS, routeQuery } from "@/lib/edge/query/router";
+import {
+  dispatchQueryRoute,
+  PUBLIC_QUERY_PATHS,
+} from "@/lib/edge/query/router";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import { requireMethodMiddleware } from "@/lib/hono/middleware/method";
 import { resolvePublicSiteMiddleware } from "@/lib/hono/middleware/site";
@@ -21,7 +24,7 @@ function publicQuery(pathname: string) {
     if (!site) {
       throw new Error("public site context missing");
     }
-    return routeQuery(
+    return dispatchQueryRoute(
       c.env,
       site.id,
       pathname,

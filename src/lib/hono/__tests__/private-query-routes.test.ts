@@ -5,7 +5,7 @@ import { withDashboardCache } from "@/lib/edge/dashboard-cache";
 import type * as QueryCoreModule from "@/lib/edge/query/core";
 import { resolvePrivateSite } from "@/lib/edge/query/core";
 import type * as QueryRouterModule from "@/lib/edge/query/router";
-import { routeQuery } from "@/lib/edge/query/router";
+import { dispatchQueryRoute } from "@/lib/edge/query/router";
 import { handleTeamDashboard } from "@/lib/edge/query/team";
 import { privateQueryRoutes } from "@/lib/hono/routes/private/query";
 import type { AppEnv } from "@/lib/hono/types";
@@ -32,7 +32,7 @@ vi.mock("@/lib/edge/query/router", async (importOriginal) => {
   const actual = await importOriginal<typeof QueryRouterModule>();
   return {
     ...actual,
-    routeQuery: vi.fn(),
+    dispatchQueryRoute: vi.fn(),
   };
 });
 
@@ -64,7 +64,7 @@ describe("Hono private query routes", () => {
       name: "Site",
       domain: "app.test",
     });
-    vi.mocked(routeQuery).mockResolvedValue(new Response("query"));
+    vi.mocked(dispatchQueryRoute).mockResolvedValue(new Response("query"));
     vi.mocked(handleTeamDashboard).mockResolvedValue(new Response("team"));
   });
 
@@ -89,7 +89,7 @@ describe("Hono private query routes", () => {
       expect.any(Function),
       undefined,
     );
-    expect(routeQuery).toHaveBeenCalledWith(
+    expect(dispatchQueryRoute).toHaveBeenCalledWith(
       env,
       "site-1",
       "overview",
@@ -114,7 +114,7 @@ describe("Hono private query routes", () => {
     expect(response.status).toBe(404);
     await expect(response.text()).resolves.toBe("denied");
     expect(withDashboardCache).not.toHaveBeenCalled();
-    expect(routeQuery).not.toHaveBeenCalled();
+    expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 
   it("keeps non-funnel mutations out of private query routes", async () => {
@@ -129,7 +129,7 @@ describe("Hono private query routes", () => {
     expect(response.status).toBe(405);
     expect(resolvePrivateSite).not.toHaveBeenCalled();
     expect(withDashboardCache).not.toHaveBeenCalled();
-    expect(routeQuery).not.toHaveBeenCalled();
+    expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 
   it("allows funnel mutations without dashboard cache", async () => {
@@ -149,7 +149,7 @@ describe("Hono private query routes", () => {
     expect(postResponse.status).toBe(200);
     expect(deleteResponse.status).toBe(200);
     expect(withDashboardCache).not.toHaveBeenCalled();
-    expect(routeQuery).toHaveBeenCalledWith(
+    expect(dispatchQueryRoute).toHaveBeenCalledWith(
       env,
       "site-1",
       "funnels",
@@ -176,7 +176,7 @@ describe("Hono private query routes", () => {
     );
     expect(resolvePrivateSite).not.toHaveBeenCalled();
     expect(withDashboardCache).not.toHaveBeenCalled();
-    expect(routeQuery).not.toHaveBeenCalled();
+    expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 
   it("falls back unknown GET queries through the legacy query dispatcher", async () => {
@@ -190,7 +190,7 @@ describe("Hono private query routes", () => {
 
     expect(response.status).toBe(200);
     expect(withDashboardCache).toHaveBeenCalled();
-    expect(routeQuery).toHaveBeenCalledWith(
+    expect(dispatchQueryRoute).toHaveBeenCalledWith(
       env,
       "site-1",
       "unknown",

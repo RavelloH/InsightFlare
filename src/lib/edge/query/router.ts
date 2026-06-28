@@ -120,6 +120,228 @@ export const DASHBOARD_QUERY_PATHS = [
 
 const PUBLIC_QUERY_PATH_SET = new Set<string>(PUBLIC_QUERY_PATHS);
 
+export interface QueryRouteContext {
+  env: Env;
+  siteId: string;
+  url: URL;
+  options: { publicMode: boolean };
+  request?: Request;
+  responseContext?: ResponseContext;
+}
+
+export type QueryRouteHandler = (
+  context: QueryRouteContext,
+) => Promise<Response>;
+
+export const QUERY_ROUTE_HANDLERS: Record<string, QueryRouteHandler> = {
+  overview: ({ env, siteId, url, responseContext }) =>
+    handleOverview(env, siteId, url, responseContext),
+  trend: ({ env, siteId, url, responseContext }) =>
+    handleTrend(env, siteId, url, responseContext),
+  pages: ({ env, siteId, url, options, responseContext }) =>
+    handlePages(env, siteId, url, !options.publicMode, responseContext),
+  referrers: ({ env, siteId, url, options, responseContext }) =>
+    handleReferrers(
+      env,
+      siteId,
+      url,
+      options.publicMode ? 8 : 20,
+      !options.publicMode,
+      responseContext,
+    ),
+  funnels: ({ env, siteId, url, request, responseContext }) =>
+    handleFunnel(env, siteId, url, responseContext, request as Request),
+  "pages-dashboard": ({ env, siteId, url, responseContext }) =>
+    handlePagesDashboard(env, siteId, url, responseContext),
+  "page-hash": ({ env, siteId, url, responseContext }) =>
+    handleDimension(
+      env,
+      siteId,
+      url,
+      "hash_fragment",
+      undefined,
+      responseContext,
+    ),
+  "page-query": ({ env, siteId, url, responseContext }) =>
+    handleDimension(
+      env,
+      siteId,
+      url,
+      "query_string",
+      undefined,
+      responseContext,
+    ),
+  "event-types": ({ env, siteId, url, responseContext }) =>
+    handleEventTypes(env, siteId, url, responseContext),
+  "events-summary": ({ env, siteId, url, responseContext }) =>
+    handleEventsSummary(env, siteId, url, responseContext),
+  "events-trend": ({ env, siteId, url, responseContext }) =>
+    handleEventsTrend(env, siteId, url, responseContext),
+  "events-records": ({ env, siteId, url, responseContext }) =>
+    handleEventsRecords(env, siteId, url, responseContext),
+  "event-type-field-values": ({ env, siteId, url, responseContext }) =>
+    handleEventTypeFieldValues(env, siteId, url, responseContext),
+  "event-type-detail": ({ env, siteId, url, responseContext }) =>
+    handleEventTypeDetail(env, siteId, url, responseContext),
+  "event-record-detail": ({ env, siteId, url, responseContext }) =>
+    handleEventRecordDetail(env, siteId, url, responseContext),
+  sessions: ({ env, siteId, url, responseContext }) =>
+    handleSessions(env, siteId, url, responseContext),
+  "session-detail": ({ env, siteId, url, responseContext }) =>
+    handleSessionDetail(env, siteId, url, responseContext),
+  "visitor-detail": ({ env, siteId, url, responseContext }) =>
+    handleVisitorDetail(env, siteId, url, responseContext),
+  visitors: ({ env, siteId, url, responseContext }) =>
+    handleVisitors(env, siteId, url, responseContext),
+  retention: ({ env, siteId, url, responseContext }) =>
+    handleRetention(env, siteId, url, responseContext),
+  performance: ({ env, siteId, url, responseContext }) =>
+    handlePerformance(env, siteId, url, responseContext),
+  "browser-trend": ({ env, siteId, url, responseContext }) =>
+    handleBrowserTrend(env, siteId, url, responseContext),
+  "browser-engine-trend": ({ env, siteId, url, responseContext }) =>
+    handleBrowserEngineTrend(env, siteId, url, responseContext),
+  "browser-version-breakdown": ({ env, siteId, url, responseContext }) =>
+    handleBrowserVersionBreakdown(env, siteId, url, responseContext),
+  "browser-cross-breakdown": ({ env, siteId, url, responseContext }) =>
+    handleBrowserCrossBreakdown(env, siteId, url, responseContext),
+  "browser-radar": ({ env, siteId, url, responseContext }) =>
+    handleBrowserRadar(env, siteId, url, responseContext),
+  "referrer-radar": ({ env, siteId, url, responseContext }) =>
+    handleReferrerRadar(env, siteId, url, responseContext),
+  "referrer-dimension-trend": ({ env, siteId, url, responseContext }) =>
+    handleReferrerDimensionTrend(env, siteId, url, responseContext),
+  "client-dimension-trend": ({ env, siteId, url, responseContext }) =>
+    handleClientDimensionTrend(env, siteId, url, responseContext),
+  "utm-dimension-trend": ({ env, siteId, url, responseContext }) =>
+    handleUtmDimensionTrend(env, siteId, url, responseContext),
+  "client-cross-breakdown": ({ env, siteId, url, responseContext }) =>
+    handleCrossBreakdown(env, siteId, url, responseContext),
+  "utm-source": ({ env, siteId, url, responseContext }) =>
+    handleDimension(
+      env,
+      siteId,
+      url,
+      utmDimensionDefinition("source").labelExpr,
+      undefined,
+      responseContext,
+    ),
+  "utm-medium": ({ env, siteId, url, responseContext }) =>
+    handleDimension(
+      env,
+      siteId,
+      url,
+      utmDimensionDefinition("medium").labelExpr,
+      undefined,
+      responseContext,
+    ),
+  "utm-campaign": ({ env, siteId, url, responseContext }) =>
+    handleDimension(
+      env,
+      siteId,
+      url,
+      utmDimensionDefinition("campaign").labelExpr,
+      undefined,
+      responseContext,
+    ),
+  "utm-term": ({ env, siteId, url, responseContext }) =>
+    handleDimension(
+      env,
+      siteId,
+      url,
+      utmDimensionDefinition("term").labelExpr,
+      undefined,
+      responseContext,
+    ),
+  "utm-content": ({ env, siteId, url, responseContext }) =>
+    handleDimension(
+      env,
+      siteId,
+      url,
+      utmDimensionDefinition("content").labelExpr,
+      undefined,
+      responseContext,
+    ),
+  countries: ({ env, siteId, url, responseContext }) =>
+    handleDimension(
+      env,
+      siteId,
+      url,
+      "country",
+      { ignoreGeo: true },
+      responseContext,
+    ),
+  "filter-options": ({ env, siteId, url, responseContext }) =>
+    handleFilterOptions(env, siteId, url, responseContext),
+  "overview-page-path": ({ env, siteId, url, responseContext }) =>
+    handleOverviewPageTab(env, siteId, url, "path", responseContext),
+  "overview-page-title": ({ env, siteId, url, responseContext }) =>
+    handleOverviewPageTab(env, siteId, url, "title", responseContext),
+  "overview-page-hostname": ({ env, siteId, url, responseContext }) =>
+    handleOverviewPageTab(env, siteId, url, "hostname", responseContext),
+  "overview-page-entry": ({ env, siteId, url, responseContext }) =>
+    handleOverviewPageTab(env, siteId, url, "entry", responseContext),
+  "overview-page-exit": ({ env, siteId, url, responseContext }) =>
+    handleOverviewPageTab(env, siteId, url, "exit", responseContext),
+  "overview-source-domain": ({ env, siteId, url, responseContext }) =>
+    handleOverviewSourceTab(env, siteId, url, "domain", responseContext),
+  "overview-source-link": ({ env, siteId, url, responseContext }) =>
+    handleOverviewSourceTab(env, siteId, url, "link", responseContext),
+  "overview-client-browser": ({ env, siteId, url, responseContext }) =>
+    handleOverviewClientTab(env, siteId, url, "browser", responseContext),
+  "overview-client-os-version": ({ env, siteId, url, responseContext }) =>
+    handleOverviewClientTab(env, siteId, url, "osVersion", responseContext),
+  "overview-client-device-type": ({ env, siteId, url, responseContext }) =>
+    handleOverviewClientTab(env, siteId, url, "deviceType", responseContext),
+  "overview-client-language": ({ env, siteId, url, responseContext }) =>
+    handleOverviewClientTab(env, siteId, url, "language", responseContext),
+  "overview-client-screen-size": ({ env, siteId, url, responseContext }) =>
+    handleOverviewClientTab(env, siteId, url, "screenSize", responseContext),
+  "overview-geo-country": ({ env, siteId, url, responseContext }) =>
+    handleOverviewGeoTab(env, siteId, url, "country", responseContext),
+  "overview-geo-region": ({ env, siteId, url, responseContext }) =>
+    handleOverviewGeoTab(env, siteId, url, "region", responseContext),
+  "overview-geo-city": ({ env, siteId, url, responseContext }) =>
+    handleOverviewGeoTab(env, siteId, url, "city", responseContext),
+  "overview-geo-continent": ({ env, siteId, url, responseContext }) =>
+    handleOverviewGeoTab(env, siteId, url, "continent", responseContext),
+  "overview-geo-timezone": ({ env, siteId, url, responseContext }) =>
+    handleOverviewGeoTab(env, siteId, url, "timezone", responseContext),
+  "overview-geo-organization": ({ env, siteId, url, responseContext }) =>
+    handleOverviewGeoTab(env, siteId, url, "organization", responseContext),
+  "overview-geo-points": ({ env, siteId, url, responseContext }) =>
+    handleOverviewGeoPoints(env, siteId, url, responseContext),
+};
+
+export function queryRouteHandler(
+  pathname: string,
+  options: { publicMode: boolean },
+): QueryRouteHandler | null {
+  if (options.publicMode && !PUBLIC_QUERY_PATH_SET.has(pathname)) {
+    return null;
+  }
+  return QUERY_ROUTE_HANDLERS[pathname] ?? null;
+}
+
+export async function dispatchQueryRoute(
+  env: Env,
+  siteId: string,
+  pathname: string,
+  url: URL,
+  options: { publicMode: boolean },
+  request?: Request,
+): Promise<Response> {
+  const responseContext: ResponseContext | undefined = request
+    ? { requestId: getRequestId(request) }
+    : undefined;
+  const handler = queryRouteHandler(pathname, options);
+  if (!handler) return notFound();
+  return handler({ env, siteId, url, options, request, responseContext });
+}
+
+/**
+ * Compatibility wrapper. Production Hono routing calls dispatchQueryRoute.
+ */
 export async function routeQuery(
   env: Env,
   siteId: string,
@@ -128,226 +350,5 @@ export async function routeQuery(
   options: { publicMode: boolean },
   request?: Request,
 ): Promise<Response> {
-  const ctx: ResponseContext | undefined = request
-    ? { requestId: getRequestId(request) }
-    : undefined;
-
-  if (pathname === "overview") return handleOverview(env, siteId, url, ctx);
-  if (pathname === "trend") return handleTrend(env, siteId, url, ctx);
-  if (pathname === "pages") {
-    return handlePages(env, siteId, url, !options.publicMode, ctx);
-  }
-  if (pathname === "referrers") {
-    return handleReferrers(
-      env,
-      siteId,
-      url,
-      options.publicMode ? 8 : 20,
-      !options.publicMode,
-      ctx,
-    );
-  }
-  if (options.publicMode && !PUBLIC_QUERY_PATH_SET.has(pathname)) {
-    return notFound();
-  }
-  if (pathname === "funnels") {
-    return handleFunnel(env, siteId, url, ctx, request as Request);
-  }
-  if (pathname === "pages-dashboard") {
-    return handlePagesDashboard(env, siteId, url, ctx);
-  }
-  if (pathname === "page-hash") {
-    return handleDimension(env, siteId, url, "hash_fragment", undefined, ctx);
-  }
-  if (pathname === "page-query") {
-    return handleDimension(env, siteId, url, "query_string", undefined, ctx);
-  }
-  if (pathname === "event-types") {
-    return handleEventTypes(env, siteId, url, ctx);
-  }
-  if (pathname === "events-summary") {
-    return handleEventsSummary(env, siteId, url, ctx);
-  }
-  if (pathname === "events-trend") {
-    return handleEventsTrend(env, siteId, url, ctx);
-  }
-  if (pathname === "events-records") {
-    return handleEventsRecords(env, siteId, url, ctx);
-  }
-  if (pathname === "event-type-field-values") {
-    return handleEventTypeFieldValues(env, siteId, url, ctx);
-  }
-  if (pathname === "event-type-detail") {
-    return handleEventTypeDetail(env, siteId, url, ctx);
-  }
-  if (pathname === "event-record-detail") {
-    return handleEventRecordDetail(env, siteId, url, ctx);
-  }
-  if (pathname === "sessions") {
-    return handleSessions(env, siteId, url, ctx);
-  }
-  if (pathname === "session-detail") {
-    return handleSessionDetail(env, siteId, url, ctx);
-  }
-  if (pathname === "visitor-detail") {
-    return handleVisitorDetail(env, siteId, url, ctx);
-  }
-  if (pathname === "visitors") {
-    return handleVisitors(env, siteId, url, ctx);
-  }
-  if (pathname === "retention") {
-    return handleRetention(env, siteId, url, ctx);
-  }
-  if (pathname === "performance") {
-    return handlePerformance(env, siteId, url, ctx);
-  }
-  if (pathname === "browser-trend")
-    return handleBrowserTrend(env, siteId, url, ctx);
-  if (pathname === "browser-engine-trend") {
-    return handleBrowserEngineTrend(env, siteId, url, ctx);
-  }
-  if (pathname === "browser-version-breakdown") {
-    return handleBrowserVersionBreakdown(env, siteId, url, ctx);
-  }
-  if (pathname === "browser-cross-breakdown") {
-    return handleBrowserCrossBreakdown(env, siteId, url, ctx);
-  }
-  if (pathname === "browser-radar") {
-    return handleBrowserRadar(env, siteId, url, ctx);
-  }
-  if (pathname === "referrer-radar") {
-    return handleReferrerRadar(env, siteId, url, ctx);
-  }
-  if (pathname === "referrer-dimension-trend") {
-    return handleReferrerDimensionTrend(env, siteId, url, ctx);
-  }
-  if (pathname === "client-dimension-trend") {
-    return handleClientDimensionTrend(env, siteId, url, ctx);
-  }
-  if (pathname === "utm-dimension-trend") {
-    return handleUtmDimensionTrend(env, siteId, url, ctx);
-  }
-  if (pathname === "client-cross-breakdown") {
-    return handleCrossBreakdown(env, siteId, url, ctx);
-  }
-  if (pathname === "utm-source") {
-    return handleDimension(
-      env,
-      siteId,
-      url,
-      utmDimensionDefinition("source").labelExpr,
-      undefined,
-      ctx,
-    );
-  }
-  if (pathname === "utm-medium") {
-    return handleDimension(
-      env,
-      siteId,
-      url,
-      utmDimensionDefinition("medium").labelExpr,
-      undefined,
-      ctx,
-    );
-  }
-  if (pathname === "utm-campaign") {
-    return handleDimension(
-      env,
-      siteId,
-      url,
-      utmDimensionDefinition("campaign").labelExpr,
-      undefined,
-      ctx,
-    );
-  }
-  if (pathname === "utm-term") {
-    return handleDimension(
-      env,
-      siteId,
-      url,
-      utmDimensionDefinition("term").labelExpr,
-      undefined,
-      ctx,
-    );
-  }
-  if (pathname === "utm-content") {
-    return handleDimension(
-      env,
-      siteId,
-      url,
-      utmDimensionDefinition("content").labelExpr,
-      undefined,
-      ctx,
-    );
-  }
-  if (pathname === "countries") {
-    return handleDimension(
-      env,
-      siteId,
-      url,
-      "country",
-      { ignoreGeo: true },
-      ctx,
-    );
-  }
-  if (pathname === "filter-options")
-    return handleFilterOptions(env, siteId, url, ctx);
-  if (pathname === "overview-page-path") {
-    return handleOverviewPageTab(env, siteId, url, "path", ctx);
-  }
-  if (pathname === "overview-page-title") {
-    return handleOverviewPageTab(env, siteId, url, "title", ctx);
-  }
-  if (pathname === "overview-page-hostname") {
-    return handleOverviewPageTab(env, siteId, url, "hostname", ctx);
-  }
-  if (pathname === "overview-page-entry") {
-    return handleOverviewPageTab(env, siteId, url, "entry", ctx);
-  }
-  if (pathname === "overview-page-exit") {
-    return handleOverviewPageTab(env, siteId, url, "exit", ctx);
-  }
-  if (pathname === "overview-source-domain") {
-    return handleOverviewSourceTab(env, siteId, url, "domain", ctx);
-  }
-  if (pathname === "overview-source-link") {
-    return handleOverviewSourceTab(env, siteId, url, "link", ctx);
-  }
-  if (pathname === "overview-client-browser") {
-    return handleOverviewClientTab(env, siteId, url, "browser", ctx);
-  }
-  if (pathname === "overview-client-os-version") {
-    return handleOverviewClientTab(env, siteId, url, "osVersion", ctx);
-  }
-  if (pathname === "overview-client-device-type") {
-    return handleOverviewClientTab(env, siteId, url, "deviceType", ctx);
-  }
-  if (pathname === "overview-client-language") {
-    return handleOverviewClientTab(env, siteId, url, "language", ctx);
-  }
-  if (pathname === "overview-client-screen-size") {
-    return handleOverviewClientTab(env, siteId, url, "screenSize", ctx);
-  }
-  if (pathname === "overview-geo-country") {
-    return handleOverviewGeoTab(env, siteId, url, "country", ctx);
-  }
-  if (pathname === "overview-geo-region") {
-    return handleOverviewGeoTab(env, siteId, url, "region", ctx);
-  }
-  if (pathname === "overview-geo-city") {
-    return handleOverviewGeoTab(env, siteId, url, "city", ctx);
-  }
-  if (pathname === "overview-geo-continent") {
-    return handleOverviewGeoTab(env, siteId, url, "continent", ctx);
-  }
-  if (pathname === "overview-geo-timezone") {
-    return handleOverviewGeoTab(env, siteId, url, "timezone", ctx);
-  }
-  if (pathname === "overview-geo-organization") {
-    return handleOverviewGeoTab(env, siteId, url, "organization", ctx);
-  }
-  if (pathname === "overview-geo-points") {
-    return handleOverviewGeoPoints(env, siteId, url, ctx);
-  }
-  return notFound();
+  return dispatchQueryRoute(env, siteId, pathname, url, options, request);
 }

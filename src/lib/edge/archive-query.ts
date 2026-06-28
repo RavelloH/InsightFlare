@@ -247,6 +247,9 @@ export async function handlePrivateArchiveFile(
   return new Response(object.body, { status, headers });
 }
 
+/**
+ * Compatibility wrapper. Production routing lives in src/lib/hono/routes.
+ */
 export async function handlePrivateArchive(
   request: Request,
   env: Env,
