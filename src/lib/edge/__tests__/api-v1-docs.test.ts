@@ -173,6 +173,25 @@ describe("api v1 public docs", () => {
       "#/components/schemas/EventSearchRequest",
     );
 
+    expect(
+      spec.components.schemas.SiteCreateInput.properties?.sharing,
+    ).toBeUndefined();
+    expect(
+      spec.components.schemas.SiteUpdateInput.properties?.sharing,
+    ).toBeUndefined();
+    expect(spec.components.schemas.SiteCreateInput.properties).toEqual(
+      expect.objectContaining({
+        publicEnabled: expect.objectContaining({ type: "boolean" }),
+        publicSlug: expect.objectContaining({ type: "string" }),
+      }),
+    );
+    expect(spec.components.schemas.SiteUpdateInput.properties).toEqual(
+      expect.objectContaining({
+        publicEnabled: expect.objectContaining({ type: "boolean" }),
+        publicSlug: expect.objectContaining({ type: "string" }),
+      }),
+    );
+
     walk(spec.paths, (value) => {
       if (!value || typeof value !== "object" || !("requestBody" in value)) {
         return;

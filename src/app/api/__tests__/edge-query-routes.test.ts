@@ -6,7 +6,12 @@ import {
   PATCH as privatePATCH,
   POST as privatePOST,
 } from "@/app/api/private/[...segments]/route";
-import { GET as publicGET } from "@/app/api/public/[...segments]/route";
+import {
+  DELETE as publicDELETE,
+  GET as publicGET,
+  PATCH as publicPATCH,
+  POST as publicPOST,
+} from "@/app/api/public/[...segments]/route";
 import { handlePrivateAdmin } from "@/lib/edge/admin";
 import { handlePrivateArchive } from "@/lib/edge/archive-query";
 import { handlePrivateQuery, handlePublicQuery } from "@/lib/edge/query";
@@ -120,6 +125,22 @@ describe("edge query route wrappers", () => {
       new URL("https://app.test/api/public/site/overview"),
       ctx,
     );
+  });
+
+  it("routes public mutation methods to the public query handler for rejection", async () => {
+    const post = mockRuntime("/api/public/site/overview", "POST");
+    await publicPOST(post);
+
+    const patch = mockRuntime("/api/public/site/overview", "PATCH");
+    await publicPATCH(patch);
+
+    const del = mockRuntime("/api/public/site/overview", "DELETE");
+    await publicDELETE(del);
+
+    expect(handlePublicQueryMock).toHaveBeenCalledTimes(3);
+    expect(
+      handlePublicQueryMock.mock.calls.map((call) => call[0].method),
+    ).toEqual(["POST", "PATCH", "DELETE"]);
   });
 
   it("routes DELETE requests to the query handler", async () => {

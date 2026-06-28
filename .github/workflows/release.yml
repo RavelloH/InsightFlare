@@ -96,7 +96,7 @@ jobs:
 
           npm run generate:openapi
           npm run generate:skills
-          node scripts/check-openapi-contract.mjs
+          npx tsx scripts/check-openapi-contract.ts
 
           git add package.json package-lock.json docs/openapi.json docs/openapi.yaml docs/skills.json
 

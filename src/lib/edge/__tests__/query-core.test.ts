@@ -17,6 +17,7 @@ import {
   emptyPerformanceRouteMetrics,
   eventPayloadFilterValueType,
   eventRecordOrderBy,
+  fetchPublicSite,
   finalizeDimensionBuckets,
   finalizeGeoDimensionBuckets,
   formatPageLabel,
@@ -62,6 +63,7 @@ import {
   withoutFilterKey,
   withoutGeoFilter,
 } from "@/lib/edge/query/core";
+import type { Env } from "@/lib/edge/types";
 
 const fixedNow = Date.UTC(2026, 4, 26, 8);
 
@@ -265,6 +267,65 @@ describe("edge query core parsers", () => {
         ]),
       ),
     ).toEqual([{ path: "/flags/enabled", operator: "ne", value: false }]);
+  });
+});
+
+describe("edge public site lookup", () => {
+  function envWithPublicSite(row: Record<string, unknown> | null) {
+    const first = vi.fn().mockResolvedValue(row);
+    const bind = vi.fn(() => ({ first }));
+    const prepare = vi.fn(() => ({ bind }));
+    const env = { DB: { prepare } } as unknown as Env;
+    return { env, prepare, bind, first };
+  }
+
+  it("requires enabled public sharing for slug lookup", async () => {
+    const { env, prepare, bind } = envWithPublicSite({
+      id: "site-1",
+      name: "Blog",
+      domain: "blog.test",
+    });
+
+    const site = await fetchPublicSite(
+      env,
+      new URL("https://edge.test/api/public/blog/site"),
+    );
+
+    expect(site).toMatchObject({ id: "site-1" });
+    expect(prepare).toHaveBeenCalledWith(
+      "SELECT id,name,domain FROM sites WHERE public_enabled=1 AND public_slug=? LIMIT 1",
+    );
+    expect(bind).toHaveBeenCalledWith("blog");
+  });
+
+  it("returns 404 for disabled, deleted, old, empty, or malformed slugs", async () => {
+    const { env, first } = envWithPublicSite(null);
+
+    for (const path of [
+      "/api/public/disabled/site",
+      "/api/public/old-slug/overview",
+      "/api/public/deleted/pages",
+    ]) {
+      const response = await fetchPublicSite(
+        env,
+        new URL(`https://edge.test${path}`),
+      );
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status, path).toBe(404);
+    }
+    expect(first).toHaveBeenCalledTimes(3);
+
+    const empty = await fetchPublicSite(
+      env,
+      new URL("https://edge.test/api/public/%20/site"),
+    );
+    expect((empty as Response).status).toBe(404);
+
+    const malformed = await fetchPublicSite(
+      env,
+      new URL("https://edge.test/api/public/%E0%A4%A/site"),
+    );
+    expect((malformed as Response).status).toBe(404);
   });
 });
 

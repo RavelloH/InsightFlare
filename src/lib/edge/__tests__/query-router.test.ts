@@ -60,8 +60,8 @@ const handlerMocks = vi.hoisted(() => {
       handleBrowserVersionBreakdown: vi.fn(
         respond("browser-version-breakdown"),
       ),
-      handleClientCrossBreakdown: vi.fn(respond("client-cross-breakdown")),
       handleClientDimensionTrend: vi.fn(respond("client-dimension-trend")),
+      handleCrossBreakdown: vi.fn(respond("client-cross-breakdown")),
       handleReferrerDimensionTrend: vi.fn(respond("referrer-dimension-trend")),
       handleReferrerRadar: vi.fn(respond("referrer-radar")),
       handleUtmDimensionTrend: vi.fn(respond("utm-dimension-trend")),
@@ -116,6 +116,72 @@ describe("edge query router", () => {
       undefined,
     );
     expect(handlerMocks.core.notFound).not.toHaveBeenCalled();
+  });
+
+  it("routes the public sharing query allowlist", async () => {
+    const publicPaths = [
+      "overview",
+      "trend",
+      "pages",
+      "pages-dashboard",
+      "referrers",
+      "retention",
+      "performance",
+      "overview-geo-points",
+      "overview-geo-country",
+      "overview-source-domain",
+      "overview-source-link",
+      "overview-client-browser",
+      "overview-client-device-type",
+      "browser-trend",
+      "browser-engine-trend",
+      "browser-version-breakdown",
+      "browser-cross-breakdown",
+      "browser-radar",
+      "referrer-radar",
+      "referrer-dimension-trend",
+      "client-dimension-trend",
+      "client-cross-breakdown",
+      "utm-source",
+      "utm-medium",
+      "utm-campaign",
+      "utm-term",
+      "utm-content",
+      "utm-dimension-trend",
+      "page-query",
+      "page-hash",
+      "event-types",
+    ];
+
+    for (const path of publicPaths) {
+      const response = await route(path, true);
+      expect(response.status, path).toBe(200);
+    }
+  });
+
+  it("blocks sensitive detail queries in public mode", async () => {
+    const blockedPaths = [
+      "funnels",
+      "sessions",
+      "session-detail",
+      "visitors",
+      "visitor-detail",
+      "events-records",
+      "event-record-detail",
+    ];
+
+    for (const path of blockedPaths) {
+      const response = await route(path, true);
+      expect(response.status, path).toBe(404);
+    }
+
+    expect(handlerMocks.funnels.handleFunnel).not.toHaveBeenCalled();
+    expect(handlerMocks.journeys.handleSessions).not.toHaveBeenCalled();
+    expect(handlerMocks.journeys.handleSessionDetail).not.toHaveBeenCalled();
+    expect(handlerMocks.journeys.handleVisitors).not.toHaveBeenCalled();
+    expect(handlerMocks.journeys.handleVisitorDetail).not.toHaveBeenCalled();
+    expect(handlerMocks.events.handleEventsRecords).not.toHaveBeenCalled();
+    expect(handlerMocks.events.handleEventRecordDetail).not.toHaveBeenCalled();
   });
 
   it("blocks all non-public routes before dispatching handlers", async () => {

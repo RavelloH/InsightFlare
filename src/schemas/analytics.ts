@@ -738,51 +738,46 @@ export const GeoPointsResponseSchema = createEnvelopeSchema(
 
 // Batch response
 export const BatchResultItemSchema = z.object({
-  queryName: z.string(),
-  ok: z.boolean(),
+  id: z.string(),
   status: z.number().describe("HTTP status code of the sub-query response"),
-  data: z
+  body: z
     .unknown()
-    .optional()
-    .describe("Query result data (shape varies by queryName)"),
-  error: z
-    .object({
-      code: z.string(),
-      message: z.string(),
-    })
-    .optional()
-    .describe("Present only if this individual query failed"),
+    .nullable()
+    .describe("Subrequest response body, or null for empty responses"),
 });
 
 export const BatchResponseSchema = createEnvelopeSchema(
   z.object({
+    responses: z.array(BatchResultItemSchema),
+  }),
+).extend({
+  meta: z.object({
     partialFailure: z
       .boolean()
       .describe("True if any sub-query returned a non-200 status"),
-    results: z.array(BatchResultItemSchema),
   }),
-);
+});
 
 export const BatchInputSchema = z
   .object({
-    from: z.number().int().optional(),
-    to: z.number().int().optional(),
-    interval: IntervalSchema.optional(),
-    timeZone: z.string().optional(),
-    queries: z
+    requests: z
       .array(
         z
           .object({
-            queryName: z.string(),
-            from: z.number().int().optional(),
-            to: z.number().int().optional(),
-            interval: IntervalSchema.optional(),
-            limit: z.number().int().optional(),
+            id: z.string(),
+            method: z.literal("GET"),
+            path: z.string().startsWith("/api/v1/"),
+            query: z
+              .record(
+                z.string(),
+                z.union([z.string(), z.number(), z.boolean(), z.null()]),
+              )
+              .optional(),
           })
           .strict(),
       )
       .min(1)
-      .max(10),
+      .max(20),
   })
   .strict();
 
