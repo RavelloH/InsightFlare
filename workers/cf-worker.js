@@ -4,22 +4,12 @@ import { IngestDurableObject as BaseIngestDurableObject } from "../src/lib/edge/
 import { getScheduledTaskDefinition } from "../src/lib/edge/scheduled-task-registry";
 import { runScheduledTask } from "../src/lib/edge/scheduled-task-runner";
 import apiApp from "../src/lib/hono/app";
+import { shouldUseHono } from "../src/lib/hono/path-match";
 
 export class IngestDurableObject extends BaseIngestDurableObject {}
 
 function shouldSkipScheduledTasks(env) {
   return env.DISABLE_CRON_TASKS === "1" || env.NEXT_PUBLIC_DEMO_MODE === "1";
-}
-
-function shouldUseHono(pathname) {
-  return (
-    pathname.startsWith("/api/") ||
-    pathname === "/collect" ||
-    pathname === "/script.js" ||
-    pathname === "/healthz" ||
-    pathname.startsWith("/.well-known/") ||
-    pathname === "/admin/ws"
-  );
 }
 
 export default {

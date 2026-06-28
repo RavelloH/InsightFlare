@@ -53,7 +53,7 @@ import {
   handleUtmDimensionTrend,
 } from "./technology";
 
-const PUBLIC_QUERY_PATHS = new Set([
+export const PUBLIC_QUERY_PATHS = [
   "overview",
   "trend",
   "pages",
@@ -100,7 +100,25 @@ const PUBLIC_QUERY_PATHS = new Set([
   "utm-campaign",
   "utm-term",
   "utm-content",
-]);
+] as const;
+
+export const DASHBOARD_QUERY_PATHS = [
+  ...PUBLIC_QUERY_PATHS,
+  "events-summary",
+  "events-trend",
+  "events-records",
+  "event-type-field-values",
+  "event-type-detail",
+  "event-record-detail",
+  "sessions",
+  "session-detail",
+  "visitor-detail",
+  "visitors",
+  "funnels",
+  "team-dashboard",
+] as const;
+
+const PUBLIC_QUERY_PATH_SET = new Set<string>(PUBLIC_QUERY_PATHS);
 
 export async function routeQuery(
   env: Env,
@@ -129,7 +147,7 @@ export async function routeQuery(
       ctx,
     );
   }
-  if (options.publicMode && !PUBLIC_QUERY_PATHS.has(pathname)) {
+  if (options.publicMode && !PUBLIC_QUERY_PATH_SET.has(pathname)) {
     return notFound();
   }
   if (pathname === "funnels") {
