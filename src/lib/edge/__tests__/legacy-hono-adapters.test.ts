@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { handlePrivateAdmin } from "@/lib/edge/admin";
 import { handleAuthLoginAdmin } from "@/lib/edge/admin-users";
-import { handlePrivateArchive } from "@/lib/edge/archive-query";
+import {
+  handlePrivateArchiveFile,
+  handlePrivateArchiveManifest,
+} from "@/lib/edge/archive-query";
 import {
   handleLegacyAdminMember,
   handleLegacyAdminProfile,
@@ -25,7 +28,8 @@ vi.mock("@/lib/edge/admin", () => ({
 }));
 
 vi.mock("@/lib/edge/archive-query", () => ({
-  handlePrivateArchive: vi.fn(),
+  handlePrivateArchiveFile: vi.fn(),
+  handlePrivateArchiveManifest: vi.fn(),
 }));
 
 vi.mock("@/lib/edge/admin-users", () => ({
@@ -65,11 +69,14 @@ describe("legacy Hono edge adapters", () => {
         },
       });
     });
-    vi.mocked(handlePrivateArchive).mockResolvedValue(
+    vi.mocked(handlePrivateArchiveManifest).mockResolvedValue(
       Response.json({
         ok: true,
         files: [{ archiveKey: "archive/site/hour.parquet" }],
       }),
+    );
+    vi.mocked(handlePrivateArchiveFile).mockResolvedValue(
+      new Response("parquet"),
     );
     vi.mocked(handleAuthLoginAdmin).mockResolvedValue(
       Response.json({
@@ -308,7 +315,7 @@ describe("legacy Hono edge adapters", () => {
       (manifestBody.files as Array<{ fetchUrl: string }>)[0].fetchUrl,
     ).toBe("/api/archive/file?key=archive%2Fsite%2Fhour.parquet");
 
-    vi.mocked(handlePrivateArchive).mockResolvedValueOnce(
+    vi.mocked(handlePrivateArchiveFile).mockResolvedValueOnce(
       new Response("parquet", {
         status: 206,
         headers: {
@@ -337,7 +344,7 @@ describe("legacy Hono edge adapters", () => {
     );
     expect(missingManifestSite.status).toBe(400);
 
-    vi.mocked(handlePrivateArchive).mockResolvedValueOnce(
+    vi.mocked(handlePrivateArchiveManifest).mockResolvedValueOnce(
       new Response("nope", { status: 403 }),
     );
     const manifestDenied = await handleLegacyArchiveManifest(
@@ -346,7 +353,7 @@ describe("legacy Hono edge adapters", () => {
     );
     expect(manifestDenied.status).toBe(403);
 
-    vi.mocked(handlePrivateArchive).mockResolvedValueOnce(
+    vi.mocked(handlePrivateArchiveManifest).mockResolvedValueOnce(
       new Response("not json", { status: 200 }),
     );
     const invalidManifest = await handleLegacyArchiveManifest(
@@ -361,7 +368,7 @@ describe("legacy Hono edge adapters", () => {
     );
     expect(missingFileKey.status).toBe(400);
 
-    vi.mocked(handlePrivateArchive).mockResolvedValueOnce(
+    vi.mocked(handlePrivateArchiveFile).mockResolvedValueOnce(
       new Response("missing", { status: 404 }),
     );
     const fileMissing = await handleLegacyArchiveFile(
@@ -370,7 +377,7 @@ describe("legacy Hono edge adapters", () => {
     );
     expect(fileMissing.status).toBe(404);
 
-    vi.mocked(handlePrivateArchive).mockResolvedValueOnce(
+    vi.mocked(handlePrivateArchiveFile).mockResolvedValueOnce(
       new Response(new Uint8Array([1, 2, 3, 4]), {
         headers: { "content-length": "4" },
       }),

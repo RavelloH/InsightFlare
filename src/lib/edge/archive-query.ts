@@ -84,7 +84,7 @@ function parseWindowHours(
   };
 }
 
-async function handleManifest(
+export async function handlePrivateArchiveManifest(
   request: Request,
   env: Env,
   url: URL,
@@ -161,7 +161,7 @@ async function handleManifest(
   });
 }
 
-async function handleFile(
+export async function handlePrivateArchiveFile(
   request: Request,
   env: Env,
   url: URL,
@@ -254,10 +254,10 @@ export async function handlePrivateArchive(
 ): Promise<Response> {
   const pathname = url.pathname;
   if (pathname === "/api/private/archive/manifest") {
-    return handleManifest(request, env, url);
+    return handlePrivateArchiveManifest(request, env, url);
   }
   if (pathname === "/api/private/archive/file") {
-    return handleFile(request, env, url);
+    return handlePrivateArchiveFile(request, env, url);
   }
 
   return notFound();

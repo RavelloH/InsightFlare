@@ -1,4 +1,7 @@
-import { handlePrivateArchive } from "@/lib/edge/archive-query";
+import {
+  handlePrivateArchiveFile,
+  handlePrivateArchiveManifest,
+} from "@/lib/edge/archive-query";
 import type { Env } from "@/lib/edge/types";
 import { bad, errorResponse, jsonResponseFor } from "@/lib/response";
 
@@ -23,7 +26,11 @@ export async function handleLegacyArchiveManifest(
     method: "GET",
     headers: request.headers,
   });
-  const edgeRes = await handlePrivateArchive(privateRequest, env, privateUrl);
+  const edgeRes = await handlePrivateArchiveManifest(
+    privateRequest,
+    env,
+    privateUrl,
+  );
 
   const text = await edgeRes.text();
   if (!edgeRes.ok) {
@@ -86,7 +93,11 @@ export async function handleLegacyArchiveFile(
     method: request.method === "HEAD" ? "HEAD" : "GET",
     headers,
   });
-  const edgeRes = await handlePrivateArchive(privateRequest, env, privateUrl);
+  const edgeRes = await handlePrivateArchiveFile(
+    privateRequest,
+    env,
+    privateUrl,
+  );
   if (!edgeRes.ok && edgeRes.status !== 206) {
     const text = await edgeRes.text();
     return errorResponse(
