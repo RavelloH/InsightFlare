@@ -1,14 +1,13 @@
-import { handlePublicQuery } from "@/lib/edge/query";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
+import apiApp from "@/lib/hono/app";
 
 export async function GET(request: Request): Promise<Response> {
   const {
     request: requestWithCf,
     env,
     ctx,
-    url,
   } = await resolveEdgeRuntime(request);
-  return handlePublicQuery(requestWithCf, env, url, ctx);
+  return apiApp.fetch(requestWithCf, env, ctx);
 }
 
 export async function POST(request: Request): Promise<Response> {
