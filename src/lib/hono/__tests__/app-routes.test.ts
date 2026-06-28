@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handlePrivateAdmin } from "@/lib/edge/admin";
 import { handleUsersAdmin } from "@/lib/edge/admin-users";
 import { handleAdminWs } from "@/lib/edge/admin-ws";
-import { handleApiV1 } from "@/lib/edge/api-v1";
+import { authenticateApiKey } from "@/lib/edge/api-key-auth";
+import { handleApiV1, handleCapabilities } from "@/lib/edge/api-v1";
 import {
   handlePrivateArchive,
   handlePrivateArchiveManifest,
@@ -91,7 +92,34 @@ vi.mock("@/lib/edge/query/router", async (importOriginal) => {
 });
 
 vi.mock("@/lib/edge/api-v1", () => ({
+  apiV1Segments: (url: URL) =>
+    url.pathname
+      .replace(/^\/api\/v1\/?/, "")
+      .split("/")
+      .filter(Boolean),
+  handleAnalytics: vi.fn(),
   handleApiV1: vi.fn(),
+  handleBatch: vi.fn(),
+  handleCapabilities: vi.fn(),
+  handleEvents: vi.fn(),
+  handleFunnels: vi.fn(),
+  handleJourneys: vi.fn(),
+  handlePerformance: vi.fn(),
+  handlePrivacy: vi.fn(),
+  handleRealtime: vi.fn(),
+  handleRoot: vi.fn(),
+  handleSharing: vi.fn(),
+  handleSiteResource: vi.fn(),
+  handleSitesCollection: vi.fn(),
+  handleTeam: vi.fn(),
+  handleToken: vi.fn(),
+  handleTokenCheck: vi.fn(),
+  handleTracking: vi.fn(),
+  handleTrackingScript: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/api-key-auth", () => ({
+  authenticateApiKey: vi.fn(),
 }));
 
 vi.mock("@/lib/edge/script-endpoint", () => ({
@@ -142,6 +170,14 @@ describe("Hono API app routing", () => {
       new Response("public-query"),
     );
     vi.mocked(handleApiV1).mockResolvedValue(new Response("v1"));
+    vi.mocked(authenticateApiKey).mockResolvedValue({
+      keyId: "key-1",
+      teamId: "team-1",
+      prefix: "if_123",
+      scopes: ["analytics:read"],
+      siteIds: ["site-1"],
+    });
+    vi.mocked(handleCapabilities).mockResolvedValue(new Response("v1"));
     vi.mocked(handleLegacyAuthLogin).mockResolvedValue(
       new Response("legacy-login"),
     );
@@ -261,7 +297,8 @@ describe("Hono API app routing", () => {
     expect(handlePrivateQuery).not.toHaveBeenCalled();
     expect(fetchPublicSite).toHaveBeenCalled();
     expect(handlePublicQuery).not.toHaveBeenCalled();
-    expect(handleApiV1).toHaveBeenCalled();
+    expect(handleCapabilities).toHaveBeenCalled();
+    expect(handleApiV1).not.toHaveBeenCalled();
   });
 
   it("routes legacy and map endpoints through Hono", async () => {

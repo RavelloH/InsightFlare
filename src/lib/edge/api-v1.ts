@@ -180,7 +180,7 @@ function apiBase(url: URL): string {
   return url.pathname.replace(/^\/api\/v1\/?/, "");
 }
 
-function segments(url: URL): string[] {
+export function apiV1Segments(url: URL): string[] {
   return apiBase(url)
     .split("/")
     .map((segment) => {
@@ -1212,7 +1212,7 @@ function requireSiteScope(
   return requireScope(principal.scopes, scope, request);
 }
 
-async function handleRoot(request: Request): Promise<Response> {
+export async function handleRoot(request: Request): Promise<Response> {
   if (request.method !== "GET") return methodNotAllowed(request);
   return jsonSuccess(
     {
@@ -1232,7 +1232,7 @@ async function handleRoot(request: Request): Promise<Response> {
   );
 }
 
-async function handleToken(
+export async function handleToken(
   request: Request,
   env: Env,
   principal: ApiKeyPrincipal,
@@ -1261,7 +1261,7 @@ async function handleToken(
   );
 }
 
-async function handleTokenCheck(
+export async function handleTokenCheck(
   request: Request,
   principal: ApiKeyPrincipal,
 ): Promise<Response> {
@@ -1302,7 +1302,7 @@ async function handleTokenCheck(
   );
 }
 
-async function handleCapabilities(
+export async function handleCapabilities(
   request: Request,
   principal: ApiKeyPrincipal,
 ): Promise<Response> {
@@ -1343,7 +1343,7 @@ async function handleCapabilities(
   );
 }
 
-async function handleTeam(
+export async function handleTeam(
   request: Request,
   env: Env,
   url: URL,
@@ -1542,7 +1542,7 @@ async function handleTeamAnalytics(
   );
 }
 
-async function handleSitesCollection(
+export async function handleSitesCollection(
   request: Request,
   env: Env,
   principal: ApiKeyPrincipal,
@@ -1604,7 +1604,7 @@ async function handleSitesCollection(
   return methodNotAllowed(request);
 }
 
-async function handleSiteResource(
+export async function handleSiteResource(
   request: Request,
   env: Env,
   principal: ApiKeyPrincipal,
@@ -1681,7 +1681,7 @@ async function handleSiteResource(
   return methodNotAllowed(request);
 }
 
-async function handleTracking(
+export async function handleTracking(
   request: Request,
   env: Env,
   principal: ApiKeyPrincipal,
@@ -1717,7 +1717,7 @@ async function handleTracking(
   return methodNotAllowed(request);
 }
 
-async function handlePrivacy(
+export async function handlePrivacy(
   request: Request,
   env: Env,
   principal: ApiKeyPrincipal,
@@ -1762,7 +1762,7 @@ async function handlePrivacy(
   return methodNotAllowed(request);
 }
 
-async function handleSharing(
+export async function handleSharing(
   request: Request,
   env: Env,
   principal: ApiKeyPrincipal,
@@ -1819,7 +1819,7 @@ async function handleSharing(
   return methodNotAllowed(request);
 }
 
-async function handleTrackingScript(
+export async function handleTrackingScript(
   request: Request,
   env: Env,
   url: URL,
@@ -1885,7 +1885,7 @@ function analyticsSchema(siteId: string) {
   };
 }
 
-async function handleAnalytics(
+export async function handleAnalytics(
   request: Request,
   env: Env,
   url: URL,
@@ -2057,7 +2057,7 @@ async function handleAnalytics(
   );
 }
 
-async function handleEvents(
+export async function handleEvents(
   request: Request,
   env: Env,
   url: URL,
@@ -2148,7 +2148,7 @@ async function handleEvents(
   );
 }
 
-async function handleJourneys(
+export async function handleJourneys(
   request: Request,
   env: Env,
   url: URL,
@@ -2393,7 +2393,7 @@ async function handleFunnelResource(
   return methodNotAllowed(request);
 }
 
-async function handleFunnels(
+export async function handleFunnels(
   request: Request,
   env: Env,
   url: URL,
@@ -2470,7 +2470,7 @@ async function handleFunnels(
   );
 }
 
-async function handlePerformance(
+export async function handlePerformance(
   request: Request,
   env: Env,
   url: URL,
@@ -2537,7 +2537,7 @@ async function handlePerformance(
   );
 }
 
-async function handleRealtime(
+export async function handleRealtime(
   request: Request,
   env: Env,
   url: URL,
@@ -2580,11 +2580,18 @@ async function handleRealtime(
   );
 }
 
-async function handleBatch(
+export type ApiV1BatchDispatcher = (
+  request: Request,
+  env: Env,
+  url: URL,
+) => Promise<Response>;
+
+export async function handleBatch(
   request: Request,
   env: Env,
   url: URL,
   _principal: ApiKeyPrincipal,
+  dispatch: ApiV1BatchDispatcher = handleApiV1,
 ): Promise<Response> {
   if (request.method !== "POST") return methodNotAllowed(request);
   const body = await parseJsonBody(request);
@@ -2636,7 +2643,7 @@ async function handleBatch(
         method: "GET",
         headers: request.headers,
       });
-      const response = await handleApiV1(subRequest, env, subUrl);
+      const response = await dispatch(subRequest, env, subUrl);
       return {
         id: item.id,
         status: response.status,
@@ -2661,7 +2668,7 @@ export async function handleApiV1(
   url: URL,
   ctx?: ExecutionContext,
 ): Promise<Response> {
-  const path = segments(url);
+  const path = apiV1Segments(url);
   if (path.length === 0) return handleRoot(request);
 
   const principal = await authenticateApiKey(request, env, ctx);
