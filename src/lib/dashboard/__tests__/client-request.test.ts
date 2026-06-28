@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchPrivateJson,
   fetchPrivateJsonMutate,
+  publicDashboardSiteId,
 } from "@/lib/dashboard/client-request";
 import { handleDemoRequest } from "@/lib/realtime/mock";
 
@@ -106,6 +107,62 @@ describe("dashboard client request helpers", () => {
       method: "GET",
       credentials: "include",
       signal,
+    });
+  });
+
+  it("rewrites public dashboard GET requests and omits credentials", async () => {
+    delete process.env.NEXT_PUBLIC_DEMO_MODE;
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(jsonResponse({ ok: true, value: "public" })),
+      );
+    globalThis.fetch = fetchMock;
+
+    await expect(
+      fetchPrivateJson("/api/private/overview", {
+        siteId: publicDashboardSiteId("team site/one"),
+        from: 1,
+        to: 2,
+      }),
+    ).resolves.toEqual({ ok: true, value: "public" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/public/team%20site%2Fone/overview?from=1&to=2",
+      expect.objectContaining({
+        method: "GET",
+        credentials: "omit",
+      }),
+    );
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain("siteId=");
+  });
+
+  it("keeps public and private request dedupe keys separate", async () => {
+    delete process.env.NEXT_PUBLIC_DEMO_MODE;
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(jsonResponse({ ok: true, value: "fresh" })),
+      );
+    globalThis.fetch = fetchMock;
+
+    await Promise.all([
+      fetchPrivateJson("/api/private/overview", { siteId: "site-1" }),
+      fetchPrivateJson("/api/private/overview", {
+        siteId: publicDashboardSiteId("site-1"),
+      }),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/private/overview?siteId=site-1",
+    );
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/public/site-1/overview");
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      credentials: "include",
+    });
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      credentials: "omit",
     });
   });
 

@@ -469,22 +469,48 @@ describe("BatchInputSchema", () => {
   it("accepts valid batch input", () => {
     expect(
       BatchInputSchema.safeParse({
-        from: 1700000000000,
-        to: 1700086400000,
-        queries: [{ queryName: "overview" }],
+        requests: [
+          {
+            id: "overview",
+            method: "GET",
+            path: "/api/v1/sites/site-1/analytics/overview",
+            query: { preset: "last_7_days" },
+          },
+        ],
       }).success,
     ).toBe(true);
   });
 
-  it("rejects empty queries array", () => {
-    expect(BatchInputSchema.safeParse({ queries: [] }).success).toBe(false);
+  it("rejects empty requests array", () => {
+    expect(BatchInputSchema.safeParse({ requests: [] }).success).toBe(false);
   });
 
-  it("rejects more than 10 queries", () => {
-    const queries = Array.from({ length: 11 }, () => ({
-      queryName: "overview",
+  it("rejects more than 20 requests", () => {
+    const requests = Array.from({ length: 21 }, (_, index) => ({
+      id: `overview-${index}`,
+      method: "GET",
+      path: "/api/v1/sites/site-1/analytics/overview",
     }));
-    expect(BatchInputSchema.safeParse({ queries }).success).toBe(false);
+    expect(BatchInputSchema.safeParse({ requests }).success).toBe(false);
+  });
+
+  it("rejects non-GET subrequests and non-v1 paths", () => {
+    expect(
+      BatchInputSchema.safeParse({
+        requests: [
+          {
+            id: "bad",
+            method: "POST",
+            path: "/api/v1/sites/site-1/analytics/overview",
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      BatchInputSchema.safeParse({
+        requests: [{ id: "bad", method: "GET", path: "/collect/event" }],
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -496,16 +522,13 @@ describe("BatchResponseSchema", () => {
         requestId: "r",
         timestamp: "t",
         data: {
-          partialFailure: true,
-          results: [
-            { queryName: "overview", ok: true, status: 200, data: {} },
-            {
-              queryName: "trend",
-              ok: false,
-              status: 400,
-              error: { code: "bad_request", message: "Missing from" },
-            },
+          responses: [
+            { id: "overview", status: 200, body: { data: {} } },
+            { id: "trend", status: 400, body: { error: {} } },
           ],
+        },
+        meta: {
+          partialFailure: true,
         },
       }).success,
     ).toBe(true);

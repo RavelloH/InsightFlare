@@ -222,7 +222,7 @@ describe("edge query entry handlers", () => {
   });
 
   it("rejects unsupported public methods before public site lookup", async () => {
-    const edgeRequest = request("/api/public-sites/public/overview", {
+    const edgeRequest = request("/api/public/public/overview", {
       method: "POST",
     });
 
@@ -237,10 +237,10 @@ describe("edge query entry handlers", () => {
     expect(withDashboardCacheMock).not.toHaveBeenCalled();
   });
 
-  it("returns public site lookup responses without routing", async () => {
+  it("returns public site lookup responses without routing or cache lookup", async () => {
     const missing = new Response("missing", { status: 404 });
     fetchPublicSiteMock.mockResolvedValueOnce(missing);
-    const edgeRequest = request("/api/public-sites/missing/overview");
+    const edgeRequest = request("/api/public/missing/overview");
 
     const response = await handlePublicQuery(
       edgeRequest,
@@ -250,10 +250,11 @@ describe("edge query entry handlers", () => {
 
     expect(response).toBe(missing);
     expect(routeQueryMock).not.toHaveBeenCalled();
+    expect(withDashboardCacheMock).not.toHaveBeenCalled();
   });
 
   it("routes public paths after the slug through dashboard cache", async () => {
-    const edgeRequest = request("/api/public-sites/public/pages/top");
+    const edgeRequest = request("/api/public/public/pages");
     const url = new URL(edgeRequest.url);
     const ctx = {} as ExecutionContext;
 
@@ -273,7 +274,7 @@ describe("edge query entry handlers", () => {
     expect(routeQueryMock).toHaveBeenCalledWith(
       env,
       "site-public",
-      "pages/top",
+      "pages",
       url,
       { publicMode: true },
       edgeRequest,
@@ -281,7 +282,7 @@ describe("edge query entry handlers", () => {
   });
 
   it("wraps public site metadata responses with public cache options", async () => {
-    const edgeRequest = request("/api/public-sites/public/site");
+    const edgeRequest = request("/api/public/public/site");
     const url = new URL(edgeRequest.url);
     const ctx = {} as ExecutionContext;
 
@@ -307,5 +308,16 @@ describe("edge query entry handlers", () => {
       },
     );
     expect(routeQueryMock).not.toHaveBeenCalled();
+  });
+
+  it("decodes public site slugs in metadata responses", async () => {
+    const edgeRequest = request("/api/public/team%20site/site");
+    const url = new URL(edgeRequest.url);
+
+    const response = await handlePublicQuery(edgeRequest, env, url);
+
+    await expect(response.json()).resolves.toMatchObject({
+      data: { slug: "team site" },
+    });
   });
 });
