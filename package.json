@@ -60,13 +60,13 @@
     "d1:migration:create": "wrangler d1 migrations create insightflare --config wrangler.toml"
   },
   "dependencies": {
-    "@deck.gl/core": "^9.3.2",
-    "@deck.gl/layers": "^9.3.2",
-    "@deck.gl/mapbox": "^9.3.2",
+    "@deck.gl/core": "^9.3.5",
+    "@deck.gl/layers": "^9.3.5",
+    "@deck.gl/mapbox": "^9.3.5",
     "@iconify-json/flagpack": "^1.2.7",
     "@iconify/react": "^6.0.2",
     "@noble/hashes": "^2.2.0",
-    "@number-flow/react": "^0.6.0",
+    "@number-flow/react": "^0.6.1",
     "@remixicon/react": "^4.9.0",
     "boring-avatars": "^2.0.4",
     "class-variance-authority": "^0.7.1",
@@ -126,7 +126,7 @@
     "yaml-loader": "^0.9.0"
   },
   "optionalDependencies": {
-    "@ast-grep/napi-linux-x64-gnu": "0.42.3"
+    "@ast-grep/napi-linux-x64-gnu": "0.44.0"
   },
   "cloudflare": {
     "bindings": {
