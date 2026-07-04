@@ -55,13 +55,13 @@
     "db:migration:create": "tsx scripts/db.ts --target local --action migration:create"
   },
   "dependencies": {
-    "@deck.gl/core": "^9.3.2",
-    "@deck.gl/layers": "^9.3.2",
-    "@deck.gl/mapbox": "^9.3.2",
+    "@deck.gl/core": "^9.3.6",
+    "@deck.gl/layers": "^9.3.6",
+    "@deck.gl/mapbox": "^9.3.6",
     "@iconify-json/flagpack": "^1.2.7",
     "@iconify/react": "^6.0.2",
     "@noble/hashes": "^2.2.0",
-    "@number-flow/react": "^0.6.0",
+    "@number-flow/react": "^0.6.1",
     "@remixicon/react": "^4.9.0",
     "asn-blocklist": "^1.20260703.3",
     "boring-avatars": "^2.0.4",
@@ -71,11 +71,11 @@
     "i18n-iso-countries": "^7.14.0",
     "isbot": "^5.1.44",
     "maplibre-gl": "^5.24.0",
-    "motion": "^12.40.0",
-    "next": "^16.2.6",
+    "motion": "^12.42.2",
+    "next": "^16.2.10",
     "next-themes": "^0.4.6",
     "overlayscrollbars": "^2.16.0",
-    "radix-ui": "^1.4.3",
+    "radix-ui": "^1.6.1",
     "react": "^19.2.6",
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.6",
@@ -123,7 +123,7 @@
     "yaml-loader": "^0.9.0"
   },
   "optionalDependencies": {
-    "@ast-grep/napi-linux-x64-gnu": "0.42.3"
+    "@ast-grep/napi-linux-x64-gnu": "0.44.0"
   },
   "cloudflare": {
     "bindings": {
