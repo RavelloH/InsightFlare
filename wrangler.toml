@@ -53,7 +53,7 @@ dataset = "insightflare_normal_events"
 # environment above, which intentionally leaves R2 unbound.
 
 [env.ravelloh]
-name = "ravelloh"
+name = "insightflare"
 
 [env.ravelloh.vars]
 SESSION_WINDOW_MINUTES = "30"
