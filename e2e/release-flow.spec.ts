@@ -91,6 +91,17 @@ type NotificationRule = {
   lastCheckedAt: number | null;
 };
 
+type NotificationEvaluation = {
+  data?: { metrics?: OverviewMetrics };
+  status: "checked" | "skipped" | "triggered";
+};
+
+type NotificationManualRun = {
+  evaluation: NotificationEvaluation;
+  messageCount: number;
+  summary: { messagesCreated: number };
+};
+
 type OverviewMetrics = {
   bounces: number;
   sessions: number;
@@ -137,7 +148,7 @@ type SeedManifest = {
     timeZone: string;
   };
   invites: Partial<Record<"active" | "revoked", CreatedTeamInvite>>;
-  notifications: Partial<Record<"threshold", NotificationRule>>;
+  notifications: Partial<Record<"dailyReport" | "threshold", NotificationRule>>;
   runId: string;
   history?: Partial<Record<"siteB", HistorySeedManifest>>;
   sites: Partial<Record<"siteA" | "siteB" | "siteC", Site>>;
@@ -1677,7 +1688,85 @@ test.describe.serial("release E2E flow", () => {
     expect(messages.payload.data?.messages).toHaveLength(1);
   });
 
-  test("16. E2E clock is token-protected and can expire an existing session", async ({
+  test("16. daily report previews, scheduled runs, and manual runs use historical truth", async ({
+    page,
+  }) => {
+    const teamA = seed.teams.teamA;
+    const siteB = seed.sites.siteB;
+    expect(teamA).toBeDefined();
+    expect(siteB).toBeDefined();
+    await signIn(page, "owner-a", ownerAPassword);
+    const created = await apiRequest<NotificationRule>(
+      page,
+      "POST",
+      "/api/private/admin/notification-rules",
+      {
+        condition: { reportType: "daily" },
+        name: "E2E daily report",
+        recipient: { mode: "creator" },
+        schedule: { kind: "daily", time: "14:00", timezone: "UTC" },
+        siteId: siteB?.id,
+        teamId: teamA?.id,
+        type: "report",
+      },
+    );
+    expect(created.status).toBe(200);
+    const rule = created.payload.data;
+    expect(rule?.id).toEqual(expect.any(String));
+    if (!rule) throw new Error("Daily report rule was not created");
+    seed.notifications.dailyReport = rule;
+    await saveManifest();
+
+    const preview = await apiRequest<NotificationEvaluation>(
+      page,
+      "POST",
+      "/api/private/admin/notification-rules/preview",
+      { ruleId: rule.id },
+    );
+    expect(preview.status).toBe(200);
+    expect(preview.payload.data).toMatchObject({
+      data: { metrics: { sessions: 1, views: 1, visitors: 1 } },
+      status: "triggered",
+    });
+
+    await e2eControlRequest(page, "POST", "clock/advance", {
+      deltaMs: 60 * 60_000,
+    });
+    const scheduled = await e2eControlRequest(page, "POST", "scheduled/run");
+    expect(scheduled.status).toBe(200);
+    const scheduledMessages = await apiRequest<{
+      messages: NotificationMessage[];
+    }>(
+      page,
+      "GET",
+      `/api/private/notifications?teamId=${encodeURIComponent(teamA?.id || "")}&ruleId=${encodeURIComponent(rule.id)}`,
+    );
+    expect(scheduledMessages.status).toBe(200);
+    expect(scheduledMessages.payload.data?.messages).toHaveLength(1);
+
+    const manual = await apiRequest<NotificationManualRun>(
+      page,
+      "POST",
+      "/api/private/admin/notification-rules/run",
+      { ruleId: rule.id },
+    );
+    expect(manual.status).toBe(200);
+    expect(manual.payload.data).toMatchObject({
+      evaluation: { status: "triggered" },
+      messageCount: 1,
+      summary: { messagesCreated: 1 },
+    });
+    const messagesAfterManualRun = await apiRequest<{
+      messages: NotificationMessage[];
+    }>(
+      page,
+      "GET",
+      `/api/private/notifications?teamId=${encodeURIComponent(teamA?.id || "")}&ruleId=${encodeURIComponent(rule.id)}`,
+    );
+    expect(messagesAfterManualRun.payload.data?.messages).toHaveLength(2);
+  });
+
+  test("17. E2E clock is token-protected and can expire an existing session", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -1720,7 +1809,7 @@ test.describe.serial("release E2E flow", () => {
       "clock",
     );
     expect(before.status).toBe(200);
-    expect(before.payload?.data?.nowMs).toBe(e2eNowMs + 60 * 60_000);
+    expect(before.payload?.data?.nowMs).toBe(e2eNowMs + 2 * 60 * 60_000);
 
     const collectToken = await page.evaluate(async (siteId) => {
       const script = await fetch(
