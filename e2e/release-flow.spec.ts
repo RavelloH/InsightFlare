@@ -1536,7 +1536,58 @@ test.describe.serial("release E2E flow", () => {
     expect(sessions.payload.data).toHaveLength(40);
   });
 
-  test("14. E2E clock is token-protected and can expire an existing session", async ({
+  test("14. scheduled notifications create one persistent message per due rule", async ({
+    page,
+  }) => {
+    const teamA = seed.teams.teamA;
+    const siteA = seed.sites.siteA;
+    expect(teamA).toBeDefined();
+    expect(siteA).toBeDefined();
+    await signIn(page, "owner-a", ownerAPassword);
+    const created = await apiRequest<{ id: string }>(
+      page,
+      "POST",
+      "/api/private/admin/notification-rules",
+      {
+        condition: {
+          metric: "views",
+          operator: ">=",
+          value: 0,
+          window: "last_1h",
+        },
+        name: "E2E due threshold",
+        recipient: { mode: "creator" },
+        schedule: { everyMinutes: 30, kind: "interval" },
+        siteId: siteA?.id,
+        teamId: teamA?.id,
+        type: "threshold",
+      },
+    );
+    expect(created.status).toBe(200);
+    const ruleId = created.payload.data?.id || "";
+    expect(ruleId).not.toBe("");
+    await e2eControlRequest(page, "POST", "clock/advance", {
+      deltaMs: 30 * 60_000,
+    });
+    const scheduled = await e2eControlRequest(page, "POST", "scheduled/run");
+    expect(scheduled.status).toBe(200);
+    const messages = await apiRequest<{ messages: Array<{ ruleId: string }> }>(
+      page,
+      "GET",
+      `/api/private/notifications?teamId=${encodeURIComponent(teamA?.id || "")}&ruleId=${encodeURIComponent(ruleId)}`,
+    );
+    expect(messages.payload.data?.messages).toHaveLength(1);
+    expect(messages.payload.data?.messages[0]?.ruleId).toBe(ruleId);
+    await e2eControlRequest(page, "POST", "scheduled/run");
+    const repeated = await apiRequest<{ messages: Array<{ ruleId: string }> }>(
+      page,
+      "GET",
+      `/api/private/notifications?teamId=${encodeURIComponent(teamA?.id || "")}&ruleId=${encodeURIComponent(ruleId)}`,
+    );
+    expect(repeated.payload.data?.messages).toHaveLength(1);
+  });
+
+  test("15. E2E clock is token-protected and can expire an existing session", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -1579,7 +1630,7 @@ test.describe.serial("release E2E flow", () => {
       "clock",
     );
     expect(before.status).toBe(200);
-    expect(before.payload?.data?.nowMs).toBe(e2eNowMs);
+    expect(before.payload?.data?.nowMs).toBe(e2eNowMs + 30 * 60_000);
 
     const collectToken = await page.evaluate(async (siteId) => {
       const script = await fetch(
