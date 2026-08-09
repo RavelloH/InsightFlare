@@ -102,6 +102,24 @@ type NotificationManualRun = {
   summary: { messagesCreated: number };
 };
 
+type NotificationEmailConfig = {
+  enabled: boolean;
+  fromEmail: string;
+  resend: { apiKeyHint: string; configured: boolean };
+};
+
+type MockEmail = {
+  authorization: string;
+  body: {
+    from?: string;
+    html?: string;
+    subject?: string;
+    text?: string;
+    to?: string[];
+  };
+  id: string;
+};
+
 type OverviewMetrics = {
   bounces: number;
   sessions: number;
@@ -285,6 +303,15 @@ async function e2eControlRequest<T>(
     },
     { body, method, path, token },
   );
+}
+
+async function readMockMailbox(): Promise<MockEmail[]> {
+  const response = await fetch(`${testSiteURL}/__e2e__/mailbox`);
+  if (!response.ok) {
+    throw new Error(`Unable to read E2E mailbox: ${response.status}`);
+  }
+  const payload = (await response.json()) as { messages?: MockEmail[] };
+  return payload.messages ?? [];
 }
 
 function siteQueryPath(siteId: string, path: string): string {
@@ -1766,7 +1793,88 @@ test.describe.serial("release E2E flow", () => {
     expect(messagesAfterManualRun.payload.data?.messages).toHaveLength(2);
   });
 
-  test("17. E2E clock is token-protected and can expire an existing session", async ({
+  test("17. local Resend mock receives configured test and in-app notification email", async ({
+    page,
+  }) => {
+    const ownerA = seed.users.ownerA;
+    const teamA = seed.teams.teamA;
+    const siteA = seed.sites.siteA;
+    expect(ownerA).toBeDefined();
+    expect(teamA).toBeDefined();
+    expect(siteA).toBeDefined();
+    await signIn(page, "admin", adminPassword);
+
+    const configured = await apiRequest<NotificationEmailConfig>(
+      page,
+      "PATCH",
+      "/api/private/admin/notification-email",
+      {
+        enabled: true,
+        fromEmail: "notifications@e2e.test",
+        fromName: "InsightFlare E2E",
+        provider: "resend",
+        replyTo: "replies@e2e.test",
+        resendApiKey: "e2e-resend-api-key",
+      },
+    );
+    expect(configured.status).toBe(200);
+    expect(configured.payload.data).toMatchObject({
+      enabled: true,
+      fromEmail: "notifications@e2e.test",
+      resend: { apiKeyHint: "••••-key", configured: true },
+    });
+
+    const testEmail = await apiRequest<{
+      messageId: string;
+      provider: string;
+    }>(page, "POST", "/api/private/admin/notification-email/test", {
+      to: ownerA?.email,
+    });
+    expect(testEmail.status).toBe(200);
+    expect(testEmail.payload.data).toMatchObject({
+      messageId: "e2e-email-1",
+      provider: "resend",
+    });
+
+    const mailboxAfterTest = await readMockMailbox();
+    expect(mailboxAfterTest).toEqual([
+      expect.objectContaining({
+        authorization: "Bearer e2e-resend-api-key",
+        body: expect.objectContaining({
+          from: "InsightFlare E2E <notifications@e2e.test>",
+          subject: "InsightFlare email test",
+          text: expect.stringContaining("Resend email configuration"),
+          to: [ownerA?.email],
+        }),
+        id: "e2e-email-1",
+      }),
+    ]);
+
+    const inAppTest = await apiRequest<{
+      summary: { emailSent: number; messagesCreated: number };
+    }>(page, "POST", "/api/private/admin/notification-test", {
+      siteId: siteA?.id,
+      teamId: teamA?.id,
+      userId: ownerA?.id,
+    });
+    expect(inAppTest.status).toBe(200);
+    expect(inAppTest.payload.data?.summary).toMatchObject({
+      emailSent: 1,
+      messagesCreated: 1,
+    });
+    const mailboxAfterNotification = await readMockMailbox();
+    expect(mailboxAfterNotification).toHaveLength(2);
+    expect(mailboxAfterNotification[1]).toMatchObject({
+      body: expect.objectContaining({
+        html: expect.stringContaining("InsightFlare notification test"),
+        subject: "InsightFlare notification test",
+        to: [ownerA?.email],
+      }),
+      id: "e2e-email-2",
+    });
+  });
+
+  test("18. E2E clock is token-protected and can expire an existing session", async ({
     page,
   }) => {
     test.setTimeout(60_000);

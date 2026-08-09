@@ -28,7 +28,31 @@ describe("sendResendEmailWithRetry", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("binds the default Worker fetch implementation to globalThis", async () => {
+    const fetchImpl = vi.fn(function (this: typeof globalThis) {
+      expect(this).toBe(globalThis);
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: "email-default-fetch" }), {
+          status: 200,
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const result = await sendResendEmailWithRetry({
+      apiKey: "re_secret",
+      body: payload,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      providerMessageId: "email-default-fetch",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("retries a network failure and succeeds on the second attempt", async () => {

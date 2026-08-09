@@ -3,7 +3,12 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import net from "node:net";
 import path from "node:path";
 import process from "node:process";
@@ -36,6 +41,7 @@ interface Environment {
   nowMs: number;
   persistencePath: string;
   port: number;
+  testSitePort: number;
   testSiteURL: string;
 }
 
@@ -46,8 +52,15 @@ interface StartedProcess {
 }
 
 interface StartedTestSite {
+  mailbox: MockEmail[];
   server: Server;
   url: string;
+}
+
+interface MockEmail {
+  authorization: string;
+  body: Record<string, unknown>;
+  id: string;
 }
 
 function optionValue(argv: string[], name: string): string | undefined {
@@ -97,6 +110,7 @@ function generatedWranglerConfig(input: {
   id: string;
   mainSecret: string;
   nowMs: number;
+  resendApiUrl: string;
 }): string {
   const root = (relativePath: string) =>
     tomlString(path.join(ROOT_DIR, relativePath));
@@ -117,6 +131,7 @@ DISABLE_CRON_TASKS = "1"
 INSIGHTFLARE_E2E = "1"
 INSIGHTFLARE_E2E_CONTROL_TOKEN = ${tomlString(input.controlToken)}
 INSIGHTFLARE_E2E_NOW = ${tomlString(String(input.nowMs))}
+INSIGHTFLARE_E2E_RESEND_API_URL = ${tomlString(input.resendApiUrl)}
 MAIN_SECRET = ${tomlString(input.mainSecret)}
 BOOTSTRAP_ADMIN_PASSWORD = ${tomlString(input.adminPassword)}
 SESSION_WINDOW_MINUTES = "30"
@@ -189,6 +204,7 @@ async function writeRunManifest(
         phase: 3,
         port: environment.port,
         runId: environment.id,
+        testSiteURL: environment.testSiteURL,
         ui: options.ui,
         workers: options.workers ?? 1,
       },
@@ -222,9 +238,11 @@ async function createEnvironment(options: Options): Promise<Environment> {
     nowMs: E2E_INITIAL_NOW_MS,
     persistencePath,
     port: await findOpenPort(),
+    testSitePort: await findOpenPort(),
     testSiteURL: "",
   };
   environment.baseURL = `http://127.0.0.1:${environment.port}`;
+  environment.testSiteURL = `http://127.0.0.1:${environment.testSitePort}`;
 
   await fs.writeFile(
     environment.configPath,
@@ -234,6 +252,7 @@ async function createEnvironment(options: Options): Promise<Environment> {
       id: environment.id,
       mainSecret: environment.mainSecret,
       nowMs: environment.nowMs,
+      resendApiUrl: `${environment.testSiteURL}/resend/emails`,
     }),
   );
   await writeRunManifest(environment, options);
@@ -253,23 +272,81 @@ function testSiteHtml(workerURL: string, requestURL: URL): string {
 </body></html>`;
 }
 
-async function startTestSite(workerURL: string): Promise<StartedTestSite> {
+function json(response: ServerResponse, body: unknown) {
+  response.writeHead(200, {
+    "content-type": "application/json; charset=utf-8",
+  });
+  response.end(`${JSON.stringify(body)}\n`);
+}
+
+async function requestBody(request: IncomingMessage) {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  try {
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    return body && typeof body === "object" && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function startTestSite(
+  workerURL: string,
+  port: number,
+): Promise<StartedTestSite> {
+  const mailbox: MockEmail[] = [];
   const server = createServer((request, response) => {
-    const requestURL = new URL(request.url || "/", "http://127.0.0.1");
-    response.writeHead(200, {
-      "cache-control": "no-store",
-      "content-type": "text/html; charset=utf-8",
+    void (async () => {
+      const requestURL = new URL(request.url || "/", "http://127.0.0.1");
+      if (
+        request.method === "POST" &&
+        requestURL.pathname === "/resend/emails"
+      ) {
+        const id = `e2e-email-${mailbox.length + 1}`;
+        mailbox.push({
+          authorization: String(request.headers.authorization || ""),
+          body: await requestBody(request),
+          id,
+        });
+        json(response, { id });
+        return;
+      }
+      if (
+        request.method === "GET" &&
+        requestURL.pathname === "/__e2e__/mailbox"
+      ) {
+        json(response, { messages: mailbox });
+        return;
+      }
+      response.writeHead(200, {
+        "cache-control": "no-store",
+        "content-type": "text/html; charset=utf-8",
+      });
+      response.end(testSiteHtml(workerURL, requestURL));
+    })().catch((error: unknown) => {
+      rlog.file.error(
+        `E2E test site failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      if (!response.headersSent) {
+        response.writeHead(500, {
+          "content-type": "text/plain; charset=utf-8",
+        });
+      }
+      response.end("E2E test site error");
     });
-    response.end(testSiteHtml(workerURL, requestURL));
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen({ host: "127.0.0.1", port: 0 }, () => resolve());
+    server.listen({ host: "127.0.0.1", port }, () => resolve());
   });
   const address = server.address();
   if (!address || typeof address === "string")
     throw new Error("Unable to start E2E test site.");
-  return { server, url: `http://127.0.0.1:${address.port}` };
+  return { mailbox, server, url: `http://127.0.0.1:${address.port}` };
 }
 
 async function stopTestSite(testSite: StartedTestSite | null): Promise<void> {
@@ -638,9 +715,11 @@ async function main(): Promise<void> {
       return startedWorker;
     });
     testSite = await runPreparationStep("Starting E2E test site", () =>
-      startTestSite(activeEnvironment.baseURL),
+      startTestSite(activeEnvironment.baseURL, activeEnvironment.testSitePort),
     );
-    activeEnvironment.testSiteURL = testSite.url;
+    if (testSite.url !== activeEnvironment.testSiteURL) {
+      throw new Error("E2E test site started on an unexpected port.");
+    }
     await writeRunManifest(activeEnvironment, options);
     rlog.progress(PREPARATION_PROGRESS_MAX, PREPARATION_PROGRESS_MAX);
     rlog.success("Test environment is ready.");
