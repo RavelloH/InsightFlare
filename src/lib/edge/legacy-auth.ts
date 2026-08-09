@@ -167,6 +167,10 @@ export async function handleLegacyAuthLogin(
       token: turnstileToken,
       remoteIp: requestRemoteIp(request),
       expectedHostname: requestHostname(request),
+      siteverifyUrl:
+        env.INSIGHTFLARE_E2E === "1"
+          ? env.INSIGHTFLARE_E2E_TURNSTILE_SITEVERIFY_URL
+          : undefined,
     });
     if (!result.ok) {
       return bad(

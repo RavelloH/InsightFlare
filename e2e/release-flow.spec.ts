@@ -254,7 +254,7 @@ async function signIn(page: Page, username: string, password: string) {
 
 async function apiRequest<T>(
   page: Page,
-  method: "GET" | "POST" | "PATCH",
+  method: "DELETE" | "GET" | "POST" | "PATCH",
   path: string,
   body?: Record<string, unknown>,
   cache?: RequestCache,
@@ -1874,7 +1874,79 @@ test.describe.serial("release E2E flow", () => {
     });
   });
 
-  test("18. E2E clock is token-protected and can expire an existing session", async ({
+  test("18. local Turnstile mock protects login and verifies administrator settings", async ({
+    page,
+  }) => {
+    await signIn(page, "admin", adminPassword);
+    const configured = await apiRequest<{
+      enabled: boolean;
+      secretKeyConfigured: boolean;
+      siteKey: string;
+    }>(page, "PATCH", "/api/private/admin/login-turnstile", {
+      enabled: true,
+      secretKey: "e2e-turnstile-secret",
+      siteKey: "e2e-turnstile-site-key",
+    });
+    expect(configured.status).toBe(200);
+    expect(configured.payload.data).toMatchObject({
+      enabled: true,
+      secretKeyConfigured: true,
+      siteKey: "e2e-turnstile-site-key",
+    });
+    const verification = await apiRequest<{ verified: boolean }>(
+      page,
+      "POST",
+      "/api/private/admin/login-turnstile/test",
+      {
+        secretKey: "e2e-turnstile-secret",
+        siteKey: "e2e-turnstile-site-key",
+        turnstileToken: "e2e-turnstile-pass",
+      },
+    );
+    expect(verification.status).toBe(200);
+    expect(verification.payload.data).toMatchObject({ verified: true });
+
+    const login = async (turnstileToken?: string) =>
+      page.evaluate(
+        async ({ password, turnstileToken }) => {
+          const response = await fetch("/api/public/session", {
+            body: JSON.stringify({
+              password,
+              ...(turnstileToken ? { turnstileToken } : {}),
+              username: "admin",
+            }),
+            headers: { "content-type": "application/json" },
+            method: "POST",
+          });
+          return {
+            payload: (await response.json()) as {
+              error?: { code?: string };
+              ok?: boolean;
+            },
+            status: response.status,
+          };
+        },
+        { password: adminPassword, turnstileToken },
+      );
+    const missing = await login();
+    expect(missing.status).toBe(400);
+    expect(missing.payload.error?.code).toBe("turnstile_required");
+    const invalid = await login("invalid-token");
+    expect(invalid.status).toBe(400);
+    expect(invalid.payload.error?.code).toBe("turnstile_failed");
+    const verified = await login("e2e-turnstile-pass");
+    expect(verified.status).toBe(200);
+    expect(verified.payload.ok).toBe(true);
+    const disabled = await apiRequest<{ enabled: boolean }>(
+      page,
+      "DELETE",
+      "/api/private/admin/login-turnstile",
+    );
+    expect(disabled.status).toBe(200);
+    expect(disabled.payload.data).toMatchObject({ enabled: false });
+  });
+
+  test("19. E2E clock is token-protected and can expire an existing session", async ({
     page,
   }) => {
     test.setTimeout(60_000);

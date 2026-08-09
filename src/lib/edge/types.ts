@@ -19,6 +19,7 @@ export interface Env {
   INSIGHTFLARE_E2E?: string;
   INSIGHTFLARE_E2E_CONTROL_TOKEN?: string;
   INSIGHTFLARE_E2E_RESEND_API_URL?: string;
+  INSIGHTFLARE_E2E_TURNSTILE_SITEVERIFY_URL?: string;
 }
 
 export interface SerializedRequestPayload {

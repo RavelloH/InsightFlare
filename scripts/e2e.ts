@@ -132,6 +132,7 @@ INSIGHTFLARE_E2E = "1"
 INSIGHTFLARE_E2E_CONTROL_TOKEN = ${tomlString(input.controlToken)}
 INSIGHTFLARE_E2E_NOW = ${tomlString(String(input.nowMs))}
 INSIGHTFLARE_E2E_RESEND_API_URL = ${tomlString(input.resendApiUrl)}
+INSIGHTFLARE_E2E_TURNSTILE_SITEVERIFY_URL = ${tomlString(`${input.resendApiUrl.replace("/resend/emails", "/turnstile/siteverify")}`)}
 MAIN_SECRET = ${tomlString(input.mainSecret)}
 BOOTSTRAP_ADMIN_PASSWORD = ${tomlString(input.adminPassword)}
 SESSION_WINDOW_MINUTES = "30"
@@ -279,13 +280,17 @@ function json(response: ServerResponse, body: unknown) {
   response.end(`${JSON.stringify(body)}\n`);
 }
 
-async function requestBody(request: IncomingMessage) {
+async function requestText(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function requestBody(request: IncomingMessage) {
   try {
-    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    const body = JSON.parse(await requestText(request)) as unknown;
     return body && typeof body === "object" && !Array.isArray(body)
       ? (body as Record<string, unknown>)
       : {};
@@ -313,6 +318,20 @@ async function startTestSite(
           id,
         });
         json(response, { id });
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        requestURL.pathname === "/turnstile/siteverify"
+      ) {
+        const body = new URLSearchParams(await requestText(request));
+        json(
+          response,
+          body.get("secret") === "e2e-turnstile-secret" &&
+            body.get("response") === "e2e-turnstile-pass"
+            ? { hostname: "127.0.0.1", success: true }
+            : { "error-codes": ["invalid-input-response"], success: false },
+        );
         return;
       }
       if (

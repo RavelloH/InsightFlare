@@ -167,6 +167,10 @@ export async function handleLoginTurnstileTestAdmin(
   const result = await verifyTurnstileToken({
     secret: secretKey,
     token: turnstileToken,
+    siteverifyUrl:
+      env.INSIGHTFLARE_E2E === "1"
+        ? env.INSIGHTFLARE_E2E_TURNSTILE_SITEVERIFY_URL
+        : undefined,
   });
 
   if (!result.ok) {

@@ -27,6 +27,7 @@ interface VerifyTurnstileTokenInput {
   token: string;
   remoteIp?: string;
   expectedHostname?: string;
+  siteverifyUrl?: string;
 }
 
 const SITEVERIFY_URL =
@@ -62,6 +63,7 @@ export async function verifyTurnstileToken({
   token,
   remoteIp,
   expectedHostname,
+  siteverifyUrl,
 }: VerifyTurnstileTokenInput): Promise<TurnstileVerifyResult> {
   const responseToken = token.trim();
   if (!responseToken) {
@@ -75,7 +77,7 @@ export async function verifyTurnstileToken({
 
   let response: Response;
   try {
-    response = await fetch(SITEVERIFY_URL, {
+    response = await fetch(siteverifyUrl || SITEVERIFY_URL, {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
