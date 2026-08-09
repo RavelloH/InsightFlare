@@ -1,5 +1,6 @@
 import { canManageSite, canManageTeam } from "@/lib/edge/admin-access";
 import type { Actor } from "@/lib/edge/admin-auth";
+import { appNow } from "@/lib/edge/e2e-clock";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
 
@@ -206,7 +207,7 @@ export async function createNotificationRule(
   if (!(await requireCanManageRuleScope(env, actor, input))) {
     throw new Error("Forbidden");
   }
-  const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(appNow() / 1000);
   const id = crypto.randomUUID();
   const schedule = normalizeNotificationSchedule(input.schedule);
   const nextRunAt = computeNextNotificationRunAt(schedule, now);
@@ -303,7 +304,7 @@ export async function updateNotificationRule(
   if (!(await requireCanManageRuleScope(env, actor, { teamId, siteId }))) {
     throw new Error("Forbidden");
   }
-  const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(appNow() / 1000);
   const nextType =
     input.type !== undefined
       ? normalizeNotificationRuleType(input.type)
@@ -512,7 +513,7 @@ export async function updateNotificationRuleState(
     now?: number;
   },
 ): Promise<void> {
-  const now = Math.trunc(input.now ?? Date.now() / 1000);
+  const now = Math.trunc(input.now ?? appNow() / 1000);
   await env.DB.prepare(
     `
       UPDATE notification_rules
