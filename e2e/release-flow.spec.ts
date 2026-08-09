@@ -277,6 +277,33 @@ async function apiRequest<T>(
   );
 }
 
+async function apiV1Request<T>(
+  page: Page,
+  method: "GET" | "POST",
+  path: string,
+  apiKey: string,
+  body?: Record<string, unknown>,
+) {
+  return page.evaluate(
+    async ({ apiKey, body, method, path }) => {
+      const response = await fetch(path, {
+        body: body ? JSON.stringify(body) : undefined,
+        credentials: "omit",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          ...(body ? { "content-type": "application/json" } : {}),
+        },
+        method,
+      });
+      return {
+        payload: (await response.json()) as ApiEnvelope<T>,
+        status: response.status,
+      };
+    },
+    { apiKey, body, method, path },
+  );
+}
+
 async function e2eControlRequest<T>(
   page: Page,
   method: "GET" | "POST",
@@ -1588,7 +1615,100 @@ test.describe.serial("release E2E flow", () => {
     expect(sessions.payload.data).toHaveLength(40);
   });
 
-  test("14. scheduled notifications create one persistent message per due rule", async ({
+  test("14. scoped API keys authenticate v1 analytics and enforce scope and revocation", async ({
+    page,
+  }) => {
+    const siteA = seed.sites.siteA;
+    const siteB = seed.sites.siteB;
+    const analyticsRead = seed.apiKeys.analyticsRead;
+    const revoked = seed.apiKeys.revoked;
+    expect(siteA).toBeDefined();
+    expect(siteB).toBeDefined();
+    expect(analyticsRead).toBeDefined();
+    expect(revoked).toBeDefined();
+
+    await signIn(page, "owner-a", ownerAPassword);
+    const analyticsKey = analyticsRead?.secret || "";
+    const fromMs = Date.now() - 60 * 60 * 1000;
+    const toMs = Date.now();
+    const privateOverview = await apiRequest<OverviewMetrics>(
+      page,
+      "GET",
+      siteQueryPathForWindow(siteA?.id || "", "overview", fromMs, toMs),
+      undefined,
+      "no-store",
+    );
+    expect(privateOverview.status).toBe(200);
+
+    const token = await apiV1Request<{
+      scopes: string[];
+      siteAccess: { mode: string; siteIds: string[] };
+    }>(page, "GET", "/api/v1/token", analyticsKey);
+    expect(token.status).toBe(200);
+    expect(token.payload.data).toMatchObject({
+      scopes: ["analytics:read"],
+      siteAccess: { mode: "restricted", siteIds: [siteA?.id] },
+    });
+
+    const capabilities = await apiV1Request<{
+      features: { analytics: boolean; sites: boolean };
+    }>(page, "GET", "/api/v1/capabilities", analyticsKey);
+    expect(capabilities.status).toBe(200);
+    expect(capabilities.payload.data).toMatchObject({
+      features: { analytics: true, sites: false },
+    });
+
+    const overview = await apiV1Request<OverviewMetrics>(
+      page,
+      "GET",
+      `/api/v1/sites/${encodeURIComponent(siteA?.id || "")}/analytics/overview?from=${encodeURIComponent(new Date(fromMs).toISOString())}&to=${encodeURIComponent(new Date(toMs).toISOString())}&timeZone=UTC`,
+      analyticsKey,
+    );
+    expect(overview.status).toBe(200);
+    expect(overview.payload.data).toMatchObject({
+      sessions: privateOverview.payload.data?.sessions,
+      views: privateOverview.payload.data?.views,
+      visitors: privateOverview.payload.data?.visitors,
+    });
+
+    const checks = await apiV1Request<{
+      checks: Array<{ allowed: boolean; reason?: string; siteId?: string }>;
+    }>(page, "POST", "/api/v1/token/check", analyticsKey, {
+      checks: [
+        { scope: "analytics:read", siteId: siteA?.id || "" },
+        { scope: "analytics:read", siteId: siteB?.id || "" },
+        { scope: "site:read" },
+      ],
+    });
+    expect(checks.status).toBe(200);
+    expect(checks.payload.data?.checks).toEqual([
+      expect.objectContaining({ allowed: true, siteId: siteA?.id }),
+      expect.objectContaining({
+        allowed: false,
+        reason: "site_not_allowed",
+        siteId: siteB?.id,
+      }),
+      expect.objectContaining({ allowed: false, reason: "missing_scope" }),
+    ]);
+
+    const otherSite = await apiV1Request<OverviewMetrics>(
+      page,
+      "GET",
+      `/api/v1/sites/${encodeURIComponent(siteB?.id || "")}/analytics/overview?from=${encodeURIComponent(new Date(fromMs).toISOString())}&to=${encodeURIComponent(new Date(toMs).toISOString())}`,
+      analyticsKey,
+    );
+    expect(otherSite.status).toBe(404);
+
+    const revokedKey = await apiV1Request<unknown>(
+      page,
+      "GET",
+      "/api/v1/sites",
+      revoked?.secret || "",
+    );
+    expect(revokedKey.status).toBe(401);
+  });
+
+  test("15. scheduled notifications create one persistent message per due rule", async ({
     page,
   }) => {
     const teamA = seed.teams.teamA;
@@ -1645,7 +1765,7 @@ test.describe.serial("release E2E flow", () => {
     expect(repeated.payload.data?.messages).toHaveLength(1);
   });
 
-  test("15. notification recipients can mark alerts read and disabled rules stay dormant", async ({
+  test("16. notification recipients can mark alerts read and disabled rules stay dormant", async ({
     page,
   }) => {
     const teamA = seed.teams.teamA;
@@ -1715,7 +1835,7 @@ test.describe.serial("release E2E flow", () => {
     expect(messages.payload.data?.messages).toHaveLength(1);
   });
 
-  test("16. daily report previews, scheduled runs, and manual runs use historical truth", async ({
+  test("17. daily report previews, scheduled runs, and manual runs use historical truth", async ({
     page,
   }) => {
     const teamA = seed.teams.teamA;
@@ -1793,7 +1913,7 @@ test.describe.serial("release E2E flow", () => {
     expect(messagesAfterManualRun.payload.data?.messages).toHaveLength(2);
   });
 
-  test("17. local Resend mock receives configured test and in-app notification email", async ({
+  test("18. local Resend mock receives configured test and in-app notification email", async ({
     page,
   }) => {
     const ownerA = seed.users.ownerA;
@@ -1874,7 +1994,7 @@ test.describe.serial("release E2E flow", () => {
     });
   });
 
-  test("18. local Turnstile mock protects login and verifies administrator settings", async ({
+  test("19. local Turnstile mock protects login and verifies administrator settings", async ({
     page,
   }) => {
     await signIn(page, "admin", adminPassword);
@@ -1946,7 +2066,7 @@ test.describe.serial("release E2E flow", () => {
     expect(disabled.payload.data).toMatchObject({ enabled: false });
   });
 
-  test("19. E2E clock is token-protected and can expire an existing session", async ({
+  test("20. E2E clock is token-protected and can expire an existing session", async ({
     page,
   }) => {
     test.setTimeout(60_000);
