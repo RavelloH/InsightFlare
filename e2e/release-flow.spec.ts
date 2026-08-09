@@ -496,6 +496,11 @@ test.describe.serial("release E2E flow", () => {
     test.setTimeout(60_000);
     await signIn(page, "admin", adminPassword);
 
+    const health = await page.request.get("/healthz");
+    expect(health.ok()).toBe(true);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(/\/zh\/app\/[^/]+\/?$/);
+
     const session = await apiRequest<{
       user?: User;
     }>(page, "GET", "/api/private/session");
@@ -686,7 +691,72 @@ test.describe.serial("release E2E flow", () => {
     await saveManifest();
   });
 
-  test("4. Team A owner assigns full and site-scoped member access", async ({
+  test("4. team management pages hydrate, render SSR content, and navigate client-side", async ({
+    page,
+  }) => {
+    const teamA = seed.teams.teamA;
+    const siteA = seed.sites.siteA;
+    expect(teamA).toBeDefined();
+    expect(siteA).toBeDefined();
+
+    const errors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+
+    await signIn(page, "owner-a", ownerAPassword);
+    await page.goto(`/zh/app/${teamA?.slug}/widgets`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.getByText("正在施工中")).toBeVisible();
+    await expect(page.locator("body")).toHaveAttribute(
+      "data-overlayscrollbars-initialize",
+    );
+    await expect(
+      page.locator('link[rel="preload"][as="font"][type="font/woff2"]'),
+    ).toHaveCount(1);
+    await expect(page.locator("body")).toHaveCSS(
+      "font-family",
+      /JetBrains Mono Variable/,
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          document.fonts.check('400 16px "JetBrains Mono Variable"'),
+        ),
+      )
+      .toBe(true);
+
+    const publicLinksResponse = await page.request.get(
+      `/zh/app/${teamA?.slug}/public-links`,
+    );
+    expect(publicLinksResponse.status()).toBe(200);
+    const publicLinksHtml = await publicLinksResponse.text();
+    expect(publicLinksHtml).toContain("公开链接");
+    expect(publicLinksHtml).toContain(siteA?.name || "");
+    expect(publicLinksHtml).toContain("已启用");
+
+    const transition = page.locator("[data-page-transition]").first();
+    await expect(transition).toHaveAttribute(
+      "data-page-transition-ready",
+      "true",
+    );
+    await expect(transition).toHaveAttribute("data-transition", "idle");
+    const navigation = page.waitForURL(
+      new RegExp(`/zh/app/${teamA?.slug}/public-links/?$`),
+    );
+    await page
+      .locator(`a[href="/zh/app/${teamA?.slug}/public-links"]`)
+      .first()
+      .click();
+    await expect(transition).toHaveAttribute("data-transition", "exit");
+    await navigation;
+    await expect(page.getByText("公开链接").first()).toBeVisible();
+    await expect(transition).toHaveAttribute("data-transition", "idle");
+    expect(errors).toEqual([]);
+  });
+
+  test("5. Team A owner assigns full and site-scoped member access", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -754,7 +824,7 @@ test.describe.serial("release E2E flow", () => {
     await saveManifest();
   });
 
-  test("5. member site access is enforced and cross-team reads are denied", async ({
+  test("6. member site access is enforced and cross-team reads are denied", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -810,7 +880,7 @@ test.describe.serial("release E2E flow", () => {
     expect(outsiderOtherTeamRead.status).toBe(403);
   });
 
-  test("6. team owner creates scoped API keys and members cannot manage them", async ({
+  test("7. team owner creates scoped API keys and members cannot manage them", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -904,7 +974,7 @@ test.describe.serial("release E2E flow", () => {
     expect(denied.status).toBe(403);
   });
 
-  test("7. team invites preserve site scope, support registration, and can be revoked", async ({
+  test("8. team invites preserve site scope, support registration, and can be revoked", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -1014,7 +1084,7 @@ test.describe.serial("release E2E flow", () => {
     expect(revokedInspection.status).toBe(400);
   });
 
-  test("8. public sharing only resolves while the owner enables its slug", async ({
+  test("9. public sharing only resolves while the owner enables its slug", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -1076,7 +1146,7 @@ test.describe.serial("release E2E flow", () => {
     expect(unavailable.status).toBe(404);
   });
 
-  test("9. real browser tracking reaches the DO and persists pageviews and events", async ({
+  test("10. real browser tracking reaches the DO and persists pageviews and events", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -1203,7 +1273,7 @@ test.describe.serial("release E2E flow", () => {
     await saveManifest();
   });
 
-  test("10. realtime websocket receives a visitor before the durable object flush", async ({
+  test("11. realtime websocket receives a visitor before the durable object flush", async ({
     browser,
     page,
   }: {
@@ -1305,7 +1375,7 @@ test.describe.serial("release E2E flow", () => {
     });
   });
 
-  test("11. site analytics API and dashboard render the real tracker manifest", async ({
+  test("12. site analytics API and dashboard render the real tracker manifest", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -1366,9 +1436,32 @@ test.describe.serial("release E2E flow", () => {
     await expect(
       page.getByText(String(expected?.overview.views), { exact: true }).first(),
     ).toBeVisible();
+    await expect(page.locator('[data-geo-map-mode="flat"]')).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const dashboardSsr = await page.request.get(
+      `/zh/app/${teamA?.slug}/analytics-a-example-test`,
+    );
+    expect(dashboardSsr.status()).toBe(200);
+    const dashboardHtml = await dashboardSsr.text();
+    expect(dashboardHtml).toContain(siteA?.name || "");
+    expect(dashboardHtml).not.toContain(
+      'aria-busy="true" aria-label="Loading"',
+    );
+
+    await page.goto(`/zh/app/${teamA?.slug}/analytics-a-example-test/pages`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(
+      page.getByRole("heading", { name: "页面分析" }).first(),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "查看详情: /", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
   });
 
-  test("12. bot and invalid collect requests do not change normal site analytics", async ({
+  test("13. bot and invalid collect requests do not change normal site analytics", async ({
     browser,
     page,
   }: {
@@ -1429,7 +1522,7 @@ test.describe.serial("release E2E flow", () => {
     expect(after).toEqual(before);
   });
 
-  test("13. historical D1 seed matches analytics query truth", async ({
+  test("14. historical D1 seed matches analytics query truth", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -1615,7 +1708,7 @@ test.describe.serial("release E2E flow", () => {
     expect(sessions.payload.data).toHaveLength(40);
   });
 
-  test("14. scoped API keys authenticate v1 analytics and enforce scope and revocation", async ({
+  test("15. scoped API keys authenticate v1 analytics and enforce scope and revocation", async ({
     page,
   }) => {
     const siteA = seed.sites.siteA;
@@ -1708,7 +1801,7 @@ test.describe.serial("release E2E flow", () => {
     expect(revokedKey.status).toBe(401);
   });
 
-  test("15. scheduled notifications create one persistent message per due rule", async ({
+  test("16. scheduled notifications create one persistent message per due rule", async ({
     page,
   }) => {
     const teamA = seed.teams.teamA;
@@ -1765,7 +1858,7 @@ test.describe.serial("release E2E flow", () => {
     expect(repeated.payload.data?.messages).toHaveLength(1);
   });
 
-  test("16. notification recipients can mark alerts read and disabled rules stay dormant", async ({
+  test("17. notification recipients can mark alerts read and disabled rules stay dormant", async ({
     page,
   }) => {
     const teamA = seed.teams.teamA;
@@ -1835,7 +1928,7 @@ test.describe.serial("release E2E flow", () => {
     expect(messages.payload.data?.messages).toHaveLength(1);
   });
 
-  test("17. daily report previews, scheduled runs, and manual runs use historical truth", async ({
+  test("18. daily report previews, scheduled runs, and manual runs use historical truth", async ({
     page,
   }) => {
     const teamA = seed.teams.teamA;
@@ -1913,7 +2006,7 @@ test.describe.serial("release E2E flow", () => {
     expect(messagesAfterManualRun.payload.data?.messages).toHaveLength(2);
   });
 
-  test("18. local Resend mock receives configured test and in-app notification email", async ({
+  test("19. local Resend mock receives configured test and in-app notification email", async ({
     page,
   }) => {
     const ownerA = seed.users.ownerA;
@@ -1994,10 +2087,16 @@ test.describe.serial("release E2E flow", () => {
     });
   });
 
-  test("19. local Turnstile mock protects login and verifies administrator settings", async ({
+  test("20. local Turnstile mock protects login and verifies administrator settings", async ({
     page,
   }) => {
     await signIn(page, "admin", adminPassword);
+    await page.goto("/zh/app/manage/request-observation", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.locator('[data-geo-map-mode="3d"]')).toBeVisible({
+      timeout: 15_000,
+    });
     const configured = await apiRequest<{
       enabled: boolean;
       secretKeyConfigured: boolean;
@@ -2066,7 +2165,7 @@ test.describe.serial("release E2E flow", () => {
     expect(disabled.payload.data).toMatchObject({ enabled: false });
   });
 
-  test("20. E2E clock is token-protected and can expire an existing session", async ({
+  test("21. E2E clock is token-protected and can expire an existing session", async ({
     page,
   }) => {
     test.setTimeout(60_000);
