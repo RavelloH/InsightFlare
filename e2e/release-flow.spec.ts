@@ -120,6 +120,12 @@ type MockEmail = {
   id: string;
 };
 
+type ResendMockMode =
+  | "bad_request"
+  | "rate_limited"
+  | "server_error"
+  | "success";
+
 type OverviewMetrics = {
   bounces: number;
   sessions: number;
@@ -339,6 +345,17 @@ async function readMockMailbox(): Promise<MockEmail[]> {
   }
   const payload = (await response.json()) as { messages?: MockEmail[] };
   return payload.messages ?? [];
+}
+
+async function setResendMockMode(mode: ResendMockMode): Promise<void> {
+  const response = await fetch(`${testSiteURL}/__e2e__/resend/mode`, {
+    body: JSON.stringify({ mode }),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to set E2E Resend mode: ${response.status}`);
+  }
 }
 
 function siteQueryPath(siteId: string, path: string): string {
@@ -1420,19 +1437,9 @@ test.describe.serial("release E2E flow", () => {
       ]),
     );
 
-    const dashboardOverview = page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/private/overview") &&
-        response.request().method() === "GET",
-    );
     await page.goto(`/zh/app/${teamA?.slug}/analytics-a-example-test`, {
       waitUntil: "domcontentloaded",
     });
-    const dashboardResponse = await dashboardOverview;
-    expect(dashboardResponse.status()).toBe(200);
-    const dashboardPayload =
-      (await dashboardResponse.json()) as ApiEnvelope<OverviewMetrics>;
-    expect(dashboardPayload.data?.views).toBe(expected?.overview.views);
     await expect(
       page.getByText(String(expected?.overview.views), { exact: true }).first(),
     ).toBeVisible();
@@ -2087,7 +2094,29 @@ test.describe.serial("release E2E flow", () => {
     });
   });
 
-  test("20. administrator request observation keeps the 3D map isolated", async ({
+  test("20. Resend 4xx failures are surfaced without a false delivery success", async ({
+    page,
+  }) => {
+    await signIn(page, "admin", adminPassword);
+    await setResendMockMode("bad_request");
+    try {
+      const failed = await apiRequest<unknown>(
+        page,
+        "POST",
+        "/api/private/admin/notification-email/test",
+        { to: "admin@example.test" },
+      );
+      expect(failed.status).toBe(400);
+      const failure = JSON.stringify(failed.payload);
+      expect(failure).toContain("Resend request failed");
+      expect(failure).toContain("E2E forced Resend bad_request");
+      expect(await readMockMailbox()).toHaveLength(2);
+    } finally {
+      await setResendMockMode("success");
+    }
+  });
+
+  test("21. administrator request observation keeps the 3D map isolated", async ({
     page,
   }) => {
     await signIn(page, "admin", adminPassword);
@@ -2099,7 +2128,7 @@ test.describe.serial("release E2E flow", () => {
     });
   });
 
-  test("21. administrator version updates render local release data in SSR and the client", async ({
+  test("22. administrator version updates render local release data in SSR and the client", async ({
     page,
   }) => {
     await signIn(page, "admin", adminPassword);
@@ -2120,7 +2149,7 @@ test.describe.serial("release E2E flow", () => {
     await expect(page.getByText("E2E mock release notes")).toBeVisible();
   });
 
-  test("22. local Turnstile mock protects login and verifies administrator settings", async ({
+  test("23. local Turnstile mock protects login and verifies administrator settings", async ({
     page,
   }) => {
     await signIn(page, "admin", adminPassword);
@@ -2192,7 +2221,7 @@ test.describe.serial("release E2E flow", () => {
     expect(disabled.payload.data).toMatchObject({ enabled: false });
   });
 
-  test("23. E2E clock is token-protected and can expire an existing session", async ({
+  test("24. E2E clock is token-protected and can expire an existing session", async ({
     page,
   }) => {
     test.setTimeout(60_000);

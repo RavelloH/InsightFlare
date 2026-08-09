@@ -63,6 +63,12 @@ interface MockEmail {
   id: string;
 }
 
+type ResendMockMode =
+  | "bad_request"
+  | "rate_limited"
+  | "server_error"
+  | "success";
+
 const E2E_GITHUB_RELEASES = [
   {
     author: { login: "insightflare-e2e" },
@@ -321,6 +327,7 @@ async function startTestSite(
   port: number,
 ): Promise<StartedTestSite> {
   const mailbox: MockEmail[] = [];
+  let resendMode: ResendMockMode = "success";
   const server = createServer((request, response) => {
     void (async () => {
       const requestURL = new URL(request.url || "/", "http://127.0.0.1");
@@ -328,6 +335,23 @@ async function startTestSite(
         request.method === "POST" &&
         requestURL.pathname === "/resend/emails"
       ) {
+        if (resendMode !== "success") {
+          const status =
+            resendMode === "bad_request"
+              ? 400
+              : resendMode === "rate_limited"
+                ? 429
+                : 500;
+          response.writeHead(status, {
+            "content-type": "application/json; charset=utf-8",
+          });
+          response.end(
+            `${JSON.stringify({
+              message: `E2E forced Resend ${resendMode}`,
+            })}\n`,
+          );
+          return;
+        }
         const id = `e2e-email-${mailbox.length + 1}`;
         mailbox.push({
           authorization: String(request.headers.authorization || ""),
@@ -335,6 +359,28 @@ async function startTestSite(
           id,
         });
         json(response, { id });
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        requestURL.pathname === "/__e2e__/resend/mode"
+      ) {
+        const body = await requestBody(request);
+        const mode = String(body.mode || "");
+        if (
+          mode !== "success" &&
+          mode !== "bad_request" &&
+          mode !== "rate_limited" &&
+          mode !== "server_error"
+        ) {
+          response.writeHead(400, {
+            "content-type": "application/json; charset=utf-8",
+          });
+          response.end(`${JSON.stringify({ error: "Invalid Resend mode" })}\n`);
+          return;
+        }
+        resendMode = mode;
+        json(response, { mode: resendMode });
         return;
       }
       if (
