@@ -61,6 +61,10 @@ export default defineConfig(({ mode }) => {
         process.env.COMMIT_SHA || "",
       ),
       "import.meta.env.VITE_DEMO_MODE": JSON.stringify(demoMode),
+      "import.meta.env.VITE_GITHUB_API_BASE": JSON.stringify(
+        process.env.INSIGHTFLARE_E2E_GITHUB_API_BASE ||
+          "https://api.github.com",
+      ),
       "import.meta.env.VITE_INSIGHTFLARE_ANALYTICS_ENGINE_DISABLED":
         JSON.stringify("0"),
     },

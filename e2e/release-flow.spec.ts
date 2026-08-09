@@ -2087,7 +2087,7 @@ test.describe.serial("release E2E flow", () => {
     });
   });
 
-  test("20. local Turnstile mock protects login and verifies administrator settings", async ({
+  test("20. administrator request observation keeps the 3D map isolated", async ({
     page,
   }) => {
     await signIn(page, "admin", adminPassword);
@@ -2097,6 +2097,33 @@ test.describe.serial("release E2E flow", () => {
     await expect(page.locator('[data-geo-map-mode="3d"]')).toBeVisible({
       timeout: 15_000,
     });
+  });
+
+  test("21. administrator version updates render local release data in SSR and the client", async ({
+    page,
+  }) => {
+    await signIn(page, "admin", adminPassword);
+    const response = await page.request.get("/zh/app/manage/version-updates");
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("当前版本");
+    expect(html).toContain("最新版本");
+    expect(html).toContain("当前提交");
+    expect(html).toContain("发布数");
+    expect(html).toContain("更新说明");
+    expect(html).toContain("查看详细变更");
+    expect(html).toContain("E2E mock release notes");
+
+    await page.goto("/zh/app/manage/version-updates", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.getByText("E2E mock release notes")).toBeVisible();
+  });
+
+  test("22. local Turnstile mock protects login and verifies administrator settings", async ({
+    page,
+  }) => {
+    await signIn(page, "admin", adminPassword);
     const configured = await apiRequest<{
       enabled: boolean;
       secretKeyConfigured: boolean;
@@ -2165,7 +2192,7 @@ test.describe.serial("release E2E flow", () => {
     expect(disabled.payload.data).toMatchObject({ enabled: false });
   });
 
-  test("21. E2E clock is token-protected and can expire an existing session", async ({
+  test("23. E2E clock is token-protected and can expire an existing session", async ({
     page,
   }) => {
     test.setTimeout(60_000);

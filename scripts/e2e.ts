@@ -63,6 +63,23 @@ interface MockEmail {
   id: string;
 }
 
+const E2E_GITHUB_RELEASES = [
+  {
+    author: { login: "insightflare-e2e" },
+    body: "E2E mock release notes",
+    created_at: "2026-07-13T12:00:00.000Z",
+    draft: false,
+    html_url: "https://example.test/releases/v0.5.0",
+    id: 1,
+    name: "InsightFlare E2E release",
+    prerelease: false,
+    published_at: "2026-07-13T12:00:00.000Z",
+    tag_name: "v0.5.0",
+    target_commitish: "e2e-release",
+    updated_at: "2026-07-13T12:00:00.000Z",
+  },
+];
+
 function optionValue(argv: string[], name: string): string | undefined {
   const flag = `--${name}`;
   const index = argv.indexOf(flag);
@@ -336,6 +353,13 @@ async function startTestSite(
       }
       if (
         request.method === "GET" &&
+        requestURL.pathname === "/github/repos/RavelloH/InsightFlare/releases"
+      ) {
+        json(response, E2E_GITHUB_RELEASES);
+        return;
+      }
+      if (
+        request.method === "GET" &&
         requestURL.pathname === "/__e2e__/mailbox"
       ) {
         json(response, { messages: mailbox });
@@ -603,6 +627,7 @@ function workerEnvironment(environment: Environment): NodeJS.ProcessEnv {
     CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH: environment.configPath,
     INSIGHTFLARE_LOCAL_PERSISTENCE_PATH: environment.persistencePath,
     INSIGHTFLARE_E2E: "1",
+    INSIGHTFLARE_E2E_GITHUB_API_BASE: `${environment.testSiteURL}/github`,
     INSIGHTFLARE_PORT: String(environment.port),
     MAIN_SECRET: environment.mainSecret,
   };

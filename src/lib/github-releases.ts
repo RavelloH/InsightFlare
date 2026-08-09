@@ -1,4 +1,5 @@
-const GITHUB_API_BASE = "https://api.github.com";
+const GITHUB_API_BASE =
+  import.meta.env.VITE_GITHUB_API_BASE || "https://api.github.com";
 
 type GithubReleaseApiItem = {
   id: number;
