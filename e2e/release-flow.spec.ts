@@ -79,6 +79,18 @@ type TeamInvite = {
 
 type CreatedTeamInvite = { invite: TeamInvite; url: string };
 
+type NotificationMessage = {
+  id: string;
+  readAt: number | null;
+  ruleId: string;
+};
+
+type NotificationRule = {
+  enabled: boolean;
+  id: string;
+  lastCheckedAt: number | null;
+};
+
 type OverviewMetrics = {
   bounces: number;
   sessions: number;
@@ -125,6 +137,7 @@ type SeedManifest = {
     timeZone: string;
   };
   invites: Partial<Record<"active" | "revoked", CreatedTeamInvite>>;
+  notifications: Partial<Record<"threshold", NotificationRule>>;
   runId: string;
   history?: Partial<Record<"siteB", HistorySeedManifest>>;
   sites: Partial<Record<"siteA" | "siteB" | "siteC", Site>>;
@@ -169,6 +182,7 @@ const seed: SeedManifest = {
     timeZone: "Asia/Shanghai",
   },
   invites: {},
+  notifications: {},
   runId,
   users: {
     admin: {
@@ -1566,6 +1580,12 @@ test.describe.serial("release E2E flow", () => {
     expect(created.status).toBe(200);
     const ruleId = created.payload.data?.id || "";
     expect(ruleId).not.toBe("");
+    seed.notifications.threshold = {
+      enabled: true,
+      id: ruleId,
+      lastCheckedAt: null,
+    };
+    await saveManifest();
     await e2eControlRequest(page, "POST", "clock/advance", {
       deltaMs: 30 * 60_000,
     });
@@ -1587,7 +1607,77 @@ test.describe.serial("release E2E flow", () => {
     expect(repeated.payload.data?.messages).toHaveLength(1);
   });
 
-  test("15. E2E clock is token-protected and can expire an existing session", async ({
+  test("15. notification recipients can mark alerts read and disabled rules stay dormant", async ({
+    page,
+  }) => {
+    const teamA = seed.teams.teamA;
+    const rule = seed.notifications.threshold;
+    expect(teamA).toBeDefined();
+    expect(rule).toBeDefined();
+    await signIn(page, "owner-a", ownerAPassword);
+    const beforeRead = await apiRequest<{
+      messages: NotificationMessage[];
+    }>(
+      page,
+      "GET",
+      `/api/private/notifications?teamId=${encodeURIComponent(teamA?.id || "")}&ruleId=${encodeURIComponent(rule?.id || "")}`,
+    );
+    expect(beforeRead.status).toBe(200);
+    const message = beforeRead.payload.data?.messages[0];
+    expect(message).toMatchObject({ readAt: null, ruleId: rule?.id });
+
+    const markedRead = await apiRequest<NotificationMessage>(
+      page,
+      "PATCH",
+      `/api/private/notifications/${encodeURIComponent(message?.id || "")}`,
+      {},
+    );
+    expect(markedRead.status).toBe(200);
+    expect(markedRead.payload.data?.readAt).toEqual(expect.any(Number));
+    const unread = await apiRequest<{ messages: NotificationMessage[] }>(
+      page,
+      "GET",
+      `/api/private/notifications?teamId=${encodeURIComponent(teamA?.id || "")}&ruleId=${encodeURIComponent(rule?.id || "")}&unread=1`,
+    );
+    expect(unread.status).toBe(200);
+    expect(unread.payload.data?.messages).toEqual([]);
+
+    const disabled = await apiRequest<NotificationRule>(
+      page,
+      "PATCH",
+      "/api/private/admin/notification-rules",
+      { enabled: false, ruleId: rule?.id },
+    );
+    expect(disabled.status).toBe(200);
+    expect(disabled.payload.data?.enabled).toBe(false);
+    const lastCheckedAt = disabled.payload.data?.lastCheckedAt;
+    await e2eControlRequest(page, "POST", "clock/advance", {
+      deltaMs: 30 * 60_000,
+    });
+    const scheduled = await e2eControlRequest(page, "POST", "scheduled/run");
+    expect(scheduled.status).toBe(200);
+
+    const rules = await apiRequest<NotificationRule[]>(
+      page,
+      "GET",
+      `/api/private/admin/notification-rules?teamId=${encodeURIComponent(teamA?.id || "")}`,
+    );
+    const persistedRule = rules.payload.data?.find(
+      (item) => item.id === rule?.id,
+    );
+    expect(persistedRule).toMatchObject({
+      enabled: false,
+      lastCheckedAt,
+    });
+    const messages = await apiRequest<{ messages: NotificationMessage[] }>(
+      page,
+      "GET",
+      `/api/private/notifications?teamId=${encodeURIComponent(teamA?.id || "")}&ruleId=${encodeURIComponent(rule?.id || "")}`,
+    );
+    expect(messages.payload.data?.messages).toHaveLength(1);
+  });
+
+  test("16. E2E clock is token-protected and can expire an existing session", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -1630,7 +1720,7 @@ test.describe.serial("release E2E flow", () => {
       "clock",
     );
     expect(before.status).toBe(200);
-    expect(before.payload?.data?.nowMs).toBe(e2eNowMs + 30 * 60_000);
+    expect(before.payload?.data?.nowMs).toBe(e2eNowMs + 60 * 60_000);
 
     const collectToken = await page.evaluate(async (siteId) => {
       const script = await fetch(
