@@ -38,6 +38,7 @@ interface Environment {
   directory: string;
   id: string;
   mainSecret: string;
+  mockControlToken: string;
   nowMs: number;
   persistencePath: string;
   port: number;
@@ -101,6 +102,11 @@ function parseWorkers(argv: string[]): number | undefined {
   const workers = Number(value);
   if (!Number.isInteger(workers) || workers < 1) {
     throw new Error("--workers must be a positive integer.");
+  }
+  if (workers !== 1) {
+    throw new Error(
+      "E2E scenarios share one linear stateful environment; --workers must be 1.",
+    );
   }
   return workers;
 }
@@ -258,6 +264,7 @@ async function createEnvironment(options: Options): Promise<Environment> {
     directory,
     id,
     mainSecret: randomBytes(32).toString("hex"),
+    mockControlToken: randomBytes(32).toString("hex"),
     nowMs: E2E_INITIAL_NOW_MS,
     persistencePath,
     port: await findOpenPort(),
@@ -446,6 +453,7 @@ async function requestBody(request: IncomingMessage) {
 async function startTestSite(
   workerURL: string,
   port: number,
+  controlToken: string,
 ): Promise<StartedTestSite> {
   const mailbox: MockEmail[] = [];
   let resendMode: ResendMockMode = "success";
@@ -486,6 +494,13 @@ async function startTestSite(
         request.method === "POST" &&
         requestURL.pathname === "/__e2e__/resend/mode"
       ) {
+        if (request.headers["x-insightflare-e2e-token"] !== controlToken) {
+          response.writeHead(403, {
+            "content-type": "application/json; charset=utf-8",
+          });
+          response.end(`${JSON.stringify({ error: "Forbidden" })}\n`);
+          return;
+        }
         const body = await requestBody(request);
         const mode = String(body.mode || "");
         if (
@@ -556,6 +571,13 @@ async function startTestSite(
         request.method === "GET" &&
         requestURL.pathname === "/__e2e__/mailbox"
       ) {
+        if (request.headers["x-insightflare-e2e-token"] !== controlToken) {
+          response.writeHead(403, {
+            "content-type": "application/json; charset=utf-8",
+          });
+          response.end(`${JSON.stringify({ error: "Forbidden" })}\n`);
+          return;
+        }
         json(response, { messages: mailbox });
         return;
       }
@@ -876,7 +898,7 @@ async function runPlaywright(
   const args = [
     localBin("@playwright/test", "cli.js"),
     "test",
-    "e2e/release-flow.spec.ts",
+    "e2e/e2e.spec.ts",
     "--config",
     "playwright.config.ts",
   ];
@@ -906,6 +928,7 @@ async function runPlaywright(
       ),
       INSIGHTFLARE_E2E_PERSISTENCE_PATH: environment.persistencePath,
       INSIGHTFLARE_E2E_NOW_MS: String(environment.nowMs),
+      INSIGHTFLARE_E2E_MOCK_CONTROL_TOKEN: environment.mockControlToken,
       INSIGHTFLARE_E2E_RUN_ID: environment.id,
       INSIGHTFLARE_E2E_TEST_SITE_URL: environment.testSiteURL,
     },
@@ -1010,7 +1033,11 @@ async function main(): Promise<void> {
     });
     throwIfAborted(shutdown.signal);
     testSite = await runPreparationStep("Starting E2E test site", () =>
-      startTestSite(activeEnvironment.baseURL, activeEnvironment.testSitePort),
+      startTestSite(
+        activeEnvironment.baseURL,
+        activeEnvironment.testSitePort,
+        activeEnvironment.mockControlToken,
+      ),
     );
     if (testSite.url !== activeEnvironment.testSiteURL) {
       throw new Error("E2E test site started on an unexpected port.");

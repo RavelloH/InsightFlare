@@ -8,7 +8,12 @@ import { type Browser, expect, type Page, test } from "@playwright/test";
 import {
   buildHistorySeed,
   type HistorySeedManifest,
-} from "../scripts/e2e/seed-history";
+} from "../../scripts/e2e/seed-history";
+import {
+  createSiteThroughUi,
+  signIn,
+  waitForCollectResponse,
+} from "../support/browser";
 
 const execFileAsync = promisify(execFile);
 
@@ -193,6 +198,9 @@ const manifestPath = requiredEnvironmentValue("INSIGHTFLARE_E2E_MANIFEST");
 const runId = requiredEnvironmentValue("INSIGHTFLARE_E2E_RUN_ID");
 const testSiteURL = requiredEnvironmentValue("INSIGHTFLARE_E2E_TEST_SITE_URL");
 const controlToken = requiredEnvironmentValue("INSIGHTFLARE_E2E_CONTROL_TOKEN");
+const mockControlToken = requiredEnvironmentValue(
+  "INSIGHTFLARE_E2E_MOCK_CONTROL_TOKEN",
+);
 const configPath = requiredEnvironmentValue("INSIGHTFLARE_E2E_CONFIG_PATH");
 const d1Name = requiredEnvironmentValue("INSIGHTFLARE_E2E_D1_NAME");
 const persistencePath = requiredEnvironmentValue(
@@ -234,28 +242,6 @@ const seed: SeedManifest = {
 
 async function saveManifest() {
   await writeFile(manifestPath, `${JSON.stringify(seed, null, 2)}\n`);
-}
-
-async function signIn(page: Page, username: string, password: string) {
-  await page.context().clearCookies();
-  const securityConfig = page.waitForResponse(
-    (response) =>
-      response.url().includes("/api/public/login-security") &&
-      response.request().method() === "GET",
-  );
-  await page.goto("/zh/login", { waitUntil: "domcontentloaded" });
-  expect((await securityConfig).status()).toBe(200);
-  await expect(page.locator('button[type="submit"]')).toBeEnabled();
-  await page.locator("#username").fill(username);
-  await page.locator("#password").fill(password);
-  const loginResponse = page.waitForResponse(
-    (response) =>
-      response.url().includes("/api/public/session") &&
-      response.request().method() === "POST",
-  );
-  await page.locator('button[type="submit"]').click();
-  expect((await loginResponse).status()).toBe(200);
-  await expect(page).toHaveURL(/\/(?:api\/public\/session|zh\/app)\/?$/);
 }
 
 async function apiRequest<T>(
@@ -317,29 +303,24 @@ async function e2eControlRequest<T>(
   body?: Record<string, unknown>,
   token = controlToken,
 ) {
-  return page.evaluate(
-    async ({ body, method, path, token }) => {
-      const response = await fetch(`/__e2e__/${path}`, {
-        body: body ? JSON.stringify(body) : undefined,
-        headers: {
-          ...(body ? { "content-type": "application/json" } : {}),
-          "x-insightflare-e2e-token": token,
-        },
-        method,
-      });
-      return {
-        payload: (await response
-          .json()
-          .catch(() => null)) as ApiEnvelope<T> | null,
-        status: response.status,
-      };
+  const response = await page.request.fetch(`/__e2e__/${path}`, {
+    data: body,
+    headers: {
+      ...(body ? { "content-type": "application/json" } : {}),
+      "x-insightflare-e2e-token": token,
     },
-    { body, method, path, token },
-  );
+    method,
+  });
+  return {
+    payload: (await response.json().catch(() => null)) as ApiEnvelope<T> | null,
+    status: response.status(),
+  };
 }
 
 async function readMockMailbox(): Promise<MockEmail[]> {
-  const response = await fetch(`${testSiteURL}/__e2e__/mailbox`);
+  const response = await fetch(`${testSiteURL}/__e2e__/mailbox`, {
+    headers: { "x-insightflare-e2e-token": mockControlToken },
+  });
   if (!response.ok) {
     throw new Error(`Unable to read E2E mailbox: ${response.status}`);
   }
@@ -350,7 +331,10 @@ async function readMockMailbox(): Promise<MockEmail[]> {
 async function setResendMockMode(mode: ResendMockMode): Promise<void> {
   const response = await fetch(`${testSiteURL}/__e2e__/resend/mode`, {
     body: JSON.stringify({ mode }),
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-insightflare-e2e-token": mockControlToken,
+    },
     method: "POST",
   });
   if (!response.ok) {
@@ -432,81 +416,7 @@ async function readSiteOverview(page: Page, siteId: string) {
   return overview.payload.data as OverviewMetrics;
 }
 
-function waitForCollectResponse(
-  page: Page,
-  expected: { kind: string; pathname: string },
-) {
-  return page.waitForResponse((response) => {
-    if (!response.url().endsWith("/collect")) return false;
-    const request = response.request();
-    if (request.method() !== "POST") return false;
-    try {
-      const payload = JSON.parse(request.postData() || "{}") as {
-        kind?: string;
-        pathname?: string;
-      };
-      return (
-        payload.kind === expected.kind && payload.pathname === expected.pathname
-      );
-    } catch {
-      return false;
-    }
-  });
-}
-
-async function createSiteThroughUi(
-  page: Page,
-  input: {
-    domain: string;
-    name: string;
-    publicSlug: string;
-    teamSlug: string;
-    waitForHydration?: boolean;
-  },
-) {
-  const sitesLoaded = input.waitForHydration
-    ? page.waitForResponse(
-        (response) =>
-          response.url().includes("/api/private/admin/sites") &&
-          response.request().method() === "GET",
-      )
-    : null;
-  await page.goto(`/zh/app/${input.teamSlug}/manage/sites`, {
-    waitUntil: "domcontentloaded",
-  });
-  if (sitesLoaded) expect((await sitesLoaded).status()).toBe(200);
-  await expect(page.locator("#admin-site-name")).toBeVisible();
-  await page.locator("#admin-site-name").fill(input.name);
-  await page.locator("#admin-site-domain").fill(input.domain);
-  await page.locator("#admin-site-public-slug").fill(input.publicSlug);
-  const created = page.waitForResponse(
-    (response) =>
-      response.url().includes("/api/private/admin/sites") &&
-      response.request().method() === "POST",
-  );
-  await page
-    .locator("#admin-site-name")
-    .locator("xpath=ancestor::form")
-    .locator('button[type="submit"]')
-    .click();
-  const createResponse = await created;
-  expect(createResponse.status()).toBe(200);
-  const payload = (await createResponse.json()) as ApiEnvelope<Site>;
-  expect(payload).toMatchObject({
-    data: { domain: input.domain, name: input.name },
-    ok: true,
-  });
-  const routeSlug = input.domain
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  await expect(page).toHaveURL(
-    new RegExp(`/zh/app/${input.teamSlug}/${routeSlug}/settings$`),
-  );
-}
-
-test.describe.serial("release E2E flow", () => {
+test.describe.serial("InsightFlare E2E", () => {
   test("1. bootstrap administrator can authenticate with a real session", async ({
     page,
   }) => {
