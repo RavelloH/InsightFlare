@@ -287,6 +287,44 @@ describe("admin bot analytics handlers", () => {
     expect(parseFailed.status).toBe(400);
   });
 
+  it("fails closed when an E2E run has no local Cloudflare Analytics URL", async () => {
+    const encrypted = await import("@/lib/edge/secret-encryption").then(
+      ({ encryptBotAnalyticsSecret }) =>
+        encryptBotAnalyticsSecret(
+          { MAIN_SECRET: "main-secret" },
+          "cf_reader_token",
+        ),
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const env = {
+      ...createEnv([
+        statement({
+          first: row({
+            apiTokenEncrypted: encrypted,
+            apiTokenHint: "••••oken",
+            configured: true,
+          }),
+        }),
+      ]),
+      INSIGHTFLARE_E2E: "1",
+    } as Env;
+
+    const response = await handleBotAnalyticsAdmin(
+      request("/api/private/admin/bot-analytics"),
+      env,
+      new URL("https://app.test/api/private/admin/bot-analytics"),
+    );
+    const body = await jsonOf(response);
+
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({
+      error: expect.objectContaining({
+        code: "e2e_analytics_mock_url_required",
+      }),
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("queries Analytics Engine and maps bot rows with site metadata", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const encrypted = await import("@/lib/edge/secret-encryption").then(

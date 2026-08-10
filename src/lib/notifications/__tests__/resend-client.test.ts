@@ -55,6 +55,25 @@ describe("sendResendEmailWithRetry", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("fails closed when an E2E run has no local Resend mock URL", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    const result = await sendResendEmailWithRetry({
+      apiKey: "re_secret",
+      body: payload,
+      fetchImpl,
+      requireApiUrl: true,
+    });
+
+    expect(result).toMatchObject({
+      attempts: 0,
+      errorMessage: "E2E Resend mock URL is required",
+      ok: false,
+      reason: "network_failed",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("retries a network failure and succeeds on the second attempt", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()

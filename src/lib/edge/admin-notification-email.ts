@@ -203,6 +203,7 @@ export async function handleNotificationEmailTestAdmin(
         ? env.INSIGHTFLARE_E2E_RESEND_API_URL
         : undefined,
     body: emailBody,
+    requireApiUrl: env.INSIGHTFLARE_E2E === "1",
     ...options,
   });
 

@@ -98,8 +98,23 @@ export async function sendResendEmailWithRetry(input: {
   fetchImpl?: typeof fetch;
   deadlineMs?: number;
   maxAttempts?: number;
+  requireApiUrl?: boolean;
 }): Promise<ResendSendResult> {
   const startedAt = Date.now();
+  const configuredApiUrl = input.apiUrl?.trim();
+  if (input.requireApiUrl && !configuredApiUrl) {
+    return {
+      ok: false,
+      status: 0,
+      payload: {},
+      providerMessageId: "",
+      errorMessage: "E2E Resend mock URL is required",
+      durationMs: Date.now() - startedAt,
+      attempts: 0,
+      retryCount: 0,
+      reason: "network_failed",
+    };
+  }
   const deadlineAt =
     startedAt + Math.max(500, input.deadlineMs ?? DEFAULT_RETRY_DEADLINE_MS);
   const maxAttempts = Math.max(
@@ -107,7 +122,7 @@ export async function sendResendEmailWithRetry(input: {
     Math.trunc(input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS),
   );
   const fetchImpl = input.fetchImpl ?? fetch.bind(globalThis);
-  const apiUrl = input.apiUrl || RESEND_EMAILS_API_URL;
+  const apiUrl = configuredApiUrl || RESEND_EMAILS_API_URL;
   let attempts = 0;
   let status = 0;
   let payload: Record<string, unknown> = {};

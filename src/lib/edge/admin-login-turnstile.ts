@@ -165,6 +165,7 @@ export async function handleLoginTurnstileTestAdmin(
     return bad("Turnstile token is required", "turnstile_required", req);
 
   const result = await verifyTurnstileToken({
+    requireSiteverifyUrl: env.INSIGHTFLARE_E2E === "1",
     secret: secretKey,
     token: turnstileToken,
     siteverifyUrl:

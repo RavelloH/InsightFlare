@@ -19,6 +19,23 @@ describe("Turnstile Siteverify", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("fails closed when an E2E run has no local siteverify URL", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      verifyTurnstileToken({
+        requireSiteverifyUrl: true,
+        secret: "secret",
+        token: "token",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "network_error",
+      errorCodes: [],
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("returns success for valid Siteverify responses", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       Response.json({ success: true, hostname: "app.test" }),

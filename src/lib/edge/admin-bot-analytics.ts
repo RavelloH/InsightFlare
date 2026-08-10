@@ -35,10 +35,10 @@ const MAX_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 const CF_ANALYTICS_ENGINE_SQL_ENDPOINT =
   "https://api.cloudflare.com/client/v4/accounts";
 
-function analyticsEngineSqlEndpoint(env: Env): string {
+function analyticsEngineSqlEndpoint(env: Env): string | null {
   if (env.INSIGHTFLARE_E2E === "1") {
     const mockUrl = env.INSIGHTFLARE_E2E_CLOUDFLARE_API_URL?.trim();
-    if (mockUrl) return mockUrl.replace(/\/+$/, "");
+    return mockUrl ? mockUrl.replace(/\/+$/, "") : null;
   }
   return CF_ANALYTICS_ENGINE_SQL_ENDPOINT;
 }
@@ -1371,6 +1371,13 @@ export async function handleBotAnalyticsAdmin(
 
   const generatedAt = Date.now();
   const analyticsApiUrl = analyticsEngineSqlEndpoint(env);
+  if (!analyticsApiUrl) {
+    return bad(
+      "E2E Cloudflare Analytics Engine mock URL is required",
+      "e2e_analytics_mock_url_required",
+      req,
+    );
+  }
   const timeWindow = parseTimeWindow(url, generatedAt);
   const { from, to, minutes, interval, bucketMs, timeZone } = timeWindow;
   const limit = parseLimit(url);

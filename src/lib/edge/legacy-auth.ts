@@ -163,6 +163,7 @@ export async function handleLegacyAuthLogin(
     }
 
     const result = await verifyTurnstileToken({
+      requireSiteverifyUrl: env.INSIGHTFLARE_E2E === "1",
       secret,
       token: turnstileToken,
       remoteIp: requestRemoteIp(request),

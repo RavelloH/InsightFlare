@@ -39,6 +39,10 @@ function ssrMapStubs() {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const isE2E = process.env.INSIGHTFLARE_E2E === "1";
+  const e2eGithubApiBase = process.env.INSIGHTFLARE_E2E_GITHUB_API_BASE;
+  if (isE2E && !e2eGithubApiBase) {
+    throw new Error("INSIGHTFLARE_E2E_GITHUB_API_BASE is required for E2E.");
+  }
   const demoMode =
     !isE2E &&
     (mode === "demo" || (process.env.DEMO_MODE ?? env.DEMO_MODE) === "1")
@@ -62,8 +66,7 @@ export default defineConfig(({ mode }) => {
       ),
       "import.meta.env.VITE_DEMO_MODE": JSON.stringify(demoMode),
       "import.meta.env.VITE_GITHUB_API_BASE": JSON.stringify(
-        process.env.INSIGHTFLARE_E2E_GITHUB_API_BASE ||
-          "https://api.github.com",
+        e2eGithubApiBase || "https://api.github.com",
       ),
       "import.meta.env.VITE_INSIGHTFLARE_ANALYTICS_ENGINE_DISABLED":
         JSON.stringify("0"),

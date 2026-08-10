@@ -161,8 +161,6 @@ MAIN_SECRET = ${tomlString(input.mainSecret)}
 BOOTSTRAP_ADMIN_PASSWORD = ${tomlString(input.adminPassword)}
 SESSION_WINDOW_MINUTES = "30"
 SCRIPT_CACHE_TTL_SECONDS = "600"
-PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm"
-
 [[durable_objects.bindings]]
 name = "INGEST_DO"
 class_name = "IngestDurableObject"
@@ -604,6 +602,43 @@ function childExitError(
   return new Error(`${name} ${reason}.`);
 }
 
+function interruptionError(signal: NodeJS.Signals): Error {
+  return new Error(`E2E interrupted by ${signal}.`);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const reason = signal.reason;
+  if (reason instanceof Error) throw reason;
+  throw new Error("E2E was interrupted.");
+}
+
+async function terminateChild(child: ChildProcess): Promise<void> {
+  if (!child.pid || child.exitCode !== null) return;
+  child.kill();
+  await Promise.race([
+    new Promise<void>((resolve) => child.once("close", () => resolve())),
+    new Promise((resolve) => setTimeout(resolve, 5_000)),
+  ]);
+  if (child.exitCode !== null) return;
+
+  if (process.platform === "win32") {
+    await new Promise<void>((resolve) => {
+      const killer = spawn(
+        "taskkill",
+        ["/pid", String(child.pid), "/t", "/f"],
+        {
+          stdio: "ignore",
+        },
+      );
+      killer.once("close", () => resolve());
+      killer.once("error", () => resolve());
+    });
+    return;
+  }
+  child.kill("SIGKILL");
+}
+
 async function migrationFileCount(): Promise<number> {
   const entries = await fs.readdir(path.join(ROOT_DIR, "migrations"), {
     withFileTypes: true,
@@ -651,7 +686,9 @@ async function runCommand(input: {
   name: string;
   onOutput?: (chunk: Buffer) => void;
   showOutput?: boolean;
+  signal?: AbortSignal;
 }): Promise<void> {
+  throwIfAborted(input.signal);
   const log = await fs.open(input.logPath, "w");
   try {
     await new Promise<void>((resolve, reject) => {
@@ -660,6 +697,11 @@ async function runCommand(input: {
         env: input.env,
         stdio: ["ignore", "pipe", "pipe"],
       });
+      const abort = () => {
+        void terminateChild(child);
+      };
+      if (input.signal?.aborted) abort();
+      else input.signal?.addEventListener("abort", abort, { once: true });
       child.stdout?.on("data", (chunk: Buffer) => {
         if (input.showOutput) process.stdout.write(chunk);
         rlog.file.info(chunk.toString());
@@ -674,6 +716,7 @@ async function runCommand(input: {
       });
       child.once("error", reject);
       child.once("close", (code, signal) => {
+        input.signal?.removeEventListener("abort", abort);
         if (code === 0) resolve();
         else reject(childExitError(input.name, code, signal));
       });
@@ -741,10 +784,12 @@ async function startProcess(input: {
 async function waitForReady(
   baseURL: string,
   worker: StartedProcess,
+  signal?: AbortSignal,
 ): Promise<void> {
   const deadline = Date.now() + 120_000;
   let lastError = "";
   while (Date.now() < deadline) {
+    throwIfAborted(signal);
     const exited = await Promise.race([
       worker.exited.then(
         () => "stopped",
@@ -761,7 +806,19 @@ async function waitForReady(
     }
 
     try {
-      const response = await fetch(`${baseURL}/healthz`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5_000);
+      const abort = () => controller.abort();
+      signal?.addEventListener("abort", abort, { once: true });
+      let response: Response;
+      try {
+        response = await fetch(`${baseURL}/healthz`, {
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", abort);
+      }
       if (response.ok) return;
       lastError = `health check returned ${response.status}`;
     } catch (error) {
@@ -789,30 +846,8 @@ async function initializeE2eClock(environment: Environment): Promise<void> {
 async function stopProcess(
   processToStop: StartedProcess | null,
 ): Promise<void> {
-  if (!processToStop?.child.pid || processToStop.child.exitCode !== null)
-    return;
-  processToStop.child.kill();
-  await Promise.race([
-    processToStop.exited.catch(() => undefined),
-    new Promise((resolve) => setTimeout(resolve, 5_000)),
-  ]);
-  if (processToStop.child.exitCode !== null) return;
-
-  if (process.platform === "win32") {
-    await new Promise<void>((resolve) => {
-      const killer = spawn(
-        "taskkill",
-        ["/pid", String(processToStop.child.pid), "/t", "/f"],
-        {
-          stdio: "ignore",
-        },
-      );
-      killer.once("close", () => resolve());
-      killer.once("error", () => resolve());
-    });
-    return;
-  }
-  processToStop.child.kill("SIGKILL");
+  if (!processToStop) return;
+  await terminateChild(processToStop.child);
 }
 
 function workerEnvironment(environment: Environment): NodeJS.ProcessEnv {
@@ -836,6 +871,7 @@ function localBin(packageName: string, relativePath: string): string {
 async function runPlaywright(
   environment: Environment,
   options: Options,
+  signal?: AbortSignal,
 ): Promise<void> {
   const args = [
     localBin("@playwright/test", "cli.js"),
@@ -876,6 +912,7 @@ async function runPlaywright(
     logPath: path.join(environment.directory, "logs", "playwright.log"),
     name: "Playwright",
     showOutput: true,
+    signal,
   });
 }
 
@@ -886,11 +923,22 @@ async function main(): Promise<void> {
   let environment: Environment | null = null;
   let succeeded = false;
   const startedAt = Date.now();
+  const shutdown = new AbortController();
+  const requestShutdown = (signal: NodeJS.Signals) => {
+    if (shutdown.signal.aborted) return;
+    rlog.warn(`Received ${signal}; stopping E2E services...`);
+    shutdown.abort(interruptionError(signal));
+    void stopTestSite(testSite);
+    void stopProcess(worker);
+  };
+  process.once("SIGINT", requestShutdown);
+  process.once("SIGTERM", requestShutdown);
 
   try {
     rlog.info("InsightFlare E2E");
     const activeEnvironment = await createEnvironment(options);
     environment = activeEnvironment;
+    throwIfAborted(shutdown.signal);
     rlog.info("Preparing isolated E2E environment...");
     rlog.progress(0, PREPARATION_PROGRESS_MAX);
     rlog.file.info(`E2E run: ${activeEnvironment.id}`);
@@ -922,6 +970,7 @@ async function main(): Promise<void> {
         ),
         name: "D1 migrations",
         onOutput: updateMigrationProgress.update,
+        signal: shutdown.signal,
       }),
     );
     if (!updateMigrationProgress.complete()) {
@@ -940,36 +989,46 @@ async function main(): Promise<void> {
           "tracker-build.log",
         ),
         name: "tracker build",
+        signal: shutdown.signal,
       }),
     );
     rlog.progress(TRACKER_BUILD_PROGRESS, PREPARATION_PROGRESS_MAX);
-    worker = await runPreparationStep("Starting local Worker", async () => {
+    await runPreparationStep("Starting local Worker", async () => {
       const startedWorker = await startProcess({
         args: [localBin("vite", "bin/vite.js"), "dev", "--mode", "development"],
         env,
         logPath: path.join(activeEnvironment.directory, "logs", "worker.log"),
         name: "E2E worker",
       });
-      await waitForReady(activeEnvironment.baseURL, startedWorker);
+      worker = startedWorker;
+      await waitForReady(
+        activeEnvironment.baseURL,
+        startedWorker,
+        shutdown.signal,
+      );
       await initializeE2eClock(activeEnvironment);
-      return startedWorker;
     });
+    throwIfAborted(shutdown.signal);
     testSite = await runPreparationStep("Starting E2E test site", () =>
       startTestSite(activeEnvironment.baseURL, activeEnvironment.testSitePort),
     );
     if (testSite.url !== activeEnvironment.testSiteURL) {
       throw new Error("E2E test site started on an unexpected port.");
     }
+    throwIfAborted(shutdown.signal);
     await writeRunManifest(activeEnvironment, options);
     rlog.progress(PREPARATION_PROGRESS_MAX, PREPARATION_PROGRESS_MAX);
     rlog.success("Test environment is ready.");
     rlog.info("Running Playwright E2E...");
-    await runPlaywright(activeEnvironment, options);
+    await runPlaywright(activeEnvironment, options, shutdown.signal);
+    throwIfAborted(shutdown.signal);
     succeeded = true;
     rlog.success(
       `E2E passed in ${((Date.now() - startedAt) / 1000).toFixed(2)}s.`,
     );
   } finally {
+    process.removeListener("SIGINT", requestShutdown);
+    process.removeListener("SIGTERM", requestShutdown);
     await stopTestSite(testSite);
     await stopProcess(worker);
     if (environment) {

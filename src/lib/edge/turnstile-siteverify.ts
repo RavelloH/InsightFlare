@@ -23,6 +23,7 @@ interface TurnstileSiteverifyPayload {
 }
 
 interface VerifyTurnstileTokenInput {
+  requireSiteverifyUrl?: boolean;
   secret: string;
   token: string;
   remoteIp?: string;
@@ -59,6 +60,7 @@ function hostnameMatches(actual: string, expected: string): boolean {
 }
 
 export async function verifyTurnstileToken({
+  requireSiteverifyUrl,
   secret,
   token,
   remoteIp,
@@ -69,6 +71,10 @@ export async function verifyTurnstileToken({
   if (!responseToken) {
     return { ok: false, reason: "missing_token", errorCodes: [] };
   }
+  const configuredSiteverifyUrl = siteverifyUrl?.trim();
+  if (requireSiteverifyUrl && !configuredSiteverifyUrl) {
+    return { ok: false, reason: "network_error", errorCodes: [] };
+  }
 
   const body = new URLSearchParams();
   body.set("secret", secret);
@@ -77,7 +83,7 @@ export async function verifyTurnstileToken({
 
   let response: Response;
   try {
-    response = await fetch(siteverifyUrl || SITEVERIFY_URL, {
+    response = await fetch(configuredSiteverifyUrl || SITEVERIFY_URL, {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
