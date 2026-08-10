@@ -66,11 +66,15 @@ export async function apiV1Request<T>(
   );
 }
 
-export function siteQueryPath(siteId: string, path: string): string {
+export function siteQueryPath(
+  siteId: string,
+  path: string,
+  toMs: number,
+): string {
   const params = new URLSearchParams({
     from: "0",
     siteId,
-    to: String(Date.now()),
+    to: String(toMs),
   });
   return `/api/private/${path}?${params.toString()}`;
 }
@@ -89,11 +93,15 @@ export function siteQueryPathForWindow(
   return `/api/private/${path}?${params.toString()}`;
 }
 
-export async function readSiteOverview(page: Page, siteId: string) {
+export async function readSiteOverview(
+  page: Page,
+  siteId: string,
+  toMs: number,
+) {
   const overview = await apiRequest<OverviewMetrics>(
     page,
     "GET",
-    siteQueryPath(siteId, "overview"),
+    siteQueryPath(siteId, "overview", toMs),
     undefined,
     "no-store",
   );

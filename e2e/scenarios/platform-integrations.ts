@@ -6,7 +6,7 @@ import type { ResendMockMode } from "../support/control";
 
 export function registerPlatformIntegrationScenarios(input: {
   adminPassword: string;
-  e2eNowMs: number;
+  getNowMs: () => number;
   readMockMailbox: () => Promise<unknown[]>;
   setResendMockMode: (mode: ResendMockMode) => Promise<void>;
 }) {
@@ -61,7 +61,7 @@ export function registerPlatformIntegrationScenarios(input: {
     }>(
       page,
       "GET",
-      `/api/private/admin/bot-analytics?from=${input.e2eNowMs - 3_600_000}&to=${input.e2eNowMs}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
+      `/api/private/admin/bot-analytics?from=${input.getNowMs() - 3_600_000}&to=${input.getNowMs()}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
     );
     expect(observed.status).toBe(200);
     expect(observed.payload).toMatchObject({
@@ -86,7 +86,7 @@ export function registerPlatformIntegrationScenarios(input: {
       const rejected = await apiRequest<unknown>(
         page,
         "GET",
-        `/api/private/admin/bot-analytics?from=${input.e2eNowMs - 3_600_000}&to=${input.e2eNowMs}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
+        `/api/private/admin/bot-analytics?from=${input.getNowMs() - 3_600_000}&to=${input.getNowMs()}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
       );
       expect(rejected.status).toBe(400);
       expect(JSON.stringify(rejected.payload)).toContain(

@@ -14,8 +14,8 @@ import {
   apiRequest,
   apiV1Request,
   type OverviewMetrics,
-  readSiteOverview,
-  siteQueryPath,
+  readSiteOverview as readSiteOverviewAt,
+  siteQueryPath as siteQueryPathAt,
   siteQueryPathForWindow,
 } from "../support/api";
 import {
@@ -194,6 +194,7 @@ const ownerBPassword = "e2e-owner-b-password";
 const memberAPassword = "e2e-member-a-password";
 const restrictedAPassword = "e2e-restricted-a-password";
 const outsiderPassword = "e2e-outsider-password";
+let currentE2eNowMs = e2eNowMs;
 
 const seed: SeedManifest = {
   apiKeys: {},
@@ -225,6 +226,38 @@ async function saveManifest() {
 
 const { e2eControlRequest, readMockMailbox, setResendMockMode } =
   createE2eControlClient({ controlToken, mockControlToken, testSiteURL });
+
+function siteQueryPath(siteId: string, path: string): string {
+  return siteQueryPathAt(siteId, path, browserNowMs());
+}
+
+async function readSiteOverview(page: Page, siteId: string) {
+  return readSiteOverviewAt(page, siteId, browserNowMs());
+}
+
+// Tracker payload timestamps originate in the real browser. Keep this distinct
+// from the E2E application clock, which drives sessions and scheduled work.
+function browserNowMs(): number {
+  return Date.now();
+}
+
+async function advanceE2eClock(page: Page, deltaMs: number): Promise<number> {
+  const advanced = await e2eControlRequest<{ nowMs: number }>(
+    page,
+    "POST",
+    "clock/advance",
+    { deltaMs },
+  );
+  expect(advanced.status).toBe(200);
+  const nowMs = advanced.payload?.data?.nowMs;
+  if (typeof nowMs !== "number" || !Number.isFinite(nowMs)) {
+    throw new Error("E2E clock advance did not return a timestamp.");
+  }
+  currentE2eNowMs = nowMs;
+  seed.clock.nowMs = nowMs;
+  await saveManifest();
+  return nowMs;
+}
 
 async function seedHistoricalVisits(
   siteId: string,
@@ -1263,22 +1296,25 @@ test.describe.serial("InsightFlare E2E", () => {
       await botContext.close();
     }
 
-    const invalidCollectStatus = await page.evaluate(async (siteId) => {
-      const response = await fetch("/collect", {
-        body: JSON.stringify({
-          collectToken: "not-a-valid-e2e-collect-token",
-          hostname: "127.0.0.1",
-          kind: "pageview",
-          pathname: "/invalid-token",
-          siteId,
-          timestamp: Date.now(),
-          visitId: crypto.randomUUID(),
-        }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-      return response.status;
-    }, siteA?.id || "");
+    const invalidCollectStatus = await page.evaluate(
+      async ({ siteId, timestamp }) => {
+        const response = await fetch("/collect", {
+          body: JSON.stringify({
+            collectToken: "not-a-valid-e2e-collect-token",
+            hostname: "127.0.0.1",
+            kind: "pageview",
+            pathname: "/invalid-token",
+            siteId,
+            timestamp,
+            visitId: crypto.randomUUID(),
+          }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        });
+        return response.status;
+      },
+      { siteId: siteA?.id || "", timestamp: browserNowMs() },
+    );
     expect(invalidCollectStatus).toBe(204);
 
     await flushSite(page, siteA?.id || "");
@@ -1486,8 +1522,8 @@ test.describe.serial("InsightFlare E2E", () => {
 
     await signIn(page, "owner-a", ownerAPassword);
     const analyticsKey = analyticsRead?.secret || "";
-    const fromMs = Date.now() - 60 * 60 * 1000;
-    const toMs = Date.now();
+    const toMs = browserNowMs();
+    const fromMs = toMs - 60 * 60 * 1000;
     const privateOverview = await apiRequest<OverviewMetrics>(
       page,
       "GET",
@@ -1601,9 +1637,7 @@ test.describe.serial("InsightFlare E2E", () => {
       lastCheckedAt: null,
     };
     await saveManifest();
-    await e2eControlRequest(page, "POST", "clock/advance", {
-      deltaMs: 30 * 60_000,
-    });
+    await advanceE2eClock(page, 30 * 60_000);
     const scheduled = await e2eControlRequest(page, "POST", "scheduled/run");
     expect(scheduled.status).toBe(200);
     const messages = await apiRequest<{ messages: Array<{ ruleId: string }> }>(
@@ -1666,9 +1700,7 @@ test.describe.serial("InsightFlare E2E", () => {
     expect(disabled.status).toBe(200);
     expect(disabled.payload.data?.enabled).toBe(false);
     const lastCheckedAt = disabled.payload.data?.lastCheckedAt;
-    await e2eControlRequest(page, "POST", "clock/advance", {
-      deltaMs: 30 * 60_000,
-    });
+    await advanceE2eClock(page, 30 * 60_000);
     const scheduled = await e2eControlRequest(page, "POST", "scheduled/run");
     expect(scheduled.status).toBe(200);
 
@@ -1733,9 +1765,7 @@ test.describe.serial("InsightFlare E2E", () => {
       status: "triggered",
     });
 
-    await e2eControlRequest(page, "POST", "clock/advance", {
-      deltaMs: 60 * 60_000,
-    });
+    await advanceE2eClock(page, 60 * 60_000);
     const scheduled = await e2eControlRequest(page, "POST", "scheduled/run");
     expect(scheduled.status).toBe(200);
     const scheduledMessages = await apiRequest<{
@@ -1853,7 +1883,7 @@ test.describe.serial("InsightFlare E2E", () => {
 
   registerPlatformIntegrationScenarios({
     adminPassword,
-    e2eNowMs,
+    getNowMs: () => currentE2eNowMs,
     readMockMailbox,
     setResendMockMode,
   });
@@ -1901,7 +1931,11 @@ test.describe.serial("InsightFlare E2E", () => {
       "clock",
     );
     expect(before.status).toBe(200);
-    expect(before.payload?.data?.nowMs).toBe(e2eNowMs + 2 * 60 * 60_000);
+    const beforeNowMs = before.payload?.data?.nowMs;
+    expect(beforeNowMs).toBe(e2eNowMs + 2 * 60 * 60_000);
+    if (typeof beforeNowMs !== "number") {
+      throw new Error("E2E clock did not return a timestamp.");
+    }
 
     const collectToken = await page.evaluate(async (siteId) => {
       const script = await fetch(
@@ -1916,13 +1950,8 @@ test.describe.serial("InsightFlare E2E", () => {
       page,
       siteA?.id || "",
     );
-    const tokenExpiredAt = await e2eControlRequest<{ nowMs: number }>(
-      page,
-      "POST",
-      "clock/advance",
-      { deltaMs: 13 * 60 * 60 * 1000 },
-    );
-    expect(tokenExpiredAt.status).toBe(200);
+    const tokenExpiredAt = await advanceE2eClock(page, 13 * 60 * 60 * 1000);
+    expect(tokenExpiredAt).toBe(beforeNowMs + 13 * 60 * 60 * 1000);
 
     const expiredCollectStatus = await page.evaluate(
       async ({ collectToken, siteId, timestamp }) => {
@@ -1949,17 +1978,9 @@ test.describe.serial("InsightFlare E2E", () => {
       analyticsBeforeExpiredToken,
     );
 
-    const advanced = await e2eControlRequest<{ nowMs: number }>(
-      page,
-      "POST",
-      "clock/advance",
-      { deltaMs: 31 * 24 * 60 * 60 * 1000 },
-    );
-    expect(advanced.status).toBe(200);
-    expect(advanced.payload?.data?.nowMs).toBe(
-      (before.payload?.data?.nowMs || 0) +
-        13 * 60 * 60 * 1000 +
-        31 * 24 * 60 * 60 * 1000,
+    const advanced = await advanceE2eClock(page, 31 * 24 * 60 * 60 * 1000);
+    expect(advanced).toBe(
+      beforeNowMs + 13 * 60 * 60 * 1000 + 31 * 24 * 60 * 60 * 1000,
     );
 
     const expired = await apiRequest<unknown>(
