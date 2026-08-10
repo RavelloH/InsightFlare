@@ -10,10 +10,21 @@ import {
   type HistorySeedManifest,
 } from "../../scripts/e2e/seed-history";
 import {
+  type ApiEnvelope,
+  apiRequest,
+  apiV1Request,
+  type OverviewMetrics,
+  readSiteOverview,
+  siteQueryPath,
+  siteQueryPathForWindow,
+} from "../support/api";
+import {
   createSiteThroughUi,
   signIn,
   waitForCollectResponse,
 } from "../support/browser";
+import { createE2eControlClient } from "../support/control";
+import { registerPlatformIntegrationScenarios } from "./platform-integrations";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,13 +35,6 @@ function requiredEnvironmentValue(name: string): string {
   }
   return value;
 }
-
-type ApiEnvelope<T> = {
-  data?: T;
-  error?: string;
-  message?: string;
-  ok?: boolean;
-};
 
 type User = {
   email: string;
@@ -111,31 +115,6 @@ type NotificationEmailConfig = {
   enabled: boolean;
   fromEmail: string;
   resend: { apiKeyHint: string; configured: boolean };
-};
-
-type MockEmail = {
-  authorization: string;
-  body: {
-    from?: string;
-    html?: string;
-    subject?: string;
-    text?: string;
-    to?: string[];
-  };
-  id: string;
-};
-
-type ResendMockMode =
-  | "bad_request"
-  | "rate_limited"
-  | "server_error"
-  | "success";
-
-type OverviewMetrics = {
-  bounces: number;
-  sessions: number;
-  views: number;
-  visitors: number;
 };
 
 type DashboardPage = { pathname: string; sessions: number; views: number };
@@ -244,126 +223,8 @@ async function saveManifest() {
   await writeFile(manifestPath, `${JSON.stringify(seed, null, 2)}\n`);
 }
 
-async function apiRequest<T>(
-  page: Page,
-  method: "DELETE" | "GET" | "POST" | "PATCH",
-  path: string,
-  body?: Record<string, unknown>,
-  cache?: RequestCache,
-) {
-  return page.evaluate(
-    async ({ body, cache, method, path }) => {
-      const response = await fetch(path, {
-        cache,
-        method,
-        credentials: "include",
-        headers: body ? { "content-type": "application/json" } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      return {
-        payload: (await response.json()) as ApiEnvelope<T>,
-        status: response.status,
-      };
-    },
-    { body, cache, method, path },
-  );
-}
-
-async function apiV1Request<T>(
-  page: Page,
-  method: "GET" | "POST",
-  path: string,
-  apiKey: string,
-  body?: Record<string, unknown>,
-) {
-  return page.evaluate(
-    async ({ apiKey, body, method, path }) => {
-      const response = await fetch(path, {
-        body: body ? JSON.stringify(body) : undefined,
-        credentials: "omit",
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          ...(body ? { "content-type": "application/json" } : {}),
-        },
-        method,
-      });
-      return {
-        payload: (await response.json()) as ApiEnvelope<T>,
-        status: response.status,
-      };
-    },
-    { apiKey, body, method, path },
-  );
-}
-
-async function e2eControlRequest<T>(
-  page: Page,
-  method: "GET" | "POST",
-  path: string,
-  body?: Record<string, unknown>,
-  token = controlToken,
-) {
-  const response = await page.request.fetch(`/__e2e__/${path}`, {
-    data: body,
-    headers: {
-      ...(body ? { "content-type": "application/json" } : {}),
-      "x-insightflare-e2e-token": token,
-    },
-    method,
-  });
-  return {
-    payload: (await response.json().catch(() => null)) as ApiEnvelope<T> | null,
-    status: response.status(),
-  };
-}
-
-async function readMockMailbox(): Promise<MockEmail[]> {
-  const response = await fetch(`${testSiteURL}/__e2e__/mailbox`, {
-    headers: { "x-insightflare-e2e-token": mockControlToken },
-  });
-  if (!response.ok) {
-    throw new Error(`Unable to read E2E mailbox: ${response.status}`);
-  }
-  const payload = (await response.json()) as { messages?: MockEmail[] };
-  return payload.messages ?? [];
-}
-
-async function setResendMockMode(mode: ResendMockMode): Promise<void> {
-  const response = await fetch(`${testSiteURL}/__e2e__/resend/mode`, {
-    body: JSON.stringify({ mode }),
-    headers: {
-      "content-type": "application/json",
-      "x-insightflare-e2e-token": mockControlToken,
-    },
-    method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`Unable to set E2E Resend mode: ${response.status}`);
-  }
-}
-
-function siteQueryPath(siteId: string, path: string): string {
-  const params = new URLSearchParams({
-    from: "0",
-    siteId,
-    to: String(Date.now()),
-  });
-  return `/api/private/${path}?${params.toString()}`;
-}
-
-function siteQueryPathForWindow(
-  siteId: string,
-  path: string,
-  from: number,
-  to: number,
-): string {
-  const params = new URLSearchParams({
-    from: String(from),
-    siteId,
-    to: String(to),
-  });
-  return `/api/private/${path}?${params.toString()}`;
-}
+const { e2eControlRequest, readMockMailbox, setResendMockMode } =
+  createE2eControlClient({ controlToken, mockControlToken, testSiteURL });
 
 async function seedHistoricalVisits(
   siteId: string,
@@ -400,20 +261,6 @@ async function flushSite(page: Page, siteId: string) {
   );
   expect(flushed.status).toBe(200);
   expect(flushed.payload?.data).toEqual({ flushed: true, siteId });
-}
-
-async function readSiteOverview(page: Page, siteId: string) {
-  const overview = await apiRequest<OverviewMetrics>(
-    page,
-    "GET",
-    siteQueryPath(siteId, "overview"),
-    undefined,
-    "no-store",
-  );
-  expect(overview.status).toBe(200);
-  expect(overview.payload.ok).toBe(true);
-  expect(overview.payload.data).toBeDefined();
-  return overview.payload.data as OverviewMetrics;
 }
 
 test.describe.serial("InsightFlare E2E", () => {
@@ -2004,197 +1851,11 @@ test.describe.serial("InsightFlare E2E", () => {
     });
   });
 
-  test("20. Resend 4xx failures are surfaced without a false delivery success", async ({
-    page,
-  }) => {
-    await signIn(page, "admin", adminPassword);
-    await setResendMockMode("bad_request");
-    try {
-      const failed = await apiRequest<unknown>(
-        page,
-        "POST",
-        "/api/private/admin/notification-email/test",
-        { to: "admin@example.test" },
-      );
-      expect(failed.status).toBe(400);
-      const failure = JSON.stringify(failed.payload);
-      expect(failure).toContain("Resend request failed");
-      expect(failure).toContain("E2E forced Resend bad_request");
-      expect(await readMockMailbox()).toHaveLength(2);
-    } finally {
-      await setResendMockMode("success");
-    }
-  });
-
-  test("21. request observation reads normal and abnormal events from the local Cloudflare mock", async ({
-    page,
-  }) => {
-    await signIn(page, "admin", adminPassword);
-    const configured = await apiRequest<{
-      accountId: string;
-      apiTokenConfigured: boolean;
-    }>(page, "PATCH", "/api/private/admin/bot-analytics-config", {
-      accountId: "0123456789abcdef0123456789abcdef",
-      apiToken: "e2e-cloudflare-token",
-    });
-    expect(configured.status).toBe(200);
-    expect(configured.payload.data).toMatchObject({
-      accountId: "0123456789abcdef0123456789abcdef",
-      apiTokenConfigured: true,
-    });
-
-    const observed = await apiRequest<{
-      configured: boolean;
-      events: Array<{ confidence: string; rayId: string }>;
-      normalEvents: Array<{ pathname: string; traceId: string }>;
-      overview: {
-        abnormalRequests: number;
-        normalRequests: number;
-        p95LatencyMs: number | null;
-      };
-    }>(
-      page,
-      "GET",
-      `/api/private/admin/bot-analytics?from=${e2eNowMs - 3_600_000}&to=${e2eNowMs}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
-    );
-    expect(observed.status).toBe(200);
-    expect(observed.payload).toMatchObject({
-      configured: true,
-      events: [{ confidence: "high", rayId: "e2e-bot-ray" }],
-      normalEvents: [{ pathname: "/home", traceId: "e2e-normal-trace" }],
-      overview: {
-        abnormalRequests: 2,
-        normalRequests: 3,
-        p95LatencyMs: 50,
-      },
-    });
-
-    const rejectedConfig = await apiRequest<unknown>(
-      page,
-      "PATCH",
-      "/api/private/admin/bot-analytics-config",
-      { apiToken: "e2e-rejected-cloudflare-token" },
-    );
-    expect(rejectedConfig.status).toBe(200);
-    try {
-      const rejected = await apiRequest<unknown>(
-        page,
-        "GET",
-        `/api/private/admin/bot-analytics?from=${e2eNowMs - 3_600_000}&to=${e2eNowMs}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
-      );
-      expect(rejected.status).toBe(400);
-      expect(JSON.stringify(rejected.payload)).toContain(
-        "E2E Cloudflare token rejected",
-      );
-    } finally {
-      const restored = await apiRequest<unknown>(
-        page,
-        "PATCH",
-        "/api/private/admin/bot-analytics-config",
-        { apiToken: "e2e-cloudflare-token" },
-      );
-      expect(restored.status).toBe(200);
-    }
-
-    await page.goto("/zh/app/manage/request-observation", {
-      waitUntil: "domcontentloaded",
-    });
-    await expect(page.locator('[data-geo-map-mode="3d"]')).toBeVisible({
-      timeout: 15_000,
-    });
-  });
-
-  test("22. administrator version updates render local release data in SSR and the client", async ({
-    page,
-  }) => {
-    await signIn(page, "admin", adminPassword);
-    const response = await page.request.get("/zh/app/manage/version-updates");
-    expect(response.status()).toBe(200);
-    const html = await response.text();
-    expect(html).toContain("当前版本");
-    expect(html).toContain("最新版本");
-    expect(html).toContain("当前提交");
-    expect(html).toContain("发布数");
-    expect(html).toContain("更新说明");
-    expect(html).toContain("查看详细变更");
-    expect(html).toContain("E2E mock release notes");
-
-    await page.goto("/zh/app/manage/version-updates", {
-      waitUntil: "domcontentloaded",
-    });
-    await expect(page.getByText("E2E mock release notes")).toBeVisible();
-  });
-
-  test("23. local Turnstile mock protects login and verifies administrator settings", async ({
-    page,
-  }) => {
-    await signIn(page, "admin", adminPassword);
-    const configured = await apiRequest<{
-      enabled: boolean;
-      secretKeyConfigured: boolean;
-      siteKey: string;
-    }>(page, "PATCH", "/api/private/admin/login-turnstile", {
-      enabled: true,
-      secretKey: "e2e-turnstile-secret",
-      siteKey: "e2e-turnstile-site-key",
-    });
-    expect(configured.status).toBe(200);
-    expect(configured.payload.data).toMatchObject({
-      enabled: true,
-      secretKeyConfigured: true,
-      siteKey: "e2e-turnstile-site-key",
-    });
-    const verification = await apiRequest<{ verified: boolean }>(
-      page,
-      "POST",
-      "/api/private/admin/login-turnstile/test",
-      {
-        secretKey: "e2e-turnstile-secret",
-        siteKey: "e2e-turnstile-site-key",
-        turnstileToken: "e2e-turnstile-pass",
-      },
-    );
-    expect(verification.status).toBe(200);
-    expect(verification.payload.data).toMatchObject({ verified: true });
-
-    const login = async (turnstileToken?: string) =>
-      page.evaluate(
-        async ({ password, turnstileToken }) => {
-          const response = await fetch("/api/public/session", {
-            body: JSON.stringify({
-              password,
-              ...(turnstileToken ? { turnstileToken } : {}),
-              username: "admin",
-            }),
-            headers: { "content-type": "application/json" },
-            method: "POST",
-          });
-          return {
-            payload: (await response.json()) as {
-              error?: { code?: string };
-              ok?: boolean;
-            },
-            status: response.status,
-          };
-        },
-        { password: adminPassword, turnstileToken },
-      );
-    const missing = await login();
-    expect(missing.status).toBe(400);
-    expect(missing.payload.error?.code).toBe("turnstile_required");
-    const invalid = await login("invalid-token");
-    expect(invalid.status).toBe(400);
-    expect(invalid.payload.error?.code).toBe("turnstile_failed");
-    const verified = await login("e2e-turnstile-pass");
-    expect(verified.status).toBe(200);
-    expect(verified.payload.ok).toBe(true);
-    const disabled = await apiRequest<{ enabled: boolean }>(
-      page,
-      "DELETE",
-      "/api/private/admin/login-turnstile",
-    );
-    expect(disabled.status).toBe(200);
-    expect(disabled.payload.data).toMatchObject({ enabled: false });
+  registerPlatformIntegrationScenarios({
+    adminPassword,
+    e2eNowMs,
+    readMockMailbox,
+    setResendMockMode,
   });
 
   test("24. E2E clock is token-protected and can expire an existing session", async ({

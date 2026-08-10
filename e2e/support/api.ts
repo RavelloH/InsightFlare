@@ -1,0 +1,104 @@
+import { expect, type Page } from "@playwright/test";
+
+export type ApiEnvelope<T> = {
+  data?: T;
+  error?: string;
+  message?: string;
+  ok?: boolean;
+};
+
+export type OverviewMetrics = {
+  bounces: number;
+  sessions: number;
+  views: number;
+  visitors: number;
+};
+
+export async function apiRequest<T>(
+  page: Page,
+  method: "DELETE" | "GET" | "POST" | "PATCH",
+  path: string,
+  body?: Record<string, unknown>,
+  cache?: RequestCache,
+) {
+  return page.evaluate(
+    async ({ body, cache, method, path }) => {
+      const response = await fetch(path, {
+        cache,
+        method,
+        credentials: "include",
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return {
+        payload: (await response.json()) as ApiEnvelope<T>,
+        status: response.status,
+      };
+    },
+    { body, cache, method, path },
+  );
+}
+
+export async function apiV1Request<T>(
+  page: Page,
+  method: "GET" | "POST",
+  path: string,
+  apiKey: string,
+  body?: Record<string, unknown>,
+) {
+  return page.evaluate(
+    async ({ apiKey, body, method, path }) => {
+      const response = await fetch(path, {
+        body: body ? JSON.stringify(body) : undefined,
+        credentials: "omit",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          ...(body ? { "content-type": "application/json" } : {}),
+        },
+        method,
+      });
+      return {
+        payload: (await response.json()) as ApiEnvelope<T>,
+        status: response.status,
+      };
+    },
+    { apiKey, body, method, path },
+  );
+}
+
+export function siteQueryPath(siteId: string, path: string): string {
+  const params = new URLSearchParams({
+    from: "0",
+    siteId,
+    to: String(Date.now()),
+  });
+  return `/api/private/${path}?${params.toString()}`;
+}
+
+export function siteQueryPathForWindow(
+  siteId: string,
+  path: string,
+  from: number,
+  to: number,
+): string {
+  const params = new URLSearchParams({
+    from: String(from),
+    siteId,
+    to: String(to),
+  });
+  return `/api/private/${path}?${params.toString()}`;
+}
+
+export async function readSiteOverview(page: Page, siteId: string) {
+  const overview = await apiRequest<OverviewMetrics>(
+    page,
+    "GET",
+    siteQueryPath(siteId, "overview"),
+    undefined,
+    "no-store",
+  );
+  expect(overview.status).toBe(200);
+  expect(overview.payload.ok).toBe(true);
+  expect(overview.payload.data).toBeDefined();
+  return overview.payload.data as OverviewMetrics;
+}
