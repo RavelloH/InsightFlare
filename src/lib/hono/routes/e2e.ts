@@ -82,32 +82,35 @@ e2eRoutes.post("/clock/advance", async (c) => {
 });
 
 e2eRoutes.post("/scheduled/run", async (c) => {
+  const input = await body(c.req.raw);
+  const key = String(input?.key || "");
+  if (key !== "notification_tick" && key !== "visit_hourly_rollup") {
+    return c.json({ ok: false, error: "scheduled task key is required" }, 400);
+  }
   const scheduledAt = appNow();
-  const rollup = getScheduledTaskDefinition("visit_hourly_rollup");
-  const notifications = getScheduledTaskDefinition("notification_tick");
-  await Promise.all([
-    runScheduledTask(
+  const definition = getScheduledTaskDefinition(key);
+  const taskDefinition = {
+    key: definition?.key || key,
+    name:
+      definition?.name ||
+      (key === "visit_hourly_rollup"
+        ? "Hourly visit aggregation"
+        : "Notification dispatch"),
+    triggerType: "cron" as const,
+  };
+  if (key === "visit_hourly_rollup") {
+    await runScheduledTask(c.env, taskDefinition, scheduledAt, ({ logger }) =>
+      runHourlyAggregation(c.env, scheduledAt, { logger }),
+    );
+  } else {
+    await runScheduledTask(
       c.env,
-      {
-        key: rollup?.key || "visit_hourly_rollup",
-        name: rollup?.name || "Hourly visit aggregation",
-        triggerType: "cron",
-      },
-      scheduledAt,
-      ({ logger }) => runHourlyAggregation(c.env, scheduledAt, { logger }),
-    ),
-    runScheduledTask(
-      c.env,
-      {
-        key: notifications?.key || "notification_tick",
-        name: notifications?.name || "Notification dispatch",
-        triggerType: "cron",
-      },
+      taskDefinition,
       scheduledAt,
       runNotificationTick,
-    ),
-  ]);
-  return c.json({ ok: true, data: { scheduledAt } });
+    );
+  }
+  return c.json({ ok: true, data: { key, scheduledAt } });
 });
 
 e2eRoutes.post("/ingest/flush", async (c) => {

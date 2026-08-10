@@ -99,10 +99,18 @@ describe("E2E control routes", () => {
     expect(await advance.json()).toMatchObject({ data: { nowMs: 1_250 } });
   });
 
-  it("runs predefined scheduled tasks and exposes guarded ingest operations", async () => {
+  it("runs an explicit scheduled task and exposes guarded ingest operations", async () => {
     const env = createEnv();
+    const invalidScheduled = await e2eRoutes.fetch(
+      controlRequest("scheduled/run", { method: "POST", body: "{}" }),
+      env as never,
+    );
     const scheduled = await e2eRoutes.fetch(
-      controlRequest("scheduled/run", { method: "POST" }),
+      controlRequest("scheduled/run", {
+        body: JSON.stringify({ key: "notification_tick" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
       env as never,
     );
     const invalidFlush = await e2eRoutes.fetch(
@@ -137,8 +145,12 @@ describe("E2E control routes", () => {
       controlRequest("ingest/status?siteId=site-1"),
       createEnv({ response: new Response("failed", { status: 500 }) }) as never,
     );
+    expect(invalidScheduled.status).toBe(400);
     expect(scheduled.status).toBe(200);
-    expect(runScheduledTask).toHaveBeenCalledTimes(2);
+    expect(await scheduled.json()).toMatchObject({
+      data: { key: "notification_tick" },
+    });
+    expect(runScheduledTask).toHaveBeenCalledTimes(1);
     expect(invalidFlush.status).toBe(400);
     expect(flushed.status).toBe(200);
     expect(status.status).toBe(200);

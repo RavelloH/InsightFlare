@@ -1638,7 +1638,9 @@ test.describe.serial("InsightFlare E2E", () => {
     };
     await saveManifest();
     await advanceE2eClock(page, 30 * 60_000);
-    const scheduled = await e2eControlRequest(page, "POST", "scheduled/run");
+    const scheduled = await e2eControlRequest(page, "POST", "scheduled/run", {
+      key: "notification_tick",
+    });
     expect(scheduled.status).toBe(200);
     const messages = await apiRequest<{ messages: Array<{ ruleId: string }> }>(
       page,
@@ -1647,7 +1649,9 @@ test.describe.serial("InsightFlare E2E", () => {
     );
     expect(messages.payload.data?.messages).toHaveLength(1);
     expect(messages.payload.data?.messages[0]?.ruleId).toBe(ruleId);
-    await e2eControlRequest(page, "POST", "scheduled/run");
+    await e2eControlRequest(page, "POST", "scheduled/run", {
+      key: "notification_tick",
+    });
     const repeated = await apiRequest<{ messages: Array<{ ruleId: string }> }>(
       page,
       "GET",
@@ -1701,7 +1705,9 @@ test.describe.serial("InsightFlare E2E", () => {
     expect(disabled.payload.data?.enabled).toBe(false);
     const lastCheckedAt = disabled.payload.data?.lastCheckedAt;
     await advanceE2eClock(page, 30 * 60_000);
-    const scheduled = await e2eControlRequest(page, "POST", "scheduled/run");
+    const scheduled = await e2eControlRequest(page, "POST", "scheduled/run", {
+      key: "notification_tick",
+    });
     expect(scheduled.status).toBe(200);
 
     const rules = await apiRequest<NotificationRule[]>(
@@ -1766,7 +1772,9 @@ test.describe.serial("InsightFlare E2E", () => {
     });
 
     await advanceE2eClock(page, 60 * 60_000);
-    const scheduled = await e2eControlRequest(page, "POST", "scheduled/run");
+    const scheduled = await e2eControlRequest(page, "POST", "scheduled/run", {
+      key: "notification_tick",
+    });
     expect(scheduled.status).toBe(200);
     const scheduledMessages = await apiRequest<{
       messages: NotificationMessage[];
@@ -1908,6 +1916,7 @@ test.describe.serial("InsightFlare E2E", () => {
       page,
       "POST",
       "scheduled/run",
+      { key: "visit_hourly_rollup" },
     );
     expect(scheduled.status).toBe(200);
     expect(scheduled.payload?.data?.scheduledAt).toEqual(expect.any(Number));
