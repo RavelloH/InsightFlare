@@ -610,6 +610,7 @@ async function startTestSite(
 
 async function stopTestSite(testSite: StartedTestSite | null): Promise<void> {
   if (!testSite) return;
+  testSite.server.closeAllConnections();
   await new Promise<void>((resolve) => testSite.server.close(() => resolve()));
 }
 
@@ -865,6 +866,78 @@ async function initializeE2eClock(environment: Environment): Promise<void> {
   }
 }
 
+async function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+  timeoutMs = 5_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function verifyTestServices(environment: Environment): Promise<void> {
+  const [page, mailbox, releases] = await Promise.all([
+    fetchWithTimeout(environment.testSiteURL),
+    fetchWithTimeout(`${environment.testSiteURL}/__e2e__/mailbox`, {
+      headers: { "x-insightflare-e2e-token": environment.mockControlToken },
+    }),
+    fetchWithTimeout(
+      `${environment.testSiteURL}/github/repos/RavelloH/InsightFlare/releases`,
+    ),
+  ]);
+
+  if (!page.ok) {
+    throw new Error(`E2E test site returned ${page.status}.`);
+  }
+  if (!mailbox.ok) {
+    throw new Error(`E2E mailbox mock returned ${mailbox.status}.`);
+  }
+  if (!releases.ok) {
+    throw new Error(`E2E GitHub mock returned ${releases.status}.`);
+  }
+
+  const messages = (await mailbox.json()) as { messages?: unknown[] };
+  if (!Array.isArray(messages.messages)) {
+    throw new Error("E2E mailbox mock returned an invalid payload.");
+  }
+  const mockReleases = (await releases.json()) as unknown;
+  if (!Array.isArray(mockReleases) || mockReleases.length === 0) {
+    throw new Error("E2E GitHub mock returned an invalid payload.");
+  }
+}
+
+async function writeFailureSummary(
+  environment: Environment,
+  error: unknown,
+): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  await fs.writeFile(
+    path.join(environment.directory, "manifest", "failure.json"),
+    `${JSON.stringify(
+      {
+        artifacts: "artifacts/playwright",
+        error: message,
+        logs: [
+          "logs/migrations.log",
+          "logs/tracker-build.log",
+          "logs/worker.log",
+          "logs/playwright.log",
+        ],
+        retainedAt: new Date().toISOString(),
+        runId: environment.id,
+        seedManifest: "manifest/seed.json",
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
 async function stopProcess(
   processToStop: StartedProcess | null,
 ): Promise<void> {
@@ -944,6 +1017,7 @@ async function main(): Promise<void> {
   let worker: StartedProcess | null = null;
   let testSite: StartedTestSite | null = null;
   let environment: Environment | null = null;
+  let failure: unknown = null;
   let succeeded = false;
   const startedAt = Date.now();
   const shutdown = new AbortController();
@@ -1042,6 +1116,9 @@ async function main(): Promise<void> {
     if (testSite.url !== activeEnvironment.testSiteURL) {
       throw new Error("E2E test site started on an unexpected port.");
     }
+    await runPreparationStep("Verifying E2E test services", () =>
+      verifyTestServices(activeEnvironment),
+    );
     throwIfAborted(shutdown.signal);
     await writeRunManifest(activeEnvironment, options);
     rlog.progress(PREPARATION_PROGRESS_MAX, PREPARATION_PROGRESS_MAX);
@@ -1053,6 +1130,9 @@ async function main(): Promise<void> {
     rlog.success(
       `E2E passed in ${((Date.now() - startedAt) / 1000).toFixed(2)}s.`,
     );
+  } catch (error) {
+    failure = error;
+    throw error;
   } finally {
     process.removeListener("SIGINT", requestShutdown);
     process.removeListener("SIGTERM", requestShutdown);
@@ -1062,6 +1142,10 @@ async function main(): Promise<void> {
       if (succeeded && !options.keep) {
         await fs.rm(environment.directory, { force: true, recursive: true });
       } else {
+        await writeFailureSummary(
+          environment,
+          failure ?? new Error("E2E did not complete successfully."),
+        );
         rlog.info(`E2E run directory retained: ${environment.directory}`);
       }
     }
