@@ -154,6 +154,7 @@ DISABLE_CRON_TASKS = "1"
 INSIGHTFLARE_E2E = "1"
 INSIGHTFLARE_E2E_CONTROL_TOKEN = ${tomlString(input.controlToken)}
 INSIGHTFLARE_E2E_NOW = ${tomlString(String(input.nowMs))}
+INSIGHTFLARE_E2E_CLOUDFLARE_API_URL = ${tomlString(`${input.resendApiUrl.replace("/resend/emails", "/cloudflare/client/v4/accounts")}`)}
 INSIGHTFLARE_E2E_RESEND_API_URL = ${tomlString(input.resendApiUrl)}
 INSIGHTFLARE_E2E_TURNSTILE_SITEVERIFY_URL = ${tomlString(`${input.resendApiUrl.replace("/resend/emails", "/turnstile/siteverify")}`)}
 MAIN_SECRET = ${tomlString(input.mainSecret)}
@@ -303,6 +304,128 @@ function json(response: ServerResponse, body: unknown) {
   response.end(`${JSON.stringify(body)}\n`);
 }
 
+function jsonEachRow(rows: Record<string, unknown>[]): string {
+  return `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
+}
+
+function mockAnalyticsTimestamp(sql: string): number {
+  const match = sql.match(/timestamp\s*<=\s*toDateTime\((\d+)\)/);
+  const toSeconds = Number(match?.[1]);
+  return (
+    (Number.isFinite(toSeconds) ? toSeconds : Date.now() / 1000) * 1000 - 60_000
+  );
+}
+
+function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
+  const timestampMs = mockAnalyticsTimestamp(sql);
+  const timestamp = new Date(timestampMs).toISOString();
+  const normal = sql.includes("FROM insightflare_normal_events");
+  if (sql.includes("AS timestampMs")) {
+    return [
+      {
+        avgLatencyMs: normal ? 42 : undefined,
+        count: normal ? 3 : 2,
+        customEvents: normal ? 1 : 0,
+        p50LatencyMs: normal ? 40 : undefined,
+        p75LatencyMs: normal ? 45 : undefined,
+        p95LatencyMs: normal ? 50 : undefined,
+        p99LatencyMs: normal ? 50 : undefined,
+        pageviews: normal ? 2 : 0,
+        timestampMs,
+      },
+    ];
+  }
+  if (sql.includes("AS pointCount")) {
+    return [
+      {
+        country: "CN",
+        latitude: normal ? 31.23 : 39.9,
+        longitude: normal ? 121.47 : 116.4,
+        pointCount: normal ? 3 : 2,
+      },
+    ];
+  }
+  if (sql.includes("count() AS total")) {
+    return [
+      normal
+        ? { affectedSites: 1, total: 3, uniqueAsns: 1, uniqueCountries: 1 }
+        : {
+            affectedSites: 1,
+            highConfidence: 2,
+            mediumConfidence: 0,
+            total: 2,
+            uniqueAsns: 1,
+            uniqueCountries: 1,
+          },
+    ];
+  }
+  if (sql.includes(" AS label")) {
+    return [
+      {
+        count: normal ? 3 : 2,
+        highConfidence: normal ? 0 : 2,
+        label: normal ? "E2E Normal Network" : "E2E Bot Network",
+      },
+    ];
+  }
+  if (sql.includes("blob3 AS confidence")) {
+    return [
+      {
+        asn: 64512,
+        asOrganization: "E2E Bot Network",
+        botScore: 5,
+        city: "Beijing",
+        confidence: "high",
+        continent: "AS",
+        country: "CN",
+        hostname: "app.example.test",
+        ip: "198.51.100.8",
+        kind: "bot",
+        latitude: 39.9,
+        longitude: 116.4,
+        origin: "https://app.example.test",
+        pathname: "/crawl",
+        rayId: "e2e-bot-ray",
+        reasons: "e2e_mock",
+        receivedAt: timestampMs,
+        region: "Beijing",
+        siteId: "",
+        timestamp,
+        userAgent: "E2E Bot",
+        userAgentLength: 7,
+      },
+    ];
+  }
+  if (sql.includes("blob3 AS origin")) {
+    return [
+      {
+        asn: 64513,
+        asOrganization: "E2E Normal Network",
+        city: "Shanghai",
+        continent: "AS",
+        country: "CN",
+        edgeLatencyMs: 42,
+        eventAt: timestampMs,
+        hostname: "app.example.test",
+        kind: "pageview",
+        latitude: 31.23,
+        longitude: 121.47,
+        origin: "https://app.example.test",
+        pathname: "/home",
+        rayId: "e2e-normal-ray",
+        receivedAt: timestampMs,
+        region: "Shanghai",
+        requestMethod: "GET",
+        siteId: "",
+        timestamp,
+        traceId: "e2e-normal-trace",
+        userAgentLength: 12,
+      },
+    ];
+  }
+  return [];
+}
+
 async function requestText(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
@@ -394,6 +517,33 @@ async function startTestSite(
             body.get("response") === "e2e-turnstile-pass"
             ? { hostname: "127.0.0.1", success: true }
             : { "error-codes": ["invalid-input-response"], success: false },
+        );
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        /^\/cloudflare\/client\/v4\/accounts\/[^/]+\/analytics_engine\/sql$/.test(
+          requestURL.pathname,
+        )
+      ) {
+        if (request.headers.authorization !== "Bearer e2e-cloudflare-token") {
+          response.writeHead(403, {
+            "content-type": "application/json; charset=utf-8",
+          });
+          response.end(
+            `${JSON.stringify({
+              errors: [
+                { code: 1001, message: "E2E Cloudflare token rejected" },
+              ],
+            })}\n`,
+          );
+          return;
+        }
+        response.writeHead(200, {
+          "content-type": "application/x-ndjson; charset=utf-8",
+        });
+        response.end(
+          jsonEachRow(mockAnalyticsRows(await requestText(request))),
         );
         return;
       }

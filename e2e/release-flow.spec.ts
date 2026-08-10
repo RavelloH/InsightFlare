@@ -2116,10 +2116,76 @@ test.describe.serial("release E2E flow", () => {
     }
   });
 
-  test("21. administrator request observation keeps the 3D map isolated", async ({
+  test("21. request observation reads normal and abnormal events from the local Cloudflare mock", async ({
     page,
   }) => {
     await signIn(page, "admin", adminPassword);
+    const configured = await apiRequest<{
+      accountId: string;
+      apiTokenConfigured: boolean;
+    }>(page, "PATCH", "/api/private/admin/bot-analytics-config", {
+      accountId: "0123456789abcdef0123456789abcdef",
+      apiToken: "e2e-cloudflare-token",
+    });
+    expect(configured.status).toBe(200);
+    expect(configured.payload.data).toMatchObject({
+      accountId: "0123456789abcdef0123456789abcdef",
+      apiTokenConfigured: true,
+    });
+
+    const observed = await apiRequest<{
+      configured: boolean;
+      events: Array<{ confidence: string; rayId: string }>;
+      normalEvents: Array<{ pathname: string; traceId: string }>;
+      overview: {
+        abnormalRequests: number;
+        normalRequests: number;
+        p95LatencyMs: number | null;
+      };
+    }>(
+      page,
+      "GET",
+      `/api/private/admin/bot-analytics?from=${e2eNowMs - 3_600_000}&to=${e2eNowMs}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
+    );
+    expect(observed.status).toBe(200);
+    expect(observed.payload).toMatchObject({
+      configured: true,
+      events: [{ confidence: "high", rayId: "e2e-bot-ray" }],
+      normalEvents: [{ pathname: "/home", traceId: "e2e-normal-trace" }],
+      overview: {
+        abnormalRequests: 2,
+        normalRequests: 3,
+        p95LatencyMs: 50,
+      },
+    });
+
+    const rejectedConfig = await apiRequest<unknown>(
+      page,
+      "PATCH",
+      "/api/private/admin/bot-analytics-config",
+      { apiToken: "e2e-rejected-cloudflare-token" },
+    );
+    expect(rejectedConfig.status).toBe(200);
+    try {
+      const rejected = await apiRequest<unknown>(
+        page,
+        "GET",
+        `/api/private/admin/bot-analytics?from=${e2eNowMs - 3_600_000}&to=${e2eNowMs}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
+      );
+      expect(rejected.status).toBe(400);
+      expect(JSON.stringify(rejected.payload)).toContain(
+        "E2E Cloudflare token rejected",
+      );
+    } finally {
+      const restored = await apiRequest<unknown>(
+        page,
+        "PATCH",
+        "/api/private/admin/bot-analytics-config",
+        { apiToken: "e2e-cloudflare-token" },
+      );
+      expect(restored.status).toBe(200);
+    }
+
     await page.goto("/zh/app/manage/request-observation", {
       waitUntil: "domcontentloaded",
     });

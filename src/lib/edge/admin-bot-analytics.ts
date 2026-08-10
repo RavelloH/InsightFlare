@@ -35,6 +35,14 @@ const MAX_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 const CF_ANALYTICS_ENGINE_SQL_ENDPOINT =
   "https://api.cloudflare.com/client/v4/accounts";
 
+function analyticsEngineSqlEndpoint(env: Env): string {
+  if (env.INSIGHTFLARE_E2E === "1") {
+    const mockUrl = env.INSIGHTFLARE_E2E_CLOUDFLARE_API_URL?.trim();
+    if (mockUrl) return mockUrl.replace(/\/+$/, "");
+  }
+  return CF_ANALYTICS_ENGINE_SQL_ENDPOINT;
+}
+
 type AdminActor = Awaited<ReturnType<typeof requireActor>>;
 type BotAnalyticsInterval = "minute" | "hour" | "day" | "week";
 type NetworkDimension =
@@ -938,6 +946,7 @@ async function siteLookupByIds(env: Env, ids: string[]) {
 }
 
 async function queryAnalyticsRows(input: {
+  apiUrl?: string;
   accountId: string;
   token: string;
   sql: string;
@@ -1195,6 +1204,7 @@ function mergeTrendRows(input: {
 }
 
 async function queryCloudflareAnalyticsEngine(input: {
+  apiUrl?: string;
   accountId: string;
   token: string;
   sql: string;
@@ -1202,7 +1212,7 @@ async function queryCloudflareAnalyticsEngine(input: {
 }) {
   const fetchImpl = input.fetchImpl || fetch;
   const response = await fetchImpl(
-    `${CF_ANALYTICS_ENGINE_SQL_ENDPOINT}/${encodeURIComponent(
+    `${input.apiUrl || CF_ANALYTICS_ENGINE_SQL_ENDPOINT}/${encodeURIComponent(
       input.accountId,
     )}/analytics_engine/sql`,
     {
@@ -1360,6 +1370,7 @@ export async function handleBotAnalyticsAdmin(
   }
 
   const generatedAt = Date.now();
+  const analyticsApiUrl = analyticsEngineSqlEndpoint(env);
   const timeWindow = parseTimeWindow(url, generatedAt);
   const { from, to, minutes, interval, bucketMs, timeZone } = timeWindow;
   const limit = parseLimit(url);
@@ -1389,6 +1400,7 @@ export async function handleBotAnalyticsAdmin(
       includeDoubles: true,
     });
     let detailResult = await queryCloudflareAnalyticsEngine({
+      apiUrl: analyticsApiUrl,
       accountId: config.accountId,
       token,
       sql: detailSql,
@@ -1398,6 +1410,7 @@ export async function handleBotAnalyticsAdmin(
       shouldRetryBotAnalyticsWithoutDoubles(detailResult)
     ) {
       detailResult = await queryCloudflareAnalyticsEngine({
+        apiUrl: analyticsApiUrl,
         accountId: config.accountId,
         token,
         sql: buildBotAnalyticsDetailSql({
@@ -1462,6 +1475,7 @@ export async function handleBotAnalyticsAdmin(
     const dataset =
       source === "abnormal" ? config.dataset : config.normalDataset;
     let pageResult = await queryCloudflareAnalyticsEngine({
+      apiUrl: analyticsApiUrl,
       accountId: config.accountId,
       token,
       sql: buildSql({
@@ -1475,6 +1489,7 @@ export async function handleBotAnalyticsAdmin(
     });
     if (!pageResult.ok && shouldRetryBotAnalyticsWithoutDoubles(pageResult)) {
       pageResult = await queryCloudflareAnalyticsEngine({
+        apiUrl: analyticsApiUrl,
         accountId: config.accountId,
         token,
         sql: buildSql({
@@ -1569,6 +1584,7 @@ export async function handleBotAnalyticsAdmin(
       );
     }
     const result = await queryAnalyticsRows({
+      apiUrl: analyticsApiUrl,
       accountId: config.accountId,
       token,
       sql,
@@ -1618,12 +1634,14 @@ export async function handleBotAnalyticsAdmin(
     includeDoubles: true,
   });
   let result = await queryCloudflareAnalyticsEngine({
+    apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql,
   });
   if (!result.ok && shouldRetryBotAnalyticsWithoutDoubles(result)) {
     result = await queryCloudflareAnalyticsEngine({
+      apiUrl: analyticsApiUrl,
       accountId: config.accountId,
       token,
       sql: buildBotAnalyticsSql({
@@ -1651,12 +1669,14 @@ export async function handleBotAnalyticsAdmin(
     includeDoubles: true,
   });
   let normalResult = await queryCloudflareAnalyticsEngine({
+    apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql: normalSql,
   });
   if (!normalResult.ok && shouldRetryBotAnalyticsWithoutDoubles(normalResult)) {
     normalResult = await queryCloudflareAnalyticsEngine({
+      apiUrl: analyticsApiUrl,
       accountId: config.accountId,
       token,
       sql: buildNormalAnalyticsSql({
@@ -1724,6 +1744,7 @@ export async function handleBotAnalyticsAdmin(
     ? detailCursorForEvent(normalEvents[normalEvents.length - 1])
     : null;
   const abnormalTrendResult = await queryAnalyticsRows({
+    apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql: buildCountByBucketSql({
@@ -1744,6 +1765,7 @@ export async function handleBotAnalyticsAdmin(
     );
   }
   const normalTrendResult = await queryAnalyticsRows({
+    apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql: buildCountByBucketSql({
@@ -1765,6 +1787,7 @@ export async function handleBotAnalyticsAdmin(
     );
   }
   const abnormalMapResult = await queryAnalyticsRows({
+    apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql: buildMapPointsSql({
@@ -1783,6 +1806,7 @@ export async function handleBotAnalyticsAdmin(
     );
   }
   const normalMapResult = await queryAnalyticsRows({
+    apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql: buildMapPointsSql({
@@ -1803,6 +1827,7 @@ export async function handleBotAnalyticsAdmin(
 
   const [abnormalSummaryResult, normalSummaryResult] = await Promise.all([
     queryAnalyticsRows({
+      apiUrl: analyticsApiUrl,
       accountId: config.accountId,
       token,
       sql: buildSourceSummarySql({
@@ -1813,6 +1838,7 @@ export async function handleBotAnalyticsAdmin(
       }),
     }),
     queryAnalyticsRows({
+      apiUrl: analyticsApiUrl,
       accountId: config.accountId,
       token,
       sql: buildSourceSummarySql({
@@ -1887,6 +1913,7 @@ export async function handleBotAnalyticsAdmin(
   const networkDimensionResults = await Promise.all(
     networkDimensions.flatMap((dimension) => [
       queryAnalyticsRows({
+        apiUrl: analyticsApiUrl,
         accountId: config.accountId,
         token,
         sql: buildNetworkDimensionSql({
@@ -1898,6 +1925,7 @@ export async function handleBotAnalyticsAdmin(
         }),
       }),
       queryAnalyticsRows({
+        apiUrl: analyticsApiUrl,
         accountId: config.accountId,
         token,
         sql: buildNetworkDimensionSql({
