@@ -21,6 +21,7 @@ export default [
       "output/**",
       "playwright-report/**",
       "test-results/**",
+      ".tmp/**",
       "tmp/**",
       "src/routeTree.gen.ts",
       "src/tracker/**",

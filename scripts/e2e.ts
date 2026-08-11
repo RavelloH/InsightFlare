@@ -999,6 +999,11 @@ async function runPlaywright(
         "artifacts",
         "playwright",
       ),
+      INSIGHTFLARE_E2E_REPORTS: path.join(
+        environment.directory,
+        "artifacts",
+        "reports",
+      ),
       INSIGHTFLARE_E2E_CONTROL_TOKEN: environment.controlToken,
       INSIGHTFLARE_E2E_BASE_URL: environment.baseURL,
       INSIGHTFLARE_E2E_CONFIG_PATH: environment.configPath,

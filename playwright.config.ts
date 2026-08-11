@@ -1,6 +1,10 @@
+import path from "node:path";
+
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.INSIGHTFLARE_E2E_BASE_URL;
+const reportsDirectory =
+  process.env.INSIGHTFLARE_E2E_REPORTS || "playwright-report";
 
 if (!baseURL) {
   throw new Error(
@@ -14,7 +18,14 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: "line",
+  reporter: [
+    ["line"],
+    [
+      "html",
+      { open: "never", outputFolder: path.join(reportsDirectory, "html") },
+    ],
+    ["junit", { outputFile: path.join(reportsDirectory, "junit.xml") }],
+  ],
   timeout: 30_000,
   workers: 1,
   use: {
