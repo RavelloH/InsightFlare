@@ -58,6 +58,24 @@ jobs:
         if: steps.changelog.outputs.has_release == 'true'
         run: npm ci
 
+      - name: Install Chromium for E2E
+        if: steps.changelog.outputs.has_release == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run full E2E gate
+        if: steps.changelog.outputs.has_release == 'true'
+        run: npm run test:e2e
+
+      - name: Upload E2E diagnostics
+        if: failure() && steps.changelog.outputs.has_release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics
+          path: |
+            .tmp/e2e/
+            logs/e2e.log
+          if-no-files-found: ignore
+
       - name: Sync release artifacts
         if: steps.changelog.outputs.has_release == 'true'
         shell: bash

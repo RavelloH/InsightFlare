@@ -1150,11 +1150,10 @@ async function main(): Promise<void> {
     if (environment) {
       if (succeeded && !options.keep) {
         await fs.rm(environment.directory, { force: true, recursive: true });
+      } else if (failure) {
+        await writeFailureSummary(environment, failure);
+        rlog.info(`E2E run directory retained: ${environment.directory}`);
       } else {
-        await writeFailureSummary(
-          environment,
-          failure ?? new Error("E2E did not complete successfully."),
-        );
         rlog.info(`E2E run directory retained: ${environment.directory}`);
       }
     }

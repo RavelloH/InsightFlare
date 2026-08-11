@@ -26,6 +26,7 @@
     "check:openapi": "npm run generate:openapi && npm run generate:skills && tsx scripts/check-openapi-contract.ts && git diff --exit-code docs/openapi.json docs/openapi.yaml docs/skills.json",
     "check:skills": "npm run generate:skills && tsx scripts/check-openapi-contract.ts && git diff --exit-code docs/skills.json",
     "check": "tsx scripts/check.ts",
+    "check:e2e": "npm run check && npm run test:e2e",
     "check:verbose": "tsx scripts/check.ts --verbose",
     "preview:local": "tsx scripts/preview.ts --target local",
     "prepare": "tsx scripts/build-tracker-sdk.ts && husky",
