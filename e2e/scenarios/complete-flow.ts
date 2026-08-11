@@ -181,6 +181,9 @@ const mockControlToken = requiredEnvironmentValue(
   "INSIGHTFLARE_E2E_MOCK_CONTROL_TOKEN",
 );
 const configPath = requiredEnvironmentValue("INSIGHTFLARE_E2E_CONFIG_PATH");
+const archiveBucketName = requiredEnvironmentValue(
+  "INSIGHTFLARE_E2E_ARCHIVE_BUCKET",
+);
 const d1Name = requiredEnvironmentValue("INSIGHTFLARE_E2E_D1_NAME");
 const persistencePath = requiredEnvironmentValue(
   "INSIGHTFLARE_E2E_PERSISTENCE_PATH",
@@ -283,6 +286,55 @@ async function seedHistoricalVisits(
     persistencePath,
   ]);
   return history.manifest;
+}
+
+async function seedArchiveObject(siteId: string): Promise<{
+  archiveKey: string;
+  content: string;
+  hour: number;
+}> {
+  const hour = Math.floor(e2eNowMs / (60 * 60 * 1000));
+  const archiveKey = `e2e/${siteId}/${hour}.parquet`;
+  const content = "E2E archive\n";
+  const archivePath = path.join(path.dirname(manifestPath), "archive.parquet");
+  const sqlPath = path.join(path.dirname(manifestPath), "archive-seed.sql");
+  await writeFile(archivePath, content);
+  await execFileAsync(process.execPath, [
+    path.join(process.cwd(), "node_modules", "wrangler", "bin", "wrangler.js"),
+    "r2",
+    "object",
+    "put",
+    `${archiveBucketName}/${archiveKey}`,
+    "--config",
+    configPath,
+    "--file",
+    archivePath,
+    "--local",
+    "--persist-to",
+    persistencePath,
+  ]);
+  const literal = (value: string | number) =>
+    typeof value === "number"
+      ? String(value)
+      : `'${value.replaceAll("'", "''")}'`;
+  await writeFile(
+    sqlPath,
+    `INSERT INTO archive_objects (archive_key, site_id, start_hour, end_hour, granularity, format, row_count, size_bytes, created_at, updated_at) VALUES (${literal(archiveKey)}, ${literal(siteId)}, ${literal(hour)}, ${literal(hour)}, 'hour', 'parquet', 1, ${literal(content.length)}, ${literal(e2eNowMs)}, ${literal(e2eNowMs)});\n`,
+  );
+  await execFileAsync(process.execPath, [
+    path.join(process.cwd(), "node_modules", "wrangler", "bin", "wrangler.js"),
+    "d1",
+    "execute",
+    d1Name,
+    "--config",
+    configPath,
+    "--file",
+    sqlPath,
+    "--local",
+    "--persist-to",
+    persistencePath,
+  ]);
+  return { archiveKey, content, hour };
 }
 
 async function flushSite(page: Page, siteId: string) {
@@ -1506,6 +1558,52 @@ test.describe.serial("InsightFlare E2E", () => {
     );
     expect(sessions.status).toBe(200);
     expect(sessions.payload.data).toHaveLength(40);
+  });
+
+  test("14b. archive manifests and ranged files use the local R2 binding", async ({
+    page,
+  }) => {
+    const siteB = seed.sites.siteB;
+    expect(siteB).toBeDefined();
+    const archive = await seedArchiveObject(siteB?.id || "");
+    const from = archive.hour * 60 * 60 * 1000;
+    const to = from + 60 * 60 * 1000 - 1;
+
+    await signIn(page, "owner-a", ownerAPassword);
+    const manifest = await apiRequest<unknown>(
+      page,
+      "GET",
+      `/api/private/archive/manifest?siteId=${encodeURIComponent(siteB?.id || "")}&from=${from}&to=${to}`,
+    );
+    const manifestPayload = manifest.payload as {
+      files: Array<{ archiveKey: string; fetchUrl: string; sizeBytes: number }>;
+    };
+    expect(manifest.status).toBe(200);
+    expect(manifestPayload.files).toEqual([
+      expect.objectContaining({
+        archiveKey: archive.archiveKey,
+        fetchUrl: `/api/private/archive/file?key=${encodeURIComponent(archive.archiveKey)}`,
+        sizeBytes: archive.content.length,
+      }),
+    ]);
+
+    const range = await page.request.get(
+      `/api/private/archive/file?key=${encodeURIComponent(archive.archiveKey)}`,
+      { headers: { range: "bytes=0-2" } },
+    );
+    expect(range.status()).toBe(206);
+    expect(range.headers()["content-range"]).toBe(
+      `bytes 0-2/${archive.content.length}`,
+    );
+    expect(await range.text()).toBe(archive.content.slice(0, 3));
+
+    await signIn(page, "restricted-a", restrictedAPassword);
+    const denied = await apiRequest<unknown>(
+      page,
+      "GET",
+      `/api/private/archive/manifest?siteId=${encodeURIComponent(siteB?.id || "")}&from=${from}&to=${to}`,
+    );
+    expect(denied.status).toBe(401);
   });
 
   test("15. scoped API keys authenticate v1 analytics and enforce scope and revocation", async ({

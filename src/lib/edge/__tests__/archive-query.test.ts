@@ -660,7 +660,10 @@ describe("private archive edge query handler", () => {
       const bucket = createBucket(null);
       bucket.get
         .mockResolvedValueOnce(
-          r2Object({ range: { length: 3 } as R2Range, size: 10 }),
+          r2Object({
+            range: { length: 3, suffix: undefined } as R2Range,
+            size: 10,
+          }),
         )
         .mockResolvedValueOnce(
           r2Object({ range: { offset: 7 } as R2Range, size: 10 }),

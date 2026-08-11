@@ -32,6 +32,7 @@ interface Options {
 
 interface Environment {
   adminPassword: string;
+  archiveBucketName: string;
   baseURL: string;
   configPath: string;
   controlToken: string;
@@ -135,6 +136,7 @@ function workerName(id: string): string {
 
 function generatedWranglerConfig(input: {
   adminPassword: string;
+  archiveBucketName: string;
   controlToken: string;
   id: string;
   mainSecret: string;
@@ -184,6 +186,10 @@ migrations_dir = ${root("migrations")}
 [[kv_namespaces]]
 binding = "SITE_SETTINGS_KV"
 id = ${tomlString(name)}
+
+[[r2_buckets]]
+binding = "ARCHIVE_BUCKET"
+bucket_name = ${tomlString(input.archiveBucketName)}
 
 [[analytics_engine_datasets]]
 binding = "BOT_ANALYTICS"
@@ -258,6 +264,7 @@ async function createEnvironment(options: Options): Promise<Environment> {
 
   const environment: Environment = {
     adminPassword: `e2e-${randomBytes(24).toString("hex")}`,
+    archiveBucketName: `${workerName(id)}-archive`,
     baseURL: "",
     configPath: path.join(configDirectory, "wrangler.e2e.toml"),
     controlToken: randomBytes(32).toString("hex"),
@@ -278,6 +285,7 @@ async function createEnvironment(options: Options): Promise<Environment> {
     environment.configPath,
     generatedWranglerConfig({
       adminPassword: environment.adminPassword,
+      archiveBucketName: environment.archiveBucketName,
       controlToken: environment.controlToken,
       id: environment.id,
       mainSecret: environment.mainSecret,
@@ -985,6 +993,7 @@ async function runPlaywright(
     env: {
       ...process.env,
       INSIGHTFLARE_E2E_ADMIN_PASSWORD: environment.adminPassword,
+      INSIGHTFLARE_E2E_ARCHIVE_BUCKET: environment.archiveBucketName,
       INSIGHTFLARE_E2E_ARTIFACTS: path.join(
         environment.directory,
         "artifacts",

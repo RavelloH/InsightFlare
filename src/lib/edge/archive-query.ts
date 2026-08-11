@@ -22,7 +22,7 @@ function normalizeRange(
     return null;
   }
 
-  if ("suffix" in range) {
+  if ("suffix" in range && typeof range.suffix === "number") {
     const suffix = Math.max(0, Math.floor(range.suffix));
     if (suffix <= 0) return null;
     const length = Math.min(size, suffix);
@@ -31,12 +31,13 @@ function normalizeRange(
     return { start, end, length };
   }
 
-  const start = Math.max(0, Math.floor(range.offset ?? 0));
+  const offsetRange = range as Exclude<R2Range, { suffix: number }>;
+  const start = Math.max(0, Math.floor(offsetRange.offset ?? 0));
   const maxLength = Math.max(0, size - start);
   const requestedLength =
-    range.length === undefined
+    offsetRange.length === undefined
       ? maxLength
-      : Math.max(0, Math.floor(range.length));
+      : Math.max(0, Math.floor(offsetRange.length));
   const length = Math.min(maxLength, requestedLength);
   if (length <= 0) return null;
   const end = start + length - 1;
