@@ -2,19 +2,14 @@ import { expect, test } from "@playwright/test";
 
 import { apiRequest } from "../support/api";
 import { signIn } from "../support/browser";
-import type { ResendMockMode } from "../support/control";
+import type { E2eContext } from "../support/flow-context";
 
-export function registerPlatformIntegrationScenarios(input: {
-  adminPassword: string;
-  getNowMs: () => number;
-  readMockMailbox: () => Promise<unknown[]>;
-  setResendMockMode: (mode: ResendMockMode) => Promise<void>;
-}) {
+export function registerPlatformIntegrationScenarios(context: E2eContext) {
   test("20. Resend 4xx failures are surfaced without a false delivery success", async ({
     page,
   }) => {
-    await signIn(page, "admin", input.adminPassword);
-    await input.setResendMockMode("bad_request");
+    await signIn(page, "admin", context.adminPassword);
+    await context.setResendMockMode("bad_request");
     try {
       const failed = await apiRequest<unknown>(
         page,
@@ -26,16 +21,16 @@ export function registerPlatformIntegrationScenarios(input: {
       const failure = JSON.stringify(failed.payload);
       expect(failure).toContain("Resend request failed");
       expect(failure).toContain("E2E forced Resend bad_request");
-      expect(await input.readMockMailbox()).toHaveLength(2);
+      expect(await context.readMockMailbox()).toHaveLength(2);
     } finally {
-      await input.setResendMockMode("success");
+      await context.setResendMockMode("success");
     }
   });
 
   test("21. request observation reads normal and abnormal events from the local Cloudflare mock", async ({
     page,
   }) => {
-    await signIn(page, "admin", input.adminPassword);
+    await signIn(page, "admin", context.adminPassword);
     const configured = await apiRequest<{
       accountId: string;
       apiTokenConfigured: boolean;
@@ -61,7 +56,7 @@ export function registerPlatformIntegrationScenarios(input: {
     }>(
       page,
       "GET",
-      `/api/private/admin/bot-analytics?from=${input.getNowMs() - 3_600_000}&to=${input.getNowMs()}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
+      `/api/private/admin/bot-analytics?from=${context.currentE2eNowMs() - 3_600_000}&to=${context.currentE2eNowMs()}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
     );
     expect(observed.status).toBe(200);
     expect(observed.payload).toMatchObject({
@@ -86,7 +81,7 @@ export function registerPlatformIntegrationScenarios(input: {
       const rejected = await apiRequest<unknown>(
         page,
         "GET",
-        `/api/private/admin/bot-analytics?from=${input.getNowMs() - 3_600_000}&to=${input.getNowMs()}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
+        `/api/private/admin/bot-analytics?from=${context.currentE2eNowMs() - 3_600_000}&to=${context.currentE2eNowMs()}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
       );
       expect(rejected.status).toBe(400);
       expect(JSON.stringify(rejected.payload)).toContain(
@@ -113,7 +108,7 @@ export function registerPlatformIntegrationScenarios(input: {
   test("22. administrator version updates render local release data in SSR and the client", async ({
     page,
   }) => {
-    await signIn(page, "admin", input.adminPassword);
+    await signIn(page, "admin", context.adminPassword);
     const response = await page.request.get("/zh/app/manage/version-updates");
     expect(response.status()).toBe(200);
     const html = await response.text();
@@ -134,7 +129,7 @@ export function registerPlatformIntegrationScenarios(input: {
   test("23. local Turnstile mock protects login and verifies administrator settings", async ({
     page,
   }) => {
-    await signIn(page, "admin", input.adminPassword);
+    await signIn(page, "admin", context.adminPassword);
     const configured = await apiRequest<{
       enabled: boolean;
       secretKeyConfigured: boolean;
@@ -183,7 +178,7 @@ export function registerPlatformIntegrationScenarios(input: {
             status: response.status,
           };
         },
-        { password: input.adminPassword, turnstileToken },
+        { password: context.adminPassword, turnstileToken },
       );
     const missing = await login();
     expect(missing.status).toBe(400);
