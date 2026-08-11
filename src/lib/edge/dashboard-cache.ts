@@ -1,20 +1,16 @@
 // Edge-cache helper for read-only dashboard and public share queries.
 //
-// Goal: hot dashboards (Devices, Browsers, Geo, etc.) currently fan out into
-// 10–20 D1 statements per page load and re-issue the same SQL on every
-// reload. We do NOT want to rely on D1 transparent read replication, so we
-// cache the JSON response in the Cloudflare Cache API for a short TTL.
-//
-// Caching is keyed on the entire request URL with query parameters sorted
-// alphabetically so that two visually identical requests with parameters in
-// different orders still hit the same cache entry. The cache lookup is
-// performed AFTER `resolvePrivateSite` runs, so we never serve cached data
-// to an unauthorized user — auth always runs first.
+// Cache API entries are scoped by the already-authorized analytics tenant,
+// not by cookies or bearer tokens. This lets authorized viewers share a
+// result without allowing authentication state into the cache key.
 
 const DASHBOARD_CACHE_NAME = "insightflare-dashboard-query";
 const DEFAULT_TTL_SECONDS = 60;
 const PUBLIC_QUERY_CACHE_NAME = "insightflare-public-query";
 export const PUBLIC_QUERY_CACHE_TTL_SECONDS = 300;
+const CACHE_KEY_ORIGIN = "https://analytics-cache.insightflare.internal";
+const CACHE_SCHEMA_VERSION = "v2";
+const DYNAMIC_RESPONSE_FIELDS = new Set(["requestId", "timestamp"]);
 export const PUBLIC_QUERY_CACHE_OPTIONS = {
   ttlSeconds: PUBLIC_QUERY_CACHE_TTL_SECONDS,
   cacheName: PUBLIC_QUERY_CACHE_NAME,
@@ -43,17 +39,55 @@ async function openEdgeCache(cacheName: string): Promise<Cache | null> {
   }
 }
 
-function buildCacheKeyRequest(url: URL): Request {
-  const normalized = new URL(url.toString());
-  const sortedEntries = [...normalized.searchParams.entries()].sort(
-    ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0),
-  );
+export type DashboardCacheScope = "private" | "public" | "private-team";
+
+export interface DashboardCacheIdentity {
+  scope: DashboardCacheScope;
+  tenantId: string;
+  route: string;
+  /**
+   * Limits sharing to an authorized audience when a route can return a
+   * subset of a tenant's sites, such as the team dashboard.
+   */
+  audienceId?: string;
+}
+
+function sortedSearchParams(url: URL, omitKeys: ReadonlySet<string>): string {
+  const sortedEntries = [...url.searchParams.entries()]
+    .filter(([key]) => !omitKeys.has(key))
+    .sort(([leftKey, leftValue], [rightKey, rightValue]) => {
+      if (leftKey !== rightKey) return leftKey < rightKey ? -1 : 1;
+      if (leftValue !== rightValue) return leftValue < rightValue ? -1 : 1;
+      return 0;
+    });
   const search = new URLSearchParams();
   for (const [key, value] of sortedEntries) {
     search.append(key, value);
   }
-  normalized.search = search.toString();
-  return new Request(normalized.toString(), { method: "GET" });
+  return search.toString();
+}
+
+function buildCacheKeyRequest(
+  url: URL,
+  identity?: DashboardCacheIdentity,
+): Request {
+  const normalized = new URL(url.toString());
+  if (!identity) {
+    normalized.search = sortedSearchParams(normalized, new Set());
+    return new Request(normalized.toString(), { method: "GET" });
+  }
+
+  const cacheUrl = new URL(CACHE_KEY_ORIGIN);
+  cacheUrl.pathname = [
+    "analytics",
+    CACHE_SCHEMA_VERSION,
+    identity.scope,
+    encodeURIComponent(identity.tenantId),
+    identity.audienceId ? encodeURIComponent(identity.audienceId) : "shared",
+    encodeURIComponent(identity.route),
+  ].join("/");
+  cacheUrl.search = sortedSearchParams(normalized, new Set(["siteId"]));
+  return new Request(cacheUrl.toString(), { method: "GET" });
 }
 
 function withCacheControlHeaders(
@@ -61,8 +95,11 @@ function withCacheControlHeaders(
   ttlSeconds: number,
   marker?: "HIT" | "MISS",
   scope: "private" | "public" = "private",
+  cacheAgeSeconds?: number,
 ): Response {
   const headers = new Headers(response.headers);
+  headers.delete("x-insightflare-cache-created-at");
+  headers.delete("x-insightflare-cache-had-dynamic-fields");
   headers.set("cache-control", `${scope}, max-age=${ttlSeconds}`);
   if (scope === "public") {
     headers.set(
@@ -74,6 +111,19 @@ function withCacheControlHeaders(
   headers.delete("vary");
   if (marker) {
     headers.set("x-edge-cache", marker);
+    headers.set("x-insightflare-cache", marker);
+    headers.set("x-insightflare-cache-layer", "response");
+    headers.set("x-insightflare-cache-version", CACHE_SCHEMA_VERSION);
+  }
+  if (typeof cacheAgeSeconds === "number") {
+    headers.set("x-insightflare-cache-age", String(cacheAgeSeconds));
+  }
+  if (marker === "HIT") {
+    const generatedRowsRead = headers.get("x-insightflare-d1-rows-read");
+    if (generatedRowsRead) {
+      headers.set("x-insightflare-cached-d1-rows-read", generatedRowsRead);
+      headers.set("x-insightflare-d1-rows-read", "0");
+    }
   }
   return new Response(response.body, {
     status: response.status,
@@ -87,6 +137,117 @@ export interface DashboardCacheOptions {
   cacheName?: string;
   applyCacheHeadersOnBypass?: boolean;
   clientCacheScope?: "private" | "public";
+  identity?: DashboardCacheIdentity;
+  request?: Request;
+}
+
+function cacheCreatedAt(response: Response): number | null {
+  const value = Number(response.headers.get("x-insightflare-cache-created-at"));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function cacheAgeSeconds(response: Response): number | undefined {
+  const createdAt = cacheCreatedAt(response);
+  if (!createdAt) return undefined;
+  return Math.max(0, Math.floor((Date.now() - createdAt) / 1000));
+}
+
+async function removeDynamicResponseFields(response: Response): Promise<{
+  response: Response;
+  hadDynamicFields: boolean;
+}> {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    return { response, hadDynamicFields: false };
+  }
+
+  try {
+    const payload = (await response.json()) as unknown;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return { response, hadDynamicFields: false };
+    }
+    const source = payload as Record<string, unknown>;
+    const hadDynamicFields = [...DYNAMIC_RESPONSE_FIELDS].some((key) =>
+      Object.hasOwn(source, key),
+    );
+    const sanitized = Object.fromEntries(
+      Object.entries(source).filter(
+        ([key]) => !DYNAMIC_RESPONSE_FIELDS.has(key),
+      ),
+    );
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    return {
+      response: new Response(JSON.stringify(sanitized), {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      }),
+      hadDynamicFields,
+    };
+  } catch {
+    return { response, hadDynamicFields: false };
+  }
+}
+
+async function addDynamicResponseFields(
+  response: Response,
+  request: Request | undefined,
+): Promise<Response> {
+  if (!request) return response;
+  if (response.headers.get("x-insightflare-cache-had-dynamic-fields") !== "1") {
+    return response;
+  }
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) return response;
+
+  try {
+    const payload = (await response.json()) as unknown;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return response;
+    }
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    return new Response(
+      JSON.stringify({
+        ...(payload as Record<string, unknown>),
+        requestId:
+          request.headers.get("cf-ray") ||
+          request.headers.get("x-request-id") ||
+          crypto.randomUUID().slice(0, 12),
+        timestamp: new Date().toISOString(),
+      }),
+      {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      },
+    );
+  } catch {
+    return response;
+  }
+}
+
+async function cacheStorageResponse(
+  response: Response,
+  ttlSeconds: number,
+): Promise<Response> {
+  const sanitized = await removeDynamicResponseFields(response);
+  const headers = new Headers(sanitized.response.headers);
+  headers.set("x-insightflare-cache-created-at", String(Date.now()));
+  if (sanitized.hadDynamicFields) {
+    headers.set("x-insightflare-cache-had-dynamic-fields", "1");
+  }
+  headers.set(
+    "cache-control",
+    `public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}`,
+  );
+  headers.delete("vary");
+  return new Response(sanitized.response.body, {
+    status: sanitized.response.status,
+    statusText: sanitized.response.statusText,
+    headers,
+  });
 }
 
 /**
@@ -121,16 +282,21 @@ export async function withDashboardCache(
     }
     return fresh;
   }
-  const cacheKey = buildCacheKeyRequest(url);
+  const cacheKey = buildCacheKeyRequest(url, options.identity);
 
   try {
     const cached = await cache.match(cacheKey);
     if (cached) {
-      return withCacheControlHeaders(
+      const materialized = await addDynamicResponseFields(
         cached,
+        options.request,
+      );
+      return withCacheControlHeaders(
+        materialized,
         ttlSeconds,
         "HIT",
         clientCacheScope,
+        cacheAgeSeconds(cached),
       );
     }
   } catch {
@@ -142,12 +308,7 @@ export async function withDashboardCache(
     return fresh;
   }
 
-  const cacheable = withCacheControlHeaders(
-    fresh.clone(),
-    ttlSeconds,
-    "HIT",
-    "public",
-  );
+  const cacheable = await cacheStorageResponse(fresh.clone(), ttlSeconds);
   const putPromise = cache.put(cacheKey, cacheable).catch(() => undefined);
   if (ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(putPromise);

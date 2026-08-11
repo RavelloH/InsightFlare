@@ -95,7 +95,15 @@ describe("Hono public query routes", () => {
       ctx,
       new URL("https://app.test/api/public/share/demo/site"),
       expect.any(Function),
-      PUBLIC_QUERY_CACHE_OPTIONS,
+      expect.objectContaining({
+        ...PUBLIC_QUERY_CACHE_OPTIONS,
+        identity: {
+          scope: "public",
+          tenantId: "site-1",
+          route: "site",
+        },
+        request: expect.any(Request),
+      }),
     );
     expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
@@ -130,7 +138,15 @@ describe("Hono public query routes", () => {
       ctx,
       new URL("https://app.test/api/public/share/demo/overview?preset=today"),
       expect.any(Function),
-      PUBLIC_QUERY_CACHE_OPTIONS,
+      expect.objectContaining({
+        ...PUBLIC_QUERY_CACHE_OPTIONS,
+        identity: {
+          scope: "public",
+          tenantId: "site-1",
+          route: "overview",
+        },
+        request: expect.any(Request),
+      }),
     );
     expect(dispatchQueryRoute).toHaveBeenCalledWith(
       env,

@@ -73,6 +73,76 @@ describe("edge dashboard cache wrapper", () => {
     expect(put).not.toHaveBeenCalled();
   });
 
+  it("uses a tenant-scoped synthetic key and omits siteId from its query", async () => {
+    const match = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({
+        match,
+        put: vi.fn().mockResolvedValue(undefined),
+      }),
+    });
+
+    await withDashboardCache(
+      undefined,
+      new URL(
+        "https://example.test/api/private/overview?siteId=site-1&to=2&from=1",
+      ),
+      vi.fn().mockResolvedValue(new Response("fresh")),
+      {
+        identity: {
+          scope: "private",
+          tenantId: "site-1",
+          route: "overview",
+        },
+      },
+    );
+
+    expect((match.mock.calls[0]![0] as Request).url).toBe(
+      "https://analytics-cache.insightflare.internal/analytics/v2/private/site-1/shared/overview?from=1&to=2",
+    );
+  });
+
+  it("refreshes request metadata instead of replaying it from a cache entry", async () => {
+    const cached = new Response(
+      JSON.stringify({ ok: true, data: { views: 2 } }),
+      {
+        headers: {
+          "content-type": "application/json",
+          "x-insightflare-cache-had-dynamic-fields": "1",
+          "x-insightflare-cache-created-at": String(Date.now() - 2_000),
+          "x-insightflare-d1-rows-read": "42",
+        },
+      },
+    );
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({
+        match: vi.fn().mockResolvedValue(cached),
+        put: vi.fn(),
+      }),
+    });
+
+    const response = await withDashboardCache(
+      undefined,
+      new URL("https://example.test/api/private/overview"),
+      vi.fn(),
+      {
+        request: new Request("https://example.test/api/private/overview", {
+          headers: { "x-request-id": "current-request" },
+        }),
+      },
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      requestId: "current-request",
+    });
+    expect(response.headers.get("x-insightflare-d1-rows-read")).toBe("0");
+    expect(response.headers.get("x-insightflare-cached-d1-rows-read")).toBe(
+      "42",
+    );
+    expect(response.headers.get("x-insightflare-cache-age")).toBe("2");
+  });
+
   it("stores successful misses and marks returned responses as MISS", async () => {
     const match = vi.fn().mockResolvedValue(undefined);
     const put = vi.fn().mockResolvedValue(undefined);
@@ -103,6 +173,46 @@ describe("edge dashboard cache wrapper", () => {
       (put.mock.calls[0]![1] as Response).headers.get("cache-control"),
     ).toBe("public, max-age=1, s-maxage=1");
     expect(waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores canonical JSON without request-specific metadata", async () => {
+    const match = vi.fn().mockResolvedValue(undefined);
+    const put = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({ match, put }),
+    });
+    const response = await withDashboardCache(
+      undefined,
+      new URL("https://example.test/api/private/overview"),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            data: { views: 2 },
+            requestId: "first-request",
+            timestamp: "2026-08-12T00:00:00.000Z",
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      ),
+      {
+        request: new Request("https://example.test/api/private/overview", {
+          headers: { "x-request-id": "first-request" },
+        }),
+      },
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      requestId: "first-request",
+    });
+    const cached = put.mock.calls[0]![1] as Response;
+    await expect(cached.clone().json()).resolves.toEqual({
+      ok: true,
+      data: { views: 2 },
+    });
+    expect(cached.headers.get("x-insightflare-cache-had-dynamic-fields")).toBe(
+      "1",
+    );
   });
 
   it("does not cache non-OK responses and tolerates cache failures", async () => {

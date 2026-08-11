@@ -3,10 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { withDashboardCache } from "@/lib/edge/dashboard-cache";
 import type * as QueryCoreModule from "@/lib/edge/query/core";
-import { resolvePrivateSiteForSession } from "@/lib/edge/query/core";
+import {
+  resolvePrivateSiteForSession,
+  resolvePrivateTeamForSession,
+} from "@/lib/edge/query/core";
 import type * as QueryRouterModule from "@/lib/edge/query/router";
 import { dispatchQueryRoute } from "@/lib/edge/query/router";
-import { handleTeamDashboardForSession } from "@/lib/edge/query/team";
+import { handleTeamDashboardForTeam } from "@/lib/edge/query/team";
 import { privateQueryRoutes } from "@/lib/hono/routes/private/query";
 import type { AppEnv } from "@/lib/hono/types";
 
@@ -25,6 +28,7 @@ vi.mock("@/lib/edge/query/core", async (importOriginal) => {
   return {
     ...actual,
     resolvePrivateSiteForSession: vi.fn(),
+    resolvePrivateTeamForSession: vi.fn(),
   };
 });
 
@@ -37,7 +41,7 @@ vi.mock("@/lib/edge/query/router", async (importOriginal) => {
 });
 
 vi.mock("@/lib/edge/query/team", () => ({
-  handleTeamDashboardForSession: vi.fn(),
+  handleTeamDashboardForTeam: vi.fn(),
 }));
 
 const env = { DB: {} };
@@ -76,7 +80,11 @@ describe("Hono private query routes", () => {
       domain: "app.test",
     });
     vi.mocked(dispatchQueryRoute).mockResolvedValue(new Response("query"));
-    vi.mocked(handleTeamDashboardForSession).mockResolvedValue(
+    vi.mocked(resolvePrivateTeamForSession).mockResolvedValue({
+      id: "team-1",
+      allowedSiteIds: ["site-1"],
+    });
+    vi.mocked(handleTeamDashboardForTeam).mockResolvedValue(
       new Response("team"),
     );
   });
@@ -101,7 +109,14 @@ describe("Hono private query routes", () => {
       ctx,
       new URL("https://app.test/api/private/overview?siteId=site-1"),
       expect.any(Function),
-      undefined,
+      expect.objectContaining({
+        identity: {
+          scope: "private",
+          tenantId: "site-1",
+          route: "overview",
+        },
+        request: expect.any(Request),
+      }),
     );
     expect(dispatchQueryRoute).toHaveBeenCalledWith(
       env,
@@ -173,24 +188,50 @@ describe("Hono private query routes", () => {
     );
   });
 
-  it("keeps team dashboard ahead of site resolution and cache", async () => {
+  it("caches the team dashboard after team access resolves", async () => {
     const app = createApp();
 
     const response = await app.fetch(
-      request("/api/private/team-dashboard?teamId=team-1"),
+      request("/api/private/team-dashboard?teamId=team-1&from=100&to=200"),
       env as never,
       ctx,
     );
 
     await expect(response.text()).resolves.toBe("team");
-    expect(handleTeamDashboardForSession).toHaveBeenCalledWith(
+    expect(resolvePrivateTeamForSession).toHaveBeenCalledWith(
       expect.any(Request),
       env,
-      new URL("https://app.test/api/private/team-dashboard?teamId=team-1"),
+      new URL(
+        "https://app.test/api/private/team-dashboard?teamId=team-1&from=100&to=200",
+      ),
       session,
     );
+    expect(withDashboardCache).toHaveBeenCalledWith(
+      ctx,
+      new URL(
+        "https://app.test/api/private/team-dashboard?teamId=team-1&from=100&to=200",
+      ),
+      expect.any(Function),
+      expect.objectContaining({
+        identity: {
+          scope: "private-team",
+          tenantId: "team-1",
+          route: "team-dashboard",
+          audienceId: "user-1",
+        },
+        request: expect.any(Request),
+      }),
+    );
+    expect(handleTeamDashboardForTeam).toHaveBeenCalledWith(
+      env,
+      new URL(
+        "https://app.test/api/private/team-dashboard?teamId=team-1&from=100&to=200",
+      ),
+      "team-1",
+      expect.objectContaining({ fromMs: 100, toMs: 200 }),
+      ["site-1"],
+    );
     expect(resolvePrivateSiteForSession).not.toHaveBeenCalled();
-    expect(withDashboardCache).not.toHaveBeenCalled();
     expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 

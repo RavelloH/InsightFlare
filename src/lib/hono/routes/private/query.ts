@@ -1,12 +1,18 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 
-import { notAllowed } from "@/lib/edge/query/core";
+import { withDashboardCache } from "@/lib/edge/dashboard-cache";
+import {
+  badRequest,
+  notAllowed,
+  parseWindow,
+  resolvePrivateTeamForSession,
+} from "@/lib/edge/query/core";
 import {
   DASHBOARD_QUERY_PATHS,
   dispatchQueryRoute,
 } from "@/lib/edge/query/router";
-import { handleTeamDashboardForSession } from "@/lib/edge/query/team";
+import { handleTeamDashboardForTeam } from "@/lib/edge/query/team";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import {
   requireMethodMiddleware,
@@ -14,7 +20,7 @@ import {
 } from "@/lib/hono/middleware/method";
 import { resolvePrivateSiteMiddleware } from "@/lib/hono/middleware/site";
 import type { AppEnv } from "@/lib/hono/types";
-import { requestUrl } from "@/lib/hono/utils/context";
+import { executionContext, requestUrl } from "@/lib/hono/utils/context";
 
 const FUNNEL_PATH = "funnels";
 const TEAM_DASHBOARD_PATH = "team-dashboard";
@@ -38,17 +44,43 @@ function privateQuery(pathname: string) {
 
 export const privateQueryRoutes = new Hono<AppEnv>();
 
-privateQueryRoutes.all("/team-dashboard", (c) => {
+privateQueryRoutes.all("/team-dashboard", async (c) => {
   if (c.req.raw.method !== "GET") return notAllowed();
   const session = c.get("session");
   if (!session) {
     throw new Error("private session context missing");
   }
-  return handleTeamDashboardForSession(
+  const url = requestUrl(c);
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const team = await resolvePrivateTeamForSession(
     c.req.raw,
     c.env,
-    requestUrl(c),
+    url,
     session,
+  );
+  if (team instanceof Response) return team;
+
+  return withDashboardCache(
+    executionContext(c),
+    url,
+    () =>
+      handleTeamDashboardForTeam(
+        c.env,
+        url,
+        team.id,
+        window,
+        team.allowedSiteIds,
+      ),
+    {
+      identity: {
+        scope: "private-team",
+        tenantId: team.id,
+        route: "team-dashboard",
+        audienceId: session.userId,
+      },
+      request: c.req.raw,
+    },
   );
 });
 
