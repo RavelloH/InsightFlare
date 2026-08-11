@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/lib/edge/types";
 
 vi.mock("@/lib/edge/hourly-rollup", () => ({
-  queryOverviewForSitesFromHourlyRollups: vi.fn(),
-  queryTrendForSitesFromHourlyRollups: vi.fn(),
+  queryOverviewForSitesFromHourlyRollupsPartial: vi.fn(),
+  queryTrendForSitesFromHourlyRollupsPartial: vi.fn(),
 }));
 
 vi.mock("@/lib/edge/query/core", () => ({
@@ -48,8 +48,8 @@ vi.mock("@/lib/edge/query/core", () => ({
 }));
 
 import {
-  queryOverviewForSitesFromHourlyRollups,
-  queryTrendForSitesFromHourlyRollups,
+  queryOverviewForSitesFromHourlyRollupsPartial,
+  queryTrendForSitesFromHourlyRollupsPartial,
 } from "@/lib/edge/hourly-rollup";
 import {
   parseWindow,
@@ -66,8 +66,10 @@ import {
   queryTeamTrendFromD1,
 } from "@/lib/edge/query/team";
 
-const queryOverviewMock = vi.mocked(queryOverviewForSitesFromHourlyRollups);
-const queryTrendMock = vi.mocked(queryTrendForSitesFromHourlyRollups);
+const queryOverviewMock = vi.mocked(
+  queryOverviewForSitesFromHourlyRollupsPartial,
+);
+const queryTrendMock = vi.mocked(queryTrendForSitesFromHourlyRollupsPartial);
 const parseWindowMock = vi.mocked(parseWindow);
 const resolvePrivateTeamMock = vi.mocked(resolvePrivateTeam);
 const resolvePrivateTeamForSessionMock = vi.mocked(
@@ -170,6 +172,8 @@ describe("handleTeamDashboard", () => {
     resolvePrivateTeamForSessionMock.mockReset();
     queryOverviewMock.mockReset();
     queryTrendMock.mockReset();
+    queryD1AllMock.mockReset();
+    queryD1AllMock.mockResolvedValue([]);
   });
 
   it("returns badRequest for invalid window", async () => {
@@ -233,6 +237,8 @@ describe("handleTeamDashboardForTeam", () => {
   beforeEach(() => {
     queryOverviewMock.mockReset();
     queryTrendMock.mockReset();
+    queryD1AllMock.mockReset();
+    queryD1AllMock.mockResolvedValue([]);
   });
 
   it("returns empty data when team has no sites", async () => {
@@ -280,7 +286,7 @@ describe("handleTeamDashboardForTeam", () => {
     });
     const env = { DB: db } as unknown as Env;
     queryOverviewMock.mockResolvedValue(new Map());
-    queryTrendMock.mockResolvedValue([]);
+    queryTrendMock.mockResolvedValue(new Map());
     const url = makeUrl("/api/private/team-dashboard");
     const window = makeWindow();
 
@@ -313,7 +319,7 @@ describe("handleTeamDashboardForTeam", () => {
       ],
     });
     const env = { DB: db } as unknown as Env;
-    queryOverviewMock.mockResolvedValue(null);
+    queryOverviewMock.mockResolvedValue(new Map());
     queryTrendMock.mockResolvedValue(null);
     queryD1AllMock.mockResolvedValue([]);
     const url = makeUrl("/api/private/team-dashboard");

@@ -33,8 +33,9 @@ class BoundStatement {
     return row ? ({ ...row } as T) : null;
   }
 
-  async run(): Promise<void> {
-    this.db.prepare(this.sql).run(...this.bindings);
+  async run(): Promise<{ meta: { changes: number } }> {
+    const result = this.db.prepare(this.sql).run(...this.bindings);
+    return { meta: { changes: Number(result.changes ?? 0) } };
   }
 }
 
@@ -73,7 +74,11 @@ function createEnv() {
       session_id TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL,
       started_at INTEGER NOT NULL,
+      last_activity_at INTEGER NOT NULL DEFAULT 0,
+      ended_at INTEGER,
+      finalized_at INTEGER,
       duration_ms INTEGER,
+      duration_source TEXT,
       perf_ttfb_ms REAL,
       perf_fcp_ms REAL,
       perf_lcp_ms REAL,
@@ -144,6 +149,7 @@ function insertVisit(
     sessionId?: string;
     status?: string;
     startedAt: number;
+    lastActivityAt?: number;
     durationMs?: number | null;
   },
 ): void {
@@ -152,8 +158,8 @@ function insertVisit(
       `
         INSERT INTO visits (
           visit_id, site_id, visitor_id, session_id, status, started_at,
-          duration_ms, perf_ttfb_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          last_activity_at, duration_ms, perf_ttfb_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     )
     .run(
@@ -163,6 +169,7 @@ function insertVisit(
       row.sessionId ?? "session-1",
       row.status ?? "closed",
       row.startedAt,
+      row.lastActivityAt ?? row.startedAt,
       row.durationMs ?? null,
       100,
     );
@@ -173,7 +180,7 @@ describe("hourly visit rollups", () => {
     vi.restoreAllMocks();
   });
 
-  it("aggregates closed visits older than the lag without deleting details", async () => {
+  it("finalizes stale open visits and aggregates them without deleting details", async () => {
     const { env, d1 } = createEnv();
     const scheduledTime = Date.UTC(2026, 4, 25, 12);
     const oldHour = Math.floor(Date.UTC(2026, 4, 24, 20) / (60 * 60 * 1000));
@@ -207,7 +214,7 @@ describe("hourly visit rollups", () => {
     const rollups = d1.db
       .prepare("SELECT * FROM visit_hourly_rollups")
       .all() as Row[];
-    expect(rollups).toHaveLength(1);
+    expect(rollups).toHaveLength(2);
     expect(rollups[0]).toMatchObject({
       site_id: "site-1",
       hour_bucket: oldHour,
@@ -221,6 +228,12 @@ describe("hourly visit rollups", () => {
     expect(JSON.parse(String(rollups[0].session_counts_json))).toEqual([
       ["session-1", 2],
     ]);
+    const timedOut = d1.db
+      .prepare(
+        "SELECT status, duration_source FROM visits WHERE visit_id = 'open-visit'",
+      )
+      .get() as Row;
+    expect(timedOut).toEqual({ status: "timeout", duration_source: "timeout" });
     const visits = d1.db
       .prepare("SELECT COUNT(*) AS count FROM visits")
       .get() as { count: number };
@@ -256,7 +269,7 @@ describe("hourly visit rollups", () => {
     d1.close();
   });
 
-  it("does not advance past old open visits", async () => {
+  it("does not let stale open visits block the backfill", async () => {
     const { env, d1 } = createEnv();
     const scheduledTime = Date.UTC(2026, 4, 25, 12);
     const firstHour = Math.floor(Date.UTC(2026, 4, 20, 0) / (60 * 60 * 1000));
@@ -281,11 +294,42 @@ describe("hourly visit rollups", () => {
     const state = d1.db
       .prepare("SELECT * FROM visit_hourly_aggregation_state")
       .get() as Row;
-    expect(state.aggregated_until_hour).toBe(firstHour);
+    const expectedEndHour =
+      Math.floor((scheduledTime - 12 * 60 * 60 * 1000) / (60 * 60 * 1000)) - 1;
+    expect(state.aggregated_until_hour).toBe(expectedEndHour);
     const rollups = d1.db
       .prepare("SELECT hour_bucket AS hourBucket FROM visit_hourly_rollups")
       .all() as Row[];
-    expect(rollups).toEqual([{ hourBucket: firstHour }]);
+    expect(rollups).toEqual([
+      { hourBucket: firstHour },
+      { hourBucket: firstHour + 1 },
+      { hourBucket: firstHour + 2 },
+    ]);
+    d1.close();
+  });
+
+  it("keeps a recently active open visit out of the rollup", async () => {
+    const { env, d1 } = createEnv();
+    const scheduledTime = Date.UTC(2026, 4, 25, 12);
+    const firstHour = Math.floor(Date.UTC(2026, 4, 20, 0) / (60 * 60 * 1000));
+    insertVisit(d1, {
+      visitId: "active-open",
+      status: "open",
+      startedAt: firstHour * 60 * 60 * 1000,
+      lastActivityAt: scheduledTime - 60 * 60 * 1000,
+    });
+
+    const result = await runHourlyAggregation(env, scheduledTime);
+
+    expect(result.status).toBe("skipped");
+    const visit = d1.db
+      .prepare("SELECT status FROM visits WHERE visit_id = 'active-open'")
+      .get() as Row;
+    expect(visit.status).toBe("open");
+    const rollups = d1.db
+      .prepare("SELECT COUNT(*) AS count FROM visit_hourly_rollups")
+      .get() as { count: number };
+    expect(rollups.count).toBe(0);
     d1.close();
   });
 
@@ -538,10 +582,10 @@ describe("hourly visit rollups", () => {
     d1.close();
   });
 
-  it("skips sites with no closed visits", async () => {
+  it("aggregates a site with only a stale open visit", async () => {
     const { env, d1 } = createEnv();
     const scheduledTime = Date.UTC(2026, 4, 25, 12);
-    // Only an open visit - no closed visits
+    // Only an old open visit; the aggregation job must finalize it first.
     insertVisit(d1, {
       visitId: "only-open",
       status: "open",
@@ -550,11 +594,11 @@ describe("hourly visit rollups", () => {
 
     const result = await runHourlyAggregation(env, scheduledTime);
 
-    expect(result.status).toBe("skipped");
+    expect(result.status).toBe("success");
     const rollups = d1.db
       .prepare("SELECT COUNT(*) AS count FROM visit_hourly_rollups")
       .get() as { count: number };
-    expect(rollups.count).toBe(0);
+    expect(rollups.count).toBe(1);
     d1.close();
   });
 

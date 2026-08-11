@@ -26,6 +26,7 @@ interface HourlyAggregationOptions {
 interface HourlyAggregationSummary {
   cutoffMs: number;
   endHour: number;
+  staleOpenVisitsFinalized: number;
   candidateSites: number;
   sitesProcessed: number;
   sitesSkippedNoClosedVisit: number;
@@ -48,6 +49,11 @@ interface AggregationStateRow {
 
 interface HourBucketRow {
   hourBucket: number | null;
+}
+
+interface RollupWindowGroup {
+  siteIds: string[];
+  split: NonNullable<ReturnType<typeof splitRollupWindow>>;
 }
 
 interface BasicRollupRow {
@@ -425,6 +431,35 @@ async function queryAggregationStates(
   return states;
 }
 
+function groupSitesByRollupWindow(
+  siteIds: string[],
+  states: Map<string, number>,
+  window: QueryWindow,
+): RollupWindowGroup[] {
+  const groups = new Map<string, RollupWindowGroup>();
+  for (const siteId of siteIds) {
+    const aggregatedUntilHour = states.get(siteId);
+    if (aggregatedUntilHour === undefined) continue;
+    const split = splitRollupWindow(window, aggregatedUntilHour);
+    if (!split) continue;
+    const key = [
+      split.rollupStartHour,
+      split.rollupEndHour,
+      split.prefix?.fromMs ?? "",
+      split.prefix?.toMs ?? "",
+      split.suffix?.fromMs ?? "",
+      split.suffix?.toMs ?? "",
+    ].join(":");
+    const existing = groups.get(key);
+    if (existing) {
+      existing.siteIds.push(siteId);
+    } else {
+      groups.set(key, { siteIds: [siteId], split });
+    }
+  }
+  return [...groups.values()];
+}
+
 async function queryDetailAccumulatorsForSites(
   env: Env,
   siteIds: string[],
@@ -509,59 +544,72 @@ async function queryStoredRollupsForSites(
   return result.results;
 }
 
+export async function queryOverviewForSitesFromHourlyRollupsPartial(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+  diagnostics?: D1ReadDiagnostics,
+): Promise<Map<string, OverviewAggregateRow>> {
+  if (siteIds.length === 0) return new Map();
+  const states = await queryAggregationStates(env, siteIds, diagnostics);
+  const result = new Map<string, OverviewAggregateRow>();
+  for (const group of groupSitesByRollupWindow(siteIds, states, window)) {
+    const bySite = new Map<string, MetricAccumulator>();
+    const ensure = (siteId: string) => {
+      const existing = bySite.get(siteId);
+      if (existing) return existing;
+      const next = createMetricAccumulator();
+      bySite.set(siteId, next);
+      return next;
+    };
+
+    for (const rollup of await queryStoredRollupsForSites(
+      env,
+      group.siteIds,
+      group.split.rollupStartHour,
+      group.split.rollupEndHour,
+      diagnostics,
+    )) {
+      addStoredRollup(ensure(rollup.siteId), rollup);
+    }
+
+    for (const detailWindow of [group.split.prefix, group.split.suffix]) {
+      if (!detailWindow) continue;
+      const detail = await queryDetailAccumulatorsForSites(
+        env,
+        group.siteIds,
+        detailWindow,
+        diagnostics,
+      );
+      for (const [siteId, accumulator] of detail.entries()) {
+        addMetricAccumulator(ensure(siteId), accumulator);
+      }
+    }
+    for (const siteId of group.siteIds) {
+      result.set(
+        siteId,
+        overviewFromAccumulator(
+          bySite.get(siteId) ?? createMetricAccumulator(),
+        ),
+      );
+    }
+  }
+  return result;
+}
+
 export async function queryOverviewForSitesFromHourlyRollups(
   env: Env,
   siteIds: string[],
   window: QueryWindow,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<Map<string, OverviewAggregateRow> | null> {
-  if (siteIds.length === 0) return new Map();
-  const states = await queryAggregationStates(env, siteIds, diagnostics);
-  if (states.size !== siteIds.length) return null;
-  const aggregatedUntilHour = Math.min(
-    ...siteIds.map((siteId) => states.get(siteId) ?? -1),
-  );
-  const split = splitRollupWindow(window, aggregatedUntilHour);
-  if (!split) return null;
-
-  const bySite = new Map<string, MetricAccumulator>();
-  const ensure = (siteId: string) => {
-    const existing = bySite.get(siteId);
-    if (existing) return existing;
-    const next = createMetricAccumulator();
-    bySite.set(siteId, next);
-    return next;
-  };
-
-  for (const rollup of await queryStoredRollupsForSites(
+  const rollup = await queryOverviewForSitesFromHourlyRollupsPartial(
     env,
     siteIds,
-    split.rollupStartHour,
-    split.rollupEndHour,
+    window,
     diagnostics,
-  )) {
-    addStoredRollup(ensure(rollup.siteId), rollup);
-  }
-
-  for (const detailWindow of [split.prefix, split.suffix]) {
-    if (!detailWindow) continue;
-    const detail = await queryDetailAccumulatorsForSites(
-      env,
-      siteIds,
-      detailWindow,
-      diagnostics,
-    );
-    for (const [siteId, accumulator] of detail.entries()) {
-      addMetricAccumulator(ensure(siteId), accumulator);
-    }
-  }
-
-  return new Map(
-    siteIds.map((siteId) => [
-      siteId,
-      overviewFromAccumulator(bySite.get(siteId) ?? createMetricAccumulator()),
-    ]),
   );
+  return rollup.size === siteIds.length ? rollup : null;
 }
 
 function bucketIndexForTimestamp(
@@ -708,6 +756,91 @@ export interface SiteTrendRow extends TrendAggregateRow {
   siteId: string;
 }
 
+export async function queryTrendForSitesFromHourlyRollupsPartial(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+  interval: Interval,
+  diagnostics?: D1ReadDiagnostics,
+): Promise<Map<string, SiteTrendRow[]> | null> {
+  if (siteIds.length === 0) return new Map();
+  const buckets = buildTimeBuckets(window, interval);
+  if (!canUseHourlyRollupsForTrend(buckets)) return null;
+  const states = await queryAggregationStates(env, siteIds, diagnostics);
+  const result = new Map<string, SiteTrendRow[]>();
+  for (const group of groupSitesByRollupWindow(siteIds, states, window)) {
+    const bySite = new Map<string, SiteTrendAccumulator>();
+    const ensure = (siteId: string) => {
+      const existing = bySite.get(siteId);
+      if (existing) return existing;
+      const next = createSiteTrendAccumulator();
+      bySite.set(siteId, next);
+      return next;
+    };
+
+    for (const rollup of await queryStoredRollupsForSites(
+      env,
+      group.siteIds,
+      group.split.rollupStartHour,
+      group.split.rollupEndHour,
+      diagnostics,
+    )) {
+      addRollupToTrend(ensure(rollup.siteId), rollup, buckets);
+    }
+
+    for (const detailWindow of [group.split.prefix, group.split.suffix]) {
+      if (!detailWindow) continue;
+      for (const row of await queryDetailVisitsForSites(
+        env,
+        group.siteIds,
+        detailWindow,
+        diagnostics,
+      )) {
+        addDetailToTrend(ensure(row.siteId), row, buckets);
+      }
+    }
+
+    for (const siteId of group.siteIds) {
+      const trend = bySite.get(siteId) ?? createSiteTrendAccumulator();
+      for (const [sessionId, count] of trend.sessionCounts.entries()) {
+        const firstAt = trend.sessionFirstAt.get(sessionId);
+        if (firstAt === undefined) continue;
+        const bucket = bucketIndexForTimestamp(buckets, firstAt);
+        if (bucket === null) continue;
+        const bucketAccumulator = ensureTrendBucket(
+          trend,
+          bucket,
+          timeBucketTimestamp(buckets, bucket),
+        );
+        bucketAccumulator.sessionCounts.set(sessionId, count);
+      }
+      const rows: SiteTrendRow[] = [];
+      for (const bucketAccumulator of trend.bucketAccumulators.values()) {
+        let bounces = 0;
+        for (const count of bucketAccumulator.sessionCounts.values()) {
+          if (count === 1) bounces += 1;
+        }
+        rows.push({
+          siteId,
+          bucket: bucketAccumulator.bucket,
+          timestampMs: bucketAccumulator.timestampMs,
+          views: bucketAccumulator.views,
+          visitors: bucketAccumulator.visitors.size,
+          sessions: bucketAccumulator.sessionCounts.size,
+          bounces,
+          totalDuration: bucketAccumulator.durationMsSum,
+          durationViews: bucketAccumulator.durationMsCount,
+        });
+      }
+      result.set(
+        siteId,
+        rows.sort((left, right) => left.bucket - right.bucket),
+      );
+    }
+  }
+  return result;
+}
+
 export async function queryTrendForSitesFromHourlyRollups(
   env: Env,
   siteIds: string[],
@@ -715,86 +848,20 @@ export async function queryTrendForSitesFromHourlyRollups(
   interval: Interval,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<SiteTrendRow[] | null> {
-  if (siteIds.length === 0) return [];
-  const buckets = buildTimeBuckets(window, interval);
-  if (!canUseHourlyRollupsForTrend(buckets)) return null;
-  const states = await queryAggregationStates(env, siteIds, diagnostics);
-  if (states.size !== siteIds.length) return null;
-  const aggregatedUntilHour = Math.min(
-    ...siteIds.map((siteId) => states.get(siteId) ?? -1),
-  );
-  const split = splitRollupWindow(window, aggregatedUntilHour);
-  if (!split) return null;
-
-  const bySite = new Map<string, SiteTrendAccumulator>();
-  const ensure = (siteId: string) => {
-    const existing = bySite.get(siteId);
-    if (existing) return existing;
-    const next = createSiteTrendAccumulator();
-    bySite.set(siteId, next);
-    return next;
-  };
-
-  for (const rollup of await queryStoredRollupsForSites(
+  const rollup = await queryTrendForSitesFromHourlyRollupsPartial(
     env,
     siteIds,
-    split.rollupStartHour,
-    split.rollupEndHour,
+    window,
+    interval,
     diagnostics,
-  )) {
-    addRollupToTrend(ensure(rollup.siteId), rollup, buckets);
-  }
-
-  for (const detailWindow of [split.prefix, split.suffix]) {
-    if (!detailWindow) continue;
-    for (const row of await queryDetailVisitsForSites(
-      env,
-      siteIds,
-      detailWindow,
-      diagnostics,
-    )) {
-      addDetailToTrend(ensure(row.siteId), row, buckets);
-    }
-  }
-
-  const rows: SiteTrendRow[] = [];
-  for (const siteId of siteIds) {
-    const trend = bySite.get(siteId) ?? createSiteTrendAccumulator();
-    for (const [sessionId, count] of trend.sessionCounts.entries()) {
-      const firstAt = trend.sessionFirstAt.get(sessionId);
-      if (firstAt === undefined) continue;
-      const bucket = bucketIndexForTimestamp(buckets, firstAt);
-      if (bucket === null) continue;
-      const bucketAccumulator = ensureTrendBucket(
-        trend,
-        bucket,
-        timeBucketTimestamp(buckets, bucket),
-      );
-      bucketAccumulator.sessionCounts.set(sessionId, count);
-    }
-    for (const bucketAccumulator of trend.bucketAccumulators.values()) {
-      let bounces = 0;
-      for (const count of bucketAccumulator.sessionCounts.values()) {
-        if (count === 1) bounces += 1;
-      }
-      rows.push({
-        siteId,
-        bucket: bucketAccumulator.bucket,
-        timestampMs: bucketAccumulator.timestampMs,
-        views: bucketAccumulator.views,
-        visitors: bucketAccumulator.visitors.size,
-        sessions: bucketAccumulator.sessionCounts.size,
-        bounces,
-        totalDuration: bucketAccumulator.durationMsSum,
-        durationViews: bucketAccumulator.durationMsCount,
-      });
-    }
-  }
-
-  return rows.sort(
-    (left, right) =>
-      left.bucket - right.bucket || left.siteId.localeCompare(right.siteId),
   );
+  if (!rollup || rollup.size !== siteIds.length) return null;
+  return [...rollup.values()]
+    .flat()
+    .sort(
+      (left, right) =>
+        left.bucket - right.bucket || left.siteId.localeCompare(right.siteId),
+    );
 }
 
 async function listAggregationCandidates(
@@ -882,6 +949,29 @@ async function readFirstOpenHour(
   }
   const hour = Number(row.hourBucket);
   return Number.isFinite(hour) ? hour : null;
+}
+
+async function finalizeStaleOpenVisits(
+  env: Env,
+  cutoffMs: number,
+  finalizedAt: number,
+): Promise<number> {
+  const result = await env.DB.prepare(
+    `
+      UPDATE visits
+      SET status = 'timeout',
+          last_activity_at = ?,
+          ended_at = ?,
+          finalized_at = ?,
+          duration_ms = NULL,
+          duration_source = 'timeout'
+      WHERE status = 'open'
+        AND last_activity_at < ?
+    `,
+  )
+    .bind(finalizedAt, finalizedAt, finalizedAt, cutoffMs)
+    .run();
+  return Number(result.meta.changes ?? 0);
 }
 
 async function aggregateSiteHours(
@@ -1136,6 +1226,7 @@ export async function runHourlyAggregation(
   const summary: HourlyAggregationSummary = {
     cutoffMs,
     endHour,
+    staleOpenVisitsFinalized: 0,
     candidateSites: 0,
     sitesProcessed: 0,
     sitesSkippedNoClosedVisit: 0,
@@ -1157,6 +1248,12 @@ export async function runHourlyAggregation(
     return { status: "skipped", summary: { ...summary } };
   }
 
+  summary.staleOpenVisitsFinalized = await finalizeStaleOpenVisits(
+    env,
+    cutoffMs,
+    nowMs,
+  );
+
   const candidates = await listAggregationCandidates(env, endHour);
   summary.candidateSites = candidates.length;
   await options.logger?.info(
@@ -1167,6 +1264,7 @@ export async function runHourlyAggregation(
       endHour,
       lagHours: ROLLUP_LAG_HOURS,
       maxHoursPerSite: ROLLUP_MAX_HOURS_PER_SITE,
+      staleOpenVisitsFinalized: summary.staleOpenVisitsFinalized,
     },
   );
 
@@ -1241,6 +1339,7 @@ export async function runHourlyAggregation(
     sitesFailed: summary.sitesFailed,
     hoursAggregated: summary.hoursAggregated,
     rollupRowsWritten: summary.rollupRowsWritten,
+    staleOpenVisitsFinalized: summary.staleOpenVisitsFinalized,
   });
   return { status, summary: { ...summary } };
 }
