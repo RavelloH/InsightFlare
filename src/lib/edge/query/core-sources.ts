@@ -2,6 +2,7 @@ import type { Env } from "@/lib/edge/types";
 
 import { buildEventFilterSql } from "./core-filters";
 import type { DashboardFilters, QueryWindow } from "./core-types";
+import { type D1ReadDiagnostics, recordD1RowsRead } from "./diagnostics";
 
 export const VISIT_SOURCE_COLUMNS = `
     visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at,
@@ -223,9 +224,11 @@ export async function queryD1All<T extends object>(
   env: Env,
   sql: string,
   bindings: Array<string | number | null>,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<T[]> {
   const result = await env.DB.prepare(sql)
     .bind(...bindings)
     .all<T>();
+  recordD1RowsRead(diagnostics, result);
   return result.results;
 }

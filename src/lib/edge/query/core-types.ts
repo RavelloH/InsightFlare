@@ -596,6 +596,7 @@ export interface PublicSiteEnvelope {
 export interface PreferredSourceResult<T> {
   value: T;
   source: "ae" | "d1";
+  diagnosticSource?: "raw" | "rollup";
   approximateVisitors?: boolean;
 }
 

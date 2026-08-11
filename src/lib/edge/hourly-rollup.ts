@@ -6,6 +6,7 @@ import type {
   QueryWindow,
   TrendAggregateRow,
 } from "./query/core-types";
+import { type D1ReadDiagnostics, recordD1RowsRead } from "./query/diagnostics";
 import type {
   ScheduledTaskLogger,
   ScheduledTaskOutcome,
@@ -397,6 +398,7 @@ function splitRollupWindow(
 async function queryAggregationStates(
   env: Env,
   siteIds: string[],
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<Map<string, number>> {
   if (siteIds.length === 0) return new Map();
   const placeholders = siteIds.map(() => "?").join(", ");
@@ -409,6 +411,7 @@ async function queryAggregationStates(
   )
     .bind(...siteIds)
     .all<AggregationStateRow>();
+  recordD1RowsRead(diagnostics, result);
   const requested = new Set(siteIds);
   const states = new Map<string, number>();
   for (const row of result.results) {
@@ -426,6 +429,7 @@ async function queryDetailAccumulatorsForSites(
   env: Env,
   siteIds: string[],
   window: QueryWindow,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<Map<string, MetricAccumulator>> {
   if (siteIds.length === 0 || window.toMs < window.fromMs) return new Map();
   const placeholders = siteIds.map(() => "?").join(", ");
@@ -449,6 +453,7 @@ async function queryDetailAccumulatorsForSites(
   )
     .bind(...siteIds, window.fromMs, window.toMs)
     .all<DetailVisitRow>();
+  recordD1RowsRead(diagnostics, result);
 
   const accumulators = new Map<string, MetricAccumulator>();
   for (const row of result.results) {
@@ -465,6 +470,7 @@ async function queryStoredRollupsForSites(
   siteIds: string[],
   startHour: number,
   endHour: number,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<StoredRollupRow[]> {
   if (siteIds.length === 0 || endHour < startHour) return [];
   const placeholders = siteIds.map(() => "?").join(", ");
@@ -499,6 +505,7 @@ async function queryStoredRollupsForSites(
   )
     .bind(...siteIds, startHour, endHour)
     .all<StoredRollupRow>();
+  recordD1RowsRead(diagnostics, result);
   return result.results;
 }
 
@@ -506,9 +513,10 @@ export async function queryOverviewForSitesFromHourlyRollups(
   env: Env,
   siteIds: string[],
   window: QueryWindow,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<Map<string, OverviewAggregateRow> | null> {
   if (siteIds.length === 0) return new Map();
-  const states = await queryAggregationStates(env, siteIds);
+  const states = await queryAggregationStates(env, siteIds, diagnostics);
   if (states.size !== siteIds.length) return null;
   const aggregatedUntilHour = Math.min(
     ...siteIds.map((siteId) => states.get(siteId) ?? -1),
@@ -530,6 +538,7 @@ export async function queryOverviewForSitesFromHourlyRollups(
     siteIds,
     split.rollupStartHour,
     split.rollupEndHour,
+    diagnostics,
   )) {
     addStoredRollup(ensure(rollup.siteId), rollup);
   }
@@ -540,6 +549,7 @@ export async function queryOverviewForSitesFromHourlyRollups(
       env,
       siteIds,
       detailWindow,
+      diagnostics,
     );
     for (const [siteId, accumulator] of detail.entries()) {
       addMetricAccumulator(ensure(siteId), accumulator);
@@ -665,6 +675,7 @@ async function queryDetailVisitsForSites(
   env: Env,
   siteIds: string[],
   window: QueryWindow,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<DetailVisitRow[]> {
   if (siteIds.length === 0 || window.toMs < window.fromMs) return [];
   const placeholders = siteIds.map(() => "?").join(", ");
@@ -689,6 +700,7 @@ async function queryDetailVisitsForSites(
   )
     .bind(...siteIds, window.fromMs, window.toMs)
     .all<DetailVisitRow>();
+  recordD1RowsRead(diagnostics, result);
   return result.results;
 }
 
@@ -701,11 +713,12 @@ export async function queryTrendForSitesFromHourlyRollups(
   siteIds: string[],
   window: QueryWindow,
   interval: Interval,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<SiteTrendRow[] | null> {
   if (siteIds.length === 0) return [];
   const buckets = buildTimeBuckets(window, interval);
   if (!canUseHourlyRollupsForTrend(buckets)) return null;
-  const states = await queryAggregationStates(env, siteIds);
+  const states = await queryAggregationStates(env, siteIds, diagnostics);
   if (states.size !== siteIds.length) return null;
   const aggregatedUntilHour = Math.min(
     ...siteIds.map((siteId) => states.get(siteId) ?? -1),
@@ -727,6 +740,7 @@ export async function queryTrendForSitesFromHourlyRollups(
     siteIds,
     split.rollupStartHour,
     split.rollupEndHour,
+    diagnostics,
   )) {
     addRollupToTrend(ensure(rollup.siteId), rollup, buckets);
   }
@@ -737,6 +751,7 @@ export async function queryTrendForSitesFromHourlyRollups(
       env,
       siteIds,
       detailWindow,
+      diagnostics,
     )) {
       addDetailToTrend(ensure(row.siteId), row, buckets);
     }

@@ -880,6 +880,10 @@ describe("edge overview D1 queries and handlers", () => {
         ],
       },
     });
+    expect(response.headers.get("x-insightflare-data-source")).toBe("raw");
+    expect(response.headers.get("x-insightflare-d1-rows-read")).toBe(
+      "unavailable",
+    );
     expect(calls).toHaveLength(6);
     expect(calls[0].sql).toContain("visit_hourly_aggregation_state");
     expect(calls[1].bindings).toEqual(visitBindings());

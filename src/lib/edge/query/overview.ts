@@ -51,6 +51,12 @@ import {
   withoutGeoFilter,
 } from "./core";
 import {
+  type AnalyticsDataSource,
+  analyticsDiagnosticHeaders,
+  createD1ReadDiagnostics,
+  type D1ReadDiagnostics,
+} from "./diagnostics";
+import {
   queryOverviewClientDimensionsFromD1,
   queryOverviewGeoDimensionsFromD1,
   querySessionBoundaryDimensionFromD1,
@@ -67,6 +73,7 @@ export async function queryOverviewFromD1(
   siteId: string,
   window: QueryWindow,
   filters: DashboardFilters,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<OverviewAggregateRow> {
   const filter = buildVisitFilterSql(filters);
   const sql = `
@@ -94,10 +101,12 @@ FROM filtered_visits
 `;
   const row =
     (
-      await queryD1All<Record<string, unknown>>(env, sql, [
-        ...visitSourceBindings(siteId, window),
-        ...filter.bindings,
-      ])
+      await queryD1All<Record<string, unknown>>(
+        env,
+        sql,
+        [...visitSourceBindings(siteId, window), ...filter.bindings],
+        diagnostics,
+      )
     )[0] ?? {};
   return {
     views: Number(row.views ?? 0),
@@ -115,6 +124,7 @@ export async function queryTrendFromD1(
   window: QueryWindow,
   interval: Interval,
   filters: DashboardFilters,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<TrendAggregateRow[]> {
   const filter = buildVisitFilterSql(filters);
   const buckets = buildTimeBuckets(window, interval);
@@ -173,12 +183,17 @@ GROUP BY bucket
 ORDER BY bucket ASC
 `;
   return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      ...visitBucket.bindings,
-      ...sessionBucket.bindings,
-    ])
+    await queryD1All<Record<string, unknown>>(
+      env,
+      sql,
+      [
+        ...visitSourceBindings(siteId, window),
+        ...filter.bindings,
+        ...visitBucket.bindings,
+        ...sessionBucket.bindings,
+      ],
+      diagnostics,
+    )
   ).map((row) => ({
     bucket: Number(row.bucket ?? 0),
     timestampMs: timeBucketTimestamp(buckets, Number(row.bucket ?? 0)),
@@ -196,25 +211,29 @@ export async function queryOverviewAggregate(
   siteId: string,
   window: QueryWindow,
   filters: DashboardFilters,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<PreferredSourceResult<OverviewAggregateRow>> {
   if (!hasDashboardFilters(filters)) {
     const rollup = await queryOverviewForSitesFromHourlyRollups(
       env,
       [siteId],
       window,
+      diagnostics,
     );
     const value = rollup?.get(siteId);
     if (value) {
       return {
         value,
         source: "d1",
+        diagnosticSource: "rollup",
         approximateVisitors: false,
       };
     }
   }
   return {
-    value: await queryOverviewFromD1(env, siteId, window, filters),
+    value: await queryOverviewFromD1(env, siteId, window, filters, diagnostics),
     source: "d1",
+    diagnosticSource: "raw",
     approximateVisitors: false,
   };
 }
@@ -225,6 +244,7 @@ export async function queryTrendAggregate(
   window: QueryWindow,
   interval: Interval,
   filters: DashboardFilters,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<PreferredSourceResult<TrendAggregateRow[]>> {
   if (!hasDashboardFilters(filters)) {
     const rollup = await queryTrendForSitesFromHourlyRollups(
@@ -232,6 +252,7 @@ export async function queryTrendAggregate(
       [siteId],
       window,
       interval,
+      diagnostics,
     );
     if (rollup) {
       return {
@@ -239,12 +260,21 @@ export async function queryTrendAggregate(
           .filter((row) => row.siteId === siteId)
           .map(({ siteId: _siteId, ...row }) => row),
         source: "d1",
+        diagnosticSource: "rollup",
       };
     }
   }
   return {
-    value: await queryTrendFromD1(env, siteId, window, interval, filters),
+    value: await queryTrendFromD1(
+      env,
+      siteId,
+      window,
+      interval,
+      filters,
+      diagnostics,
+    ),
     source: "d1",
+    diagnosticSource: "raw",
   };
 }
 
@@ -286,8 +316,18 @@ export async function handleOverview(
   const includeChange = parseBooleanFlag(url, "includeChange");
   const includeDetail = parseBooleanFlag(url, "includeDetail");
   const interval = parseInterval(url);
+  const diagnostics = createD1ReadDiagnostics();
 
-  const current = await queryOverviewAggregate(env, siteId, window, filters);
+  const current = await queryOverviewAggregate(
+    env,
+    siteId,
+    window,
+    filters,
+    diagnostics,
+  );
+  const dataSources: AnalyticsDataSource[] = [
+    current.diagnosticSource ?? "raw",
+  ];
   const currentMetrics = mapOverviewAggregate(current.value, {
     approximateVisitors: Boolean(current.approximateVisitors),
   });
@@ -313,7 +353,9 @@ export async function handleOverview(
       siteId,
       previousWindow,
       filters,
+      diagnostics,
     );
+    dataSources.push(previous.diagnosticSource ?? "raw");
     const previousMetrics = mapOverviewAggregate(previous.value, {
       approximateVisitors: Boolean(previous.approximateVisitors),
     });
@@ -347,7 +389,9 @@ export async function handleOverview(
       window,
       interval,
       filters,
+      diagnostics,
     );
+    dataSources.push(detail.diagnosticSource ?? "raw");
     payload.detail = {
       interval,
       data: mapTrendRows(
@@ -357,7 +401,19 @@ export async function handleOverview(
     };
   }
 
-  return jsonResponseWith(ctx!, payload);
+  return jsonResponseWith(
+    ctx!,
+    payload,
+    200,
+    analyticsDiagnosticHeaders(
+      dataSources.every((source) => source === "rollup")
+        ? "rollup"
+        : dataSources.every((source) => source === "raw")
+          ? "raw"
+          : "mixed",
+      diagnostics,
+    ),
+  );
 }
 
 export async function handleTrend(
@@ -370,21 +426,28 @@ export async function handleTrend(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilters(url);
   const interval = parseInterval(url);
+  const diagnostics = createD1ReadDiagnostics();
   const trend = await queryTrendAggregate(
     env,
     siteId,
     window,
     interval,
     filters,
+    diagnostics,
   );
-  return jsonResponseWith(ctx!, {
-    ok: true,
-    interval,
-    data: mapTrendRows(
-      trend.value,
-      trend.source === "ae" ? "detail" : sourceLabel(window),
-    ),
-  });
+  return jsonResponseWith(
+    ctx!,
+    {
+      ok: true,
+      interval,
+      data: mapTrendRows(
+        trend.value,
+        trend.source === "ae" ? "detail" : sourceLabel(window),
+      ),
+    },
+    200,
+    analyticsDiagnosticHeaders(trend.diagnosticSource ?? "raw", diagnostics),
+  );
 }
 
 export type OverviewPageTabKey =
