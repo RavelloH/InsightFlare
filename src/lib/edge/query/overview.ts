@@ -500,6 +500,7 @@ export async function handleOverviewPageTab(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilters(url);
   const limit = parseLimit(url, 100, 200);
+  const diagnostics = createD1ReadDiagnostics();
   const rows =
     tab === "entry" || tab === "exit"
       ? await querySessionBoundaryDimensionFromD1(
@@ -509,6 +510,7 @@ export async function handleOverviewPageTab(
           filters,
           limit,
           tab,
+          diagnostics,
         )
       : await queryDimensionAggregate(
           env,
@@ -518,11 +520,14 @@ export async function handleOverviewPageTab(
           limit,
           PAGE_TAB_DIMENSION_EXPRESSIONS[tab]!,
           { excludeEmpty: true },
+          diagnostics,
         );
-  return jsonResponseWith(ctx!, {
-    ok: true,
-    data: mapTabs(rows),
-  });
+  return jsonResponseWith(
+    ctx!,
+    { ok: true, data: mapTabs(rows) },
+    200,
+    analyticsDiagnosticHeaders("raw", diagnostics),
+  );
 }
 
 export async function handleOverviewSourceTab(
@@ -536,6 +541,7 @@ export async function handleOverviewSourceTab(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilters(url);
   const limit = parseLimit(url, 100, 200);
+  const diagnostics = createD1ReadDiagnostics();
   const rows = await queryReferrerAggregate(
     env,
     siteId,
@@ -543,16 +549,22 @@ export async function handleOverviewSourceTab(
     filters,
     limit,
     tab === "link",
+    diagnostics,
   );
-  return jsonResponseWith(ctx!, {
-    ok: true,
-    data: rows.map((row) => ({
-      label: row.referrer,
-      views: row.views,
-      sessions: row.sessions,
-      visitors: row.visitors,
-    })),
-  });
+  return jsonResponseWith(
+    ctx!,
+    {
+      ok: true,
+      data: rows.map((row) => ({
+        label: row.referrer,
+        views: row.views,
+        sessions: row.sessions,
+        visitors: row.visitors,
+      })),
+    },
+    200,
+    analyticsDiagnosticHeaders("raw", diagnostics),
+  );
 }
 
 export async function handleOverviewClientTab(
@@ -566,6 +578,7 @@ export async function handleOverviewClientTab(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilters(url);
   const limit = parseLimit(url, 100, 200);
+  const diagnostics = createD1ReadDiagnostics();
   const rows = await queryDimensionAggregate(
     env,
     siteId,
@@ -574,13 +587,19 @@ export async function handleOverviewClientTab(
     limit,
     clientDimensionDefinition(tab).labelExpr,
     { excludeEmpty: true },
+    diagnostics,
   );
-  return jsonResponseWith(ctx!, {
-    ok: true,
-    // Preserve the existing response contract. The legacy client-dimension
-    // path did not expose distinct visitor counts for these cards.
-    data: mapTabs(rows.map((row) => ({ ...row, visitors: 0 }))),
-  });
+  return jsonResponseWith(
+    ctx!,
+    {
+      ok: true,
+      // Preserve the existing response contract. The legacy client-dimension
+      // path did not expose distinct visitor counts for these cards.
+      data: mapTabs(rows.map((row) => ({ ...row, visitors: 0 }))),
+    },
+    200,
+    analyticsDiagnosticHeaders("raw", diagnostics),
+  );
 }
 
 export async function handleOverviewGeoTab(
@@ -595,6 +614,7 @@ export async function handleOverviewGeoTab(
   const rawFilters = parseFilters(url);
   const filters = tab === "country" ? withoutGeoFilter(rawFilters) : rawFilters;
   const limit = parseLimit(url, 100, 200);
+  const diagnostics = createD1ReadDiagnostics();
   const rows = await queryDimensionAggregate(
     env,
     siteId,
@@ -603,16 +623,22 @@ export async function handleOverviewGeoTab(
     limit,
     GEO_TAB_DIMENSION_EXPRESSIONS[tab],
     { excludeEmpty: true },
+    diagnostics,
   );
-  return jsonResponseWith(ctx!, {
-    ok: true,
-    data: mapGeoTabs(
-      rows.map((row) => ({
-        ...row,
-        label: geoTabLabel(row.value, tab),
-      })),
-    ),
-  });
+  return jsonResponseWith(
+    ctx!,
+    {
+      ok: true,
+      data: mapGeoTabs(
+        rows.map((row) => ({
+          ...row,
+          label: geoTabLabel(row.value, tab),
+        })),
+      ),
+    },
+    200,
+    analyticsDiagnosticHeaders("raw", diagnostics),
+  );
 }
 
 export async function handleFilterOptions(
@@ -755,18 +781,25 @@ export async function handleOverviewGeoPoints(
     ? parseFilters(url)
     : withoutGeoFilter(parseFilters(url));
   const limit = parseLimit(url, 5000, 20000);
+  const diagnostics = createD1ReadDiagnostics();
   const aggregate = await queryGeoPointAggregate(
     env,
     siteId,
     window,
     filters,
     limit,
+    diagnostics,
   );
-  return jsonResponseWith(ctx!, {
-    ok: true,
-    data: aggregate.points,
-    countryCounts: aggregate.countryCounts,
-    regionCounts: aggregate.regionCounts,
-    cityCounts: aggregate.cityCounts,
-  });
+  return jsonResponseWith(
+    ctx!,
+    {
+      ok: true,
+      data: aggregate.points,
+      countryCounts: aggregate.countryCounts,
+      regionCounts: aggregate.regionCounts,
+      cityCounts: aggregate.cityCounts,
+    },
+    200,
+    analyticsDiagnosticHeaders("raw", diagnostics),
+  );
 }

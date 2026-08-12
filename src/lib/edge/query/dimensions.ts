@@ -23,6 +23,7 @@ import {
   regionValueExpr,
   visitSourceBindings,
 } from "./core";
+import type { D1ReadDiagnostics } from "./diagnostics";
 
 export async function queryDimensionFromD1(
   env: Env,
@@ -32,6 +33,7 @@ export async function queryDimensionFromD1(
   limit: number,
   selectExpr: string,
   options?: { excludeEmpty?: boolean },
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
   const filter = buildVisitFilterSql(filters);
   const sql = `
@@ -58,11 +60,12 @@ ORDER BY views DESC, sessions DESC, value ASC
 LIMIT ?
 `;
   return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      limit,
-    ])
+    await queryD1All<Record<string, unknown>>(
+      env,
+      sql,
+      [...visitSourceBindings(siteId, window), ...filter.bindings, limit],
+      diagnostics,
+    )
   ).map((row) => ({
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),
@@ -78,6 +81,7 @@ export async function querySessionPathDimensionFromD1(
   filters: DashboardFilters,
   limit: number,
   kind: "entry" | "exit",
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
   const filter = buildVisitFilterSql(filters);
   const order = kind === "entry" ? "ASC" : "DESC";
@@ -121,11 +125,12 @@ ORDER BY views DESC, value ASC
 LIMIT ?
 `;
   return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      limit,
-    ])
+    await queryD1All<Record<string, unknown>>(
+      env,
+      sql,
+      [...visitSourceBindings(siteId, window), ...filter.bindings, limit],
+      diagnostics,
+    )
   ).map((row) => ({
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),
@@ -142,6 +147,7 @@ export async function queryVisitDimensionFromD1(
   limit: number,
   selectExpr: string,
   options?: { excludeEmpty?: boolean },
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
   return queryDimensionFromD1(
     env,
@@ -151,6 +157,7 @@ export async function queryVisitDimensionFromD1(
     limit,
     selectExpr,
     options,
+    diagnostics,
   );
 }
 
@@ -161,6 +168,7 @@ export async function querySessionBoundaryDimensionFromD1(
   filters: DashboardFilters,
   limit: number,
   kind: "entry" | "exit",
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
   return querySessionPathDimensionFromD1(
     env,
@@ -169,6 +177,7 @@ export async function querySessionBoundaryDimensionFromD1(
     filters,
     limit,
     kind,
+    diagnostics,
   );
 }
 
@@ -276,6 +285,7 @@ export async function queryReferrersFromD1(
   filters: DashboardFilters,
   limit: number,
   includeFullUrl: boolean,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<ReferrerRow[]> {
   const filter = buildVisitFilterSql(filters);
   const keyExpr = includeFullUrl ? "referrer_url" : "referrer_host";
@@ -298,11 +308,12 @@ ORDER BY views DESC, sessions DESC, referrer ASC
 LIMIT ?
 `;
   return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      limit,
-    ])
+    await queryD1All<Record<string, unknown>>(
+      env,
+      sql,
+      [...visitSourceBindings(siteId, window), ...filter.bindings, limit],
+      diagnostics,
+    )
   ).map((row) => ({
     referrer: String(row.referrer ?? ""),
     views: Number(row.views ?? 0),

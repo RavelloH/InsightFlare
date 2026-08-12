@@ -21,6 +21,7 @@ import {
   targetVisitSourceBindings,
   visitSourceBindings,
 } from "./core";
+import type { D1ReadDiagnostics } from "./diagnostics";
 import { mapGeoPointRow } from "./journey-helpers";
 
 export async function querySessionLocationPointsFromD1(
@@ -64,6 +65,7 @@ export async function queryGeoPointsFromD1(
   window: QueryWindow,
   filters: DashboardFilters,
   limit: number,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<GeoPointAggregate> {
   const filter = buildVisitFilterSql(filters);
   const parsedGeo = parseGeoFilterValue(filters.geo);
@@ -104,11 +106,12 @@ ORDER BY timestampMs DESC
 LIMIT ?
 `;
   const points = (
-    await queryD1All<Record<string, unknown>>(env, pointsSql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      limit,
-    ])
+    await queryD1All<Record<string, unknown>>(
+      env,
+      pointsSql,
+      [...visitSourceBindings(siteId, window), ...filter.bindings, limit],
+      diagnostics,
+    )
   ).map(mapGeoPointRow);
 
   const countryCounts: GeoCountryCountRow[] = [];
@@ -139,10 +142,12 @@ LIMIT 300
 `;
     countryCounts.push(
       ...(
-        await queryD1All<Record<string, unknown>>(env, countrySql, [
-          ...visitSourceBindings(siteId, window),
-          ...filter.bindings,
-        ])
+        await queryD1All<Record<string, unknown>>(
+          env,
+          countrySql,
+          [...visitSourceBindings(siteId, window), ...filter.bindings],
+          diagnostics,
+        )
       ).map((row) => ({
         country: String(row.country ?? ""),
         views: Number(row.views ?? 0),
@@ -184,10 +189,12 @@ LIMIT 400
 `;
     regionCounts.push(
       ...(
-        await queryD1All<Record<string, unknown>>(env, regionSql, [
-          ...visitSourceBindings(siteId, window),
-          ...filter.bindings,
-        ])
+        await queryD1All<Record<string, unknown>>(
+          env,
+          regionSql,
+          [...visitSourceBindings(siteId, window), ...filter.bindings],
+          diagnostics,
+        )
       )
         .map((row) => {
           const country = String(row.country ?? "")
@@ -246,10 +253,12 @@ LIMIT 600
 `;
     cityCounts.push(
       ...(
-        await queryD1All<Record<string, unknown>>(env, citySql, [
-          ...visitSourceBindings(siteId, window),
-          ...filter.bindings,
-        ])
+        await queryD1All<Record<string, unknown>>(
+          env,
+          citySql,
+          [...visitSourceBindings(siteId, window), ...filter.bindings],
+          diagnostics,
+        )
       )
         .map((row) => {
           const country = String(row.country ?? "")

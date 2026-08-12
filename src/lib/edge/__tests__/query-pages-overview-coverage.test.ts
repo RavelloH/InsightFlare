@@ -42,7 +42,10 @@ const window: QueryWindow = {
   timeZone: "UTC",
 };
 
-function createD1Env(resultSets: D1Row[][]): {
+function createD1Env(
+  resultSets: D1Row[][],
+  rowsRead?: number,
+): {
   env: Env;
   calls: QueryCall[];
   prepare: ReturnType<typeof vi.fn>;
@@ -53,7 +56,10 @@ function createD1Env(resultSets: D1Row[][]): {
     bind: vi.fn((...bindings: QueryBinding[]) => ({
       all: vi.fn(async () => {
         calls.push({ sql, bindings });
-        return { results: pendingResults.shift() ?? [] };
+        return {
+          results: pendingResults.shift() ?? [],
+          ...(rowsRead === undefined ? {} : { meta: { rows_read: rowsRead } }),
+        };
       }),
     })),
   }));
@@ -944,40 +950,43 @@ describe("edge overview D1 queries and handlers", () => {
   });
 
   it("maps overview page, source, client, and geo tab handlers", async () => {
-    const { env, calls } = createD1Env([
+    const { env, calls } = createD1Env(
       [
-        {
-          value: "/home",
-          views: "1",
-          sessions: "1",
-          visitors: "1",
-        },
+        [
+          {
+            value: "/home",
+            views: "1",
+            sessions: "1",
+            visitors: "1",
+          },
+        ],
+        [
+          {
+            referrer: "",
+            views: "4",
+            sessions: "2",
+            visitors: "2",
+          },
+        ],
+        [
+          {
+            value: "1440x900",
+            views: "2",
+            sessions: "2",
+            visitors: "2",
+          },
+        ],
+        [
+          {
+            value: "US",
+            views: "1",
+            sessions: "1",
+            visitors: "1",
+          },
+        ],
       ],
-      [
-        {
-          referrer: "",
-          views: "4",
-          sessions: "2",
-          visitors: "2",
-        },
-      ],
-      [
-        {
-          value: "1440x900",
-          views: "2",
-          sessions: "2",
-          visitors: "2",
-        },
-      ],
-      [
-        {
-          value: "US",
-          views: "1",
-          sessions: "1",
-          visitors: "1",
-        },
-      ],
-    ]);
+      37,
+    );
 
     const pageTab = await handleOverviewPageTab(
       env,
@@ -1020,6 +1029,13 @@ describe("edge overview D1 queries and handlers", () => {
       }),
       "country",
     );
+
+    for (const response of [pageTab, sourceTab, clientTab, geoTab]) {
+      expect(response.headers.get("x-insightflare-data-source")).toBe("raw");
+    }
+    for (const response of [pageTab, sourceTab, clientTab, geoTab]) {
+      expect(response.headers.get("x-insightflare-d1-rows-read")).toBe("37");
+    }
 
     await expect(pageTab.json()).resolves.toEqual({
       ok: true,

@@ -38,6 +38,7 @@ import {
   visitSourceBindings,
   withoutGeoFilter,
 } from "./core";
+import type { D1ReadDiagnostics } from "./diagnostics";
 import {
   queryPageTabsFromD1,
   queryReferrersFromD1,
@@ -368,6 +369,7 @@ export async function queryReferrerAggregate(
   filters: DashboardFilters,
   limit: number,
   includeFullUrl: boolean,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<ReferrerRow[]> {
   return queryReferrersFromD1(
     env,
@@ -376,6 +378,7 @@ export async function queryReferrerAggregate(
     filters,
     limit,
     includeFullUrl,
+    diagnostics,
   );
 }
 
@@ -387,6 +390,7 @@ export async function queryDimensionAggregate(
   limit: number,
   d1Expr: string,
   options?: { excludeEmpty?: boolean },
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
   return queryVisitDimensionFromD1(
     env,
@@ -396,6 +400,7 @@ export async function queryDimensionAggregate(
     limit,
     d1Expr,
     options,
+    diagnostics,
   );
 }
 

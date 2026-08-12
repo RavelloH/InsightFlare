@@ -23,6 +23,7 @@ import {
   parseWindow,
   type ResponseContext,
 } from "./core";
+import type { D1ReadDiagnostics } from "./diagnostics";
 import {
   querySessionDetailFromD1,
   queryVisitorDetailFromD1,
@@ -107,8 +108,9 @@ export async function queryGeoPointAggregate(
   window: QueryWindow,
   filters: DashboardFilters,
   limit: number,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<GeoPointAggregate> {
-  return queryGeoPointsFromD1(env, siteId, window, filters, limit);
+  return queryGeoPointsFromD1(env, siteId, window, filters, limit, diagnostics);
 }
 
 export async function handleVisitors(

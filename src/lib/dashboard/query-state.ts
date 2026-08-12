@@ -110,6 +110,12 @@ const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 const YEAR_MS = 366 * DAY_MS;
 
+function cacheAlignedPresetNow(now: number): number {
+  // Keep rolling preset requests stable for one minute so separate dashboard
+  // loads resolve to the same Cache API key without hiding the current minute.
+  return Math.floor(now / MINUTE_MS) * MINUTE_MS + MINUTE_MS - 1;
+}
+
 function normalizeFilterValue(
   value: string | null | undefined,
 ): string | undefined {
@@ -343,7 +349,14 @@ export function resolveTimeWindow(
     options?.timeZone,
     typeof window === "undefined" ? null : browserTimeZone(),
   );
-  const bounds = rangeBounds(preset, now, timeZone, options?.customRange);
+  const bounds = rangeBounds(
+    preset,
+    preset === "custom" && isValidCustomRange(options?.customRange)
+      ? now
+      : cacheAlignedPresetNow(now),
+    timeZone,
+    options?.customRange,
+  );
   const interval = clampIntervalForRange(
     options?.interval,
     bounds.from,

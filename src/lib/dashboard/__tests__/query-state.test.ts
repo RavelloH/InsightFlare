@@ -64,7 +64,7 @@ describe("dashboard query-state helpers", () => {
   });
 
   describe("resolveTimeWindow", () => {
-    const now = Date.UTC(2026, 4, 26, 15, 14, 56, 789);
+    const now = Date.UTC(2026, 4, 26, 15, 14, 59, 999);
 
     it.each([
       ["30m", now - 30 * MINUTE_MS, now, "minute"],
@@ -85,6 +85,28 @@ describe("dashboard query-state helpers", () => {
         });
       },
     );
+
+    it("stabilizes preset cache keys within a minute while preserving custom precision", () => {
+      const withinMinuteNow = Date.UTC(2026, 4, 26, 15, 14, 12, 345);
+      const first = resolveTimeWindow("30d", withinMinuteNow, {
+        timeZone: "UTC",
+      });
+      const second = resolveTimeWindow("30d", withinMinuteNow + 32_000, {
+        timeZone: "UTC",
+      });
+      const nextMinute = resolveTimeWindow("30d", withinMinuteNow + 48_000, {
+        timeZone: "UTC",
+      });
+
+      expect(second).toMatchObject({ from: first.from, to: first.to });
+      expect(nextMinute.to).toBe(first.to + MINUTE_MS);
+      expect(
+        resolveTimeWindow("custom", withinMinuteNow, {
+          customRange: { from: 101, to: 202 },
+          timeZone: "UTC",
+        }),
+      ).toMatchObject({ from: 101, to: 202 });
+    });
 
     it("resolves calendar anchored ranges in the requested reporting timezone", () => {
       expect(
