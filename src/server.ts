@@ -2,6 +2,7 @@ import handler from "@tanstack/react-start/server-entry";
 
 import { runHourlyAggregation } from "@/lib/edge/hourly-rollup";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest-do";
+import { runPerformanceMaintenance } from "@/lib/edge/performance-maintenance";
 import { getScheduledTaskDefinition } from "@/lib/edge/scheduled-task-registry";
 import { runScheduledTask } from "@/lib/edge/scheduled-task-runner";
 import type { Env } from "@/lib/edge/types";
@@ -152,6 +153,16 @@ export default {
           controller.scheduledTime,
           runNotificationTick,
         ),
+        runPerformanceMaintenance(env).catch((error) => {
+          // Maintenance is deliberately best-effort. A migration/table or
+          // lease failure must not reject the cron promise for existing tasks.
+          console.warn(
+            JSON.stringify({
+              event: "performance_maintenance_failed",
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }),
       ]),
     );
   },

@@ -18,6 +18,14 @@ export const SCHEDULED_TASKS: ScheduledTaskDefinitionInfo[] = [
     trigger: "cron",
     enabled: true,
   },
+  {
+    key: "performance_maintenance",
+    name: "Performance foundation maintenance",
+    description: "Runs fenced, Foundation-only maintenance jobs.",
+    schedule: "Every 30 minutes",
+    trigger: "cron",
+    enabled: true,
+  },
 ];
 
 export function getScheduledTaskDefinition(
