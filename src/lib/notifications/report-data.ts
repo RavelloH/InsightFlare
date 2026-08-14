@@ -1,10 +1,19 @@
-import type { QueryWindow } from "@/lib/edge/query/core";
+import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
 import { queryOverviewAggregate } from "@/lib/edge/query/overview";
 import {
   queryPagesAggregate,
   queryReferrerAggregate,
 } from "@/lib/edge/query/pages";
 import type { Env } from "@/lib/edge/types";
+
+import {
+  getOrCreateCachedPromise,
+  notificationCacheKey,
+  type NotificationInvocationCache,
+  type NotificationMetricCacheKey,
+  type NotificationReportCacheKey,
+  type NotificationSiteInfo,
+} from "./notification-cache";
 
 export type NotificationMetric = "views" | "visitors" | "sessions";
 export type NotificationMetricWindow = "last_1h" | "last_24h" | "yesterday";
@@ -312,15 +321,26 @@ export function notificationReportWindowFor(input: {
   };
 }
 
-async function getSite(
+export async function loadSiteInfo(
   env: Env,
   siteId: string,
-): Promise<{ name: string; domain: string } | null> {
+  cache?: NotificationInvocationCache,
+): Promise<NotificationSiteInfo | null> {
+  if (!cache) return loadSiteInfoUncached(env, siteId);
+  return getOrCreateCachedPromise(cache.sites, siteId, () =>
+    loadSiteInfoUncached(env, siteId),
+  );
+}
+
+async function loadSiteInfoUncached(
+  env: Env,
+  siteId: string,
+): Promise<NotificationSiteInfo | null> {
   const row = await env.DB.prepare(
     "SELECT name, domain FROM sites WHERE id = ? LIMIT 1",
   )
     .bind(siteId)
-    .first<{ name: string; domain: string }>();
+    .first<NotificationSiteInfo>();
   return row ?? null;
 }
 
@@ -330,6 +350,7 @@ export async function loadDailyReportData(
     siteId: string;
     now: number;
     timezone?: string;
+    cache?: NotificationInvocationCache;
   },
 ): Promise<DailyReportData | null> {
   return loadReportData(env, { ...input, reportType: "daily" });
@@ -342,9 +363,34 @@ export async function loadReportData(
     now: number;
     timezone?: string;
     reportType: NotificationReportType;
+    cache?: NotificationInvocationCache;
   },
 ): Promise<ReportData | null> {
-  const site = await getSite(env, input.siteId);
+  const key = notificationCacheKey([
+    input.siteId,
+    input.reportType,
+    Math.trunc(input.now),
+    cleanTimezone(input.timezone),
+  ] satisfies NotificationReportCacheKey);
+  if (input.cache) {
+    return getOrCreateCachedPromise(input.cache.reports, key, () =>
+      loadReportDataUncached(env, input),
+    );
+  }
+  return loadReportDataUncached(env, input);
+}
+
+async function loadReportDataUncached(
+  env: Env,
+  input: {
+    siteId: string;
+    now: number;
+    timezone?: string;
+    reportType: NotificationReportType;
+    cache?: NotificationInvocationCache;
+  },
+): Promise<ReportData | null> {
+  const site = await loadSiteInfo(env, input.siteId, input.cache);
   if (!site) return null;
   const window = notificationReportWindowFor({
     reportType: input.reportType,
@@ -352,7 +398,7 @@ export async function loadReportData(
     timezone: input.timezone,
   });
   const [overview, pages, referrers] = await Promise.all([
-    queryOverviewAggregate(env, input.siteId, window, {}),
+    loadOverviewAggregate(env, input.siteId, window, {}, input.cache),
     queryPagesAggregate(env, input.siteId, window, {}, 5, false),
     queryReferrerAggregate(env, input.siteId, window, {}, 5, false),
   ]);
@@ -389,6 +435,7 @@ export async function loadMetricValue(
     window: NotificationMetricWindow;
     now: number;
     timezone?: string;
+    cache?: NotificationInvocationCache;
   },
 ): Promise<MetricValueResult> {
   const window = notificationWindowFor({
@@ -396,7 +443,41 @@ export async function loadMetricValue(
     now: input.now,
     timezone: input.timezone,
   });
-  const overview = await queryOverviewAggregate(env, input.siteId, window, {});
+  const key = notificationCacheKey([
+    input.siteId,
+    input.metric,
+    input.window,
+    Math.trunc(window.fromMs),
+    Math.trunc(window.toMs),
+    window.timeZone,
+  ] satisfies NotificationMetricCacheKey);
+  if (input.cache) {
+    return getOrCreateCachedPromise(input.cache.metrics, key, () =>
+      loadMetricValueUncached(env, input, window),
+    );
+  }
+  return loadMetricValueUncached(env, input, window);
+}
+
+async function loadMetricValueUncached(
+  env: Env,
+  input: {
+    siteId: string;
+    metric: NotificationMetric;
+    window: NotificationMetricWindow;
+    now: number;
+    timezone?: string;
+    cache?: NotificationInvocationCache;
+  },
+  window: QueryWindow,
+): Promise<MetricValueResult> {
+  const overview = await loadOverviewAggregate(
+    env,
+    input.siteId,
+    window,
+    {},
+    input.cache,
+  );
   return {
     metric: input.metric,
     window: input.window,
@@ -416,6 +497,7 @@ export async function loadPreviousMetricValue(
     window: NotificationMetricWindow;
     now: number;
     timezone?: string;
+    cache?: NotificationInvocationCache;
   },
 ): Promise<MetricValueResult> {
   const currentWindow = notificationWindowFor({
@@ -430,11 +512,38 @@ export async function loadPreviousMetricValue(
     nowMs: currentWindow.nowMs,
     timeZone: currentWindow.timeZone,
   };
-  const overview = await queryOverviewAggregate(
+  const key = notificationCacheKey([
+    input.siteId,
+    input.metric,
+    input.window,
+    Math.trunc(previousWindow.fromMs),
+    Math.trunc(previousWindow.toMs),
+    previousWindow.timeZone,
+  ] satisfies NotificationMetricCacheKey);
+  if (input.cache) {
+    return getOrCreateCachedPromise(input.cache.previousMetrics, key, () =>
+      loadPreviousMetricValueUncached(env, input, previousWindow),
+    );
+  }
+  return loadPreviousMetricValueUncached(env, input, previousWindow);
+}
+
+async function loadPreviousMetricValueUncached(
+  env: Env,
+  input: {
+    siteId: string;
+    metric: NotificationMetric;
+    window: NotificationMetricWindow;
+    cache?: NotificationInvocationCache;
+  },
+  previousWindow: QueryWindow,
+): Promise<MetricValueResult> {
+  const overview = await loadOverviewAggregate(
     env,
     input.siteId,
     previousWindow,
     {},
+    input.cache,
   );
   return {
     metric: input.metric,
@@ -454,24 +563,63 @@ export async function loadCumulativeMetricValue(
     metric: NotificationMetric;
     now: number;
     timezone?: string;
+    cache?: NotificationInvocationCache;
   },
 ): Promise<number> {
   const nowMs = Math.max(0, Math.trunc(input.now)) * 1000;
-  const overview = await queryOverviewAggregate(
+  const window = {
+    fromMs: 0,
+    toMs: nowMs,
+    nowMs,
+    timeZone: cleanTimezone(input.timezone),
+  } satisfies QueryWindow;
+  const key = notificationCacheKey([
+    input.siteId,
+    input.metric,
+    Math.trunc(nowMs),
+    window.timeZone,
+  ]);
+  if (input.cache) {
+    return getOrCreateCachedPromise(input.cache.cumulativeMetrics, key, () =>
+      loadCumulativeMetricValueUncached(env, input, window),
+    );
+  }
+  return loadCumulativeMetricValueUncached(env, input, window);
+}
+
+async function loadCumulativeMetricValueUncached(
+  env: Env,
+  input: {
+    siteId: string;
+    metric: NotificationMetric;
+    cache?: NotificationInvocationCache;
+  },
+  window: QueryWindow,
+): Promise<number> {
+  const overview = await loadOverviewAggregate(
     env,
     input.siteId,
-    {
-      fromMs: 0,
-      toMs: nowMs,
-      nowMs,
-      timeZone: cleanTimezone(input.timezone),
-    },
+    window,
     {},
+    input.cache,
   );
   return overview.value[input.metric];
 }
 
 export async function loadSiteLastSeenAt(
+  env: Env,
+  siteId: string,
+  cache?: NotificationInvocationCache,
+): Promise<number | null> {
+  if (cache) {
+    return getOrCreateCachedPromise(cache.lastSeenAt, siteId, () =>
+      loadSiteLastSeenAtUncached(env, siteId),
+    );
+  }
+  return loadSiteLastSeenAtUncached(env, siteId);
+}
+
+async function loadSiteLastSeenAtUncached(
   env: Env,
   siteId: string,
 ): Promise<number | null> {
@@ -495,4 +643,25 @@ export async function loadSiteLastSeenAt(
     .first<{ lastSeenAt: number | null }>();
   const value = Number(row?.lastSeenAt ?? 0);
   return Number.isFinite(value) && value > 0 ? Math.floor(value / 1000) : null;
+}
+
+async function loadOverviewAggregate(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+  cache?: NotificationInvocationCache,
+) {
+  if (!cache) return queryOverviewAggregate(env, siteId, window, filters);
+  const key = notificationCacheKey([
+    siteId,
+    window.fromMs,
+    window.toMs,
+    window.nowMs,
+    window.timeZone,
+    filters,
+  ]);
+  return getOrCreateCachedPromise(cache.overviews, key, () =>
+    queryOverviewAggregate(env, siteId, window, filters),
+  );
 }

@@ -14,6 +14,7 @@ import {
   type NotificationMessage,
   updateNotificationDeliveryResult,
 } from "./message-store";
+import type { NotificationInvocationCache } from "./notification-cache";
 import { normalizeNotificationPreferences } from "./preferences";
 import {
   buildResendFromAddress,
@@ -50,11 +51,36 @@ function fallbackRenderedEmail(message: NotificationMessage) {
   };
 }
 
+async function loadNotificationEmailConfig(
+  env: Env,
+  cache?: NotificationInvocationCache,
+) {
+  if (!cache) {
+    return normalizeNotificationEmailConfig(
+      await readConfig(env, SYSTEM_NOTIFICATION_EMAIL_CONFIG_KEY),
+    );
+  }
+  if (!cache.emailConfig) {
+    const promise = readConfig(env, SYSTEM_NOTIFICATION_EMAIL_CONFIG_KEY).then(
+      normalizeNotificationEmailConfig,
+    );
+    cache.emailConfig = promise;
+    void promise.catch(() => {
+      if (cache.emailConfig === promise) cache.emailConfig = null;
+    });
+  }
+  return cache.emailConfig;
+}
+
 export async function deliverNotificationMessage(
   env: Env,
   message: NotificationMessage,
   user: NotificationDeliveryUser,
-  context: { logger?: NotificationDeliveryLogger; fetchImpl?: typeof fetch },
+  context: {
+    logger?: NotificationDeliveryLogger;
+    fetchImpl?: typeof fetch;
+    cache?: NotificationInvocationCache;
+  },
 ): Promise<NotificationMessage | null> {
   const preferences = normalizeNotificationPreferences(user.preferencesJson);
   const channels = { inApp: true, email: preferences.email };
@@ -85,8 +111,7 @@ export async function deliverNotificationMessage(
     });
   }
 
-  const rawConfig = await readConfig(env, SYSTEM_NOTIFICATION_EMAIL_CONFIG_KEY);
-  const config = normalizeNotificationEmailConfig(rawConfig);
+  const config = await loadNotificationEmailConfig(env, context.cache);
   if (
     !config.enabled ||
     config.provider !== "resend" ||

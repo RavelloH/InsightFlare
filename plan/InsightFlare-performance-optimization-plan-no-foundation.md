@@ -1133,9 +1133,10 @@ events detail/summary。
 path/referrer/username/email 等精确谓词。
 
 ### Commit 8
-`perf: reuse notification metrics per tick`
+`perf: reuse notification metrics per tick`（已完成）
 
-invocation scoped cache。
+以显式 invocation cache 复用相同 tick 内的 report/metric 查询和系统邮件配置；不跨
+invocation 持久化敏感结果。
 
 ### Commit 9
 `perf: reduce redundant visit upserts`
@@ -1284,12 +1285,20 @@ rollback = 旧 Worker version
   通过同一 SQL 的 session ranking 计算。
 - Technology browser version breakdown 已将 top-browser 与 version 聚合合并到单次
   filtered source 查询，保留 browser/version limit、unknown/other bucket 和空结果行为。
+- Notification tick、手动执行和预览现在使用 invocation-scoped cache：相同站点与窗口的
+  overview/metric、previous window、cumulative metric、site metadata 和 last-seen 查询在
+  同一 invocation 内复用；不同站点、窗口或过滤条件不会共享，拒绝的 Promise 不会污染后续
+  查询。邮件投递在同一 invocation 内只读取一次系统邮件配置，不新增 KV/DO 或持久化状态。
 - 上述改动已通过真实 SQLite Scheduled Tasks 测试、Journey/Events 回归测试和 TypeScript
   类型检查；Pages/dimensions 与 technology 回归测试、TypeScript 与 lint 亦已通过。
+- Notification cache 已补充同窗口跨 metric 复用、站点/窗口隔离、报告复用、previous/
+  cumulative/last-seen 复用、邮件配置单次读取和 rejected-entry 清理测试。当前完整检查为
+  196 个测试文件、2709 个测试通过；Statements 95.94%、Branches 88.00%、Functions
+  98.09%、Lines 97.39%。生产 Origin MISS 的实际下降仍需部署后按 Phase 0 指标验收。
 
 ### 后续阶段
 
 Technology 其他 cross/trend 路径的重复窗口扫描、历史数据兼容证明后的 canonical
-predicate、notification invocation cache、visit UPSERT 差异 guard、索引候选和 rollup
+predicate、visit UPSERT 差异 guard、索引候选和 rollup
 仍按本计划后续门槛推进；未有
 `EXPLAIN QUERY PLAN` 与生产 Origin MISS 证据的改动不得提前扩大 schema。

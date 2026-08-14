@@ -14,8 +14,14 @@ vi.mock("@/lib/edge/query/pages", () => ({
 }));
 
 import {
+  createNotificationInvocationCache,
+  getOrCreateCachedPromise,
+} from "@/lib/notifications/notification-cache";
+import {
+  loadCumulativeMetricValue,
   loadDailyReportData,
   loadMetricValue,
+  loadPreviousMetricValue,
   loadSiteLastSeenAt,
   notificationReportWindowFor,
   notificationWindowFor,
@@ -199,6 +205,129 @@ describe("notification report data", () => {
       value: 55,
       range: { from: 0, to: 3_600 },
     });
+  });
+
+  it("reuses overview queries only within the same invocation and window", async () => {
+    queryOverviewAggregate.mockResolvedValue({
+      value: { views: 100, visitors: 40, sessions: 55 },
+    });
+    const cache = createNotificationInvocationCache();
+
+    await Promise.all([
+      loadMetricValue({} as never, {
+        siteId: "site-1",
+        metric: "views",
+        window: "last_24h",
+        now: 86_400,
+        cache,
+      }),
+      loadMetricValue({} as never, {
+        siteId: "site-1",
+        metric: "visitors",
+        window: "last_24h",
+        now: 86_400,
+        cache,
+      }),
+      loadMetricValue({} as never, {
+        siteId: "site-1",
+        metric: "views",
+        window: "last_24h",
+        now: 86_400,
+        cache,
+      }),
+    ]);
+
+    expect(queryOverviewAggregate).toHaveBeenCalledTimes(1);
+
+    await loadMetricValue({} as never, {
+      siteId: "site-2",
+      metric: "views",
+      window: "last_24h",
+      now: 86_400,
+      cache,
+    });
+    await loadMetricValue({} as never, {
+      siteId: "site-1",
+      metric: "views",
+      window: "last_1h",
+      now: 86_400,
+      cache,
+    });
+
+    expect(queryOverviewAggregate).toHaveBeenCalledTimes(3);
+  });
+
+  it("caches reports, previous windows, cumulative values, and last-seen data", async () => {
+    queryOverviewAggregate.mockResolvedValue({
+      value: { views: 100, visitors: 40, sessions: 55 },
+    });
+    queryPagesAggregate.mockResolvedValue([]);
+    queryReferrerAggregate.mockResolvedValue([]);
+    const prepare = vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn(() =>
+          Promise.resolve({ name: "Demo", domain: "example.test" }),
+        ),
+      })),
+    }));
+    const env = { DB: { prepare } };
+    const cache = createNotificationInvocationCache();
+
+    const reportInput = {
+      siteId: "site-1",
+      now: Date.UTC(2026, 5, 30, 12) / 1000,
+      timezone: "UTC",
+      cache,
+    };
+    await Promise.all([
+      loadDailyReportData(env as never, reportInput),
+      loadDailyReportData(env as never, reportInput),
+    ]);
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(queryPagesAggregate).toHaveBeenCalledTimes(1);
+    expect(queryReferrerAggregate).toHaveBeenCalledTimes(1);
+
+    await Promise.all([
+      loadPreviousMetricValue({} as never, {
+        siteId: "site-1",
+        metric: "views",
+        window: "last_24h",
+        now: 86_400,
+        cache,
+      }),
+      loadPreviousMetricValue({} as never, {
+        siteId: "site-1",
+        metric: "visitors",
+        window: "last_24h",
+        now: 86_400,
+        cache,
+      }),
+      loadCumulativeMetricValue({} as never, {
+        siteId: "site-1",
+        metric: "sessions",
+        now: 86_400,
+        cache,
+      }),
+    ]);
+    expect(queryOverviewAggregate).toHaveBeenCalledTimes(3);
+
+    const lastSeenEnv = envWithLastSeen(1_800_000_123_000).env;
+    const lastSeenCache = createNotificationInvocationCache();
+    await Promise.all([
+      loadSiteLastSeenAt(lastSeenEnv as never, "site-1", lastSeenCache),
+      loadSiteLastSeenAt(lastSeenEnv as never, "site-1", lastSeenCache),
+    ]);
+    expect(lastSeenEnv.DB.prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retain a rejected cache entry", async () => {
+    const cache = new Map<string, Promise<number>>();
+    const failure = Promise.reject(new Error("temporary"));
+    await expect(
+      getOrCreateCachedPromise(cache, "key", () => failure),
+    ).rejects.toThrow("temporary");
+    await Promise.resolve();
+    expect(cache).toHaveLength(0);
   });
 
   it("queries visits and visits_archive when loading site last seen time", async () => {

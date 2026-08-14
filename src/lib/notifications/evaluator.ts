@@ -5,11 +5,13 @@ import type {
   NotificationMessageType,
   NotificationSeverity,
 } from "./message-types";
+import type { NotificationInvocationCache } from "./notification-cache";
 import {
   loadCumulativeMetricValue,
   loadMetricValue,
   loadPreviousMetricValue,
   loadReportData,
+  loadSiteInfo,
   loadSiteLastSeenAt,
   type NotificationMetric,
   type NotificationMetricWindow,
@@ -210,6 +212,7 @@ async function evaluateReportRule(
   env: Env,
   rule: NotificationRule,
   now: number,
+  cache?: NotificationInvocationCache,
 ): Promise<NotificationRuleEvaluationResult> {
   if (!rule.siteId) {
     return { status: "skipped", reason: "missing_site_id" };
@@ -219,6 +222,7 @@ async function evaluateReportRule(
     siteId: rule.siteId,
     now,
     reportType,
+    cache,
     timezone:
       typeof rule.schedule === "object" && "timezone" in rule.schedule
         ? rule.schedule.timezone
@@ -343,7 +347,13 @@ function thresholdTriggerKey(
 async function getSiteDisplay(
   env: Env,
   siteId: string,
+  cache?: NotificationInvocationCache,
 ): Promise<string | null> {
+  if (cache) {
+    const row = await loadSiteInfo(env, siteId, cache);
+    if (!row) return null;
+    return row.domain || row.name || "Site";
+  }
   const row = await env.DB.prepare(
     "SELECT name, domain FROM sites WHERE id = ? LIMIT 1",
   )
@@ -357,9 +367,10 @@ async function evaluateThresholdRule(
   env: Env,
   rule: NotificationRule,
   now: number,
+  cache?: NotificationInvocationCache,
 ): Promise<NotificationRuleEvaluationResult> {
   if (!rule.siteId) return { status: "skipped", reason: "missing_site_id" };
-  const site = await getSiteDisplay(env, rule.siteId);
+  const site = await getSiteDisplay(env, rule.siteId, cache);
   if (!site) return { status: "skipped", reason: "site_not_found" };
   const { combinator, items } = conditionItems(rule.condition);
   const validItems = items.map(validMetricCondition);
@@ -390,6 +401,7 @@ async function evaluateThresholdRule(
       metric: item.metric,
       window: item.window,
       now,
+      cache,
     });
     evaluations.push({
       metric: item.metric,
@@ -522,9 +534,10 @@ async function evaluateChangeRule(
   env: Env,
   rule: NotificationRule,
   now: number,
+  cache?: NotificationInvocationCache,
 ): Promise<NotificationRuleEvaluationResult> {
   if (!rule.siteId) return { status: "skipped", reason: "missing_site_id" };
-  const site = await getSiteDisplay(env, rule.siteId);
+  const site = await getSiteDisplay(env, rule.siteId, cache);
   if (!site) return { status: "skipped", reason: "site_not_found" };
   const { combinator, items } = conditionItems(rule.condition);
   const validItems = items.map(validChangeCondition);
@@ -540,12 +553,14 @@ async function evaluateChangeRule(
         metric: item.metric,
         window: item.window,
         now,
+        cache,
       }),
       loadPreviousMetricValue(env, {
         siteId: rule.siteId,
         metric: item.metric,
         window: item.window,
         now,
+        cache,
       }),
     ]);
     const absolute = current.value - previous.value;
@@ -641,9 +656,10 @@ async function evaluateMilestoneRule(
   env: Env,
   rule: NotificationRule,
   now: number,
+  cache?: NotificationInvocationCache,
 ): Promise<NotificationRuleEvaluationResult> {
   if (!rule.siteId) return { status: "skipped", reason: "missing_site_id" };
-  const site = await getSiteDisplay(env, rule.siteId);
+  const site = await getSiteDisplay(env, rule.siteId, cache);
   if (!site) return { status: "skipped", reason: "site_not_found" };
   const metric = conditionString(
     rule.condition,
@@ -660,6 +676,7 @@ async function evaluateMilestoneRule(
     siteId: rule.siteId,
     metric,
     now,
+    cache,
   });
   const bucket = Math.floor(value / step) * step;
   const milestoneState = isRecord(rule.state.milestone)
@@ -725,6 +742,7 @@ async function evaluateHealthRule(
   env: Env,
   rule: NotificationRule,
   now: number,
+  cache?: NotificationInvocationCache,
 ): Promise<NotificationRuleEvaluationResult> {
   if (!rule.siteId) return { status: "skipped", reason: "missing_site_id" };
   if (conditionString(rule.condition, "check") !== "no_data") {
@@ -733,9 +751,9 @@ async function evaluateHealthRule(
   const hours = conditionNumber(rule.condition, "hours");
   if (!hours || hours <= 0)
     return { status: "skipped", reason: "invalid_hours" };
-  const site = await getSiteDisplay(env, rule.siteId);
+  const site = await getSiteDisplay(env, rule.siteId, cache);
   if (!site) return { status: "skipped", reason: "site_not_found" };
-  const lastSeenAt = await loadSiteLastSeenAt(env, rule.siteId);
+  const lastSeenAt = await loadSiteLastSeenAt(env, rule.siteId, cache);
   const thresholdSeconds = Math.trunc(hours) * 3600;
   const triggered = lastSeenAt === null || now - lastSeenAt >= thresholdSeconds;
   const data = {
@@ -784,13 +802,16 @@ export async function evaluateNotificationRule(
   env: Env,
   rule: NotificationRule,
   now: number,
+  cache?: NotificationInvocationCache,
 ): Promise<NotificationRuleEvaluationResult> {
   if (rule.type === "test") return testRule();
-  if (rule.type === "report") return evaluateReportRule(env, rule, now);
-  if (rule.type === "milestone") return evaluateMilestoneRule(env, rule, now);
-  if (rule.type === "threshold") return evaluateThresholdRule(env, rule, now);
-  if (rule.type === "change") return evaluateChangeRule(env, rule, now);
-  if (rule.type === "health") return evaluateHealthRule(env, rule, now);
+  if (rule.type === "report") return evaluateReportRule(env, rule, now, cache);
+  if (rule.type === "milestone")
+    return evaluateMilestoneRule(env, rule, now, cache);
+  if (rule.type === "threshold")
+    return evaluateThresholdRule(env, rule, now, cache);
+  if (rule.type === "change") return evaluateChangeRule(env, rule, now, cache);
+  if (rule.type === "health") return evaluateHealthRule(env, rule, now, cache);
   return {
     status: "skipped",
     reason: `unsupported_rule_type:${clampString(rule.type, 60)}`,

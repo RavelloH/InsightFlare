@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deliverNotificationMessage } from "@/lib/notifications/delivery";
 import type { NotificationMessage } from "@/lib/notifications/message-store";
+import { createNotificationInvocationCache } from "@/lib/notifications/notification-cache";
 
 const updateNotificationDeliveryResult = vi.hoisted(() => vi.fn());
 const readConfig = vi.hoisted(() => vi.fn());
@@ -125,6 +126,26 @@ describe("notification delivery", () => {
         }),
       }),
     );
+  });
+
+  it("reads the system email config once per notification invocation", async () => {
+    readConfig.mockResolvedValue(null);
+    const cache = createNotificationInvocationCache();
+
+    await deliverNotificationMessage(
+      {} as never,
+      message({ id: "msg-1" }),
+      { id: "user-1", email: "first@example.test", preferencesJson: "{}" },
+      { cache },
+    );
+    await deliverNotificationMessage(
+      {} as never,
+      message({ id: "msg-2" }),
+      { id: "user-2", email: "second@example.test", preferencesJson: "{}" },
+      { cache },
+    );
+
+    expect(readConfig).toHaveBeenCalledTimes(1);
   });
 
   it("marks delivery failed when Resend rejects the request", async () => {

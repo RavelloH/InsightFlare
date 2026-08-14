@@ -235,6 +235,26 @@ describe("notification task", () => {
     expect(advanceNotificationRuleSchedule).toHaveBeenCalled();
   });
 
+  it("shares one invocation cache across every rule evaluated by a tick", async () => {
+    listDueNotificationRules.mockResolvedValue([
+      rule({ id: "rule-1" }),
+      rule({ id: "rule-2" }),
+    ]);
+    evaluateNotificationRule.mockResolvedValue({
+      status: "checked",
+      triggered: false,
+      summary: "Not triggered",
+    });
+
+    await runNotificationTick(context());
+
+    expect(evaluateNotificationRule).toHaveBeenCalledTimes(2);
+    const firstCache = evaluateNotificationRule.mock.calls[0]?.[3];
+    const secondCache = evaluateNotificationRule.mock.calls[1]?.[3];
+    expect(firstCache).toBe(secondCache);
+    expect(firstCache).not.toBeUndefined();
+  });
+
   it("continues when one rule evaluation fails", async () => {
     listDueNotificationRules.mockResolvedValue([rule({ id: "bad" }), rule()]);
     evaluateNotificationRule
