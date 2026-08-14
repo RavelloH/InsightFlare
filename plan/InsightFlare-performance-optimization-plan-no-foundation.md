@@ -669,6 +669,21 @@ WHERE LOWER(TRIM(pathname)) = ?
 - 避免五次重复 filtered source。
 - 短窗口继续 raw 精确 percentile。
 
+### 实施约束与验收
+
+- Performance dashboard 应以一条 tagged SQL 返回 summaries、trends、routes 和
+  countries；四种结果共用同一个 `filtered_visits AS MATERIALIZED` 及同一个
+  `metric_visits AS MATERIALIZED`，不能仅将四条独立 SQL 并行执行。
+- 单独导出的查询 helper 也必须在其自身需要重复读取筛选集时显式 materialize，避免
+  SQLite inline CTE 后对五个 metric arm 重复扫描 `visits`。
+- 保持 `ceil(sampleCount * percentile / 100)` 的 p50/p75/p95 排名规则、原始精确
+  percentile、路径/国家规范化、route limit 与现有 API 响应结构。
+- 使用包含 null metric、跨 bucket 数据、空路径、空国家和 route limit 的真实 SQLite
+  fixture 验证输出等价；对每条独立 helper SQL 与 dashboard SQL 运行
+  `EXPLAIN QUERY PLAN`，确认 `idx_visits_site_started_at` 的 `SEARCH visits` 入口为一次。
+- 部署后以同窗口 Origin MISS 的 D1 Insights 比较 rows read、CPU duration 与 wall time；
+  本阶段不以 cache hit 掩盖数据库成本。
+
 ## 第二阶段仅在仍超预算时考虑 rollup
 
 候选：
@@ -1290,6 +1305,13 @@ rollback = 旧 Worker version
   SQLite 将 CTE 展开为重复 visits 扫描。真实 SQLite fixture 覆盖跨 bucket 标签变更、Other、
   filters 和空 visitor；`EXPLAIN QUERY PLAN` 确认通过 `idx_visits_site_started_at` 的 visits
   索引入口仅一次。仍须以生产 Origin MISS 的 D1 Insights 验证实际 rows-read 下降。
+- Performance dashboard 已将 summaries、五项 metric trends、routes 与 countries 合并为
+  一条 tagged D1 SQL；共享 `filtered_visits` 和 metric-unpivot source 均显式
+  `MATERIALIZED`。原先同一个请求的四次 visits 窗口扫描现在为一次；独立 helper 在需要
+  多次读取其筛选集时也使用 materialized source。真实 SQLite fixture 覆盖 null metric、
+  percentile rank、bucket、路径/国家规范化与 route limit，并确认 dashboard 和四条 helper
+  均从 `idx_visits_site_started_at` 仅进入 visits 一次。生产 Origin MISS 的 D1 Insights
+  仍是实际 rows-read、duration 与 wall time 降幅的验收依据。
 - visits UPSERT 已增加 null-safe 差异 guard：完全相同的业务快照不再触发 `DO UPDATE`；
   late performance 与 identity 字段仍会更新。`updated_at` 仅在业务字段变化时推进，
   `ae_synced_at` 作为 archive 内部状态不再被 ingest flush 的 `NULL` 覆盖。真实 SQLite
@@ -1303,12 +1325,12 @@ rollback = 旧 Worker version
   类型检查；Pages/dimensions 与 technology 回归测试、TypeScript 与 lint 亦已通过。
 - Notification cache 已补充同窗口跨 metric 复用、站点/窗口隔离、报告复用、previous/
   cumulative/last-seen 复用、邮件配置单次读取和 rejected-entry 清理测试。当前完整检查为
-  196 个测试文件、2709 个测试通过；Statements 95.94%、Branches 88.00%、Functions
-  98.09%、Lines 97.39%。生产 Origin MISS 的实际下降仍需部署后按 Phase 0 指标验收。
+  196 个测试文件、2712 个测试通过；Statements 95.95%、Branches 88.01%、Functions
+  98.10%、Lines 97.39%。生产 Origin MISS 的实际下降仍需部署后按 Phase 0 指标验收。
 
 ### 后续阶段
 
 Technology 其他 cross/trend 路径的重复窗口扫描、历史数据兼容证明后的 canonical
-predicate、visit UPSERT 差异 guard、索引候选和 rollup
+predicate、索引候选和 rollup
 仍按本计划后续门槛推进；未有
 `EXPLAIN QUERY PLAN` 与生产 Origin MISS 证据的改动不得提前扩大 schema。

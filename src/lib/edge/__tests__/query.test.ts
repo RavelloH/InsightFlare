@@ -616,7 +616,7 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(
-      ["tagged_rows AS", "rowType"],
+      ["tagged_rows AS", "rowType", "top_rows AS"],
       [
         {
           rowType: "top",
@@ -834,6 +834,56 @@ function commonQueryMatches(): SqlMatch[] {
     allMatch(
       ["GROUP BY pathname, bucket"],
       [{ pathname: "/pricing", bucket: 0, views: 5, visitors: 4 }],
+    ),
+    allMatch(
+      [
+        "metric_visits AS MATERIALIZED",
+        "tagged_rows AS",
+        "'summary' AS rowType",
+      ],
+      [
+        {
+          rowType: "summary",
+          metric: "lcp",
+          avgValue: 123.4567,
+          p50: 100,
+          p75: 140,
+          p95: 200,
+          samples: 8,
+        },
+        {
+          rowType: "trend",
+          metric: "ttfb",
+          bucket: 0,
+          avgValue: 50,
+          p50: 40,
+          p75: 60,
+          p95: 90,
+          samples: 4,
+        },
+        {
+          rowType: "route",
+          pathname: "/pricing",
+          metric: "lcp",
+          views: 6,
+          avgValue: 100,
+          p50: 90,
+          p75: 120,
+          p95: 180,
+          samples: 5,
+        },
+        {
+          rowType: "country",
+          country: "us",
+          metric: "ttfb",
+          views: 6,
+          avgValue: 30,
+          p50: 20,
+          p75: 35,
+          p95: 60,
+          samples: 5,
+        },
+      ],
     ),
     allMatch(
       ["thresholds.pathname AS pathname"],

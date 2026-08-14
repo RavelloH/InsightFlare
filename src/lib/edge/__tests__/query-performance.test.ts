@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
@@ -35,6 +37,78 @@ function createD1Env(rowSets: Record<string, unknown>[][] = []) {
     env: { DB: { prepare } as unknown as D1Database } as Env,
     calls,
     prepare,
+  };
+}
+
+type D1Row = Record<string, unknown>;
+type Binding = string | number | null;
+
+class SqliteStatement {
+  constructor(
+    private readonly database: DatabaseSync,
+    private readonly sql: string,
+    private readonly bindings: Binding[],
+  ) {}
+
+  async all<T extends D1Row>(): Promise<{ results: T[] }> {
+    return {
+      results: this.database
+        .prepare(this.sql)
+        .all(...this.bindings)
+        .map((row) => ({ ...row }) as T),
+    };
+  }
+}
+
+class SqliteD1Database {
+  readonly database = new DatabaseSync(":memory:");
+  readonly calls: PreparedQuery[] = [];
+
+  prepare(sql: string) {
+    return {
+      bind: (...bindings: Binding[]) => {
+        this.calls.push({ sql, bindings });
+        return new SqliteStatement(this.database, sql, bindings);
+      },
+    };
+  }
+
+  close(): void {
+    this.database.close();
+  }
+}
+
+function createSqlitePerformanceEnv(): { env: Env; d1: SqliteD1Database } {
+  const d1 = new SqliteD1Database();
+  d1.database.exec(`
+    CREATE TABLE visits (
+      visit_id TEXT PRIMARY KEY,
+      site_id TEXT NOT NULL,
+      visitor_id TEXT, session_id TEXT, status TEXT, started_at INTEGER,
+      last_activity_at INTEGER, ended_at INTEGER, finalized_at INTEGER,
+      duration_ms INTEGER, duration_source TEXT, exit_reason TEXT,
+      pathname TEXT, query_string TEXT, hash_fragment TEXT, hostname TEXT,
+      title TEXT, referrer_url TEXT, referrer_host TEXT,
+      utm_source TEXT, utm_medium TEXT, utm_campaign TEXT, utm_term TEXT,
+      utm_content TEXT, is_eu INTEGER, country TEXT, region TEXT,
+      region_code TEXT, city TEXT, continent TEXT, latitude REAL,
+      longitude REAL, postal_code TEXT, metro_code TEXT, timezone TEXT,
+      as_organization TEXT, ua_raw TEXT, browser TEXT, browser_version TEXT,
+      os TEXT, os_version TEXT, device_type TEXT, screen_width INTEGER,
+      screen_height INTEGER, language TEXT, perf_ttfb_ms REAL,
+      perf_fcp_ms REAL, perf_lcp_ms REAL, perf_cls REAL, perf_inp_ms REAL,
+      ae_synced_at INTEGER
+    );
+    CREATE INDEX idx_visits_site_started_at
+      ON visits(site_id, started_at);
+  `);
+  return {
+    env: {
+      DB: d1 as unknown as D1Database,
+      DAILY_SALT_SECRET: "test-secret",
+      INGEST_DO: {},
+    } as unknown as Env,
+    d1,
   };
 }
 
@@ -567,6 +641,135 @@ describe("edge query performance D1 helpers", () => {
     ]);
   });
 
+  it("materializes each shared performance source without changing percentile results", async () => {
+    const { env, d1 } = createSqlitePerformanceEnv();
+    const insert = d1.database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, started_at, pathname, country,
+        perf_ttfb_ms, perf_fcp_ms, perf_lcp_ms, perf_cls, perf_inp_ms
+      ) VALUES (?, 'site-1', ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const at = (minutes: number) => Date.UTC(2026, 0, 2, 1, 30 + minutes);
+
+    insert.run(
+      "pricing-fast",
+      at(5),
+      "/pricing",
+      "us",
+      50,
+      null,
+      100,
+      0.2,
+      null,
+    );
+    insert.run(
+      "pricing-slow",
+      at(10),
+      " /pricing ",
+      "US",
+      100,
+      null,
+      200,
+      0.1,
+      50,
+    );
+    insert.run("blog", at(40), "/blog", " ca ", 150, 80, 300, null, 100);
+    insert.run("unknown", at(50), "", "", null, null, null, null, null);
+    insert.run("outside-window", at(-1), "/outside", "US", 1, 1, 1, 1, 1);
+
+    try {
+      await expect(
+        queryPerformanceSummariesFromD1(env, siteId, window, {}),
+      ).resolves.toMatchObject({
+        ttfb: { avg: 100, p50: 100, p75: 150, p95: 150, samples: 3 },
+        lcp: { avg: 200, p50: 200, p75: 300, p95: 300, samples: 3 },
+        fcp: { avg: 80, p50: 80, p75: 80, p95: 80, samples: 1 },
+      });
+      await expect(
+        queryAllPerformanceTrendsFromD1(env, siteId, window, "hour", {}),
+      ).resolves.toMatchObject({
+        ttfb: [
+          { bucket: 0, avg: 75, p50: 50, p75: 100, p95: 100, samples: 2 },
+          { bucket: 1, avg: 150, p50: 150, p75: 150, p95: 150, samples: 1 },
+        ],
+      });
+      await expect(
+        queryPerformanceRoutesFromD1(env, siteId, window, {}, 1),
+      ).resolves.toMatchObject([
+        {
+          pathname: "/pricing",
+          views: 2,
+          metrics: {
+            ttfb: { avg: 75, p50: 50, p75: 100, p95: 100, samples: 2 },
+          },
+        },
+      ]);
+      await expect(
+        queryPerformanceCountriesFromD1(env, siteId, window, {}),
+      ).resolves.toMatchObject([
+        {
+          country: "US",
+          views: 2,
+          metrics: {
+            lcp: { avg: 150, p50: 100, p75: 200, p95: 200, samples: 2 },
+          },
+        },
+        {
+          country: "CA",
+          views: 1,
+          metrics: {
+            inp: { avg: 100, p50: 100, p75: 100, p95: 100, samples: 1 },
+          },
+        },
+      ]);
+
+      expect(d1.calls).toHaveLength(4);
+      for (const call of d1.calls) {
+        expect(call.sql).toContain("AS MATERIALIZED");
+        const plan = d1.database
+          .prepare(`EXPLAIN QUERY PLAN ${call.sql}`)
+          .all(...call.bindings) as Array<{ detail: string }>;
+        expect(
+          plan.filter((row) =>
+            row.detail.includes("SEARCH visits USING INDEX"),
+          ),
+        ).toHaveLength(1);
+      }
+
+      const response = await handlePerformance(
+        env,
+        siteId,
+        new URL(
+          `https://edge.test/performance?from=${window.fromMs}&to=${window.toMs}&interval=hour`,
+        ),
+      );
+      const payload = (await response.json()) as {
+        summaries: Record<string, { p50: number | null }>;
+        trends: Record<string, Array<{ bucket: number; p50: number | null }>>;
+        routes: Array<{ pathname: string; views: number }>;
+        countries: Array<{ country: string; views: number }>;
+      };
+      expect(payload.summaries.ttfb).toMatchObject({ p50: 100 });
+      expect(payload.trends.ttfb?.[0]).toMatchObject({ bucket: 0, p50: 50 });
+      expect(payload.routes[0]).toMatchObject({
+        pathname: "/pricing",
+        views: 2,
+      });
+      expect(payload.countries[0]).toMatchObject({ country: "US", views: 2 });
+      expect(d1.calls).toHaveLength(5);
+      const dashboardPlan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${d1.calls[4]?.sql}`)
+        .all(...(d1.calls[4]?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(
+        dashboardPlan.filter((row) =>
+          row.detail.includes("SEARCH visits USING INDEX"),
+        ),
+      ).toHaveLength(1);
+    } finally {
+      d1.close();
+    }
+  });
+
   it("rejects invalid handlePerformance windows before querying D1", async () => {
     const { env, prepare } = createD1Env();
 
@@ -584,11 +787,11 @@ describe("edge query performance D1 helpers", () => {
     expect(prepare).not.toHaveBeenCalled();
   });
 
-  it("serves the performance dashboard with four D1 statements", async () => {
+  it("serves the performance dashboard with one shared D1 statement", async () => {
     const { env, prepare } = createD1Env([
-      [],
       [
         {
+          rowType: "trend",
           metric: "lcp",
           bucket: 0,
           samples: 2,
@@ -598,8 +801,6 @@ describe("edge query performance D1 helpers", () => {
           p95: 200,
         },
       ],
-      [],
-      [],
     ]);
 
     const response = await handlePerformance(
@@ -611,7 +812,7 @@ describe("edge query performance D1 helpers", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(prepare).toHaveBeenCalledTimes(4);
+    expect(prepare).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       trends: {

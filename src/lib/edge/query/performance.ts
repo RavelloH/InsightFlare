@@ -34,14 +34,131 @@ import {
   visitSourceBindings,
 } from "./core";
 
-const ALL_PERFORMANCE_METRIC_VISITS_SQL = PERFORMANCE_METRIC_KEYS.map(
-  (metric) => {
+function performanceMetricVisitsSql(
+  source: string,
+  dimensions: string[] = [],
+): string {
+  const dimensionSql =
+    dimensions.length > 0 ? `${dimensions.join(", ")}, ` : "";
+  return PERFORMANCE_METRIC_KEYS.map((metric) => {
     const column = PERFORMANCE_METRIC_COLUMNS[metric];
-    return `SELECT bucket, '${metric}' AS metric, ${column} AS metricValue
-  FROM bucketed_visits
+    return `SELECT ${dimensionSql}'${metric}' AS metric, ${column} AS metricValue
+  FROM ${source}
   WHERE ${column} IS NOT NULL`;
-  },
-).join("\n  UNION ALL\n  ");
+  }).join("\n  UNION ALL\n  ");
+}
+
+function emptyPerformanceSummaries(): Record<
+  PerformanceMetricKey,
+  PerformanceSummaryRow
+> {
+  return {
+    ttfb: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
+    fcp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
+    lcp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
+    cls: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
+    inp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
+  };
+}
+
+function mapPerformanceSummaries(
+  rows: Record<string, unknown>[],
+): Record<PerformanceMetricKey, PerformanceSummaryRow> {
+  const summaries = emptyPerformanceSummaries();
+  for (const row of rows) {
+    const metric = String(row.metric ?? "") as PerformanceMetricKey;
+    if (!(metric in PERFORMANCE_METRIC_COLUMNS)) continue;
+    summaries[metric] = {
+      avg: roundPerformanceValue(row.avgValue),
+      p50: roundPerformanceValue(row.p50),
+      p75: roundPerformanceValue(row.p75),
+      p95: roundPerformanceValue(row.p95),
+      samples: Number(row.samples ?? 0),
+    };
+  }
+  return summaries;
+}
+
+function emptyPerformanceTrends(): Record<
+  PerformanceMetricKey,
+  PerformanceTrendPointRow[]
+> {
+  return { ttfb: [], fcp: [], lcp: [], cls: [], inp: [] };
+}
+
+function mapPerformanceTrends(
+  rows: Record<string, unknown>[],
+  buckets: ReturnType<typeof buildTimeBuckets>,
+): Record<PerformanceMetricKey, PerformanceTrendPointRow[]> {
+  const trends = emptyPerformanceTrends();
+  for (const row of rows) {
+    const metric = String(row.metric ?? "") as PerformanceMetricKey;
+    if (!(metric in PERFORMANCE_METRIC_COLUMNS)) continue;
+    const bucketIndex = Number(row.bucket ?? 0);
+    trends[metric].push({
+      bucket: bucketIndex,
+      timestampMs: timeBucketTimestamp(buckets, bucketIndex),
+      avg: roundPerformanceValue(row.avgValue),
+      p50: roundPerformanceValue(row.p50),
+      p75: roundPerformanceValue(row.p75),
+      p95: roundPerformanceValue(row.p95),
+      samples: Number(row.samples ?? 0),
+    });
+  }
+  return trends;
+}
+
+function mapPerformanceRoutes(
+  rows: Record<string, unknown>[],
+): PerformanceRouteRow[] {
+  const byPath = new Map<string, PerformanceRouteRow>();
+  for (const row of rows) {
+    const pathname = normalizePathname(String(row.pathname ?? ""));
+    const metric = String(row.metric ?? "") as PerformanceMetricKey;
+    if (!(metric in PERFORMANCE_METRIC_COLUMNS)) continue;
+    const current = byPath.get(pathname) ?? {
+      pathname,
+      views: Number(row.views ?? 0),
+      metrics: emptyPerformanceRouteMetrics(),
+    };
+    current.metrics[metric] = {
+      avg: roundPerformanceValue(row.avgValue),
+      p50: roundPerformanceValue(row.p50),
+      p75: roundPerformanceValue(row.p75),
+      p95: roundPerformanceValue(row.p95),
+      samples: Number(row.samples ?? 0),
+    };
+    byPath.set(pathname, current);
+  }
+  return [...byPath.values()];
+}
+
+function mapPerformanceCountries(
+  rows: Record<string, unknown>[],
+): PerformanceCountryRow[] {
+  const byCountry = new Map<string, PerformanceCountryRow>();
+  for (const row of rows) {
+    const country = String(row.country ?? "")
+      .trim()
+      .toUpperCase();
+    const metric = String(row.metric ?? "") as PerformanceMetricKey;
+    if (!country || !(metric in PERFORMANCE_METRIC_COLUMNS)) continue;
+    const current = byCountry.get(country) ?? {
+      country,
+      views: Number(row.views ?? 0),
+      metrics: emptyPerformanceRouteMetrics(),
+    };
+    current.metrics[metric] = {
+      avg: roundPerformanceValue(row.avgValue),
+      p50: roundPerformanceValue(row.p50),
+      p75: roundPerformanceValue(row.p75),
+      p95: roundPerformanceValue(row.p95),
+      samples: Number(row.samples ?? 0),
+    };
+    byCountry.set(country, current);
+  }
+  return [...byCountry.values()];
+}
 
 export async function queryPerformanceSummariesFromD1(
   env: Env,
@@ -53,31 +170,18 @@ export async function queryPerformanceSummariesFromD1(
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT *
+filtered_visits AS MATERIALIZED (
+  SELECT
+    perf_ttfb_ms,
+    perf_fcp_ms,
+    perf_lcp_ms,
+    perf_cls,
+    perf_inp_ms
   FROM visit_source
   ${filter.clause}
 ),
 metric_visits AS (
-  SELECT 'ttfb' AS metric, perf_ttfb_ms AS metricValue
-  FROM filtered_visits
-  WHERE perf_ttfb_ms IS NOT NULL
-  UNION ALL
-  SELECT 'fcp' AS metric, perf_fcp_ms AS metricValue
-  FROM filtered_visits
-  WHERE perf_fcp_ms IS NOT NULL
-  UNION ALL
-  SELECT 'lcp' AS metric, perf_lcp_ms AS metricValue
-  FROM filtered_visits
-  WHERE perf_lcp_ms IS NOT NULL
-  UNION ALL
-  SELECT 'cls' AS metric, perf_cls AS metricValue
-  FROM filtered_visits
-  WHERE perf_cls IS NOT NULL
-  UNION ALL
-  SELECT 'inp' AS metric, perf_inp_ms AS metricValue
-  FROM filtered_visits
-  WHERE perf_inp_ms IS NOT NULL
+  ${performanceMetricVisitsSql("filtered_visits")}
 ),
 ordered_values AS (
   SELECT
@@ -110,29 +214,11 @@ JOIN ordered_values ordered
   ON ordered.metric = thresholds.metric
 GROUP BY thresholds.metric, thresholds.sampleCount, thresholds.avgValue
 `;
-  const summaries: Record<PerformanceMetricKey, PerformanceSummaryRow> = {
-    ttfb: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
-    fcp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
-    lcp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
-    cls: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
-    inp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
-  };
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
     ...filter.bindings,
   ]);
-  for (const row of rows) {
-    const metric = String(row.metric ?? "") as PerformanceMetricKey;
-    if (!(metric in PERFORMANCE_METRIC_COLUMNS)) continue;
-    summaries[metric] = {
-      avg: roundPerformanceValue(row.avgValue),
-      p50: roundPerformanceValue(row.p50),
-      p75: roundPerformanceValue(row.p75),
-      p95: roundPerformanceValue(row.p95),
-      samples: Number(row.samples ?? 0),
-    };
-  }
-  return summaries;
+  return mapPerformanceSummaries(rows);
 }
 
 export async function queryPerformanceTrendFromD1(
@@ -222,7 +308,7 @@ export async function queryAllPerformanceTrendsFromD1(
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-bucketed_visits AS (
+bucketed_visits AS MATERIALIZED (
   SELECT
     ${bucket.sql} AS bucket,
     perf_ttfb_ms,
@@ -234,7 +320,7 @@ bucketed_visits AS (
   ${filter.clause}
 ),
 metric_visits AS (
-  ${ALL_PERFORMANCE_METRIC_VISITS_SQL}
+  ${performanceMetricVisitsSql("bucketed_visits", ["bucket"])}
 ),
 ordered_values AS (
   SELECT
@@ -284,29 +370,7 @@ ORDER BY thresholds.metric ASC, thresholds.bucket ASC
     ...bucket.bindings,
     ...filter.bindings,
   ]);
-  const trends: Record<PerformanceMetricKey, PerformanceTrendPointRow[]> = {
-    ttfb: [],
-    fcp: [],
-    lcp: [],
-    cls: [],
-    inp: [],
-  };
-
-  for (const row of rows) {
-    const metric = String(row.metric ?? "") as PerformanceMetricKey;
-    if (!(metric in PERFORMANCE_METRIC_COLUMNS)) continue;
-    const bucketIndex = Number(row.bucket ?? 0);
-    trends[metric].push({
-      bucket: bucketIndex,
-      timestampMs: timeBucketTimestamp(buckets, bucketIndex),
-      avg: roundPerformanceValue(row.avgValue),
-      p50: roundPerformanceValue(row.p50),
-      p75: roundPerformanceValue(row.p75),
-      p95: roundPerformanceValue(row.p95),
-      samples: Number(row.samples ?? 0),
-    });
-  }
-  return trends;
+  return mapPerformanceTrends(rows, buckets);
 }
 
 export async function queryPerformanceRoutesFromD1(
@@ -321,14 +385,20 @@ export async function queryPerformanceRoutesFromD1(
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT *
+filtered_visits AS MATERIALIZED (
+  SELECT
+    ${pathExpr} AS pathname,
+    perf_ttfb_ms,
+    perf_fcp_ms,
+    perf_lcp_ms,
+    perf_cls,
+    perf_inp_ms
   FROM visit_source
   ${filter.clause}
 ),
 path_views AS (
   SELECT
-    ${pathExpr} AS pathname,
+    pathname,
     count(*) AS views
   FROM filtered_visits
   GROUP BY pathname
@@ -336,25 +406,7 @@ path_views AS (
   LIMIT ?
 ),
 metric_visits AS (
-  SELECT ${pathExpr} AS pathname, 'ttfb' AS metric, perf_ttfb_ms AS metricValue
-  FROM filtered_visits
-  WHERE perf_ttfb_ms IS NOT NULL
-  UNION ALL
-  SELECT ${pathExpr} AS pathname, 'fcp' AS metric, perf_fcp_ms AS metricValue
-  FROM filtered_visits
-  WHERE perf_fcp_ms IS NOT NULL
-  UNION ALL
-  SELECT ${pathExpr} AS pathname, 'lcp' AS metric, perf_lcp_ms AS metricValue
-  FROM filtered_visits
-  WHERE perf_lcp_ms IS NOT NULL
-  UNION ALL
-  SELECT ${pathExpr} AS pathname, 'cls' AS metric, perf_cls AS metricValue
-  FROM filtered_visits
-  WHERE perf_cls IS NOT NULL
-  UNION ALL
-  SELECT ${pathExpr} AS pathname, 'inp' AS metric, perf_inp_ms AS metricValue
-  FROM filtered_visits
-  WHERE perf_inp_ms IS NOT NULL
+  ${performanceMetricVisitsSql("filtered_visits", ["pathname"])}
 ),
 scoped_metric_visits AS (
   SELECT metric_visits.*
@@ -409,29 +461,7 @@ ORDER BY path_views.views DESC, thresholds.pathname ASC, thresholds.metric ASC
     ...filter.bindings,
     limit,
   ]);
-  const byPath = new Map<string, PerformanceRouteRow>();
-
-  for (const row of rows) {
-    const pathname = normalizePathname(String(row.pathname ?? ""));
-    const metric = String(row.metric ?? "") as PerformanceMetricKey;
-    if (!(metric in PERFORMANCE_METRIC_COLUMNS)) continue;
-
-    const current = byPath.get(pathname) ?? {
-      pathname,
-      views: Number(row.views ?? 0),
-      metrics: emptyPerformanceRouteMetrics(),
-    };
-    current.metrics[metric] = {
-      avg: roundPerformanceValue(row.avgValue),
-      p50: roundPerformanceValue(row.p50),
-      p75: roundPerformanceValue(row.p75),
-      p95: roundPerformanceValue(row.p95),
-      samples: Number(row.samples ?? 0),
-    };
-    byPath.set(pathname, current);
-  }
-
-  return [...byPath.values()];
+  return mapPerformanceRoutes(rows);
 }
 
 export async function queryPerformanceCountriesFromD1(
@@ -445,39 +475,32 @@ export async function queryPerformanceCountriesFromD1(
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT *
+filtered_visits AS MATERIALIZED (
+  SELECT
+    ${countryExpr} AS country,
+    perf_ttfb_ms,
+    perf_fcp_ms,
+    perf_lcp_ms,
+    perf_cls,
+    perf_inp_ms
   FROM visit_source
   ${filter.clause}
 ),
 country_views AS (
   SELECT
-    ${countryExpr} AS country,
+    country,
     count(*) AS views
   FROM filtered_visits
-  WHERE ${countryExpr} != ''
+  WHERE country != ''
   GROUP BY country
 ),
 metric_visits AS (
-  SELECT ${countryExpr} AS country, 'ttfb' AS metric, perf_ttfb_ms AS metricValue
-  FROM filtered_visits
-  WHERE ${countryExpr} != '' AND perf_ttfb_ms IS NOT NULL
-  UNION ALL
-  SELECT ${countryExpr} AS country, 'fcp' AS metric, perf_fcp_ms AS metricValue
-  FROM filtered_visits
-  WHERE ${countryExpr} != '' AND perf_fcp_ms IS NOT NULL
-  UNION ALL
-  SELECT ${countryExpr} AS country, 'lcp' AS metric, perf_lcp_ms AS metricValue
-  FROM filtered_visits
-  WHERE ${countryExpr} != '' AND perf_lcp_ms IS NOT NULL
-  UNION ALL
-  SELECT ${countryExpr} AS country, 'cls' AS metric, perf_cls AS metricValue
-  FROM filtered_visits
-  WHERE ${countryExpr} != '' AND perf_cls IS NOT NULL
-  UNION ALL
-  SELECT ${countryExpr} AS country, 'inp' AS metric, perf_inp_ms AS metricValue
-  FROM filtered_visits
-  WHERE ${countryExpr} != '' AND perf_inp_ms IS NOT NULL
+  ${performanceMetricVisitsSql("filtered_visits", ["country"])}
+),
+scoped_metric_visits AS (
+  SELECT metric_visits.*
+  FROM metric_visits
+  WHERE country != ''
 ),
 ordered_values AS (
   SELECT
@@ -486,7 +509,7 @@ ordered_values AS (
     metricValue,
     ROW_NUMBER() OVER (PARTITION BY country, metric ORDER BY metricValue ASC) AS rowNum,
     COUNT(*) OVER (PARTITION BY country, metric) AS sampleCount
-  FROM metric_visits
+  FROM scoped_metric_visits
 ),
 metric_thresholds AS (
   SELECT
@@ -526,31 +549,327 @@ ORDER BY country_views.views DESC, thresholds.country ASC, thresholds.metric ASC
     ...visitSourceBindings(siteId, window),
     ...filter.bindings,
   ]);
-  const byCountry = new Map<string, PerformanceCountryRow>();
+  return mapPerformanceCountries(rows);
+}
 
-  for (const row of rows) {
-    const country = String(row.country ?? "")
-      .trim()
-      .toUpperCase();
-    const metric = String(row.metric ?? "") as PerformanceMetricKey;
-    if (!country || !(metric in PERFORMANCE_METRIC_COLUMNS)) continue;
-
-    const current = byCountry.get(country) ?? {
-      country,
-      views: Number(row.views ?? 0),
-      metrics: emptyPerformanceRouteMetrics(),
-    };
-    current.metrics[metric] = {
-      avg: roundPerformanceValue(row.avgValue),
-      p50: roundPerformanceValue(row.p50),
-      p75: roundPerformanceValue(row.p75),
-      p95: roundPerformanceValue(row.p95),
-      samples: Number(row.samples ?? 0),
-    };
-    byCountry.set(country, current);
-  }
-
-  return [...byCountry.values()];
+async function queryPerformanceDashboardFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: DashboardFilters,
+  routeLimit: number,
+): Promise<{
+  summaries: Record<PerformanceMetricKey, PerformanceSummaryRow>;
+  trends: Record<PerformanceMetricKey, PerformanceTrendPointRow[]>;
+  routes: PerformanceRouteRow[];
+  countries: PerformanceCountryRow[];
+}> {
+  const filter = buildVisitFilterSql(filters);
+  const buckets = buildTimeBuckets(window, interval);
+  const bucket = timeBucketCase(buckets, "started_at");
+  const pathExpr = "COALESCE(NULLIF(trim(pathname), ''), '/')";
+  const countryExpr = "UPPER(TRIM(COALESCE(country, '')))";
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS MATERIALIZED (
+  SELECT
+    ${bucket.sql} AS bucket,
+    ${pathExpr} AS pathname,
+    ${countryExpr} AS country,
+    perf_ttfb_ms,
+    perf_fcp_ms,
+    perf_lcp_ms,
+    perf_cls,
+    perf_inp_ms
+  FROM visit_source
+  ${filter.clause}
+),
+metric_visits AS MATERIALIZED (
+  ${performanceMetricVisitsSql("filtered_visits", [
+    "bucket",
+    "pathname",
+    "country",
+  ])}
+),
+summary_ordered_values AS (
+  SELECT
+    metric,
+    metricValue,
+    ROW_NUMBER() OVER (PARTITION BY metric ORDER BY metricValue ASC) AS rowNum,
+    COUNT(*) OVER (PARTITION BY metric) AS sampleCount
+  FROM metric_visits
+),
+summary_thresholds AS (
+  SELECT
+    metric,
+    sampleCount,
+    AVG(metricValue) AS avgValue,
+    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
+    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
+    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
+  FROM summary_ordered_values
+  GROUP BY metric, sampleCount
+),
+summary_rows AS (
+  SELECT
+    thresholds.metric AS metric,
+    thresholds.sampleCount AS samples,
+    thresholds.avgValue AS avgValue,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p50Rank THEN ordered.metricValue END) AS p50,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p75Rank THEN ordered.metricValue END) AS p75,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p95Rank THEN ordered.metricValue END) AS p95
+  FROM summary_thresholds thresholds
+  JOIN summary_ordered_values ordered
+    ON ordered.metric = thresholds.metric
+  GROUP BY thresholds.metric, thresholds.sampleCount, thresholds.avgValue
+),
+trend_ordered_values AS (
+  SELECT
+    metric,
+    bucket,
+    metricValue,
+    ROW_NUMBER() OVER (
+      PARTITION BY metric, bucket
+      ORDER BY metricValue ASC
+    ) AS rowNum,
+    COUNT(*) OVER (PARTITION BY metric, bucket) AS sampleCount
+  FROM metric_visits
+),
+trend_thresholds AS (
+  SELECT
+    metric,
+    bucket,
+    sampleCount,
+    AVG(metricValue) AS avgValue,
+    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
+    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
+    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
+  FROM trend_ordered_values
+  GROUP BY metric, bucket, sampleCount
+),
+trend_rows AS (
+  SELECT
+    thresholds.metric AS metric,
+    thresholds.bucket AS bucket,
+    thresholds.sampleCount AS samples,
+    thresholds.avgValue AS avgValue,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p50Rank THEN ordered.metricValue END) AS p50,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p75Rank THEN ordered.metricValue END) AS p75,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p95Rank THEN ordered.metricValue END) AS p95
+  FROM trend_thresholds thresholds
+  JOIN trend_ordered_values ordered
+    ON ordered.metric = thresholds.metric
+   AND ordered.bucket = thresholds.bucket
+  GROUP BY
+    thresholds.metric,
+    thresholds.bucket,
+    thresholds.sampleCount,
+    thresholds.avgValue
+),
+path_views AS (
+  SELECT pathname, count(*) AS views
+  FROM filtered_visits
+  GROUP BY pathname
+  ORDER BY views DESC, pathname ASC
+  LIMIT ?
+),
+route_ordered_values AS (
+  SELECT
+    metric_visits.pathname,
+    metric_visits.metric,
+    metric_visits.metricValue,
+    ROW_NUMBER() OVER (
+      PARTITION BY metric_visits.pathname, metric_visits.metric
+      ORDER BY metric_visits.metricValue ASC
+    ) AS rowNum,
+    COUNT(*) OVER (
+      PARTITION BY metric_visits.pathname, metric_visits.metric
+    ) AS sampleCount
+  FROM metric_visits
+  JOIN path_views ON path_views.pathname = metric_visits.pathname
+),
+route_thresholds AS (
+  SELECT
+    pathname,
+    metric,
+    sampleCount,
+    AVG(metricValue) AS avgValue,
+    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
+    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
+    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
+  FROM route_ordered_values
+  GROUP BY pathname, metric, sampleCount
+),
+route_rows AS (
+  SELECT
+    thresholds.pathname AS pathname,
+    thresholds.metric AS metric,
+    path_views.views AS views,
+    thresholds.sampleCount AS samples,
+    thresholds.avgValue AS avgValue,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p50Rank THEN ordered.metricValue END) AS p50,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p75Rank THEN ordered.metricValue END) AS p75,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p95Rank THEN ordered.metricValue END) AS p95
+  FROM route_thresholds thresholds
+  JOIN route_ordered_values ordered
+    ON ordered.pathname = thresholds.pathname
+   AND ordered.metric = thresholds.metric
+  JOIN path_views ON path_views.pathname = thresholds.pathname
+  GROUP BY
+    thresholds.pathname,
+    thresholds.metric,
+    path_views.views,
+    thresholds.sampleCount,
+    thresholds.avgValue
+),
+country_views AS (
+  SELECT country, count(*) AS views
+  FROM filtered_visits
+  WHERE country != ''
+  GROUP BY country
+),
+country_ordered_values AS (
+  SELECT
+    metric_visits.country,
+    metric_visits.metric,
+    metric_visits.metricValue,
+    ROW_NUMBER() OVER (
+      PARTITION BY metric_visits.country, metric_visits.metric
+      ORDER BY metric_visits.metricValue ASC
+    ) AS rowNum,
+    COUNT(*) OVER (
+      PARTITION BY metric_visits.country, metric_visits.metric
+    ) AS sampleCount
+  FROM metric_visits
+  JOIN country_views ON country_views.country = metric_visits.country
+),
+country_thresholds AS (
+  SELECT
+    country,
+    metric,
+    sampleCount,
+    AVG(metricValue) AS avgValue,
+    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
+    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
+    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
+  FROM country_ordered_values
+  GROUP BY country, metric, sampleCount
+),
+country_rows AS (
+  SELECT
+    thresholds.country AS country,
+    thresholds.metric AS metric,
+    country_views.views AS views,
+    thresholds.sampleCount AS samples,
+    thresholds.avgValue AS avgValue,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p50Rank THEN ordered.metricValue END) AS p50,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p75Rank THEN ordered.metricValue END) AS p75,
+    MIN(CASE WHEN ordered.rowNum >= thresholds.p95Rank THEN ordered.metricValue END) AS p95
+  FROM country_thresholds thresholds
+  JOIN country_ordered_values ordered
+    ON ordered.country = thresholds.country
+   AND ordered.metric = thresholds.metric
+  JOIN country_views ON country_views.country = thresholds.country
+  GROUP BY
+    thresholds.country,
+    thresholds.metric,
+    country_views.views,
+    thresholds.sampleCount,
+    thresholds.avgValue
+),
+tagged_rows AS (
+  SELECT
+    'summary' AS rowType,
+    metric,
+    NULL AS bucket,
+    NULL AS pathname,
+    NULL AS country,
+    NULL AS views,
+    samples,
+    avgValue,
+    p50,
+    p75,
+    p95
+  FROM summary_rows
+  UNION ALL
+  SELECT
+    'trend' AS rowType,
+    metric,
+    bucket,
+    NULL AS pathname,
+    NULL AS country,
+    NULL AS views,
+    samples,
+    avgValue,
+    p50,
+    p75,
+    p95
+  FROM trend_rows
+  UNION ALL
+  SELECT
+    'route' AS rowType,
+    metric,
+    NULL AS bucket,
+    pathname,
+    NULL AS country,
+    views,
+    samples,
+    avgValue,
+    p50,
+    p75,
+    p95
+  FROM route_rows
+  UNION ALL
+  SELECT
+    'country' AS rowType,
+    metric,
+    NULL AS bucket,
+    NULL AS pathname,
+    country,
+    views,
+    samples,
+    avgValue,
+    p50,
+    p75,
+    p95
+  FROM country_rows
+)
+SELECT
+  rowType,
+  metric,
+  bucket,
+  pathname,
+  country,
+  views,
+  samples,
+  avgValue,
+  p50,
+  p75,
+  p95
+FROM tagged_rows
+ORDER BY rowType ASC, metric ASC, bucket ASC, pathname ASC, country ASC
+`;
+  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...bucket.bindings,
+    ...filter.bindings,
+    routeLimit,
+  ]);
+  return {
+    summaries: mapPerformanceSummaries(
+      rows.filter((row) => row.rowType === "summary"),
+    ),
+    trends: mapPerformanceTrends(
+      rows.filter((row) => row.rowType === "trend"),
+      buckets,
+    ),
+    routes: mapPerformanceRoutes(rows.filter((row) => row.rowType === "route")),
+    countries: mapPerformanceCountries(
+      rows.filter((row) => row.rowType === "country"),
+    ),
+  };
 }
 
 export async function handlePerformance(
@@ -564,12 +883,15 @@ export async function handlePerformance(
   const filters = parseFilters(url);
   const interval = parseInterval(url);
   const routeLimit = parseLimit(url, 18, 50);
-  const [summaries, trends, routes, countries] = await Promise.all([
-    queryPerformanceSummariesFromD1(env, siteId, window, filters),
-    queryAllPerformanceTrendsFromD1(env, siteId, window, interval, filters),
-    queryPerformanceRoutesFromD1(env, siteId, window, filters, routeLimit),
-    queryPerformanceCountriesFromD1(env, siteId, window, filters),
-  ]);
+  const { summaries, trends, routes, countries } =
+    await queryPerformanceDashboardFromD1(
+      env,
+      siteId,
+      window,
+      interval,
+      filters,
+      routeLimit,
+    );
 
   return jsonResponseWith(ctx!, {
     ok: true,
