@@ -286,35 +286,140 @@ export async function queryBrowserCrossDimensionFromD1(
   const normalizedDimensionLimit = Math.min(Math.max(1, dimensionLimit), 8);
   const browserExpr = "TRIM(COALESCE(browser, ''))";
   const normalizedDimensionExpr = `CASE WHEN ${dimensionExpr} != '' THEN ${dimensionExpr} ELSE '${BROWSER_CROSS_UNKNOWN_TOKEN}' END`;
-  const topBrowsersSql = `
+  const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
+filtered_visits AS MATERIALIZED (
   SELECT
     ${browserExpr} AS browser,
+    ${normalizedDimensionExpr} AS dimension,
     visitor_id AS visitorId,
     session_id AS sessionId
   FROM visit_source
   ${filter.clause}
+),
+top_browser_aggregate AS (
+  SELECT
+    browser,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM filtered_visits
+  WHERE browser != ''
+  GROUP BY browser
+),
+top_browser_rows AS (
+  SELECT
+    browser,
+    views,
+    visitors,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
+    ) AS rowOrder
+  FROM top_browser_aggregate
+  ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
+  LIMIT ?
+),
+top_dimension_aggregate AS (
+  SELECT
+    dimension,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM filtered_visits
+  WHERE browser != ''
+  GROUP BY dimension
+),
+top_dimension_rows AS (
+  SELECT
+    dimension,
+    views,
+    visitors,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY visitors DESC, views DESC, sessions DESC, dimension ASC
+    ) AS rowOrder
+  FROM top_dimension_aggregate
+  ORDER BY visitors DESC, views DESC, sessions DESC, dimension ASC
+  LIMIT ?
+),
+normalized_visits AS (
+  SELECT
+    CASE
+      WHEN browser IN (
+        SELECT browser
+        FROM top_browser_rows
+        WHERE browser != '' AND visitors > 0
+      ) THEN browser
+      ELSE '${BROWSER_CROSS_OTHER_BROWSER_TOKEN}'
+    END AS browserBucket,
+    CASE
+      WHEN dimension IN (
+        SELECT dimension
+        FROM top_dimension_rows
+        WHERE visitors > 0
+      ) THEN dimension
+      ELSE '${BROWSER_CROSS_OTHER_DIMENSION_TOKEN}'
+    END AS dimensionBucket,
+    visitorId,
+    sessionId
+  FROM filtered_visits
+  WHERE browser != ''
+),
+pair_rows AS (
+  SELECT
+    browserBucket AS browser,
+    dimensionBucket AS dimension,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM normalized_visits
+  GROUP BY browserBucket, dimensionBucket
+),
+tagged_rows AS (
+  SELECT
+    'browser' AS rowType,
+    browser,
+    NULL AS dimension,
+    views,
+    visitors,
+    sessions,
+    rowOrder
+  FROM top_browser_rows
+  UNION ALL
+  SELECT
+    'dimension' AS rowType,
+    NULL AS browser,
+    dimension,
+    views,
+    visitors,
+    sessions,
+    rowOrder
+  FROM top_dimension_rows
+  UNION ALL
+  SELECT
+    'pair' AS rowType,
+    browser,
+    dimension,
+    views,
+    visitors,
+    sessions,
+    0 AS rowOrder
+  FROM pair_rows
 )
-SELECT
-  browser,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM filtered_visits
-WHERE browser != ''
-GROUP BY browser
-ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
-LIMIT ?
+SELECT rowType, browser, dimension, views, visitors, sessions
+FROM tagged_rows
+ORDER BY rowType ASC, rowOrder ASC, browser ASC, dimension ASC
 `;
-  const topBrowsers = (
-    await queryD1All<Record<string, unknown>>(env, topBrowsersSql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      normalizedBrowserLimit,
-    ])
-  )
+  const queryRows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...filter.bindings,
+    normalizedBrowserLimit,
+    normalizedDimensionLimit,
+  ]);
+  const topBrowsers = queryRows
+    .filter((row) => row.rowType === "browser")
     .map((row) => ({
       browser: String(row.browser ?? "").trim(),
       views: Number(row.views ?? 0),
@@ -331,36 +436,8 @@ LIMIT ?
     };
   }
 
-  const topDimensionsSql = `
-WITH
-${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT
-    ${browserExpr} AS browser,
-    ${normalizedDimensionExpr} AS dimension,
-    visitor_id AS visitorId,
-    session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
-)
-SELECT
-  dimension,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM filtered_visits
-WHERE browser != ''
-GROUP BY dimension
-ORDER BY visitors DESC, views DESC, sessions DESC, dimension ASC
-LIMIT ?
-`;
-  const topDimensions = (
-    await queryD1All<Record<string, unknown>>(env, topDimensionsSql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      normalizedDimensionLimit,
-    ])
-  )
+  const topDimensions = queryRows
+    .filter((row) => row.rowType === "dimension")
     .map((row) => ({
       dimension:
         String(row.dimension ?? "").trim() || BROWSER_CROSS_UNKNOWN_TOKEN,
@@ -378,55 +455,8 @@ LIMIT ?
     };
   }
 
-  const topBrowserLabels = topBrowsers.map((row) => row.browser);
-  const topDimensionLabels = topDimensions.map((row) => row.dimension);
-  const topBrowserPlaceholders = topBrowserLabels.map(() => "?").join(", ");
-  const topDimensionPlaceholders = topDimensionLabels.map(() => "?").join(", ");
-  const pairsSql = `
-WITH
-${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT
-    ${browserExpr} AS browser,
-    ${normalizedDimensionExpr} AS dimension,
-    visitor_id AS visitorId,
-    session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
-),
-normalized_visits AS (
-  SELECT
-    CASE
-      WHEN browser IN (${topBrowserPlaceholders}) THEN browser
-      ELSE '${BROWSER_CROSS_OTHER_BROWSER_TOKEN}'
-    END AS browserBucket,
-    CASE
-      WHEN dimension IN (${topDimensionPlaceholders}) THEN dimension
-      ELSE '${BROWSER_CROSS_OTHER_DIMENSION_TOKEN}'
-    END AS dimensionBucket,
-    visitorId,
-    sessionId
-  FROM filtered_visits
-  WHERE browser != ''
-)
-SELECT
-  browserBucket AS browser,
-  dimensionBucket AS dimension,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM normalized_visits
-GROUP BY browserBucket, dimensionBucket
-ORDER BY browser ASC, dimension ASC
-`;
-  const pairRows = (
-    await queryD1All<Record<string, unknown>>(env, pairsSql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      ...topBrowserLabels,
-      ...topDimensionLabels,
-    ])
-  )
+  const pairRows = queryRows
+    .filter((row) => row.rowType === "pair")
     .map(
       (row) =>
         ({

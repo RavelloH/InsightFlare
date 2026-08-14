@@ -1311,6 +1311,11 @@ rollback = 旧 Worker version
   primary/secondary limit、Other bucket 与窗口边界，`EXPLAIN QUERY PLAN` 确认从
   `idx_visits_site_started_at` 进入 visits 一次。仍须通过生产 Origin MISS 的 D1 Insights
   验证 rows-read 与 duration 降幅。
+- Browser cross breakdown 的 OS 与 deviceType 分支各自已将 browser Top-N、dimension
+  Top-N 与 pair matrix 合并为一条 materialized tagged SQL。页面请求从六条 D1 查询降为
+  两条并行分支查询，保留专用 Other/Unknown token、Top-N 排序与响应结构；真实 SQLite
+  fixture 确认每个分支的 `SEARCH visits USING INDEX` 仅一次。生产 Origin MISS 仍需确认
+  rows-read 与 duration 降幅。
 - Performance dashboard 已将 summaries、五项 metric trends、routes 与 countries 合并为
   一条 tagged D1 SQL；共享 `filtered_visits` 和 metric-unpivot source 均显式
   `MATERIALIZED`。原先同一个请求的四次 visits 窗口扫描现在为一次；独立 helper 在需要
@@ -1331,12 +1336,12 @@ rollback = 旧 Worker version
   类型检查；Pages/dimensions 与 technology 回归测试、TypeScript 与 lint 亦已通过。
 - Notification cache 已补充同窗口跨 metric 复用、站点/窗口隔离、报告复用、previous/
   cumulative/last-seen 复用、邮件配置单次读取和 rejected-entry 清理测试。当前完整检查为
-  196 个测试文件、2713 个测试通过；Statements 95.94%、Branches 88.00%、Functions
+  196 个测试文件、2714 个测试通过；Statements 95.94%、Branches 88.01%、Functions
   98.10%、Lines 97.39%。生产 Origin MISS 的实际下降仍需部署后按 Phase 0 指标验收。
 
 ### 后续阶段
 
-Browser cross breakdown 与 Technology 其他 cross/trend 路径的重复窗口扫描、历史数据兼容
-证明后的 canonical predicate、索引候选和 rollup
+Technology 其他 cross/trend 路径的重复窗口扫描、历史数据兼容证明后的 canonical predicate、
+索引候选和 rollup
 仍按本计划后续门槛推进；未有
 `EXPLAIN QUERY PLAN` 与生产 Origin MISS 证据的改动不得提前扩大 schema。

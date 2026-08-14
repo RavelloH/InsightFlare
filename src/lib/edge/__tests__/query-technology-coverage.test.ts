@@ -79,6 +79,18 @@ function createD1Env(resultSets: D1Row[][]): {
     bind: vi.fn((...bindings: Array<string | number | null>) => ({
       all: vi.fn(async () => {
         calls.push({ sql, bindings });
+        if (sql.includes("top_browser_rows") && sql.includes("tagged_rows")) {
+          const browserRows = pendingResults.shift() ?? [];
+          const dimensionRows = pendingResults.shift() ?? [];
+          const pairRows = pendingResults.shift() ?? [];
+          return {
+            results: [
+              ...browserRows.map((row) => withRowType(row, "browser")),
+              ...dimensionRows.map((row) => withRowType(row, "dimension")),
+              ...pairRows.map((row) => withRowType(row, "pair")),
+            ],
+          };
+        }
         if (
           sql.includes("top_primary_rows") &&
           sql.includes("tagged_rows") &&
@@ -493,8 +505,8 @@ describe("edge technology query coverage", () => {
       },
     ]);
     expect(result.totalVisitors).toBe(16);
-    expect(calls[0].bindings.at(-1)).toBe(12);
-    expect(calls[1].bindings.at(-1)).toBe(1);
+    expect(calls[0].bindings.at(-2)).toBe(12);
+    expect(calls[0].bindings.at(-1)).toBe(1);
   });
 
   it("returns empty browser cross dimensions when top buckets are missing", async () => {
@@ -530,15 +542,13 @@ describe("edge technology query coverage", () => {
     ).resolves.toEqual({ columns: [], rows: [], totalVisitors: 0 });
 
     expect(noBrowsers.calls).toHaveLength(1);
-    expect(noDimensions.calls).toHaveLength(2);
+    expect(noDimensions.calls).toHaveLength(1);
   });
 
   it("queries browser cross breakdown dimensions in parallel", async () => {
     const { env, calls } = createD1Env([
       [{ browser: "Chrome", views: 5, visitors: 3, sessions: 2 }],
-      [{ browser: "Chrome", views: 5, visitors: 3, sessions: 2 }],
       [{ dimension: "Windows", views: 5, visitors: 3, sessions: 2 }],
-      [{ dimension: "desktop", views: 5, visitors: 3, sessions: 2 }],
       [
         {
           browser: "Chrome",
@@ -548,6 +558,8 @@ describe("edge technology query coverage", () => {
           sessions: 2,
         },
       ],
+      [{ browser: "Chrome", views: 5, visitors: 3, sessions: 2 }],
+      [{ dimension: "desktop", views: 5, visitors: 3, sessions: 2 }],
       [
         {
           browser: "Chrome",
@@ -577,10 +589,11 @@ describe("edge technology query coverage", () => {
       key: "desktop",
       label: "desktop",
     });
-    expect(calls[2].sql).toContain("TRIM(COALESCE(os, ''))");
-    expect(calls[3].sql).toContain("TRIM(COALESCE(device_type, ''))");
-    expect(calls[2].bindings.at(-1)).toBe(2);
-    expect(calls[3].bindings.at(-1)).toBe(3);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].sql).toContain("TRIM(COALESCE(os, ''))");
+    expect(calls[1].sql).toContain("TRIM(COALESCE(device_type, ''))");
+    expect(calls[0].bindings.at(-1)).toBe(2);
+    expect(calls[1].bindings.at(-1)).toBe(3);
   });
 
   it("maps client cross dimensions with unknown and other buckets", async () => {

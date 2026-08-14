@@ -12,6 +12,7 @@ import {
 import {
   parseClientDimensionKey,
   parseUtmDimensionKey,
+  queryBrowserCrossDimensionFromD1,
   queryBrowserVersionBreakdownFromD1,
   queryShareTrendFromD1,
 } from "@/lib/edge/query/technology";
@@ -506,6 +507,123 @@ describe("edge query technology D1 mapping", () => {
         totalVisitors: 5,
       });
 
+      expect(d1.calls).toHaveLength(1);
+      const plan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)
+        .all(...d1.calls[0].bindings) as Array<{ detail: string }>;
+      expect(
+        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+      ).toHaveLength(1);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("executes the consolidated browser cross SQL against a SQLite fixture", async () => {
+    const { env, d1 } = createSqliteTrendEnv();
+    const window = queryWindow();
+    const insert = d1.database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, started_at, browser, os
+      ) VALUES (?, 'site-1', ?, ?, ?, ?, ?)
+    `);
+    const at = (minute: number) => Date.UTC(2026, 0, 1, 0, minute);
+
+    insert.run(
+      "chrome-windows-1",
+      "chrome-1",
+      "session-1",
+      at(15),
+      "Chrome",
+      "Windows",
+    );
+    insert.run(
+      "chrome-windows-2",
+      "chrome-2",
+      "session-2",
+      at(20),
+      "Chrome",
+      "Windows",
+    );
+    insert.run(
+      "chrome-mac",
+      "chrome-3",
+      "session-3",
+      at(25),
+      "Chrome",
+      "macOS",
+    );
+    insert.run("edge-windows", "edge", "session-4", at(30), "Edge", "Windows");
+    insert.run("safari-mac", "safari", "session-5", at(35), "Safari", "macOS");
+    insert.run(
+      "outside-window",
+      "outside",
+      "session-6",
+      at(5),
+      "Chrome",
+      "Windows",
+    );
+
+    try {
+      const result = await queryBrowserCrossDimensionFromD1(
+        env,
+        "site-1",
+        window,
+        {},
+        2,
+        1,
+        "TRIM(COALESCE(os, ''))",
+        "os",
+      );
+
+      expect(result.columns).toEqual([
+        {
+          key: "windows",
+          label: "Windows",
+          views: 3,
+          visitors: 3,
+          sessions: 3,
+        },
+        {
+          key: "other",
+          label: SHARE_TREND_OTHER_LABEL,
+          views: 2,
+          visitors: 2,
+          sessions: 2,
+          isOther: true,
+        },
+      ]);
+      expect(result.rows).toMatchObject([
+        {
+          key: "chrome",
+          views: 3,
+          visitors: 3,
+          cells: [
+            { key: "windows", views: 2, visitors: 2 },
+            { key: "other", views: 1, visitors: 1, isOther: true },
+          ],
+        },
+        {
+          key: "edge",
+          views: 1,
+          visitors: 1,
+          cells: [
+            { key: "windows", views: 1, visitors: 1 },
+            { key: "other", views: 0, visitors: 0, isOther: true },
+          ],
+        },
+        {
+          key: "other",
+          views: 1,
+          visitors: 1,
+          isOther: true,
+          cells: [
+            { key: "windows", views: 0, visitors: 0 },
+            { key: "other", views: 1, visitors: 1, isOther: true },
+          ],
+        },
+      ]);
+      expect(result.totalVisitors).toBe(5);
       expect(d1.calls).toHaveLength(1);
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)

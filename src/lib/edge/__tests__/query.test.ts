@@ -715,6 +715,33 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(
+      ["top_browser_rows AS", "tagged_rows AS", "'browser' AS rowType"],
+      [
+        {
+          rowType: "browser",
+          browser: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+        },
+        {
+          rowType: "dimension",
+          dimension: "Windows",
+          views: 8,
+          visitors: 5,
+          sessions: 4,
+        },
+        {
+          rowType: "pair",
+          browser: "Chrome",
+          dimension: "Windows",
+          views: 8,
+          visitors: 5,
+          sessions: 4,
+        },
+      ],
+    ),
+    allMatch(
       [
         "SELECT",
         "browser,",
