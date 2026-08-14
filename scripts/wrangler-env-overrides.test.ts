@@ -73,6 +73,14 @@ describe("applyWranglerEnvOverrides", () => {
     expect(result.content).toContain('id = "kv-id"');
   });
 
+  it("replaces an existing CRLF variable without duplicating it", () => {
+    const config = `[vars]\r\nDEMO_MODE = "1"\r\n[[migrations]]\r\ntag = "v1"\r\n`;
+    const result = applyWranglerEnvOverrides(config, { DEMO_MODE: "1" });
+
+    expect(result.content.match(/^DEMO_MODE\s*=/gm)).toHaveLength(1);
+    expect(result.content).toContain('DEMO_MODE = "1"\r\n');
+  });
+
   it("overrides root and environment worker names", () => {
     const rootResult = applyWranglerEnvOverrides(BASE_CONFIG, {
       INSIGHTFLARE_WORKER_NAME: "custom-root",

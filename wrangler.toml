@@ -25,6 +25,14 @@ class_name = "IngestDurableObject"
 tag = "v1"
 new_sqlite_classes = ["IngestDurableObject"]
 
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DiagnosticsSampler"]
+
+[[migrations]]
+tag = "v3"
+deleted_classes = ["DiagnosticsSampler"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "insightflare"
@@ -70,6 +78,14 @@ class_name = "IngestDurableObject"
 [[env.ravelloh.migrations]]
 tag = "v1"
 new_sqlite_classes = ["IngestDurableObject"]
+
+[[env.ravelloh.migrations]]
+tag = "v2"
+new_sqlite_classes = ["DiagnosticsSampler"]
+
+[[env.ravelloh.migrations]]
+tag = "v3"
+deleted_classes = ["DiagnosticsSampler"]
 
 [[env.ravelloh.d1_databases]]
 binding = "DB"

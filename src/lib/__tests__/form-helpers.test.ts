@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assertContentSize,
   bodyStr,
   parseFormBool,
   parseRequestBody,
@@ -110,6 +111,31 @@ describe("Form Validation and Parser Helpers", () => {
       expect(bodyStr(body, "port")).toBe("3000");
       expect(bodyStr(body, "empty")).toBe("");
       expect(bodyStr(body, "missing")).toBe("");
+    });
+  });
+
+  describe("assertContentSize", () => {
+    it("rejects a request whose declared body is too large", () => {
+      const response = assertContentSize(
+        {
+          headers: new Headers({ "content-length": "1025" }),
+        } as Request,
+        1024,
+      );
+
+      expect(response?.status).toBe(413);
+      expect(response?.headers.get("content-type")).toBe("application/json");
+    });
+
+    it("ignores a non-numeric content length", () => {
+      const response = assertContentSize(
+        {
+          headers: new Headers({ "content-length": "not-a-number" }),
+        } as Request,
+        1024,
+      );
+
+      expect(response).toBeNull();
     });
   });
 });

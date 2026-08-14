@@ -14,3 +14,11 @@ DISABLE_CRON_TASKS = "1"
 SESSION_WINDOW_MINUTES = "30"
 SCRIPT_CACHE_TTL_SECONDS = "600"
 PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DiagnosticsSampler"]
+
+[[migrations]]
+tag = "v3"
+deleted_classes = ["DiagnosticsSampler"]

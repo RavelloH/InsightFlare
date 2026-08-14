@@ -74,7 +74,7 @@ function replaceKeyLine(
 ): string | null {
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = line.match(
-    new RegExp(`^(\\s*${escapedKey}\\s*=\\s*)([^#\\r\\n]*)(.*)$`),
+    new RegExp(`^(\\s*${escapedKey}\\s*=\\s*)([^#\\r\\n]*)([\\s\\S]*)$`),
   );
   if (!match) return null;
   const suffix = match[3] ?? "";
