@@ -61,6 +61,33 @@ describe("edge dashboard cache wrapper", () => {
 
     expect(await response.text()).toBe("fresh");
     expect(generate).toHaveBeenCalledTimes(1);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(match).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("marks a request-bound bypass as no-store", async () => {
+    const match = vi.fn();
+    const put = vi.fn();
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({ match, put }),
+    });
+
+    const response = await withDashboardCache(
+      undefined,
+      new URL("https://example.test/api/private/v2/journeys/visitors"),
+      vi.fn().mockResolvedValue(new Response("fresh")),
+      {
+        bypassCache: true,
+        request: new Request(
+          "https://example.test/api/private/v2/journeys/visitors",
+        ),
+      },
+    );
+
+    expect(await response.text()).toBe("fresh");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-insightflare-cache")).toBe("BYPASS");
     expect(match).not.toHaveBeenCalled();
     expect(put).not.toHaveBeenCalled();
   });

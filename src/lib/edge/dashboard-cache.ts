@@ -134,6 +134,18 @@ function withCacheControlHeaders(
   });
 }
 
+function withNoStoreHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set("cache-control", "no-store");
+  headers.set("x-insightflare-cache", "BYPASS");
+  headers.set("x-insightflare-cache-layer", "response");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export interface DashboardCacheOptions {
   /**
    * Server-controlled opt-out for cursor/snapshot routes and diagnostics
@@ -280,15 +292,7 @@ export async function withDashboardCache(
   const clientCacheScope = options.clientCacheScope ?? "private";
   if (options.bypassCache === true) {
     const fresh = await generate();
-    if (options.applyCacheHeadersOnBypass && fresh.ok) {
-      return withCacheControlHeaders(
-        fresh,
-        ttlSeconds,
-        undefined,
-        clientCacheScope,
-      );
-    }
-    return fresh;
+    return withNoStoreHeaders(fresh);
   }
   const cache = await openEdgeCache(options.cacheName ?? DASHBOARD_CACHE_NAME);
   if (!cache) {

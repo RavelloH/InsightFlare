@@ -4,6 +4,7 @@ import type { Env } from "./types";
 
 export const DIAGNOSTICS_SAMPLER_SHARDS = 16;
 export const DIAGNOSTICS_HEALTH_SAMPLER_NAME = "health:0";
+export const DIAGNOSTICS_CACHE_BYPASS_SAMPLER_NAME = "cache-bypass";
 const MAX_PER_SHARD_DAY = 10_000;
 
 export interface DiagnosticsSampleDecision {
@@ -100,5 +101,49 @@ export class DiagnosticsSampler extends DurableObject<Env> {
 
   async heartbeat(nowMs = Date.now()): Promise<void> {
     await this.ctx.storage.put("lastHeartbeatAt", nowMs);
+  }
+
+  async consumeBypassNonce(
+    nonce: string,
+    expiresAtMs: number,
+    nowMs = Date.now(),
+  ): Promise<boolean> {
+    const normalizedNonce = nonce.trim();
+    if (
+      !/^[A-Za-z0-9_-]{16,96}$/.test(normalizedNonce) ||
+      !Number.isFinite(expiresAtMs) ||
+      expiresAtMs <= nowMs
+    ) {
+      return false;
+    }
+    const key = `bypass:${normalizedNonce}`;
+    const seenAt = await this.ctx.storage.get<number>(key);
+    if (typeof seenAt === "number" && seenAt >= nowMs) return false;
+    await this.ctx.storage.put(key, expiresAtMs);
+    const alarmAt = await this.ctx.storage.getAlarm();
+    if (!alarmAt || expiresAtMs < alarmAt) {
+      await this.ctx.storage.setAlarm(expiresAtMs);
+    }
+    return true;
+  }
+
+  async alarm(): Promise<void> {
+    const nowMs = Date.now();
+    const entries = await this.ctx.storage.list<number>({
+      prefix: "bypass:",
+    });
+    let nextAlarmAt: number | null = null;
+    for (const [key, expiresAtMs] of entries) {
+      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) {
+        await this.ctx.storage.delete(key);
+      } else if (nextAlarmAt === null || expiresAtMs < nextAlarmAt) {
+        nextAlarmAt = expiresAtMs;
+      }
+    }
+    if (nextAlarmAt === null) {
+      await this.ctx.storage.deleteAlarm();
+    } else {
+      await this.ctx.storage.setAlarm(nextAlarmAt);
+    }
   }
 }
