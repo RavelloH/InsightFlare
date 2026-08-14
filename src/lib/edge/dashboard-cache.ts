@@ -135,6 +135,11 @@ function withCacheControlHeaders(
 }
 
 export interface DashboardCacheOptions {
+  /**
+   * Server-controlled opt-out for cursor/snapshot routes and diagnostics
+   * probes. Do not derive this from an arbitrary client request header.
+   */
+  bypassCache?: boolean;
   ttlSeconds?: number;
   cacheName?: string;
   applyCacheHeadersOnBypass?: boolean;
@@ -273,6 +278,18 @@ export async function withDashboardCache(
     Math.floor(options.ttlSeconds ?? DEFAULT_TTL_SECONDS),
   );
   const clientCacheScope = options.clientCacheScope ?? "private";
+  if (options.bypassCache === true) {
+    const fresh = await generate();
+    if (options.applyCacheHeadersOnBypass && fresh.ok) {
+      return withCacheControlHeaders(
+        fresh,
+        ttlSeconds,
+        undefined,
+        clientCacheScope,
+      );
+    }
+    return fresh;
+  }
   const cache = await openEdgeCache(options.cacheName ?? DASHBOARD_CACHE_NAME);
   if (!cache) {
     const fresh = await generate();

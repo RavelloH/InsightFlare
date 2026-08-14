@@ -44,6 +44,50 @@ describe("edge dashboard cache wrapper", () => {
     expect(response.headers.get("x-edge-cache")).toBeNull();
   });
 
+  it("does not read or write Cache API for a server-controlled bypass", async () => {
+    const match = vi.fn();
+    const put = vi.fn();
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({ match, put }),
+    });
+    const generate = vi.fn().mockResolvedValue(new Response("fresh"));
+
+    const response = await withDashboardCache(
+      undefined,
+      new URL("https://example.test/api/private/v2/cursor"),
+      generate,
+      { bypassCache: true },
+    );
+
+    expect(await response.text()).toBe("fresh");
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(match).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("does not infer bypass from a client request header", async () => {
+    const match = vi.fn().mockResolvedValue(new Response("cached"));
+    const put = vi.fn();
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({ match, put }),
+    });
+
+    const response = await withDashboardCache(
+      undefined,
+      new URL("https://example.test/api/private/v2/cursor"),
+      vi.fn().mockResolvedValue(new Response("fresh")),
+      {
+        request: new Request("https://example.test/api/private/v2/cursor", {
+          headers: { "x-insightflare-cache-bypass": "true" },
+        }),
+      },
+    );
+
+    expect(await response.text()).toBe("cached");
+    expect(match).toHaveBeenCalledTimes(1);
+    expect(put).not.toHaveBeenCalled();
+  });
+
   it("returns cached responses with HIT headers when a cache entry exists", async () => {
     const match = vi
       .fn()
