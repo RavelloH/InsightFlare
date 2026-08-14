@@ -11,7 +11,7 @@ DASHBOARD_CACHE_GENERATION = "foundation-0"
 PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm"
 
 [triggers]
-crons = ["*/30 * * * *"]
+crons = ["*/5 * * * *", "*/30 * * * *"]
 
 [observability]
 [observability.logs]
@@ -78,7 +78,7 @@ DASHBOARD_CACHE_GENERATION = "foundation-0"
 PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm"
 
 [env.ravelloh.triggers]
-crons = ["*/30 * * * *"]
+crons = ["*/5 * * * *", "*/30 * * * *"]
 
 [[env.ravelloh.durable_objects.bindings]]
 name = "INGEST_DO"

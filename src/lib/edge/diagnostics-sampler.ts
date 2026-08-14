@@ -3,6 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./types";
 
 export const DIAGNOSTICS_SAMPLER_SHARDS = 16;
+export const DIAGNOSTICS_HEALTH_SAMPLER_NAME = "health:0";
 const MAX_PER_SHARD_DAY = 10_000;
 
 export interface DiagnosticsSampleDecision {
@@ -14,6 +15,7 @@ export interface DiagnosticsSampleDecision {
 export interface DiagnosticsSamplerHealth {
   acceptedCount: number;
   lastAcceptedAt: number | null;
+  lastHeartbeatAt: number | null;
 }
 
 function stableHash(value: string): number {
@@ -91,6 +93,12 @@ export class DiagnosticsSampler extends DurableObject<Env> {
       acceptedCount: (await this.ctx.storage.get<number>("acceptedCount")) ?? 0,
       lastAcceptedAt:
         (await this.ctx.storage.get<number>("lastAcceptedAt")) ?? null,
+      lastHeartbeatAt:
+        (await this.ctx.storage.get<number>("lastHeartbeatAt")) ?? null,
     };
+  }
+
+  async heartbeat(nowMs = Date.now()): Promise<void> {
+    await this.ctx.storage.put("lastHeartbeatAt", nowMs);
   }
 }

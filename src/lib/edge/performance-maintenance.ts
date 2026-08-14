@@ -1,3 +1,4 @@
+import { heartbeatPerformanceDiagnostics } from "./performance-diagnostics-health";
 import type { Env } from "./types";
 
 const LEASE_MS = 90_000;
@@ -73,9 +74,10 @@ export async function runPerformanceMaintenance(env: Env): Promise<void> {
   }
 
   try {
-    // The Foundation release intentionally has no business side effects. Any
-    // future batch must include the lease owner, token, and revision in its
-    // conditional write before it mutates a projection or cursor.
+    await heartbeatPerformanceDiagnostics(env);
+    // The Foundation release intentionally has no analytics-base side
+    // effects. Any future batch must include the lease owner, token, and
+    // revision in its conditional write before it mutates a projection/cursor.
   } finally {
     try {
       await releasePerformanceMaintenanceJob(env, lease);

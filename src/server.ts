@@ -28,6 +28,8 @@ declare module "@tanstack/react-router" {
 export class IngestDurableObject extends BaseIngestDurableObject {}
 export class DiagnosticsSampler extends BaseDiagnosticsSampler {}
 
+const PERFORMANCE_MAINTENANCE_CRON = "*/5 * * * *";
+
 function withPageHeaders(
   response: Response,
   pathname: string,
@@ -130,6 +132,19 @@ export default {
     ctx: ExecutionContext,
   ) {
     if (shouldSkipScheduledTasks(env)) return;
+    if (controller.cron === PERFORMANCE_MAINTENANCE_CRON) {
+      ctx.waitUntil(
+        runPerformanceMaintenance(env).catch((error) => {
+          console.warn(
+            JSON.stringify({
+              event: "performance_maintenance_failed",
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }),
+      );
+      return;
+    }
     const task = getScheduledTaskDefinition("visit_hourly_rollup");
     const notificationTask = getScheduledTaskDefinition("notification_tick");
     ctx.waitUntil(
@@ -155,16 +170,6 @@ export default {
           controller.scheduledTime,
           runNotificationTick,
         ),
-        runPerformanceMaintenance(env).catch((error) => {
-          // Maintenance is deliberately best-effort. A migration/table or
-          // lease failure must not reject the cron promise for existing tasks.
-          console.warn(
-            JSON.stringify({
-              event: "performance_maintenance_failed",
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
-        }),
       ]),
     );
   },
