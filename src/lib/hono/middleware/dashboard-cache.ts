@@ -5,7 +5,6 @@ import {
   type DashboardCacheOptions,
   withDashboardCache,
 } from "@/lib/edge/dashboard-cache";
-import { verifyDiagnosticCacheBypass } from "@/lib/edge/diagnostic-cache-bypass";
 import type { AppEnv } from "@/lib/hono/types";
 import { executionContext, requestUrl } from "@/lib/hono/utils/context";
 
@@ -43,11 +42,6 @@ export function dashboardCacheMiddleware(
 ): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const identity = cacheIdentity(c);
-    const diagnosticBypass = await verifyDiagnosticCacheBypass({
-      actorId: c.get("session")?.userId,
-      env: c.env,
-      request: c.req.raw,
-    });
     const response = await withDashboardCache(
       executionContext(c),
       requestUrl(c),
@@ -55,17 +49,7 @@ export function dashboardCacheMiddleware(
         await next();
         return c.res;
       },
-      identity
-        ? {
-            ...options,
-            ...(options?.bypassCache === true || diagnosticBypass
-              ? { bypassCache: true }
-              : {}),
-            identity,
-            request: c.req.raw,
-            cacheGeneration: c.env.DASHBOARD_CACHE_GENERATION,
-          }
-        : options,
+      identity ? { ...options, identity, request: c.req.raw } : options,
     );
     c.res = response;
     return response;

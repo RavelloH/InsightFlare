@@ -1,9 +1,7 @@
 import handler from "@tanstack/react-start/server-entry";
 
-import { DiagnosticsSampler as BaseDiagnosticsSampler } from "@/lib/edge/diagnostics-sampler";
 import { runHourlyAggregation } from "@/lib/edge/hourly-rollup";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest-do";
-import { runPerformanceMaintenance } from "@/lib/edge/performance-maintenance";
 import { getScheduledTaskDefinition } from "@/lib/edge/scheduled-task-registry";
 import { runScheduledTask } from "@/lib/edge/scheduled-task-runner";
 import type { Env } from "@/lib/edge/types";
@@ -26,9 +24,6 @@ declare module "@tanstack/react-router" {
 }
 
 export class IngestDurableObject extends BaseIngestDurableObject {}
-export class DiagnosticsSampler extends BaseDiagnosticsSampler {}
-
-const PERFORMANCE_MAINTENANCE_CRON = "*/5 * * * *";
 
 function withPageHeaders(
   response: Response,
@@ -132,19 +127,6 @@ export default {
     ctx: ExecutionContext,
   ) {
     if (shouldSkipScheduledTasks(env)) return;
-    if (controller.cron === PERFORMANCE_MAINTENANCE_CRON) {
-      ctx.waitUntil(
-        runPerformanceMaintenance(env).catch((error) => {
-          console.warn(
-            JSON.stringify({
-              event: "performance_maintenance_failed",
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
-        }),
-      );
-      return;
-    }
     const task = getScheduledTaskDefinition("visit_hourly_rollup");
     const notificationTask = getScheduledTaskDefinition("notification_tick");
     ctx.waitUntil(

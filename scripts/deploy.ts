@@ -13,10 +13,6 @@ import {
   type StageResult,
   targetEnv,
 } from "./shared/deploy-runtime";
-import {
-  assertFoundationDeployConfig,
-  writeFoundationDeployManifest,
-} from "./shared/foundation-deploy";
 import { ROOT_DIR } from "./shared/paths";
 import {
   applyAnalyticsEngineDisabledFallback,
@@ -117,27 +113,10 @@ async function deployWithAnalyticsEngineFallback(
   const configPath = fs.existsSync(generatedConfig)
     ? generatedConfig
     : resolveConfigPath(options.config);
-  const sourceConfigPath = resolveConfigPath(options.config);
-  if (options.foundation) {
-    assertFoundationDeployConfig(fs.readFileSync(sourceConfigPath, "utf8"));
-    if (configPath !== sourceConfigPath) {
-      assertFoundationDeployConfig(fs.readFileSync(configPath, "utf8"));
-    }
-  }
   try {
     await runWranglerDeploy(options, configPath);
-    if (options.foundation) {
-      writeFoundationDeployManifest({
-        configPath: sourceConfigPath,
-        dryRun: options.dryRun,
-        envName: options.envName,
-        rootDir: ROOT_DIR,
-        target: options.target,
-      });
-    }
     return;
   } catch (error) {
-    if (options.foundation) throw error;
     if (!isAnalyticsEngineNotEnabledError(deployLogText(error))) {
       throw error;
     }

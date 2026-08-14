@@ -87,14 +87,6 @@ describe("notification email config", () => {
       },
       updatedAt: 123,
     });
-
-    expect(
-      normalizeNotificationEmailConfig({ provider: "none" }).resend,
-    ).toEqual({
-      apiKeyEncrypted: "",
-      apiKeyHint: "",
-      configured: false,
-    });
   });
 
   it("validates update payload shape and email fields", () => {

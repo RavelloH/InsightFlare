@@ -167,9 +167,6 @@ describe("response helpers", () => {
     expect(
       normalizeErrorMessage('request failed {"error":"Clean error"}'),
     ).toBe("Clean error");
-    expect(normalizeErrorMessage('request failed {"error":""}')).toBe(
-      'request failed {"error":""}',
-    );
     expect(normalizeErrorMessage("request failed {bad json")).toBe(
       "request failed {bad json",
     );

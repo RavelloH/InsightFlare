@@ -44,77 +44,6 @@ describe("edge dashboard cache wrapper", () => {
     expect(response.headers.get("x-edge-cache")).toBeNull();
   });
 
-  it("does not read or write Cache API for a server-controlled bypass", async () => {
-    const match = vi.fn();
-    const put = vi.fn();
-    vi.stubGlobal("caches", {
-      open: vi.fn().mockResolvedValue({ match, put }),
-    });
-    const generate = vi.fn().mockResolvedValue(new Response("fresh"));
-
-    const response = await withDashboardCache(
-      undefined,
-      new URL("https://example.test/api/private/v2/cursor"),
-      generate,
-      { bypassCache: true },
-    );
-
-    expect(await response.text()).toBe("fresh");
-    expect(generate).toHaveBeenCalledTimes(1);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(match).not.toHaveBeenCalled();
-    expect(put).not.toHaveBeenCalled();
-  });
-
-  it("marks a request-bound bypass as no-store", async () => {
-    const match = vi.fn();
-    const put = vi.fn();
-    vi.stubGlobal("caches", {
-      open: vi.fn().mockResolvedValue({ match, put }),
-    });
-
-    const response = await withDashboardCache(
-      undefined,
-      new URL("https://example.test/api/private/v2/journeys/visitors"),
-      vi.fn().mockResolvedValue(new Response("fresh")),
-      {
-        bypassCache: true,
-        request: new Request(
-          "https://example.test/api/private/v2/journeys/visitors",
-        ),
-      },
-    );
-
-    expect(await response.text()).toBe("fresh");
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.headers.get("x-insightflare-cache")).toBe("BYPASS");
-    expect(match).not.toHaveBeenCalled();
-    expect(put).not.toHaveBeenCalled();
-  });
-
-  it("does not infer bypass from a client request header", async () => {
-    const match = vi.fn().mockResolvedValue(new Response("cached"));
-    const put = vi.fn();
-    vi.stubGlobal("caches", {
-      open: vi.fn().mockResolvedValue({ match, put }),
-    });
-
-    const response = await withDashboardCache(
-      undefined,
-      new URL("https://example.test/api/private/v2/cursor"),
-      vi.fn().mockResolvedValue(new Response("fresh")),
-      {
-        request: new Request("https://example.test/api/private/v2/cursor", {
-          headers: { "x-insightflare-cache-bypass": "true" },
-        }),
-      },
-    );
-
-    expect(await response.text()).toBe("cached");
-    expect(match).toHaveBeenCalledTimes(1);
-    expect(put).not.toHaveBeenCalled();
-  });
-
   it("returns cached responses with HIT headers when a cache entry exists", async () => {
     const match = vi
       .fn()
@@ -169,71 +98,8 @@ describe("edge dashboard cache wrapper", () => {
     );
 
     expect((match.mock.calls[0]![0] as Request).url).toBe(
-      "https://analytics-cache.insightflare.internal/analytics/v2/legacy/private/site-1/shared/overview?from=1&to=2",
+      "https://analytics-cache.insightflare.internal/analytics/v2/private/site-1/shared/overview?from=1&to=2",
     );
-  });
-
-  it("isolates cache generations without changing public/private key scopes", async () => {
-    const entries = new Map<string, Response>();
-    const match = vi.fn(async (request: Request) =>
-      entries.get(request.url)?.clone(),
-    );
-    const put = vi.fn(async (request: Request, response: Response) => {
-      entries.set(request.url, response.clone());
-    });
-    vi.stubGlobal("caches", {
-      open: vi.fn().mockResolvedValue({ match, put }),
-    });
-
-    const url = new URL(
-      "https://example.test/api/query?siteId=site-1&from=1&to=2",
-    );
-    const privateIdentity = {
-      scope: "private" as const,
-      tenantId: "site-1",
-      route: "overview",
-    };
-    const publicIdentity = {
-      scope: "public" as const,
-      tenantId: "site-1",
-      route: "overview",
-    };
-    const firstGenerate = vi.fn().mockResolvedValue(new Response("first"));
-    const secondGenerate = vi.fn().mockResolvedValue(new Response("second"));
-    const publicGenerate = vi.fn().mockResolvedValue(new Response("public"));
-
-    await withDashboardCache(undefined, url, firstGenerate, {
-      identity: privateIdentity,
-      cacheGeneration: "generation-a",
-    });
-    const second = await withDashboardCache(undefined, url, secondGenerate, {
-      identity: privateIdentity,
-      cacheGeneration: "generation-b",
-    });
-    await withDashboardCache(undefined, url, publicGenerate, {
-      identity: publicIdentity,
-      cacheGeneration: "generation-a",
-    });
-    const sameGeneration = await withDashboardCache(
-      undefined,
-      url,
-      vi.fn().mockResolvedValue(new Response("unexpected")),
-      {
-        identity: privateIdentity,
-        cacheGeneration: "generation-a",
-      },
-    );
-
-    await expect(second.text()).resolves.toBe("second");
-    await expect(sameGeneration.text()).resolves.toBe("first");
-    expect(firstGenerate).toHaveBeenCalledTimes(1);
-    expect(secondGenerate).toHaveBeenCalledTimes(1);
-    expect(publicGenerate).toHaveBeenCalledTimes(1);
-    expect([...entries.keys()]).toEqual([
-      "https://analytics-cache.insightflare.internal/analytics/v2/generation-a/private/site-1/shared/overview?from=1&to=2",
-      "https://analytics-cache.insightflare.internal/analytics/v2/generation-b/private/site-1/shared/overview?from=1&to=2",
-      "https://analytics-cache.insightflare.internal/analytics/v2/generation-a/public/site-1/shared/overview?from=1&to=2",
-    ]);
   });
 
   it("refreshes request metadata instead of replaying it from a cache entry", async () => {

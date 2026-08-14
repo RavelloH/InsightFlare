@@ -70,7 +70,6 @@ function sortedSearchParams(url: URL, omitKeys: ReadonlySet<string>): string {
 function buildCacheKeyRequest(
   url: URL,
   identity?: DashboardCacheIdentity,
-  generation = "legacy",
 ): Request {
   const normalized = new URL(url.toString());
   if (!identity) {
@@ -82,7 +81,6 @@ function buildCacheKeyRequest(
   cacheUrl.pathname = [
     "analytics",
     CACHE_SCHEMA_VERSION,
-    encodeURIComponent(generation),
     identity.scope,
     encodeURIComponent(identity.tenantId),
     identity.audienceId ? encodeURIComponent(identity.audienceId) : "shared",
@@ -134,32 +132,13 @@ function withCacheControlHeaders(
   });
 }
 
-function withNoStoreHeaders(response: Response): Response {
-  const headers = new Headers(response.headers);
-  headers.set("cache-control", "no-store");
-  headers.set("x-insightflare-cache", "BYPASS");
-  headers.set("x-insightflare-cache-layer", "response");
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
-
 export interface DashboardCacheOptions {
-  /**
-   * Server-controlled opt-out for cursor/snapshot routes and diagnostics
-   * probes. Do not derive this from an arbitrary client request header.
-   */
-  bypassCache?: boolean;
   ttlSeconds?: number;
   cacheName?: string;
   applyCacheHeadersOnBypass?: boolean;
   clientCacheScope?: "private" | "public";
   identity?: DashboardCacheIdentity;
   request?: Request;
-  /** Server-controlled namespace used for contract-safe cache rollouts. */
-  cacheGeneration?: string;
 }
 
 function cacheCreatedAt(response: Response): number | null {
@@ -290,10 +269,6 @@ export async function withDashboardCache(
     Math.floor(options.ttlSeconds ?? DEFAULT_TTL_SECONDS),
   );
   const clientCacheScope = options.clientCacheScope ?? "private";
-  if (options.bypassCache === true) {
-    const fresh = await generate();
-    return withNoStoreHeaders(fresh);
-  }
   const cache = await openEdgeCache(options.cacheName ?? DASHBOARD_CACHE_NAME);
   if (!cache) {
     const fresh = await generate();
@@ -307,8 +282,7 @@ export async function withDashboardCache(
     }
     return fresh;
   }
-  const cacheGeneration = options.cacheGeneration?.trim() || "legacy";
-  const cacheKey = buildCacheKeyRequest(url, options.identity, cacheGeneration);
+  const cacheKey = buildCacheKeyRequest(url, options.identity);
 
   try {
     const cached = await cache.match(cacheKey);

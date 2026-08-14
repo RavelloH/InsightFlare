@@ -649,43 +649,6 @@ describe("Hono middleware foundation", () => {
     );
   });
 
-  it("passes the server-side dashboard cache generation to the wrapper", async () => {
-    const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => {
-      c.set("privateSite", { id: "site-1" });
-      await next();
-    });
-    app.use("*", dashboardCacheMiddleware({ ttlSeconds: 30 }));
-    app.get("*", () => new Response("cached"));
-
-    const env = {
-      ...createEnv(),
-      DASHBOARD_CACHE_GENERATION: "generation-a",
-    } as Env;
-    const response = await app.fetch(
-      request("/api/private/overview?siteId=site-1"),
-      env,
-      ctx,
-    );
-
-    await expect(response.text()).resolves.toBe("cached");
-    expect(withDashboardCache).toHaveBeenCalledWith(
-      ctx,
-      new URL("https://app.test/api/private/overview?siteId=site-1"),
-      expect.any(Function),
-      {
-        ttlSeconds: 30,
-        identity: {
-          scope: "private",
-          tenantId: "site-1",
-          route: "overview",
-        },
-        request: expect.any(Request),
-        cacheGeneration: "generation-a",
-      },
-    );
-  });
-
   it("does not mutate realtime websocket response headers", async () => {
     const app = createApp(apiNoCacheMiddleware(), () =>
       responseWithThrowingHeaderSet(),

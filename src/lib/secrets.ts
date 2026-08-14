@@ -10,7 +10,6 @@ export const SECRET_PURPOSES = {
   botAnalyticsSecretEncryption:
     "insightflare:bot-analytics-secret-encryption:v1",
   collectTokenSigning: "insightflare:collect-token-signing:v1",
-  diagnosticsCacheBypass: "insightflare:diagnostics-cache-bypass:v1",
   teamInviteTokenEncryption: "insightflare:team-invite-token-encryption:v1",
 } as const;
 
@@ -126,14 +125,5 @@ export async function collectTokenSigningSecret(
   const root = rootSecret(source);
   return root
     ? cachedDerivedSecret(root, SECRET_PURPOSES.collectTokenSigning)
-    : null;
-}
-
-export async function diagnosticsCacheBypassSecret(
-  source: SecretSource,
-): Promise<string | null> {
-  const root = rootSecret(source);
-  return root
-    ? cachedDerivedSecret(root, SECRET_PURPOSES.diagnosticsCacheBypass)
     : null;
 }

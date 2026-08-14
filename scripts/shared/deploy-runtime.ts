@@ -13,7 +13,6 @@ export interface CommonOptions {
   database: string;
   dryRun: boolean;
   envName?: string;
-  foundation: boolean;
   skipPrebuild: boolean;
   skipSdk: boolean;
   target: DeployTarget;
@@ -73,7 +72,6 @@ export function parseCommonOptions(argv: string[]): CommonOptions {
       "insightflare",
     dryRun: hasFlag(argv, "dry-run"),
     envName: readOption(argv, "env") ?? process.env.INSIGHTFLARE_ENV,
-    foundation: hasFlag(argv, "foundation"),
     skipPrebuild: hasFlag(argv, "skip-prebuild"),
     skipSdk: hasFlag(argv, "skip-sdk"),
     target,
@@ -182,7 +180,6 @@ export function createRuntime(scriptName: string, title: string) {
     rlog.info(`Config: ${options.config}`);
     if (options.envName) rlog.info(`Wrangler env: ${options.envName}`);
     if (options.dryRun) rlog.info("Dry run: enabled");
-    if (options.foundation) rlog.info("Foundation deploy safeguards: enabled");
     rlog.info(`Log file: ${logFilePath}`);
   }
 

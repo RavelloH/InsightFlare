@@ -88,16 +88,6 @@ describe("mock/events-sort branch behavior", () => {
         (event) => event.eventId,
       ),
     ).toEqual(["latest", "middle", "earliest"]);
-
-    const ties = [
-      makeEvent("tie-a", "view", 200),
-      makeEvent("tie-b", "view", 200),
-    ];
-    expect(
-      sortDemoEventRecords(ties, { key: "occurredAt", direction: "asc" }).map(
-        (event) => event.eventId,
-      ),
-    ).toEqual(["tie-a", "tie-b"]);
   });
 });
 

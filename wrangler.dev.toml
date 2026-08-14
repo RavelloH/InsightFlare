@@ -11,24 +11,15 @@ binding = "ASSETS"
 DEMO_MODE = "0"
 SESSION_WINDOW_MINUTES = "30"
 SCRIPT_CACHE_TTL_SECONDS = "600"
-DASHBOARD_CACHE_GENERATION = "foundation-0"
 PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm"
 
 [[durable_objects.bindings]]
 name = "INGEST_DO"
 class_name = "IngestDurableObject"
 
-[[durable_objects.bindings]]
-name = "DIAGNOSTICS_SAMPLER"
-class_name = "DiagnosticsSampler"
-
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["IngestDurableObject"]
-
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["DiagnosticsSampler"]
 
 [[d1_databases]]
 binding = "DB"
@@ -47,10 +38,3 @@ dataset = "insightflare_bot_events"
 [[analytics_engine_datasets]]
 binding = "NORMAL_ANALYTICS"
 dataset = "insightflare_normal_events"
-
-[[analytics_engine_datasets]]
-binding = "QUERY_DIAGNOSTICS"
-dataset = "insightflare_query_diagnostics_dev"
-
-[version_metadata]
-binding = "CF_VERSION_METADATA"

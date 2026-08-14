@@ -22,9 +22,6 @@ import {
   handleNotificationRulesAdmin,
   handleNotificationTestAdmin,
 } from "@/lib/edge/admin-notifications";
-import { handlePerformanceDiagnosticBypassAdmin } from "@/lib/edge/admin-performance-diagnostic-bypass";
-import { handlePerformanceFoundationAdmin } from "@/lib/edge/admin-performance-foundation";
-import { handlePerformanceMaintenanceAdmin } from "@/lib/edge/admin-performance-maintenance";
 import { nf } from "@/lib/edge/admin-response";
 import { handleScheduledTasksAdmin } from "@/lib/edge/admin-scheduled-tasks";
 import {
@@ -111,15 +108,6 @@ privateAdminRoutes.all("/system-performance", (c) =>
 );
 privateAdminRoutes.all("/scheduled-tasks", (c) =>
   handleScheduledTasksAdmin(c.req.raw, c.env, requestUrl(c), requireActor),
-);
-privateAdminRoutes.all("/performance-foundation", (c) =>
-  handlePerformanceFoundationAdmin(c.req.raw, c.env),
-);
-privateAdminRoutes.all("/performance-foundation/maintenance", (c) =>
-  handlePerformanceMaintenanceAdmin(c.req.raw, c.env),
-);
-privateAdminRoutes.all("/performance-foundation/diagnostic-cache-bypass", (c) =>
-  handlePerformanceDiagnosticBypassAdmin(c.req.raw, c.env),
 );
 privateAdminRoutes.all("/do-diagnostic", (c) =>
   handleDoDiagnosticAdmin(c.req.raw, c.env, requestUrl(c), requireActor),
