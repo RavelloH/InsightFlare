@@ -11,6 +11,7 @@ binding = "ASSETS"
 DEMO_MODE = "0"
 SESSION_WINDOW_MINUTES = "30"
 SCRIPT_CACHE_TTL_SECONDS = "600"
+DASHBOARD_CACHE_GENERATION = "foundation-0"
 PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm"
 
 [[durable_objects.bindings]]
