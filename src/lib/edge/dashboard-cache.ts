@@ -70,6 +70,7 @@ function sortedSearchParams(url: URL, omitKeys: ReadonlySet<string>): string {
 function buildCacheKeyRequest(
   url: URL,
   identity?: DashboardCacheIdentity,
+  generation = "legacy",
 ): Request {
   const normalized = new URL(url.toString());
   if (!identity) {
@@ -81,6 +82,7 @@ function buildCacheKeyRequest(
   cacheUrl.pathname = [
     "analytics",
     CACHE_SCHEMA_VERSION,
+    encodeURIComponent(generation),
     identity.scope,
     encodeURIComponent(identity.tenantId),
     identity.audienceId ? encodeURIComponent(identity.audienceId) : "shared",
@@ -139,6 +141,8 @@ export interface DashboardCacheOptions {
   clientCacheScope?: "private" | "public";
   identity?: DashboardCacheIdentity;
   request?: Request;
+  /** Server-controlled namespace used for contract-safe cache rollouts. */
+  cacheGeneration?: string;
 }
 
 function cacheCreatedAt(response: Response): number | null {
@@ -282,7 +286,8 @@ export async function withDashboardCache(
     }
     return fresh;
   }
-  const cacheKey = buildCacheKeyRequest(url, options.identity);
+  const cacheGeneration = options.cacheGeneration?.trim() || "legacy";
+  const cacheKey = buildCacheKeyRequest(url, options.identity, cacheGeneration);
 
   try {
     const cached = await cache.match(cacheKey);

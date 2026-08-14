@@ -5,6 +5,7 @@ export interface Env {
   NORMAL_ANALYTICS?: AnalyticsEngineDataset;
   QUERY_DIAGNOSTICS?: AnalyticsEngineDataset;
   CF_VERSION_METADATA?: WorkerVersionMetadata;
+  DASHBOARD_CACHE_GENERATION?: string;
   ARCHIVE_BUCKET?: R2Bucket;
   MAIN_SECRET?: string;
   DAILY_SALT_SECRET?: string;

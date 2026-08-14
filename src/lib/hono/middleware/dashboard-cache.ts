@@ -49,7 +49,14 @@ export function dashboardCacheMiddleware(
         await next();
         return c.res;
       },
-      identity ? { ...options, identity, request: c.req.raw } : options,
+      identity
+        ? {
+            ...options,
+            identity,
+            request: c.req.raw,
+            cacheGeneration: c.env.DASHBOARD_CACHE_GENERATION,
+          }
+        : options,
     );
     c.res = response;
     return response;
