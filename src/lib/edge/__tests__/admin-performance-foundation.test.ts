@@ -142,6 +142,25 @@ describe("performance foundation admin handler", () => {
     expect(malformed.prepare).not.toHaveBeenCalled();
   });
 
+  it("does not permit an enabled state before a P0 implementation exists", async () => {
+    const blocked = env([]);
+
+    const response = await handlePerformanceFoundationAdmin(
+      request("PUT", {
+        state: "enabled",
+        generation: "foundation-1",
+        revision: 1,
+      }),
+      blocked.env,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "performance_v2_not_ready" },
+    });
+    expect(blocked.prepare).not.toHaveBeenCalled();
+  });
+
   it("uses a conditional revision update and reports stale CAS writes", async () => {
     const update = statement({ changes: 0 });
     const { env: testEnv, prepare } = env([update]);

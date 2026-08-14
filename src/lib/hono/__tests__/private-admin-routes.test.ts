@@ -17,6 +17,7 @@ import {
   handleNotificationRulesAdmin,
   handleNotificationTestAdmin,
 } from "@/lib/edge/admin-notifications";
+import { handlePerformanceDiagnosticBypassAdmin } from "@/lib/edge/admin-performance-diagnostic-bypass";
 import { handlePerformanceFoundationAdmin } from "@/lib/edge/admin-performance-foundation";
 import { handlePerformanceMaintenanceAdmin } from "@/lib/edge/admin-performance-maintenance";
 import { nf } from "@/lib/edge/admin-response";
@@ -67,6 +68,10 @@ vi.mock("@/lib/edge/admin-performance-foundation", () => ({
 
 vi.mock("@/lib/edge/admin-performance-maintenance", () => ({
   handlePerformanceMaintenanceAdmin: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/admin-performance-diagnostic-bypass", () => ({
+  handlePerformanceDiagnosticBypassAdmin: vi.fn(),
 }));
 
 vi.mock("@/lib/edge/admin-scheduled-tasks", () => ({
@@ -122,6 +127,11 @@ const routeCases = [
   [
     "/performance-foundation/maintenance",
     handlePerformanceMaintenanceAdmin,
+    false,
+  ],
+  [
+    "/performance-foundation/diagnostic-cache-bypass",
+    handlePerformanceDiagnosticBypassAdmin,
     false,
   ],
   ["/system-performance", handleSystemPerformanceAdmin, true, true],

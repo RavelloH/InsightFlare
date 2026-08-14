@@ -5,20 +5,26 @@ import {
   issueDiagnosticCacheBypassToken,
   verifyDiagnosticCacheBypass,
 } from "@/lib/edge/diagnostic-cache-bypass";
+import { DiagnosticsSampler } from "@/lib/edge/diagnostics-sampler";
 import type { Env } from "@/lib/edge/types";
 
 const nowMs = Date.UTC(2026, 7, 14, 12, 0, 0);
 
-function createEnv(consumeBypassNonce = vi.fn().mockResolvedValue(true)): {
+function createEnv(
+  consumeBypassNonce = vi.fn().mockResolvedValue(true),
+  reserveCacheBypass = vi.fn().mockResolvedValue(true),
+): {
   consumeBypassNonce: ReturnType<typeof vi.fn>;
   env: Env;
+  reserveCacheBypass: ReturnType<typeof vi.fn>;
 } {
   return {
     consumeBypassNonce,
+    reserveCacheBypass,
     env: {
       MAIN_SECRET: "diagnostic-cache-bypass-test-secret",
       DIAGNOSTICS_SAMPLER: {
-        getByName: vi.fn(() => ({ consumeBypassNonce })),
+        getByName: vi.fn(() => ({ consumeBypassNonce, reserveCacheBypass })),
       },
     } as unknown as Env,
   };
@@ -32,8 +38,52 @@ function request(
 }
 
 describe("diagnostic cache bypass token", () => {
+  it("keeps a rate reservation until its minute bucket expires after a nonce alarm", async () => {
+    const values = new Map<string, unknown>();
+    let alarmAt: number | null = null;
+    const storage = {
+      delete: vi.fn(async (key: string) => values.delete(key)),
+      deleteAlarm: vi.fn(async () => {
+        alarmAt = null;
+      }),
+      get: vi.fn(async <T>(key: string) => values.get(key) as T | undefined),
+      getAlarm: vi.fn(async () => alarmAt),
+      list: vi.fn(
+        async <T>({ prefix }: { prefix: string }) =>
+          new Map(
+            [...values.entries()].filter(([key]) => key.startsWith(prefix)),
+          ) as Map<string, T>,
+      ),
+      put: vi.fn(async (key: string, value: unknown) => {
+        values.set(key, value);
+      }),
+      setAlarm: vi.fn(async (value: number) => {
+        alarmAt = value;
+      }),
+    };
+    const sampler = Object.create(
+      DiagnosticsSampler.prototype,
+    ) as DiagnosticsSampler;
+    Object.defineProperty(sampler, "ctx", { value: { storage } });
+    const nonce = "n".repeat(16);
+
+    await sampler.reserveCacheBypass("admin-1", nowMs);
+    await sampler.consumeBypassNonce(nonce, nowMs + 1_000, nowMs);
+    vi.spyOn(Date, "now").mockReturnValue(nowMs + 1_000);
+    await sampler.alarm();
+    vi.restoreAllMocks();
+
+    expect([...values.keys()]).toEqual([
+      expect.stringMatching(/^bypass-rate:\d+:[a-z0-9]+$/),
+    ]);
+    expect([...values.values()]).toEqual([
+      { count: 1, expiresAtMs: nowMs + 60_000 },
+    ]);
+    expect(alarmAt).toBe(nowMs + 60_000);
+  });
+
   it("accepts a one-time token bound to its actor and canonical request", async () => {
-    const { env, consumeBypassNonce } = createEnv();
+    const { env, consumeBypassNonce, reserveCacheBypass } = createEnv();
     const token = await issueDiagnosticCacheBypassToken({
       actorId: "admin-1",
       env,
@@ -55,6 +105,7 @@ describe("diagnostic cache bypass token", () => {
       }),
     ).resolves.toBe(true);
     expect(consumeBypassNonce).toHaveBeenCalledTimes(1);
+    expect(reserveCacheBypass).toHaveBeenCalledWith("admin-1", nowMs);
     expect(consumeBypassNonce).toHaveBeenCalledWith(
       expect.stringMatching(/^[A-Za-z0-9_-]{16,96}$/),
       nowMs + 60_000,
@@ -179,5 +230,22 @@ describe("diagnostic cache bypass token", () => {
         }),
       }),
     ).resolves.toBe(false);
+  });
+
+  it("does not issue a bypass token when the short-lived rate limit rejects it", async () => {
+    const { env, reserveCacheBypass } = createEnv(
+      vi.fn().mockResolvedValue(true),
+      vi.fn().mockResolvedValue(false),
+    );
+
+    await expect(
+      issueDiagnosticCacheBypassToken({
+        actorId: "admin-1",
+        env,
+        nowMs,
+        request: request(),
+      }),
+    ).resolves.toBeNull();
+    expect(reserveCacheBypass).toHaveBeenCalledWith("admin-1", nowMs);
   });
 });

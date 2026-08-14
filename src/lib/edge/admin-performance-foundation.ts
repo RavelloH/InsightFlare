@@ -52,6 +52,14 @@ export async function handlePerformanceFoundationAdmin(
       undefined,
       request,
     );
+  if (state === "enabled") {
+    return errorResponse(
+      request,
+      409,
+      "performance_v2_not_ready",
+      "Foundation routes have no P0 implementation; keep the rollout disabled or shadowed",
+    );
+  }
   const next = await compareAndSetPerformanceControl(env, {
     name: "foundation",
     revision,

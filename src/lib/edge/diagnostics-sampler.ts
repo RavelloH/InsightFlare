@@ -5,6 +5,7 @@ import type { Env } from "./types";
 export const DIAGNOSTICS_SAMPLER_SHARDS = 16;
 export const DIAGNOSTICS_HEALTH_SAMPLER_NAME = "health:0";
 export const DIAGNOSTICS_CACHE_BYPASS_SAMPLER_NAME = "cache-bypass";
+export const MAX_DIAGNOSTIC_CACHE_BYPASSES_PER_MINUTE = 20;
 const MAX_PER_SHARD_DAY = 10_000;
 
 export interface DiagnosticsSampleDecision {
@@ -17,6 +18,11 @@ export interface DiagnosticsSamplerHealth {
   acceptedCount: number;
   lastAcceptedAt: number | null;
   lastHeartbeatAt: number | null;
+}
+
+interface CacheBypassRateBucket {
+  count: number;
+  expiresAtMs: number;
 }
 
 function stableHash(value: string): number {
@@ -127,17 +133,57 @@ export class DiagnosticsSampler extends DurableObject<Env> {
     return true;
   }
 
+  async reserveCacheBypass(
+    actorId: string,
+    nowMs = Date.now(),
+  ): Promise<boolean> {
+    const normalizedActor = actorId.trim();
+    if (!normalizedActor || !Number.isFinite(nowMs)) return false;
+    const bucket = Math.floor(nowMs / 60_000);
+    const expiresAtMs = (bucket + 1) * 60_000;
+    // Durable Object storage must not retain a raw account identifier merely
+    // for a short-lived rate-limit bucket.
+    const key = `bypass-rate:${bucket}:${stableHash(normalizedActor).toString(36)}`;
+    const previous = await this.ctx.storage.get<CacheBypassRateBucket>(key);
+    const count =
+      previous &&
+      Number.isFinite(previous.count) &&
+      Number.isFinite(previous.expiresAtMs) &&
+      previous.expiresAtMs > nowMs
+        ? previous.count
+        : 0;
+    if (count >= MAX_DIAGNOSTIC_CACHE_BYPASSES_PER_MINUTE) return false;
+    await this.ctx.storage.put(key, { count: count + 1, expiresAtMs });
+    const alarmAt = await this.ctx.storage.getAlarm();
+    if (!alarmAt || expiresAtMs < alarmAt) {
+      await this.ctx.storage.setAlarm(expiresAtMs);
+    }
+    return true;
+  }
+
   async alarm(): Promise<void> {
     const nowMs = Date.now();
-    const entries = await this.ctx.storage.list<number>({
-      prefix: "bypass:",
-    });
+    const [nonceEntries, rateEntries] = await Promise.all([
+      this.ctx.storage.list<number>({ prefix: "bypass:" }),
+      this.ctx.storage.list<CacheBypassRateBucket>({ prefix: "bypass-rate:" }),
+    ]);
     let nextAlarmAt: number | null = null;
-    for (const [key, expiresAtMs] of entries) {
+    for (const [key, expiresAtMs] of nonceEntries) {
       if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) {
         await this.ctx.storage.delete(key);
       } else if (nextAlarmAt === null || expiresAtMs < nextAlarmAt) {
         nextAlarmAt = expiresAtMs;
+      }
+    }
+    for (const [key, bucket] of rateEntries) {
+      if (
+        !bucket ||
+        !Number.isFinite(bucket.expiresAtMs) ||
+        bucket.expiresAtMs <= nowMs
+      ) {
+        await this.ctx.storage.delete(key);
+      } else if (nextAlarmAt === null || bucket.expiresAtMs < nextAlarmAt) {
+        nextAlarmAt = bucket.expiresAtMs;
       }
     }
     if (nextAlarmAt === null) {

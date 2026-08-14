@@ -126,8 +126,17 @@ export async function issueDiagnosticCacheBypassToken(input: {
 }): Promise<string | null> {
   const secret = await diagnosticsCacheBypassSecret(input.env);
   const actorId = input.actorId.trim();
-  if (!secret || !actorId) return null;
+  const sampler = input.env.DIAGNOSTICS_SAMPLER;
+  if (!secret || !actorId || !sampler) return null;
   const nowMs = input.nowMs ?? Date.now();
+  try {
+    const reserved = await sampler
+      .getByName(DIAGNOSTICS_CACHE_BYPASS_SAMPLER_NAME)
+      .reserveCacheBypass(actorId, nowMs);
+    if (!reserved) return null;
+  } catch {
+    return null;
+  }
   const ttlMs = Math.min(
     MAX_TOKEN_TTL_MS,
     Math.max(1_000, Math.trunc(input.ttlMs ?? MAX_TOKEN_TTL_MS)),
