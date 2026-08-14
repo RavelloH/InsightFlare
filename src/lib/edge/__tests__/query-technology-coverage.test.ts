@@ -55,10 +55,25 @@ function createD1Env(resultSets: D1Row[][]): {
 } {
   const calls: QueryCall[] = [];
   const pendingResults = [...resultSets];
+  const withRowType = (row: D1Row, rowType: string) =>
+    "rowType" in row ? row : { ...row, rowType };
+  const taggedShareResults =
+    resultSets.length >= 3
+      ? [
+          ...resultSets[0].map((row) => withRowType(row, "top")),
+          ...resultSets[1].map((row) => withRowType(row, "series")),
+          ...resultSets[2].map((row) => withRowType(row, "bucket")),
+        ]
+      : [];
+  let taggedShareResultsConsumed = false;
   const prepare = vi.fn((sql: string) => ({
     bind: vi.fn((...bindings: Array<string | number | null>) => ({
       all: vi.fn(async () => {
         calls.push({ sql, bindings });
+        if (sql.includes("tagged_rows") && !taggedShareResultsConsumed) {
+          taggedShareResultsConsumed = true;
+          return { results: taggedShareResults };
+        }
         return { results: pendingResults.shift() ?? [] };
       }),
     })),
@@ -900,7 +915,8 @@ describe("edge technology query coverage", () => {
       visitorsBySeries: { chrome: 0, other: 0 },
     });
     expect(calls[0].bindings.at(-1)).toBe(12);
-    expect(calls[1].bindings).toEqual([...visitBindings(), "Chrome", "Safari"]);
+    expect(calls[0].sql).toContain("tagged_rows");
+    expect(calls[0].bindings).toEqual([...visitBindings(), 12]);
   });
 
   it("returns no share trend data when selected top labels have no series rows", async () => {
@@ -973,8 +989,8 @@ describe("edge technology query coverage", () => {
       ],
     });
     expect(calls[0].bindings.at(-1)).toBe(1);
-    expect(calls[1].sql).toContain(`'${SHARE_TREND_OTHER_TOKEN}' AS label`);
-    expect(calls[1].bindings).toEqual(visitBindings());
+    expect(calls[0].sql).toContain(`'${SHARE_TREND_OTHER_TOKEN}'`);
+    expect(calls[0].bindings).toEqual([...visitBindings(), 1]);
   });
 
   it("returns no share trend data when all series rows are filtered out", async () => {
@@ -1256,7 +1272,8 @@ describe("edge technology query coverage", () => {
   it("defaults nullable share trend rows and bucket metrics", async () => {
     const { env } = createD1Env([
       [
-        { label: null, views: 9, visitors: 9, sessions: 9 },
+        { rowType: null, label: "Ignored", views: 9, visitors: 9, sessions: 9 },
+        { label: null, views: 9, visitors: null, sessions: 9 },
         { label: " Chrome ", views: null, visitors: "4", sessions: null },
       ],
       [

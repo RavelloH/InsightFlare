@@ -43,11 +43,12 @@ export async function queryShareTrendFromD1(
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "started_at");
   const normalizedLimit = Math.min(Math.max(1, limit), 12);
-  const topSql = `
+  const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
+filtered_visits AS MATERIALIZED (
   SELECT
+    ${bucket.sql} AS bucket,
     visit_id AS visitId,
     started_at AS startedAt,
     ${labelExpr} AS labelValue,
@@ -83,125 +84,42 @@ assigned_visits AS (
   FROM visitor_latest
   INNER JOIN filtered_visits
     ON filtered_visits.visitorId = visitor_latest.visitorId
-)
-SELECT
-  label,
-  count(*) AS views,
-  count(DISTINCT visitorId) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM assigned_visits
-WHERE label != ''
-GROUP BY label
-ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
-LIMIT ?
-`;
-  const topRows = (
-    await queryD1All<Record<string, unknown>>(env, topSql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      normalizedLimit,
-    ])
-  )
-    .map((row) => ({
-      label: String(row.label ?? "").trim(),
-      views: Number(row.views ?? 0),
-      visitors: Number(row.visitors ?? 0),
-      sessions: Number(row.sessions ?? 0),
-    }))
-    .filter((row) => row.label.length > 0 && row.visitors > 0);
-
-  const topLabels = topRows.map((row) => row.label);
-  const topLabelPlaceholders = topLabels.map(() => "?").join(", ");
-  const assignmentCaseExpr =
-    topLabels.length > 0
-      ? `CASE WHEN assignedLabel != '' AND assignedLabel IN (${topLabelPlaceholders}) THEN assignedLabel ELSE '${SHARE_TREND_OTHER_TOKEN}' END`
-      : `'${SHARE_TREND_OTHER_TOKEN}'`;
-
-  const seriesSql = `
-WITH
-${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT
-    visit_id AS visitId,
-    started_at AS startedAt,
-    ${labelExpr} AS labelValue,
-    visitor_id AS visitorId,
-    session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
 ),
-visitor_latest AS (
+top_aggregate AS (
   SELECT
-    visitorId,
-    labelValue AS assignedLabel
-  FROM (
-    SELECT
-      visitorId,
-      labelValue,
-      startedAt,
-      visitId,
-      ROW_NUMBER() OVER (
-        PARTITION BY visitorId
-        ORDER BY startedAt DESC, visitId DESC
-      ) AS rowNumber
-    FROM filtered_visits
-    WHERE visitorId != ''
-  )
-  WHERE rowNumber = 1
+    label,
+    count(*) AS views,
+    count(DISTINCT visitorId) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM assigned_visits
+  WHERE label != ''
+  GROUP BY label
 ),
-assigned_visits AS (
+top_rows AS (
   SELECT
-    ${assignmentCaseExpr} AS label,
-    filtered_visits.visitorId AS visitorId,
-    filtered_visits.sessionId AS sessionId
+    label,
+    views,
+    visitors,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
+    ) AS rowOrder
+  FROM top_aggregate
+  ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
+  LIMIT ?
+),
+series_rows AS (
+  SELECT
+    COALESCE(top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    count(*) AS views,
+    count(DISTINCT filtered_visits.visitorId) AS visitors,
+    count(DISTINCT CASE WHEN filtered_visits.sessionId != '' THEN filtered_visits.sessionId ELSE NULL END) AS sessions
   FROM visitor_latest
   INNER JOIN filtered_visits
     ON filtered_visits.visitorId = visitor_latest.visitorId
-)
-SELECT
-  label,
-  count(*) AS views,
-  count(DISTINCT visitorId) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM assigned_visits
-GROUP BY label
-ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
-`;
-  const seriesRows = (
-    await queryD1All<Record<string, unknown>>(env, seriesSql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      ...topLabels,
-    ])
-  )
-    .map((row) => ({
-      label: String(row.label ?? "").trim(),
-      views: Number(row.views ?? 0),
-      visitors: Number(row.visitors ?? 0),
-      sessions: Number(row.sessions ?? 0),
-    }))
-    .filter((row) => row.label.length > 0 && row.visitors > 0);
-
-  if (seriesRows.length === 0) {
-    return {
-      series: [],
-      data: [],
-    };
-  }
-
-  const bucketSql = `
-WITH
-${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT
-    ${bucket.sql} AS bucket,
-    visit_id AS visitId,
-    started_at AS startedAt,
-    ${labelExpr} AS labelValue,
-    visitor_id AS visitorId,
-    session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
+  LEFT JOIN top_rows
+    ON top_rows.label = visitor_latest.assignedLabel
+  GROUP BY label
 ),
 bucket_visitor_latest AS (
   SELECT
@@ -224,44 +142,101 @@ bucket_visitor_latest AS (
   )
   WHERE rowNumber = 1
 ),
-assigned_visits AS (
+bucket_rows AS (
   SELECT
-    filtered_visits.bucket AS bucket,
-    ${assignmentCaseExpr} AS label,
-    filtered_visits.visitorId AS visitorId,
-    filtered_visits.sessionId AS sessionId
+    bucket_visitor_latest.bucket AS bucket,
+    COALESCE(top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    count(*) AS views,
+    count(DISTINCT filtered_visits.visitorId) AS visitors,
+    count(DISTINCT CASE WHEN filtered_visits.sessionId != '' THEN filtered_visits.sessionId ELSE NULL END) AS sessions
   FROM bucket_visitor_latest
   INNER JOIN filtered_visits
     ON filtered_visits.bucket = bucket_visitor_latest.bucket
     AND filtered_visits.visitorId = bucket_visitor_latest.visitorId
+  LEFT JOIN top_rows
+    ON top_rows.label = bucket_visitor_latest.assignedLabel
+  GROUP BY bucket_visitor_latest.bucket, label
+),
+tagged_rows AS (
+  SELECT
+    'top' AS rowType,
+    NULL AS bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    rowOrder
+  FROM top_rows
+  UNION ALL
+  SELECT
+    'series' AS rowType,
+    NULL AS bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    0 AS rowOrder
+  FROM series_rows
+  UNION ALL
+  SELECT
+    'bucket' AS rowType,
+    bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    0 AS rowOrder
+  FROM bucket_rows
 )
-SELECT
-  bucket,
-  label,
-  count(*) AS views,
-  count(DISTINCT visitorId) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM assigned_visits
-GROUP BY bucket, label
-ORDER BY bucket ASC, label ASC
+SELECT rowType, bucket, label, views, visitors, sessions
+FROM tagged_rows
+ORDER BY rowType ASC, rowOrder ASC, bucket ASC, label ASC
 `;
-  const bucketRows = (
-    await queryD1All<Record<string, unknown>>(env, bucketSql, [
-      ...visitSourceBindings(siteId, window),
-      ...bucket.bindings,
-      ...filter.bindings,
-      ...topLabels,
-    ])
-  ).map(
-    (row) =>
-      ({
-        bucket: Number(row.bucket ?? 0),
-        label: String(row.label ?? "").trim(),
-        views: Number(row.views ?? 0),
-        visitors: Number(row.visitors ?? 0),
-        sessions: Number(row.sessions ?? 0),
-      }) satisfies BrowserTrendBucketRow,
-  );
+  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...bucket.bindings,
+    ...filter.bindings,
+    normalizedLimit,
+  ]);
+  const topRows = rows
+    .filter((row) => String(row.rowType ?? "") === "top")
+    .map((row) => ({
+      label: String(row.label ?? "").trim(),
+      views: Number(row.views ?? 0),
+      visitors: Number(row.visitors ?? 0),
+      sessions: Number(row.sessions ?? 0),
+    }))
+    .filter((row) => row.label.length > 0 && row.visitors > 0);
+  const seriesRows = rows
+    .filter((row) => String(row.rowType ?? "") === "series")
+    .map((row) => ({
+      label: String(row.label ?? "").trim(),
+      views: Number(row.views ?? 0),
+      visitors: Number(row.visitors ?? 0),
+      sessions: Number(row.sessions ?? 0),
+    }))
+    .filter((row) => row.label.length > 0 && row.visitors > 0);
+  const bucketRows = rows
+    .filter((row) => String(row.rowType ?? "") === "bucket")
+    .map(
+      (row) =>
+        ({
+          bucket: Number(row.bucket ?? 0),
+          label: String(row.label ?? "").trim(),
+          views: Number(row.views ?? 0),
+          visitors: Number(row.visitors ?? 0),
+          sessions: Number(row.sessions ?? 0),
+        }) satisfies BrowserTrendBucketRow,
+    );
+
+  if (seriesRows.length === 0) {
+    return {
+      series: [],
+      data: [],
+    };
+  }
+
+  const topLabels = topRows.map((row) => row.label);
 
   const seriesByLabel = new Map(
     seriesRows.map((row) => [row.label, row] as const),

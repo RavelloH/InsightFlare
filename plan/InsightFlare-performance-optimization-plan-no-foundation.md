@@ -1285,6 +1285,11 @@ rollback = 旧 Worker version
   通过同一 SQL 的 session ranking 计算。
 - Technology browser version breakdown 已将 top-browser 与 version 聚合合并到单次
   filtered source 查询，保留 browser/version limit、unknown/other bucket 和空结果行为。
+- Technology share trends（browser、client dimension、UTM 与 referrer）已将 top labels、
+  series 与 bucket 聚合合并为一次 D1 查询，并显式 materialize 共享 filtered source，避免
+  SQLite 将 CTE 展开为重复 visits 扫描。真实 SQLite fixture 覆盖跨 bucket 标签变更、Other、
+  filters 和空 visitor；`EXPLAIN QUERY PLAN` 确认通过 `idx_visits_site_started_at` 的 visits
+  索引入口仅一次。仍须以生产 Origin MISS 的 D1 Insights 验证实际 rows-read 下降。
 - Notification tick、手动执行和预览现在使用 invocation-scoped cache：相同站点与窗口的
   overview/metric、previous window、cumulative metric、site metadata 和 last-seen 查询在
   同一 invocation 内复用；不同站点、窗口或过滤条件不会共享，拒绝的 Promise 不会污染后续

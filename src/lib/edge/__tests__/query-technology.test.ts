@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
@@ -36,10 +38,23 @@ function createD1Env(resultSets: D1Row[][]): {
 } {
   const calls: QueryCall[] = [];
   const pendingResults = [...resultSets];
+  const taggedShareResults =
+    resultSets.length >= 3
+      ? [
+          ...resultSets[0].map((row) => ({ ...row, rowType: "top" })),
+          ...resultSets[1].map((row) => ({ ...row, rowType: "series" })),
+          ...resultSets[2].map((row) => ({ ...row, rowType: "bucket" })),
+        ]
+      : [];
+  let taggedShareResultsConsumed = false;
   const prepare = vi.fn((sql: string) => ({
     bind: vi.fn((...bindings: Array<string | number | null>) => ({
       all: vi.fn(async () => {
         calls.push({ sql, bindings });
+        if (sql.includes("tagged_rows") && !taggedShareResultsConsumed) {
+          taggedShareResultsConsumed = true;
+          return { results: taggedShareResults };
+        }
         return { results: pendingResults.shift() ?? [] };
       }),
     })),
@@ -57,6 +72,112 @@ function createD1Env(resultSets: D1Row[][]): {
 
 function visitBindings(siteId: string, window: QueryWindow) {
   return [siteId, window.fromMs, window.toMs];
+}
+
+type Binding = string | number | null;
+
+class SqliteStatement {
+  constructor(
+    private readonly database: DatabaseSync,
+    private readonly sql: string,
+    private readonly bindings: Binding[],
+  ) {}
+
+  async all<T extends D1Row>(): Promise<{ results: T[] }> {
+    return {
+      results: this.database
+        .prepare(this.sql)
+        .all(...this.bindings)
+        .map((row) => ({ ...row }) as T),
+    };
+  }
+}
+
+class SqliteD1Database {
+  readonly database = new DatabaseSync(":memory:");
+  readonly calls: QueryCall[] = [];
+
+  prepare(sql: string) {
+    return {
+      bind: (...bindings: Binding[]) => {
+        this.calls.push({ sql, bindings });
+        return new SqliteStatement(this.database, sql, bindings);
+      },
+    };
+  }
+
+  close(): void {
+    this.database.close();
+  }
+}
+
+function createSqliteTrendEnv(): { env: Env; d1: SqliteD1Database } {
+  const d1 = new SqliteD1Database();
+  d1.database.exec(`
+    CREATE TABLE visits (
+      visit_id TEXT PRIMARY KEY,
+      site_id TEXT NOT NULL,
+      visitor_id TEXT NOT NULL DEFAULT '',
+      session_id TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'closed',
+      started_at INTEGER NOT NULL,
+      last_activity_at INTEGER NOT NULL DEFAULT 0,
+      ended_at INTEGER,
+      finalized_at INTEGER,
+      duration_ms INTEGER,
+      duration_source TEXT,
+      exit_reason TEXT,
+      pathname TEXT NOT NULL DEFAULT '',
+      query_string TEXT NOT NULL DEFAULT '',
+      hash_fragment TEXT NOT NULL DEFAULT '',
+      hostname TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL DEFAULT '',
+      referrer_url TEXT NOT NULL DEFAULT '',
+      referrer_host TEXT NOT NULL DEFAULT '',
+      utm_source TEXT NOT NULL DEFAULT '',
+      utm_medium TEXT NOT NULL DEFAULT '',
+      utm_campaign TEXT NOT NULL DEFAULT '',
+      utm_term TEXT NOT NULL DEFAULT '',
+      utm_content TEXT NOT NULL DEFAULT '',
+      is_eu INTEGER NOT NULL DEFAULT 0,
+      country TEXT NOT NULL DEFAULT '',
+      region TEXT NOT NULL DEFAULT '',
+      region_code TEXT NOT NULL DEFAULT '',
+      city TEXT NOT NULL DEFAULT '',
+      continent TEXT NOT NULL DEFAULT '',
+      latitude REAL,
+      longitude REAL,
+      postal_code TEXT NOT NULL DEFAULT '',
+      metro_code TEXT NOT NULL DEFAULT '',
+      timezone TEXT NOT NULL DEFAULT '',
+      as_organization TEXT NOT NULL DEFAULT '',
+      ua_raw TEXT NOT NULL DEFAULT '',
+      browser TEXT NOT NULL DEFAULT '',
+      browser_version TEXT NOT NULL DEFAULT '',
+      os TEXT NOT NULL DEFAULT '',
+      os_version TEXT NOT NULL DEFAULT '',
+      device_type TEXT NOT NULL DEFAULT '',
+      screen_width INTEGER,
+      screen_height INTEGER,
+      language TEXT NOT NULL DEFAULT '',
+      perf_ttfb_ms REAL,
+      perf_fcp_ms REAL,
+      perf_lcp_ms REAL,
+      perf_cls REAL,
+      perf_inp_ms REAL,
+      ae_synced_at INTEGER
+    );
+    CREATE INDEX idx_visits_site_started_at
+      ON visits(site_id, started_at);
+  `);
+  return {
+    env: {
+      DB: d1 as unknown as D1Database,
+      DAILY_SALT_SECRET: "test-secret",
+      INGEST_DO: {},
+    } as unknown as Env,
+    d1,
+  };
 }
 
 describe("edge query technology dimension parsers", () => {
@@ -89,6 +210,140 @@ describe("edge query technology dimension parsers", () => {
 });
 
 describe("edge query technology D1 mapping", () => {
+  it("executes the consolidated share trend SQL against a SQLite fixture", async () => {
+    const { env, d1 } = createSqliteTrendEnv();
+    const window = queryWindow();
+    const insert = d1.database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, started_at, country,
+        device_type, browser
+      ) VALUES (?, 'site-1', ?, ?, ?, ?, ?, ?)
+    `);
+    const at = (minute: number) => Date.UTC(2026, 0, 1, 0, minute);
+
+    insert.run(
+      "alpha-first",
+      "alpha",
+      "alpha-session",
+      at(15),
+      "US",
+      "desktop",
+      "Chrome",
+    );
+    insert.run(
+      "alpha-last",
+      "alpha",
+      "alpha-session",
+      at(65),
+      "US",
+      "desktop",
+      "Firefox",
+    );
+    insert.run(
+      "bravo",
+      "bravo",
+      "bravo-session",
+      at(55),
+      "US",
+      "desktop",
+      "Chrome",
+    );
+    insert.run(
+      "charlie",
+      "charlie",
+      "charlie-session",
+      at(20),
+      "US",
+      "desktop",
+      "Safari",
+    );
+    insert.run(
+      "excluded-country",
+      "delta",
+      "delta-session",
+      at(30),
+      "CA",
+      "desktop",
+      "Edge",
+    );
+    insert.run(
+      "empty-visitor",
+      "",
+      "anonymous-session",
+      at(45),
+      "US",
+      "desktop",
+      "Opera",
+    );
+
+    try {
+      await expect(
+        queryShareTrendFromD1(
+          env,
+          "site-1",
+          window,
+          "hour",
+          { country: "US", clientDeviceType: "desktop" },
+          2,
+          "TRIM(COALESCE(browser, ''))",
+          "browser",
+        ),
+      ).resolves.toEqual({
+        series: [
+          {
+            key: "firefox",
+            label: "Firefox",
+            views: 2,
+            visitors: 1,
+            sessions: 1,
+          },
+          {
+            key: "chrome",
+            label: "Chrome",
+            views: 1,
+            visitors: 1,
+            sessions: 1,
+          },
+          {
+            key: "other",
+            label: SHARE_TREND_OTHER_LABEL,
+            views: 1,
+            visitors: 1,
+            sessions: 1,
+            isOther: true,
+          },
+        ],
+        data: [
+          {
+            bucket: 0,
+            timestampMs: Date.UTC(2026, 0, 1, 0),
+            totalVisitors: 3,
+            visitorsBySeries: { firefox: 0, chrome: 2, other: 1 },
+          },
+          {
+            bucket: 1,
+            timestampMs: Date.UTC(2026, 0, 1, 1),
+            totalVisitors: 1,
+            visitorsBySeries: { firefox: 1, chrome: 0, other: 0 },
+          },
+        ],
+      });
+
+      expect(d1.calls).toHaveLength(1);
+      const plan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)
+        .all(...d1.calls[0].bindings) as Array<{ detail: string }>;
+      expect(
+        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+      ).toBe(true);
+      expect(
+        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+      ).toHaveLength(1);
+    } finally {
+      d1.close();
+    }
+  });
+
   it("maps browser version breakdown rows and captures SQL bindings", async () => {
     const siteId = "site-1";
     const window = queryWindow();
@@ -286,7 +541,7 @@ describe("edge query technology D1 mapping", () => {
       },
     ]);
 
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(1);
     expect(calls[0].sql).toContain("TRIM(COALESCE(browser, '')) AS labelValue");
     expect(calls[0].sql).toContain("LOWER(TRIM(COALESCE(country, ''))) = ?");
     expect(calls[0].bindings).toEqual([
@@ -295,23 +550,8 @@ describe("edge query technology D1 mapping", () => {
       "desktop",
       12,
     ]);
-    expect(calls[1].sql).toContain(
-      "assignedLabel IN (?, ?) THEN assignedLabel",
-    );
-    expect(calls[1].bindings).toEqual([
-      ...visitBindings(siteId, window),
-      "us",
-      "desktop",
-      "Chrome",
-      "Firefox",
-    ]);
-    expect(calls[2].sql).toContain("CASE WHEN started_at >=");
-    expect(calls[2].bindings).toEqual([
-      ...visitBindings(siteId, window),
-      "us",
-      "desktop",
-      "Chrome",
-      "Firefox",
-    ]);
+    expect(calls[0].sql).toContain("top_rows");
+    expect(calls[0].sql).toContain("bucket_rows");
+    expect(calls[0].sql).toContain("tagged_rows");
   });
 });

@@ -616,21 +616,39 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(
-      ["TRIM(COALESCE(browser", "AS labelValue", "LIMIT ?"],
-      [{ label: "Chrome", views: 10, visitors: 6, sessions: 5 }],
-    ),
-    allMatch(
-      ["assigned_visits AS", "GROUP BY label"],
+      ["tagged_rows AS", "rowType"],
       [
-        { label: "Chrome", views: 10, visitors: 6, sessions: 5 },
-        { label: "__share_trend_other__", views: 3, visitors: 2, sessions: 2 },
-      ],
-    ),
-    allMatch(
-      ["GROUP BY bucket, label"],
-      [
-        { bucket: 0, label: "Chrome", views: 5, visitors: 3, sessions: 2 },
         {
+          rowType: "top",
+          label: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+        },
+        {
+          rowType: "series",
+          label: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+        },
+        {
+          rowType: "series",
+          label: "__share_trend_other__",
+          views: 3,
+          visitors: 2,
+          sessions: 2,
+        },
+        {
+          rowType: "bucket",
+          bucket: 0,
+          label: "Chrome",
+          views: 5,
+          visitors: 3,
+          sessions: 2,
+        },
+        {
+          rowType: "bucket",
           bucket: 0,
           label: "__share_trend_other__",
           views: 1,
