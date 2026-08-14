@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+
 import { describe, expect, it } from "vitest";
 
 import type { VisitBindingRow } from "@/lib/edge/ingest-sql";
@@ -131,7 +133,77 @@ describe("ingest visit SQL bindings", () => {
     expect(UPSERT_VISIT_SQL).toContain("perf_lcp_ms = excluded.perf_lcp_ms");
     expect(UPSERT_VISIT_SQL).toContain("perf_cls = excluded.perf_cls");
     expect(UPSERT_VISIT_SQL).toContain("perf_inp_ms = excluded.perf_inp_ms");
-    expect(UPSERT_VISIT_SQL).toContain("ae_synced_at = excluded.ae_synced_at");
+    expect(UPSERT_VISIT_SQL).not.toContain(
+      "ae_synced_at = excluded.ae_synced_at",
+    );
+    expect(UPSERT_VISIT_SQL).toContain("WHERE");
+    expect(UPSERT_VISIT_SQL).toContain(
+      "visits.perf_lcp_ms IS NOT excluded.perf_lcp_ms",
+    );
+  });
+
+  it("skips unchanged retries while retaining late metrics and archive state", () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(`
+      CREATE TABLE visits (
+        ${VISIT_D1_COLUMNS.map((column) =>
+          column === "visit_id"
+            ? "visit_id TEXT PRIMARY KEY"
+            : `${column} BLOB`,
+        ).join(",\n")}
+      )
+    `);
+    const statement = db.prepare(UPSERT_VISIT_SQL);
+
+    try {
+      const initial = visitRow({ perfLcpMs: null, updatedAt: 20 });
+      expect(statement.run(...visitBindings(initial)).changes).toBe(1);
+
+      db.prepare("UPDATE visits SET ae_synced_at = ? WHERE visit_id = ?").run(
+        123,
+        initial.visitId,
+      );
+      expect(
+        statement.run(
+          ...visitBindings({ ...initial, updatedAt: initial.updatedAt + 1 }),
+        ).changes,
+      ).toBe(0);
+
+      expect(
+        statement.run(
+          ...visitBindings({
+            ...initial,
+            perfLcpMs: 2500,
+            updatedAt: initial.updatedAt + 2,
+          }),
+        ).changes,
+      ).toBe(1);
+      expect(
+        statement.run(
+          ...visitBindings({
+            ...initial,
+            perfLcpMs: 2500,
+            userId: "user-late",
+            userName: "Ada",
+            updatedAt: initial.updatedAt + 3,
+          }),
+        ).changes,
+      ).toBe(1);
+      expect(
+        db
+          .prepare(
+            "SELECT perf_lcp_ms AS perfLcpMs, user_id AS userId, user_name AS userName, ae_synced_at AS aeSyncedAt FROM visits WHERE visit_id = ?",
+          )
+          .get(initial.visitId),
+      ).toEqual({
+        perfLcpMs: 2500,
+        userId: "user-late",
+        userName: "Ada",
+        aeSyncedAt: 123,
+      });
+    } finally {
+      db.close();
+    }
   });
 
   it("defines buffered custom event schema fields used by flush bookkeeping", () => {

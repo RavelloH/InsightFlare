@@ -1290,6 +1290,11 @@ rollback = 旧 Worker version
   SQLite 将 CTE 展开为重复 visits 扫描。真实 SQLite fixture 覆盖跨 bucket 标签变更、Other、
   filters 和空 visitor；`EXPLAIN QUERY PLAN` 确认通过 `idx_visits_site_started_at` 的 visits
   索引入口仅一次。仍须以生产 Origin MISS 的 D1 Insights 验证实际 rows-read 下降。
+- visits UPSERT 已增加 null-safe 差异 guard：完全相同的业务快照不再触发 `DO UPDATE`；
+  late performance 与 identity 字段仍会更新。`updated_at` 仅在业务字段变化时推进，
+  `ae_synced_at` 作为 archive 内部状态不再被 ingest flush 的 `NULL` 覆盖。真实 SQLite
+  replay 覆盖重复 flush、迟到 performance 与 identity 更新；生产写入下降仍按 Phase 0 的
+  writes/flush 指标验收。
 - Notification tick、手动执行和预览现在使用 invocation-scoped cache：相同站点与窗口的
   overview/metric、previous window、cumulative metric、site metadata 和 last-seen 查询在
   同一 invocation 内复用；不同站点、窗口或过滤条件不会共享，拒绝的 Promise 不会污染后续
