@@ -90,93 +90,121 @@ export async function queryBrowserVersionBreakdownFromD1(
       ? Math.max(1, Math.floor(browserLimit))
       : null;
   const normalizedVersionLimit = Math.min(Math.max(1, versionLimit), 8);
-  const topBrowsersSql = `
+  const browserLimitClause = normalizedBrowserLimit
+    ? "WHERE browserRank <= ?"
+    : "WHERE 1 = 1";
+  const sql = `
 WITH
 ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
     TRIM(COALESCE(browser, '')) AS browser,
-    visitor_id AS visitorId,
-    session_id AS sessionId
+    browser_version,
+    visitor_id,
+    session_id
   FROM visit_source
   ${filter.clause}
+),
+browser_rollup AS (
+  SELECT
+    browser,
+    COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions
+  FROM filtered_visits
+  WHERE browser != ''
+  GROUP BY browser
+),
+ranked_browsers AS (
+  SELECT
+    browser,
+    views,
+    visitors,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
+    ) AS browserRank
+  FROM browser_rollup
+),
+top_browsers AS (
+  SELECT browser, views, visitors, sessions, browserRank
+  FROM ranked_browsers
+  ${browserLimitClause}
+),
+versioned_visits AS (
+  SELECT
+    fv.browser,
+    CASE
+      WHEN ${browserMajorVersionExpr("fv")} != ''
+        THEN ${browserMajorVersionExpr("fv")}
+      ELSE '${BROWSER_VERSION_UNKNOWN_TOKEN}'
+    END AS version,
+    fv.visitor_id,
+    fv.session_id
+  FROM filtered_visits fv
+  INNER JOIN top_browsers tb ON tb.browser = fv.browser
+),
+version_rollup AS (
+  SELECT
+    browser,
+    version,
+    COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions
+  FROM versioned_visits
+  GROUP BY browser, version
+  HAVING COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) > 0
 )
 SELECT
-  browser,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM filtered_visits
-WHERE browser != ''
-GROUP BY browser
-ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
-${normalizedBrowserLimit ? "LIMIT ?" : ""}
+  tb.browser,
+  tb.views,
+  tb.visitors,
+  tb.sessions,
+  tb.browserRank,
+  vr.version,
+  vr.version AS versionLabel,
+  vr.views AS versionViews,
+  vr.visitors AS versionVisitors,
+  vr.sessions AS versionSessions
+FROM top_browsers tb
+LEFT JOIN version_rollup vr ON vr.browser = tb.browser
+ORDER BY tb.browserRank ASC, versionVisitors DESC, versionViews DESC,
+  versionSessions DESC, versionLabel ASC
 `;
-  const topBrowsers = (
-    await queryD1All<Record<string, unknown>>(env, topBrowsersSql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      ...(normalizedBrowserLimit ? [normalizedBrowserLimit] : []),
-    ])
-  )
-    .map((row) => ({
-      browser: String(row.browser ?? "").trim(),
-      views: Number(row.views ?? 0),
-      visitors: Number(row.visitors ?? 0),
-      sessions: Number(row.sessions ?? 0),
-    }))
-    .filter((row) => row.browser.length > 0 && row.visitors > 0);
-
-  if (topBrowsers.length === 0) {
-    return [];
+  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...filter.bindings,
+    ...(normalizedBrowserLimit ? [normalizedBrowserLimit] : []),
+  ]);
+  const topBrowsersByName = new Map<string, BrowserVersionAggregateRow>();
+  const versionRows: BrowserVersionAggregateRow[] = [];
+  for (const row of rows) {
+    const browser = String(row.browser ?? "").trim();
+    const browserVisitors = Number(row.visitors ?? 0);
+    if (!browser || browserVisitors <= 0) continue;
+    if (!topBrowsersByName.has(browser)) {
+      topBrowsersByName.set(browser, {
+        browser,
+        version: "",
+        views: Number(row.views ?? 0),
+        visitors: browserVisitors,
+        sessions: Number(row.sessions ?? 0),
+      });
+    }
+    const version = String(row.version ?? "").trim();
+    const versionVisitors = Number(row.versionVisitors ?? 0);
+    if (version && versionVisitors > 0) {
+      versionRows.push({
+        browser,
+        version,
+        views: Number(row.versionViews ?? 0),
+        visitors: versionVisitors,
+        sessions: Number(row.versionSessions ?? 0),
+      });
+    }
   }
-
-  const topBrowserLabels = topBrowsers.map((row) => row.browser);
-  const topBrowserPlaceholders = topBrowserLabels.map(() => "?").join(", ");
-  const versionsSql = `
-WITH
-${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT
-    TRIM(COALESCE(browser, '')) AS browser,
-    ${browserMajorVersionExpr()} AS browserVersion,
-    visitor_id AS visitorId,
-    session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
-)
-SELECT
-  browser,
-  CASE
-    WHEN browserVersion != '' THEN browserVersion
-    ELSE '${BROWSER_VERSION_UNKNOWN_TOKEN}'
-  END AS version,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM filtered_visits
-WHERE browser != '' AND browser IN (${topBrowserPlaceholders})
-GROUP BY browser, version
-ORDER BY browser ASC, visitors DESC, views DESC, sessions DESC, version ASC
-`;
-  const versionRows = (
-    await queryD1All<Record<string, unknown>>(env, versionsSql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      ...topBrowserLabels,
-    ])
-  )
-    .map(
-      (row) =>
-        ({
-          browser: String(row.browser ?? "").trim(),
-          version: String(row.version ?? "").trim(),
-          views: Number(row.views ?? 0),
-          visitors: Number(row.visitors ?? 0),
-          sessions: Number(row.sessions ?? 0),
-        }) satisfies BrowserVersionAggregateRow,
-    )
-    .filter((row) => row.browser.length > 0 && row.visitors > 0);
+  const topBrowsers = [...topBrowsersByName.values()];
+  if (topBrowsers.length === 0) return [];
 
   const versionsByBrowser = new Map<string, BrowserVersionAggregateRow[]>();
   for (const row of versionRows) {

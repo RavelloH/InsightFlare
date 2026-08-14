@@ -101,38 +101,45 @@ describe("edge technology query coverage", () => {
   it("maps browser version slices with unknown and other buckets", async () => {
     const { env, calls } = createD1Env([
       [
-        { browser: " Chrome ", views: 20, visitors: 10, sessions: 8 },
-        { browser: "Ignored", views: 9, visitors: 0, sessions: 0 },
-      ],
-      [
         {
           browser: "Chrome",
+          views: 20,
+          visitors: 10,
+          sessions: 8,
           version: "124",
-          views: 8,
-          visitors: 5,
-          sessions: 4,
+          versionViews: 8,
+          versionVisitors: 5,
+          versionSessions: 4,
         },
         {
           browser: "Chrome",
           version: BROWSER_VERSION_UNKNOWN_TOKEN,
-          views: 4,
-          visitors: 3,
-          sessions: 2,
+          views: 20,
+          visitors: 10,
+          sessions: 8,
+          versionViews: 4,
+          versionVisitors: 3,
+          versionSessions: 2,
         },
         {
           browser: "Chrome",
           version: "122",
-          views: 3,
-          visitors: 2,
-          sessions: 2,
+          views: 20,
+          visitors: 10,
+          sessions: 8,
+          versionViews: 3,
+          versionVisitors: 2,
+          versionSessions: 2,
         },
-        { browser: "", version: "121", views: 9, visitors: 9, sessions: 9 },
         {
-          browser: "Chrome",
+          browser: "Ignored",
           version: "121",
           views: 9,
           visitors: 0,
           sessions: 0,
+          versionViews: 9,
+          versionVisitors: 0,
+          versionSessions: 0,
         },
       ],
     ]);
@@ -167,23 +174,34 @@ describe("edge technology query coverage", () => {
       },
     ]);
 
-    expect(calls[0].sql).toContain("LIMIT ?");
+    expect(calls[0].sql).toContain("browserRank <= ?");
     expect(calls[0].bindings.at(-1)).toBe(2);
-    expect(calls[1].bindings).toEqual([...visitBindings(), "Chrome"]);
+    expect(calls).toHaveLength(1);
   });
 
   it("returns browser version rows with empty versions when all version rows are invalid", async () => {
     const { env } = createD1Env([
-      [{ browser: "Chrome", views: 5, visitors: 3, sessions: 2 }],
       [
         {
           browser: "Chrome",
+          views: 5,
+          visitors: 3,
+          sessions: 2,
           version: "124",
+          versionViews: 5,
+          versionVisitors: 0,
+          versionSessions: 0,
+        },
+        {
+          browser: "",
           views: 5,
           visitors: 0,
           sessions: 0,
+          version: "123",
+          versionViews: 5,
+          versionVisitors: 3,
+          versionSessions: 2,
         },
-        { browser: "", version: "123", views: 5, visitors: 3, sessions: 2 },
       ],
     ]);
 
@@ -1041,16 +1059,15 @@ describe("edge technology query coverage", () => {
   it("defaults nullable browser version rows while filtering empty browser buckets", async () => {
     const { env } = createD1Env([
       [
-        { browser: null, views: 9, visitors: 9, sessions: 9 },
-        { browser: " Chrome ", views: null, visitors: "4", sessions: null },
-      ],
-      [
         {
           browser: "Chrome",
-          version: null,
           views: null,
-          visitors: "2",
+          visitors: "4",
           sessions: null,
+          version: BROWSER_VERSION_UNKNOWN_TOKEN,
+          versionViews: null,
+          versionVisitors: "2",
+          versionSessions: null,
         },
       ],
     ]);
@@ -1065,11 +1082,12 @@ describe("edge technology query coverage", () => {
         sessions: 0,
         versions: [
           {
-            key: "version",
-            label: "",
+            key: "unknown",
+            label: "Unknown",
             views: 0,
             visitors: 2,
             sessions: 0,
+            isUnknown: true,
           },
         ],
       },

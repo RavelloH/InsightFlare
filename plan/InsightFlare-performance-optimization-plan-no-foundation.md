@@ -1282,11 +1282,14 @@ rollback = 旧 Worker version
 - Pages tabs、overview client dimensions 与 overview geo dimensions 已改为数据库侧
   `GROUP BY + ROW_NUMBER + LIMIT`，Worker 不再接收整段窗口的 raw visits；entry/exit
   通过同一 SQL 的 session ranking 计算。
+- Technology browser version breakdown 已将 top-browser 与 version 聚合合并到单次
+  filtered source 查询，保留 browser/version limit、unknown/other bucket 和空结果行为。
 - 上述改动已通过真实 SQLite Scheduled Tasks 测试、Journey/Events 回归测试和 TypeScript
-  类型检查；Pages/dimensions 回归测试、TypeScript 与 lint 亦已通过。
+  类型检查；Pages/dimensions 与 technology 回归测试、TypeScript 与 lint 亦已通过。
 
 ### 后续阶段
 
-Technology 的重复窗口扫描、历史数据兼容证明后的 canonical predicate、notification
-invocation cache、visit UPSERT 差异 guard、索引候选和 rollup 仍按本计划后续门槛推进；未有
+Technology 其他 cross/trend 路径的重复窗口扫描、历史数据兼容证明后的 canonical
+predicate、notification invocation cache、visit UPSERT 差异 guard、索引候选和 rollup
+仍按本计划后续门槛推进；未有
 `EXPLAIN QUERY PLAN` 与生产 Origin MISS 证据的改动不得提前扩大 schema。

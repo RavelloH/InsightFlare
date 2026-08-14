@@ -94,47 +94,66 @@ describe("edge query technology D1 mapping", () => {
     const window = queryWindow();
     const { env, calls } = createD1Env([
       [
-        { browser: " Chrome ", views: "50", visitors: "25", sessions: "20" },
-        { browser: "Safari", views: 10, visitors: 5, sessions: 4 },
-        { browser: "NoVisitors", views: 99, visitors: 0, sessions: 0 },
-      ],
-      [
         {
           browser: "Chrome",
+          views: 50,
+          visitors: 25,
+          sessions: 20,
           version: "124",
-          views: 30,
-          visitors: 20,
-          sessions: 18,
+          versionViews: 30,
+          versionVisitors: 20,
+          versionSessions: 18,
         },
         {
           browser: "Chrome",
+          views: 50,
+          visitors: 25,
+          sessions: 20,
           version: BROWSER_VERSION_UNKNOWN_TOKEN,
-          views: 8,
-          visitors: 3,
-          sessions: 2,
+          versionViews: 8,
+          versionVisitors: 3,
+          versionSessions: 2,
         },
         {
           browser: "Chrome",
+          views: 50,
+          visitors: 25,
+          sessions: 20,
           version: "123",
-          views: 4,
-          visitors: 2,
-          sessions: 2,
+          versionViews: 4,
+          versionVisitors: 2,
+          versionSessions: 2,
         },
         {
           browser: "Chrome",
+          views: 50,
+          visitors: 25,
+          sessions: 20,
           version: "122",
-          views: 1,
-          visitors: 1,
-          sessions: 1,
+          versionViews: 1,
+          versionVisitors: 1,
+          versionSessions: 1,
         },
         {
           browser: "Safari",
-          version: "17",
-          views: 9,
+          views: 10,
           visitors: 5,
           sessions: 4,
+          version: "17",
+          versionViews: 9,
+          versionVisitors: 5,
+          versionSessions: 4,
         },
-        { browser: "", version: "1", views: 1, visitors: 1, sessions: 1 },
+        {
+          browser: "NoVisitors",
+          views: 99,
+          visitors: 0,
+          sessions: 0,
+          version: "",
+          versionViews: 0,
+          versionVisitors: 0,
+          versionSessions: 0,
+        },
       ],
     ]);
 
@@ -184,17 +203,11 @@ describe("edge query technology D1 mapping", () => {
       },
     ]);
 
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(1);
     expect(calls[0].sql).toContain("WHERE browser != ''");
-    expect(calls[0].sql).toContain("LIMIT ?");
+    expect(calls[0].sql).toContain("browserRank <= ?");
     expect(calls[0].bindings).toEqual([...visitBindings(siteId, window), 2]);
-    expect(calls[1].sql).toContain("browser IN (?, ?)");
-    expect(calls[1].sql).toContain(BROWSER_VERSION_UNKNOWN_TOKEN);
-    expect(calls[1].bindings).toEqual([
-      ...visitBindings(siteId, window),
-      "Chrome",
-      "Safari",
-    ]);
+    expect(calls[0].sql).toContain(BROWSER_VERSION_UNKNOWN_TOKEN);
   });
 
   it("maps shared trend rows with top labels, other bucket, filters, and time buckets", async () => {

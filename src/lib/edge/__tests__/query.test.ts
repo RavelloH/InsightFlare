@@ -640,6 +640,44 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(
+      ["browser_rollup AS", "version_rollup AS", "browserRank"],
+      [
+        {
+          browser: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+          browserRank: 1,
+          version: "124",
+          versionViews: 6,
+          versionVisitors: 4,
+          versionSessions: 3,
+        },
+        {
+          browser: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+          browserRank: 1,
+          version: "__browser_version_unknown__",
+          versionViews: 2,
+          versionVisitors: 1,
+          versionSessions: 1,
+        },
+        {
+          browser: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+          browserRank: 1,
+          version: "122",
+          versionViews: 1,
+          versionVisitors: 1,
+          versionSessions: 1,
+        },
+      ],
+    ),
+    allMatch(
       ["browserVersion != '' THEN browserVersion"],
       [
         {
