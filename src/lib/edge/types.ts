@@ -1,7 +1,9 @@
+import type { DiagnosticsSampler } from "./diagnostics-sampler";
+
 export interface Env {
   DB: D1Database;
   INGEST_DO: DurableObjectNamespace;
-  DIAGNOSTICS_SAMPLER?: DurableObjectNamespace;
+  DIAGNOSTICS_SAMPLER?: DurableObjectNamespace<DiagnosticsSampler>;
   BOT_ANALYTICS?: AnalyticsEngineDataset;
   NORMAL_ANALYTICS?: AnalyticsEngineDataset;
   QUERY_DIAGNOSTICS?: AnalyticsEngineDataset;

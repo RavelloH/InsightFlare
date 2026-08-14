@@ -1,3 +1,4 @@
+import { diagnosticsSamplerName } from "./diagnostics-sampler";
 import type { Env } from "./types";
 
 export type PerformanceCacheState = "hit" | "miss" | "bypass";
@@ -19,6 +20,7 @@ function bounded(value: string, max: number): string {
 }
 
 const INVALID_FINGERPRINT = "unknown";
+export const DEFAULT_DIAGNOSTIC_DAILY_LIMIT = 10_000;
 
 /**
  * Keep the route dimension low-cardinality and independent from caller input.
@@ -122,4 +124,31 @@ export function writePerformanceDiagnostic(
     );
     return false;
   }
+}
+
+/**
+ * Applies the sharded, global daily quota before emitting the single request
+ * event. Sampler errors fail closed so observation cannot become unbounded.
+ */
+export async function writeSampledPerformanceDiagnostic(
+  env: Env,
+  input: PerformanceDiagnosticInput,
+  dailyLimit = DEFAULT_DIAGNOSTIC_DAILY_LIMIT,
+): Promise<boolean> {
+  const sampler = env.DIAGNOSTICS_SAMPLER;
+  if (!sampler) return false;
+  const route = routeToken(input.route);
+  const fingerprint = fingerprintToken(input.fingerprint);
+  try {
+    const decision = await sampler
+      .getByName(diagnosticsSamplerName(route, fingerprint))
+      .take(dailyLimit);
+    if (!decision.accepted) return false;
+  } catch {
+    console.warn(
+      JSON.stringify({ event: "performance_diagnostic_sampler_failed" }),
+    );
+    return false;
+  }
+  return writePerformanceDiagnostic(env, input);
 }

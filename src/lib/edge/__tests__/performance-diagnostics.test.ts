@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  DEFAULT_DIAGNOSTIC_DAILY_LIMIT,
   type PerformanceDiagnosticInput,
   writePerformanceDiagnostic,
+  writeSampledPerformanceDiagnostic,
 } from "@/lib/edge/performance-diagnostics";
 import type { Env } from "@/lib/edge/types";
 
@@ -109,6 +111,39 @@ describe("performance diagnostic sink", () => {
 
   it("does not affect the request when the dataset is unbound", () => {
     expect(writePerformanceDiagnostic(env(), baseInput)).toBe(false);
+  });
+
+  it("samples before writing and fails closed when the sampler is unbound", async () => {
+    const writeDataPoint = vi.fn<AnalyticsWriter>();
+    const take = vi.fn().mockResolvedValue({ accepted: true });
+    const getByName = vi.fn<(name: string) => { take: typeof take }>(() => ({
+      take,
+    }));
+    const sampledEnv = {
+      DIAGNOSTICS_SAMPLER: { getByName },
+      QUERY_DIAGNOSTICS: { writeDataPoint },
+    } as unknown as Env;
+
+    await expect(
+      writeSampledPerformanceDiagnostic(sampledEnv, {
+        ...baseInput,
+        route: "/api/private/v2/journeys?siteId=secret-site",
+        fingerprint: "SELECT * FROM visits WHERE site_id = 'private-site'",
+      }),
+    ).resolves.toBe(true);
+    expect(take).toHaveBeenCalledWith(DEFAULT_DIAGNOSTIC_DAILY_LIMIT);
+    expect(getByName.mock.calls[0]?.[0]).not.toContain("secret-site");
+    expect(getByName.mock.calls[0]?.[0]).not.toContain("SELECT");
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    await expect(
+      writeSampledPerformanceDiagnostic(env(), baseInput),
+    ).resolves.toBe(false);
+
+    take.mockRejectedValueOnce(new Error("sampler unavailable"));
+    await expect(
+      writeSampledPerformanceDiagnostic(sampledEnv, baseInput),
+    ).resolves.toBe(false);
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
   });
 
   it("does not affect the request when writing fails and logs only a short token", () => {

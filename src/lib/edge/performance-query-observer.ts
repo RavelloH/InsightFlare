@@ -1,6 +1,6 @@
 import {
   type PerformanceCacheState,
-  writePerformanceDiagnostic,
+  writeSampledPerformanceDiagnostic,
 } from "./performance-diagnostics";
 import type { Env } from "./types";
 
@@ -90,10 +90,10 @@ export function completePerformanceQueryObservation(
   env: Env,
   observer: PerformanceQueryObserver,
   input: CompletePerformanceQueryObservation,
-): boolean {
-  if (observer.completed) return false;
+): Promise<boolean> {
+  if (observer.completed) return Promise.resolve(false);
   observer.completed = true;
-  return writePerformanceDiagnostic(env, {
+  return writeSampledPerformanceDiagnostic(env, {
     cacheState: observer.cacheState,
     d1QueryCount: observer.d1QueryCount,
     d1RowsRead: observer.rowsReadAvailable ? observer.d1RowsRead : null,

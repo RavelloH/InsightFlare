@@ -9,7 +9,11 @@ import {
 } from "@/lib/edge/performance-query-observer";
 
 const writeDataPoint = vi.fn();
+const take = vi.fn();
 const env = {
+  DIAGNOSTICS_SAMPLER: {
+    getByName: vi.fn(() => ({ take })),
+  },
   QUERY_DIAGNOSTICS: { writeDataPoint },
 } as never;
 
@@ -55,7 +59,8 @@ describe("PerformanceQueryObserver", () => {
     });
   });
 
-  it("writes exactly one request-level observation", () => {
+  it("writes exactly one request-level observation", async () => {
+    take.mockResolvedValue({ accepted: true });
     const observer = createPerformanceQueryObserver(
       "/api/task-v2?account=secret",
       "SELECT * FROM sessions",
@@ -68,14 +73,14 @@ describe("PerformanceQueryObserver", () => {
       windowBucket: "30d",
     });
 
-    expect(emitted).toBe(true);
-    expect(
+    await expect(emitted).resolves.toBe(true);
+    await expect(
       completePerformanceQueryObservation(env, observer, {
         resultBucket: "1-25",
         statusCode: 200,
         windowBucket: "30d",
       }),
-    ).toBe(false);
+    ).resolves.toBe(false);
     expect(writeDataPoint).toHaveBeenCalledTimes(1);
     expect(writeDataPoint.mock.calls[0]?.[0].indexes).toEqual([
       "/api/task-v2",
