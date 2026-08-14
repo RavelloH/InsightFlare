@@ -188,37 +188,41 @@ describe("edge query dimensions low-level coverage", () => {
   it("builds page tab entries while skipping rows without session ids or pathnames", async () => {
     const { env } = createD1Env([
       [
+        {},
         {
-          visitorId: "visitor-a",
-          sessionId: "",
-          startedAt: baseMs,
-          pathname: "/anonymous",
-          title: "Anonymous",
-          hostname: "example.com",
+          cardType: "path",
+          value: "/first",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
         },
         {
-          visitorId: "visitor-b",
-          sessionId: "session-b",
-          startedAt: baseMs + 1,
-          pathname: "   ",
-          title: "Blank",
-          hostname: "example.com",
+          cardType: "path",
+          value: "/last",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
         },
         {
-          visitorId: "visitor-c",
-          sessionId: "session-c",
-          startedAt: baseMs + 3,
-          pathname: "/last",
-          title: "Last",
-          hostname: "example.com",
+          cardType: "path",
+          value: "/anonymous",
+          views: 1,
+          sessions: 0,
+          visitors: 1,
         },
         {
-          visitorId: "visitor-c",
-          sessionId: "session-c",
-          startedAt: baseMs + 2,
-          pathname: "/first",
-          title: "First",
-          hostname: "example.com",
+          cardType: "entry",
+          value: "/first",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
+        },
+        {
+          cardType: "exit",
+          value: "/last",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
         },
       ],
     ]);
@@ -243,37 +247,45 @@ describe("edge query dimensions low-level coverage", () => {
       [
         {},
         {
-          sessionId: "session-1",
-          browser: null,
-          os: "",
-          osVersion: "15",
-          deviceType: "mobile",
-          language: undefined,
-          screenWidth: Number.NaN,
-          screenHeight: 844,
+          cardType: "browser",
+          value: "Safari",
+          views: 1,
+          sessions: 1,
         },
         {
-          sessionId: "session-2",
-          browser: "Safari",
-          os: "iOS",
-          osVersion: "",
-          deviceType: "mobile",
-          language: "en-US",
-          screenWidth: 390.9,
-          screenHeight: 844.8,
+          cardType: "osVersion",
+          value: "15",
+          views: 1,
+          sessions: 1,
+        },
+        {
+          cardType: "osVersion",
+          value: "iOS",
+          views: 1,
+          sessions: 1,
+        },
+        {
+          cardType: "screenSize",
+          value: "390x844",
+          views: 1,
+          sessions: 1,
         },
       ],
       [
         {},
         {
-          sessionId: "session-1",
-          visitorId: "visitor-1",
-          country: null,
-          region: undefined,
-          city: "",
-          continent: "NA",
-          timezone: "America/Los_Angeles",
-          asOrganization: "Example ISP",
+          cardType: "continent",
+          value: "NA",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
+        },
+        {
+          cardType: "organization",
+          value: "Example ISP",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
         },
       ],
     ]);
@@ -295,8 +307,10 @@ describe("edge query dimensions low-level coverage", () => {
       continent: [{ value: "NA", label: "NA" }],
       organization: [{ value: "Example ISP", label: "Example ISP" }],
     });
-    expect(calls[0].bindings).toEqual(visitBindings());
-    expect(calls[1].bindings).toEqual(visitBindings());
+    expect(calls[0].bindings).toEqual([...visitBindings(), 10]);
+    expect(calls[1].bindings).toEqual([...visitBindings(), 10]);
+    expect(calls[0].sql).toContain("ranked_cards AS");
+    expect(calls[1].sql).toContain("ranked_cards AS");
   });
 });
 

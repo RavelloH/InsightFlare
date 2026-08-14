@@ -1279,11 +1279,14 @@ rollback = 旧 Worker version
   日志；不再在分页前对所有 group 做相关日志扫描。
 - Events summary 与 analytics context cards 已合并同窗口重复扫描，使用单次 filtered
   source 查询和按 card type 的 Top-N 排名。
+- Pages tabs、overview client dimensions 与 overview geo dimensions 已改为数据库侧
+  `GROUP BY + ROW_NUMBER + LIMIT`，Worker 不再接收整段窗口的 raw visits；entry/exit
+  通过同一 SQL 的 session ranking 计算。
 - 上述改动已通过真实 SQLite Scheduled Tasks 测试、Journey/Events 回归测试和 TypeScript
-  类型检查。
+  类型检查；Pages/dimensions 回归测试、TypeScript 与 lint 亦已通过。
 
 ### 后续阶段
 
-Pages/technology 的重复窗口扫描、历史数据兼容证明后的 canonical predicate、notification
+Technology 的重复窗口扫描、历史数据兼容证明后的 canonical predicate、notification
 invocation cache、visit UPSERT 差异 guard、索引候选和 rollup 仍按本计划后续门槛推进；未有
 `EXPLAIN QUERY PLAN` 与生产 Origin MISS 证据的改动不得提前扩大 schema。

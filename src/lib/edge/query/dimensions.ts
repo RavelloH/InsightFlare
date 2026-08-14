@@ -3,21 +3,16 @@ import type { Env } from "@/lib/edge/types";
 import type {
   ClientDimensionTabs,
   DashboardFilters,
-  DimensionAccumulator,
   DimensionRow,
-  GeoDimensionAccumulator,
   GeoDimensionTabs,
+  GeoTabRow,
   QueryWindow,
   ReferrerRow,
 } from "./core";
 import {
-  addDimensionValue,
-  addGeoDimensionValue,
   buildVisitFilterSql,
   buildVisitSourceCte,
   cityValueExpr,
-  finalizeDimensionBuckets,
-  finalizeGeoDimensionBuckets,
   geoTabLabel,
   queryD1All,
   regionValueExpr,
@@ -200,81 +195,133 @@ WITH
 ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
-    visitor_id AS visitorId,
-    session_id AS sessionId,
-    started_at AS startedAt,
-    pathname,
-    title,
-    hostname
+    visitor_id,
+    session_id,
+    started_at,
+    visit_id,
+    TRIM(COALESCE(pathname, '')) AS pathname,
+    TRIM(COALESCE(title, '')) AS title,
+    TRIM(COALESCE(hostname, '')) AS hostname
   FROM visit_source
   ${filter.clause}
+),
+ranked_session_visits AS (
+  SELECT
+    session_id,
+    visitor_id,
+    pathname,
+    ROW_NUMBER() OVER (
+      PARTITION BY session_id
+      ORDER BY started_at ASC, visit_id ASC
+    ) AS first_rank,
+    ROW_NUMBER() OVER (
+      PARTITION BY session_id
+      ORDER BY started_at DESC, visit_id DESC
+    ) AS latest_rank
+  FROM filtered_visits
+  WHERE session_id != '' AND pathname != ''
+),
+session_edges AS (
+  SELECT
+    session_id,
+    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
+    MAX(CASE WHEN first_rank = 1 THEN pathname END) AS entry,
+    MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exit
+  FROM ranked_session_visits
+  GROUP BY session_id
+),
+card_rows AS (
+  SELECT
+    'path' AS card_type,
+    pathname AS value,
+    COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM filtered_visits
+  WHERE pathname != ''
+  GROUP BY pathname
+  UNION ALL
+  SELECT
+    'title' AS card_type,
+    title AS value,
+    COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM filtered_visits
+  WHERE title != ''
+  GROUP BY title
+  UNION ALL
+  SELECT
+    'hostname' AS card_type,
+    hostname AS value,
+    COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM filtered_visits
+  WHERE hostname != ''
+  GROUP BY hostname
+  UNION ALL
+  SELECT
+    'entry' AS card_type,
+    entry AS value,
+    COUNT(*) AS views,
+    COUNT(*) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM session_edges
+  WHERE entry != ''
+  GROUP BY entry
+  UNION ALL
+  SELECT
+    'exit' AS card_type,
+    exit AS value,
+    COUNT(*) AS views,
+    COUNT(*) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM session_edges
+  WHERE exit != ''
+  GROUP BY exit
+),
+ranked_cards AS (
+  SELECT
+    card_type,
+    value,
+    views,
+    sessions,
+    visitors,
+    ROW_NUMBER() OVER (
+      PARTITION BY card_type
+      ORDER BY views DESC, sessions DESC, value ASC
+    ) AS card_rank
+  FROM card_rows
 )
-SELECT visitorId, sessionId, startedAt, pathname, title, hostname
-FROM filtered_visits
+SELECT card_type AS cardType, value, views, sessions, visitors
+FROM ranked_cards
+WHERE card_rank <= ?
+ORDER BY card_type ASC, card_rank ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
     ...filter.bindings,
+    limit,
   ]);
-
-  const path = new Map<string, DimensionAccumulator>();
-  const title = new Map<string, DimensionAccumulator>();
-  const hostname = new Map<string, DimensionAccumulator>();
-  const entryBySession = new Map<string, { at: number; value: string }>();
-  const exitBySession = new Map<string, { at: number; value: string }>();
-  const visitorBySession = new Map<string, string>();
-
+  const byCard = new Map<string, DimensionRow[]>();
   for (const row of rows) {
-    const sessionId = String(row.sessionId ?? "");
-    const visitorId = String(row.visitorId ?? "");
-    const startedAt = Number(row.startedAt ?? 0);
-    addDimensionValue(path, String(row.pathname ?? ""), sessionId, visitorId);
-    addDimensionValue(title, String(row.title ?? ""), sessionId, visitorId);
-    addDimensionValue(
-      hostname,
-      String(row.hostname ?? ""),
-      sessionId,
-      visitorId,
-    );
-    if (!sessionId) continue;
-    if (visitorId) visitorBySession.set(sessionId, visitorId);
-    const pathname = String(row.pathname ?? "").trim();
-    if (!pathname) continue;
-    const entry = entryBySession.get(sessionId);
-    if (!entry || startedAt < entry.at) {
-      entryBySession.set(sessionId, { at: startedAt, value: pathname });
-    }
-    const exit = exitBySession.get(sessionId);
-    if (!exit || startedAt >= exit.at) {
-      exitBySession.set(sessionId, { at: startedAt, value: pathname });
-    }
+    const card = String(row.cardType ?? "");
+    const values = byCard.get(card) ?? [];
+    values.push({
+      value: String(row.value ?? ""),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+      visitors: Number(row.visitors ?? 0),
+    });
+    byCard.set(card, values);
   }
-
-  const entry = new Map<string, DimensionAccumulator>();
-  const exit = new Map<string, DimensionAccumulator>();
-  for (const [sessionId, edge] of entryBySession.entries()) {
-    addDimensionValue(
-      entry,
-      edge.value,
-      sessionId,
-      visitorBySession.get(sessionId),
-    );
-  }
-  for (const [sessionId, edge] of exitBySession.entries()) {
-    addDimensionValue(
-      exit,
-      edge.value,
-      sessionId,
-      visitorBySession.get(sessionId),
-    );
-  }
-
   return {
-    path: finalizeDimensionBuckets(path, limit),
-    title: finalizeDimensionBuckets(title, limit),
-    hostname: finalizeDimensionBuckets(hostname, limit),
-    entry: finalizeDimensionBuckets(entry, limit),
-    exit: finalizeDimensionBuckets(exit, limit),
+    path: byCard.get("path") ?? [],
+    title: byCard.get("title") ?? [],
+    hostname: byCard.get("hostname") ?? [],
+    entry: byCard.get("entry") ?? [],
+    exit: byCard.get("exit") ?? [],
   };
 }
 
@@ -335,65 +382,78 @@ WITH
 ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
-    session_id AS sessionId,
-    browser,
-    os,
-    os_version AS osVersion,
-    device_type AS deviceType,
-    language,
-    screen_width AS screenWidth,
-    screen_height AS screenHeight
+    session_id,
+    TRIM(COALESCE(browser, '')) AS browser,
+    TRIM(CASE
+      WHEN TRIM(COALESCE(os, '')) != '' AND TRIM(COALESCE(os_version, '')) != ''
+        THEN TRIM(os) || ' ' || TRIM(os_version)
+      WHEN TRIM(COALESCE(os, '')) != '' THEN TRIM(os)
+      ELSE TRIM(COALESCE(os_version, ''))
+    END) AS osVersion,
+    TRIM(COALESCE(device_type, '')) AS deviceType,
+    TRIM(COALESCE(language, '')) AS language,
+    CASE
+      WHEN screen_width > 0 AND screen_height > 0
+        THEN CAST(screen_width AS INTEGER) || 'x' || CAST(screen_height AS INTEGER)
+      ELSE ''
+    END AS screenSize
   FROM visit_source
   ${filter.clause}
+),
+card_rows AS (
+  SELECT 'browser' AS card_type, browser AS value, COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions
+  FROM filtered_visits WHERE browser != '' GROUP BY browser
+  UNION ALL
+  SELECT 'osVersion', osVersion, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
+  FROM filtered_visits WHERE osVersion != '' GROUP BY osVersion
+  UNION ALL
+  SELECT 'deviceType', deviceType, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
+  FROM filtered_visits WHERE deviceType != '' GROUP BY deviceType
+  UNION ALL
+  SELECT 'language', language, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
+  FROM filtered_visits WHERE language != '' GROUP BY language
+  UNION ALL
+  SELECT 'screenSize', screenSize, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
+  FROM filtered_visits WHERE screenSize != '' GROUP BY screenSize
+),
+ranked_cards AS (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY card_type ORDER BY views DESC, sessions DESC, value ASC
+  ) AS card_rank
+  FROM card_rows
 )
-SELECT sessionId, browser, os, osVersion, deviceType, language, screenWidth, screenHeight
-FROM filtered_visits
+SELECT card_type AS cardType, value, views, sessions
+FROM ranked_cards
+WHERE card_rank <= ?
+ORDER BY card_type ASC, card_rank ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
     ...filter.bindings,
+    limit,
   ]);
-
-  const browser = new Map<string, DimensionAccumulator>();
-  const osVersion = new Map<string, DimensionAccumulator>();
-  const deviceType = new Map<string, DimensionAccumulator>();
-  const language = new Map<string, DimensionAccumulator>();
-  const screenSize = new Map<string, DimensionAccumulator>();
-
+  const byCard = new Map<string, DimensionRow[]>();
   for (const row of rows) {
-    const sessionId = String(row.sessionId ?? "");
-    addDimensionValue(browser, String(row.browser ?? ""), sessionId);
-    addDimensionValue(deviceType, String(row.deviceType ?? ""), sessionId);
-    addDimensionValue(language, String(row.language ?? ""), sessionId);
-    const os = String(row.os ?? "").trim();
-    const version = String(row.osVersion ?? "").trim();
-    addDimensionValue(
-      osVersion,
-      os && version ? `${os} ${version}` : os || version,
-      sessionId,
-    );
-    const width = Number(row.screenWidth ?? 0);
-    const height = Number(row.screenHeight ?? 0);
-    if (
-      Number.isFinite(width) &&
-      width > 0 &&
-      Number.isFinite(height) &&
-      height > 0
-    ) {
-      addDimensionValue(
-        screenSize,
-        `${Math.trunc(width)}x${Math.trunc(height)}`,
-        sessionId,
-      );
-    }
+    const values = byCard.get(String(row.cardType ?? "")) ?? [];
+    values.push({
+      value: String(row.value ?? ""),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+      visitors: 0,
+    });
+    byCard.set(String(row.cardType ?? ""), values);
   }
-
   return {
-    browser: finalizeDimensionBuckets(browser, limit),
-    osVersion: finalizeDimensionBuckets(osVersion, limit),
-    deviceType: finalizeDimensionBuckets(deviceType, limit),
-    language: finalizeDimensionBuckets(language, limit),
-    screenSize: finalizeDimensionBuckets(screenSize, limit),
+    browser: byCard.get("browser") ?? [],
+    osVersion: byCard.get("osVersion") ?? [],
+    deviceType: byCard.get("deviceType") ?? [],
+    language: byCard.get("language") ?? [],
+    screenSize: byCard.get("screenSize") ?? [],
   };
 }
 
@@ -410,80 +470,85 @@ WITH
 ${buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
-    session_id AS sessionId,
-    visitor_id AS visitorId,
-    country,
+    session_id,
+    visitor_id,
+    TRIM(COALESCE(country, '')) AS country,
     ${regionValueExpr()} AS region,
     ${cityValueExpr()} AS city,
-    continent,
-    timezone,
-    as_organization AS asOrganization
+    TRIM(COALESCE(continent, '')) AS continent,
+    TRIM(COALESCE(timezone, '')) AS timezone,
+    TRIM(COALESCE(as_organization, '')) AS organization
   FROM visit_source
   ${filter.clause}
+),
+card_rows AS (
+  SELECT 'country' AS card_type, country AS value, COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM filtered_visits WHERE country != '' GROUP BY country
+  UNION ALL
+  SELECT 'region', region, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE region != '' GROUP BY region
+  UNION ALL
+  SELECT 'city', city, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE city != '' GROUP BY city
+  UNION ALL
+  SELECT 'continent', continent, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE continent != '' GROUP BY continent
+  UNION ALL
+  SELECT 'timezone', timezone, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE timezone != '' GROUP BY timezone
+  UNION ALL
+  SELECT 'organization', organization, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE organization != '' GROUP BY organization
+),
+ranked_cards AS (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY card_type
+    ORDER BY views DESC, sessions DESC, visitors DESC, value ASC
+  ) AS card_rank
+  FROM card_rows
 )
-SELECT sessionId, visitorId, country, region, city, continent, timezone, asOrganization
-FROM filtered_visits
+SELECT card_type AS cardType, value, views, sessions, visitors
+FROM ranked_cards
+WHERE card_rank <= ?
+ORDER BY card_type ASC, card_rank ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
     ...filter.bindings,
+    limit,
   ]);
-
-  const country = new Map<string, GeoDimensionAccumulator>();
-  const region = new Map<string, GeoDimensionAccumulator>();
-  const city = new Map<string, GeoDimensionAccumulator>();
-  const continent = new Map<string, GeoDimensionAccumulator>();
-  const timezone = new Map<string, GeoDimensionAccumulator>();
-  const organization = new Map<string, GeoDimensionAccumulator>();
-
+  const byCard = new Map<string, GeoTabRow[]>();
   for (const row of rows) {
-    const sessionId = String(row.sessionId ?? "");
-    const visitorId = String(row.visitorId ?? "");
-    addGeoDimensionValue(
-      country,
-      String(row.country ?? ""),
-      sessionId,
-      visitorId,
-    );
-    addGeoDimensionValue(
-      region,
-      String(row.region ?? ""),
-      sessionId,
-      visitorId,
-    );
-    addGeoDimensionValue(city, String(row.city ?? ""), sessionId, visitorId);
-    addGeoDimensionValue(
-      continent,
-      String(row.continent ?? ""),
-      sessionId,
-      visitorId,
-    );
-    addGeoDimensionValue(
-      timezone,
-      String(row.timezone ?? ""),
-      sessionId,
-      visitorId,
-    );
-    addGeoDimensionValue(
-      organization,
-      String(row.asOrganization ?? ""),
-      sessionId,
-      visitorId,
-    );
+    const card = String(row.cardType ?? "");
+    const value = String(row.value ?? "");
+    const values = byCard.get(card) ?? [];
+    values.push({
+      value,
+      label: geoTabLabel(value, card as Parameters<typeof geoTabLabel>[1]),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+      visitors: Number(row.visitors ?? 0),
+    });
+    byCard.set(card, values);
   }
-
   return {
-    country: finalizeGeoDimensionBuckets(country, limit, (value) =>
-      geoTabLabel(value, "country"),
-    ),
-    region: finalizeGeoDimensionBuckets(region, limit, (value) =>
-      geoTabLabel(value, "region"),
-    ),
-    city: finalizeGeoDimensionBuckets(city, limit, (value) =>
-      geoTabLabel(value, "city"),
-    ),
-    continent: finalizeGeoDimensionBuckets(continent, limit),
-    timezone: finalizeGeoDimensionBuckets(timezone, limit),
-    organization: finalizeGeoDimensionBuckets(organization, limit),
+    country: byCard.get("country") ?? [],
+    region: byCard.get("region") ?? [],
+    city: byCard.get("city") ?? [],
+    continent: byCard.get("continent") ?? [],
+    timezone: byCard.get("timezone") ?? [],
+    organization: byCard.get("organization") ?? [],
   };
 }

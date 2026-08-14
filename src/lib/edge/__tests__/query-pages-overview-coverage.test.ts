@@ -367,28 +367,60 @@ describe("edge pages handlers", () => {
       [{ pathname: "/home", queryValue: "x=1", hashValue: "", views: 7 }],
       [
         {
-          visitorId: "visitor-1",
-          sessionId: "session-1",
-          startedAt: window.fromMs,
-          pathname: "/home",
-          title: "Home",
-          hostname: "example.com",
+          cardType: "path",
+          value: "/home",
+          views: 2,
+          sessions: 2,
+          visitors: 2,
         },
         {
-          visitorId: "visitor-1",
-          sessionId: "session-1",
-          startedAt: window.fromMs + 1,
-          pathname: "/pricing",
-          title: "Pricing",
-          hostname: "example.com",
+          cardType: "path",
+          value: "/pricing",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
         },
         {
-          visitorId: "visitor-2",
-          sessionId: "session-2",
-          startedAt: window.fromMs + 2,
-          pathname: "/home",
-          title: "Home",
-          hostname: "example.com",
+          cardType: "title",
+          value: "Home",
+          views: 2,
+          sessions: 2,
+          visitors: 2,
+        },
+        {
+          cardType: "title",
+          value: "Pricing",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
+        },
+        {
+          cardType: "hostname",
+          value: "example.com",
+          views: 3,
+          sessions: 2,
+          visitors: 2,
+        },
+        {
+          cardType: "entry",
+          value: "/home",
+          views: 2,
+          sessions: 2,
+          visitors: 2,
+        },
+        {
+          cardType: "exit",
+          value: "/home",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
+        },
+        {
+          cardType: "exit",
+          value: "/pricing",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
         },
       ],
     ]);
@@ -438,7 +470,8 @@ describe("edge pages handlers", () => {
     });
     expect(calls).toHaveLength(2);
     expect(calls[0].bindings).toEqual([...visitBindings(), "us", 5]);
-    expect(calls[1].bindings).toEqual([...visitBindings(), "us"]);
+    expect(calls[1].bindings).toEqual([...visitBindings(), "us", 5]);
+    expect(calls[1].sql).toContain("ranked_cards AS");
   });
 
   it("maps referrer handler rows with full URL mode and filters", async () => {
@@ -1085,12 +1118,11 @@ describe("edge overview D1 queries and handlers", () => {
       ],
       [
         {
-          visitorId: "visitor-1",
-          sessionId: "session-1",
-          startedAt: window.fromMs,
-          pathname: "/home",
-          title: "Home",
-          hostname: "example.com",
+          cardType: "path",
+          value: "/home",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
         },
       ],
       [
@@ -1103,38 +1135,42 @@ describe("edge overview D1 queries and handlers", () => {
       ],
       [
         {
-          sessionId: "session-1",
-          browser: "Chrome",
-          os: "macOS",
-          osVersion: "14",
-          deviceType: "desktop",
-          language: "en-US",
-          screenWidth: 390,
-          screenHeight: 844,
+          cardType: "screenSize",
+          value: "390x844",
+          views: 1,
+          sessions: 1,
         },
       ],
       [
         {
-          sessionId: "session-1",
-          visitorId: "visitor-1",
-          country: "US",
-          region: "US::CA::California",
-          city: "US::CA::California::San Francisco",
-          continent: "NA",
-          timezone: "America/Los_Angeles",
-          asOrganization: "Example ISP",
+          cardType: "country",
+          value: "US",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
+        },
+        {
+          cardType: "region",
+          value: "US::CA::California",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
+        },
+        {
+          cardType: "city",
+          value: "US::CA::California::San Francisco",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
         },
       ],
       [
         {
-          sessionId: "session-1",
-          visitorId: "visitor-1",
-          country: "US",
-          region: "US::CA::California",
-          city: "US::CA::California::San Francisco",
-          continent: "NA",
-          timezone: "America/Los_Angeles",
-          asOrganization: "Example ISP",
+          cardType: "organization",
+          value: "Example ISP",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
         },
       ],
     ]);
@@ -1245,11 +1281,11 @@ describe("edge overview D1 queries and handlers", () => {
     });
     expect(calls.map((call) => call.bindings)).toEqual([
       [...visitBindings(), "Chrome", 4],
-      visitBindings(),
       [...visitBindings(), 4],
-      visitBindings(),
-      visitBindings(),
-      visitBindings(),
+      [...visitBindings(), 4],
+      [...visitBindings(), 4],
+      [...visitBindings(), 4],
+      [...visitBindings(), 4],
     ]);
   });
 
