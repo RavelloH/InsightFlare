@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
 import {
   BROWSER_VERSION_UNKNOWN_TOKEN,
+  clientDimensionDefinition,
   SHARE_TREND_OTHER_LABEL,
   SHARE_TREND_OTHER_TOKEN,
 } from "@/lib/edge/query/core";
@@ -14,6 +15,7 @@ import {
   queryBrowserVersionBreakdownFromD1,
   queryShareTrendFromD1,
 } from "@/lib/edge/query/technology";
+import { queryCrossDimensionFromD1 } from "@/lib/edge/query/technology/client-cross";
 import type { Env } from "@/lib/edge/types";
 
 type D1Row = Record<string, unknown>;
@@ -336,6 +338,178 @@ describe("edge query technology D1 mapping", () => {
       expect(
         plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
       ).toBe(true);
+      expect(
+        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+      ).toHaveLength(1);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("executes the consolidated client cross SQL against a SQLite fixture", async () => {
+    const { env, d1 } = createSqliteTrendEnv();
+    const window = queryWindow();
+    const insert = d1.database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, started_at, browser, device_type
+      ) VALUES (?, 'site-1', ?, ?, ?, ?, ?)
+    `);
+    const at = (minute: number) => Date.UTC(2026, 0, 1, 0, minute);
+
+    insert.run(
+      "chrome-desktop-1",
+      "chrome-1",
+      "session-1",
+      at(15),
+      "Chrome",
+      "desktop",
+    );
+    insert.run(
+      "chrome-desktop-2",
+      "chrome-2",
+      "session-2",
+      at(20),
+      "Chrome",
+      "desktop",
+    );
+    insert.run(
+      "chrome-mobile",
+      "chrome-3",
+      "session-3",
+      at(25),
+      "Chrome",
+      "mobile",
+    );
+    insert.run("edge-desktop", "edge", "session-4", at(30), "Edge", "desktop");
+    insert.run(
+      "safari-mobile",
+      "safari",
+      "session-5",
+      at(35),
+      "Safari",
+      "mobile",
+    );
+    insert.run(
+      "outside-window",
+      "outside",
+      "session-6",
+      at(5),
+      "Chrome",
+      "desktop",
+    );
+
+    try {
+      await expect(
+        queryCrossDimensionFromD1(
+          env,
+          "site-1",
+          window,
+          {},
+          2,
+          1,
+          clientDimensionDefinition("browser"),
+          clientDimensionDefinition("deviceType"),
+        ),
+      ).resolves.toEqual({
+        columns: [
+          {
+            key: "desktop",
+            label: "desktop",
+            views: 3,
+            visitors: 3,
+            sessions: 3,
+          },
+          {
+            key: "other",
+            label: SHARE_TREND_OTHER_LABEL,
+            views: 2,
+            visitors: 2,
+            sessions: 2,
+            isOther: true,
+          },
+        ],
+        rows: [
+          {
+            key: "chrome",
+            label: "Chrome",
+            views: 3,
+            visitors: 3,
+            sessions: 3,
+            cells: [
+              {
+                key: "desktop",
+                label: "desktop",
+                views: 2,
+                visitors: 2,
+                sessions: 2,
+              },
+              {
+                key: "other",
+                label: SHARE_TREND_OTHER_LABEL,
+                views: 1,
+                visitors: 1,
+                sessions: 1,
+                isOther: true,
+              },
+            ],
+          },
+          {
+            key: "edge",
+            label: "Edge",
+            views: 1,
+            visitors: 1,
+            sessions: 1,
+            cells: [
+              {
+                key: "desktop",
+                label: "desktop",
+                views: 1,
+                visitors: 1,
+                sessions: 1,
+              },
+              {
+                key: "other",
+                label: SHARE_TREND_OTHER_LABEL,
+                views: 0,
+                visitors: 0,
+                sessions: 0,
+                isOther: true,
+              },
+            ],
+          },
+          {
+            key: "other",
+            label: SHARE_TREND_OTHER_LABEL,
+            views: 1,
+            visitors: 1,
+            sessions: 1,
+            isOther: true,
+            cells: [
+              {
+                key: "desktop",
+                label: "desktop",
+                views: 0,
+                visitors: 0,
+                sessions: 0,
+              },
+              {
+                key: "other",
+                label: SHARE_TREND_OTHER_LABEL,
+                views: 1,
+                visitors: 1,
+                sessions: 1,
+                isOther: true,
+              },
+            ],
+          },
+        ],
+        totalVisitors: 5,
+      });
+
+      expect(d1.calls).toHaveLength(1);
+      const plan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)
+        .all(...d1.calls[0].bindings) as Array<{ detail: string }>;
       expect(
         plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
       ).toHaveLength(1);

@@ -1305,6 +1305,12 @@ rollback = 旧 Worker version
   SQLite 将 CTE 展开为重复 visits 扫描。真实 SQLite fixture 覆盖跨 bucket 标签变更、Other、
   filters 和空 visitor；`EXPLAIN QUERY PLAN` 确认通过 `idx_visits_site_started_at` 的 visits
   索引入口仅一次。仍须以生产 Origin MISS 的 D1 Insights 验证实际 rows-read 下降。
+- Client cross-dimension breakdown 已将 dependent 的 primary Top-N、secondary Top-N 与
+  pair matrix 从三条 D1 查询合并为一条 tagged SQL，并 materialize 共享筛选源。Top-N
+  排序、Other/Unknown bucket、空结果和 response 结构不变；真实 SQLite fixture 覆盖
+  primary/secondary limit、Other bucket 与窗口边界，`EXPLAIN QUERY PLAN` 确认从
+  `idx_visits_site_started_at` 进入 visits 一次。仍须通过生产 Origin MISS 的 D1 Insights
+  验证 rows-read 与 duration 降幅。
 - Performance dashboard 已将 summaries、五项 metric trends、routes 与 countries 合并为
   一条 tagged D1 SQL；共享 `filtered_visits` 和 metric-unpivot source 均显式
   `MATERIALIZED`。原先同一个请求的四次 visits 窗口扫描现在为一次；独立 helper 在需要
@@ -1325,12 +1331,12 @@ rollback = 旧 Worker version
   类型检查；Pages/dimensions 与 technology 回归测试、TypeScript 与 lint 亦已通过。
 - Notification cache 已补充同窗口跨 metric 复用、站点/窗口隔离、报告复用、previous/
   cumulative/last-seen 复用、邮件配置单次读取和 rejected-entry 清理测试。当前完整检查为
-  196 个测试文件、2712 个测试通过；Statements 95.95%、Branches 88.01%、Functions
+  196 个测试文件、2713 个测试通过；Statements 95.94%、Branches 88.00%、Functions
   98.10%、Lines 97.39%。生产 Origin MISS 的实际下降仍需部署后按 Phase 0 指标验收。
 
 ### 后续阶段
 
-Technology 其他 cross/trend 路径的重复窗口扫描、历史数据兼容证明后的 canonical
-predicate、索引候选和 rollup
+Browser cross breakdown 与 Technology 其他 cross/trend 路径的重复窗口扫描、历史数据兼容
+证明后的 canonical predicate、索引候选和 rollup
 仍按本计划后续门槛推进；未有
 `EXPLAIN QUERY PLAN` 与生产 Origin MISS 证据的改动不得提前扩大 schema。

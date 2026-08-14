@@ -40,35 +40,140 @@ export async function queryCrossDimensionFromD1(
   const primaryExpr = primaryDimension.labelExpr;
   const normalizedSecondaryExpr = `CASE WHEN ${secondaryDimension.labelExpr} != '' THEN ${secondaryDimension.labelExpr} ELSE '${CLIENT_CROSS_UNKNOWN_TOKEN}' END`;
 
-  const topPrimarySql = `
+  const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
+filtered_visits AS MATERIALIZED (
   SELECT
     ${primaryExpr} AS primaryValue,
+    ${normalizedSecondaryExpr} AS secondaryValue,
     visitor_id AS visitorId,
     session_id AS sessionId
   FROM visit_source
   ${filter.clause}
+),
+top_primary_aggregate AS (
+  SELECT
+    primaryValue,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM filtered_visits
+  WHERE primaryValue != ''
+  GROUP BY primaryValue
+),
+top_primary_rows AS (
+  SELECT
+    primaryValue,
+    views,
+    visitors,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY visitors DESC, views DESC, sessions DESC, primaryValue ASC
+    ) AS rowOrder
+  FROM top_primary_aggregate
+  ORDER BY visitors DESC, views DESC, sessions DESC, primaryValue ASC
+  LIMIT ?
+),
+top_secondary_aggregate AS (
+  SELECT
+    secondaryValue,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM filtered_visits
+  WHERE primaryValue != ''
+  GROUP BY secondaryValue
+),
+top_secondary_rows AS (
+  SELECT
+    secondaryValue,
+    views,
+    visitors,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY visitors DESC, views DESC, sessions DESC, secondaryValue ASC
+    ) AS rowOrder
+  FROM top_secondary_aggregate
+  ORDER BY visitors DESC, views DESC, sessions DESC, secondaryValue ASC
+  LIMIT ?
+),
+normalized_visits AS (
+  SELECT
+    CASE
+      WHEN primaryValue IN (
+        SELECT primaryValue
+        FROM top_primary_rows
+        WHERE primaryValue != '' AND visitors > 0
+      ) THEN primaryValue
+      ELSE '${CLIENT_CROSS_OTHER_PRIMARY_TOKEN}'
+    END AS primaryBucket,
+    CASE
+      WHEN secondaryValue IN (
+        SELECT secondaryValue
+        FROM top_secondary_rows
+        WHERE visitors > 0
+      ) THEN secondaryValue
+      ELSE '${CLIENT_CROSS_OTHER_SECONDARY_TOKEN}'
+    END AS secondaryBucket,
+    visitorId,
+    sessionId
+  FROM filtered_visits
+  WHERE primaryValue != ''
+),
+pair_rows AS (
+  SELECT
+    primaryBucket AS primaryValue,
+    secondaryBucket AS secondaryValue,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM normalized_visits
+  GROUP BY primaryBucket, secondaryBucket
+),
+tagged_rows AS (
+  SELECT
+    'primary' AS rowType,
+    primaryValue,
+    NULL AS secondaryValue,
+    views,
+    visitors,
+    sessions,
+    rowOrder
+  FROM top_primary_rows
+  UNION ALL
+  SELECT
+    'secondary' AS rowType,
+    NULL AS primaryValue,
+    secondaryValue,
+    views,
+    visitors,
+    sessions,
+    rowOrder
+  FROM top_secondary_rows
+  UNION ALL
+  SELECT
+    'pair' AS rowType,
+    primaryValue,
+    secondaryValue,
+    views,
+    visitors,
+    sessions,
+    0 AS rowOrder
+  FROM pair_rows
 )
-SELECT
-  primaryValue,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM filtered_visits
-WHERE primaryValue != ''
-GROUP BY primaryValue
-ORDER BY visitors DESC, views DESC, sessions DESC, primaryValue ASC
-LIMIT ?
+SELECT rowType, primaryValue, secondaryValue, views, visitors, sessions
+FROM tagged_rows
+ORDER BY rowType ASC, rowOrder ASC, primaryValue ASC, secondaryValue ASC
 `;
-  const topPrimaryRows = (
-    await queryD1All<Record<string, unknown>>(env, topPrimarySql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      normalizedPrimaryLimit,
-    ])
-  )
+  const queryRows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...filter.bindings,
+    normalizedPrimaryLimit,
+    normalizedSecondaryLimit,
+  ]);
+  const topPrimaryRows = queryRows
+    .filter((row) => row.rowType === "primary")
     .map((row) => ({
       value: String(row.primaryValue ?? "").trim(),
       views: Number(row.views ?? 0),
@@ -85,36 +190,8 @@ LIMIT ?
     };
   }
 
-  const topSecondarySql = `
-WITH
-${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT
-    ${primaryExpr} AS primaryValue,
-    ${normalizedSecondaryExpr} AS secondaryValue,
-    visitor_id AS visitorId,
-    session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
-)
-SELECT
-  secondaryValue,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM filtered_visits
-WHERE primaryValue != ''
-GROUP BY secondaryValue
-ORDER BY visitors DESC, views DESC, sessions DESC, secondaryValue ASC
-LIMIT ?
-`;
-  const topSecondaryRows = (
-    await queryD1All<Record<string, unknown>>(env, topSecondarySql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      normalizedSecondaryLimit,
-    ])
-  )
+  const topSecondaryRows = queryRows
+    .filter((row) => row.rowType === "secondary")
     .map((row) => ({
       value:
         String(row.secondaryValue ?? "").trim() || CLIENT_CROSS_UNKNOWN_TOKEN,
@@ -132,55 +209,8 @@ LIMIT ?
     };
   }
 
-  const topPrimaryLabels = topPrimaryRows.map((row) => row.value);
-  const topSecondaryLabels = topSecondaryRows.map((row) => row.value);
-  const topPrimaryPlaceholders = topPrimaryLabels.map(() => "?").join(", ");
-  const topSecondaryPlaceholders = topSecondaryLabels.map(() => "?").join(", ");
-  const pairsSql = `
-WITH
-${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT
-    ${primaryExpr} AS primaryValue,
-    ${normalizedSecondaryExpr} AS secondaryValue,
-    visitor_id AS visitorId,
-    session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
-),
-normalized_visits AS (
-  SELECT
-    CASE
-      WHEN primaryValue IN (${topPrimaryPlaceholders}) THEN primaryValue
-      ELSE '${CLIENT_CROSS_OTHER_PRIMARY_TOKEN}'
-    END AS primaryBucket,
-    CASE
-      WHEN secondaryValue IN (${topSecondaryPlaceholders}) THEN secondaryValue
-      ELSE '${CLIENT_CROSS_OTHER_SECONDARY_TOKEN}'
-    END AS secondaryBucket,
-    visitorId,
-    sessionId
-  FROM filtered_visits
-  WHERE primaryValue != ''
-)
-SELECT
-  primaryBucket AS primaryValue,
-  secondaryBucket AS secondaryValue,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-FROM normalized_visits
-GROUP BY primaryBucket, secondaryBucket
-ORDER BY primaryValue ASC, secondaryValue ASC
-`;
-  const pairRows = (
-    await queryD1All<Record<string, unknown>>(env, pairsSql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
-      ...topPrimaryLabels,
-      ...topSecondaryLabels,
-    ])
-  )
+  const pairRows = queryRows
+    .filter((row) => row.rowType === "pair")
     .map(
       (row) =>
         ({

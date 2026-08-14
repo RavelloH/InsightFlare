@@ -65,11 +65,28 @@ function createD1Env(resultSets: D1Row[][]): {
           ...resultSets[2].map((row) => withRowType(row, "bucket")),
         ]
       : [];
+  const taggedClientCrossResults =
+    resultSets.length >= 2
+      ? [
+          ...resultSets[0].map((row) => withRowType(row, "primary")),
+          ...resultSets[1].map((row) => withRowType(row, "secondary")),
+          ...(resultSets[2] ?? []).map((row) => withRowType(row, "pair")),
+        ]
+      : [];
   let taggedShareResultsConsumed = false;
+  let taggedClientCrossResultsConsumed = false;
   const prepare = vi.fn((sql: string) => ({
     bind: vi.fn((...bindings: Array<string | number | null>) => ({
       all: vi.fn(async () => {
         calls.push({ sql, bindings });
+        if (
+          sql.includes("top_primary_rows") &&
+          sql.includes("tagged_rows") &&
+          !taggedClientCrossResultsConsumed
+        ) {
+          taggedClientCrossResultsConsumed = true;
+          return { results: taggedClientCrossResults };
+        }
         if (sql.includes("tagged_rows") && !taggedShareResultsConsumed) {
           taggedShareResultsConsumed = true;
           return { results: taggedShareResults };
@@ -729,7 +746,7 @@ describe("edge technology query coverage", () => {
     ).resolves.toEqual({ columns: [], rows: [], totalVisitors: 0 });
 
     expect(noPrimary.calls).toHaveLength(1);
-    expect(noSecondary.calls).toHaveLength(2);
+    expect(noSecondary.calls).toHaveLength(1);
   });
 
   it("filters invalid client cross pair rows and drops zero-visitor fallback rows", async () => {
