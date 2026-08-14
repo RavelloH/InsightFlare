@@ -127,6 +127,21 @@ describe("performance foundation admin handler", () => {
     expect(malformed.prepare).not.toHaveBeenCalled();
   });
 
+  it("rejects invalid JSON bodies before touching the control store", async () => {
+    const malformed = env([]);
+    const response = await handlePerformanceFoundationAdmin(
+      new Request("https://app.test/api/private/admin/performance-foundation", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: "{",
+      }),
+      malformed.env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(malformed.prepare).not.toHaveBeenCalled();
+  });
+
   it("uses a conditional revision update and reports stale CAS writes", async () => {
     const update = statement({ changes: 0 });
     const { env: testEnv, prepare } = env([update]);

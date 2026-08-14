@@ -95,6 +95,11 @@ describe("Dashboard Client Data Processing Utilities", () => {
       });
     });
 
+    it("should use an empty label when both label and value are blank", () => {
+      const result = normalizeOverviewRows([{ label: "   " }]);
+      expect(result[0].label).toBe("");
+    });
+
     it("should handle missing fields and string values gracefully by fallback to zero", () => {
       const input = [{ label: "Opera", views: "50", sessions: undefined }];
       const result = normalizeOverviewRows(input);

@@ -19,6 +19,12 @@ describe("notification preferences", () => {
     expect(isNotificationChannelEnabled(preferences, "inApp")).toBe(true);
   });
 
+  it("normalizes JSON null to safe defaults", () => {
+    expect(normalizeNotificationPreferences("null")).toEqual(
+      normalizeNotificationPreferences(undefined),
+    );
+  });
+
   it("honors email opt-out without allowing in-app opt-out", () => {
     const preferences = normalizeNotificationPreferences({
       inApp: false,
