@@ -18,9 +18,17 @@ PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_
 name = "INGEST_DO"
 class_name = "IngestDurableObject"
 
+[[durable_objects.bindings]]
+name = "DIAGNOSTICS_SAMPLER"
+class_name = "DiagnosticsSampler"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["IngestDurableObject"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DiagnosticsSampler"]
 
 [[d1_databases]]
 binding = "DB"

@@ -173,9 +173,17 @@ SCRIPT_CACHE_TTL_SECONDS = "600"
 name = "INGEST_DO"
 class_name = "IngestDurableObject"
 
+[[durable_objects.bindings]]
+name = "DIAGNOSTICS_SAMPLER"
+class_name = "DiagnosticsSampler"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["IngestDurableObject"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DiagnosticsSampler"]
 
 [[d1_databases]]
 binding = "DB"
@@ -198,6 +206,13 @@ dataset = "insightflare_e2e_bot_events"
 [[analytics_engine_datasets]]
 binding = "NORMAL_ANALYTICS"
 dataset = "insightflare_e2e_normal_events"
+
+[[analytics_engine_datasets]]
+binding = "QUERY_DIAGNOSTICS"
+dataset = "insightflare_e2e_query_diagnostics"
+
+[version_metadata]
+binding = "CF_VERSION_METADATA"
 `;
 }
 

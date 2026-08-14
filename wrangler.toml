@@ -22,9 +22,17 @@ invocation_logs = true
 name = "INGEST_DO"
 class_name = "IngestDurableObject"
 
+[[durable_objects.bindings]]
+name = "DIAGNOSTICS_SAMPLER"
+class_name = "DiagnosticsSampler"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["IngestDurableObject"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DiagnosticsSampler"]
 
 [[d1_databases]]
 binding = "DB"
@@ -76,9 +84,17 @@ crons = ["*/30 * * * *"]
 name = "INGEST_DO"
 class_name = "IngestDurableObject"
 
+[[env.ravelloh.durable_objects.bindings]]
+name = "DIAGNOSTICS_SAMPLER"
+class_name = "DiagnosticsSampler"
+
 [[env.ravelloh.migrations]]
 tag = "v1"
 new_sqlite_classes = ["IngestDurableObject"]
+
+[[env.ravelloh.migrations]]
+tag = "v2"
+new_sqlite_classes = ["DiagnosticsSampler"]
 
 [[env.ravelloh.d1_databases]]
 binding = "DB"

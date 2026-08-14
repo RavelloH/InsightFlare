@@ -1,5 +1,6 @@
 import handler from "@tanstack/react-start/server-entry";
 
+import { DiagnosticsSampler as BaseDiagnosticsSampler } from "@/lib/edge/diagnostics-sampler";
 import { runHourlyAggregation } from "@/lib/edge/hourly-rollup";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest-do";
 import { runPerformanceMaintenance } from "@/lib/edge/performance-maintenance";
@@ -25,6 +26,7 @@ declare module "@tanstack/react-router" {
 }
 
 export class IngestDurableObject extends BaseIngestDurableObject {}
+export class DiagnosticsSampler extends BaseDiagnosticsSampler {}
 
 function withPageHeaders(
   response: Response,

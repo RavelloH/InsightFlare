@@ -1,6 +1,7 @@
 export interface Env {
   DB: D1Database;
   INGEST_DO: DurableObjectNamespace;
+  DIAGNOSTICS_SAMPLER?: DurableObjectNamespace;
   BOT_ANALYTICS?: AnalyticsEngineDataset;
   NORMAL_ANALYTICS?: AnalyticsEngineDataset;
   QUERY_DIAGNOSTICS?: AnalyticsEngineDataset;
