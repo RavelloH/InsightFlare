@@ -37,6 +37,26 @@ function request(
   return new Request(url, { headers });
 }
 
+function encodePayload(payload: unknown): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function withToken(
+  token: string,
+  mutate: (parts: string[]) => string[],
+  url?: string,
+): Request {
+  return request(url, {
+    [DIAGNOSTIC_CACHE_BYPASS_HEADER]: mutate(token.split(".")).join("."),
+  });
+}
+
 describe("diagnostic cache bypass token", () => {
   it("keeps a rate reservation until its minute bucket expires after a nonce alarm", async () => {
     const values = new Map<string, unknown>();
@@ -247,5 +267,216 @@ describe("diagnostic cache bypass token", () => {
       }),
     ).resolves.toBeNull();
     expect(reserveCacheBypass).toHaveBeenCalledWith("admin-1", nowMs);
+  });
+
+  it("fails closed for missing configuration, malformed token framing, and signatures", async () => {
+    const { env } = createEnv();
+    const token = await issueDiagnosticCacheBypassToken({
+      actorId: "admin-1",
+      env,
+      nowMs,
+      request: request(),
+    });
+    expect(token).toBeTruthy();
+
+    await expect(
+      verifyDiagnosticCacheBypass({
+        actorId: undefined,
+        env,
+        nowMs,
+        request: request(),
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      verifyDiagnosticCacheBypass({
+        actorId: "admin-1",
+        env,
+        nowMs,
+        request: request(),
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      verifyDiagnosticCacheBypass({
+        actorId: "admin-1",
+        env,
+        nowMs,
+        request: request(undefined, {
+          [DIAGNOSTIC_CACHE_BYPASS_HEADER]: "x".repeat(769),
+        }),
+      }),
+    ).resolves.toBe(false);
+
+    for (const malformed of [
+      "v2.payload.signature",
+      "v1.payload",
+      "v1.payload.signature.extra",
+      "v1.!invalid.signature",
+    ]) {
+      await expect(
+        verifyDiagnosticCacheBypass({
+          actorId: "admin-1",
+          env,
+          nowMs,
+          request: request(undefined, {
+            [DIAGNOSTIC_CACHE_BYPASS_HEADER]: malformed,
+          }),
+        }),
+      ).resolves.toBe(false);
+    }
+
+    const badSignature = withToken(token!, (parts) => {
+      parts[2] = `${parts[2]!.slice(0, -1)}${parts[2]!.endsWith("A") ? "B" : "A"}`;
+      return parts;
+    });
+    await expect(
+      verifyDiagnosticCacheBypass({
+        actorId: "admin-1",
+        env,
+        nowMs,
+        request: badSignature,
+      }),
+    ).resolves.toBe(false);
+
+    const invalidSignatureEncoding = withToken(token!, (parts) => {
+      parts[2] = "!";
+      return parts;
+    });
+    await expect(
+      verifyDiagnosticCacheBypass({
+        actorId: "admin-1",
+        env,
+        nowMs,
+        request: invalidSignatureEncoding,
+      }),
+    ).resolves.toBe(false);
+
+    await expect(
+      issueDiagnosticCacheBypassToken({
+        actorId: "admin-1",
+        env: { DIAGNOSTICS_SAMPLER: undefined } as unknown as Env,
+        nowMs,
+        request: request(),
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      issueDiagnosticCacheBypassToken({
+        actorId: "   ",
+        env,
+        nowMs,
+        request: request(),
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      issueDiagnosticCacheBypassToken({
+        actorId: "admin-1",
+        env: { DIAGNOSTICS_SAMPLER: env.DIAGNOSTICS_SAMPLER } as Env,
+        nowMs,
+        request: request(),
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("rejects payloads that do not satisfy the signed request schema", async () => {
+    const { env } = createEnv();
+    const payloads = [
+      null,
+      "not-an-object",
+      {},
+      {
+        actorId: "admin-1",
+        audience: "wrong-audience",
+        requestPath: "/api/private/v2/journeys/visitors",
+        nonce: "n".repeat(16),
+        expiresAtMs: nowMs + 1_000,
+      },
+      {
+        actorId: "admin-1",
+        audience: "diagnostics-cache-bypass",
+        requestPath: "relative",
+        nonce: "n".repeat(16),
+        expiresAtMs: nowMs + 1_000,
+      },
+      {
+        actorId: "admin-1",
+        audience: "diagnostics-cache-bypass",
+        requestPath: "/api/private/v2/journeys/visitors",
+        nonce: "short",
+        expiresAtMs: nowMs + 1_000,
+      },
+      {
+        actorId: "admin-1",
+        audience: "diagnostics-cache-bypass",
+        requestPath: "/api/private/v2/journeys/visitors",
+        nonce: "n".repeat(16),
+        expiresAtMs: "not-a-number",
+      },
+      {
+        actorId: "admin-1",
+        audience: "diagnostics-cache-bypass",
+        requestPath: "/api/private/v2/journeys/visitors",
+        nonce: "n".repeat(16),
+        expiresAtMs: nowMs + 1_000,
+      },
+    ];
+    for (const payload of payloads) {
+      await expect(
+        verifyDiagnosticCacheBypass({
+          actorId: "admin-1",
+          env,
+          nowMs,
+          request: request(undefined, {
+            [DIAGNOSTIC_CACHE_BYPASS_HEADER]: `v1.${encodePayload(payload)}.signature`,
+          }),
+        }),
+      ).resolves.toBe(false);
+    }
+  });
+
+  it("canonicalizes duplicate and empty query parameters and bounds token TTL", async () => {
+    const { env, reserveCacheBypass } = createEnv();
+    vi.spyOn(Date, "now").mockReturnValue(nowMs);
+    const noQueryToken = await issueDiagnosticCacheBypassToken({
+      actorId: "admin-1",
+      env,
+      ttlMs: 100,
+      request: request("https://app.test/api/private/v2/journeys/visitors"),
+    });
+    expect(noQueryToken).toBeTruthy();
+    const duplicateQueryRequest = request(
+      "https://app.test/api/private/v2/journeys/visitors?b=2&a=z&a=a&a=z",
+    );
+    const duplicateToken = await issueDiagnosticCacheBypassToken({
+      actorId: "admin-1",
+      env,
+      nowMs,
+      ttlMs: 120_000,
+      request: duplicateQueryRequest,
+    });
+    expect(duplicateToken).toBeTruthy();
+    expect(reserveCacheBypass).toHaveBeenCalledTimes(2);
+
+    await expect(
+      verifyDiagnosticCacheBypass({
+        actorId: "admin-1",
+        env,
+        request: withToken(
+          duplicateToken!,
+          (parts) => parts,
+          duplicateQueryRequest.url,
+        ),
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      verifyDiagnosticCacheBypass({
+        actorId: "admin-1",
+        env,
+        nowMs: nowMs - 60_001,
+        request: withToken(
+          noQueryToken!,
+          (parts) => parts,
+          "https://app.test/api/private/v2/journeys/visitors",
+        ),
+      }),
+    ).resolves.toBe(false);
   });
 });
