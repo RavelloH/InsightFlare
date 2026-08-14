@@ -18,6 +18,7 @@ import {
   handleNotificationTestAdmin,
 } from "@/lib/edge/admin-notifications";
 import { handlePerformanceFoundationAdmin } from "@/lib/edge/admin-performance-foundation";
+import { handlePerformanceMaintenanceAdmin } from "@/lib/edge/admin-performance-maintenance";
 import { nf } from "@/lib/edge/admin-response";
 import { handleScheduledTasksAdmin } from "@/lib/edge/admin-scheduled-tasks";
 import {
@@ -62,6 +63,10 @@ vi.mock("@/lib/edge/admin-notifications", () => ({
 
 vi.mock("@/lib/edge/admin-performance-foundation", () => ({
   handlePerformanceFoundationAdmin: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/admin-performance-maintenance", () => ({
+  handlePerformanceMaintenanceAdmin: vi.fn(),
 }));
 
 vi.mock("@/lib/edge/admin-scheduled-tasks", () => ({
@@ -114,6 +119,11 @@ const routeCases = [
   ["/notification-rules/run", handleNotificationRuleRunAdmin, false],
   ["/notification-test", handleNotificationTestAdmin, false],
   ["/performance-foundation", handlePerformanceFoundationAdmin, false],
+  [
+    "/performance-foundation/maintenance",
+    handlePerformanceMaintenanceAdmin,
+    false,
+  ],
   ["/system-performance", handleSystemPerformanceAdmin, true, true],
   ["/scheduled-tasks", handleScheduledTasksAdmin, true, true],
   ["/do-diagnostic", handleDoDiagnosticAdmin, true, true],
