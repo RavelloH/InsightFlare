@@ -19,6 +19,12 @@ import {
   siteQueryResponse,
   sqlIntegerLiteral,
 } from "@/lib/edge/query/core";
+import {
+  queryEventAnalyticsContextCardsFromD1,
+  queryEventDimensionRowsFromFilteredEvents,
+  queryEventGeoRowsFromFilteredEvents,
+  queryEventSessionBoundaryRowsFromFilteredEvents,
+} from "@/lib/edge/query/events-context";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/query/events-overview";
 import {
   queryEventsSummaryFromD1,
@@ -73,22 +79,43 @@ describe("edge query events summary coverage", () => {
   });
 
   it("reads event summary cards from each dimension query", async () => {
-    queryD1AllMock
-      .mockResolvedValueOnce([
-        { events: 8, eventTypes: 2, sessions: 4, visitors: 3 },
-      ])
-      .mockResolvedValueOnce([
-        { value: "signup", views: 5, sessions: 3, visitors: 2 },
-      ])
-      .mockResolvedValueOnce([
-        { value: "/pricing", views: 4, sessions: 2, visitors: 2 },
-      ])
-      .mockResolvedValueOnce([
-        { value: "Pricing", views: 4, sessions: 2, visitors: 2 },
-      ])
-      .mockResolvedValueOnce([
-        { value: "example.com", views: 8, sessions: 4, visitors: 3 },
-      ]);
+    queryD1AllMock.mockResolvedValueOnce([
+      {
+        cardType: "__summary__",
+        views: 8,
+        eventTypes: 2,
+        sessions: 4,
+        visitors: 3,
+      },
+      {
+        cardType: "event",
+        value: "signup",
+        views: 5,
+        sessions: 3,
+        visitors: 2,
+      },
+      {
+        cardType: "path",
+        value: "/pricing",
+        views: 4,
+        sessions: 2,
+        visitors: 2,
+      },
+      {
+        cardType: "title",
+        value: "Pricing",
+        views: 4,
+        sessions: 2,
+        visitors: 2,
+      },
+      {
+        cardType: "hostname",
+        value: "example.com",
+        views: 8,
+        sessions: 4,
+        visitors: 3,
+      },
+    ]);
 
     await expect(
       queryEventsSummaryFromD1(env, siteId, window, {}),
@@ -108,8 +135,168 @@ describe("edge query events summary coverage", () => {
       },
     });
 
-    expect(queryD1AllMock).toHaveBeenCalledTimes(5);
-    expect(queryD1AllMock.mock.calls[1][2]).toContain(100);
+    expect(queryD1AllMock).toHaveBeenCalledOnce();
+    expect(queryD1AllMock.mock.calls[0][2]).toEqual(
+      expect.arrayContaining([siteId, window.fromMs, window.toMs]),
+    );
+  });
+
+  it("builds all event context cards from one ranked result set", async () => {
+    queryD1AllMock.mockResolvedValueOnce([
+      {
+        cardType: "path",
+        value: "/pricing",
+        views: 8,
+        sessions: 4,
+        visitors: 3,
+      },
+      {
+        cardType: "entry",
+        value: "/",
+        views: 8,
+        sessions: 4,
+        visitors: 3,
+      },
+      {
+        cardType: "sourceDomain",
+        value: "",
+        views: 2,
+        sessions: 1,
+        visitors: 1,
+      },
+      {
+        cardType: "region",
+        value: "US::CA::California",
+        label: "California",
+        views: 8,
+        sessions: 4,
+        visitors: 3,
+      },
+      {
+        cardType: "browser",
+        value: "Chrome",
+        views: 8,
+        sessions: 4,
+        visitors: 3,
+      },
+      {
+        cardType: "query",
+        value: null,
+        label: null,
+        views: null,
+        sessions: null,
+        visitors: null,
+      },
+    ]);
+
+    const cards = await queryEventAnalyticsContextCardsFromD1(
+      env,
+      siteId,
+      window,
+      {},
+      10,
+      "Signup",
+    );
+
+    expect(cards.page.path).toEqual([
+      { value: "/pricing", views: 8, sessions: 4, visitors: 3 },
+    ]);
+    expect(cards.page.entry).toEqual([
+      { value: "/", views: 8, sessions: 4, visitors: 3 },
+    ]);
+    expect(cards.source.domain[0]?.value).toBe("");
+    expect(cards.geo.region[0]).toMatchObject({
+      value: "US::CA::California",
+      label: "California",
+    });
+    expect(cards.client.browser[0]?.value).toBe("Chrome");
+    expect(queryD1AllMock).toHaveBeenCalledOnce();
+    expect(queryD1AllMock.mock.calls[0][1]).toContain("ranked_cards AS");
+  });
+
+  it("maps empty combined summary results without a synthetic row", async () => {
+    queryD1AllMock.mockResolvedValueOnce([]);
+
+    await expect(
+      queryEventsSummaryFromD1(env, siteId, window, {}),
+    ).resolves.toMatchObject({
+      summary: { events: 0, eventTypes: 0, sessions: 0, visitors: 0 },
+      cards: { event: { name: [] } },
+    });
+  });
+
+  it("keeps low-level context helpers compatible for targeted callers", async () => {
+    queryD1AllMock
+      .mockResolvedValueOnce([
+        { value: "", views: 1, sessions: 1, visitors: 1 },
+      ])
+      .mockResolvedValueOnce([
+        { value: "Chrome", views: 2, sessions: 1, visitors: 1 },
+      ])
+      .mockResolvedValueOnce([
+        {
+          value: "US::CA::California",
+          label: "California",
+          views: 2,
+          sessions: 1,
+          visitors: 1,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { value: "/", views: 2, sessions: 1, visitors: 1 },
+      ])
+      .mockResolvedValueOnce([
+        { value: "/pricing", views: 2, sessions: 1, visitors: 1 },
+      ]);
+    const baseCte = "WITH filtered_events AS (SELECT * FROM source)";
+
+    await expect(
+      queryEventDimensionRowsFromFilteredEvents(
+        env,
+        baseCte,
+        [siteId],
+        "browser",
+        5,
+        { includeEmpty: true },
+      ),
+    ).resolves.toHaveLength(1);
+    await expect(
+      queryEventDimensionRowsFromFilteredEvents(
+        env,
+        baseCte,
+        [siteId],
+        "browser",
+        5,
+      ),
+    ).resolves.toMatchObject([{ value: "Chrome" }]);
+    await expect(
+      queryEventGeoRowsFromFilteredEvents(
+        env,
+        baseCte,
+        [siteId],
+        "country",
+        "region",
+        5,
+      ),
+    ).resolves.toMatchObject([{ label: "California" }]);
+    await expect(
+      queryEventSessionBoundaryRowsFromFilteredEvents(
+        env,
+        baseCte,
+        [siteId],
+        "entry",
+        5,
+      ),
+    ).resolves.toMatchObject([{ value: "/" }]);
+    await expect(
+      queryEventSessionBoundaryRowsFromFilteredEvents(
+        env,
+        baseCte,
+        [siteId],
+        "exit",
+        5,
+      ),
+    ).resolves.toMatchObject([{ value: "/pricing" }]);
   });
 
   it("queries custom event type aggregates with visit context filters", async () => {

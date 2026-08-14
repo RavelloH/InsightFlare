@@ -387,6 +387,25 @@ function commonQueryMatches(): SqlMatch[] {
     ),
     allMatch(["dimension_rollup AS"], dimensionRows),
     allMatch(
+      ["card_rows AS", "ranked_cards AS", "__summary__"],
+      [
+        {
+          cardType: "__summary__",
+          views: 12,
+          eventTypes: 3,
+          sessions: 5,
+          visitors: 4,
+        },
+        {
+          cardType: "event",
+          value: "Signup",
+          views: 7,
+          sessions: 4,
+          visitors: 3,
+        },
+      ],
+    ),
+    allMatch(
       ["event_with_context AS", "event_rollup AS"],
       [{ value: "Signup", views: 8, sessions: 5, visitors: 4 }],
     ),
@@ -454,6 +473,44 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(["LIMIT 1", "event_id AS eventId"], [eventRecordRow]),
+    {
+      match: (sql) =>
+        sql.includes("visitor_metrics AS") &&
+        sql.includes("PARTITION BY fv.visitor_id"),
+      all: [
+        {
+          visitorId: "visitor-1",
+          sessionId: "session-2",
+          firstSeenAt: from,
+          lastSeenAt: to,
+          views: 4,
+          sessions: 2,
+          events: 3,
+          country: "US",
+          region: "CA",
+          regionCode: "CA",
+          city: "San Francisco",
+          referrerHost: "news.example",
+          referrerUrl: "https://news.example/post",
+          browser: "Chrome",
+          browserVersion: "124",
+          os: "Windows",
+          osVersion: "11",
+          deviceType: "desktop",
+          screenWidth: 1440,
+          screenHeight: 900,
+        },
+      ],
+    },
+    {
+      match: (sql) =>
+        sql.includes("session_metrics AS") &&
+        sql.includes("PARTITION BY fv.session_id"),
+      all: [
+        sessionRow(),
+        sessionRow({ sessionId: "session-2", views: 1, bounce: 1 }),
+      ],
+    },
     allMatch(
       ["fv.visitor_id AS visitorId"],
       [

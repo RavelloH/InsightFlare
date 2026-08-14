@@ -22,6 +22,10 @@ import {
   visitSourceBindings,
 } from "./core";
 import {
+  buildSessionAggregationSql,
+  buildVisitorAggregationSql,
+} from "./journey-aggregation-sql";
+import {
   buildJourneySearchSql,
   mapJourneyEventRow,
   mapSessionRow,
@@ -70,123 +74,13 @@ filtered_visits AS (
   FROM visit_source
   ${targetClause}
 )
-${searchCte}
-SELECT
-  fv.visitor_id AS visitorId,
-  COALESCE((
-    SELECT latest.session_id
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ), '') AS sessionId,
-  MIN(fv.started_at) AS firstSeenAt,
-  MAX(fv.started_at) AS lastSeenAt,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN fv.session_id != '' THEN fv.session_id ELSE NULL END) AS sessions,
-  (
-    SELECT count(*)
-    FROM event_source es
-    WHERE es.visitor_id = fv.visitor_id
-  ) AS events,
-  COALESCE((
-    SELECT latest.country
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ), '') AS country,
-  COALESCE((
-    SELECT latest.region
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ), '') AS region,
-  COALESCE((
-    SELECT latest.region_code
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ), '') AS regionCode,
-  COALESCE((
-    SELECT latest.city
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ), '') AS city,
-  COALESCE((
-    SELECT first.referrer_host
-    FROM filtered_visits first
-    WHERE first.visitor_id = fv.visitor_id
-    ORDER BY first.started_at ASC, first.visit_id ASC
-    LIMIT 1
-  ), '') AS referrerHost,
-  COALESCE((
-    SELECT first.referrer_url
-    FROM filtered_visits first
-    WHERE first.visitor_id = fv.visitor_id
-    ORDER BY first.started_at ASC, first.visit_id ASC
-    LIMIT 1
-  ), '') AS referrerUrl,
-  COALESCE((
-    SELECT latest.browser
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ), '') AS browser,
-  COALESCE((
-    SELECT ${browserMajorVersionExpr("latest")}
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ), '') AS browserVersion,
-  COALESCE((
-    SELECT latest.os
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ), '') AS os,
-  COALESCE((
-    SELECT latest.os_version
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ), '') AS osVersion,
-  COALESCE((
-    SELECT latest.device_type
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ), '') AS deviceType,
-  (
-    SELECT latest.screen_width
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ) AS screenWidth,
-  (
-    SELECT latest.screen_height
-    FROM filtered_visits latest
-    WHERE latest.visitor_id = fv.visitor_id
-    ORDER BY latest.started_at DESC, latest.visit_id DESC
-    LIMIT 1
-  ) AS screenHeight
-FROM filtered_visits fv
-WHERE fv.visitor_id != ''
-  ${searchWhere}
-GROUP BY fv.visitor_id
-ORDER BY ${visitorListOrderBy(sort)}
-LIMIT ? OFFSET ?
-`;
+${searchCte},
+${buildVisitorAggregationSql({
+  searchWhere,
+  browserVersionExpression: browserMajorVersionExpr(),
+  orderBy: visitorListOrderBy(sort),
+  limitOffset: "LIMIT ? OFFSET ?",
+})}`;
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
       ...visitSourceBindings(siteId, window),
@@ -245,161 +139,13 @@ filtered_visits AS (
   FROM visit_source
   ${targetClause}
 )
-${searchCte}
-SELECT
-  fv.session_id AS sessionId,
-  COALESCE((
-    SELECT edge.visitor_id
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS visitorId,
-  MIN(fv.started_at) AS startedAt,
-  MAX(COALESCE(fv.ended_at, fv.last_activity_at, fv.started_at)) AS endedAt,
-  SUM(COALESCE(fv.duration_ms, 0)) AS totalDurationMs,
-  MAX(CASE WHEN LOWER(COALESCE(fv.status, '')) = 'open' THEN 1 ELSE 0 END) AS active,
-  count(*) AS views,
-  (
-    SELECT count(*)
-    FROM event_source es
-    WHERE es.session_id = fv.session_id
-  ) AS events,
-  CASE WHEN count(*) <= 1 THEN 1 ELSE 0 END AS bounce,
-  COALESCE((
-    SELECT edge.pathname
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS entryPath,
-  COALESCE((
-    SELECT edge.pathname
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at DESC, edge.visit_id DESC
-    LIMIT 1
-  ), '') AS exitPath,
-  COALESCE((
-    SELECT edge.referrer_host
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS referrerHost,
-  COALESCE((
-    SELECT edge.referrer_url
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS referrerUrl,
-  COALESCE((
-    SELECT edge.country
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS country,
-  COALESCE((
-    SELECT edge.region
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS region,
-  COALESCE((
-    SELECT edge.region_code
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS regionCode,
-  COALESCE((
-    SELECT edge.city
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS city,
-  (
-    SELECT edge.latitude
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-      AND edge.latitude IS NOT NULL
-      AND edge.longitude IS NOT NULL
-      AND ABS(edge.latitude) <= 90
-      AND ABS(edge.longitude) <= 180
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ) AS latitude,
-  (
-    SELECT edge.longitude
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-      AND edge.latitude IS NOT NULL
-      AND edge.longitude IS NOT NULL
-      AND ABS(edge.latitude) <= 90
-      AND ABS(edge.longitude) <= 180
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ) AS longitude,
-  COALESCE((
-    SELECT edge.browser
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS browser,
-  COALESCE((
-    SELECT ${browserMajorVersionExpr("edge")}
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS browserVersion,
-  COALESCE((
-    SELECT edge.os
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS os,
-  COALESCE((
-    SELECT edge.os_version
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS osVersion,
-  COALESCE((
-    SELECT edge.device_type
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ), '') AS deviceType,
-  (
-    SELECT edge.screen_width
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ) AS screenWidth,
-  (
-    SELECT edge.screen_height
-    FROM filtered_visits edge
-    WHERE edge.session_id = fv.session_id
-    ORDER BY edge.started_at ASC, edge.visit_id ASC
-    LIMIT 1
-  ) AS screenHeight
-FROM filtered_visits fv
-WHERE fv.session_id != ''
-  ${searchWhere}
-GROUP BY fv.session_id
-ORDER BY ${sessionListOrderBy(sort)}
-LIMIT ? OFFSET ?
-`;
+${searchCte},
+${buildSessionAggregationSql({
+  searchWhere,
+  browserVersionExpression: browserMajorVersionExpr(),
+  orderBy: sessionListOrderBy(sort),
+  limitOffset: "LIMIT ? OFFSET ?",
+})}`;
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
       ...visitSourceBindings(siteId, window),

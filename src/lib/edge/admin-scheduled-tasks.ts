@@ -325,6 +325,77 @@ function runGroupSelectSql(whereClause: string): string {
   `;
 }
 
+function runGroupPageSelectSql(whereClause: string): string {
+  return `
+    WITH grouped AS (
+      SELECT
+        ${RUN_GROUP_KEY_SQL} AS id,
+        MAX(trigger_type) AS triggerType,
+        MIN(scheduled_at_ms) AS scheduledAt,
+        MIN(started_at_ms) AS startedAt,
+        CASE
+          WHEN SUM(CASE WHEN finished_at_ms IS NULL THEN 1 ELSE 0 END) > 0
+            THEN NULL
+          ELSE MAX(finished_at_ms)
+        END AS finishedAt,
+        COUNT(*) AS taskCount,
+        SUM(CASE WHEN status IN ('success', 'skipped') THEN 1 ELSE 0 END) AS successCount,
+        SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) AS partialCount,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failedCount,
+        SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skippedCount,
+        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS runningCount
+      FROM scheduled_task_runs
+      ${whereClause}
+      GROUP BY ${RUN_GROUP_KEY_SQL}
+    ),
+    normalized AS (
+      SELECT
+        *,
+        CASE
+          WHEN failedCount > 0 THEN 'failed'
+          WHEN runningCount > 0 THEN 'running'
+          WHEN partialCount > 0 THEN 'partial'
+          ELSE 'success'
+        END AS status
+      FROM grouped
+    ),
+    filtered_groups AS (
+      SELECT *
+      FROM normalized
+      WHERE (? = '' OR status = ?)
+    ),
+    page_groups AS (
+      SELECT *
+      FROM filtered_groups
+      ORDER BY startedAt DESC, id ASC
+      LIMIT ? OFFSET ?
+    ),
+    page_runs AS (
+      SELECT
+        runs.id,
+        ${RUNS_GROUP_KEY_SQL} AS groupId
+      FROM scheduled_task_runs runs
+      INNER JOIN page_groups pg
+        ON pg.id = ${RUNS_GROUP_KEY_SQL}
+    ),
+    page_log_counts AS (
+      SELECT
+        pr.groupId,
+        COUNT(*) AS logsCount
+      FROM page_runs pr
+      INNER JOIN scheduled_task_run_logs logs
+        ON logs.run_id = pr.id
+      GROUP BY pr.groupId
+    )
+    SELECT
+      pg.*,
+      COALESCE(plc.logsCount, 0) AS logsCount
+    FROM page_groups pg
+    LEFT JOIN page_log_counts plc ON plc.groupId = pg.id
+    ORDER BY pg.startedAt DESC, pg.id ASC
+  `;
+}
+
 function successRate(success: number, total: number): number | null {
   return total > 0 ? success / total : null;
 }
@@ -463,12 +534,7 @@ export async function handleScheduledTasksAdmin(
     )
       .bind(since30d)
       .all<RunRow>(),
-    env.DB.prepare(
-      `${runGroupSelectSql(`WHERE ${runFilters.join(" AND ")}`)}
-       WHERE (? = '' OR status = ?)
-       ORDER BY startedAt DESC
-       LIMIT ? OFFSET ?`,
-    )
+    env.DB.prepare(runGroupPageSelectSql(`WHERE ${runFilters.join(" AND ")}`))
       .bind(...runBindings, statusFilter, statusFilter, pageSize + 1, offset)
       .all<RunGroupRow>(),
   ]);

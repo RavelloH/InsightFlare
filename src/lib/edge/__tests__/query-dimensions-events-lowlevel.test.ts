@@ -616,16 +616,13 @@ describe("edge query event handlers low-level coverage", () => {
     const { env } = createD1Env([
       [
         {
-          events: null,
-          eventTypes: undefined,
-          sessions: 4,
+          cardType: "__summary__",
+          views: null,
+          eventTypes: null,
+          sessions: null,
           visitors: null,
         },
       ],
-      [],
-      [],
-      [],
-      [],
       [eventRecord({ eventId: "evt-final" })],
     ]);
 
@@ -653,7 +650,7 @@ describe("edge query event handlers low-level coverage", () => {
       summary: {
         events: 0,
         eventTypes: 0,
-        sessions: 4,
+        sessions: 0,
         visitors: 0,
         avgEventsPerSession: 0,
       },

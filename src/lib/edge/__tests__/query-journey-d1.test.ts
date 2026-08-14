@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { QueryWindow } from "@/lib/edge/query/core";
 import {
+  buildSessionAggregationSql,
+  buildVisitorAggregationSql,
+} from "@/lib/edge/query/journey-aggregation-sql";
+import {
   handleSessionDetail,
   handleSessions,
   handleVisitorDetail,
@@ -181,6 +185,15 @@ function journeyEventRow(overrides: D1Row = {}): D1Row {
 }
 
 describe("edge journey detail D1 queries", () => {
+  it("supports aggregation SQL callers without pagination", () => {
+    expect(
+      buildVisitorAggregationSql({ orderBy: "lastSeenAt DESC" }),
+    ).not.toContain("LIMIT ?");
+    expect(buildSessionAggregationSql({ orderBy: "startedAt DESC" })).toContain(
+      "session_metrics AS",
+    );
+  });
+
   it("returns null for a missing visitor detail row and captures target bindings", async () => {
     const { env, calls } = createD1Env([[]]);
 

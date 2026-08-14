@@ -140,31 +140,97 @@ export async function queryEventsSummaryFromD1(
   cards: EventSummaryCards;
 }> {
   const source = buildEventFilteredSourceCte(siteId, window, filters);
-  const dimensionSql = (expr: string) => `${source.cte}
-SELECT
-  ${expr} AS value,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-FROM filtered_events
-GROUP BY value
-HAVING TRIM(COALESCE(value, '')) != ''
-ORDER BY views DESC, sessions DESC, value ASC
-LIMIT ?
-`;
-  const readDimension = (expr: string) =>
-    queryD1All<DimensionRow>(env, dimensionSql(expr), [
-      ...source.bindings,
-      100,
-    ]);
-
-  const [summary, eventNames, path, title, hostname] = await Promise.all([
-    queryEventSummaryMetricsFromD1(env, siteId, window, filters),
-    readDimension("event_name"),
-    readDimension("pathname"),
-    readDimension("title"),
-    readDimension("hostname"),
-  ]);
+  const rows = await queryD1All<{
+    cardType: string;
+    value: string | null;
+    views: number;
+    eventTypes: number;
+    sessions: number;
+    visitors: number;
+  }>(
+    env,
+    `${source.cte},
+card_rows AS (
+  SELECT
+    '__summary__' AS cardType,
+    NULL AS value,
+    count(*) AS views,
+    count(DISTINCT event_name) AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM filtered_events
+  UNION ALL
+  SELECT 'event', event_name, count(*), 0,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
+  FROM filtered_events
+  WHERE TRIM(COALESCE(event_name, '')) != ''
+  GROUP BY event_name
+  UNION ALL
+  SELECT 'path', pathname, count(*), 0,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
+  FROM filtered_events
+  WHERE TRIM(COALESCE(pathname, '')) != ''
+  GROUP BY pathname
+  UNION ALL
+  SELECT 'title', title, count(*), 0,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
+  FROM filtered_events
+  WHERE TRIM(COALESCE(title, '')) != ''
+  GROUP BY title
+  UNION ALL
+  SELECT 'hostname', hostname, count(*), 0,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
+  FROM filtered_events
+  WHERE TRIM(COALESCE(hostname, '')) != ''
+  GROUP BY hostname
+),
+ranked_cards AS (
+  SELECT
+    cardType,
+    value,
+    views,
+    eventTypes,
+    sessions,
+    visitors,
+    ROW_NUMBER() OVER (
+      PARTITION BY cardType
+      ORDER BY views DESC, sessions DESC, visitors DESC, value ASC
+    ) AS card_rank
+  FROM card_rows
+)
+SELECT cardType, value, views, eventTypes, sessions, visitors
+FROM ranked_cards
+WHERE cardType = '__summary__' OR card_rank <= 100
+ORDER BY cardType ASC, card_rank ASC
+`,
+    source.bindings,
+  );
+  const summaryRow = rows.find((row) => row.cardType === "__summary__");
+  const summary: EventSummaryRow = summaryRow
+    ? {
+        events: Number(summaryRow.views ?? 0),
+        eventTypes: Number(summaryRow.eventTypes ?? 0),
+        sessions: Number(summaryRow.sessions ?? 0),
+        visitors: Number(summaryRow.visitors ?? 0),
+      }
+    : { events: 0, eventTypes: 0, sessions: 0, visitors: 0 };
+  const readDimension = (cardType: string): DimensionRow[] =>
+    rows
+      .filter((row) => row.cardType === cardType)
+      .map((row) => ({
+        value: String(row.value ?? ""),
+        views: Number(row.views ?? 0),
+        sessions: Number(row.sessions ?? 0),
+        visitors: Number(row.visitors ?? 0),
+      }));
+  const eventNames = readDimension("event");
+  const path = readDimension("path");
+  const title = readDimension("title");
+  const hostname = readDimension("hostname");
 
   return {
     summary,

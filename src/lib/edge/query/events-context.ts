@@ -119,91 +119,200 @@ export async function queryEventAnalyticsContextCardsFromD1(
     filters,
     eventName,
   );
-  const dimension = (expr: string) =>
-    queryEventDimensionRowsFromFilteredEvents(
-      env,
-      source.cte,
-      source.bindings,
-      expr,
-      limit,
-    );
-  const geo = (valueExpr: string, labelExpr = valueExpr) =>
-    queryEventGeoRowsFromFilteredEvents(
-      env,
-      source.cte,
-      source.bindings,
-      valueExpr,
-      labelExpr,
-      limit,
-    );
-
-  const [
-    path,
-    query,
-    title,
-    hostname,
-    entry,
-    exit,
-    sourceDomain,
-    sourceLink,
-    browser,
-    osVersion,
-    deviceType,
-    language,
-    screenSize,
-    country,
-    region,
-    city,
-    continent,
-    timezone,
-    organization,
-  ] = await Promise.all([
-    dimension("pathname"),
-    dimension("query_string"),
-    dimension("title"),
-    dimension("hostname"),
-    queryEventSessionBoundaryRowsFromFilteredEvents(
-      env,
-      source.cte,
-      source.bindings,
-      "entry",
-      limit,
+  const dimensions: Array<{
+    key: string;
+    expr: string;
+    includeEmpty?: boolean;
+  }> = [
+    { key: "path", expr: "pathname" },
+    { key: "query", expr: "query_string" },
+    { key: "title", expr: "title" },
+    { key: "hostname", expr: "hostname" },
+    { key: "sourceDomain", expr: "referrer_host", includeEmpty: true },
+    { key: "sourceLink", expr: "referrer_url", includeEmpty: true },
+    { key: "browser", expr: clientDimensionDefinition("browser").labelExpr },
+    {
+      key: "osVersion",
+      expr: clientDimensionDefinition("osVersion").labelExpr,
+    },
+    {
+      key: "deviceType",
+      expr: clientDimensionDefinition("deviceType").labelExpr,
+    },
+    { key: "language", expr: clientDimensionDefinition("language").labelExpr },
+    {
+      key: "screenSize",
+      expr: clientDimensionDefinition("screenSize").labelExpr,
+    },
+  ];
+  const geoDimensions: Array<{
+    key: string;
+    valueExpr: string;
+    labelExpr: string;
+  }> = [
+    { key: "country", valueExpr: "country", labelExpr: "country" },
+    {
+      key: "region",
+      valueExpr: regionValueExpr(),
+      labelExpr: regionValueExpr(),
+    },
+    { key: "city", valueExpr: cityValueExpr(), labelExpr: cityValueExpr() },
+    { key: "continent", valueExpr: "continent", labelExpr: "continent" },
+    { key: "timezone", valueExpr: "timezone", labelExpr: "timezone" },
+    {
+      key: "organization",
+      valueExpr: "as_organization",
+      labelExpr: "as_organization",
+    },
+  ];
+  const cardSources = [
+    ...dimensions.map(
+      ({ key, expr, includeEmpty }) => `
+  SELECT
+    '${key}' AS cardType,
+    ${expr} AS value,
+    NULL AS label,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM filtered_events
+  ${includeEmpty ? "" : `WHERE TRIM(COALESCE(${expr}, '')) != ''`}
+  GROUP BY value`,
     ),
-    queryEventSessionBoundaryRowsFromFilteredEvents(
-      env,
-      source.cte,
-      source.bindings,
-      "exit",
-      limit,
+    ...geoDimensions.map(
+      ({ key, valueExpr, labelExpr }) => `
+  SELECT
+    '${key}' AS cardType,
+    ${valueExpr} AS value,
+    ${labelExpr} AS label,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM filtered_events
+  WHERE TRIM(COALESCE(${valueExpr}, '')) != ''
+  GROUP BY value, label`,
     ),
-    queryEventDimensionRowsFromFilteredEvents(
-      env,
-      source.cte,
-      source.bindings,
-      "referrer_host",
-      limit,
-      { includeEmpty: true },
+    ...(["entry", "exit"] as const).map(
+      (kind) => `
+  SELECT
+    '${kind}' AS cardType,
+    edges.${kind}Path AS value,
+    NULL AS label,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN fe.session_id != '' THEN fe.session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN fe.visitor_id != '' THEN fe.visitor_id ELSE NULL END) AS visitors
+  FROM filtered_events fe
+  INNER JOIN session_edges edges ON edges.session_id = fe.session_id
+  WHERE TRIM(COALESCE(edges.${kind}Path, '')) != ''
+  GROUP BY value`,
     ),
-    queryEventDimensionRowsFromFilteredEvents(
-      env,
-      source.cte,
-      source.bindings,
-      "referrer_url",
-      limit,
-      { includeEmpty: true },
-    ),
-    dimension(clientDimensionDefinition("browser").labelExpr),
-    dimension(clientDimensionDefinition("osVersion").labelExpr),
-    dimension(clientDimensionDefinition("deviceType").labelExpr),
-    dimension(clientDimensionDefinition("language").labelExpr),
-    dimension(clientDimensionDefinition("screenSize").labelExpr),
-    geo("country"),
-    geo(regionValueExpr()),
-    geo(cityValueExpr()),
-    geo("continent"),
-    geo("timezone"),
-    geo("as_organization"),
-  ]);
+  ].join("\nUNION ALL");
+  const rows = await queryD1All<{
+    cardType: string;
+    value: string | null;
+    label: string | null;
+    views: number;
+    sessions: number;
+    visitors: number;
+  }>(
+    env,
+    `${source.cte},
+session_visit_edges AS (
+  SELECT
+    session_id,
+    pathname,
+    ROW_NUMBER() OVER (
+      PARTITION BY session_id
+      ORDER BY started_at ASC, visit_id ASC
+    ) AS first_rank,
+    ROW_NUMBER() OVER (
+      PARTITION BY session_id
+      ORDER BY started_at DESC, visit_id DESC
+    ) AS latest_rank
+  FROM visit_source
+  WHERE TRIM(COALESCE(session_id, '')) != ''
+    AND TRIM(COALESCE(pathname, '')) != ''
+),
+session_edges AS (
+  SELECT
+    session_id,
+    MAX(CASE WHEN first_rank = 1 THEN pathname END) AS entryPath,
+    MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exitPath
+  FROM session_visit_edges
+  GROUP BY session_id
+),
+card_rows AS (
+${cardSources}
+),
+ranked_cards AS (
+  SELECT
+    cardType,
+    value,
+    label,
+    views,
+    sessions,
+    visitors,
+    ROW_NUMBER() OVER (
+      PARTITION BY cardType
+      ORDER BY views DESC, sessions DESC, visitors DESC, COALESCE(label, value) ASC
+    ) AS card_rank
+  FROM card_rows
+)
+SELECT cardType, value, label, views, sessions, visitors
+FROM ranked_cards
+WHERE card_rank <= ?
+ORDER BY cardType ASC, card_rank ASC
+`,
+    [...source.bindings, limit],
+  );
+  const byCard = new Map<
+    string,
+    Array<{
+      value: string;
+      label: string;
+      views: number;
+      sessions: number;
+      visitors: number;
+    }>
+  >();
+  for (const row of rows) {
+    const list = byCard.get(row.cardType) ?? [];
+    list.push({
+      value: String(row.value ?? ""),
+      label: String(row.label ?? row.value ?? ""),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+      visitors: Number(row.visitors ?? 0),
+    });
+    byCard.set(row.cardType, list);
+  }
+  const dimensionRows = (key: string): DimensionRow[] =>
+    (byCard.get(key) ?? []).map(({ value, views, sessions, visitors }) => ({
+      value,
+      views,
+      sessions,
+      visitors,
+    }));
+  const geoRows = (key: string): GeoTabRow[] => byCard.get(key) ?? [];
+  const path = dimensionRows("path");
+  const query = dimensionRows("query");
+  const title = dimensionRows("title");
+  const hostname = dimensionRows("hostname");
+  const entry = dimensionRows("entry");
+  const exit = dimensionRows("exit");
+  const sourceDomain = dimensionRows("sourceDomain");
+  const sourceLink = dimensionRows("sourceLink");
+  const browser = dimensionRows("browser");
+  const osVersion = dimensionRows("osVersion");
+  const deviceType = dimensionRows("deviceType");
+  const language = dimensionRows("language");
+  const screenSize = dimensionRows("screenSize");
+  const country = geoRows("country");
+  const region = geoRows("region");
+  const city = geoRows("city");
+  const continent = geoRows("continent");
+  const timezone = geoRows("timezone");
+  const organization = geoRows("organization");
 
   return {
     page: {
