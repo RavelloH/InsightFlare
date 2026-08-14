@@ -3,6 +3,8 @@ export interface Env {
   INGEST_DO: DurableObjectNamespace;
   BOT_ANALYTICS?: AnalyticsEngineDataset;
   NORMAL_ANALYTICS?: AnalyticsEngineDataset;
+  QUERY_DIAGNOSTICS?: AnalyticsEngineDataset;
+  CF_VERSION_METADATA?: WorkerVersionMetadata;
   ARCHIVE_BUCKET?: R2Bucket;
   MAIN_SECRET?: string;
   DAILY_SALT_SECRET?: string;

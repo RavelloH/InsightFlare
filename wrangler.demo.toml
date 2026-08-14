@@ -14,3 +14,10 @@ DISABLE_CRON_TASKS = "1"
 SESSION_WINDOW_MINUTES = "30"
 SCRIPT_CACHE_TTL_SECONDS = "600"
 PARQUET_WASM_URL = "https://cdn.jsdelivr.net/npm/parquet-wasm@0.7.1/esm/parquet_wasm_bg.wasm"
+
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[analytics_engine_datasets]]
+binding = "QUERY_DIAGNOSTICS"
+dataset = "insightflare_query_diagnostics_demo"
