@@ -1,4 +1,7 @@
-import { currentInvocationLogger } from "@/lib/edge/observability-logger";
+import {
+  currentInvocationLogger,
+  runWithD1Operation,
+} from "@/lib/edge/observability-logger";
 import type { Env } from "@/lib/edge/types";
 
 import {
@@ -190,7 +193,9 @@ export async function handleEventTypeDetail(
   const interval = parseInterval(url);
   const logger = currentInvocationLogger();
   const measure = <T>(operation: string, action: () => Promise<T>) =>
-    logger ? logger.measure(operation, action) : action();
+    logger
+      ? logger.measure(operation, () => runWithD1Operation(operation, action))
+      : action();
   const [overview, trend, fields, cards] = await Promise.all([
     measure("event_type_detail.overview", () =>
       queryEventTypeOverviewFromD1(env, siteId, window, filters, eventName),

@@ -78,6 +78,16 @@ export interface InvocationOperationSummary {
   count: number;
   durationMs: number;
   failed: number;
+  d1Statements?: number;
+  d1RowsRead?: number;
+  d1RowsReadAvailable?: boolean;
+  d1DurationMs?: number;
+}
+
+export interface InvocationD1OperationMetrics {
+  durationMs: number;
+  rowsRead?: number;
+  rowsReadAvailable: boolean;
 }
 
 export interface InvocationLogEvent {
@@ -164,12 +174,17 @@ export interface InvocationLogger {
   setRequest(request: InvocationRequest): void;
   setPerformance(performance: InvocationPerformancePatch): void;
   increment(counter: InvocationPerformanceCounter, amount?: number): void;
+  recordD1Operation(
+    operation: string,
+    metrics: InvocationD1OperationMetrics,
+  ): void;
   build(): InvocationLogRecord;
   emit(): InvocationLogRecord;
   emitWhenComplete(): Promise<InvocationLogRecord>;
 }
 
 const invocationLoggerContext = new AsyncLocalStorage<InvocationLogger>();
+const d1OperationContext = new AsyncLocalStorage<string>();
 
 export function runWithInvocationLogger<T>(
   logger: InvocationLogger,
@@ -180,6 +195,14 @@ export function runWithInvocationLogger<T>(
 
 export function currentInvocationLogger(): InvocationLogger | undefined {
   return invocationLoggerContext.getStore();
+}
+
+export function runWithD1Operation<T>(operation: string, action: () => T): T {
+  return d1OperationContext.run(operation, action);
+}
+
+export function currentD1Operation(): string | undefined {
+  return d1OperationContext.getStore();
 }
 
 export async function measureCurrentExternalFetch(
@@ -270,6 +293,7 @@ export function createInvocationLogger(
       operations: {
         ...performance.operations,
         [operation]: {
+          ...prior,
           count: prior.count + 1,
           durationMs: prior.durationMs + durationMs,
           failed: prior.failed + (failed ? 1 : 0),
@@ -368,6 +392,32 @@ export function createInvocationLogger(
       performance = {
         ...performance,
         [counter]: (performance[counter] ?? 0) + incrementBy,
+      };
+    },
+    recordD1Operation(operation, metrics) {
+      const prior = performance.operations?.[operation] ?? {
+        count: 0,
+        durationMs: 0,
+        failed: 0,
+      };
+      const durationMs = toTimeMs(metrics.durationMs);
+      const rowsRead = toCounterValue(metrics.rowsRead ?? 0);
+      const rowsReadAvailable =
+        prior.d1RowsReadAvailable !== false && metrics.rowsReadAvailable;
+      performance = {
+        ...performance,
+        operations: {
+          ...performance.operations,
+          [operation]: {
+            ...prior,
+            d1Statements: (prior.d1Statements ?? 0) + 1,
+            d1DurationMs: (prior.d1DurationMs ?? 0) + durationMs,
+            ...(rowsRead !== null
+              ? { d1RowsRead: (prior.d1RowsRead ?? 0) + rowsRead }
+              : {}),
+            d1RowsReadAvailable: rowsReadAvailable,
+          },
+        },
       };
     },
     build,

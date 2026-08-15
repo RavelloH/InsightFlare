@@ -1,3 +1,7 @@
+import {
+  currentD1Operation,
+  currentInvocationLogger,
+} from "@/lib/edge/observability-logger";
 import type { Env } from "@/lib/edge/types";
 
 import { buildEventFilterSql } from "./core-filters";
@@ -247,9 +251,24 @@ export async function queryD1All<T extends object>(
   bindings: Array<string | number | null>,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<T[]> {
+  const logger = currentInvocationLogger();
+  const operation = currentD1Operation();
+  const startedAt = globalThis.performance?.now() ?? Date.now();
   const result = await env.DB.prepare(sql)
     .bind(...bindings)
     .all<T>();
+  const finishedAt = globalThis.performance?.now() ?? Date.now();
   recordD1RowsRead(diagnostics, result);
+  if (logger && operation) {
+    const rowsRead = result.meta?.rows_read;
+    logger.recordD1Operation(operation, {
+      durationMs: finishedAt - startedAt,
+      ...(typeof rowsRead === "number" && Number.isFinite(rowsRead)
+        ? { rowsRead: Math.max(0, Math.trunc(rowsRead)) }
+        : {}),
+      rowsReadAvailable:
+        typeof rowsRead === "number" && Number.isFinite(rowsRead),
+    });
+  }
   return result.results;
 }

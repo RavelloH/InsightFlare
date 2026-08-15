@@ -4,9 +4,11 @@ import { instrumentEnv } from "@/lib/edge/observability-bindings";
 import { measureExternalFetch } from "@/lib/edge/observability-bindings";
 import {
   createInvocationLogger,
+  currentD1Operation,
   currentInvocationLogger,
   MAX_INVOCATION_LOG_EVENTS,
   measureCurrentExternalFetch,
+  runWithD1Operation,
   runWithInvocationLogger,
 } from "@/lib/edge/observability-logger";
 import type { Env } from "@/lib/edge/types";
@@ -202,6 +204,41 @@ describe("edge observability logger", () => {
           data: { rows: 3, durationMs: 7 },
         },
       ],
+    });
+  });
+
+  it("attaches D1 metrics to the active operation without emitting query text", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+
+    await runWithInvocationLogger(logger, () =>
+      logger.measure("event_type_detail.fields", () =>
+        runWithD1Operation("event_type_detail.fields", async () => {
+          expect(currentD1Operation()).toBe("event_type_detail.fields");
+          logger.recordD1Operation("event_type_detail.fields", {
+            durationMs: 12.8,
+            rowsRead: 42.9,
+            rowsReadAvailable: true,
+          });
+        }),
+      ),
+    );
+
+    expect(currentD1Operation()).toBeUndefined();
+    expect(logger.build()).toMatchObject({
+      performance: {
+        operations: {
+          "event_type_detail.fields": {
+            count: 1,
+            d1Statements: 1,
+            d1RowsRead: 42,
+            d1RowsReadAvailable: true,
+            d1DurationMs: 13,
+          },
+        },
+      },
     });
   });
 
