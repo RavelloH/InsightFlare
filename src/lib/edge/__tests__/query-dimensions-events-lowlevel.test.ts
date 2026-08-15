@@ -824,7 +824,7 @@ describe("edge query event handlers low-level coverage", () => {
 
 describe("edge query event type overview low-level coverage", () => {
   it("uses zero summary fallbacks when scoped and event rows are empty", async () => {
-    const { env, calls } = createD1Env([[], [], [], [], [], []]);
+    const { env, calls } = createD1Env([[], []]);
 
     await expect(
       queryEventTypeOverviewFromD1(env, siteId, window, {}, "Signup"),
@@ -845,6 +845,6 @@ describe("edge query event type overview low-level coverage", () => {
       },
     });
 
-    expect(calls).toHaveLength(6);
+    expect(calls).toHaveLength(2);
   });
 });

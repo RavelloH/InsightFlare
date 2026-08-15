@@ -225,12 +225,23 @@ describe("event detail D1 SQL", () => {
       expect(cards.client.browser).toMatchObject([{ value: "Edge", views: 1 }]);
       expect(cards.geo.country).toMatchObject([{ value: "CN", views: 1 }]);
       const cardQueries = d1.calls.filter(({ sql }) =>
-        sql.includes("card_rows AS"),
+        sql.includes("\ncard_rows AS"),
       );
       expect(cardQueries).toHaveLength(4);
       for (const { sql } of cardQueries) {
         expect((sql.match(/UNION ALL/g) ?? []).length).toBeLessThan(5);
       }
+      const overviewQuery = d1.calls.find(({ sql }) =>
+        sql.includes("overview_card_rows AS"),
+      );
+      expect(overviewQuery).toBeDefined();
+      expect((overviewQuery?.sql.match(/UNION ALL/g) ?? []).length).toBe(4);
+      const plan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${overviewQuery?.sql ?? "SELECT 1"}`)
+        .all(...(overviewQuery?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(plan.map((row) => row.detail).join("\n")).toContain(
+        "MATERIALIZE filtered_events",
+      );
     } finally {
       d1.close();
     }

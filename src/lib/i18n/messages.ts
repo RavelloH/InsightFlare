@@ -1988,6 +1988,7 @@ export interface AppMessages {
     doDiagnosticDescription: string;
     doDiagnosticLoadFailed: string;
     doDiagnosticLoading: string;
+    doDiagnosticRun: string;
     doDiagnosticEmpty: string;
     doDiagnosticUnreachable: string;
     doDiagnosticReachableSites: string;
@@ -4220,6 +4221,7 @@ const enMessages = {
       "Asks each site's Durable Object directly for the state of buffered_visits / buffered_custom_events to surface stale rows, future-skewed timestamps, or stuck dirty rows.",
     doDiagnosticLoadFailed: "Failed to load DO diagnostic data.",
     doDiagnosticLoading: "Fetching DO state per site…",
+    doDiagnosticRun: "Run DO diagnostic",
     doDiagnosticEmpty: "No DO state available.",
     doDiagnosticUnreachable: "Some DOs unreachable",
     doDiagnosticReachableSites: "Reachable DOs",
@@ -6374,6 +6376,7 @@ const zhMessages = {
       "直接询问每个站点的 Durable Object，统计 buffered_visits / buffered_custom_events 是否存在停滞、未来时间戳或永久未刷新（脏）行。",
     doDiagnosticLoadFailed: "加载 DO 诊断数据失败。",
     doDiagnosticLoading: "正在拉取每个 DO 的状态…",
+    doDiagnosticRun: "运行 DO 诊断",
     doDiagnosticEmpty: "暂无站点 DO 状态。",
     doDiagnosticUnreachable: "部分站点 DO 不可达",
     doDiagnosticReachableSites: "可达 DO",
@@ -8602,6 +8605,7 @@ const jaMessages = {
       "各サイトの Durable Object に直接問い合わせ、buffered_visits / buffered_custom_events の状態から、停滞行、未来時刻の行、未フラッシュの滞留行を検出します。",
     doDiagnosticLoadFailed: "DO 診断データを読み込めません。",
     doDiagnosticLoading: "サイトごとに DO 状態を取得中…",
+    doDiagnosticRun: "DO 診断を実行",
     doDiagnosticEmpty: "DO 状態はありません。",
     doDiagnosticUnreachable: "一部の DO に到達できません",
     doDiagnosticReachableSites: "到達可能 DO",

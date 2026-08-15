@@ -1946,6 +1946,7 @@ systemPerformance:
     buffered_custom_events の状態から、停滞行、未来時刻の行、未フラッシュの滞留行を検出します。
   doDiagnosticLoadFailed: DO 診断データを読み込めません。
   doDiagnosticLoading: サイトごとに DO 状態を取得中…
+  doDiagnosticRun: DO 診断を実行
   doDiagnosticEmpty: DO 状態はありません。
   doDiagnosticUnreachable: 一部の DO に到達できません
   doDiagnosticReachableSites: 到達可能 DO

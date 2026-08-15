@@ -39,43 +39,109 @@ export async function queryEventTypeOverviewFromD1(
 WITH
 ${buildVisitSourceCte()},
 ${buildEventAnalyticsSourceCte()},
-filtered_events AS (
+filtered_events AS MATERIALIZED (
   SELECT *
   FROM event_source es
   ${eventFilter.clause}
 )`;
-  const [summaryRow] = await queryD1All<EventSummaryRow>(
+  type OverviewCardRow = EventSummaryRow & {
+    cardType: "summary" | "page" | "country" | "device" | "browser";
+    value: string | null;
+  };
+  const overviewRows = await queryD1All<OverviewCardRow>(
     env,
-    `${baseCte}
-SELECT
-  count(*) AS events,
-  count(DISTINCT event_name) AS eventTypes,
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-FROM filtered_events
+    `${baseCte},
+overview_card_rows AS (
+  SELECT
+    count(*) AS events,
+    count(DISTINCT event_name) AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
+    'summary' AS cardType,
+    NULL AS value
+  FROM filtered_events
+  UNION ALL
+  SELECT
+    count(*) AS events,
+    0 AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
+    'page' AS cardType,
+    pathname AS value
+  FROM filtered_events
+  WHERE TRIM(COALESCE(pathname, '')) != ''
+  GROUP BY pathname
+  UNION ALL
+  SELECT
+    count(*) AS events,
+    0 AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
+    'country' AS cardType,
+    country AS value
+  FROM filtered_events
+  WHERE TRIM(COALESCE(country, '')) != ''
+  GROUP BY country
+  UNION ALL
+  SELECT
+    count(*) AS events,
+    0 AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
+    'device' AS cardType,
+    device_type AS value
+  FROM filtered_events
+  WHERE TRIM(COALESCE(device_type, '')) != ''
+  GROUP BY device_type
+  UNION ALL
+  SELECT
+    count(*) AS events,
+    0 AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
+    'browser' AS cardType,
+    browser AS value
+  FROM filtered_events
+  WHERE TRIM(COALESCE(browser, '')) != ''
+  GROUP BY browser
+),
+ranked_overview_cards AS (
+  SELECT
+    cardType,
+    value,
+    events,
+    eventTypes,
+    sessions,
+    visitors,
+    ROW_NUMBER() OVER (
+      PARTITION BY cardType
+      ORDER BY events DESC, sessions DESC, value ASC
+    ) AS cardRank
+  FROM overview_card_rows
+)
+SELECT cardType, value, events, eventTypes, sessions, visitors
+FROM ranked_overview_cards
+WHERE cardType = 'summary' OR cardRank <= 8
+ORDER BY cardType ASC, cardRank ASC
 `,
     bindings,
   );
-  const dimensionSql = (expr: string) => `${baseCte}
-SELECT
-  ${expr} AS value,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-FROM filtered_events
-GROUP BY value
-HAVING TRIM(COALESCE(value, '')) != ''
-ORDER BY views DESC, sessions DESC, value ASC
-LIMIT 8
-`;
-  const readDimension = (expr: string) =>
-    queryD1All<DimensionRow>(env, dimensionSql(expr), bindings);
-  const [pages, countries, devices, browsers] = await Promise.all([
-    readDimension("pathname"),
-    readDimension("country"),
-    readDimension("device_type"),
-    readDimension("browser"),
-  ]);
+  const summaryRow = overviewRows.find((row) => row.cardType === "summary");
+  const readDimension = (
+    cardType: OverviewCardRow["cardType"],
+  ): DimensionRow[] =>
+    overviewRows
+      .filter((row) => row.cardType === cardType)
+      .map((row) => ({
+        value: String(row.value ?? ""),
+        views: Number(row.events ?? 0),
+        sessions: Number(row.sessions ?? 0),
+        visitors: Number(row.visitors ?? 0),
+      }));
+  const pages = readDimension("page");
+  const countries = readDimension("country");
+  const devices = readDimension("device");
+  const browsers = readDimension("browser");
   const summary = summaryRow ?? {
     events: 0,
     eventTypes: 0,

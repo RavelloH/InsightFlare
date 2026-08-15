@@ -2031,6 +2031,7 @@ systemPerformance:
     future-skewed timestamps, or stuck dirty rows.
   doDiagnosticLoadFailed: Failed to load DO diagnostic data.
   doDiagnosticLoading: Fetching DO state per site…
+  doDiagnosticRun: Run DO diagnostic
   doDiagnosticEmpty: No DO state available.
   doDiagnosticUnreachable: Some DOs unreachable
   doDiagnosticReachableSites: Reachable DOs

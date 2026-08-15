@@ -468,6 +468,47 @@ function commonQueryMatches(): SqlMatch[] {
       [{ bucket: 0, seriesKey: "Signup", events: 2 }],
     ),
     allMatch(
+      ["overview_card_rows AS", "ranked_overview_cards AS"],
+      [
+        {
+          cardType: "summary",
+          value: null,
+          events: 12,
+          eventTypes: 3,
+          sessions: 5,
+          visitors: 4,
+        },
+        {
+          cardType: "page",
+          value: "/signup",
+          events: 7,
+          sessions: 4,
+          visitors: 3,
+        },
+        {
+          cardType: "country",
+          value: "US",
+          events: 7,
+          sessions: 4,
+          visitors: 3,
+        },
+        {
+          cardType: "device",
+          value: "desktop",
+          events: 7,
+          sessions: 4,
+          visitors: 3,
+        },
+        {
+          cardType: "browser",
+          value: "Chrome",
+          events: 7,
+          sessions: 4,
+          visitors: 3,
+        },
+      ],
+    ),
+    allMatch(
       ["count(*) AS events", "count(DISTINCT event_name)"],
       [{ events: 12, eventTypes: 3, sessions: 5, visitors: 4 }],
     ),

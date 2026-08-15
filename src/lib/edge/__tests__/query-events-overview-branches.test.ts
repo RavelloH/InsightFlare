@@ -37,12 +37,43 @@ describe("edge query event type overview branch coverage", () => {
         { events: 20, eventTypes: 4, sessions: 8, visitors: 6 },
       ])
       .mockResolvedValueOnce([
-        { events: 6, eventTypes: 1, sessions: 3, visitors: 2 },
-      ])
-      .mockResolvedValueOnce([{ value: "/pricing", views: 4 }])
-      .mockResolvedValueOnce([{ value: "US", views: 3 }])
-      .mockResolvedValueOnce([{ value: "Desktop", views: 2 }])
-      .mockResolvedValueOnce([{ value: "Chrome", views: 1 }]);
+        {
+          events: 6,
+          eventTypes: 1,
+          sessions: 3,
+          visitors: 2,
+          cardType: "summary",
+          value: null,
+        },
+        {
+          events: 4,
+          sessions: 0,
+          visitors: 0,
+          cardType: "page",
+          value: "/pricing",
+        },
+        {
+          events: 3,
+          sessions: 0,
+          visitors: 0,
+          cardType: "country",
+          value: "US",
+        },
+        {
+          events: 2,
+          sessions: 0,
+          visitors: 0,
+          cardType: "device",
+          value: "Desktop",
+        },
+        {
+          events: 1,
+          sessions: 0,
+          visitors: 0,
+          cardType: "browser",
+          value: "Chrome",
+        },
+      ]);
 
     await expect(
       queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
@@ -56,10 +87,10 @@ describe("edge query event type overview branch coverage", () => {
         shareOfAllEvents: 0.3,
       },
       breakdowns: {
-        pages: [{ value: "/pricing", views: 4 }],
-        countries: [{ value: "US", views: 3 }],
-        devices: [{ value: "Desktop", views: 2 }],
-        browsers: [{ value: "Chrome", views: 1 }],
+        pages: [{ value: "/pricing", views: 4, sessions: 0, visitors: 0 }],
+        countries: [{ value: "US", views: 3, sessions: 0, visitors: 0 }],
+        devices: [{ value: "Desktop", views: 2, sessions: 0, visitors: 0 }],
+        browsers: [{ value: "Chrome", views: 1, sessions: 0, visitors: 0 }],
       },
     });
   });
@@ -75,12 +106,10 @@ describe("edge query event type overview branch coverage", () => {
           eventTypes: null,
           sessions: null,
           visitors: null,
+          cardType: "summary",
+          value: null,
         },
-      ])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+      ]);
 
     await expect(
       queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),

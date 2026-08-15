@@ -379,12 +379,38 @@ describe("edge query events summary coverage", () => {
           eventTypes: undefined,
           sessions: 4,
           visitors: null,
+          cardType: "summary",
+          value: null,
         },
-      ])
-      .mockResolvedValueOnce([{ value: "/signup", views: 2 }])
-      .mockResolvedValueOnce([{ value: "US", views: 2 }])
-      .mockResolvedValueOnce([{ value: "desktop", views: 2 }])
-      .mockResolvedValueOnce([{ value: "Chrome", views: 2 }]);
+        {
+          events: 2,
+          sessions: 0,
+          visitors: 0,
+          cardType: "page",
+          value: "/signup",
+        },
+        {
+          events: 2,
+          sessions: 0,
+          visitors: 0,
+          cardType: "country",
+          value: "US",
+        },
+        {
+          events: 2,
+          sessions: 0,
+          visitors: 0,
+          cardType: "device",
+          value: "desktop",
+        },
+        {
+          events: 2,
+          sessions: 0,
+          visitors: 0,
+          cardType: "browser",
+          value: "Chrome",
+        },
+      ]);
 
     await expect(
       queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
@@ -398,22 +424,16 @@ describe("edge query events summary coverage", () => {
         shareOfAllEvents: 0,
       },
       breakdowns: {
-        pages: [{ value: "/signup", views: 2 }],
-        countries: [{ value: "US", views: 2 }],
-        devices: [{ value: "desktop", views: 2 }],
-        browsers: [{ value: "Chrome", views: 2 }],
+        pages: [{ value: "/signup", views: 2, sessions: 0, visitors: 0 }],
+        countries: [{ value: "US", views: 2, sessions: 0, visitors: 0 }],
+        devices: [{ value: "desktop", views: 2, sessions: 0, visitors: 0 }],
+        browsers: [{ value: "Chrome", views: 2, sessions: 0, visitors: 0 }],
       },
     });
   });
 
   it("uses zero ratios when event type overview has no rows", async () => {
-    queryD1AllMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+    queryD1AllMock.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
     await expect(
       queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
