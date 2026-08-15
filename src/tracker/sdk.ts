@@ -1,26 +1,57 @@
 /* eslint-disable */
 // InsightFlare browser tracker SDK
-// Compiled at build time; config placeholders replaced at serve time via script-endpoint.
+// Compiled at build time; the script endpoint injects this config immediately
+// before the SDK. Do not turn these values into build-time string placeholders:
+// minifiers may constant-fold privacy branches before injection happens.
 
 import { initAutoTrack } from "./auto-track";
 import { createPerformanceTracker } from "./performance";
 import type { UaClientHintsResult } from "./ua-client-hints";
 import { readUaClientHints, withUaClientHints } from "./ua-client-hints";
 
-// ── Config placeholders (replaced at serve time) ──
-const SITE_ID = "__IF_SITE_ID__";
-const IS_EU_MODE = "__IF_IS_EU_MODE__";
-const TRACK_QUERY_PARAMS = "__IF_TRACK_QUERY_PARAMS__";
-const TRACK_HASH = "__IF_TRACK_HASH__";
-const IGNORE_DO_NOT_TRACK = "__IF_IGNORE_DO_NOT_TRACK__";
-const AUTO_TRACK_OUTBOUND_LINKS = "__IF_AUTO_TRACK_OUTBOUND_LINKS__";
-const PERFORMANCE_SAMPLE_RATE = "__IF_PERFORMANCE_SAMPLE_RATE__";
-const SESSION_WINDOW_MS = "__IF_SESSION_WINDOW_MS__";
-const COLLECT_TOKEN = "__IF_COLLECT_TOKEN__";
+const TRACKER_RUNTIME_CONFIG_KEY = "__insightflare_tracker_runtime_config__";
+
+interface TrackerRuntimeConfig {
+  siteId: string;
+  isEUMode: boolean;
+  trackQueryParams: boolean;
+  trackHash: boolean;
+  ignoreDoNotTrack: boolean;
+  autoTrackOutboundLinks: boolean;
+  performanceSampleRate: number;
+  sessionWindowMs: number;
+  collectToken: string;
+}
+
+function takeRuntimeConfig(): TrackerRuntimeConfig {
+  const configHost = globalThis as typeof globalThis & Record<string, unknown>;
+  const rawConfig = configHost[TRACKER_RUNTIME_CONFIG_KEY];
+  delete configHost[TRACKER_RUNTIME_CONFIG_KEY];
+
+  if (!rawConfig || typeof rawConfig !== "object" || Array.isArray(rawConfig)) {
+    throw new Error("InsightFlare: runtime configuration is missing");
+  }
+
+  const config = rawConfig as Partial<TrackerRuntimeConfig>;
+  if (
+    typeof config.siteId !== "string" ||
+    typeof config.isEUMode !== "boolean" ||
+    typeof config.trackQueryParams !== "boolean" ||
+    typeof config.trackHash !== "boolean" ||
+    typeof config.ignoreDoNotTrack !== "boolean" ||
+    typeof config.autoTrackOutboundLinks !== "boolean" ||
+    typeof config.performanceSampleRate !== "number" ||
+    typeof config.sessionWindowMs !== "number" ||
+    typeof config.collectToken !== "string"
+  ) {
+    throw new Error("InsightFlare: runtime configuration is invalid");
+  }
+
+  return config as TrackerRuntimeConfig;
+}
 
 // ── Static constants ──
 const INSTALL_KEY = "__insightflare_tracker_v6__";
-const VISITOR_KEY = "__insightflare_visitor_" + SITE_ID + "__";
 const ROUTE_SETTLE_DELAY_MS = 300;
 const UA_CLIENT_HINT_TIMEOUT_MS = 200;
 
@@ -58,7 +89,23 @@ if (!scriptEl || !(scriptEl instanceof HTMLScriptElement) || !scriptEl.src) {
   throw new Error("InsightFlare: script element not found");
 }
 
-if (!(IGNORE_DO_NOT_TRACK as unknown as string)) {
+if ((window as any)[INSTALL_KEY]) {
+  throw new Error("InsightFlare: already installed");
+}
+
+const runtimeConfig = takeRuntimeConfig();
+const SITE_ID = runtimeConfig.siteId;
+const IS_EU_MODE = runtimeConfig.isEUMode;
+const TRACK_QUERY_PARAMS = runtimeConfig.trackQueryParams;
+const TRACK_HASH = runtimeConfig.trackHash;
+const IGNORE_DO_NOT_TRACK = runtimeConfig.ignoreDoNotTrack;
+const AUTO_TRACK_OUTBOUND_LINKS = runtimeConfig.autoTrackOutboundLinks;
+const PERFORMANCE_SAMPLE_RATE = runtimeConfig.performanceSampleRate;
+const SESSION_WINDOW_MS = runtimeConfig.sessionWindowMs;
+const COLLECT_TOKEN = runtimeConfig.collectToken;
+const VISITOR_KEY = "__insightflare_visitor_" + SITE_ID + "__";
+
+if (!IGNORE_DO_NOT_TRACK) {
   const dnt = String(navigator.doNotTrack || "")
     .trim()
     .toLowerCase();
@@ -67,18 +114,12 @@ if (!(IGNORE_DO_NOT_TRACK as unknown as string)) {
   }
 }
 
-if ((window as any)[INSTALL_KEY]) {
-  throw new Error("InsightFlare: already installed");
-}
-
 const scriptUrl = new URL(scriptEl.src);
 const collectUrl = new URL("/collect", scriptUrl.origin).toString();
-const visitorId = (IS_EU_MODE as unknown as boolean)
-  ? ""
-  : loadOrCreateVisitorId(VISITOR_KEY);
+const visitorId = IS_EU_MODE ? "" : loadOrCreateVisitorId(VISITOR_KEY);
 const performanceTracker = createPerformanceTracker({
   enabled: BUILD_PERFORMANCE,
-  sampleRate: PERFORMANCE_SAMPLE_RATE as unknown as number,
+  sampleRate: PERFORMANCE_SAMPLE_RATE,
 });
 
 const uaClientHintsReady: Promise<UaClientHintsResult | null> =
@@ -100,8 +141,8 @@ function routeKey(href: string): string {
   const url = new URL(href, window.location.href);
   return [
     url.pathname || "/",
-    (TRACK_QUERY_PARAMS as unknown as string) ? url.search || "" : "",
-    (TRACK_HASH as unknown as string) ? url.hash || "" : "",
+    TRACK_QUERY_PARAMS ? url.search || "" : "",
+    TRACK_HASH ? url.hash || "" : "",
   ].join("|");
 }
 
@@ -126,8 +167,8 @@ function pagePayloadBase(
     timestamp: eventAt,
     startedAt,
     pathname: url.pathname || "/",
-    query: (TRACK_QUERY_PARAMS as unknown as string) ? url.search || "" : "",
-    hash: (TRACK_HASH as unknown as string) ? url.hash || "" : "",
+    query: TRACK_QUERY_PARAMS ? url.search || "" : "",
+    hash: TRACK_HASH ? url.hash || "" : "",
     hostname: url.hostname || "",
     title: document.title || "",
     language: navigator.language || "",
@@ -291,7 +332,7 @@ function handleDocumentHidden(): void {
 function handleDocumentVisible(): void {
   if (!currentVisit || leaveSent || pendingHiddenAt <= 0) return;
   const eventAt = Date.now();
-  if (eventAt - pendingHiddenAt > (SESSION_WINDOW_MS as unknown as number)) {
+  if (eventAt - pendingHiddenAt > SESSION_WINDOW_MS) {
     const referrerUrl = currentVisit.href;
     if (BUILD_PERFORMANCE) performanceTracker.stop();
     startVisit(window.location.href, referrerUrl, eventAt);
@@ -516,12 +557,7 @@ window.addEventListener("pagehide", () => {
   sendLeave();
 });
 
-initAutoTrack({
-  autoTrackOutboundLinks: Boolean(
-    AUTO_TRACK_OUTBOUND_LINKS as unknown as string,
-  ),
-  track,
-});
+initAutoTrack({ autoTrackOutboundLinks: AUTO_TRACK_OUTBOUND_LINKS, track });
 
 // ── Window exposure ──
 const api = {

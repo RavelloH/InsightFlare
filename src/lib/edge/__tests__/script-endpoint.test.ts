@@ -7,13 +7,11 @@ import type { Env } from "@/lib/edge/types";
 import type { SiteTrackingConfig } from "@/lib/site-settings";
 
 vi.mock("@/tracker/sdk.min", () => ({
-  SDK_MIN:
-    'full:"__IF_SITE_ID__","__IF_IS_EU_MODE__","__IF_TRACK_QUERY_PARAMS__","__IF_TRACK_HASH__","__IF_IGNORE_DO_NOT_TRACK__","__IF_AUTO_TRACK_OUTBOUND_LINKS__","__IF_PERFORMANCE_SAMPLE_RATE__","__IF_SESSION_WINDOW_MS__","__IF_COLLECT_TOKEN__"',
+  SDK_MIN: '"use strict";full-sdk',
 }));
 
 vi.mock("@/tracker/sdk.no-perf.min", () => ({
-  SDK_MIN:
-    'no-perf:"__IF_SITE_ID__","__IF_IS_EU_MODE__","__IF_TRACK_QUERY_PARAMS__","__IF_TRACK_HASH__","__IF_IGNORE_DO_NOT_TRACK__","__IF_AUTO_TRACK_OUTBOUND_LINKS__","__IF_PERFORMANCE_SAMPLE_RATE__","__IF_SESSION_WINDOW_MS__","__IF_COLLECT_TOKEN__"',
+  SDK_MIN: "no-perf-sdk",
 }));
 
 vi.mock("@/lib/edge/site-settings-store", async () => {
@@ -172,8 +170,9 @@ describe("edge script endpoint", () => {
       "public, max-age=12, s-maxage=12",
     );
     expect(script).toMatch(
-      /^full:"site-1",true,false,true,false,true,100,1800000,"eyJ/,
+      /^"use strict";globalThis\["__insightflare_tracker_runtime_config__"\] = \{"siteId":"site-1","isEUMode":true,"trackQueryParams":false,"trackHash":true,"ignoreDoNotTrack":false,"autoTrackOutboundLinks":true,"performanceSampleRate":100,"sessionWindowMs":1800000,"collectToken":"eyJ/,
     );
+    expect(script).toMatch(/\nfull-sdk$/);
     expect(storage.open).toHaveBeenCalledWith("insightflare-script-cache");
     expect(cache.match).toHaveBeenCalledTimes(1);
     expect(cache.put).toHaveBeenCalledTimes(1);
@@ -222,7 +221,7 @@ describe("edge script endpoint", () => {
     );
 
     await expect(response.text()).resolves.toMatch(
-      /^no-perf:"site-1",true,true,false,true,false,0,86400000,"eyJ/,
+      /^globalThis\["__insightflare_tracker_runtime_config__"\] = \{"siteId":"site-1","isEUMode":true,"trackQueryParams":true,"trackHash":false,"ignoreDoNotTrack":true,"autoTrackOutboundLinks":false,"performanceSampleRate":0,"sessionWindowMs":86400000,"collectToken":"eyJ/,
     );
     expect(response.headers.get("cache-control")).toBe(
       "public, max-age=43200, s-maxage=43200",
@@ -249,7 +248,7 @@ describe("edge script endpoint", () => {
       }),
     );
 
-    await expect(response.text()).resolves.toContain('full:"site-1",false');
+    await expect(response.text()).resolves.toContain('"isEUMode":false');
     expect(response.headers.get("cache-control")).toBe(
       "public, max-age=600, s-maxage=600",
     );

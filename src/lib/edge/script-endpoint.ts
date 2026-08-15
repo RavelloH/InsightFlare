@@ -17,6 +17,7 @@ const SCRIPT_RESPONSE_CACHE_NAME = "insightflare-script-cache";
 const SCRIPT_RESPONSE_CACHE_TTL_SECONDS = 10 * 60;
 const SCRIPT_CACHE_VERSION = "sdk-prebuilt-v1";
 const MAX_SCRIPT_RESPONSE_CACHE_TTL_SECONDS = 24 * 60 * 60;
+const TRACKER_RUNTIME_CONFIG_KEY = "__insightflare_tracker_runtime_config__";
 
 function isEUCountry(request: Request): boolean {
   const cf = (request as Request & { cf?: { isEUCountry?: boolean } }).cf;
@@ -83,28 +84,11 @@ function applyConfigToSdk(
     collectToken: string;
   },
 ): string {
-  return template
-    .replaceAll(`"__IF_SITE_ID__"`, JSON.stringify(config.siteId))
-    .replaceAll(`"__IF_IS_EU_MODE__"`, config.isEUMode ? "true" : "false")
-    .replaceAll(
-      `"__IF_TRACK_QUERY_PARAMS__"`,
-      config.trackQueryParams ? "true" : "false",
-    )
-    .replaceAll(`"__IF_TRACK_HASH__"`, config.trackHash ? "true" : "false")
-    .replaceAll(
-      `"__IF_IGNORE_DO_NOT_TRACK__"`,
-      config.ignoreDoNotTrack ? "true" : "false",
-    )
-    .replaceAll(
-      `"__IF_AUTO_TRACK_OUTBOUND_LINKS__"`,
-      config.autoTrackOutboundLinks ? "true" : "false",
-    )
-    .replaceAll(
-      `"__IF_PERFORMANCE_SAMPLE_RATE__"`,
-      String(config.performanceSampleRate),
-    )
-    .replaceAll(`"__IF_SESSION_WINDOW_MS__"`, String(config.sessionWindowMs))
-    .replaceAll(`"__IF_COLLECT_TOKEN__"`, JSON.stringify(config.collectToken));
+  const assignment = `globalThis[${JSON.stringify(TRACKER_RUNTIME_CONFIG_KEY)}] = ${JSON.stringify(config)};\n`;
+  const strictDirective = '"use strict";';
+  return template.startsWith(strictDirective)
+    ? `${strictDirective}${assignment}${template.slice(strictDirective.length)}`
+    : `${assignment}${template}`;
 }
 
 function settingsFingerprint(input: {

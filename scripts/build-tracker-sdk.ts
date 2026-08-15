@@ -3,7 +3,8 @@
  * Generates two variants:
  *   - sdk.min.ts        (BUILD_PERFORMANCE=true)  for sites with performance sampling
  *   - sdk.no-perf.min.ts (BUILD_PERFORMANCE=false) for sites without performance
- * Placeholder strings (__IF_*__) survive minification and are replaced at serve time.
+ * Per-request settings are injected by the script endpoint immediately before
+ * execution, so minification cannot pre-evaluate privacy branches.
  */
 import * as esbuild from "esbuild";
 import { writeFileSync } from "fs";
