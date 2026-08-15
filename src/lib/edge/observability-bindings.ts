@@ -7,6 +7,7 @@ import type { Env } from "./types";
 const INSTRUMENTED_ENV = Symbol("insightflare.instrumented-env");
 const INVOCATION_LOGGER = Symbol("insightflare.invocation-logger");
 const RAW_D1_STATEMENT = new WeakMap<object, D1PreparedStatement>();
+const D1_ROWS_READ_STATE = new WeakMap<InvocationLogger, boolean>();
 
 type D1MetaLike = {
   changes?: unknown;
@@ -36,13 +37,19 @@ function errorData(error: unknown): InvocationLogData {
 function recordD1Result(logger: InvocationLogger, result: unknown): void {
   const meta = (result as { meta?: D1MetaLike } | null)?.meta;
   if (!meta) {
-    logger.setPerformance({ d1RowsReadAvailable: false });
+    if (!D1_ROWS_READ_STATE.get(logger)) {
+      logger.setPerformance({ d1RowsReadAvailable: false });
+    }
     return;
   }
   const rowsRead = asNonNegativeInteger(meta.rows_read);
   if (rowsRead === undefined) {
-    logger.setPerformance({ d1RowsReadAvailable: false });
+    if (!D1_ROWS_READ_STATE.get(logger)) {
+      logger.setPerformance({ d1RowsReadAvailable: false });
+    }
   } else {
+    D1_ROWS_READ_STATE.set(logger, true);
+    logger.setPerformance({ d1RowsReadAvailable: true });
     logger.increment("d1RowsRead", rowsRead);
   }
   const rowsWritten = asNonNegativeInteger(meta.changes);

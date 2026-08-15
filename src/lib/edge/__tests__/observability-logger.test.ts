@@ -286,7 +286,7 @@ describe("edge observability logger", () => {
           total_attempts: 2,
         },
       }),
-      first: vi.fn(),
+      first: vi.fn().mockResolvedValue({ value: 1 }),
       run: vi.fn(),
       raw: vi.fn(),
     };
@@ -311,16 +311,19 @@ describe("edge observability logger", () => {
     await instrumented.DB.prepare("SELECT value FROM metrics")
       .bind("ignored")
       .all();
+    await instrumented.DB.prepare("SELECT value FROM metrics").first();
 
     expect(logger.build()).toMatchObject({
       performance: {
-        d1Statements: 1,
+        d1Statements: 2,
         d1RowsRead: 9,
+        d1RowsReadAvailable: true,
         d1SqlDurationMs: 4,
         d1TotalAttempts: 2,
         d1Retries: 1,
         operations: {
           "d1.all": { count: 1, failed: 0 },
+          "d1.first": { count: 1, failed: 0 },
         },
       },
       logs: expect.arrayContaining([
@@ -330,6 +333,40 @@ describe("edge observability logger", () => {
         }),
         expect.objectContaining({ message: "d1.all.completed" }),
       ]),
+    });
+  });
+
+  it("marks rows-read unavailable when completed D1 operations have no metadata", async () => {
+    const statement = {
+      bind: vi.fn(),
+      all: vi.fn(),
+      first: vi.fn().mockResolvedValue({ value: 1 }),
+      run: vi.fn(),
+      raw: vi.fn(),
+    };
+    const database: D1Database = {
+      prepare: () => statement as D1PreparedStatement,
+      batch: vi.fn(),
+      exec: vi.fn(),
+      withSession: vi.fn(),
+      dump: vi.fn(),
+    };
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const instrumented = instrumentEnv(
+      { DB: database, INGEST_DO: {} as DurableObjectNamespace },
+      logger,
+    );
+
+    await instrumented.DB.prepare("SELECT value FROM metrics").first();
+
+    expect(logger.build()).toMatchObject({
+      performance: {
+        d1Statements: 1,
+        d1RowsReadAvailable: false,
+      },
     });
   });
 
