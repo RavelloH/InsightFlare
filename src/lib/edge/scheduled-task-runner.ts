@@ -1,4 +1,8 @@
-import type { InvocationLogger } from "@/lib/edge/observability-logger";
+import { measureExternalFetch } from "@/lib/edge/observability-bindings";
+import {
+  currentInvocationLogger,
+  type InvocationLogger,
+} from "@/lib/edge/observability-logger";
 import {
   SCHEDULED_TASK_LOG_RETENTION_DAYS,
   type ScheduledTaskLogLevel,
@@ -143,7 +147,7 @@ function createLogger(
   runId: string,
   taskKey: string,
   expiresAtSec: number,
-  observability?: Pick<InvocationLogger, "warn">,
+  observability?: InvocationLogger,
 ): ScheduledTaskLogger {
   let sequence = 0;
   const write = async (
@@ -181,6 +185,12 @@ function createLogger(
       },
       observability,
     );
+    // Persisted task logs can contain operator-facing identifiers. The Worker
+    // record mirrors only the stable event and level, never its message/data.
+    const eventCode = `scheduled_task.${event.slice(0, 120)}`;
+    if (level === "error") observability?.error(eventCode);
+    else if (level === "warn") observability?.warn(eventCode);
+    else observability?.info(eventCode);
   };
   return {
     debug: (event, message, data) => write("debug", event, message, data),
@@ -197,15 +207,18 @@ export async function runScheduledTask(
   handler: (
     context: ScheduledTaskContext,
   ) => Promise<ScheduledTaskOutcome | undefined>,
-  observability?: Pick<InvocationLogger, "warn">,
+  observability?: InvocationLogger,
 ): Promise<void> {
+  // Manual tasks run beneath the Hono request scope; Cron supplies its logger
+  // explicitly. Either path must keep task work in the outer invocation record.
+  const activeObservability = observability ?? currentInvocationLogger();
   const startedAt = Date.now();
   const triggerType = definition.triggerType ?? "cron";
   const scheduledAt = normalizeScheduledAtMs(scheduledTime);
   const runId = crypto.randomUUID();
   const invocationId = crypto.randomUUID();
   const expiresAtSec = Math.floor(startedAt / 1000) + RETENTION_SECONDS;
-  await pruneExpiredScheduledTaskLogs(env, observability);
+  await pruneExpiredScheduledTaskLogs(env, activeObservability);
 
   await bestEffortRun(
     "run-start",
@@ -234,7 +247,7 @@ export async function runScheduledTask(
         )
         .run();
     },
-    observability,
+    activeObservability,
   );
 
   const logger = createLogger(
@@ -242,7 +255,7 @@ export async function runScheduledTask(
     runId,
     definition.key,
     expiresAtSec,
-    observability,
+    activeObservability,
   );
   await logger.info("start", "Task run started", {
     triggerType,
@@ -257,7 +270,12 @@ export async function runScheduledTask(
       scheduledTime: scheduledAt,
       startedAt,
       logger,
-      externalFetch: fetch.bind(globalThis),
+      externalFetch: (...args) =>
+        measureExternalFetch(
+          activeObservability,
+          "external_fetch.scheduled_task",
+          () => fetch(...args),
+        ),
     })) ?? { status: "success" as const };
     const finishedAt = Date.now();
     const status = outcome.status ?? "success";
@@ -292,7 +310,7 @@ export async function runScheduledTask(
           )
           .run();
       },
-      observability,
+      activeObservability,
     );
   } catch (error) {
     const finishedAt = Date.now();
@@ -328,7 +346,7 @@ export async function runScheduledTask(
           )
           .run();
       },
-      observability,
+      activeObservability,
     );
     throw error;
   }

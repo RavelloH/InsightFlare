@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  createInvocationLogger,
+  runWithInvocationLogger,
+} from "@/lib/edge/observability-logger";
 import { fetchGithubCompare, fetchGithubReleases } from "@/lib/github-releases";
 
 describe("github-releases", () => {
@@ -14,6 +18,27 @@ describe("github-releases", () => {
   });
 
   describe("fetchGithubReleases", () => {
+    it("records the direct request in an active Worker invocation", async () => {
+      fetchSpy.mockResolvedValueOnce(new Response("[]", { status: 200 }));
+      const logger = createInvocationLogger({
+        source: "worker",
+        trigger: "request",
+      });
+
+      await runWithInvocationLogger(logger, () =>
+        fetchGithubReleases("owner", "repo"),
+      );
+
+      expect(logger.build()).toMatchObject({
+        performance: {
+          externalFetches: 1,
+          operations: {
+            "external_fetch.github_releases": { count: 1, failed: 0 },
+          },
+        },
+      });
+    });
+
     it("returns normalized releases sorted by timestamp descending", async () => {
       fetchSpy.mockResolvedValueOnce(
         new Response(
@@ -195,7 +220,13 @@ describe("github-releases", () => {
         ),
       );
 
-      const result = await fetchGithubCompare("owner", "repo", "v1", "v2");
+      const logger = createInvocationLogger({
+        source: "worker",
+        trigger: "request",
+      });
+      const result = await runWithInvocationLogger(logger, () =>
+        fetchGithubCompare("owner", "repo", "v1", "v2"),
+      );
 
       expect(result.htmlUrl).toBe("https://github.com/test/compare/v1...v2");
       expect(result.status).toBe("ahead");
@@ -211,6 +242,12 @@ describe("github-releases", () => {
       expect(result.commits[1].authorName).toBe("Other Author");
       expect(result.commits[1].authorLogin).toBeNull();
       expect(result.commits[1].authorUrl).toBeNull();
+      expect(logger.build().performance).toMatchObject({
+        externalFetches: 1,
+        operations: {
+          "external_fetch.github_compare": { count: 1, failed: 0 },
+        },
+      });
     });
 
     it("throws on non-OK HTTP response", async () => {

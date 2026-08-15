@@ -4,7 +4,10 @@ import { instrumentEnv } from "@/lib/edge/observability-bindings";
 import { measureExternalFetch } from "@/lib/edge/observability-bindings";
 import {
   createInvocationLogger,
+  currentInvocationLogger,
   MAX_INVOCATION_LOG_EVENTS,
+  measureCurrentExternalFetch,
+  runWithInvocationLogger,
 } from "@/lib/edge/observability-logger";
 import type { Env } from "@/lib/edge/types";
 
@@ -199,6 +202,75 @@ describe("edge observability logger", () => {
           data: { rows: 3, durationMs: 7 },
         },
       ],
+    });
+  });
+
+  it("keeps the invocation logger scoped to async work and measures direct fetches", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+
+    await runWithInvocationLogger(logger, async () => {
+      expect(currentInvocationLogger()).toBe(logger);
+      const response = await measureCurrentExternalFetch(
+        "external_fetch.github_releases",
+        () => Promise.resolve(new Response(null, { status: 204 })),
+      );
+      expect(response.status).toBe(204);
+    });
+
+    expect(currentInvocationLogger()).toBeUndefined();
+    expect(logger.build()).toMatchObject({
+      performance: {
+        externalFetches: 1,
+        operations: {
+          "external_fetch.github_releases": {
+            count: 1,
+            failed: 0,
+          },
+        },
+      },
+      logs: expect.arrayContaining([
+        expect.objectContaining({
+          message: "external_fetch.github_releases.started",
+        }),
+        expect.objectContaining({
+          message: "external_fetch.github_releases.completed",
+          data: expect.objectContaining({ status: 204 }),
+        }),
+      ]),
+    });
+  });
+
+  it("records failures from direct fetches in the current invocation", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+
+    await expect(
+      runWithInvocationLogger(logger, () =>
+        measureCurrentExternalFetch("external_fetch.failing", () =>
+          Promise.reject(new TypeError("network unavailable")),
+        ),
+      ),
+    ).rejects.toThrow("network unavailable");
+
+    expect(logger.build()).toMatchObject({
+      performance: {
+        externalFetches: 1,
+        failedExternalFetches: 1,
+        operations: {
+          "external_fetch.failing": { count: 1, failed: 1 },
+        },
+      },
+      logs: expect.arrayContaining([
+        expect.objectContaining({
+          message: "external_fetch.failing.failed",
+          data: expect.objectContaining({ errorName: "TypeError" }),
+        }),
+      ]),
     });
   });
 

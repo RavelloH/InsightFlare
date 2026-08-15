@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  createInvocationLogger,
+  runWithInvocationLogger,
+} from "@/lib/edge/observability-logger";
 import type { Env } from "@/lib/edge/types";
 
 vi.mock("@/lib/scheduled-tasks", () => ({
@@ -223,5 +227,40 @@ describe("runScheduledTask", () => {
     // Should not throw even though DB writes fail
     await runScheduledTask(env, definition, 1000, handler);
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("mirrors stable task events without persisting operator-facing data", async () => {
+    const env = createEnv(Array.from({ length: 7 }, () => statement()));
+    const observability = createInvocationLogger({
+      source: "worker",
+      trigger: "alarm",
+    });
+
+    await runWithInvocationLogger(observability, () =>
+      runScheduledTask(env, definition, 1000, async ({ logger }) => {
+        await logger.warn("delivery.delayed", "site-123 delayed", {
+          siteId: "site-123",
+          retryAfterMs: 500,
+        });
+        return { status: "success" };
+      }),
+    );
+
+    const record = observability.build();
+    expect(record.logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: "scheduled_task.start" }),
+        expect.objectContaining({ message: "scheduled_task.delivery.delayed" }),
+        expect.objectContaining({ message: "scheduled_task.finish" }),
+      ]),
+    );
+    expect(
+      record.logs.some((entry) => entry.message.includes("site-123")),
+    ).toBe(false);
+    expect(
+      record.logs.find(
+        (entry) => entry.message === "scheduled_task.delivery.delayed",
+      )?.data,
+    ).toBeUndefined();
   });
 });

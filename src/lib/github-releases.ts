@@ -1,3 +1,5 @@
+import { measureCurrentExternalFetch } from "@/lib/edge/observability-logger";
+
 const GITHUB_API_BASE =
   import.meta.env.VITE_GITHUB_API_BASE || "https://api.github.com";
 
@@ -105,16 +107,20 @@ export async function fetchGithubReleases(
   owner: string,
   repo: string,
 ): Promise<GithubRelease[]> {
-  const response = await fetch(
-    `${GITHUB_API_BASE}/repos/${owner}/${repo}/releases?per_page=50&page=1`,
-    {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": "InsightFlare",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-      cache: "no-store",
-    },
+  const response = await measureCurrentExternalFetch(
+    "external_fetch.github_releases",
+    () =>
+      fetch(
+        `${GITHUB_API_BASE}/repos/${owner}/${repo}/releases?per_page=50&page=1`,
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "InsightFlare",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          cache: "no-store",
+        },
+      ),
   );
 
   if (!response.ok) {
@@ -156,18 +162,22 @@ export async function fetchGithubCompare(
   base: string,
   head: string,
 ): Promise<GithubCompareResult> {
-  const response = await fetch(
-    `${GITHUB_API_BASE}/repos/${owner}/${repo}/compare/${encodeURIComponent(
-      base,
-    )}...${encodeURIComponent(head)}`,
-    {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": "InsightFlare",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-      cache: "no-store",
-    },
+  const response = await measureCurrentExternalFetch(
+    "external_fetch.github_compare",
+    () =>
+      fetch(
+        `${GITHUB_API_BASE}/repos/${owner}/${repo}/compare/${encodeURIComponent(
+          base,
+        )}...${encodeURIComponent(head)}`,
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "InsightFlare",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          cache: "no-store",
+        },
+      ),
   );
 
   if (!response.ok) {

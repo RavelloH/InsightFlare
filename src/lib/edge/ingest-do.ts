@@ -48,7 +48,9 @@ import type {
 import { instrumentEnv } from "./observability-bindings";
 import {
   createInvocationLogger,
+  currentInvocationLogger,
   type InvocationLogger,
+  runWithInvocationLogger,
 } from "./observability-logger";
 import type {
   Env,
@@ -86,15 +88,17 @@ export class IngestDurableObject extends DurableObject {
     logger.info("do.request.started");
 
     try {
-      await logger.measure("do.schema_ready", () => this.schemaReady);
-      const response = await this.handleRequest(request, url, logger);
-      logger.setRequest({
-        route: url.pathname,
-        method: request.method,
-        status: response.status,
-        outcome: response.status >= 400 ? "error" : "ok",
+      return await runWithInvocationLogger(logger, async () => {
+        await logger.measure("do.schema_ready", () => this.schemaReady);
+        const response = await this.handleRequest(request, url, logger);
+        logger.setRequest({
+          route: url.pathname,
+          method: request.method,
+          status: response.status,
+          outcome: response.status >= 400 ? "error" : "ok",
+        });
+        return response;
       });
-      return response;
     } catch (error) {
       logger.error("do.request.unhandled_error");
       logger.setRequest({
@@ -149,16 +153,20 @@ export class IngestDurableObject extends DurableObject {
     const logger = createInvocationLogger({ source: "do", trigger: "alarm" });
     logger.info("do.alarm.started");
     try {
-      await logger.measure("do.schema_ready", () => this.schemaReady);
-      await logger.measure("do.maintenance", () => this.runMaintenance(logger));
-      if ((await this.hasOpenVisits()) || this.hasDirtyRows()) {
-        const scheduledAt = Date.now() + D1_FLUSH_INTERVAL_MS;
-        await this.doState.storage.setAlarm(scheduledAt);
-        logger.info("do.alarm.rescheduled");
-        return;
-      }
-      await this.doState.storage.deleteAlarm();
-      logger.info("do.alarm.cleared");
+      await runWithInvocationLogger(logger, async () => {
+        await logger.measure("do.schema_ready", () => this.schemaReady);
+        await logger.measure("do.maintenance", () =>
+          this.runMaintenance(logger),
+        );
+        if ((await this.hasOpenVisits()) || this.hasDirtyRows()) {
+          const scheduledAt = Date.now() + D1_FLUSH_INTERVAL_MS;
+          await this.doState.storage.setAlarm(scheduledAt);
+          logger.info("do.alarm.rescheduled");
+          return;
+        }
+        await this.doState.storage.deleteAlarm();
+        logger.info("do.alarm.cleared");
+      });
     } catch (error) {
       logger.error("do.alarm.failed");
       throw error;
@@ -243,6 +251,7 @@ export class IngestDurableObject extends DurableObject {
 
     server.accept();
     this.sockets.add(server);
+    const connectedAt = performance.now();
     logger.info("do.websocket.connected");
     if (
       await logger.measure("do.websocket.initial_snapshot", () =>
@@ -254,11 +263,15 @@ export class IngestDurableObject extends DurableObject {
       logger.error("do.websocket.snapshot_failed");
     }
 
-    server.addEventListener("close", () => {
+    server.addEventListener("close", (event) => {
       this.sockets.delete(server);
+      this.emitWebSocketLifecycle("do.websocket.closed", connectedAt, {
+        code: event.code,
+      });
     });
     server.addEventListener("error", () => {
       this.sockets.delete(server);
+      this.emitWebSocketLifecycle("do.websocket.error", connectedAt);
       try {
         server.close();
       } catch {
@@ -270,6 +283,32 @@ export class IngestDurableObject extends DurableObject {
       status: 101,
       webSocket: client,
     });
+  }
+
+  private emitWebSocketLifecycle(
+    event: "do.websocket.closed" | "do.websocket.error",
+    connectedAt: number,
+    data?: { code: number },
+  ): void {
+    const logger = createInvocationLogger({ source: "do", trigger: "request" });
+    logger.setRequest({
+      route: "/ws",
+      method: "WEBSOCKET",
+      status: event === "do.websocket.error" ? 500 : 101,
+      outcome: event === "do.websocket.error" ? "error" : "ok",
+    });
+    logger.setPerformance({
+      webSocketDurationMs: Math.max(
+        0,
+        Math.round(performance.now() - connectedAt),
+      ),
+    });
+    if (event === "do.websocket.error") {
+      logger.error(event);
+    } else {
+      logger.info(event, data);
+    }
+    logger.emit();
   }
 
   private async handleSnapshot(
@@ -348,6 +387,12 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private sqlAll<T>(query: string, ...bindings: SqlBinding[]): T[] {
+    const logger = currentInvocationLogger();
+    if (logger) return this.measuredSqlAll<T>(logger, query, ...bindings);
+    return this.rawSqlAll<T>(query, ...bindings);
+  }
+
+  private rawSqlAll<T>(query: string, ...bindings: SqlBinding[]): T[] {
     return this.doState.storage.sql.exec(query, ...bindings).toArray() as T[];
   }
 
@@ -357,6 +402,12 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private sqlRun(query: string, ...bindings: SqlBinding[]): number {
+    const logger = currentInvocationLogger();
+    if (logger) return this.measuredSqlRun(logger, query, ...bindings);
+    return this.rawSqlRun(query, ...bindings);
+  }
+
+  private rawSqlRun(query: string, ...bindings: SqlBinding[]): number {
     return this.doState.storage.sql.exec(query, ...bindings).rowsWritten;
   }
 
@@ -375,7 +426,7 @@ export class IngestDurableObject extends DurableObject {
     });
     logger.increment("doSqlStatements");
     try {
-      const rows = this.sqlAll<T>(query, ...bindings);
+      const rows = this.rawSqlAll<T>(query, ...bindings);
       logger.increment("doSqlRowsRead", rows.length);
       span.end({ rowCount: rows.length });
       return rows;
@@ -408,7 +459,7 @@ export class IngestDurableObject extends DurableObject {
     });
     logger.increment("doSqlStatements");
     try {
-      const rowsWritten = this.sqlRun(query, ...bindings);
+      const rowsWritten = this.rawSqlRun(query, ...bindings);
       logger.increment("doSqlRowsWritten", rowsWritten);
       span.end({ rowsWritten });
       return rowsWritten;

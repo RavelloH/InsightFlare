@@ -5,6 +5,7 @@ import {
   createInvocationLogger,
   type InvocationCacheState,
   type InvocationDataSource,
+  runWithInvocationLogger,
 } from "@/lib/edge/observability-logger";
 import type { AppEnv } from "@/lib/hono/types";
 import { getRequestId } from "@/lib/response";
@@ -56,7 +57,9 @@ export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
     logger.info("request.started");
 
     try {
-      await logger.measure("route.handler", () => next());
+      await runWithInvocationLogger(logger, () =>
+        logger.measure("route.handler", () => next()),
+      );
     } catch (error) {
       logger.error("request.unhandled_error");
       throw error;

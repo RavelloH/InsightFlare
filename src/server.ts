@@ -4,7 +4,10 @@ import { initializeE2eClock } from "@/lib/edge/e2e-clock";
 import { runHourlyAggregation } from "@/lib/edge/hourly-rollup";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest-do";
 import { instrumentEnv } from "@/lib/edge/observability-bindings";
-import { createInvocationLogger } from "@/lib/edge/observability-logger";
+import {
+  createInvocationLogger,
+  runWithInvocationLogger,
+} from "@/lib/edge/observability-logger";
 import { getScheduledTaskDefinition } from "@/lib/edge/scheduled-task-registry";
 import { runScheduledTask } from "@/lib/edge/scheduled-task-runner";
 import type { Env } from "@/lib/edge/types";
@@ -107,23 +110,60 @@ export default {
     const instrumentedEnv = instrumentEnv(env, logger);
 
     try {
-      // Server functions are protocol requests, not localized page navigations.
-      // Let Start see the original /_serverFn path before page middleware can
-      // redirect it beneath a locale segment.
-      if (isServerFunctionRequest(pathname)) {
-        const response = await logger.measure(
-          "server_function.handler",
-          async () =>
-            handler.fetch(request, {
-              context: { env: instrumentedEnv, executionCtx: ctx },
-            }),
+      return await runWithInvocationLogger(logger, async () => {
+        // Server functions are protocol requests, not localized page navigations.
+        // Let Start see the original /_serverFn path before page middleware can
+        // redirect it beneath a locale segment.
+        if (isServerFunctionRequest(pathname)) {
+          const response = await logger.measure(
+            "server_function.handler",
+            async () =>
+              handler.fetch(request, {
+                context: { env: instrumentedEnv, executionCtx: ctx },
+              }),
+          );
+          const result = withPageHeaders(
+            response,
+            pathname,
+            null,
+            env.DEMO_MODE === "1",
+          );
+          logger.setRequest({
+            route: pageRouteForLog(pathname),
+            method: request.method,
+            status: result.status,
+            outcome: result.status >= 400 ? "error" : "ok",
+          });
+          return result;
+        }
+
+        const decision = await logger.measure("page.middleware", () =>
+          resolvePageRequest(request, env, async (internalRequest) =>
+            apiApp.fetch(
+              markInternalPageRequest(internalRequest),
+              instrumentedEnv,
+              ctx,
+            ),
+          ),
         );
-        const result = withPageHeaders(
-          response,
-          pathname,
-          null,
-          env.DEMO_MODE === "1",
-        );
+        const result = decision.response
+          ? withPageHeaders(
+              decision.response,
+              new URL(decision.response.headers.get("location") || request.url)
+                .pathname,
+              decision.locale,
+              env.DEMO_MODE === "1",
+            )
+          : withPageHeaders(
+              await logger.measure("page.handler", async () =>
+                handler.fetch(request, {
+                  context: { env: instrumentedEnv, executionCtx: ctx },
+                }),
+              ),
+              pathname,
+              decision.locale,
+              env.DEMO_MODE === "1",
+            );
         logger.setRequest({
           route: pageRouteForLog(pathname),
           method: request.method,
@@ -131,42 +171,7 @@ export default {
           outcome: result.status >= 400 ? "error" : "ok",
         });
         return result;
-      }
-
-      const decision = await logger.measure("page.middleware", () =>
-        resolvePageRequest(request, env, async (internalRequest) =>
-          apiApp.fetch(
-            markInternalPageRequest(internalRequest),
-            instrumentedEnv,
-            ctx,
-          ),
-        ),
-      );
-      const result = decision.response
-        ? withPageHeaders(
-            decision.response,
-            new URL(decision.response.headers.get("location") || request.url)
-              .pathname,
-            decision.locale,
-            env.DEMO_MODE === "1",
-          )
-        : withPageHeaders(
-            await logger.measure("page.handler", async () =>
-              handler.fetch(request, {
-                context: { env: instrumentedEnv, executionCtx: ctx },
-              }),
-            ),
-            pathname,
-            decision.locale,
-            env.DEMO_MODE === "1",
-          );
-      logger.setRequest({
-        route: pageRouteForLog(pathname),
-        method: request.method,
-        status: result.status,
-        outcome: result.status >= 400 ? "error" : "ok",
       });
-      return result;
     } catch (error) {
       logger.error("request.unhandled_error");
       logger.setRequest({
@@ -201,45 +206,51 @@ export default {
     const task = getScheduledTaskDefinition("visit_hourly_rollup");
     const notificationTask = getScheduledTaskDefinition("notification_tick");
     ctx.waitUntil(
-      Promise.all([
-        runScheduledTask(
-          instrumentedEnv,
-          {
-            key: task?.key || "visit_hourly_rollup",
-            name: task?.name || "Hourly visit aggregation",
-            triggerType: "cron",
-          },
-          controller.scheduledTime,
-          ({ logger: taskLogger }) =>
-            logger.measure("scheduled.hourly_rollup", () =>
-              runHourlyAggregation(instrumentedEnv, controller.scheduledTime, {
-                logger: taskLogger,
-              }),
-            ),
-          logger,
-        ),
-        runScheduledTask(
-          instrumentedEnv,
-          {
-            key: notificationTask?.key || "notification_tick",
-            name: notificationTask?.name || "Notification dispatch",
-            triggerType: "cron",
-          },
-          controller.scheduledTime,
-          (taskContext) =>
-            logger.measure("scheduled.notification_tick", () =>
-              runNotificationTick(taskContext),
-            ),
-          logger,
-        ),
-      ])
-        .then(() => logger.info("scheduled.completed"))
-        .catch((error) => {
-          void error;
-          logger.error("scheduled.failed");
-          throw error;
-        })
-        .finally(() => logger.emit()),
+      runWithInvocationLogger(logger, () =>
+        Promise.all([
+          runScheduledTask(
+            instrumentedEnv,
+            {
+              key: task?.key || "visit_hourly_rollup",
+              name: task?.name || "Hourly visit aggregation",
+              triggerType: "cron",
+            },
+            controller.scheduledTime,
+            ({ logger: taskLogger }) =>
+              logger.measure("scheduled.hourly_rollup", () =>
+                runHourlyAggregation(
+                  instrumentedEnv,
+                  controller.scheduledTime,
+                  {
+                    logger: taskLogger,
+                  },
+                ),
+              ),
+            logger,
+          ),
+          runScheduledTask(
+            instrumentedEnv,
+            {
+              key: notificationTask?.key || "notification_tick",
+              name: notificationTask?.name || "Notification dispatch",
+              triggerType: "cron",
+            },
+            controller.scheduledTime,
+            (taskContext) =>
+              logger.measure("scheduled.notification_tick", () =>
+                runNotificationTick(taskContext),
+              ),
+            logger,
+          ),
+        ])
+          .then(() => logger.info("scheduled.completed"))
+          .catch((error) => {
+            void error;
+            logger.error("scheduled.failed");
+            throw error;
+          })
+          .finally(() => logger.emit()),
+      ),
     );
   },
 };

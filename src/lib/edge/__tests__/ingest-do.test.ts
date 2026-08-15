@@ -346,13 +346,17 @@ class FakeD1Database {
 }
 
 type FakeWebSocketEvent = "close" | "error";
+type FakeWebSocketEventPayload = { code?: number };
 
 class FakeWebSocket {
   accepted = false;
   closed = false;
   failSend = false;
   readonly sent: string[] = [];
-  private readonly listeners = new Map<FakeWebSocketEvent, Array<() => void>>();
+  private readonly listeners = new Map<
+    FakeWebSocketEvent,
+    Array<(event: FakeWebSocketEventPayload) => void>
+  >();
 
   accept(): void {
     this.accepted = true;
@@ -369,15 +373,21 @@ class FakeWebSocket {
     this.closed = true;
   }
 
-  addEventListener(event: FakeWebSocketEvent, listener: () => void): void {
+  addEventListener(
+    event: FakeWebSocketEvent,
+    listener: (event: FakeWebSocketEventPayload) => void,
+  ): void {
     const listeners = this.listeners.get(event) ?? [];
     listeners.push(listener);
     this.listeners.set(event, listeners);
   }
 
-  emit(event: FakeWebSocketEvent): void {
+  emit(
+    event: FakeWebSocketEvent,
+    payload: FakeWebSocketEventPayload = {},
+  ): void {
     for (const listener of this.listeners.get(event) ?? []) {
-      listener();
+      listener(payload);
     }
   }
 }
@@ -751,6 +761,80 @@ describe("IngestDurableObject", () => {
       expect(upgrade.status).toBe(101);
       expect(server.accepted).toBe(true);
       expect(upgrade.webSocket).toBe(client);
+    } finally {
+      vi.stubGlobal("Response", RealResponse);
+    }
+  });
+
+  it("records direct Durable Object SQL calls in the request invocation", async () => {
+    const ctx = createTestDo();
+
+    const response = await ctx.object.fetch(
+      new Request("https://ingest.internal/snapshot"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(console.log).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        source: "do",
+        request: expect.objectContaining({ route: "/snapshot", status: 200 }),
+        performance: expect.objectContaining({
+          doSqlStatements: expect.any(Number),
+        }),
+        logs: expect.arrayContaining([
+          expect.objectContaining({ message: "do_sql.all.started" }),
+          expect.objectContaining({ message: "do_sql.all.completed" }),
+        ]),
+      }),
+    );
+  });
+
+  it("emits a separate websocket lifecycle record after the upgrade response", async () => {
+    const ctx = createTestDo();
+    const client = new FakeWebSocket();
+    const server = new FakeWebSocket();
+    class LifecycleWebSocketPair {
+      constructor() {
+        return [client, server];
+      }
+    }
+    const RealResponse = globalThis.Response;
+    vi.stubGlobal("WebSocketPair", LifecycleWebSocketPair);
+    vi.stubGlobal("Response", FakeUpgradeResponse);
+
+    try {
+      const response = await ctx.object.fetch({
+        url: "https://ingest.internal/ws",
+        method: "GET",
+        headers: {
+          get: (name: string) =>
+            name.toLowerCase() === "upgrade" ? "websocket" : null,
+        },
+      } as unknown as Request);
+      expect(response.status).toBe(101);
+
+      server.emit("close", { code: 1000 });
+
+      expect(console.log).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          source: "do",
+          request: {
+            route: "/ws",
+            method: "WEBSOCKET",
+            status: 101,
+            outcome: "ok",
+          },
+          performance: expect.objectContaining({
+            webSocketDurationMs: expect.any(Number),
+          }),
+          logs: [
+            expect.objectContaining({
+              message: "do.websocket.closed",
+              data: { code: 1000 },
+            }),
+          ],
+        }),
+      );
     } finally {
       vi.stubGlobal("Response", RealResponse);
     }

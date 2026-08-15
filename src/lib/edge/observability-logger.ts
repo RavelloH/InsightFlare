@@ -1,7 +1,9 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 export const OBSERVABILITY_LOG_VERSION = 1 as const;
 // One record is emitted for each invocation. Keep this comfortably below the
 // Workers log-size limit while preserving the start/end pair for real work.
-export const MAX_INVOCATION_LOG_EVENTS = 256;
+export const MAX_INVOCATION_LOG_EVENTS = 512;
 
 export type InvocationSource = "worker" | "do";
 export type InvocationTrigger = "request" | "alarm";
@@ -41,6 +43,7 @@ export interface InvocationPerformance {
   doCalls?: number;
   externalFetches?: number;
   failedExternalFetches?: number;
+  webSocketDurationMs?: number;
   operations?: Record<string, InvocationOperationSummary>;
 }
 
@@ -164,6 +167,39 @@ export interface InvocationLogger {
   build(): InvocationLogRecord;
   emit(): InvocationLogRecord;
   emitWhenComplete(): Promise<InvocationLogRecord>;
+}
+
+const invocationLoggerContext = new AsyncLocalStorage<InvocationLogger>();
+
+export function runWithInvocationLogger<T>(
+  logger: InvocationLogger,
+  action: () => T,
+): T {
+  return invocationLoggerContext.run(logger, action);
+}
+
+export function currentInvocationLogger(): InvocationLogger | undefined {
+  return invocationLoggerContext.getStore();
+}
+
+export async function measureCurrentExternalFetch(
+  operation: string,
+  action: () => Promise<Response>,
+): Promise<Response> {
+  const logger = currentInvocationLogger();
+  if (!logger) return action();
+  const span = logger.startSpan(operation);
+  logger.increment("externalFetches");
+  try {
+    const response = await action();
+    if (response.status >= 500) logger.increment("failedExternalFetches");
+    span.end({ status: response.status });
+    return response;
+  } catch (error) {
+    logger.increment("failedExternalFetches");
+    span.fail({ errorName: error instanceof Error ? error.name : "Error" });
+    throw error;
+  }
 }
 
 export function createInvocationLogger(
