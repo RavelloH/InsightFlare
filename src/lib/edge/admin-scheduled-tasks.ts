@@ -9,7 +9,8 @@ import {
   type ScheduledTaskSummary,
 } from "@/lib/scheduled-tasks";
 
-import { forb, jsonResponseFor, na } from "./admin-response";
+import { bad as badRequest, forb, jsonResponseFor, na } from "./admin-response";
+import { paginationOffset } from "./query/core-parsers";
 import { SCHEDULED_TASKS } from "./scheduled-task-registry";
 import type { Env } from "./types";
 
@@ -447,7 +448,14 @@ export async function handleScheduledTasksAdmin(
   const staleBefore = generatedAt - STALE_RUNNING_MS;
   const page = parseIntegerParam(url, "page", 1, 1, 10_000);
   const pageSize = parseRunPageSize(url);
-  const offset = (page - 1) * pageSize;
+  const offset = paginationOffset(page, pageSize);
+  if (offset === null) {
+    return badRequest(
+      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
+      undefined,
+      req,
+    );
+  }
   const status = (url.searchParams.get("status") || "").trim();
   const runId = (
     url.searchParams.get("runId") ||

@@ -29,6 +29,7 @@ import {
   parseInterval,
   parseLimit,
   parseQueryLimit,
+  paginationOffset,
   parseWindow,
   percentChange,
   queryD1All,
@@ -460,7 +461,12 @@ export async function handlePagesDashboard(
   const interval = parseInterval(url);
   const page = parseQueryLimit(url, "page", 1, 1, 10_000);
   const pageSize = parseQueryLimit(url, "pageSize", 12, 1, 24);
-  const offset = (page - 1) * pageSize;
+  const offset = paginationOffset(page, pageSize);
+  if (offset === null) {
+    return badRequest(
+      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
+    );
+  }
   const requestedRows = await queryPageCardMetricsFromD1(
     env,
     siteId,

@@ -51,6 +51,7 @@ import {
   parseLimit,
   parseListSearch,
   parseQueryLimit,
+  paginationOffset,
   parseSessionListSort,
   parseVisitorListSort,
   parseWindow,
@@ -123,6 +124,11 @@ describe("edge query core parsers", () => {
     expect(parseQueryLimit(url("?pageSize=nope"), "pageSize", 20, 5, 50)).toBe(
       20,
     );
+
+    expect(paginationOffset(1, 120)).toBe(0);
+    expect(paginationOffset(167, 120)).toBe(19_920);
+    expect(paginationOffset(168, 120)).toBeNull();
+    expect(paginationOffset(Number.MAX_SAFE_INTEGER, 2)).toBeNull();
   });
 
   it("parses list sort keys and falls back to defaults", () => {

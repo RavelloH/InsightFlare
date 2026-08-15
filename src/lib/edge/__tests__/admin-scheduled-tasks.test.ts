@@ -7,6 +7,10 @@ vi.mock("@/lib/scheduled-tasks", () => ({
 }));
 
 vi.mock("@/lib/edge/admin-response", () => ({
+  bad: vi.fn(
+    (msg: string, _code?: string, _req?: Request) =>
+      new Response(JSON.stringify({ ok: false, error: msg }), { status: 400 }),
+  ),
   forb: vi.fn(
     (msg: string, _code?: string, _req?: Request) =>
       new Response(JSON.stringify({ ok: false, error: msg }), { status: 403 }),
@@ -106,6 +110,24 @@ async function resolveAsResponse() {
 }
 
 describe("handleScheduledTasksAdmin", () => {
+  it("rejects deep run pages before querying D1", async () => {
+    const req = new Request(
+      "https://app.test/api/private/admin/scheduled-tasks?page=10000&pageSize=100",
+    );
+    const env = createEnv();
+    const url = new URL(req.url);
+
+    const response = await handleScheduledTasksAdmin(
+      req,
+      env,
+      url,
+      resolveAdmin,
+    );
+
+    expect(response.status).toBe(400);
+    expect(env.DB.prepare).not.toHaveBeenCalled();
+  });
+
   it("returns forbidden for non-admin actor", async () => {
     const req = new Request(
       "https://app.test/api/private/admin/scheduled-tasks",

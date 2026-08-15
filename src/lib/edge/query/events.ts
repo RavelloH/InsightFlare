@@ -19,6 +19,7 @@ import {
   parseLimit,
   parseListSearch,
   parseQueryLimit,
+  paginationOffset,
   parseWindow,
   type ResponseContext,
 } from "./core";
@@ -146,12 +147,18 @@ export async function handleEventsRecords(
   const filters = parseFilters(url);
   const page = parseQueryLimit(url, "page", 1, 1, 10_000);
   const pageSize = parseQueryLimit(url, "pageSize", 80, 1, 120);
+  const offset = paginationOffset(page, pageSize);
+  if (offset === null) {
+    return badRequest(
+      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
+    );
+  }
   const sort = parseEventRecordSort(url);
   const search = parseListSearch(url);
   const eventName = parseEventName(url);
   const rows = await queryEventRecordsFromD1(env, siteId, window, filters, {
     limit: pageSize + 1,
-    offset: (page - 1) * pageSize,
+    offset,
     sort,
     search,
     eventName,

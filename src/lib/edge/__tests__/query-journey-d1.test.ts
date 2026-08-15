@@ -919,6 +919,27 @@ describe("edge journey handlers", () => {
     expect(calls[0].bindings.at(-1)).toBe(1);
   });
 
+  it("rejects deep visitor and session pages before querying D1", async () => {
+    const window = queryWindow();
+    const visitors = createD1Env([]);
+    const sessions = createD1Env([]);
+    const request = {
+      from: window.fromMs,
+      to: window.toMs,
+      page: 10_000,
+      pageSize: 120,
+    };
+
+    await expect(
+      handleVisitors(visitors.env, siteId, url("/visitors", request)),
+    ).resolves.toMatchObject({ status: 400 });
+    await expect(
+      handleSessions(sessions.env, siteId, url("/sessions", request)),
+    ).resolves.toMatchObject({ status: 400 });
+    expect(visitors.calls).toHaveLength(0);
+    expect(sessions.calls).toHaveLength(0);
+  });
+
   it("returns non-paged sessions with search and default metadata", async () => {
     const window = queryWindow();
     const { env, calls } = createD1Env([[sessionRow()]]);

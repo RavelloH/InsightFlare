@@ -634,6 +634,27 @@ describe("edge query event handlers low-level coverage", () => {
     ]);
   });
 
+  it("rejects deep event record pages before querying D1", async () => {
+    const { env, calls } = createD1Env([]);
+
+    const response = await handleEventsRecords(
+      env,
+      siteId,
+      url("/events-records", {
+        from: window.fromMs,
+        to: window.toMs,
+        page: 10_000,
+        pageSize: 120,
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { message: expect.stringContaining("Pagination depth") },
+    });
+    expect(calls).toHaveLength(0);
+  });
+
   it("maps event summaries and final event record pages without more rows", async () => {
     const { env } = createD1Env([
       [

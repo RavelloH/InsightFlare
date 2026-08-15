@@ -19,6 +19,8 @@ import {
   type VisitorListSortKey,
 } from "./core-types";
 
+export const MAX_PAGINATION_OFFSET = 20_000;
+
 export function parseWindow(url: URL): QueryWindow | null {
   const nowMs = appNow();
   const defaultFrom = nowMs - ONE_DAY_MS;
@@ -78,6 +80,16 @@ export function parseQueryLimit(
   );
   if (!Number.isFinite(value)) return fallback;
   return Math.max(min, Math.min(max, value));
+}
+
+export function paginationOffset(
+  page: number,
+  pageSize: number,
+): number | null {
+  const offset = (page - 1) * pageSize;
+  return Number.isSafeInteger(offset) && offset <= MAX_PAGINATION_OFFSET
+    ? offset
+    : null;
 }
 
 export function parseSortDirection(url: URL): SortDirection {

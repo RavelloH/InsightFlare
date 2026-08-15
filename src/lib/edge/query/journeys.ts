@@ -18,6 +18,7 @@ import {
   parseLimit,
   parseListSearch,
   parseQueryLimit,
+  paginationOffset,
   parseSessionListSort,
   parseVisitorListSort,
   parseWindow,
@@ -128,7 +129,12 @@ export async function handleVisitors(
   const pageSize = paged
     ? parseQueryLimit(url, "pageSize", 80, 1, 120)
     : parseLimit(url, 20, 200);
-  const offset = paged ? (page - 1) * pageSize : 0;
+  const offset = paged ? paginationOffset(page, pageSize) : 0;
+  if (offset === null) {
+    return badRequest(
+      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
+    );
+  }
   const sort = parseVisitorListSort(url);
   const search = parseListSearch(url);
   const requestedRows = await queryVisitorAggregate(
@@ -171,7 +177,12 @@ export async function handleSessions(
   const pageSize = paged
     ? parseQueryLimit(url, "pageSize", 80, 1, 120)
     : parseLimit(url, 100, 500);
-  const offset = paged ? (page - 1) * pageSize : 0;
+  const offset = paged ? paginationOffset(page, pageSize) : 0;
+  if (offset === null) {
+    return badRequest(
+      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
+    );
+  }
   const sort = parseSessionListSort(url);
   const search = parseListSearch(url);
   const requestedRows = await querySessionsFromD1(

@@ -1338,6 +1338,9 @@ rollback = 旧 Worker version
   overview/metric、previous window、cumulative metric、site metadata 和 last-seen 查询在
   同一 invocation 内复用；不同站点、窗口或过滤条件不会共享，拒绝的 Promise 不会污染后续
   查询。邮件投递在同一 invocation 内只读取一次系统邮件配置，不新增 KV/DO 或持久化状态。
+- Events records、Pages dashboard、Journey visitor/session 和 Scheduled Tasks 管理列表现在
+  以最大 20,000 行的 `OFFSET` 深度保护分页；超过上限会在执行 D1 前返回结构化 400，要求
+  缩小时间范围或过滤条件。此项是短期防护，未改变排序或引入 cursor API contract。
 - 上述改动已通过真实 SQLite Scheduled Tasks 测试、Journey/Events 回归测试和 TypeScript
   类型检查；Pages/dimensions 与 technology 回归测试、TypeScript 与 lint 亦已通过。
 - Notification cache 已补充同窗口跨 metric 复用、站点/窗口隔离、报告复用、previous/

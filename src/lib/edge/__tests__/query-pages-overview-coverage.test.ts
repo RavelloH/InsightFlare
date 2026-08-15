@@ -584,6 +584,24 @@ describe("edge pages handlers", () => {
     expect(calls[0].bindings).toEqual([...visitBindings(), 5, 4]);
   });
 
+  it("rejects deep dashboard pages before querying D1", async () => {
+    const { env, calls } = createD1Env([]);
+
+    const response = await handlePagesDashboard(
+      env,
+      siteId,
+      url("/pages/dashboard", {
+        from: window.fromMs,
+        to: window.toMs,
+        page: 10_000,
+        pageSize: 24,
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(calls).toHaveLength(0);
+  });
+
   it("maps dashboard cards, titles, trends, previous changes, and hasMore pagination", async () => {
     const currentRows = [
       {
@@ -1164,6 +1182,8 @@ describe("edge overview D1 queries and handlers", () => {
           visitors: 1,
         },
       ],
+      [],
+      [],
       [
         {
           cardType: "organization",
@@ -1281,6 +1301,8 @@ describe("edge overview D1 queries and handlers", () => {
     });
     expect(calls.map((call) => call.bindings)).toEqual([
       [...visitBindings(), "Chrome", 4],
+      [...visitBindings(), 4],
+      [...visitBindings(), 4],
       [...visitBindings(), 4],
       [...visitBindings(), 4],
       [...visitBindings(), 4],
