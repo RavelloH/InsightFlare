@@ -102,7 +102,9 @@ event_source AS (
 
 export function buildEventAnalyticsSourceCte(options?: {
   eventName?: string;
+  cteName?: string;
 }): string {
+  const cteName = options?.cteName ?? "event_source";
   const eventNameSource = options?.eventName
     ? `
 target_event_name AS (
@@ -118,7 +120,7 @@ target_event_name AS (
     : "";
   return `
 ${eventNameSource}
-event_source AS (
+${cteName} AS (
   SELECT
     ce.event_pk,
     ce.event_id,

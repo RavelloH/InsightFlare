@@ -12,7 +12,6 @@ import {
   eventSourceBindings,
   queryD1All,
 } from "./core";
-import { queryEventSummaryMetricsFromD1 } from "./events-summary";
 
 export async function queryEventTypeOverviewFromD1(
   env: Env,
@@ -21,15 +20,11 @@ export async function queryEventTypeOverviewFromD1(
   filters: DashboardFilters,
   eventName: string,
 ) {
-  const scopedSummary = await queryEventSummaryMetricsFromD1(
-    env,
-    siteId,
-    window,
-    filters,
-  );
   const eventFilter = buildEventFilterSql(filters, "es");
   const bindings = [
     ...eventSourceBindings(siteId, window, eventName),
+    ...eventFilter.bindings,
+    ...eventSourceBindings(siteId, window),
     ...eventFilter.bindings,
   ];
   const baseCte = `
@@ -39,10 +34,21 @@ filtered_events AS MATERIALIZED (
   SELECT *
   FROM event_source es
   ${eventFilter.clause}
+),
+${buildEventAnalyticsSourceCte({ cteName: "scoped_event_source" })},
+scoped_events AS (
+  SELECT *
+  FROM scoped_event_source es
+  ${eventFilter.clause}
+),
+scoped_summary AS (
+  SELECT count(*) AS events
+  FROM scoped_events
 )`;
   type OverviewCardRow = EventSummaryRow & {
     cardType: "summary" | "page" | "country" | "device" | "browser";
     value: string | null;
+    scopedEvents: number | null;
   };
   const overviewRows = await queryD1All<OverviewCardRow>(
     env,
@@ -115,7 +121,14 @@ ranked_overview_cards AS (
     ) AS cardRank
   FROM overview_card_rows
 )
-SELECT cardType, value, events, eventTypes, sessions, visitors
+SELECT
+  cardType,
+  value,
+  events,
+  eventTypes,
+  sessions,
+  visitors,
+  (SELECT events FROM scoped_summary) AS scopedEvents
 FROM ranked_overview_cards
 WHERE cardType = 'summary' OR cardRank <= 8
 ORDER BY cardType ASC, cardRank ASC
@@ -155,8 +168,8 @@ ORDER BY cardType ASC, cardRank ASC
           ? Number(summary.events ?? 0) / Number(summary.sessions ?? 0)
           : 0,
       shareOfAllEvents:
-        Number(scopedSummary.events ?? 0) > 0
-          ? Number(summary.events ?? 0) / Number(scopedSummary.events ?? 0)
+        Number(summaryRow?.scopedEvents ?? 0) > 0
+          ? Number(summary.events ?? 0) / Number(summaryRow?.scopedEvents ?? 0)
           : 0,
     },
     breakdowns: {

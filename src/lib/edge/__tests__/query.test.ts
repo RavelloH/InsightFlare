@@ -477,6 +477,7 @@ function commonQueryMatches(): SqlMatch[] {
           eventTypes: 3,
           sessions: 5,
           visitors: 4,
+          scopedEvents: 12,
         },
         {
           cardType: "page",

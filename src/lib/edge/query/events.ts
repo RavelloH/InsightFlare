@@ -1,5 +1,5 @@
-import type { Env } from "@/lib/edge/types";
 import { currentInvocationLogger } from "@/lib/edge/observability-logger";
+import type { Env } from "@/lib/edge/types";
 
 import {
   badRequest,

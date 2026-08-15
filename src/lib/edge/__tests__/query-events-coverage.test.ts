@@ -362,48 +362,45 @@ describe("edge query events summary coverage", () => {
   });
 
   it("computes event type overview fallbacks for sparse summary rows", async () => {
-    queryD1AllMock
-      .mockResolvedValueOnce([
-        { events: 10, eventTypes: 2, sessions: 5, visitors: 4 },
-      ])
-      .mockResolvedValueOnce([
-        {
-          events: null,
-          eventTypes: undefined,
-          sessions: 4,
-          visitors: null,
-          cardType: "summary",
-          value: null,
-        },
-        {
-          events: 2,
-          sessions: 0,
-          visitors: 0,
-          cardType: "page",
-          value: "/signup",
-        },
-        {
-          events: 2,
-          sessions: 0,
-          visitors: 0,
-          cardType: "country",
-          value: "US",
-        },
-        {
-          events: 2,
-          sessions: 0,
-          visitors: 0,
-          cardType: "device",
-          value: "desktop",
-        },
-        {
-          events: 2,
-          sessions: 0,
-          visitors: 0,
-          cardType: "browser",
-          value: "Chrome",
-        },
-      ]);
+    queryD1AllMock.mockResolvedValueOnce([
+      {
+        events: null,
+        eventTypes: undefined,
+        sessions: 4,
+        visitors: null,
+        cardType: "summary",
+        value: null,
+        scopedEvents: 10,
+      },
+      {
+        events: 2,
+        sessions: 0,
+        visitors: 0,
+        cardType: "page",
+        value: "/signup",
+      },
+      {
+        events: 2,
+        sessions: 0,
+        visitors: 0,
+        cardType: "country",
+        value: "US",
+      },
+      {
+        events: 2,
+        sessions: 0,
+        visitors: 0,
+        cardType: "device",
+        value: "desktop",
+      },
+      {
+        events: 2,
+        sessions: 0,
+        visitors: 0,
+        cardType: "browser",
+        value: "Chrome",
+      },
+    ]);
 
     await expect(
       queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
@@ -426,7 +423,7 @@ describe("edge query events summary coverage", () => {
   });
 
   it("uses zero ratios when event type overview has no rows", async () => {
-    queryD1AllMock.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    queryD1AllMock.mockResolvedValueOnce([]);
 
     await expect(
       queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),

@@ -275,6 +275,7 @@ describe("event detail D1 SQL", () => {
 
       expect(records).toHaveLength(1);
       expect(overview.summary.events).toBe(1);
+      expect(overview.summary.shareOfAllEvents).toBe(0.5);
       expect(trend.data.some((point) => point.events === 1)).toBe(true);
       expect(fields).toMatchObject([{ path: "/href", events: 1 }]);
       expect(cards.page.path).toMatchObject([
@@ -310,6 +311,9 @@ describe("event detail D1 SQL", () => {
         sql.includes("overview_card_rows AS"),
       );
       expect(overviewQuery).toBeDefined();
+      expect(
+        d1.calls.filter(({ sql }) => sql.includes("scoped_summary AS")),
+      ).toHaveLength(1);
       expect((overviewQuery?.sql.match(/UNION ALL/g) ?? []).length).toBe(4);
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${overviewQuery?.sql ?? "SELECT 1"}`)

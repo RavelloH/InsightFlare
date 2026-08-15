@@ -32,48 +32,45 @@ describe("edge query event type overview branch coverage", () => {
   });
 
   it("computes positive average events per session and share of scoped events", async () => {
-    queryD1AllMock
-      .mockResolvedValueOnce([
-        { events: 20, eventTypes: 4, sessions: 8, visitors: 6 },
-      ])
-      .mockResolvedValueOnce([
-        {
-          events: 6,
-          eventTypes: 1,
-          sessions: 3,
-          visitors: 2,
-          cardType: "summary",
-          value: null,
-        },
-        {
-          events: 4,
-          sessions: 0,
-          visitors: 0,
-          cardType: "page",
-          value: "/pricing",
-        },
-        {
-          events: 3,
-          sessions: 0,
-          visitors: 0,
-          cardType: "country",
-          value: "US",
-        },
-        {
-          events: 2,
-          sessions: 0,
-          visitors: 0,
-          cardType: "device",
-          value: "Desktop",
-        },
-        {
-          events: 1,
-          sessions: 0,
-          visitors: 0,
-          cardType: "browser",
-          value: "Chrome",
-        },
-      ]);
+    queryD1AllMock.mockResolvedValueOnce([
+      {
+        events: 6,
+        eventTypes: 1,
+        sessions: 3,
+        visitors: 2,
+        cardType: "summary",
+        value: null,
+        scopedEvents: 20,
+      },
+      {
+        events: 4,
+        sessions: 0,
+        visitors: 0,
+        cardType: "page",
+        value: "/pricing",
+      },
+      {
+        events: 3,
+        sessions: 0,
+        visitors: 0,
+        cardType: "country",
+        value: "US",
+      },
+      {
+        events: 2,
+        sessions: 0,
+        visitors: 0,
+        cardType: "device",
+        value: "Desktop",
+      },
+      {
+        events: 1,
+        sessions: 0,
+        visitors: 0,
+        cardType: "browser",
+        value: "Chrome",
+      },
+    ]);
 
     await expect(
       queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
@@ -96,20 +93,17 @@ describe("edge query event type overview branch coverage", () => {
   });
 
   it("normalizes nullable event overview metrics to zero", async () => {
-    queryD1AllMock
-      .mockResolvedValueOnce([
-        { events: null, eventTypes: 2, sessions: 1, visitors: 1 },
-      ])
-      .mockResolvedValueOnce([
-        {
-          events: null,
-          eventTypes: null,
-          sessions: null,
-          visitors: null,
-          cardType: "summary",
-          value: null,
-        },
-      ]);
+    queryD1AllMock.mockResolvedValueOnce([
+      {
+        events: null,
+        eventTypes: null,
+        sessions: null,
+        visitors: null,
+        cardType: "summary",
+        value: null,
+        scopedEvents: null,
+      },
+    ]);
 
     await expect(
       queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
