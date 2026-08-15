@@ -576,6 +576,8 @@ interface AnalyticsOrderBy {
   direction: "asc" | "desc";
 }
 
+const D1_MAX_BOUND_PARAMETERS = 100;
+
 function sqlWhereWithExtra(baseClause: string, extraClause: string): string {
   if (!extraClause) return baseClause;
   if (baseClause.trim()) return `${baseClause} AND ${extraClause}`;
@@ -830,6 +832,24 @@ async function queryAnalyticsAggregateRows(
       ? visitSourceBindings(siteIds[0]!, window)
       : visitSourceBindingsForSites(siteIds, window);
   const eventSitePlaceholders = siteIds.map(() => "?").join(", ");
+  const bindingCount =
+    sourceBindings.length +
+    filters.bindings.length +
+    complex.bindings.length +
+    siteIds.length +
+    3;
+  if (bindingCount > D1_MAX_BOUND_PARAMETERS) {
+    return jsonError(
+      "validation_failed",
+      "Analytics query exceeds the D1 bound parameter limit",
+      400,
+      {
+        maximumBindings: D1_MAX_BOUND_PARAMETERS,
+        requestedBindings: bindingCount,
+      },
+      request,
+    );
+  }
   const dimensionSelects = dimensionDefs.map(
     ({ definition }, index) => `${definition.labelExpr} AS d${index}`,
   );

@@ -2399,6 +2399,26 @@ describe("api v1 gateway", () => {
     });
   });
 
+  it("rejects a team breakdown that would exceed D1's binding limit", async () => {
+    const sites = Array.from({ length: 48 }, (_, index) => ({
+      id: `site-${index}`,
+      name: `Site ${index}`,
+    }));
+    const { response } = await authed(
+      "/api/v1/team/analytics/breakdowns/geo.country?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
+      [sitesListMatch(sites)],
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "validation_failed",
+        message: "Analytics query exceeds the D1 bound parameter limit",
+        details: { maximumBindings: 100, requestedBindings: 101 },
+      },
+    });
+  });
+
   it("returns 404 for unknown team analytics resource", async () => {
     const matches = [teamSitesListMatch([{ id: "site-1", name: "One" }])];
     const { response } = await authed(

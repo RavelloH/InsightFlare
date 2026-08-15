@@ -1349,6 +1349,10 @@ rollback = 旧 Worker version
 - 成员权限和 API key 的“team ID + site IDs”授权检查现在每条最多绑定 99 个站点，并精确合并
   分块结果；团队级删除与关联的 config 清理每条最多 100 个绑定，且仍按 event JSON -> events ->
   visits/rollups -> configs 的原有依赖顺序执行。重复 site ID 继续被拒绝，未改变授权语义。
+- Bot analytics 的站点名称/域名查找按 100 个 site ID 分块合并。API v1 team analytics
+  breakdown 会在实际绑定数超过 100 时于 Worker 内返回结构化 400，而不会向 D1 发出必然失败的
+  查询；由于该 SQL 使用全局 `DISTINCT`、bounce 和派生比例，未实现会改变统计语义的简单分块。
+  未来若需支持更大的 team breakdown，必须先以 fixture parity 证明新的全局聚合读模型等价。
 - 上述改动已通过真实 SQLite Scheduled Tasks 测试、Journey/Events 回归测试和 TypeScript
   类型检查；Pages/dimensions 与 technology 回归测试、TypeScript 与 lint 亦已通过。
 - Notification cache 已补充同窗口跨 metric 复用、站点/窗口隔离、报告复用、previous/

@@ -29,6 +29,7 @@ import { clampString, ONE_HOUR_MS } from "./utils";
 
 const DETAIL_PAGE_SIZE = 100;
 const MAX_DETAIL_PAGE_SIZE = DETAIL_PAGE_SIZE;
+const MAX_SITE_IDS_PER_D1_QUERY = 100;
 const NETWORK_DIMENSION_LIMIT = 30;
 const WINDOW_OPTIONS_MINUTES = new Set([60, 1440, 10080, 43200]);
 const MAX_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
@@ -928,21 +929,23 @@ async function siteLookup(
 async function siteLookupByIds(env: Env, ids: string[]) {
   if (ids.length === 0)
     return new Map<string, { name: string; domain: string }>();
-  const placeholders = ids.map(() => "?").join(",");
-  const rows = await env.DB.prepare(
-    `SELECT id, name, domain FROM sites WHERE id IN (${placeholders})`,
-  )
-    .bind(...ids)
-    .all<{ id: string; name: string; domain: string }>();
-  return new Map(
-    rows.results.map((row) => [
-      String(row.id || ""),
-      {
+  const sites = new Map<string, { name: string; domain: string }>();
+  for (let index = 0; index < ids.length; index += MAX_SITE_IDS_PER_D1_QUERY) {
+    const chunk = ids.slice(index, index + MAX_SITE_IDS_PER_D1_QUERY);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = await env.DB.prepare(
+      `SELECT id, name, domain FROM sites WHERE id IN (${placeholders})`,
+    )
+      .bind(...chunk)
+      .all<{ id: string; name: string; domain: string }>();
+    for (const row of rows.results) {
+      sites.set(String(row.id || ""), {
         name: String(row.name || ""),
         domain: String(row.domain || ""),
-      },
-    ]),
-  );
+      });
+    }
+  }
+  return sites;
 }
 
 async function queryAnalyticsRows(input: {
