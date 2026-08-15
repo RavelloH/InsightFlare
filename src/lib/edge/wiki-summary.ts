@@ -1,3 +1,9 @@
+import {
+  getInvocationLogger,
+  measureExternalFetch,
+} from "@/lib/edge/observability-bindings";
+import type { InvocationLogger } from "@/lib/edge/observability-logger";
+import type { Env } from "@/lib/edge/types";
 import { requireSameOrigin } from "@/lib/edge/utils";
 import { type Locale, resolveLocale } from "@/lib/i18n/config";
 import { jsonResponse } from "@/lib/response";
@@ -145,6 +151,7 @@ function resolvePreferredSitelink(
 
 async function fetchWikidataEntity(
   wikidataId: string,
+  logger?: InvocationLogger,
 ): Promise<WikidataEntity | null> {
   const url = new URL(WIKIDATA_API_ENDPOINT);
   url.searchParams.set("action", "wbgetentities");
@@ -152,12 +159,17 @@ async function fetchWikidataEntity(
   url.searchParams.set("props", "labels|descriptions|sitelinks/urls");
   url.searchParams.set("format", "json");
 
-  const response = await fetch(url, {
-    headers: {
-      accept: "application/json",
-      "user-agent": WIKIMEDIA_USER_AGENT,
-    },
-  });
+  const response = await measureExternalFetch(
+    logger,
+    "external_fetch.wikidata",
+    () =>
+      fetch(url, {
+        headers: {
+          accept: "application/json",
+          "user-agent": WIKIMEDIA_USER_AGENT,
+        },
+      }),
+  );
 
   if (!response.ok) {
     throw new Error(`Wikidata upstream failed with ${response.status}`);
@@ -172,15 +184,21 @@ async function fetchWikipediaSummary(
   language: string,
   title: string,
   acceptLanguage: string | null,
+  logger?: InvocationLogger,
 ): Promise<WikipediaSummaryResponse | null> {
   const endpoint = `https://${language}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-  const response = await fetch(endpoint, {
-    headers: {
-      accept: "application/json",
-      "user-agent": WIKIMEDIA_USER_AGENT,
-      ...(acceptLanguage ? { "accept-language": acceptLanguage } : {}),
-    },
-  });
+  const response = await measureExternalFetch(
+    logger,
+    "external_fetch.wikipedia",
+    () =>
+      fetch(endpoint, {
+        headers: {
+          accept: "application/json",
+          "user-agent": WIKIMEDIA_USER_AGENT,
+          ...(acceptLanguage ? { "accept-language": acceptLanguage } : {}),
+        },
+      }),
+  );
 
   if (response.status === 404) {
     return null;
@@ -194,6 +212,7 @@ async function fetchWikipediaSummary(
 
 export async function handleWikiSummaryRequest(
   request: Request,
+  env?: Env,
 ): Promise<Response> {
   const sameOriginError = requireSameOrigin(request);
   if (sameOriginError) return sameOriginError;
@@ -221,7 +240,8 @@ export async function handleWikiSummaryRequest(
   );
 
   try {
-    const entity = await fetchWikidataEntity(wikidataId);
+    const logger = env ? getInvocationLogger(env) : undefined;
+    const entity = await fetchWikidataEntity(wikidataId, logger);
     if (!entity) {
       return jsonResponse(
         {
@@ -259,6 +279,7 @@ export async function handleWikiSummaryRequest(
         sitelink.language,
         sitelink.title,
         acceptLanguage,
+        logger,
       );
 
       const resolvedPageUrl =

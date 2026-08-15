@@ -1,3 +1,9 @@
+import {
+  getInvocationLogger,
+  measureExternalFetch,
+} from "@/lib/edge/observability-bindings";
+import type { InvocationLogger } from "@/lib/edge/observability-logger";
+import type { Env } from "@/lib/edge/types";
 import { requireSameOrigin } from "@/lib/edge/utils";
 
 const COUNTRIES_GEOJSON_UPSTREAMS = [
@@ -13,16 +19,23 @@ function isFeatureCollection(payload: unknown): boolean {
   );
 }
 
-async function proxyCountriesGeoJson(): Promise<Response> {
+async function proxyCountriesGeoJson(
+  logger?: InvocationLogger,
+): Promise<Response> {
   let lastStatus = 502;
 
   for (const upstreamUrl of COUNTRIES_GEOJSON_UPSTREAMS) {
     try {
-      const upstreamResponse = await fetch(upstreamUrl, {
-        headers: {
-          accept: "application/geo+json,application/json;q=0.9,*/*;q=0.8",
-        },
-      });
+      const upstreamResponse = await measureExternalFetch(
+        logger,
+        "external_fetch.world_countries",
+        () =>
+          fetch(upstreamUrl, {
+            headers: {
+              accept: "application/geo+json,application/json;q=0.9,*/*;q=0.8",
+            },
+          }),
+      );
       if (!upstreamResponse.ok) {
         lastStatus = upstreamResponse.status;
         continue;
@@ -54,9 +67,10 @@ async function proxyCountriesGeoJson(): Promise<Response> {
 
 export async function handleWorldCountriesRequest(
   request: Request,
+  env?: Env,
 ): Promise<Response> {
   const sameOriginError = requireSameOrigin(request);
   if (sameOriginError) return sameOriginError;
 
-  return proxyCountriesGeoJson();
+  return proxyCountriesGeoJson(env ? getInvocationLogger(env) : undefined);
 }

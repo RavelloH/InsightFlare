@@ -105,7 +105,8 @@ function payloadEventAt(
 export function writeNormalAnalyticsEvent(
   env: Env,
   input: NormalAnalyticsInput,
-  logger?: Pick<InvocationLogger, "warn" | "error">,
+  logger?: Pick<InvocationLogger, "warn" | "error"> &
+    Partial<Pick<InvocationLogger, "info">>,
 ): void {
   if (isAnalyticsEngineDisabled(env)) {
     return;
@@ -175,6 +176,7 @@ export function writeNormalAnalyticsEvent(
         userAgent.length,
       ],
     });
+    logger?.info?.("collect.normal_analytics_written");
   } catch (error) {
     void error;
     logger?.error("collect.normal_analytics_write_failed");

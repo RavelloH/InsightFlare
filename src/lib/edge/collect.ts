@@ -432,7 +432,11 @@ export async function handleCollectRequest(
     acceptedAt: Date.now(),
   };
 
-  const body = await requestWithCf.text();
+  const body = logger
+    ? await logger.measure("collect.request_body_read", () =>
+        requestWithCf.text(),
+      )
+    : await requestWithCf.text();
   let payload: TrackerClientPayload | null = null;
   if (body) {
     try {
@@ -447,12 +451,16 @@ export async function handleCollectRequest(
     const siteId = normalizeSiteSettingsKey(
       pickSiteIdFromPayload(payload, url),
     );
-    const verification = await verifyCollectToken({
-      env,
-      token: collectTokenFromPayload(payload),
-      siteId,
-      ip: requestIp(requestWithCf),
-    });
+    const verify = () =>
+      verifyCollectToken({
+        env,
+        token: collectTokenFromPayload(payload),
+        siteId,
+        ip: requestIp(requestWithCf),
+      });
+    const verification = logger
+      ? await logger.measure("collect.token_verify", verify)
+      : await verify();
     if (!verification.ok) {
       logger?.warn(`collect.rejected.${verification.reason}`);
       return noContent(origin);
@@ -491,13 +499,11 @@ export async function handleCollectRequest(
     }
   }
 
-  const decision = await decideCollectionPolicy(
-    requestWithCf,
-    env,
-    payload,
-    url,
-    logger,
-  );
+  const decide = () =>
+    decideCollectionPolicy(requestWithCf, env, payload, url, logger);
+  const decision = logger
+    ? await logger.measure("collect.policy", decide)
+    : await decide();
   if (!decision.shouldForward) {
     logger?.warn(`collect.rejected.${decision.reason}`);
     return noContent(decision.allowOrigin);
@@ -530,20 +536,19 @@ export async function handleCollectRequest(
     logger,
   );
 
-  ctx.waitUntil(
-    stub
-      .fetch("https://ingest.internal/ingest", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(envelope),
-      })
-      .then((response) => {
-        void response;
-      })
-      .catch(() => undefined),
-  );
+  const forward = stub
+    .fetch("https://ingest.internal/ingest", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(envelope),
+    })
+    .then((response) => {
+      void response;
+    })
+    .catch(() => undefined);
+  ctx.waitUntil(logger ? logger.track(forward) : forward);
 
   return noContent(decision.allowOrigin);
 }

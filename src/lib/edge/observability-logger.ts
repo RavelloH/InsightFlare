@@ -1,5 +1,7 @@
 export const OBSERVABILITY_LOG_VERSION = 1 as const;
-export const MAX_INVOCATION_LOG_EVENTS = 32;
+// One record is emitted for each invocation. Keep this comfortably below the
+// Workers log-size limit while preserving the start/end pair for real work.
+export const MAX_INVOCATION_LOG_EVENTS = 256;
 
 export type InvocationSource = "worker" | "do";
 export type InvocationTrigger = "request" | "alarm";
@@ -20,12 +22,26 @@ export interface InvocationPerformance {
   cache?: InvocationCacheState;
   dataSource?: InvocationDataSource;
   d1RowsRead?: number;
+  /** Legacy handler-reported value; compare with binding-level total when present. */
+  handlerD1RowsRead?: number;
   d1RowsReadAvailable?: boolean;
   d1Statements?: number;
   d1RowsWritten?: number;
   failedStatements?: number;
   flushedVisits?: number;
   flushedCustomEvents?: number;
+  d1SqlDurationMs?: number;
+  d1TotalAttempts?: number;
+  d1Retries?: number;
+  doSqlStatements?: number;
+  doSqlRowsRead?: number;
+  doSqlRowsWritten?: number;
+  kvOperations?: number;
+  r2Operations?: number;
+  doCalls?: number;
+  externalFetches?: number;
+  failedExternalFetches?: number;
+  operations?: Record<string, InvocationOperationSummary>;
 }
 
 export type InvocationPerformancePatch = Omit<
@@ -39,12 +55,38 @@ export type InvocationPerformanceCounter =
   | "d1RowsWritten"
   | "failedStatements"
   | "flushedVisits"
-  | "flushedCustomEvents";
+  | "flushedCustomEvents"
+  | "d1SqlDurationMs"
+  | "d1TotalAttempts"
+  | "d1Retries"
+  | "doSqlStatements"
+  | "doSqlRowsRead"
+  | "doSqlRowsWritten"
+  | "kvOperations"
+  | "r2Operations"
+  | "doCalls"
+  | "externalFetches"
+  | "failedExternalFetches";
+
+export type InvocationLogValue = string | number | boolean | null;
+export type InvocationLogData = Record<string, InvocationLogValue>;
+
+export interface InvocationOperationSummary {
+  count: number;
+  durationMs: number;
+  failed: number;
+}
 
 export interface InvocationLogEvent {
   timeMs: number;
   level: InvocationLogLevel;
   message: string;
+  data?: InvocationLogData;
+}
+
+export interface InvocationSpan {
+  end(data?: InvocationLogData): void;
+  fail(data?: InvocationLogData): void;
 }
 
 export interface InvocationLogRecord {
@@ -105,15 +147,23 @@ function consoleFor(record: InvocationLogRecord): typeof console.log {
 }
 
 export interface InvocationLogger {
-  info(message: string): void;
-  warn(message: string): void;
-  error(message: string): void;
+  info(message: string, data?: InvocationLogData): void;
+  warn(message: string, data?: InvocationLogData): void;
+  error(message: string, data?: InvocationLogData): void;
+  startSpan(operation: string, data?: InvocationLogData): InvocationSpan;
+  measure<T>(
+    operation: string,
+    action: () => Promise<T>,
+    data?: InvocationLogData,
+  ): Promise<T>;
+  track<T>(promise: Promise<T>): Promise<T>;
   setTraceId(traceId: string | undefined): void;
   setRequest(request: InvocationRequest): void;
   setPerformance(performance: InvocationPerformancePatch): void;
   increment(counter: InvocationPerformanceCounter, amount?: number): void;
   build(): InvocationLogRecord;
   emit(): InvocationLogRecord;
+  emitWhenComplete(): Promise<InvocationLogRecord>;
 }
 
 export function createInvocationLogger(
@@ -129,17 +179,94 @@ export function createInvocationLogger(
   let performance: InvocationPerformancePatch = {};
   let logsTruncated = false;
   let emitted: InvocationLogRecord | undefined;
+  const background = new Set<Promise<unknown>>();
 
-  function record(level: InvocationLogLevel, message: string): void {
+  function sanitizeData(
+    data: InvocationLogData | undefined,
+  ): InvocationLogData | undefined {
+    if (!data) return undefined;
+    const entries = Object.entries(data)
+      .filter(([key, value]) => {
+        return (
+          key.length > 0 &&
+          key.length <= 64 &&
+          (typeof value === "number"
+            ? Number.isFinite(value)
+            : typeof value === "string"
+              ? value.length <= 160
+              : true)
+        );
+      })
+      .slice(0, 12);
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+  }
+
+  function record(
+    level: InvocationLogLevel,
+    message: string,
+    data?: InvocationLogData,
+  ): void {
     if (events.length >= maxEvents) {
       logsTruncated = true;
       return;
     }
+    const safeData = sanitizeData(data);
     events.push({
       timeMs: toTimeMs(now() - startedAtMs),
       level,
       message,
+      ...(safeData ? { data: safeData } : {}),
     });
+  }
+
+  function addOperation(
+    operation: string,
+    durationMs: number,
+    failed: boolean,
+  ): void {
+    const prior = performance.operations?.[operation] ?? {
+      count: 0,
+      durationMs: 0,
+      failed: 0,
+    };
+    performance = {
+      ...performance,
+      operations: {
+        ...performance.operations,
+        [operation]: {
+          count: prior.count + 1,
+          durationMs: prior.durationMs + durationMs,
+          failed: prior.failed + (failed ? 1 : 0),
+        },
+      },
+    };
+  }
+
+  function startSpan(
+    operation: string,
+    data?: InvocationLogData,
+  ): InvocationSpan {
+    const startedAtSpan = now();
+    let completed = false;
+    record("info", `${operation}.started`, data);
+    const finish = (failed: boolean, result?: InvocationLogData) => {
+      if (completed) return;
+      completed = true;
+      const durationMs = toTimeMs(now() - startedAtSpan);
+      addOperation(operation, durationMs, failed);
+      record(
+        failed ? "error" : "info",
+        `${operation}.${failed ? "failed" : "completed"}`,
+        {
+          ...result,
+          durationMs,
+        },
+      );
+    };
+    return {
+      end: (result) => finish(false, result),
+      fail: (result) => finish(true, result),
+    };
   }
 
   function build(): InvocationLogRecord {
@@ -161,14 +288,34 @@ export function createInvocationLogger(
   }
 
   return {
-    info(message) {
-      record("info", message);
+    info(message, data) {
+      record("info", message, data);
     },
-    warn(message) {
-      record("warn", message);
+    warn(message, data) {
+      record("warn", message, data);
     },
-    error(message) {
-      record("error", message);
+    error(message, data) {
+      record("error", message, data);
+    },
+    startSpan,
+    async measure(operation, action, data) {
+      const span = startSpan(operation, data);
+      try {
+        const result = await action();
+        span.end();
+        return result;
+      } catch (error) {
+        span.fail({ errorName: error instanceof Error ? error.name : "Error" });
+        throw error;
+      }
+    },
+    track(promise) {
+      background.add(promise);
+      void promise.then(
+        () => background.delete(promise),
+        () => background.delete(promise),
+      );
+      return promise;
     },
     setTraceId(nextTraceId) {
       traceId = nextTraceId;
@@ -193,6 +340,14 @@ export function createInvocationLogger(
       emitted = build();
       consoleFor(emitted)(emitted);
       return emitted;
+    },
+    async emitWhenComplete() {
+      // Background tasks are registered by the request handler before its
+      // middleware unwinds. Capture all of them in this invocation record.
+      while (background.size > 0) {
+        await Promise.allSettled([...background]);
+      }
+      return this.emit();
     },
   };
 }

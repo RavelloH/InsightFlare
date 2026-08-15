@@ -1,3 +1,8 @@
+import {
+  getInvocationLogger,
+  measureExternalFetch,
+} from "@/lib/edge/observability-bindings";
+import type { Env } from "@/lib/edge/types";
 import { requireSameOrigin } from "@/lib/edge/utils";
 
 const LIGHT_TILE_UPSTREAMS = [
@@ -62,6 +67,7 @@ function resolveTileUpstreams(theme: TileTheme): readonly string[] {
 export async function handleMapTileRequest(
   request: Request,
   params: { z: string; x: string; y: string },
+  env?: Env,
 ): Promise<Response> {
   const sameOriginError = requireSameOrigin(request);
   if (sameOriginError) return sameOriginError;
@@ -88,15 +94,20 @@ export async function handleMapTileRequest(
   for (const template of upstreams) {
     const upstreamUrl = buildUpstreamUrl(template, z, normalizedX, y);
     try {
-      const upstreamRes = await fetch(upstreamUrl, {
-        headers: {
-          accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-        },
-        cf: {
-          cacheEverything: true,
-          cacheTtl: 60 * 60 * 24 * 30,
-        },
-      });
+      const upstreamRes = await measureExternalFetch(
+        env ? getInvocationLogger(env) : undefined,
+        "external_fetch.map_tile",
+        () =>
+          fetch(upstreamUrl, {
+            headers: {
+              accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            },
+            cf: {
+              cacheEverything: true,
+              cacheTtl: 60 * 60 * 24 * 30,
+            },
+          }),
+      );
 
       if (!upstreamRes.ok) {
         lastStatus = upstreamRes.status;

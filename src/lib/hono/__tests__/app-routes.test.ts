@@ -451,11 +451,12 @@ describe("Hono API app routing", () => {
         performance: expect.objectContaining({
           cache: "MISS",
           dataSource: "raw",
-          d1RowsRead: 42,
-          d1RowsReadAvailable: true,
+          handlerD1RowsRead: 42,
         }),
         logs: expect.arrayContaining([
           expect.objectContaining({ message: "request.started" }),
+          expect.objectContaining({ message: "route.handler.started" }),
+          expect.objectContaining({ message: "route.handler.completed" }),
           expect.objectContaining({ message: "request.completed" }),
         ]),
       }),
@@ -519,11 +520,11 @@ describe("Hono API app routing", () => {
 
     expect(handleLegacyAuthLogin).toHaveBeenCalled();
     expect(handleLegacyAuthLogout).toHaveBeenCalled();
-    expect(handleMapTileRequest).toHaveBeenCalledWith(expect.any(Request), {
-      z: "1",
-      x: "0",
-      y: "0.png",
-    });
+    expect(handleMapTileRequest).toHaveBeenCalledWith(
+      expect.any(Request),
+      { z: "1", x: "0", y: "0.png" },
+      expect.anything(),
+    );
   });
 
   it("routes private endpoints only after session authentication", async () => {
@@ -610,7 +611,10 @@ describe("Hono API app routing", () => {
     const response = await apiApp.fetch(original, env as any, executionCtx);
 
     expect(await response.text()).toBe("countries");
-    expect(handleWorldCountriesRequest).toHaveBeenCalledWith(original);
+    expect(handleWorldCountriesRequest).toHaveBeenCalledWith(
+      original,
+      expect.anything(),
+    );
   });
 
   it("routes wiki summary through Hono", async () => {
@@ -621,7 +625,10 @@ describe("Hono API app routing", () => {
     const response = await apiApp.fetch(original, env as any, executionCtx);
 
     expect(await response.text()).toBe("wiki");
-    expect(handleWikiSummaryRequest).toHaveBeenCalledWith(original);
+    expect(handleWikiSummaryRequest).toHaveBeenCalledWith(
+      original,
+      expect.anything(),
+    );
   });
 
   it("routes release comparison through Hono", async () => {

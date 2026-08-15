@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 
+import { instrumentEnv } from "@/lib/edge/observability-bindings";
 import {
   createInvocationLogger,
   type InvocationCacheState,
@@ -51,10 +52,11 @@ export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
       traceId: c.get("requestId") || getRequestId(c.req.raw),
     });
     c.set("observabilityLogger", logger);
+    c.env = instrumentEnv(c.env, logger);
     logger.info("request.started");
 
     try {
-      await next();
+      await logger.measure("route.handler", () => next());
     } catch (error) {
       logger.error("request.unhandled_error");
       throw error;
@@ -79,12 +81,19 @@ export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
       logger.setPerformance({
         ...(cache ? { cache } : {}),
         ...(dataSource ? { dataSource } : {}),
-        ...(rowsRead !== undefined ? { d1RowsRead: rowsRead } : {}),
-        d1RowsReadAvailable:
-          rowsReadHeader !== null && rowsReadHeader !== "unavailable",
+        // The binding proxy records every D1 operation, including authentication
+        // and mutation queries. Retain the legacy handler value separately for
+        // comparison while using binding metadata as the authoritative total.
+        ...(rowsRead !== undefined ? { handlerD1RowsRead: rowsRead } : {}),
       });
       logger.info("request.completed");
-      logger.emit();
+      const emit = logger.emitWhenComplete();
+      const executionCtx = c.executionCtx;
+      if (executionCtx) {
+        executionCtx.waitUntil(emit);
+      } else {
+        void emit;
+      }
     }
   };
 }

@@ -1,3 +1,6 @@
+import { measureExternalFetch } from "./observability-bindings";
+import type { InvocationLogger } from "./observability-logger";
+
 export type TurnstileVerifyError =
   | "missing_token"
   | "siteverify_failed"
@@ -29,6 +32,7 @@ interface VerifyTurnstileTokenInput {
   remoteIp?: string;
   expectedHostname?: string;
   siteverifyUrl?: string;
+  logger?: InvocationLogger;
 }
 
 const SITEVERIFY_URL =
@@ -66,6 +70,7 @@ export async function verifyTurnstileToken({
   remoteIp,
   expectedHostname,
   siteverifyUrl,
+  logger,
 }: VerifyTurnstileTokenInput): Promise<TurnstileVerifyResult> {
   const responseToken = token.trim();
   if (!responseToken) {
@@ -83,13 +88,18 @@ export async function verifyTurnstileToken({
 
   let response: Response;
   try {
-    response = await fetch(configuredSiteverifyUrl || SITEVERIFY_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
+    response = await measureExternalFetch(
+      logger,
+      "external_fetch.turnstile",
+      () =>
+        fetch(configuredSiteverifyUrl || SITEVERIFY_URL, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body,
+        }),
+    );
   } catch {
     return { ok: false, reason: "network_error", errorCodes: [] };
   }

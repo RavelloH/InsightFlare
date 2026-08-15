@@ -3,6 +3,7 @@ import handler from "@tanstack/react-start/server-entry";
 import { initializeE2eClock } from "@/lib/edge/e2e-clock";
 import { runHourlyAggregation } from "@/lib/edge/hourly-rollup";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest-do";
+import { instrumentEnv } from "@/lib/edge/observability-bindings";
 import { createInvocationLogger } from "@/lib/edge/observability-logger";
 import { getScheduledTaskDefinition } from "@/lib/edge/scheduled-task-registry";
 import { runScheduledTask } from "@/lib/edge/scheduled-task-runner";
@@ -103,15 +104,20 @@ export default {
       trigger: "request",
     });
     logger.info("request.started");
+    const instrumentedEnv = instrumentEnv(env, logger);
 
     try {
       // Server functions are protocol requests, not localized page navigations.
       // Let Start see the original /_serverFn path before page middleware can
       // redirect it beneath a locale segment.
       if (isServerFunctionRequest(pathname)) {
-        const response = await handler.fetch(request, {
-          context: { env, executionCtx: ctx },
-        });
+        const response = await logger.measure(
+          "server_function.handler",
+          async () =>
+            handler.fetch(request, {
+              context: { env: instrumentedEnv, executionCtx: ctx },
+            }),
+        );
         const result = withPageHeaders(
           response,
           pathname,
@@ -127,11 +133,14 @@ export default {
         return result;
       }
 
-      const decision = await resolvePageRequest(
-        request,
-        env,
-        async (internalRequest) =>
-          apiApp.fetch(markInternalPageRequest(internalRequest), env, ctx),
+      const decision = await logger.measure("page.middleware", () =>
+        resolvePageRequest(request, env, async (internalRequest) =>
+          apiApp.fetch(
+            markInternalPageRequest(internalRequest),
+            instrumentedEnv,
+            ctx,
+          ),
+        ),
       );
       const result = decision.response
         ? withPageHeaders(
@@ -142,9 +151,11 @@ export default {
             env.DEMO_MODE === "1",
           )
         : withPageHeaders(
-            await handler.fetch(request, {
-              context: { env, executionCtx: ctx },
-            }),
+            await logger.measure("page.handler", async () =>
+              handler.fetch(request, {
+                context: { env: instrumentedEnv, executionCtx: ctx },
+              }),
+            ),
             pathname,
             decision.locale,
             env.DEMO_MODE === "1",
@@ -181,6 +192,7 @@ export default {
       trigger: "alarm",
     });
     logger.info("scheduled.started");
+    const instrumentedEnv = instrumentEnv(env, logger);
     if (shouldSkipScheduledTasks(env)) {
       logger.info("scheduled.skipped");
       logger.emit();
@@ -191,7 +203,7 @@ export default {
     ctx.waitUntil(
       Promise.all([
         runScheduledTask(
-          env,
+          instrumentedEnv,
           {
             key: task?.key || "visit_hourly_rollup",
             name: task?.name || "Hourly visit aggregation",
@@ -199,20 +211,25 @@ export default {
           },
           controller.scheduledTime,
           ({ logger: taskLogger }) =>
-            runHourlyAggregation(env, controller.scheduledTime, {
-              logger: taskLogger,
-            }),
+            logger.measure("scheduled.hourly_rollup", () =>
+              runHourlyAggregation(instrumentedEnv, controller.scheduledTime, {
+                logger: taskLogger,
+              }),
+            ),
           logger,
         ),
         runScheduledTask(
-          env,
+          instrumentedEnv,
           {
             key: notificationTask?.key || "notification_tick",
             name: notificationTask?.name || "Notification dispatch",
             triggerType: "cron",
           },
           controller.scheduledTime,
-          runNotificationTick,
+          (taskContext) =>
+            logger.measure("scheduled.notification_tick", () =>
+              runNotificationTick(taskContext),
+            ),
           logger,
         ),
       ])

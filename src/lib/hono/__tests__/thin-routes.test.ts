@@ -131,11 +131,11 @@ describe("thin Hono route modules", () => {
     expect(handleAdminWs).toHaveBeenCalledTimes(2);
     expect(handleLegacyAuthLogin).toHaveBeenCalled();
     expect(handleLegacyAuthLogout).toHaveBeenCalled();
-    expect(handleMapTileRequest).toHaveBeenCalledWith(expect.any(Request), {
-      z: "1",
-      x: "2",
-      y: "3.png",
-    });
+    expect(handleMapTileRequest).toHaveBeenCalledWith(
+      expect.any(Request),
+      { z: "1", x: "2", y: "3.png" },
+      env,
+    );
     expect(handleWikiSummaryRequest).toHaveBeenCalled();
     expect(handleWorldCountriesRequest).toHaveBeenCalled();
     expect(handleReleasesCompareRequest).toHaveBeenCalledWith(

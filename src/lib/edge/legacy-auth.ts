@@ -2,6 +2,7 @@ import { SESSION_COOKIE, SESSION_DURATION_SECONDS } from "@/lib/constants";
 import { handleAuthLoginAdmin } from "@/lib/edge/admin-users";
 import { appNow } from "@/lib/edge/e2e-clock";
 import { readLoginTurnstileRuntimeConfig } from "@/lib/edge/login-turnstile-runtime";
+import { getInvocationLogger } from "@/lib/edge/observability-bindings";
 import { decryptLoginTurnstileSecret } from "@/lib/edge/secret-encryption";
 import { verifyTurnstileToken } from "@/lib/edge/turnstile-siteverify";
 import type { Env } from "@/lib/edge/types";
@@ -172,6 +173,7 @@ export async function handleLegacyAuthLogin(
         env.INSIGHTFLARE_E2E === "1"
           ? env.INSIGHTFLARE_E2E_TURNSTILE_SITEVERIFY_URL
           : undefined,
+      logger: getInvocationLogger(env),
     });
     if (!result.ok) {
       return bad(

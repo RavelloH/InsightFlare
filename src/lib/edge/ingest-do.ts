@@ -45,6 +45,7 @@ import type {
   RecentVisitorSession,
   StoredOpenVisit,
 } from "./ingest-types";
+import { instrumentEnv } from "./observability-bindings";
 import {
   createInvocationLogger,
   type InvocationLogger,
@@ -85,7 +86,7 @@ export class IngestDurableObject extends DurableObject {
     logger.info("do.request.started");
 
     try {
-      await this.schemaReady;
+      await logger.measure("do.schema_ready", () => this.schemaReady);
       const response = await this.handleRequest(request, url, logger);
       logger.setRequest({
         route: url.pathname,
@@ -123,15 +124,15 @@ export class IngestDurableObject extends DurableObject {
     }
 
     if (url.pathname === "/snapshot" && request.method === "GET") {
-      return this.handleSnapshot(url);
+      return this.handleSnapshot(url, logger);
     }
 
     if (url.pathname === "/active" && request.method === "GET") {
-      return this.handleActive();
+      return this.handleActive(logger);
     }
 
     if (url.pathname === "/diagnostic" && request.method === "GET") {
-      return this.handleDiagnostic();
+      return this.handleDiagnostic(logger);
     }
 
     if (url.pathname === "/flush" && request.method === "POST") {
@@ -148,8 +149,8 @@ export class IngestDurableObject extends DurableObject {
     const logger = createInvocationLogger({ source: "do", trigger: "alarm" });
     logger.info("do.alarm.started");
     try {
-      await this.schemaReady;
-      await this.runMaintenance(logger);
+      await logger.measure("do.schema_ready", () => this.schemaReady);
+      await logger.measure("do.maintenance", () => this.runMaintenance(logger));
       if ((await this.hasOpenVisits()) || this.hasDirtyRows()) {
         const scheduledAt = Date.now() + D1_FLUSH_INTERVAL_MS;
         await this.doState.storage.setAlarm(scheduledAt);
@@ -173,7 +174,9 @@ export class IngestDurableObject extends DurableObject {
   ): Promise<Response> {
     let envelope: IngestEnvelopePayload;
     try {
-      envelope = (await request.json()) as IngestEnvelopePayload;
+      envelope = (await logger.measure("do.request_body_read", () =>
+        request.json(),
+      )) as IngestEnvelopePayload;
     } catch {
       logger.warn("do.ingest.bad_request");
       return new Response("Bad Request", { status: 400 });
@@ -183,7 +186,9 @@ export class IngestDurableObject extends DurableObject {
     logger.setTraceId(traceId || undefined);
     logger.info("do.ingest.received");
 
-    const normalized = await this.normalizeRecord(envelope);
+    const normalized = await logger.measure("do.ingest.normalize", () =>
+      this.normalizeRecord(envelope),
+    );
     const record = normalized.record;
     if (!record) {
       logger.warn(`do.ingest.ignored.${normalized.reason || "unknown"}`);
@@ -193,18 +198,28 @@ export class IngestDurableObject extends DurableObject {
     }
 
     if (record.kind === "pageview") {
-      await this.handlePageview(record, logger);
+      await logger.measure("do.ingest.pageview", () =>
+        this.handlePageview(record, logger),
+      );
     } else if (record.kind === "leave") {
-      await this.handleLeave(record, logger);
+      await logger.measure("do.ingest.leave", () =>
+        this.handleLeave(record, logger),
+      );
     } else if (record.kind === "visibility") {
-      await this.handleVisibility(record, logger);
+      await logger.measure("do.ingest.visibility", () =>
+        this.handleVisibility(record, logger),
+      );
     } else if (record.kind === "identify") {
-      await this.handleIdentify(record, logger);
+      await logger.measure("do.ingest.identify", () =>
+        this.handleIdentify(record, logger),
+      );
     } else {
-      await this.handleCustomEvent(record, logger);
+      await logger.measure("do.ingest.custom_event", () =>
+        this.handleCustomEvent(record, logger),
+      );
     }
 
-    await this.ensureAlarm(logger);
+    await logger.measure("do.alarm.ensure", () => this.ensureAlarm(logger));
     logger.info("do.ingest.completed");
     return new Response("ok", { status: 202 });
   }
@@ -229,7 +244,11 @@ export class IngestDurableObject extends DurableObject {
     server.accept();
     this.sockets.add(server);
     logger.info("do.websocket.connected");
-    if (await this.pushInitialSnapshotToSocket(server)) {
+    if (
+      await logger.measure("do.websocket.initial_snapshot", () =>
+        this.pushInitialSnapshotToSocket(server, logger),
+      )
+    ) {
       logger.info("do.websocket.snapshot_sent");
     } else {
       logger.error("do.websocket.snapshot_failed");
@@ -253,55 +272,75 @@ export class IngestDurableObject extends DurableObject {
     });
   }
 
-  private async handleSnapshot(url: URL): Promise<Response> {
+  private async handleSnapshot(
+    url: URL,
+    logger: InvocationLogger,
+  ): Promise<Response> {
     const { fromMs, toMs, limit } = snapshotQueryParams(url);
     const cutoffMs = Date.now() - ACTIVE_NOW_WINDOW_MS;
-    const activeNow =
-      this.sqlOne<{ count: number }>(
-        `
+    const activeNow = await logger.measure(
+      "do.snapshot.active_count",
+      async () =>
+        this.measuredSqlOne<{ count: number }>(
+          logger,
+          `
         SELECT count(DISTINCT visitor_id) AS count
         FROM buffered_visits
         WHERE status = 'open'
           AND last_activity_at >= ?
       `,
-        cutoffMs,
-      )?.count ?? 0;
+          cutoffMs,
+        )?.count ?? 0,
+    );
 
     return jsonResponse({
       ok: true,
       buffered: 0,
       activeNow,
-      data: readRecentRealtimeEvents(
-        { sqlAll: this.sqlAll.bind(this) },
-        fromMs,
-        toMs,
-        limit,
+      data: await logger.measure("do.snapshot.realtime_events", async () =>
+        readRecentRealtimeEvents(
+          {
+            sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
+              this.measuredSqlAll<T>(logger, query, ...bindings),
+          },
+          fromMs,
+          toMs,
+          limit,
+        ),
       ),
     });
   }
 
-  private async handleActive(): Promise<Response> {
+  private async handleActive(logger: InvocationLogger): Promise<Response> {
     const cutoffMs = Date.now() - ACTIVE_NOW_WINDOW_MS;
-    const activeNow =
-      this.sqlOne<{ count: number }>(
-        `
+    const activeNow = await logger.measure(
+      "do.active.count",
+      async () =>
+        this.measuredSqlOne<{ count: number }>(
+          logger,
+          `
         SELECT count(DISTINCT visitor_id) AS count
         FROM buffered_visits
         WHERE status = 'open'
           AND last_activity_at >= ?
       `,
-        cutoffMs,
-      )?.count ?? 0;
+          cutoffMs,
+        )?.count ?? 0,
+    );
 
     return jsonResponse({ ok: true, activeNow });
   }
 
-  private async handleDiagnostic(): Promise<Response> {
-    return handleIngestDiagnostic({
-      sqlAll: this.sqlAll.bind(this),
-      sqlOne: this.sqlOne.bind(this),
-      getAlarm: () => this.doState.storage.getAlarm(),
-    });
+  private async handleDiagnostic(logger: InvocationLogger): Promise<Response> {
+    return logger.measure("do.diagnostic", () =>
+      handleIngestDiagnostic({
+        sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
+          this.measuredSqlAll<T>(logger, query, ...bindings),
+        sqlOne: <T>(query: string, ...bindings: SqlBinding[]) =>
+          this.measuredSqlOne<T>(logger, query, ...bindings),
+        getAlarm: () => this.doState.storage.getAlarm(),
+      }),
+    );
   }
 
   private initializeSqlSchema(): void {
@@ -319,6 +358,64 @@ export class IngestDurableObject extends DurableObject {
 
   private sqlRun(query: string, ...bindings: SqlBinding[]): number {
     return this.doState.storage.sql.exec(query, ...bindings).rowsWritten;
+  }
+
+  private measuredSqlAll<T>(
+    logger: InvocationLogger,
+    query: string,
+    ...bindings: SqlBinding[]
+  ): T[] {
+    const span = logger.startSpan("do_sql.all", {
+      statementKind:
+        query
+          .trimStart()
+          .match(/^([a-z]+)/i)?.[1]
+          ?.toLowerCase() || "other",
+      bindingCount: bindings.length,
+    });
+    logger.increment("doSqlStatements");
+    try {
+      const rows = this.sqlAll<T>(query, ...bindings);
+      logger.increment("doSqlRowsRead", rows.length);
+      span.end({ rowCount: rows.length });
+      return rows;
+    } catch (error) {
+      span.fail({ errorName: error instanceof Error ? error.name : "Error" });
+      throw error;
+    }
+  }
+
+  private measuredSqlOne<T>(
+    logger: InvocationLogger,
+    query: string,
+    ...bindings: SqlBinding[]
+  ): T | null {
+    return this.measuredSqlAll<T>(logger, query, ...bindings)[0] ?? null;
+  }
+
+  private measuredSqlRun(
+    logger: InvocationLogger,
+    query: string,
+    ...bindings: SqlBinding[]
+  ): number {
+    const span = logger.startSpan("do_sql.run", {
+      statementKind:
+        query
+          .trimStart()
+          .match(/^([a-z]+)/i)?.[1]
+          ?.toLowerCase() || "other",
+      bindingCount: bindings.length,
+    });
+    logger.increment("doSqlStatements");
+    try {
+      const rowsWritten = this.sqlRun(query, ...bindings);
+      logger.increment("doSqlRowsWritten", rowsWritten);
+      span.end({ rowsWritten });
+      return rowsWritten;
+    } catch (error) {
+      span.fail({ errorName: error instanceof Error ? error.name : "Error" });
+      throw error;
+    }
   }
 
   private bufferStoreContext() {
@@ -927,11 +1024,14 @@ export class IngestDurableObject extends DurableObject {
 
   private async pushInitialSnapshotToSocket(
     socket: WebSocket,
+    logger: InvocationLogger,
   ): Promise<boolean> {
     return pushInitialRealtimeSnapshot(
       {
-        sqlAll: this.sqlAll.bind(this),
-        sqlOne: this.sqlOne.bind(this),
+        sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
+          this.measuredSqlAll<T>(logger, query, ...bindings),
+        sqlOne: <T>(query: string, ...bindings: SqlBinding[]) =>
+          this.measuredSqlOne<T>(logger, query, ...bindings),
         sockets: this.sockets,
       },
       socket,
@@ -939,15 +1039,16 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private flushStoreContext(logger: InvocationLogger) {
+    const env = instrumentEnv(this.doEnv, logger);
     return {
-      env: this.doEnv,
+      env,
       dictionaryIds: this.dictionaryIds,
       sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
-        this.sqlAll<T>(query, ...bindings),
+        this.measuredSqlAll<T>(logger, query, ...bindings),
       sqlOne: <T>(query: string, ...bindings: SqlBinding[]) =>
-        this.sqlOne<T>(query, ...bindings),
+        this.measuredSqlOne<T>(logger, query, ...bindings),
       sqlRun: (query: string, ...bindings: SqlBinding[]) =>
-        this.sqlRun(query, ...bindings),
+        this.measuredSqlRun(logger, query, ...bindings),
       readPersistedVisitRow: this.readPersistedVisitRow.bind(this),
       insertBufferedVisitRow: this.insertBufferedVisitRow.bind(this),
       hasOpenVisitsForVisitor: this.hasOpenVisitsForVisitor.bind(this),
@@ -969,14 +1070,10 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private async runMaintenance(logger: InvocationLogger): Promise<void> {
-    logger.info("do.flush_timeouts.started");
-    await this.flushTimeouts(logger);
-    logger.info("do.flush_timeouts.completed");
-    logger.info("do.flush_pending.started");
-    await this.flushPendingToD1(logger);
-    logger.info("do.flush_pending.completed");
-    logger.info("do.cleanup.started");
-    await this.cleanupBufferedRows(logger);
-    logger.info("do.cleanup.completed");
+    await logger.measure("do.flush_timeouts", () => this.flushTimeouts(logger));
+    await logger.measure("do.flush_pending", () =>
+      this.flushPendingToD1(logger),
+    );
+    await logger.measure("do.cleanup", () => this.cleanupBufferedRows(logger));
   }
 }

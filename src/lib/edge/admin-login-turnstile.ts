@@ -17,6 +17,7 @@ import {
   deleteLoginTurnstileRuntimeConfig,
   writeLoginTurnstileRuntimeConfig,
 } from "./login-turnstile-runtime";
+import { getInvocationLogger } from "./observability-bindings";
 import { encryptLoginTurnstileSecret } from "./secret-encryption";
 import { deleteConfig, readConfig, upsertConfig } from "./system-config";
 import { verifyTurnstileToken } from "./turnstile-siteverify";
@@ -172,6 +173,7 @@ export async function handleLoginTurnstileTestAdmin(
       env.INSIGHTFLARE_E2E === "1"
         ? env.INSIGHTFLARE_E2E_TURNSTILE_SITEVERIFY_URL
         : undefined,
+    logger: getInvocationLogger(env),
   });
 
   if (!result.ok) {

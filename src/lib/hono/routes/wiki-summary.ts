@@ -6,5 +6,5 @@ import type { AppEnv } from "@/lib/hono/types";
 export const wikiSummaryRoutes = new Hono<AppEnv>();
 
 wikiSummaryRoutes.get("/wiki-summary", (c) =>
-  handleWikiSummaryRequest(c.req.raw),
+  handleWikiSummaryRequest(c.req.raw, c.env),
 );

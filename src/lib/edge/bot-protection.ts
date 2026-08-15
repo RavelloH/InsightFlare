@@ -235,7 +235,8 @@ function longitude(cf: Record<string, unknown>): number {
 export function writeBotAnalyticsEvent(
   env: Env,
   input: BotAnalyticsInput,
-  logger?: Pick<InvocationLogger, "warn" | "error">,
+  logger?: Pick<InvocationLogger, "warn" | "error"> &
+    Partial<Pick<InvocationLogger, "info">>,
 ): void {
   if (isAnalyticsEngineDisabled(env)) {
     return;
@@ -320,6 +321,7 @@ export function writeBotAnalyticsEvent(
         userAgent.length,
       ],
     });
+    logger?.info?.("collect.bot_analytics_written");
   } catch (error) {
     void error;
     logger?.error("collect.bot_analytics_write_failed");

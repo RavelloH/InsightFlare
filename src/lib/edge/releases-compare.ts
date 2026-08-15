@@ -3,6 +3,8 @@ import type { Env } from "@/lib/edge/types";
 import { fetchGithubCompare } from "@/lib/github-releases";
 import { bad, errorResponse, jsonResponseFor } from "@/lib/response";
 
+import { getInvocationLogger } from "./observability-bindings";
+
 const REPO_OWNER = "RavelloH";
 const REPO_NAME = "InsightFlare";
 const REF_PATTERN = /^[0-9A-Za-z._/-]+$/;
@@ -41,7 +43,21 @@ export async function handleReleasesCompareRequest(
   }
 
   try {
-    const data = await fetchGithubCompare(REPO_OWNER, REPO_NAME, base, head);
+    const logger = getInvocationLogger(env);
+    let data;
+    if (logger) {
+      logger.increment("externalFetches");
+      try {
+        data = await logger.measure("external_fetch.github_compare", () =>
+          fetchGithubCompare(REPO_OWNER, REPO_NAME, base, head),
+        );
+      } catch (error) {
+        logger.increment("failedExternalFetches");
+        throw error;
+      }
+    } else {
+      data = await fetchGithubCompare(REPO_OWNER, REPO_NAME, base, head);
+    }
     return jsonResponseFor(request, { ok: true, data });
   } catch (error) {
     const message =
