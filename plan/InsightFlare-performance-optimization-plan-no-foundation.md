@@ -1316,6 +1316,10 @@ rollback = 旧 Worker version
   两条并行分支查询，保留专用 Other/Unknown token、Top-N 排序与响应结构；真实 SQLite
   fixture 确认每个分支的 `SEARCH visits USING INDEX` 仅一次。生产 Origin MISS 仍需确认
   rows-read 与 duration 降幅。
+- Browser/referrer radar 已显式 materialize 同时供 session、visitor 和 total 聚合使用的
+  filtered source，避免 SQLite inline 后重复 visits 扫描。真实 SQLite fixture 覆盖 bounce、
+  duration、frequency、traffic share、空 referrer 和窗口边界，并确认两条查询各自仅一次
+  `SEARCH visits USING INDEX`；生产 D1 Insights 仍是实际 rows-read 与 duration 降幅的依据。
 - Performance dashboard 已将 summaries、五项 metric trends、routes 与 countries 合并为
   一条 tagged D1 SQL；共享 `filtered_visits` 和 metric-unpivot source 均显式
   `MATERIALIZED`。原先同一个请求的四次 visits 窗口扫描现在为一次；独立 helper 在需要
@@ -1341,7 +1345,7 @@ rollback = 旧 Worker version
 
 ### 后续阶段
 
-Technology 其他 cross/trend 路径的重复窗口扫描、历史数据兼容证明后的 canonical predicate、
+Technology 其他趋势/聚合路径的重复窗口扫描、历史数据兼容证明后的 canonical predicate、
 索引候选和 rollup
 仍按本计划后续门槛推进；未有
 `EXPLAIN QUERY PLAN` 与生产 Origin MISS 证据的改动不得提前扩大 schema。

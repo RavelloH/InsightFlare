@@ -13,7 +13,9 @@ import {
   parseClientDimensionKey,
   parseUtmDimensionKey,
   queryBrowserCrossDimensionFromD1,
+  queryBrowserRadarFromD1,
   queryBrowserVersionBreakdownFromD1,
+  queryReferrerRadarFromD1,
   queryShareTrendFromD1,
 } from "@/lib/edge/query/technology";
 import { queryCrossDimensionFromD1 } from "@/lib/edge/query/technology/client-cross";
@@ -631,6 +633,126 @@ describe("edge query technology D1 mapping", () => {
       expect(
         plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
       ).toHaveLength(1);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("materializes shared radar sources against a SQLite fixture", async () => {
+    const { env, d1 } = createSqliteTrendEnv();
+    const window = queryWindow();
+    const insert = d1.database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, started_at, browser,
+        referrer_host, duration_ms
+      ) VALUES (?, 'site-1', ?, ?, ?, ?, ?, ?)
+    `);
+    const at = (minute: number) => Date.UTC(2026, 0, 1, 0, minute);
+
+    insert.run(
+      "chrome-first",
+      "chrome-a",
+      "session-1",
+      at(15),
+      "Chrome",
+      "news.example",
+      100,
+    );
+    insert.run(
+      "chrome-last",
+      "chrome-a",
+      "session-1",
+      at(20),
+      "Chrome",
+      "news.example",
+      200,
+    );
+    insert.run(
+      "chrome-bounce",
+      "chrome-b",
+      "session-2",
+      at(25),
+      "Chrome",
+      "news.example",
+      400,
+    );
+    insert.run("firefox", "firefox", "session-3", at(30), "Firefox", "", 50);
+    insert.run(
+      "outside-window",
+      "outside",
+      "session-4",
+      at(5),
+      "Chrome",
+      "news.example",
+      1,
+    );
+
+    try {
+      await expect(
+        queryBrowserRadarFromD1(env, "site-1", window, {}),
+      ).resolves.toEqual([
+        {
+          browser: "Chrome",
+          sessions: 2,
+          bounces: 1,
+          avgDurationMs: 350,
+          avgDepth: 1.5,
+          visitors: 2,
+          returningVisitors: 0,
+          avgFrequency: 1,
+          trafficShare: 2 / 3,
+        },
+        {
+          browser: "Firefox",
+          sessions: 1,
+          bounces: 1,
+          avgDurationMs: 50,
+          avgDepth: 1,
+          visitors: 1,
+          returningVisitors: 0,
+          avgFrequency: 1,
+          trafficShare: 1 / 3,
+        },
+      ]);
+      await expect(
+        queryReferrerRadarFromD1(env, "site-1", window, {}, 2),
+      ).resolves.toEqual([
+        {
+          referrer: "news.example",
+          sessions: 2,
+          bounces: 1,
+          avgDurationMs: 350,
+          avgDepth: 1.5,
+          visitors: 2,
+          returningVisitors: 0,
+          avgFrequency: 1,
+          trafficShare: 2 / 3,
+        },
+        {
+          referrer: "",
+          sessions: 1,
+          bounces: 1,
+          avgDurationMs: 50,
+          avgDepth: 1,
+          visitors: 1,
+          returningVisitors: 0,
+          avgFrequency: 1,
+          trafficShare: 1 / 3,
+        },
+      ]);
+
+      expect(d1.calls).toHaveLength(2);
+      for (const call of d1.calls) {
+        expect(call.sql).toContain("filtered_visits AS MATERIALIZED");
+        const plan = d1.database
+          .prepare(`EXPLAIN QUERY PLAN ${call.sql}`)
+          .all(...call.bindings) as Array<{ detail: string }>;
+        expect(
+          plan.filter((row) =>
+            row.detail.includes("SEARCH visits USING INDEX"),
+          ),
+        ).toHaveLength(1);
+      }
     } finally {
       d1.close();
     }

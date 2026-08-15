@@ -35,7 +35,7 @@ export async function queryBrowserRadarFromD1(
 WITH
 ${buildVisitSourceCte()},
 
-filtered_visits AS (
+filtered_visits AS MATERIALIZED (
   SELECT
     visit_id,
     visitor_id,
@@ -152,7 +152,7 @@ export async function queryReferrerRadarFromD1(
 WITH
 ${buildVisitSourceCte()},
 
-filtered_visits AS (
+filtered_visits AS MATERIALIZED (
   SELECT
     visit_id,
     visitor_id,
