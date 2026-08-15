@@ -95,7 +95,12 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
       perf_ttfb_ms REAL, perf_fcp_ms REAL, perf_lcp_ms REAL, perf_cls REAL,
       perf_inp_ms REAL, ae_synced_at INTEGER
     );
-    CREATE TABLE custom_event_names (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+    CREATE TABLE custom_event_names (
+      id INTEGER PRIMARY KEY,
+      site_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      UNIQUE(site_id, name)
+    );
     CREATE TABLE custom_events (
       event_pk INTEGER PRIMARY KEY, event_id TEXT NOT NULL, site_id TEXT NOT NULL,
       visit_id TEXT NOT NULL, event_name_id INTEGER NOT NULL, occurred_at INTEGER NOT NULL,
@@ -107,6 +112,10 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
       event_pk INTEGER NOT NULL, path_id INTEGER NOT NULL, value_type INTEGER NOT NULL,
       occurred_at INTEGER NOT NULL, string_value TEXT, number_value REAL, boolean_value INTEGER
     );
+    CREATE INDEX idx_custom_events_site_name_time
+      ON custom_events(site_id, event_name_id, occurred_at, event_pk);
+    CREATE INDEX idx_visits_site_session_started_at
+      ON visits(site_id, session_id, started_at, visit_id);
   `);
   d1.database
     .prepare(
@@ -144,8 +153,38 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
       "zh-CN",
     );
   d1.database
-    .prepare("INSERT INTO custom_event_names VALUES (?, ?)")
-    .run(1, eventName);
+    .prepare(
+      "INSERT INTO custom_event_names (id, site_id, name) VALUES (?, ?, ?)",
+    )
+    .run(1, siteId, eventName);
+  d1.database
+    .prepare(
+      `INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, started_at, pathname
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      "visit-entry",
+      siteId,
+      "visitor-1",
+      "session-1",
+      eventTime - 2,
+      "/entry",
+    );
+  d1.database
+    .prepare(
+      `INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, started_at, pathname
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      "visit-exit",
+      siteId,
+      "visitor-1",
+      "session-1",
+      eventTime + 1,
+      "/exit",
+    );
   d1.database
     .prepare(
       "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -159,6 +198,28 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
       eventTime,
       eventTime,
       1,
+      1,
+      1,
+      null,
+    );
+  d1.database
+    .prepare(
+      "INSERT INTO custom_event_names (id, site_id, name) VALUES (?, ?, ?)",
+    )
+    .run(99, siteId, "purchase");
+  d1.database
+    .prepare(
+      "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      99,
+      "event-other-name",
+      siteId,
+      "visit-1",
+      99,
+      eventTime,
+      eventTime,
+      2,
       1,
       1,
       null,
@@ -224,12 +285,25 @@ describe("event detail D1 SQL", () => {
       ]);
       expect(cards.client.browser).toMatchObject([{ value: "Edge", views: 1 }]);
       expect(cards.geo.country).toMatchObject([{ value: "CN", views: 1 }]);
+      expect(cards.page.entry).toMatchObject([{ value: "/entry", views: 1 }]);
+      expect(cards.page.exit).toMatchObject([{ value: "/exit", views: 1 }]);
       const cardQueries = d1.calls.filter(({ sql }) =>
         sql.includes("\ncard_rows AS"),
       );
       expect(cardQueries).toHaveLength(4);
       for (const { sql } of cardQueries) {
         expect((sql.match(/UNION ALL/g) ?? []).length).toBeLessThan(5);
+      }
+      expect(
+        cardQueries.filter(({ sql }) => sql.includes("session_visit_edges")),
+      ).toHaveLength(1);
+      for (const cardQuery of cardQueries) {
+        const cardPlan = d1.database
+          .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
+          .all(...cardQuery.bindings) as Array<{ detail: string }>;
+        expect(cardPlan.map((row) => row.detail).join("\n")).toContain(
+          "MATERIALIZE filtered_events",
+        );
       }
       const overviewQuery = d1.calls.find(({ sql }) =>
         sql.includes("overview_card_rows AS"),
@@ -239,8 +313,18 @@ describe("event detail D1 SQL", () => {
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${overviewQuery?.sql ?? "SELECT 1"}`)
         .all(...(overviewQuery?.bindings ?? [])) as Array<{ detail: string }>;
-      expect(plan.map((row) => row.detail).join("\n")).toContain(
-        "MATERIALIZE filtered_events",
+      const planDetails = plan.map((row) => row.detail).join("\n");
+      expect(planDetails).toContain("MATERIALIZE filtered_events");
+      expect(planDetails).toContain("idx_custom_events_site_name_time");
+
+      const entryExitQuery = cardQueries.find(({ sql }) =>
+        sql.includes("session_visit_edges"),
+      );
+      const entryExitPlan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${entryExitQuery?.sql ?? "SELECT 1"}`)
+        .all(...(entryExitQuery?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(entryExitPlan.map((row) => row.detail).join("\n")).toContain(
+        "idx_visits_site_session_started_at",
       );
     } finally {
       d1.close();
@@ -266,8 +350,10 @@ describe("event detail D1 SQL", () => {
           "/pricing",
         );
       d1.database
-        .prepare("INSERT INTO custom_event_names VALUES (?, ?)")
-        .run(2, "Purchase");
+        .prepare(
+          "INSERT INTO custom_event_names (id, site_id, name) VALUES (?, ?, ?)",
+        )
+        .run(2, siteId, "Purchase");
       for (const [eventPk, eventId, visitId, eventNameId, occurredAt] of [
         [2, "event-2", "visit-1", 1, eventTime + 1],
         [3, "event-3", "visit-2", 2, eventTime + 1],

@@ -9,11 +9,9 @@ import type {
 import {
   buildEventAnalyticsSourceCte,
   buildEventFilterSql,
-  buildVisitSourceCte,
   customEventJsonTypeCode,
   eventSourceBindings,
   queryD1All,
-  visitSourceBindings,
 } from "./core";
 
 export async function queryEventFieldsFromD1(
@@ -24,11 +22,10 @@ export async function queryEventFieldsFromD1(
   eventName: string,
   limit: number,
 ): Promise<EventFieldRow[]> {
-  const filter = buildEventFilterSql(filters, "es", { eventName });
+  const filter = buildEventFilterSql(filters, "es");
   const sql = `
 WITH
-${buildVisitSourceCte()},
-${buildEventAnalyticsSourceCte()},
+${buildEventAnalyticsSourceCte({ eventName })},
 filtered_events AS (
   SELECT *
   FROM event_source es
@@ -65,8 +62,7 @@ ORDER BY events DESC, occurrences DESC, path ASC
 LIMIT ?
 `;
   return queryD1All<EventFieldRow>(env, sql, [
-    ...visitSourceBindings(siteId, window),
-    ...eventSourceBindings(siteId, window),
+    ...eventSourceBindings(siteId, window, eventName),
     ...filter.bindings,
     limit,
   ]);
@@ -82,13 +78,12 @@ export async function queryEventFieldValuesFromD1(
   fieldValueType: string,
   limit: number,
 ): Promise<EventFieldValueRow[]> {
-  const filter = buildEventFilterSql(filters, "es", { eventName });
+  const filter = buildEventFilterSql(filters, "es");
   const valueTypeCode = customEventJsonTypeCode(fieldValueType);
   if (valueTypeCode === null) return [];
   const sql = `
 WITH
-${buildVisitSourceCte()},
-${buildEventAnalyticsSourceCte()},
+${buildEventAnalyticsSourceCte({ eventName })},
 filtered_events AS (
   SELECT *
   FROM event_source es
@@ -124,8 +119,7 @@ ORDER BY occurrences DESC, events DESC, stringValue ASC, numberValue ASC, boolea
 LIMIT ?
 `;
   return queryD1All<EventFieldValueRow>(env, sql, [
-    ...visitSourceBindings(siteId, window),
-    ...eventSourceBindings(siteId, window),
+    ...eventSourceBindings(siteId, window, eventName),
     ...filter.bindings,
     fieldPath,
     valueTypeCode,

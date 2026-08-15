@@ -100,8 +100,24 @@ event_source AS (
 )`;
 }
 
-export function buildEventAnalyticsSourceCte(): string {
+export function buildEventAnalyticsSourceCte(options?: {
+  eventName?: string;
+}): string {
+  const eventNameSource = options?.eventName
+    ? `
+target_event_name AS (
+  SELECT id
+  FROM custom_event_names
+  WHERE site_id = ? AND name = ?
+),`
+    : "";
+  const eventNameJoin = options?.eventName
+    ? `
+  INNER JOIN target_event_name ten
+    ON ten.id = ce.event_name_id`
+    : "";
   return `
+${eventNameSource}
 event_source AS (
   SELECT
     ce.event_pk,
@@ -141,6 +157,7 @@ event_source AS (
   FROM custom_events ce
   INNER JOIN custom_event_names cen
     ON cen.id = ce.event_name_id
+${eventNameJoin}
   INNER JOIN visits v
     ON v.site_id = ce.site_id
    AND v.visit_id = ce.visit_id
@@ -153,24 +170,23 @@ export function buildEventFilteredSourceCte(
   window: QueryWindow,
   filters: DashboardFilters,
   eventName?: string,
+  options?: { materialize?: boolean },
 ): {
   cte: string;
   bindings: Array<string | number>;
 } {
-  const filter = buildEventFilterSql(filters, "es", { eventName });
+  const filter = buildEventFilterSql(filters, "es");
   return {
     cte: `
 WITH
-${buildVisitSourceCte()},
-${buildEventAnalyticsSourceCte()},
-filtered_events AS (
+${buildEventAnalyticsSourceCte({ eventName })},
+filtered_events ${options?.materialize ? "AS MATERIALIZED" : "AS"} (
   SELECT *
   FROM event_source es
   ${filter.clause}
 )`,
     bindings: [
-      ...visitSourceBindings(siteId, window),
-      ...eventSourceBindings(siteId, window),
+      ...eventSourceBindings(siteId, window, eventName),
       ...filter.bindings,
     ],
   };
@@ -186,8 +202,11 @@ export function visitSourceBindings(
 export function eventSourceBindings(
   siteId: string,
   window: QueryWindow,
+  eventName?: string,
 ): Array<string | number> {
-  return [siteId, window.fromMs, window.toMs];
+  return eventName
+    ? [siteId, eventName, siteId, window.fromMs, window.toMs]
+    : [siteId, window.fromMs, window.toMs];
 }
 
 export function targetVisitSourceBindings(

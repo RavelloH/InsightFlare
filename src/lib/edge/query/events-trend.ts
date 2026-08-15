@@ -12,7 +12,6 @@ import {
   buildEventAnalyticsSourceCte,
   buildEventFilterSql,
   buildTimeBuckets,
-  buildVisitSourceCte,
   eventSourceBindings,
   queryD1All,
   SHARE_TREND_OTHER_KEY,
@@ -20,7 +19,6 @@ import {
   SHARE_TREND_OTHER_TOKEN,
   shareTrendSeriesKey,
   timeBucketCase,
-  visitSourceBindings,
 } from "./core";
 
 export async function queryEventsTrendFromD1(
@@ -33,14 +31,10 @@ export async function queryEventsTrendFromD1(
   eventName?: string,
 ) {
   const filter = buildEventFilterSql(filters, "es", { eventName });
-  const sourceBindings = [
-    ...visitSourceBindings(siteId, window),
-    ...eventSourceBindings(siteId, window),
-  ];
+  const sourceBindings = [...eventSourceBindings(siteId, window)];
   const filterBindings = filter.bindings;
   const baseCte = `
 WITH
-${buildVisitSourceCte()},
 ${buildEventAnalyticsSourceCte()},
 filtered_events AS (
   SELECT *
@@ -187,19 +181,14 @@ export async function queryEventTypeTrendFromD1(
   filters: DashboardFilters,
   eventName: string,
 ) {
-  const filter = buildEventFilterSql(filters, "es", { eventName });
-  const sourceBindings = [
-    ...visitSourceBindings(siteId, window),
-    ...eventSourceBindings(siteId, window),
-  ];
+  const filter = buildEventFilterSql(filters, "es");
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "occurred_at");
   const rows = await queryD1All<EventTypeTrendPointRow>(
     env,
     `
 WITH
-${buildVisitSourceCte()},
-${buildEventAnalyticsSourceCte()},
+${buildEventAnalyticsSourceCte({ eventName })},
 filtered_events AS (
   SELECT *
   FROM event_source es
@@ -221,7 +210,7 @@ FROM bucketed
 WHERE bucket IS NOT NULL
 ORDER BY bucket ASC
 `,
-    [...sourceBindings, ...filter.bindings],
+    [...eventSourceBindings(siteId, window, eventName), ...filter.bindings],
   );
   const data = buckets.map((item) => ({
     bucket: item.index,

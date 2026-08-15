@@ -375,9 +375,9 @@ describe("edge query event fields and records low-level coverage", () => {
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(calls[0].sql).toContain("GROUP BY path, valueType");
     expect(calls[0].bindings).toEqual([
-      ...visitBindings(),
-      ...eventBindings(),
+      siteId,
       "Signup",
+      ...eventBindings(),
       9,
     ]);
   });
@@ -424,10 +424,10 @@ describe("edge query event fields and records low-level coverage", () => {
 
     expect(calls[0].sql).toContain("WHERE p.path = ? AND v.value_type = ?");
     expect(calls[0].bindings).toEqual([
-      ...visitBindings(),
+      siteId,
+      "Purchase",
       ...eventBindings(),
       "mobile",
-      "Purchase",
       "/amount",
       2,
       7,

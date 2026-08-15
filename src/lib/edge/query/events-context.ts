@@ -13,6 +13,7 @@ import {
   clientDimensionDefinition,
   queryD1All,
   regionValueExpr,
+  visitSourceBindings,
 } from "./core";
 
 export async function queryEventDimensionRowsFromFilteredEvents(
@@ -118,6 +119,7 @@ export async function queryEventAnalyticsContextCardsFromD1(
     window,
     filters,
     eventName,
+    { materialize: true },
   );
   const dimensions: Array<{
     key: string;
@@ -165,9 +167,9 @@ export async function queryEventAnalyticsContextCardsFromD1(
       labelExpr: "as_organization",
     },
   ];
-  const cardSources = [
-    ...dimensions.map(
-      ({ key, expr, includeEmpty }) => `
+  const cardSources: Array<{ sql: string; usesSessionEdges?: true }> = [
+    ...dimensions.map(({ key, expr, includeEmpty }) => ({
+      sql: `
   SELECT
     '${key}' AS cardType,
     ${expr} AS value,
@@ -178,9 +180,9 @@ export async function queryEventAnalyticsContextCardsFromD1(
   FROM filtered_events
   ${includeEmpty ? "" : `WHERE TRIM(COALESCE(${expr}, '')) != ''`}
   GROUP BY value`,
-    ),
-    ...geoDimensions.map(
-      ({ key, valueExpr, labelExpr }) => `
+    })),
+    ...geoDimensions.map(({ key, valueExpr, labelExpr }) => ({
+      sql: `
   SELECT
     '${key}' AS cardType,
     ${valueExpr} AS value,
@@ -191,9 +193,10 @@ export async function queryEventAnalyticsContextCardsFromD1(
   FROM filtered_events
   WHERE TRIM(COALESCE(${valueExpr}, '')) != ''
   GROUP BY value, label`,
-    ),
-    ...(["entry", "exit"] as const).map(
-      (kind) => `
+    })),
+    ...(["entry", "exit"] as const).map((kind) => ({
+      usesSessionEdges: true as const,
+      sql: `
   SELECT
     '${kind}' AS cardType,
     edges.${kind}Path AS value,
@@ -205,9 +208,11 @@ export async function queryEventAnalyticsContextCardsFromD1(
   INNER JOIN session_edges edges ON edges.session_id = fe.session_id
   WHERE TRIM(COALESCE(edges.${kind}Path, '')) != ''
   GROUP BY value`,
-    ),
+    })),
   ];
-  const cardSourceChunks: string[][] = [];
+  const cardSourceChunks: Array<
+    Array<{ sql: string; usesSessionEdges?: true }>
+  > = [];
   // D1 currently rejects compound SELECT statements with more than five terms.
   const maxCompoundTerms = 5;
   for (let index = 0; index < cardSources.length; index += maxCompoundTerms) {
@@ -215,32 +220,35 @@ export async function queryEventAnalyticsContextCardsFromD1(
   }
   const rows = (
     await Promise.all(
-      cardSourceChunks.map((sources) =>
-        queryD1All<{
-          cardType: string;
-          value: string | null;
-          label: string | null;
-          views: number;
-          sessions: number;
-          visitors: number;
-        }>(
-          env,
-          `${source.cte},
+      cardSourceChunks.map((sources) => {
+        const usesSessionEdges = sources.some(
+          (source) => source.usesSessionEdges,
+        );
+        const sessionEdgeCte = usesSessionEdges
+          ? `,
+event_sessions AS MATERIALIZED (
+  SELECT DISTINCT session_id
+  FROM filtered_events
+  WHERE TRIM(COALESCE(session_id, '')) != ''
+),
 session_visit_edges AS (
   SELECT
-    session_id,
-    pathname,
+    v.session_id,
+    v.pathname,
     ROW_NUMBER() OVER (
-      PARTITION BY session_id
-      ORDER BY started_at ASC, visit_id ASC
+      PARTITION BY v.session_id
+      ORDER BY v.started_at ASC, v.visit_id ASC
     ) AS first_rank,
     ROW_NUMBER() OVER (
-      PARTITION BY session_id
-      ORDER BY started_at DESC, visit_id DESC
+      PARTITION BY v.session_id
+      ORDER BY v.started_at DESC, v.visit_id DESC
     ) AS latest_rank
-  FROM visit_source
-  WHERE TRIM(COALESCE(session_id, '')) != ''
-    AND TRIM(COALESCE(pathname, '')) != ''
+  FROM event_sessions es
+  INNER JOIN visits v
+    ON v.site_id = ?
+   AND v.session_id = es.session_id
+   AND v.started_at BETWEEN ? AND ?
+  WHERE TRIM(COALESCE(v.pathname, '')) != ''
 ),
 session_edges AS (
   SELECT
@@ -249,9 +257,23 @@ session_edges AS (
     MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exitPath
   FROM session_visit_edges
   GROUP BY session_id
-),
+)`
+          : "";
+        const bindings = usesSessionEdges
+          ? [...source.bindings, ...visitSourceBindings(siteId, window), limit]
+          : [...source.bindings, limit];
+        return queryD1All<{
+          cardType: string;
+          value: string | null;
+          label: string | null;
+          views: number;
+          sessions: number;
+          visitors: number;
+        }>(
+          env,
+          `${source.cte}${sessionEdgeCte},
 card_rows AS (
-${sources.join("\nUNION ALL")}
+${sources.map(({ sql }) => sql).join("\nUNION ALL")}
 ),
 ranked_cards AS (
   SELECT
@@ -272,9 +294,9 @@ FROM ranked_cards
 WHERE card_rank <= ?
 ORDER BY cardType ASC, card_rank ASC
 `,
-          [...source.bindings, limit],
-        ),
-      ),
+          bindings,
+        );
+      }),
     )
   ).flat();
   const byCard = new Map<

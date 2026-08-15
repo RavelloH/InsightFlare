@@ -9,10 +9,8 @@ import type {
 import {
   buildEventAnalyticsSourceCte,
   buildEventFilterSql,
-  buildVisitSourceCte,
   eventSourceBindings,
   queryD1All,
-  visitSourceBindings,
 } from "./core";
 import { queryEventSummaryMetricsFromD1 } from "./events-summary";
 
@@ -29,16 +27,14 @@ export async function queryEventTypeOverviewFromD1(
     window,
     filters,
   );
-  const eventFilter = buildEventFilterSql(filters, "es", { eventName });
+  const eventFilter = buildEventFilterSql(filters, "es");
   const bindings = [
-    ...visitSourceBindings(siteId, window),
-    ...eventSourceBindings(siteId, window),
+    ...eventSourceBindings(siteId, window, eventName),
     ...eventFilter.bindings,
   ];
   const baseCte = `
 WITH
-${buildVisitSourceCte()},
-${buildEventAnalyticsSourceCte()},
+${buildEventAnalyticsSourceCte({ eventName })},
 filtered_events AS MATERIALIZED (
   SELECT *
   FROM event_source es
