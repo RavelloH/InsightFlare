@@ -70,7 +70,7 @@ describe("fetchVisitors", () => {
     } as any);
 
     await fetchVisitors("site-1", window, undefined, {
-      page: 2,
+      cursor: "visitor-cursor",
       pageSize: 25,
       sortBy: "lastSeenAt",
       sortDir: "desc",
@@ -80,7 +80,7 @@ describe("fetchVisitors", () => {
     expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
       "/api/private/visitors",
       expect.objectContaining({
-        page: 2,
+        cursor: "visitor-cursor",
         pageSize: 25,
         sortBy: "lastSeenAt",
         sortDir: "desc",
@@ -162,7 +162,7 @@ describe("fetchSessions", () => {
     } as any);
 
     await fetchSessions("site-1", window, undefined, {
-      page: 3,
+      cursor: "session-cursor",
       pageSize: 10,
       sortBy: "startedAt",
       sortDir: "asc",
@@ -172,7 +172,7 @@ describe("fetchSessions", () => {
     expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
       "/api/private/sessions",
       expect.objectContaining({
-        page: 3,
+        cursor: "session-cursor",
         pageSize: 10,
         sortBy: "startedAt",
         sortDir: "asc",

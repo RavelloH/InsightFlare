@@ -1552,7 +1552,6 @@ describe("edge query handlers", () => {
         },
       ],
       meta: {
-        page: 1,
         pageSize: 1,
         returned: 1,
         hasMore: false,
@@ -1573,7 +1572,7 @@ describe("edge query handlers", () => {
       meta: {
         pageSize: 1,
         hasMore: true,
-        nextPage: 2,
+        nextCursor: expect.any(String),
       },
     });
     expect(await retention.json()).toMatchObject({

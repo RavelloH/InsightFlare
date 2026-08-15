@@ -316,16 +316,16 @@ export function VisitorsClientPage({
     ],
     queryFn: ({ pageParam, signal }) =>
       fetchVisitors(siteId, timeWindow, filters, {
-        page: pageParam,
+        cursor: pageParam,
         pageSize: VISITOR_PAGE_SIZE,
         sortBy: sort.key,
         sortDir: sort.direction,
         search: debouncedQuery,
         signal,
       }),
-    initialPageParam: 1,
+    initialPageParam: null as string | null,
     getNextPageParam: (lastPage) =>
-      lastPage.meta.hasMore ? lastPage.meta.nextPage : undefined,
+      lastPage.meta.hasMore ? lastPage.meta.nextCursor : undefined,
     enabled: typeof window !== "undefined",
   });
   const rows = useMemo(

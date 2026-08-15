@@ -37,6 +37,7 @@ import {
   mapTrendRows,
   mapVisitors,
   mapVisitPerformanceMetrics,
+  paginationOffset,
   parseBooleanFlag,
   parseEventFieldPath,
   parseEventFieldValueType,
@@ -51,7 +52,6 @@ import {
   parseLimit,
   parseListSearch,
   parseQueryLimit,
-  paginationOffset,
   parseSessionListSort,
   parseVisitorListSort,
   parseWindow,
@@ -1131,13 +1131,13 @@ describe("edge query core SQL helpers", () => {
 
   it("builds deterministic event ordering clauses", () => {
     expect(eventRecordOrderBy({ key: "eventName", direction: "asc" })).toBe(
-      "eventName ASC, occurredAt DESC, eventId DESC",
+      "eventName ASC, occurredAt DESC, eventId DESC, eventPk DESC",
     );
     expect(eventRecordOrderBy({ key: "pathname", direction: "desc" })).toBe(
-      "pathname DESC, occurredAt DESC, eventId DESC",
+      "pathname DESC, occurredAt DESC, eventId DESC, eventPk DESC",
     );
     expect(eventRecordOrderBy({ key: "occurredAt", direction: "asc" })).toBe(
-      "occurredAt ASC, eventId ASC",
+      "occurredAt ASC, eventId ASC, eventPk ASC",
     );
   });
 });

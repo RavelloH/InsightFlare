@@ -1200,7 +1200,10 @@ async function runLegacyQuery(
   } = {},
 ): Promise<Response> {
   const internalUrl = buildInternalUrl(url, options.timeRange);
-  if (queryName === "events-records" && options.pagination) {
+  if (
+    ["events-records", "visitors", "sessions"].includes(queryName) &&
+    options.pagination
+  ) {
     internalUrl.searchParams.set("pageSize", String(options.pagination.limit));
     internalUrl.searchParams.delete("page");
     if (options.pagination.cursor) {
@@ -2211,9 +2214,12 @@ export async function handleJourneys(
   const id = path[3];
   if (kind === "visitors" && !id) {
     if (request.method !== "GET") return methodNotAllowed(request);
+    const pagination = parseCursorPagination(url);
+    if (pagination instanceof Response) return pagination;
     return runLegacyQuery(request, env, siteId, url, "visitors", {
       timeRange,
       paginated: true,
+      pagination,
     });
   }
   if (kind === "visitors" && id && !path[4]) {
@@ -2226,9 +2232,12 @@ export async function handleJourneys(
   }
   if (kind === "sessions" && !id) {
     if (request.method !== "GET") return methodNotAllowed(request);
+    const pagination = parseCursorPagination(url);
+    if (pagination instanceof Response) return pagination;
     return runLegacyQuery(request, env, siteId, url, "sessions", {
       timeRange,
       paginated: true,
+      pagination,
     });
   }
   if (kind === "sessions" && id && !path[4]) {
@@ -2251,9 +2260,12 @@ export async function handleJourneys(
   }
   if (path[4] === "sessions") {
     if (request.method !== "GET") return methodNotAllowed(request);
+    const pagination = parseCursorPagination(url);
+    if (pagination instanceof Response) return pagination;
     return runLegacyQuery(request, env, siteId, url, "sessions", {
       timeRange,
       paginated: true,
+      pagination,
     });
   }
   return jsonError(

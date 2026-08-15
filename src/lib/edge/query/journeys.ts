@@ -18,7 +18,6 @@ import {
   parseLimit,
   parseListSearch,
   parseQueryLimit,
-  paginationOffset,
   parseSessionListSort,
   parseVisitorListSort,
   parseWindow,
@@ -31,8 +30,14 @@ import {
 } from "./journey-detail-queries";
 import { queryGeoPointsFromD1 } from "./journey-geo-queries";
 import {
+  parseSessionListCursor,
+  parseVisitorListCursor,
+  querySessionListPageFromD1,
   querySessionsFromD1,
+  queryVisitorListPageFromD1,
   queryVisitorsFromD1,
+  serializeSessionListCursor,
+  serializeVisitorListCursor,
 } from "./journey-list-queries";
 
 export {
@@ -75,7 +80,9 @@ export {
 } from "./journey-helpers";
 export {
   queryJourneyEventsFromD1,
+  querySessionListPageFromD1,
   querySessionsFromD1,
+  queryVisitorListPageFromD1,
   queryVisitorsFromD1,
 } from "./journey-list-queries";
 export { handleRetention } from "./journey-retention";
@@ -124,40 +131,45 @@ export async function handleVisitors(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilters(url);
   const paged =
-    url.searchParams.has("page") || url.searchParams.has("pageSize");
-  const page = paged ? parseQueryLimit(url, "page", 1, 1, 10_000) : 1;
+    url.searchParams.has("cursor") || url.searchParams.has("pageSize");
   const pageSize = paged
     ? parseQueryLimit(url, "pageSize", 80, 1, 120)
     : parseLimit(url, 20, 200);
-  const offset = paged ? paginationOffset(page, pageSize) : 0;
-  if (offset === null) {
-    return badRequest(
-      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
-    );
-  }
   const sort = parseVisitorListSort(url);
+  const rawCursor = url.searchParams.get("cursor");
+  const cursor = rawCursor ? parseVisitorListCursor(rawCursor, sort) : null;
+  if (rawCursor && !cursor) return badRequest("Invalid cursor");
   const search = parseListSearch(url);
-  const requestedRows = await queryVisitorAggregate(
-    env,
-    siteId,
-    window,
-    filters,
-    paged ? pageSize + 1 : pageSize,
-    offset,
-    sort,
-    search,
-  );
-  const hasMore = paged && requestedRows.length > pageSize;
-  const rows = hasMore ? requestedRows.slice(0, pageSize) : requestedRows;
+  const page = paged
+    ? await queryVisitorListPageFromD1(env, siteId, window, filters, {
+        pageSize,
+        sort,
+        search,
+        cursor,
+      })
+    : {
+        rows: await queryVisitorAggregate(
+          env,
+          siteId,
+          window,
+          filters,
+          pageSize,
+          0,
+          sort,
+          search,
+        ),
+        nextCursor: null,
+      };
   return jsonResponseWith(ctx!, {
     ok: true,
-    data: mapVisitors(rows),
+    data: mapVisitors(page.rows),
     meta: {
-      page,
       pageSize,
-      returned: rows.length,
-      hasMore,
-      nextPage: hasMore ? page + 1 : null,
+      returned: page.rows.length,
+      hasMore: page.nextCursor !== null,
+      nextCursor: page.nextCursor
+        ? serializeVisitorListCursor(page.nextCursor)
+        : null,
     },
   });
 }
@@ -172,41 +184,46 @@ export async function handleSessions(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilters(url);
   const paged =
-    url.searchParams.has("page") || url.searchParams.has("pageSize");
-  const page = paged ? parseQueryLimit(url, "page", 1, 1, 10_000) : 1;
+    url.searchParams.has("cursor") || url.searchParams.has("pageSize");
   const pageSize = paged
     ? parseQueryLimit(url, "pageSize", 80, 1, 120)
     : parseLimit(url, 100, 500);
-  const offset = paged ? paginationOffset(page, pageSize) : 0;
-  if (offset === null) {
-    return badRequest(
-      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
-    );
-  }
   const sort = parseSessionListSort(url);
+  const rawCursor = url.searchParams.get("cursor");
+  const cursor = rawCursor ? parseSessionListCursor(rawCursor, sort) : null;
+  if (rawCursor && !cursor) return badRequest("Invalid cursor");
   const search = parseListSearch(url);
-  const requestedRows = await querySessionsFromD1(
-    env,
-    siteId,
-    window,
-    filters,
-    paged ? pageSize + 1 : pageSize,
-    undefined,
-    offset,
-    sort,
-    search,
-  );
-  const hasMore = paged && requestedRows.length > pageSize;
-  const rows = hasMore ? requestedRows.slice(0, pageSize) : requestedRows;
+  const page = paged
+    ? await querySessionListPageFromD1(env, siteId, window, filters, {
+        pageSize,
+        sort,
+        search,
+        cursor,
+      })
+    : {
+        rows: await querySessionsFromD1(
+          env,
+          siteId,
+          window,
+          filters,
+          pageSize,
+          undefined,
+          0,
+          sort,
+          search,
+        ),
+        nextCursor: null,
+      };
   return jsonResponseWith(ctx!, {
     ok: true,
-    data: rows,
+    data: page.rows,
     meta: {
-      page,
       pageSize,
-      returned: rows.length,
-      hasMore,
-      nextPage: hasMore ? page + 1 : null,
+      returned: page.rows.length,
+      hasMore: page.nextCursor !== null,
+      nextCursor: page.nextCursor
+        ? serializeSessionListCursor(page.nextCursor)
+        : null,
     },
   });
 }

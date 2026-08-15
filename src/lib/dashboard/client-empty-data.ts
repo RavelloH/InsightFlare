@@ -114,11 +114,10 @@ export function emptyVisitors(): VisitorsData {
     ok: true,
     data: [],
     meta: {
-      page: 1,
       pageSize: 0,
       returned: 0,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     },
   };
 }
@@ -128,11 +127,10 @@ export function emptySessions(): SessionsData {
     ok: true,
     data: [],
     meta: {
-      page: 1,
       pageSize: 0,
       returned: 0,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     },
   };
 }

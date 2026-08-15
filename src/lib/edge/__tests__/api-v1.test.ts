@@ -844,6 +844,56 @@ describe("api v1 gateway", () => {
     expect(internalUrl.searchParams.has("page")).toBe(false);
   });
 
+  it("adapts private Journey keyset cursors without changing the v1 envelope", async () => {
+    const journeyResponse = () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          data: [{ id: "journey-1" }],
+          meta: {
+            pageSize: 50,
+            returned: 1,
+            hasMore: true,
+            nextCursor: "next-journey-cursor",
+          },
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    routeQueryMock.mockImplementation(async () => journeyResponse());
+
+    const visitors = await authed(
+      "/api/v1/sites/site-1/visitors?limit=50&cursor=visitor-cursor",
+      [siteMatch("site-1", "Blog")],
+    );
+    const sessions = await authed(
+      "/api/v1/sites/site-1/sessions?limit=50&cursor=session-cursor",
+      [siteMatch("site-1", "Blog")],
+    );
+
+    expect(await visitors.response.json()).toMatchObject({
+      pagination: {
+        limit: 50,
+        hasMore: true,
+        nextCursor: "next-journey-cursor",
+      },
+    });
+    expect(await sessions.response.json()).toMatchObject({
+      pagination: {
+        limit: 50,
+        hasMore: true,
+        nextCursor: "next-journey-cursor",
+      },
+    });
+    const visitorUrl = routeQueryMock.mock.calls.at(-2)?.[3] as URL;
+    const sessionUrl = routeQueryMock.mock.calls.at(-1)?.[3] as URL;
+    expect(visitorUrl.searchParams.get("pageSize")).toBe("50");
+    expect(visitorUrl.searchParams.get("cursor")).toBe("visitor-cursor");
+    expect(visitorUrl.searchParams.has("page")).toBe(false);
+    expect(sessionUrl.searchParams.get("pageSize")).toBe("50");
+    expect(sessionUrl.searchParams.get("cursor")).toBe("session-cursor");
+    expect(sessionUrl.searchParams.has("page")).toBe(false);
+  });
+
   it("serves team analytics from the team dashboard runtime", async () => {
     const matches = [
       teamSitesListMatch([

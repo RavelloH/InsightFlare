@@ -1191,7 +1191,6 @@ describe("mock — handleDemoRequest", () => {
           path: "/api/private/visitors",
           params: {
             ...ANALYTICS_PARAMS,
-            page: 1,
             pageSize: 2,
             sortBy: "views",
             sortDir: "asc",
@@ -1200,7 +1199,10 @@ describe("mock — handleDemoRequest", () => {
         }),
       );
       expect(visitors.meta).toEqual(
-        expect.objectContaining({ page: 1, pageSize: 2 }),
+        expect.objectContaining({
+          pageSize: 2,
+          nextCursor: expect.any(String),
+        }),
       );
       expect(visitors.data).toEqual(expect.any(Array));
 
@@ -1209,7 +1211,6 @@ describe("mock — handleDemoRequest", () => {
           path: "/api/private/sessions",
           params: {
             ...ANALYTICS_PARAMS,
-            page: 1,
             pageSize: 2,
             sortBy: "durationMs",
             sortDir: "asc",
@@ -1218,7 +1219,10 @@ describe("mock — handleDemoRequest", () => {
         }),
       );
       expect(sessions.meta).toEqual(
-        expect.objectContaining({ page: 1, pageSize: 2 }),
+        expect.objectContaining({
+          pageSize: 2,
+          nextCursor: expect.any(String),
+        }),
       );
 
       const events = asRecord(

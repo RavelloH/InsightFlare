@@ -142,11 +142,10 @@ describe("mock events and journeys branch coverage", () => {
         }),
       ],
       meta: {
-        page: 1,
         pageSize: 10,
         returned: 1,
         hasMore: false,
-        nextPage: null,
+        nextCursor: null,
       },
     });
   });
@@ -210,21 +209,18 @@ describe("mock events and journeys branch coverage", () => {
 
     expect(
       generateDemoVisitors("site", {
-        page: 1,
         pageSize: 2,
       }),
     ).toMatchObject({
       meta: {
-        page: 1,
         pageSize: 2,
         returned: 2,
         hasMore: true,
-        nextPage: 2,
+        nextCursor: "2",
       },
     });
 
     const searched = generateDemoVisitors("site", {
-      page: 1,
       pageSize: 2,
       search: "beta-docs",
     }) as {
@@ -236,7 +232,7 @@ describe("mock events and journeys branch coverage", () => {
     expect(searched.meta).toMatchObject({
       returned: 1,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     });
   });
 
@@ -333,21 +329,18 @@ describe("mock events and journeys branch coverage", () => {
 
     expect(
       generateDemoSessions("site", {
-        page: 1,
         pageSize: 2,
       }),
     ).toMatchObject({
       meta: {
-        page: 1,
         pageSize: 2,
         returned: 2,
         hasMore: true,
-        nextPage: 2,
+        nextCursor: "2",
       },
     });
 
     const searched = generateDemoSessions("site", {
-      page: 1,
       pageSize: 2,
       q: "gamma help",
     }) as {
@@ -361,7 +354,7 @@ describe("mock events and journeys branch coverage", () => {
     expect(searched.meta).toMatchObject({
       returned: 1,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     });
   });
 });

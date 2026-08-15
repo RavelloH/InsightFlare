@@ -35,6 +35,224 @@ import {
   whereClauseWithTarget,
 } from "./journey-helpers";
 
+const JOURNEY_LIST_CURSOR_MAX_LENGTH = 12_288;
+
+export interface VisitorListCursor {
+  sortKey: VisitorListSortKey;
+  sortDirection: "asc" | "desc";
+  sortValue: number;
+  lastSeenAt: number;
+  visitorId: string;
+}
+
+export interface SessionListCursor {
+  sortKey: SessionListSortKey;
+  sortDirection: "asc" | "desc";
+  sortValue: number;
+  startedAt: number;
+  sessionId: string;
+}
+
+export interface VisitorListPage {
+  rows: VisitorRow[];
+  nextCursor: VisitorListCursor | null;
+}
+
+export interface SessionListPage {
+  rows: SessionRow[];
+  nextCursor: SessionListCursor | null;
+}
+
+function toBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+}
+
+function fromBase64Url(value: string): string | null {
+  try {
+    const padded = value.replaceAll("-", "+").replaceAll("_", "/");
+    const binary = atob(padded.padEnd(Math.ceil(padded.length / 4) * 4, "="));
+    const bytes = Uint8Array.from(binary, (character) =>
+      character.charCodeAt(0),
+    );
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function parseCursorValue(raw: string): Record<string, unknown> | null {
+  if (raw.length === 0 || raw.length > JOURNEY_LIST_CURSOR_MAX_LENGTH) {
+    return null;
+  }
+  const decoded = fromBase64Url(raw);
+  if (!decoded) return null;
+  try {
+    const value: unknown = JSON.parse(decoded);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function serializeVisitorListCursor(cursor: VisitorListCursor): string {
+  return toBase64Url(JSON.stringify(cursor));
+}
+
+export function parseVisitorListCursor(
+  raw: string,
+  sort: ListSort<VisitorListSortKey>,
+): VisitorListCursor | null {
+  const cursor = parseCursorValue(raw);
+  if (
+    !cursor ||
+    cursor.sortKey !== sort.key ||
+    cursor.sortDirection !== sort.direction ||
+    typeof cursor.sortValue !== "number" ||
+    !Number.isFinite(cursor.sortValue) ||
+    typeof cursor.lastSeenAt !== "number" ||
+    !Number.isFinite(cursor.lastSeenAt) ||
+    typeof cursor.visitorId !== "string"
+  ) {
+    return null;
+  }
+  return {
+    sortKey: sort.key,
+    sortDirection: sort.direction,
+    sortValue: cursor.sortValue,
+    lastSeenAt: cursor.lastSeenAt,
+    visitorId: cursor.visitorId,
+  };
+}
+
+export function serializeSessionListCursor(cursor: SessionListCursor): string {
+  return toBase64Url(JSON.stringify(cursor));
+}
+
+export function parseSessionListCursor(
+  raw: string,
+  sort: ListSort<SessionListSortKey>,
+): SessionListCursor | null {
+  const cursor = parseCursorValue(raw);
+  if (
+    !cursor ||
+    cursor.sortKey !== sort.key ||
+    cursor.sortDirection !== sort.direction ||
+    typeof cursor.sortValue !== "number" ||
+    !Number.isFinite(cursor.sortValue) ||
+    typeof cursor.startedAt !== "number" ||
+    !Number.isFinite(cursor.startedAt) ||
+    typeof cursor.sessionId !== "string"
+  ) {
+    return null;
+  }
+  return {
+    sortKey: sort.key,
+    sortDirection: sort.direction,
+    sortValue: cursor.sortValue,
+    startedAt: cursor.startedAt,
+    sessionId: cursor.sessionId,
+  };
+}
+
+function visitorCursorFromRow(
+  row: VisitorRow,
+  sort: ListSort<VisitorListSortKey>,
+): VisitorListCursor {
+  return {
+    sortKey: sort.key,
+    sortDirection: sort.direction,
+    sortValue: row[sort.key],
+    lastSeenAt: row.lastSeenAt,
+    visitorId: row.visitorId,
+  };
+}
+
+function sessionCursorFromRow(
+  row: SessionRow,
+  sort: ListSort<SessionListSortKey>,
+): SessionListCursor {
+  return {
+    sortKey: sort.key,
+    sortDirection: sort.direction,
+    sortValue: sort.key === "durationMs" ? row.durationMs : row[sort.key],
+    startedAt: row.startedAt,
+    sessionId: row.sessionId,
+  };
+}
+
+function visitorCursorFilter(
+  cursor: VisitorListCursor,
+  sort: ListSort<VisitorListSortKey>,
+): { clause: string; bindings: Array<string | number> } {
+  const column: Record<VisitorListSortKey, string> = {
+    firstSeenAt: "vm.firstSeenAt",
+    lastSeenAt: "vm.lastSeenAt",
+    sessions: "vm.sessions",
+    views: "vm.views",
+  };
+  const primary = column[sort.key];
+  const operator = sort.direction === "asc" ? ">" : "<";
+  if (sort.key === "lastSeenAt") {
+    return {
+      clause: `AND (${primary} ${operator} ? OR (${primary} = ? AND vm.visitor_id > ?))`,
+      bindings: [cursor.sortValue, cursor.sortValue, cursor.visitorId],
+    };
+  }
+  return {
+    clause: `AND (
+  ${primary} ${operator} ?
+  OR (${primary} = ? AND (vm.lastSeenAt < ? OR (vm.lastSeenAt = ? AND vm.visitor_id > ?)))
+)`,
+    bindings: [
+      cursor.sortValue,
+      cursor.sortValue,
+      cursor.lastSeenAt,
+      cursor.lastSeenAt,
+      cursor.visitorId,
+    ],
+  };
+}
+
+function sessionCursorFilter(
+  cursor: SessionListCursor,
+  sort: ListSort<SessionListSortKey>,
+): { clause: string; bindings: Array<string | number> } {
+  const column: Record<SessionListSortKey, string> = {
+    startedAt: "sm.startedAt",
+    durationMs: "sm.totalDurationMs",
+    views: "sm.views",
+  };
+  const primary = column[sort.key];
+  const operator = sort.direction === "asc" ? ">" : "<";
+  if (sort.key === "startedAt") {
+    return {
+      clause: `AND (${primary} ${operator} ? OR (${primary} = ? AND sm.session_id > ?))`,
+      bindings: [cursor.sortValue, cursor.sortValue, cursor.sessionId],
+    };
+  }
+  return {
+    clause: `AND (
+  ${primary} ${operator} ?
+  OR (${primary} = ? AND (sm.startedAt < ? OR (sm.startedAt = ? AND sm.session_id > ?)))
+)`,
+    bindings: [
+      cursor.sortValue,
+      cursor.sortValue,
+      cursor.startedAt,
+      cursor.startedAt,
+      cursor.sessionId,
+    ],
+  };
+}
+
 export async function queryVisitorsFromD1(
   env: Env,
   siteId: string,
@@ -92,6 +310,70 @@ ${buildVisitorAggregationSql({
       offset,
     ])
   ).map(mapVisitorRow);
+}
+
+export async function queryVisitorListPageFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+  options: {
+    pageSize: number;
+    sort: ListSort<VisitorListSortKey>;
+    search?: string;
+    cursor?: VisitorListCursor | null;
+  },
+): Promise<VisitorListPage> {
+  const filter = buildVisitFilterSql(filters);
+  const searchSql = buildJourneySearchSql(options.search);
+  const searchCte = searchSql
+    ? `,
+matched_visitors AS (
+  SELECT DISTINCT visitor_id
+  FROM filtered_visits
+  WHERE visitor_id != '' AND ${searchSql.condition}
+)`
+    : "";
+  const searchWhere = searchSql
+    ? "AND fv.visitor_id IN (SELECT visitor_id FROM matched_visitors)"
+    : "";
+  const cursor = options.cursor
+    ? visitorCursorFilter(options.cursor, options.sort)
+    : { clause: "", bindings: [] };
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+${buildCustomEventSourceCte()},
+filtered_visits AS (
+  SELECT *
+  FROM visit_source
+  ${filter.clause}
+)
+${searchCte},
+${buildVisitorAggregationSql({
+  searchWhere,
+  browserVersionExpression: browserMajorVersionExpr(),
+  cursorWhere: cursor.clause,
+  orderBy: visitorListOrderBy(options.sort),
+  limitOffset: "LIMIT ?",
+})}`;
+  const records = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...eventSourceBindings(siteId, window),
+    ...filter.bindings,
+    ...(searchSql?.bindings ?? []),
+    ...cursor.bindings,
+    options.pageSize + 1,
+  ]);
+  const hasMore = records.length > options.pageSize;
+  const pageRecords = hasMore ? records.slice(0, options.pageSize) : records;
+  const rows = pageRecords.map(mapVisitorRow);
+  const lastRow = rows.at(-1);
+  return {
+    rows,
+    nextCursor:
+      hasMore && lastRow ? visitorCursorFromRow(lastRow, options.sort) : null,
+  };
 }
 
 export async function querySessionsFromD1(
@@ -157,6 +439,70 @@ ${buildSessionAggregationSql({
       offset,
     ])
   ).map(mapSessionRow);
+}
+
+export async function querySessionListPageFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: DashboardFilters,
+  options: {
+    pageSize: number;
+    sort: ListSort<SessionListSortKey>;
+    search?: string;
+    cursor?: SessionListCursor | null;
+  },
+): Promise<SessionListPage> {
+  const filter = buildVisitFilterSql(filters);
+  const searchSql = buildJourneySearchSql(options.search);
+  const searchCte = searchSql
+    ? `,
+matched_sessions AS (
+  SELECT DISTINCT session_id
+  FROM filtered_visits
+  WHERE session_id != '' AND ${searchSql.condition}
+)`
+    : "";
+  const searchWhere = searchSql
+    ? "AND fv.session_id IN (SELECT session_id FROM matched_sessions)"
+    : "";
+  const cursor = options.cursor
+    ? sessionCursorFilter(options.cursor, options.sort)
+    : { clause: "", bindings: [] };
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+${buildCustomEventSourceCte()},
+filtered_visits AS (
+  SELECT *
+  FROM visit_source
+  ${filter.clause}
+)
+${searchCte},
+${buildSessionAggregationSql({
+  searchWhere,
+  browserVersionExpression: browserMajorVersionExpr(),
+  cursorWhere: cursor.clause,
+  orderBy: sessionListOrderBy(options.sort),
+  limitOffset: "LIMIT ?",
+})}`;
+  const records = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...eventSourceBindings(siteId, window),
+    ...filter.bindings,
+    ...(searchSql?.bindings ?? []),
+    ...cursor.bindings,
+    options.pageSize + 1,
+  ]);
+  const hasMore = records.length > options.pageSize;
+  const pageRecords = hasMore ? records.slice(0, options.pageSize) : records;
+  const rows = pageRecords.map(mapSessionRow);
+  const lastRow = rows.at(-1);
+  return {
+    rows,
+    nextCursor:
+      hasMore && lastRow ? sessionCursorFromRow(lastRow, options.sort) : null,
+  };
 }
 
 export async function queryJourneyEventsFromD1(

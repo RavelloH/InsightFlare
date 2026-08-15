@@ -1509,7 +1509,6 @@ describe("mock remaining generator coverage", () => {
     dataset.visitors.get("u1")!.weight = 3;
 
     const visitors = generateDemoVisitors(SITE_ID, {
-      page: 1,
       pageSize: 1,
       search: "checkout",
       sortBy: "views",
@@ -1525,11 +1524,10 @@ describe("mock remaining generator coverage", () => {
           events: 1,
         }),
       ],
-      meta: { page: 1, pageSize: 1, returned: 1, hasMore: false },
+      meta: { pageSize: 1, returned: 1, hasMore: false, nextCursor: null },
     });
 
     const sessions = generateDemoSessions(SITE_ID, {
-      page: 1,
       pageSize: 1,
       search: "pricing",
       sortBy: "durationMs",

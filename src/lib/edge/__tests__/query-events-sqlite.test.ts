@@ -12,6 +12,12 @@ import {
   queryEventRecordsFromD1,
 } from "@/lib/edge/query/events-records";
 import { queryEventTypeTrendFromD1 } from "@/lib/edge/query/events-trend";
+import {
+  querySessionListPageFromD1,
+  querySessionsFromD1,
+  queryVisitorListPageFromD1,
+  queryVisitorsFromD1,
+} from "@/lib/edge/query/journey-list-queries";
 import type { Env } from "@/lib/edge/types";
 
 type Binding = string | number | null;
@@ -94,7 +100,7 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
       event_pk INTEGER PRIMARY KEY, event_id TEXT NOT NULL, site_id TEXT NOT NULL,
       visit_id TEXT NOT NULL, event_name_id INTEGER NOT NULL, occurred_at INTEGER NOT NULL,
       received_at INTEGER NOT NULL, sequence INTEGER NOT NULL, node_count INTEGER NOT NULL,
-      value_count INTEGER NOT NULL
+      value_count INTEGER NOT NULL, ae_synced_at INTEGER
     );
     CREATE TABLE custom_event_json_paths (id INTEGER PRIMARY KEY, path TEXT NOT NULL);
     CREATE TABLE custom_event_json_values (
@@ -141,8 +147,22 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
     .prepare("INSERT INTO custom_event_names VALUES (?, ?)")
     .run(1, eventName);
   d1.database
-    .prepare("INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(1, "event-1", siteId, "visit-1", 1, eventTime, eventTime, 1, 1, 1);
+    .prepare(
+      "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      1,
+      "event-1",
+      siteId,
+      "visit-1",
+      1,
+      eventTime,
+      eventTime,
+      1,
+      1,
+      1,
+      null,
+    );
   d1.database
     .prepare("INSERT INTO custom_event_json_paths VALUES (?, ?)")
     .run(1, "/href");
@@ -244,7 +264,7 @@ describe("event detail D1 SQL", () => {
       ]) {
         d1.database
           .prepare(
-            "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           )
           .run(
             eventPk,
@@ -257,6 +277,7 @@ describe("event detail D1 SQL", () => {
             eventPk,
             1,
             1,
+            null,
           );
       }
 
@@ -299,6 +320,109 @@ describe("event detail D1 SQL", () => {
 
         expect(received.map((row) => row.eventId)).toEqual(
           expected.map((row) => row.eventId),
+        );
+      }
+
+      const cursorQuery = d1.calls.at(-1);
+      expect(cursorQuery?.sql).not.toContain("OFFSET");
+      const plan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${cursorQuery?.sql ?? "SELECT 1"}`)
+        .all(...(cursorQuery?.bindings ?? []));
+      expect(plan.length).toBeGreaterThan(0);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("matches Journey offset ordering with keyset pages for every list sort", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      for (const [visitId, visitorId, sessionId, startedAt] of [
+        ["visit-2", "visitor-2", "session-2", eventTime],
+        ["visit-3", "visitor-2", "session-2", eventTime + 2],
+        ["visit-4", "visitor-3", "session-3", eventTime + 2],
+      ] as const) {
+        d1.database
+          .prepare(
+            `INSERT INTO visits (
+              visit_id, site_id, visitor_id, session_id, started_at, pathname
+            ) VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(visitId, siteId, visitorId, sessionId, startedAt, "/pricing");
+      }
+
+      for (const sort of [
+        { key: "firstSeenAt", direction: "asc" },
+        { key: "firstSeenAt", direction: "desc" },
+        { key: "lastSeenAt", direction: "asc" },
+        { key: "lastSeenAt", direction: "desc" },
+        { key: "sessions", direction: "asc" },
+        { key: "sessions", direction: "desc" },
+        { key: "views", direction: "asc" },
+        { key: "views", direction: "desc" },
+      ] as const) {
+        const expected = await queryVisitorsFromD1(
+          env,
+          siteId,
+          window,
+          {},
+          20,
+          undefined,
+          0,
+          sort,
+        );
+        const received = [];
+        let cursor = null;
+        do {
+          const page = await queryVisitorListPageFromD1(
+            env,
+            siteId,
+            window,
+            {},
+            { pageSize: 2, sort, cursor },
+          );
+          received.push(...page.rows);
+          cursor = page.nextCursor;
+        } while (cursor);
+        expect(received.map((row) => row.visitorId)).toEqual(
+          expected.map((row) => row.visitorId),
+        );
+      }
+
+      for (const sort of [
+        { key: "startedAt", direction: "asc" },
+        { key: "startedAt", direction: "desc" },
+        { key: "durationMs", direction: "asc" },
+        { key: "durationMs", direction: "desc" },
+        { key: "views", direction: "asc" },
+        { key: "views", direction: "desc" },
+      ] as const) {
+        const expected = await querySessionsFromD1(
+          env,
+          siteId,
+          window,
+          {},
+          20,
+          undefined,
+          0,
+          sort,
+        );
+        const received = [];
+        let cursor = null;
+        do {
+          const page = await querySessionListPageFromD1(
+            env,
+            siteId,
+            window,
+            {},
+            { pageSize: 2, sort, cursor },
+          );
+          received.push(...page.rows);
+          cursor = page.nextCursor;
+        } while (cursor);
+        expect(received.map((row) => row.sessionId)).toEqual(
+          expected.map((row) => row.sessionId),
         );
       }
 

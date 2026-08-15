@@ -2,6 +2,7 @@ interface VisitorAggregationOptions {
   searchWhere?: string;
   browserVersionExpression?: string;
   orderBy: string;
+  cursorWhere?: string;
   limitOffset?: string;
 }
 
@@ -9,6 +10,7 @@ interface SessionAggregationOptions {
   searchWhere?: string;
   browserVersionExpression?: string;
   orderBy: string;
+  cursorWhere?: string;
   limitOffset?: string;
 }
 
@@ -90,6 +92,8 @@ SELECT
   vm.screenHeight
 FROM visitor_metrics vm
 LEFT JOIN event_counts ec ON ec.visitor_id = vm.visitor_id
+WHERE 1 = 1
+${options.cursorWhere ?? ""}
 ORDER BY ${options.orderBy}
 ${options.limitOffset ?? ""}
 `;
@@ -204,6 +208,8 @@ SELECT
 FROM session_metrics sm
 LEFT JOIN event_counts ec ON ec.session_id = sm.session_id
 LEFT JOIN geo_first gf ON gf.session_id = sm.session_id
+WHERE 1 = 1
+${options.cursorWhere ?? ""}
 ORDER BY ${options.orderBy}
 ${options.limitOffset ?? ""}
 `;

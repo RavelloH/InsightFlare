@@ -134,16 +134,16 @@ export function SessionsClientPage({
     ],
     queryFn: ({ pageParam, signal }) =>
       fetchSessions(siteId, timeWindow, filters, {
-        page: pageParam,
+        cursor: pageParam,
         pageSize: SESSION_PAGE_SIZE,
         sortBy: sort.key,
         sortDir: sort.direction,
         search: debouncedQuery,
         signal,
       }),
-    initialPageParam: 1,
+    initialPageParam: null as string | null,
     getNextPageParam: (lastPage) =>
-      lastPage.meta.hasMore ? lastPage.meta.nextPage : undefined,
+      lastPage.meta.hasMore ? lastPage.meta.nextCursor : undefined,
     enabled: typeof window !== "undefined",
   });
   const rows = useMemo(

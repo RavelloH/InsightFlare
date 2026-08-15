@@ -4,11 +4,10 @@ import type {
 } from "./performance";
 
 export interface VisitorsMeta {
-  page: number;
   pageSize: number;
   returned: number;
   hasMore: boolean;
-  nextPage: number | null;
+  nextCursor: string | null;
 }
 
 export interface VisitorsData {
@@ -148,11 +147,10 @@ export interface VisitorDetailData {
 }
 
 export interface SessionsMeta {
-  page: number;
   pageSize: number;
   returned: number;
   hasMore: boolean;
-  nextPage: number | null;
+  nextCursor: string | null;
 }
 
 export interface SessionsData {

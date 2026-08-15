@@ -729,7 +729,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
       expect(params.get("interval")).toBe("hour");
 
       await fetchVisitors("option-visitors", mockWindow, undefined, {
-        page: 2,
+        cursor: "visitor-cursor",
         pageSize: 25,
         limit: 7,
         sortBy: "lastSeenAt",
@@ -737,7 +737,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         search: "  alice  ",
       });
       params = paramsFromCall(fetchMock, 1);
-      expect(params.get("page")).toBe("2");
+      expect(params.get("cursor")).toBe("visitor-cursor");
       expect(params.get("pageSize")).toBe("25");
       expect(params.get("limit")).toBe("7");
       expect(params.get("sortBy")).toBe("lastSeenAt");
@@ -753,7 +753,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
       expect(params.has("search")).toBe(false);
 
       await fetchSessions("option-sessions", mockWindow, undefined, {
-        page: 3,
+        cursor: "session-cursor",
         pageSize: 30,
         limit: 9,
         sortBy: "durationMs",
@@ -761,7 +761,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         search: "  session  ",
       });
       params = paramsFromCall(fetchMock, 3);
-      expect(params.get("page")).toBe("3");
+      expect(params.get("cursor")).toBe("session-cursor");
       expect(params.get("pageSize")).toBe("30");
       expect(params.get("limit")).toBe("9");
       expect(params.get("sortBy")).toBe("durationMs");
@@ -1607,11 +1607,10 @@ describe("Dashboard Client Data Processing Utilities", () => {
         ok: true,
         data: [],
         meta: {
-          page: 1,
           pageSize: 0,
           returned: 0,
           hasMore: false,
-          nextPage: null,
+          nextCursor: null,
         },
       });
       await expect(
@@ -1620,11 +1619,10 @@ describe("Dashboard Client Data Processing Utilities", () => {
         ok: true,
         data: [],
         meta: {
-          page: 1,
           pageSize: 0,
           returned: 0,
           hasMore: false,
-          nextPage: null,
+          nextCursor: null,
         },
       });
 

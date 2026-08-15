@@ -91,8 +91,10 @@ export function parseEventRecordCursor(
       sortKey !== sort.key ||
       sortDirection !== sort.direction ||
       (typeof sortValue !== "string" && typeof sortValue !== "number") ||
+      typeof occurredAt !== "number" ||
       !Number.isFinite(occurredAt) ||
       typeof eventId !== "string" ||
+      typeof eventPk !== "number" ||
       !Number.isSafeInteger(eventPk) ||
       eventPk < 0
     ) {
@@ -107,8 +109,8 @@ export function parseEventRecordCursor(
       return null;
     }
     return {
-      sortKey,
-      sortDirection,
+      sortKey: sort.key,
+      sortDirection: sort.direction,
       sortValue,
       occurredAt,
       eventId,

@@ -206,12 +206,11 @@ export function generateDemoVisitors(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const paged = params.page !== undefined || params.pageSize !== undefined;
-  const page = paged ? parseDemoLimit(params.page, 1, 1, 10_000) : 1;
+  const paged = params.cursor !== undefined || params.pageSize !== undefined;
   const pageSize = paged
     ? parseDemoLimit(params.pageSize, 80, 1, 120)
     : parseDemoLimit(params.limit, 100, 1, 500);
-  const offset = paged ? (page - 1) * pageSize : 0;
+  const offset = paged ? parseDemoLimit(params.cursor, 0, 0, 1_000_000) : 0;
   const from = parseDemoNumber(params.from, Date.now() - 7 * 24 * 3600 * 1000);
   const to = parseDemoNumber(params.to, Date.now());
   const filters = parseDemoFilters(params);
@@ -309,11 +308,10 @@ export function generateDemoVisitors(
     ok: true,
     data: rows,
     meta: {
-      page,
       pageSize,
       returned: rows.length,
       hasMore,
-      nextPage: hasMore ? page + 1 : null,
+      nextCursor: hasMore ? String(offset + pageSize) : null,
     },
   };
 }
@@ -322,12 +320,11 @@ export function generateDemoSessions(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const paged = params.page !== undefined || params.pageSize !== undefined;
-  const page = paged ? parseDemoLimit(params.page, 1, 1, 10_000) : 1;
+  const paged = params.cursor !== undefined || params.pageSize !== undefined;
   const pageSize = paged
     ? parseDemoLimit(params.pageSize, 80, 1, 120)
     : parseDemoLimit(params.limit, 100, 1, 500);
-  const offset = paged ? (page - 1) * pageSize : 0;
+  const offset = paged ? parseDemoLimit(params.cursor, 0, 0, 1_000_000) : 0;
   const from = parseDemoNumber(params.from, Date.now() - 7 * 24 * 3600 * 1000);
   const to = parseDemoNumber(params.to, Date.now());
   const filters = parseDemoFilters(params);
@@ -368,11 +365,10 @@ export function generateDemoSessions(
     ok: true,
     data: rows,
     meta: {
-      page,
       pageSize,
       returned: rows.length,
       hasMore,
-      nextPage: hasMore ? page + 1 : null,
+      nextCursor: hasMore ? String(offset + pageSize) : null,
     },
   };
 }

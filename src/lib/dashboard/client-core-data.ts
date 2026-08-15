@@ -139,7 +139,7 @@ export async function fetchVisitors(
   filters?: DashboardFilters,
   options?: {
     limit?: number;
-    page?: number;
+    cursor?: string | null;
     pageSize?: number;
     sortBy?: VisitorListSortKey;
     sortDir?: SortDirection;
@@ -153,7 +153,7 @@ export async function fetchVisitors(
     to: window.to,
     timeZone: window.timeZone,
   };
-  if (options?.page !== undefined) params.page = options.page;
+  if (options?.cursor) params.cursor = options.cursor;
   if (options?.pageSize !== undefined) params.pageSize = options.pageSize;
   if (options?.limit !== undefined) {
     params.limit = options.limit;
@@ -205,7 +205,7 @@ export async function fetchSessions(
   filters?: DashboardFilters,
   options?: {
     limit?: number;
-    page?: number;
+    cursor?: string | null;
     pageSize?: number;
     sortBy?: SessionListSortKey;
     sortDir?: SortDirection;
@@ -219,7 +219,7 @@ export async function fetchSessions(
     to: window.to,
     timeZone: window.timeZone,
   };
-  if (options?.page !== undefined) params.page = options.page;
+  if (options?.cursor) params.cursor = options.cursor;
   if (options?.pageSize !== undefined) params.pageSize = options.pageSize;
   if (options?.limit !== undefined) {
     params.limit = options.limit;

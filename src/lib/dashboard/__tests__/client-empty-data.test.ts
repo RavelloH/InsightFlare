@@ -80,11 +80,10 @@ describe("dashboard client empty data builders", () => {
   it("builds empty dashboard dimension containers", () => {
     expect(emptyVisitors().meta.pageSize).toBe(0);
     expect(emptySessions().meta).toEqual({
-      page: 1,
       pageSize: 0,
       returned: 0,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     });
     expect(emptyOverviewGeoPoints()).toEqual({
       ok: true,
