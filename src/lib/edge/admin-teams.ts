@@ -27,6 +27,26 @@ import { deleteSiteScriptSettings } from "./site-settings-store";
 import type { Env } from "./types";
 import { clampString } from "./utils";
 
+const MAX_SITE_IDS_PER_D1_QUERY = 100;
+
+async function deleteForSiteIds(
+  env: Env,
+  siteIds: string[],
+  sql: (placeholders: string) => string,
+): Promise<void> {
+  for (
+    let index = 0;
+    index < siteIds.length;
+    index += MAX_SITE_IDS_PER_D1_QUERY
+  ) {
+    const chunk = siteIds.slice(index, index + MAX_SITE_IDS_PER_D1_QUERY);
+    const placeholders = chunk.map(() => "?").join(",");
+    await env.DB.prepare(sql(placeholders))
+      .bind(...chunk)
+      .run();
+  }
+}
+
 export async function handleTeamsAdmin(
   req: Request,
   env: Env,
@@ -165,59 +185,67 @@ export async function handleTeamsAdmin(
       const siteIds = siteRows.results.map((row) => row.id);
 
       if (siteIds.length > 0) {
-        const sitePlaceholders = siteIds.map(() => "?").join(",");
-        await env.DB.prepare(
-          `DELETE FROM custom_event_json_values WHERE site_id IN (${sitePlaceholders})`,
-        )
-          .bind(...siteIds)
-          .run();
-        await env.DB.prepare(
-          `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_id IN (${sitePlaceholders}))`,
-        )
-          .bind(...siteIds)
-          .run();
-        await env.DB.prepare(
-          `DELETE FROM custom_events WHERE site_id IN (${sitePlaceholders})`,
-        )
-          .bind(...siteIds)
-          .run();
-        await env.DB.prepare(
-          `DELETE FROM custom_event_names WHERE site_id IN (${sitePlaceholders})`,
-        )
-          .bind(...siteIds)
-          .run();
-        await env.DB.prepare(
-          `DELETE FROM custom_event_json_keys WHERE site_id IN (${sitePlaceholders})`,
-        )
-          .bind(...siteIds)
-          .run();
-        await env.DB.prepare(
-          `DELETE FROM custom_event_json_paths WHERE site_id IN (${sitePlaceholders})`,
-        )
-          .bind(...siteIds)
-          .run();
-        await env.DB.prepare(
-          `DELETE FROM visits WHERE site_id IN (${sitePlaceholders})`,
-        )
-          .bind(...siteIds)
-          .run();
-        await env.DB.prepare(
-          `DELETE FROM visit_hourly_rollups WHERE site_id IN (${sitePlaceholders})`,
-        )
-          .bind(...siteIds)
-          .run();
-        await env.DB.prepare(
-          `DELETE FROM visit_hourly_aggregation_state WHERE site_id IN (${sitePlaceholders})`,
-        )
-          .bind(...siteIds)
-          .run();
+        await deleteForSiteIds(
+          env,
+          siteIds,
+          (placeholders) =>
+            `DELETE FROM custom_event_json_values WHERE site_id IN (${placeholders})`,
+        );
+        await deleteForSiteIds(
+          env,
+          siteIds,
+          (placeholders) =>
+            `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_id IN (${placeholders}))`,
+        );
+        await deleteForSiteIds(
+          env,
+          siteIds,
+          (placeholders) =>
+            `DELETE FROM custom_events WHERE site_id IN (${placeholders})`,
+        );
+        await deleteForSiteIds(
+          env,
+          siteIds,
+          (placeholders) =>
+            `DELETE FROM custom_event_names WHERE site_id IN (${placeholders})`,
+        );
+        await deleteForSiteIds(
+          env,
+          siteIds,
+          (placeholders) =>
+            `DELETE FROM custom_event_json_keys WHERE site_id IN (${placeholders})`,
+        );
+        await deleteForSiteIds(
+          env,
+          siteIds,
+          (placeholders) =>
+            `DELETE FROM custom_event_json_paths WHERE site_id IN (${placeholders})`,
+        );
+        await deleteForSiteIds(
+          env,
+          siteIds,
+          (placeholders) =>
+            `DELETE FROM visits WHERE site_id IN (${placeholders})`,
+        );
+        await deleteForSiteIds(
+          env,
+          siteIds,
+          (placeholders) =>
+            `DELETE FROM visit_hourly_rollups WHERE site_id IN (${placeholders})`,
+        );
+        await deleteForSiteIds(
+          env,
+          siteIds,
+          (placeholders) =>
+            `DELETE FROM visit_hourly_aggregation_state WHERE site_id IN (${placeholders})`,
+        );
         const configKeys = siteIds.map((id) => `site:${id}`);
-        const cfgPlaceholders = configKeys.map(() => "?").join(",");
-        await env.DB.prepare(
-          `DELETE FROM configs WHERE config_key IN (${cfgPlaceholders})`,
-        )
-          .bind(...configKeys)
-          .run();
+        await deleteForSiteIds(
+          env,
+          configKeys,
+          (placeholders) =>
+            `DELETE FROM configs WHERE config_key IN (${placeholders})`,
+        );
 
         await Promise.allSettled(
           siteIds.map((id) => deleteSiteScriptSettings(env, id)),

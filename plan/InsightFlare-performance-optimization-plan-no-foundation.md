@@ -1346,6 +1346,9 @@ rollback = 旧 Worker version
   aggregation state（最多 100 个站点）及带两个时间绑定的 visits/rollup 查询（最多 98 个
   站点）同样分块，并按原有时间顺序合并。此项修复 Cloudflare D1 每条语句最多 100 个绑定参数
   的已记录平台上限，不增加 schema、索引或持久化观测。
+- 成员权限和 API key 的“team ID + site IDs”授权检查现在每条最多绑定 99 个站点，并精确合并
+  分块结果；团队级删除与关联的 config 清理每条最多 100 个绑定，且仍按 event JSON -> events ->
+  visits/rollups -> configs 的原有依赖顺序执行。重复 site ID 继续被拒绝，未改变授权语义。
 - 上述改动已通过真实 SQLite Scheduled Tasks 测试、Journey/Events 回归测试和 TypeScript
   类型检查；Pages/dimensions 与 technology 回归测试、TypeScript 与 lint 亦已通过。
 - Notification cache 已补充同窗口跨 metric 复用、站点/窗口隔离、报告复用、previous/

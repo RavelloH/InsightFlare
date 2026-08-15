@@ -18,23 +18,9 @@ import {
   revokeApiKeyRecord,
   toPublicApiKey,
 } from "./api-key-store";
+import { assertSitesBelongToTeam } from "./member-site-access";
 import type { Env } from "./types";
 import { clampString } from "./utils";
-
-async function assertSitesBelongToTeam(
-  env: Env,
-  teamId: string,
-  siteIds: string[],
-): Promise<boolean> {
-  if (siteIds.length === 0) return true;
-  const placeholders = siteIds.map(() => "?").join(",");
-  const rows = await env.DB.prepare(
-    `SELECT id FROM sites WHERE team_id=? AND id IN (${placeholders})`,
-  )
-    .bind(teamId, ...siteIds)
-    .all<{ id: string }>();
-  return rows.results.length === siteIds.length;
-}
 
 export async function handleApiKeysAdmin(
   req: Request,

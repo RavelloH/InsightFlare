@@ -1,6 +1,8 @@
 import type { Env } from "./types";
 import { clampString } from "./utils";
 
+const MAX_SITE_IDS_WITH_TEAM_BINDING = 99;
+
 function safeJsonArray(input: string): unknown[] {
   try {
     const parsed = JSON.parse(input) as unknown;
@@ -69,11 +71,22 @@ export async function assertSitesBelongToTeam(
   siteIds: string[],
 ): Promise<boolean> {
   if (siteIds.length === 0) return true;
-  const placeholders = siteIds.map(() => "?").join(",");
-  const rows = await env.DB.prepare(
-    `SELECT id FROM sites WHERE team_id=? AND id IN (${placeholders})`,
-  )
-    .bind(teamId, ...siteIds)
-    .all<{ id: string }>();
-  return rows.results.length === siteIds.length;
+  if (new Set(siteIds).size !== siteIds.length) return false;
+
+  let matchingSiteIds = 0;
+  for (
+    let index = 0;
+    index < siteIds.length;
+    index += MAX_SITE_IDS_WITH_TEAM_BINDING
+  ) {
+    const chunk = siteIds.slice(index, index + MAX_SITE_IDS_WITH_TEAM_BINDING);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = await env.DB.prepare(
+      `SELECT id FROM sites WHERE team_id=? AND id IN (${placeholders})`,
+    )
+      .bind(teamId, ...chunk)
+      .all<{ id: string }>();
+    matchingSiteIds += rows.results.length;
+  }
+  return matchingSiteIds === siteIds.length;
 }
