@@ -1341,6 +1341,11 @@ rollback = 旧 Worker version
 - Events records、Pages dashboard、Journey visitor/session 和 Scheduled Tasks 管理列表现在
   以最大 20,000 行的 `OFFSET` 深度保护分页；超过上限会在执行 D1 前返回结构化 400，要求
   缩小时间范围或过滤条件。此项是短期防护，未改变排序或引入 cursor API contract。
+- Team dashboard 的原始 overview 与 trend 查询现在按最多 98 个站点分块，预留 time-window
+  的两个绑定参数；分块结果在 Worker 内按原有 site/bucket 排序合并。Hourly rollup 的
+  aggregation state（最多 100 个站点）及带两个时间绑定的 visits/rollup 查询（最多 98 个
+  站点）同样分块，并按原有时间顺序合并。此项修复 Cloudflare D1 每条语句最多 100 个绑定参数
+  的已记录平台上限，不增加 schema、索引或持久化观测。
 - 上述改动已通过真实 SQLite Scheduled Tasks 测试、Journey/Events 回归测试和 TypeScript
   类型检查；Pages/dimensions 与 technology 回归测试、TypeScript 与 lint 亦已通过。
 - Notification cache 已补充同窗口跨 metric 复用、站点/窗口隔离、报告复用、previous/
@@ -1351,6 +1356,6 @@ rollback = 旧 Worker version
 ### 后续阶段
 
 Technology 其他趋势/聚合路径的重复窗口扫描、历史数据兼容证明后的 canonical predicate、
-索引候选和 rollup
-仍按本计划后续门槛推进；未有
-`EXPLAIN QUERY PLAN` 与生产 Origin MISS 证据的改动不得提前扩大 schema。
+索引候选和 rollup 仍按本计划后续门槛推进；100-binding 兼容审计将优先处理剩余的多站点
+API 与管理查询。未有 `EXPLAIN QUERY PLAN` 与生产 Origin MISS 证据的改动不得提前扩大
+schema。

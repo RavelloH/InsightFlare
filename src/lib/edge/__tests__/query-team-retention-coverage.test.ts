@@ -233,18 +233,18 @@ describe("edge team query coverage", () => {
       queryTeamTrendFromD1(env, siteIds, window, "hour"),
     ).resolves.toEqual([
       {
-        siteId: "site-b",
-        bucket: 1,
-        timestampMs: baseMs + 60 * 60 * 1000,
-        views: 7,
-        visitors: 2,
-      },
-      {
         siteId: "",
         bucket: 0,
         timestampMs: baseMs,
         views: 0,
         visitors: 0,
+      },
+      {
+        siteId: "site-b",
+        bucket: 1,
+        timestampMs: baseMs + 60 * 60 * 1000,
+        views: 7,
+        visitors: 2,
       },
     ]);
 
@@ -254,6 +254,22 @@ describe("edge team query coverage", () => {
     ]);
     expect(calls[0].sql).toContain("WHERE site_id IN (?, ?)");
     expect(calls[1].sql).toContain("ORDER BY bucket ASC, siteId ASC");
+  });
+
+  it("splits large team overview queries before D1 reaches 100 bindings", async () => {
+    const siteIds = Array.from({ length: 99 }, (_, index) => `site-${index}`);
+    const { env, calls } = createD1Env([
+      [{ siteId: "site-0", views: 1, sessions: 1, visitors: 1 }],
+      [{ siteId: "site-98", views: 2, sessions: 2, visitors: 2 }],
+    ]);
+
+    const rows = await queryTeamOverviewFromD1(env, siteIds, window);
+
+    expect(rows.get("site-0")?.views).toBe(1);
+    expect(rows.get("site-98")?.views).toBe(2);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].bindings).toHaveLength(100);
+    expect(calls[1].bindings).toHaveLength(3);
   });
 
   it("shapes team dashboard payloads with previous comparisons and grouped trends", async () => {

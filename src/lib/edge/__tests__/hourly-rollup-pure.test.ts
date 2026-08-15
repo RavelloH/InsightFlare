@@ -73,6 +73,31 @@ describe("queryOverviewForSitesFromHourlyRollups", () => {
     expect(result).toBeNull();
   });
 
+  it("splits rollup reads before D1 reaches 100 bindings", async () => {
+    const db = makeDbMock();
+    const siteIds = Array.from({ length: 99 }, (_, index) => `site-${index}`);
+    db.all
+      .mockResolvedValueOnce({
+        results: siteIds.map((siteId) => ({
+          siteId,
+          aggregatedUntilHour: 1,
+        })),
+      })
+      .mockResolvedValueOnce({ results: [] })
+      .mockResolvedValueOnce({ results: [] });
+    const env = { DB: db } as unknown as Env;
+
+    const result = await queryOverviewForSitesFromHourlyRollups(env, siteIds, {
+      fromMs: 60 * 60 * 1000,
+      toMs: 2 * 60 * 60 * 1000 - 1,
+      nowMs: 3 * 60 * 60 * 1000,
+      timeZone: "UTC",
+    });
+
+    expect(result).toHaveLength(99);
+    expect(db.bind.mock.calls.map((call) => call.length)).toEqual([99, 100, 3]);
+  });
+
   it("returns null when splitRollupWindow returns null (window before rollup range)", async () => {
     const db = makeDbMock();
     // Aggregation state: site aggregated until hour 10

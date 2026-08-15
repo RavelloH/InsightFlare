@@ -37,6 +37,22 @@ import {
   recordD1RowsRead,
 } from "./diagnostics";
 
+// D1 permits at most 100 bound parameters per statement; visit sources use
+// two additional bindings for the time window.
+const MAX_SITE_IDS_PER_D1_QUERY = 98;
+
+function siteIdChunks(siteIds: string[]): string[][] {
+  const chunks: string[][] = [];
+  for (
+    let index = 0;
+    index < siteIds.length;
+    index += MAX_SITE_IDS_PER_D1_QUERY
+  ) {
+    chunks.push(siteIds.slice(index, index + MAX_SITE_IDS_PER_D1_QUERY));
+  }
+  return chunks;
+}
+
 export async function queryTeamOverviewFromD1(
   env: Env,
   siteIds: string[],
@@ -44,9 +60,11 @@ export async function queryTeamOverviewFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<Map<string, OverviewAggregateRow>> {
   if (siteIds.length === 0) return new Map();
-  const sql = `
+  const result = new Map<string, OverviewAggregateRow>();
+  for (const chunk of siteIdChunks(siteIds)) {
+    const sql = `
 WITH
-${buildVisitSourceCteForSites(siteIds.length)},
+${buildVisitSourceCteForSites(chunk.length)},
 session_rollup AS (
   SELECT site_id AS siteId, session_id, count(*) AS visit_count
   FROM visit_source
@@ -87,25 +105,24 @@ SELECT
 FROM combined
 GROUP BY siteId
 `;
-  const rows = await queryD1All<Record<string, unknown>>(
-    env,
-    sql,
-    visitSourceBindingsForSites(siteIds, window),
-    diagnostics,
-  );
-  return new Map(
-    rows.map((row) => [
-      String(row.siteId ?? ""),
-      {
+    const rows = await queryD1All<Record<string, unknown>>(
+      env,
+      sql,
+      visitSourceBindingsForSites(chunk, window),
+      diagnostics,
+    );
+    for (const row of rows) {
+      result.set(String(row.siteId ?? ""), {
         views: Number(row.views ?? 0),
         sessions: Number(row.sessions ?? 0),
         visitors: Number(row.visitors ?? 0),
         bounces: Number(row.bounces ?? 0),
         totalDuration: Number(row.totalDuration ?? 0),
         durationViews: Number(row.durationViews ?? 0),
-      } satisfies OverviewAggregateRow,
-    ]),
-  );
+      } satisfies OverviewAggregateRow);
+    }
+  }
+  return result;
 }
 
 async function queryTeamOverviewAggregate(
@@ -156,9 +173,11 @@ export async function queryTeamTrendFromD1(
   if (siteIds.length === 0) return [];
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "started_at");
-  const sql = `
+  const result: TeamTrendRow[] = [];
+  for (const chunk of siteIdChunks(siteIds)) {
+    const sql = `
 WITH
-${buildVisitSourceCteForSites(siteIds.length)}
+${buildVisitSourceCteForSites(chunk.length)}
 SELECT
   site_id AS siteId,
   ${bucket.sql} AS bucket,
@@ -168,20 +187,26 @@ FROM visit_source
 GROUP BY siteId, bucket
 ORDER BY bucket ASC, siteId ASC
 `;
-  return (
-    await queryD1All<Record<string, unknown>>(
+    const rows = await queryD1All<Record<string, unknown>>(
       env,
       sql,
-      [...visitSourceBindingsForSites(siteIds, window), ...bucket.bindings],
+      [...visitSourceBindingsForSites(chunk, window), ...bucket.bindings],
       diagnostics,
-    )
-  ).map((row) => ({
-    siteId: String(row.siteId ?? ""),
-    bucket: Number(row.bucket ?? 0),
-    timestampMs: timeBucketTimestamp(buckets, Number(row.bucket ?? 0)),
-    views: Number(row.views ?? 0),
-    visitors: Number(row.visitors ?? 0),
-  }));
+    );
+    result.push(
+      ...rows.map((row) => ({
+        siteId: String(row.siteId ?? ""),
+        bucket: Number(row.bucket ?? 0),
+        timestampMs: timeBucketTimestamp(buckets, Number(row.bucket ?? 0)),
+        views: Number(row.views ?? 0),
+        visitors: Number(row.visitors ?? 0),
+      })),
+    );
+  }
+  return result.sort(
+    (left, right) =>
+      left.bucket - right.bucket || left.siteId.localeCompare(right.siteId),
+  );
 }
 
 async function queryTeamTrendAggregate(

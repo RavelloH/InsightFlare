@@ -18,6 +18,16 @@ export const ROLLUP_LAG_HOURS = 12;
 export const ROLLUP_SCHEMA_VERSION = 1;
 
 const ROLLUP_MAX_HOURS_PER_SITE = 24 * 7;
+const D1_MAX_BOUND_PARAMETERS = 100;
+
+function siteIdChunks(siteIds: string[], fixedBindingCount = 0): string[][] {
+  const maxSiteIds = D1_MAX_BOUND_PARAMETERS - fixedBindingCount;
+  const chunks: string[][] = [];
+  for (let index = 0; index < siteIds.length; index += maxSiteIds) {
+    chunks.push(siteIds.slice(index, index + maxSiteIds));
+  }
+  return chunks;
+}
 
 interface HourlyAggregationOptions {
   logger?: ScheduledTaskLogger;
@@ -407,26 +417,28 @@ async function queryAggregationStates(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<Map<string, number>> {
   if (siteIds.length === 0) return new Map();
-  const placeholders = siteIds.map(() => "?").join(", ");
-  const result = await env.DB.prepare(
-    `
+  const states = new Map<string, number>();
+  const requested = new Set(siteIds);
+  for (const chunk of siteIdChunks(siteIds)) {
+    const placeholders = chunk.map(() => "?").join(", ");
+    const result = await env.DB.prepare(
+      `
       SELECT site_id AS siteId, aggregated_until_hour AS aggregatedUntilHour
       FROM visit_hourly_aggregation_state
       WHERE site_id IN (${placeholders})
     `,
-  )
-    .bind(...siteIds)
-    .all<AggregationStateRow>();
-  recordD1RowsRead(diagnostics, result);
-  const requested = new Set(siteIds);
-  const states = new Map<string, number>();
-  for (const row of result.results) {
-    const siteId = String(row.siteId ?? "");
-    const aggregatedUntilHour = Number(row.aggregatedUntilHour);
-    if (!requested.has(siteId) || !Number.isFinite(aggregatedUntilHour)) {
-      continue;
+    )
+      .bind(...chunk)
+      .all<AggregationStateRow>();
+    recordD1RowsRead(diagnostics, result);
+    for (const row of result.results) {
+      const siteId = String(row.siteId ?? "");
+      const aggregatedUntilHour = Number(row.aggregatedUntilHour);
+      if (!requested.has(siteId) || !Number.isFinite(aggregatedUntilHour)) {
+        continue;
+      }
+      states.set(siteId, aggregatedUntilHour);
     }
-    states.set(siteId, aggregatedUntilHour);
   }
   return states;
 }
@@ -467,9 +479,11 @@ async function queryDetailAccumulatorsForSites(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<Map<string, MetricAccumulator>> {
   if (siteIds.length === 0 || window.toMs < window.fromMs) return new Map();
-  const placeholders = siteIds.map(() => "?").join(", ");
-  const result = await env.DB.prepare(
-    `
+  const accumulators = new Map<string, MetricAccumulator>();
+  for (const chunk of siteIdChunks(siteIds, 2)) {
+    const placeholders = chunk.map(() => "?").join(", ");
+    const result = await env.DB.prepare(
+      `
       SELECT
         site_id AS siteId,
         started_at AS startedAt,
@@ -485,17 +499,17 @@ async function queryDetailAccumulatorsForSites(
       WHERE site_id IN (${placeholders})
         AND started_at BETWEEN ? AND ?
     `,
-  )
-    .bind(...siteIds, window.fromMs, window.toMs)
-    .all<DetailVisitRow>();
-  recordD1RowsRead(diagnostics, result);
+    )
+      .bind(...chunk, window.fromMs, window.toMs)
+      .all<DetailVisitRow>();
+    recordD1RowsRead(diagnostics, result);
 
-  const accumulators = new Map<string, MetricAccumulator>();
-  for (const row of result.results) {
-    const siteId = row.siteId;
-    const accumulator = accumulators.get(siteId) ?? createMetricAccumulator();
-    addDetailVisit(accumulator, row);
-    accumulators.set(siteId, accumulator);
+    for (const row of result.results) {
+      const siteId = row.siteId;
+      const accumulator = accumulators.get(siteId) ?? createMetricAccumulator();
+      addDetailVisit(accumulator, row);
+      accumulators.set(siteId, accumulator);
+    }
   }
   return accumulators;
 }
@@ -508,9 +522,11 @@ async function queryStoredRollupsForSites(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<StoredRollupRow[]> {
   if (siteIds.length === 0 || endHour < startHour) return [];
-  const placeholders = siteIds.map(() => "?").join(", ");
-  const result = await env.DB.prepare(
-    `
+  const rollups: StoredRollupRow[] = [];
+  for (const chunk of siteIdChunks(siteIds, 2)) {
+    const placeholders = chunk.map(() => "?").join(", ");
+    const result = await env.DB.prepare(
+      `
       SELECT
         site_id AS siteId,
         hour_bucket AS hourBucket,
@@ -537,11 +553,17 @@ async function queryStoredRollupsForSites(
         AND hour_bucket BETWEEN ? AND ?
       ORDER BY hour_bucket ASC
     `,
-  )
-    .bind(...siteIds, startHour, endHour)
-    .all<StoredRollupRow>();
-  recordD1RowsRead(diagnostics, result);
-  return result.results;
+    )
+      .bind(...chunk, startHour, endHour)
+      .all<StoredRollupRow>();
+    recordD1RowsRead(diagnostics, result);
+    rollups.push(...result.results);
+  }
+  return rollups.sort(
+    (left, right) =>
+      left.hourBucket - right.hourBucket ||
+      left.siteId.localeCompare(right.siteId),
+  );
 }
 
 export async function queryOverviewForSitesFromHourlyRollupsPartial(
@@ -726,9 +748,11 @@ async function queryDetailVisitsForSites(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<DetailVisitRow[]> {
   if (siteIds.length === 0 || window.toMs < window.fromMs) return [];
-  const placeholders = siteIds.map(() => "?").join(", ");
-  const result = await env.DB.prepare(
-    `
+  const visits: DetailVisitRow[] = [];
+  for (const chunk of siteIdChunks(siteIds, 2)) {
+    const placeholders = chunk.map(() => "?").join(", ");
+    const result = await env.DB.prepare(
+      `
       SELECT
         site_id AS siteId,
         started_at AS startedAt,
@@ -745,11 +769,17 @@ async function queryDetailVisitsForSites(
         AND started_at BETWEEN ? AND ?
       ORDER BY started_at ASC
     `,
-  )
-    .bind(...siteIds, window.fromMs, window.toMs)
-    .all<DetailVisitRow>();
-  recordD1RowsRead(diagnostics, result);
-  return result.results;
+    )
+      .bind(...chunk, window.fromMs, window.toMs)
+      .all<DetailVisitRow>();
+    recordD1RowsRead(diagnostics, result);
+    visits.push(...result.results);
+  }
+  return visits.sort(
+    (left, right) =>
+      left.startedAt - right.startedAt ||
+      left.siteId.localeCompare(right.siteId),
+  );
 }
 
 export interface SiteTrendRow extends TrendAggregateRow {
