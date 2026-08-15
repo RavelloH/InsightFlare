@@ -1,4 +1,5 @@
 import type { Env } from "@/lib/edge/types";
+import { currentInvocationLogger } from "@/lib/edge/observability-logger";
 
 import {
   badRequest,
@@ -187,24 +188,35 @@ export async function handleEventTypeDetail(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilters(url);
   const interval = parseInterval(url);
+  const logger = currentInvocationLogger();
+  const measure = <T>(operation: string, action: () => Promise<T>) =>
+    logger ? logger.measure(operation, action) : action();
   const [overview, trend, fields, cards] = await Promise.all([
-    queryEventTypeOverviewFromD1(env, siteId, window, filters, eventName),
-    queryEventTypeTrendFromD1(
-      env,
-      siteId,
-      window,
-      interval,
-      filters,
-      eventName,
+    measure("event_type_detail.overview", () =>
+      queryEventTypeOverviewFromD1(env, siteId, window, filters, eventName),
     ),
-    queryEventFieldsFromD1(env, siteId, window, filters, eventName, 100),
-    queryEventAnalyticsContextCardsFromD1(
-      env,
-      siteId,
-      window,
-      filters,
-      100,
-      eventName,
+    measure("event_type_detail.trend", () =>
+      queryEventTypeTrendFromD1(
+        env,
+        siteId,
+        window,
+        interval,
+        filters,
+        eventName,
+      ),
+    ),
+    measure("event_type_detail.fields", () =>
+      queryEventFieldsFromD1(env, siteId, window, filters, eventName, 100),
+    ),
+    measure("event_type_detail.context_cards", () =>
+      queryEventAnalyticsContextCardsFromD1(
+        env,
+        siteId,
+        window,
+        filters,
+        100,
+        eventName,
+      ),
     ),
   ]);
   return jsonResponseWith(ctx!, {
