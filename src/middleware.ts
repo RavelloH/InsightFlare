@@ -1,4 +1,5 @@
 import { SESSION_COOKIE } from "@/lib/constants";
+import { appNow, initializeE2eClock } from "@/lib/edge/e2e-clock";
 import type { Env } from "@/lib/edge/types";
 import {
   DEFAULT_LOCALE,
@@ -53,7 +54,7 @@ async function authState(request: Request, env: Env): Promise<AuthState> {
   if (!token) return "unauthenticated";
   const secret = await dashboardSessionSecret(env);
   if (!secret) return "unknown";
-  return (await verifySessionToken(token, secret))
+  return (await verifySessionToken(token, secret, appNow()))
     ? "authenticated"
     : "unauthenticated";
 }
@@ -312,6 +313,7 @@ export async function middleware(
       ...process.env,
       DEMO_MODE: process.env.VITE_DEMO_MODE,
     } as unknown as Env);
+  initializeE2eClock(runtimeEnv);
   const decision = await resolvePageRequest(request, runtimeEnv, internalFetch);
   if (decision.response) return decision.response;
   const headers = new Headers({ "x-pathname": decision.pathname });

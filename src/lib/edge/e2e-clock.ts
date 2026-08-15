@@ -6,6 +6,11 @@ type E2eClockState = { nowMs: number };
 
 const CLOCK_KEY = "__insightflare_e2e_clock__";
 
+type E2eClockEnv = {
+  INSIGHTFLARE_E2E?: string;
+  INSIGHTFLARE_E2E_NOW?: string;
+};
+
 function globalState(): E2eClockState | null {
   const value = (globalThis as Record<string, unknown>)[CLOCK_KEY];
   if (!value || typeof value !== "object") return null;
@@ -19,6 +24,12 @@ export function appNow(): number {
 
 export function e2eClockNow(): number | null {
   return globalState()?.nowMs ?? null;
+}
+
+export function initializeE2eClock(env: E2eClockEnv): void {
+  if (env.INSIGHTFLARE_E2E !== "1" || globalState()) return;
+  const nowMs = Number(env.INSIGHTFLARE_E2E_NOW);
+  if (Number.isFinite(nowMs) && nowMs >= 0) setE2eClock(nowMs);
 }
 
 export function setE2eClock(nowMs: number): number {

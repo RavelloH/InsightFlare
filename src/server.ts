@@ -1,5 +1,6 @@
 import handler from "@tanstack/react-start/server-entry";
 
+import { initializeE2eClock } from "@/lib/edge/e2e-clock";
 import { runHourlyAggregation } from "@/lib/edge/hourly-rollup";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest-do";
 import { getScheduledTaskDefinition } from "@/lib/edge/scheduled-task-registry";
@@ -80,6 +81,7 @@ function isServerFunctionRequest(pathname: string): boolean {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    initializeE2eClock(env);
     const pathname = new URL(request.url).pathname;
     if (shouldUseHono(pathname)) {
       return apiApp.fetch(request, env, ctx);

@@ -4,6 +4,7 @@ import {
   advanceE2eClock,
   appNow,
   e2eClockNow,
+  initializeE2eClock,
   setE2eClock,
 } from "@/lib/edge/e2e-clock";
 
@@ -35,5 +36,27 @@ describe("E2E clock", () => {
     expect(appNow()).toBe(456);
     expect(() => setE2eClock(-1)).toThrow("non-negative");
     expect(() => advanceE2eClock(-1)).toThrow("non-negative");
+  });
+
+  it("initializes a newly created E2E isolate from its Worker configuration", () => {
+    initializeE2eClock({
+      INSIGHTFLARE_E2E: "1",
+      INSIGHTFLARE_E2E_NOW: "789.9",
+    });
+    expect(appNow()).toBe(789);
+
+    initializeE2eClock({
+      INSIGHTFLARE_E2E: "1",
+      INSIGHTFLARE_E2E_NOW: "456",
+    });
+    expect(appNow()).toBe(789);
+  });
+
+  it("does not enable a configured clock outside E2E", () => {
+    initializeE2eClock({
+      INSIGHTFLARE_E2E: "0",
+      INSIGHTFLARE_E2E_NOW: "789",
+    });
+    expect(e2eClockNow()).toBeNull();
   });
 });

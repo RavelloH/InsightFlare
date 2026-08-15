@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { initializeE2eClock } from "@/lib/edge/e2e-clock";
 import type { Env } from "@/lib/edge/types";
 import { createSessionToken } from "@/lib/session";
 import { middleware } from "@/middleware";
 
 const baseEnv = { MAIN_SECRET: "test-secret" } as unknown as Env;
+const CLOCK_KEY = "__insightflare_e2e_clock__";
 
 function request(
   path: string,
@@ -21,7 +23,10 @@ function request(
 }
 
 describe("page request middleware", () => {
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, CLOCK_KEY);
+    vi.unstubAllEnvs();
+  });
 
   it("localizes non-prefixed paths and preserves search", async () => {
     const response = await middleware(
@@ -118,6 +123,32 @@ describe("page request middleware", () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("x-pathname")).toBe("/en/app/team-a");
+  });
+
+  it("uses the configured E2E clock when validating a session", async () => {
+    vi.stubEnv("MAIN_SECRET", "test-secret");
+    vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 6, 13, 12));
+    const token = await createSessionToken(
+      {
+        userId: "user-1",
+        username: "admin",
+        displayName: "Admin",
+        systemRole: "admin",
+      },
+      3600,
+    );
+    vi.restoreAllMocks();
+
+    const response = await middleware(
+      request("/en/app/team-a", { cookies: { if_session: token } }),
+      {
+        ...baseEnv,
+        INSIGHTFLARE_E2E: "1",
+        INSIGHTFLARE_E2E_NOW: String(Date.UTC(2026, 6, 13, 12)),
+      },
+    );
+
+    expect(response.status).toBe(200);
   });
 
   it("rejects an app session signed with a different root secret", async () => {

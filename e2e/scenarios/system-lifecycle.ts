@@ -69,7 +69,7 @@ export function registerSystemLifecycleScenarios(context: E2eContext) {
         `/script.js?siteId=${encodeURIComponent(siteId)}`,
         { cache: "no-store" },
       ).then((response) => response.text());
-      return script.match(/collectToken:"([^"\\]+)"/)?.[1] || "";
+      return script.match(/"collectToken":"([^"\\]+)"/)?.[1] || "";
     }, siteA?.id || "");
     expect(collectToken).not.toBe("");
 
