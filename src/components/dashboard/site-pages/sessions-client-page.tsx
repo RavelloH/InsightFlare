@@ -50,6 +50,19 @@ const SessionDetailClientPage = dynamic(
   },
 );
 
+const VisitorDetailClientPage = dynamic(
+  () =>
+    import("@/components/dashboard/site-pages/visitor-detail-client-page").then(
+      (module) => module.VisitorDetailClientPage,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="p-6 text-sm text-muted-foreground">Loading...</div>
+    ),
+  },
+);
+
 const DEFAULT_SESSION_SORT: SessionSortState = {
   key: "startedAt",
   direction: "desc",
@@ -94,6 +107,7 @@ export function SessionsClientPage({
   const [sort, setSort] = useState<SessionSortState>(DEFAULT_SESSION_SORT);
   const searchParams = useLiveSearchParams();
   const detailSessionId = searchParams.get(DETAIL_QUERY_PARAM)?.trim() || "";
+  const [detailVisitorId, setDetailVisitorId] = useState("");
   const openedDetailFromListRef = useRef(false);
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
 
@@ -206,6 +220,10 @@ export function SessionsClientPage({
     const query = params.toString();
     replaceUrlWithoutNavigation(query ? `${pathname}?${query}` : pathname);
   }, [pathname]);
+  const visitorsPathname = useMemo(
+    () => pathname.replace(/\/sessions(?:\/detail)?$/, "/visitors"),
+    [pathname],
+  );
 
   return (
     <div className="space-y-6">
@@ -247,7 +265,10 @@ export function SessionsClientPage({
           drawerKey={`session:${detailSessionId}`}
           open={Boolean(detailSessionId)}
           onOpenChange={(nextOpen) => {
-            if (!nextOpen) closeSessionDetail();
+            if (!nextOpen) {
+              setDetailVisitorId("");
+              closeSessionDetail();
+            }
           }}
         >
           <SessionDetailClientPage
@@ -256,6 +277,26 @@ export function SessionsClientPage({
             siteId={siteId}
             pathname={pathname}
             sessionId={detailSessionId}
+            onOpenVisitor={setDetailVisitorId}
+          />
+        </DetailDrawer>
+      ) : null}
+
+      {detailSessionId && detailVisitorId ? (
+        <DetailDrawer
+          ariaLabel={messages.visitors.title}
+          drawerKey={`session-visitor:${detailVisitorId}`}
+          open={Boolean(detailVisitorId)}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setDetailVisitorId("");
+          }}
+        >
+          <VisitorDetailClientPage
+            locale={locale}
+            messages={messages}
+            siteId={siteId}
+            pathname={visitorsPathname}
+            visitorId={detailVisitorId}
           />
         </DetailDrawer>
       ) : null}
