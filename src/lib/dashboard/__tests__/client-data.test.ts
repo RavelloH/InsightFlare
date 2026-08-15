@@ -785,7 +785,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
       expect(params.get("eventName")).toBe("Signup");
 
       await fetchEventsRecords("option-events-records", mockWindow, undefined, {
-        page: 4,
+        cursor: "event-cursor",
         pageSize: 15,
         sortBy: "pathname",
         sortDir: "desc",
@@ -793,7 +793,8 @@ describe("Dashboard Client Data Processing Utilities", () => {
         eventName: "  Purchase  ",
       });
       params = paramsFromCall(fetchMock, 6);
-      expect(params.get("page")).toBe("4");
+      expect(params.get("cursor")).toBe("event-cursor");
+      expect(params.has("page")).toBe(false);
       expect(params.get("pageSize")).toBe("15");
       expect(params.get("sortBy")).toBe("pathname");
       expect(params.get("sortDir")).toBe("desc");
@@ -870,8 +871,8 @@ describe("Dashboard Client Data Processing Utilities", () => {
         },
       );
       params = paramsFromCall(fetchMock, 3);
-      expect(params.get("page")).toBe("1");
       expect(params.get("pageSize")).toBe("80");
+      expect(params.has("cursor")).toBe(false);
       expect(params.has("search")).toBe(false);
       expect(params.has("eventName")).toBe(false);
     });

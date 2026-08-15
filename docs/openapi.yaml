@@ -3106,7 +3106,7 @@ components:
           type:
             - string
             - "null"
-          maxLength: 512
+          maxLength: 12288
         hasMore:
           type: boolean
     PaginatedEnvelope:
@@ -4371,7 +4371,7 @@ components:
           default: 100
         cursor:
           type: string
-          maxLength: 512
+          maxLength: 12288
       additionalProperties: false
     Visitor:
       type: object
@@ -5055,7 +5055,7 @@ components:
       in: query
       schema:
         type: string
-        maxLength: 512
+        maxLength: 12288
       description: Opaque pagination cursor from the previous response.
   responses:
     BadRequest:

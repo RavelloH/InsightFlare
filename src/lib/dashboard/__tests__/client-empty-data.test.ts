@@ -62,11 +62,10 @@ describe("dashboard client empty data builders", () => {
 
   it("preserves requested empty metadata values", () => {
     expect(emptyEventsRecords(33).meta).toMatchObject({
-      page: 1,
       pageSize: 33,
       returned: 0,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     });
     expect(emptyEventTypeDetail("Signup").summary.eventTypes).toBe(1);
     expect(emptyEventTypeDetail("").summary.eventTypes).toBe(0);

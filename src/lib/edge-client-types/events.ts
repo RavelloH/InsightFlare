@@ -126,11 +126,10 @@ export interface EventRecord {
 }
 
 export interface EventsRecordsMeta {
-  page: number;
   pageSize: number;
   returned: number;
   hasMore: boolean;
-  nextPage: number | null;
+  nextCursor: string | null;
 }
 
 export interface EventsRecordsData {

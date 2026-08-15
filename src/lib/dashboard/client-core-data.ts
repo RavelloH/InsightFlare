@@ -402,7 +402,7 @@ export async function fetchEventsRecords(
   window: TimeWindow,
   filters?: DashboardFilters,
   options?: {
-    page?: number;
+    cursor?: string | null;
     pageSize?: number;
     sortBy?: EventRecordSortKey;
     sortDir?: SortDirection;
@@ -417,9 +417,9 @@ export async function fetchEventsRecords(
     from: window.from,
     to: window.to,
     timeZone: window.timeZone,
-    page: options?.page ?? 1,
     pageSize,
   };
+  if (options?.cursor) params.cursor = options.cursor;
   if (options?.sortBy) params.sortBy = options.sortBy;
   if (options?.sortDir) params.sortDir = options.sortDir;
   const search = options?.search?.trim();

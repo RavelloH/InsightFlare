@@ -6,7 +6,11 @@ import type { QueryWindow } from "@/lib/edge/query/core";
 import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/query/events-context";
 import { queryEventFieldsFromD1 } from "@/lib/edge/query/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/query/events-overview";
-import { queryEventRecordsFromD1 } from "@/lib/edge/query/events-records";
+import {
+  type EventRecordCursor,
+  queryEventRecordPageFromD1,
+  queryEventRecordsFromD1,
+} from "@/lib/edge/query/events-records";
 import { queryEventTypeTrendFromD1 } from "@/lib/edge/query/events-trend";
 import type { Env } from "@/lib/edge/types";
 
@@ -207,6 +211,103 @@ describe("event detail D1 SQL", () => {
       for (const { sql } of cardQueries) {
         expect((sql.match(/UNION ALL/g) ?? []).length).toBeLessThan(5);
       }
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("matches offset ordering with keyset pages for every event-record sort", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      d1.database
+        .prepare(
+          `INSERT INTO visits (
+            visit_id, site_id, visitor_id, session_id, started_at, pathname
+          ) VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "visit-2",
+          siteId,
+          "visitor-2",
+          "session-2",
+          eventTime,
+          "/pricing",
+        );
+      d1.database
+        .prepare("INSERT INTO custom_event_names VALUES (?, ?)")
+        .run(2, "Purchase");
+      for (const [eventPk, eventId, visitId, eventNameId, occurredAt] of [
+        [2, "event-2", "visit-1", 1, eventTime + 1],
+        [3, "event-3", "visit-2", 2, eventTime + 1],
+        [4, "event-4", "visit-2", 2, eventTime],
+      ]) {
+        d1.database
+          .prepare(
+            "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          )
+          .run(
+            eventPk,
+            eventId,
+            siteId,
+            visitId,
+            eventNameId,
+            occurredAt,
+            occurredAt,
+            eventPk,
+            1,
+            1,
+          );
+      }
+
+      for (const sort of [
+        { key: "occurredAt", direction: "asc" },
+        { key: "occurredAt", direction: "desc" },
+        { key: "eventName", direction: "asc" },
+        { key: "eventName", direction: "desc" },
+        { key: "pathname", direction: "asc" },
+        { key: "pathname", direction: "desc" },
+      ] as const) {
+        const expected = await queryEventRecordsFromD1(
+          env,
+          siteId,
+          window,
+          {},
+          {
+            limit: 20,
+            offset: 0,
+            sort,
+          },
+        );
+        const received = [];
+        let cursor = null;
+        do {
+          const page = await queryEventRecordPageFromD1(
+            env,
+            siteId,
+            window,
+            {},
+            {
+              pageSize: 2,
+              sort,
+              cursor,
+            },
+          );
+          received.push(...page.rows);
+          cursor = page.nextCursor;
+        } while (cursor);
+
+        expect(received.map((row) => row.eventId)).toEqual(
+          expected.map((row) => row.eventId),
+        );
+      }
+
+      const cursorQuery = d1.calls.at(-1);
+      expect(cursorQuery?.sql).not.toContain("OFFSET");
+      const plan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${cursorQuery?.sql ?? "SELECT 1"}`)
+        .all(...(cursorQuery?.bindings ?? []));
+      expect(plan.length).toBeGreaterThan(0);
     } finally {
       d1.close();
     }

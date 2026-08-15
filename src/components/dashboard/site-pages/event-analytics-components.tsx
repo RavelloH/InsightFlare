@@ -1699,7 +1699,7 @@ export function EventRecordsSection({
     ],
     queryFn: ({ pageParam, signal }) =>
       fetchEventsRecords(siteId, timeWindow, filters, {
-        page: pageParam,
+        cursor: pageParam,
         pageSize: EVENT_PAGE_SIZE,
         sortBy: sort.key,
         sortDir: sort.direction,
@@ -1707,9 +1707,9 @@ export function EventRecordsSection({
         eventName,
         signal,
       }),
-    initialPageParam: 1,
+    initialPageParam: null as string | null,
     getNextPageParam: (lastPage) =>
-      lastPage.meta.hasMore ? lastPage.meta.nextPage : undefined,
+      lastPage.meta.hasMore ? lastPage.meta.nextCursor : undefined,
     enabled: typeof window !== "undefined",
   });
   const rows = useMemo(

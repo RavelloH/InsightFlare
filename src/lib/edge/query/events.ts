@@ -19,7 +19,6 @@ import {
   parseLimit,
   parseListSearch,
   parseQueryLimit,
-  paginationOffset,
   parseWindow,
   type ResponseContext,
 } from "./core";
@@ -35,8 +34,11 @@ import {
 } from "./events-fields";
 import { queryEventTypeOverviewFromD1 } from "./events-overview";
 import {
+  parseEventRecordCursor,
   queryEventRecordDetailFromD1,
+  queryEventRecordPageFromD1,
   queryEventRecordsFromD1,
+  serializeEventRecordCursor,
 } from "./events-records";
 import {
   queryEventsSummaryFromD1,
@@ -145,35 +147,30 @@ export async function handleEventsRecords(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilters(url);
-  const page = parseQueryLimit(url, "page", 1, 1, 10_000);
-  const pageSize = parseQueryLimit(url, "pageSize", 80, 1, 120);
-  const offset = paginationOffset(page, pageSize);
-  if (offset === null) {
-    return badRequest(
-      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
-    );
-  }
+  const pageSize = parseQueryLimit(url, "pageSize", 80, 1, 1_000);
   const sort = parseEventRecordSort(url);
+  const rawCursor = url.searchParams.get("cursor");
+  const cursor = rawCursor ? parseEventRecordCursor(rawCursor, sort) : null;
+  if (rawCursor && !cursor) return badRequest("Invalid cursor");
   const search = parseListSearch(url);
   const eventName = parseEventName(url);
-  const rows = await queryEventRecordsFromD1(env, siteId, window, filters, {
-    limit: pageSize + 1,
-    offset,
+  const page = await queryEventRecordPageFromD1(env, siteId, window, filters, {
+    pageSize,
     sort,
     search,
     eventName,
+    cursor,
   });
-  const hasMore = rows.length > pageSize;
-  const currentRows = hasMore ? rows.slice(0, pageSize) : rows;
   return jsonResponseWith(ctx!, {
     ok: true,
-    data: currentRows.map(mapEventRecord),
+    data: page.rows.map(mapEventRecord),
     meta: {
-      page,
       pageSize,
-      returned: currentRows.length,
-      hasMore,
-      nextPage: hasMore ? page + 1 : null,
+      returned: page.rows.length,
+      hasMore: page.nextCursor !== null,
+      nextCursor: page.nextCursor
+        ? serializeEventRecordCursor(page.nextCursor)
+        : null,
     },
   });
 }

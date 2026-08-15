@@ -5,6 +5,7 @@ import type { ApiKeyScope } from "./api-key-store";
 export const API_V1_VERSION = import.meta.env.VITE_APP_VERSION || "1.0.0";
 export const DEFAULT_PAGE_LIMIT = 100;
 export const MAX_PAGE_LIMIT = 1000;
+export const MAX_CURSOR_LENGTH = 12_288;
 export const BATCH_MAX_REQUESTS = 20;
 
 export const TIME_PRESETS = [
@@ -547,7 +548,10 @@ export function parseCursorPagination(url: URL): CursorPagination | Response {
     });
   }
   const cursor = url.searchParams.get("cursor");
-  if (cursor !== null && !/^[A-Za-z0-9._~:-]{1,512}$/.test(cursor)) {
+  if (
+    cursor !== null &&
+    !new RegExp(`^[A-Za-z0-9._~:-]{1,${MAX_CURSOR_LENGTH}}$`).test(cursor)
+  ) {
     return jsonError("validation_failed", "Invalid cursor", 400, {
       field: "cursor",
     });

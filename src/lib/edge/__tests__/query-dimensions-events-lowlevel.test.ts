@@ -29,7 +29,11 @@ import {
   queryEventFieldValuesFromD1,
 } from "@/lib/edge/query/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/query/events-overview";
-import { queryEventRecordDetailFromD1 } from "@/lib/edge/query/events-records";
+import {
+  parseEventRecordCursor,
+  queryEventRecordDetailFromD1,
+  serializeEventRecordCursor,
+} from "@/lib/edge/query/events-records";
 import type { Env } from "@/lib/edge/types";
 
 vi.mock("@/lib/edge/custom-event-read", () => ({
@@ -592,10 +596,21 @@ describe("edge query event handlers low-level coverage", () => {
     ]);
   });
 
-  it("paginates event records and maps current rows", async () => {
+  it("uses a keyset cursor for event records and maps current rows", async () => {
     const { env, calls } = createD1Env([
-      [eventRecord({ eventId: "evt-1" }), eventRecord({ eventId: "evt-2" })],
+      [
+        { ...eventRecord({ eventId: "evt-1" }), eventPk: 11 },
+        { ...eventRecord({ eventId: "evt-2" }), eventPk: 10 },
+      ],
     ]);
+    const cursor = serializeEventRecordCursor({
+      sortKey: "eventName",
+      sortDirection: "asc",
+      sortValue: "Register",
+      occurredAt: baseMs + 200,
+      eventId: "evt-before",
+      eventPk: 9,
+    });
 
     const response = await handleEventsRecords(
       env,
@@ -603,12 +618,12 @@ describe("edge query event handlers low-level coverage", () => {
       url("/events-records", {
         from: window.fromMs,
         to: window.toMs,
-        page: 2,
         pageSize: 1,
         sortBy: "eventName",
         sortDir: "asc",
         search: "signup",
         eventName: "Signup",
+        cursor,
       }),
     );
 
@@ -616,25 +631,31 @@ describe("edge query event handlers low-level coverage", () => {
       ok: true,
       data: [{ eventId: "evt-1", eventName: "Signup" }],
       meta: {
-        page: 2,
         pageSize: 1,
         returned: 1,
         hasMore: true,
-        nextPage: 3,
+        nextCursor: expect.any(String),
       },
     });
     expect(calls[0].sql).toContain("ORDER BY eventName ASC");
+    expect(calls[0].sql).not.toContain("OFFSET");
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
       ...eventBindings(),
       "Signup",
       ...Array<string>(8).fill("%signup%"),
+      "Register",
+      "Register",
+      baseMs + 200,
+      baseMs + 200,
+      "evt-before",
+      "evt-before",
+      9,
       2,
-      1,
     ]);
   });
 
-  it("rejects deep event record pages before querying D1", async () => {
+  it("rejects invalid event record cursors before querying D1", async () => {
     const { env, calls } = createD1Env([]);
 
     const response = await handleEventsRecords(
@@ -643,16 +664,32 @@ describe("edge query event handlers low-level coverage", () => {
       url("/events-records", {
         from: window.fromMs,
         to: window.toMs,
-        page: 10_000,
         pageSize: 120,
+        cursor: "not-a-valid-cursor",
       }),
     );
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      error: { message: expect.stringContaining("Pagination depth") },
+      error: { message: "Invalid cursor" },
     });
     expect(calls).toHaveLength(0);
+  });
+
+  it("round-trips a cursor for the longest accepted UTF-8 pathname", () => {
+    const sort = { key: "pathname", direction: "asc" } as const;
+    const cursor = {
+      sortKey: sort.key,
+      sortDirection: sort.direction,
+      sortValue: `/${"路".repeat(2_047)}`,
+      occurredAt: baseMs,
+      eventId: "evt-unicode",
+      eventPk: 1,
+    };
+
+    const encoded = serializeEventRecordCursor(cursor);
+    expect(encoded.length).toBeLessThanOrEqual(12_288);
+    expect(parseEventRecordCursor(encoded, sort)).toEqual(cursor);
   });
 
   it("maps event summaries and final event record pages without more rows", async () => {
@@ -706,11 +743,10 @@ describe("edge query event handlers low-level coverage", () => {
       ok: true,
       data: [{ eventId: "evt-final", eventName: "Signup" }],
       meta: {
-        page: 1,
         pageSize: 2,
         returned: 1,
         hasMore: false,
-        nextPage: null,
+        nextCursor: null,
       },
     });
   });

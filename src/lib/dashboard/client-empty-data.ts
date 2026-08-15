@@ -193,11 +193,10 @@ export function emptyEventsRecords(pageSize = 0): EventsRecordsData {
     ok: true,
     data: [],
     meta: {
-      page: 1,
       pageSize,
       returned: 0,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     },
   };
 }

@@ -289,10 +289,10 @@ export function buildEventFilterSql(
 export function eventRecordOrderBy(sort: ListSort<EventRecordSortKey>): string {
   const direction = sort.direction === "asc" ? "ASC" : "DESC";
   if (sort.key === "eventName") {
-    return `eventName ${direction}, occurredAt DESC, eventId DESC`;
+    return `eventName ${direction}, occurredAt DESC, eventId DESC, eventPk DESC`;
   }
   if (sort.key === "pathname") {
-    return `pathname ${direction}, occurredAt DESC, eventId DESC`;
+    return `pathname ${direction}, occurredAt DESC, eventId DESC, eventPk DESC`;
   }
-  return `occurredAt ${direction}, eventId ${direction}`;
+  return `occurredAt ${direction}, eventId ${direction}, eventPk ${direction}`;
 }

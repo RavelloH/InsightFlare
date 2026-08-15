@@ -5065,7 +5065,7 @@
           },
           "nextCursor": {
             "type": ["string", "null"],
-            "maxLength": 512
+            "maxLength": 12288
           },
           "hasMore": {
             "type": "boolean"
@@ -6804,7 +6804,7 @@
           },
           "cursor": {
             "type": "string",
-            "maxLength": 512
+            "maxLength": 12288
           }
         },
         "additionalProperties": false
@@ -7764,7 +7764,7 @@
         "in": "query",
         "schema": {
           "type": "string",
-          "maxLength": 512
+          "maxLength": 12288
         },
         "description": "Opaque pagination cursor from the previous response."
       }

@@ -9,6 +9,7 @@ import { createScriptLogger } from "./shared/logger";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const rlog = createScriptLogger();
+const MAX_CURSOR_LENGTH = 12_288;
 
 function getAppVersion(): string {
   const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
@@ -476,7 +477,7 @@ function buildSchemas(): Record<string, unknown> {
       required: ["limit", "nextCursor", "hasMore"],
       properties: {
         limit: { type: "integer", minimum: 1, maximum: 1000 },
-        nextCursor: { type: ["string", "null"], maxLength: 512 },
+        nextCursor: { type: ["string", "null"], maxLength: MAX_CURSOR_LENGTH },
         hasMore: { type: "boolean" },
       },
     },
@@ -1413,7 +1414,7 @@ function buildSchemas(): Record<string, unknown> {
           items: ref("ComplexFilter"),
         },
         limit: { type: "integer", minimum: 1, maximum: 1000, default: 100 },
-        cursor: { type: "string", maxLength: 512 },
+        cursor: { type: "string", maxLength: MAX_CURSOR_LENGTH },
       },
       additionalProperties: false,
     },
@@ -3409,7 +3410,7 @@ function buildSpec(): OpenAPISpec {
         CursorQueryParam: {
           name: "cursor",
           in: "query",
-          schema: { type: "string", maxLength: 512 },
+          schema: { type: "string", maxLength: MAX_CURSOR_LENGTH },
           description: "Opaque pagination cursor from the previous response.",
         },
       },

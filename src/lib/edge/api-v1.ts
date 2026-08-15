@@ -50,6 +50,7 @@ import {
   API_V1_VERSION,
   BATCH_MAX_REQUESTS,
   type ComplexFilter,
+  type CursorPagination,
   epochSecondsToIso,
   FILTER_OPERATORS,
   INTERVALS,
@@ -479,9 +480,6 @@ function buildInternalUrl(url: URL, timeRange?: ParsedTimeRange): URL {
     next.searchParams.set("sortBy", sort.field);
     next.searchParams.set("sortDir", sort.direction);
   }
-  if (url.searchParams.has("cursor")) {
-    next.searchParams.set("page", "1");
-  }
   return next;
 }
 
@@ -511,12 +509,33 @@ function stripLegacyPayload(payload: LegacyPayload): {
     data,
     interval,
     pagination,
+    meta: payloadMeta,
     ...rest
   } = payload;
   const meta: Record<string, unknown> = {};
   if (interval) meta.interval = interval;
   for (const [key, value] of Object.entries(rest)) {
     if (value !== undefined) meta[key] = value;
+  }
+  if (
+    payloadMeta &&
+    typeof payloadMeta === "object" &&
+    !Array.isArray(payloadMeta) &&
+    typeof (payloadMeta as Record<string, unknown>).pageSize === "number" &&
+    typeof (payloadMeta as Record<string, unknown>).hasMore === "boolean" &&
+    ((payloadMeta as Record<string, unknown>).nextCursor === null ||
+      typeof (payloadMeta as Record<string, unknown>).nextCursor === "string")
+  ) {
+    const privatePagination = payloadMeta as Record<string, unknown>;
+    return {
+      data,
+      meta,
+      pagination: {
+        limit: privatePagination.pageSize as number,
+        nextCursor: privatePagination.nextCursor as string | null,
+        hasMore: privatePagination.hasMore as boolean,
+      },
+    };
   }
   if (
     pagination &&
@@ -1177,9 +1196,19 @@ async function runLegacyQuery(
     transform?: (data: unknown, payload: LegacyPayload) => unknown;
     meta?: Record<string, unknown>;
     paginated?: boolean;
+    pagination?: CursorPagination;
   } = {},
 ): Promise<Response> {
   const internalUrl = buildInternalUrl(url, options.timeRange);
+  if (queryName === "events-records" && options.pagination) {
+    internalUrl.searchParams.set("pageSize", String(options.pagination.limit));
+    internalUrl.searchParams.delete("page");
+    if (options.pagination.cursor) {
+      internalUrl.searchParams.set("cursor", options.pagination.cursor);
+    } else {
+      internalUrl.searchParams.delete("cursor");
+    }
+  }
   const response = await routeQuery(
     env,
     siteId,
@@ -2133,6 +2162,7 @@ export async function handleEvents(
     return runLegacyQuery(request, env, siteId, url, "events-records", {
       timeRange,
       paginated: true,
+      pagination,
     });
   }
   if (path[2] === "events" && path[3]) {
@@ -2153,6 +2183,7 @@ export async function handleEvents(
     return runLegacyQuery(request, env, siteId, url, "events-records", {
       timeRange,
       paginated: true,
+      pagination,
     });
   }
   return jsonError(
@@ -2210,9 +2241,12 @@ export async function handleJourneys(
   }
   if (path[4] === "events") {
     if (request.method !== "GET") return methodNotAllowed(request);
+    const pagination = parseCursorPagination(url);
+    if (pagination instanceof Response) return pagination;
     return runLegacyQuery(request, env, siteId, url, "events-records", {
       timeRange,
       paginated: true,
+      pagination,
     });
   }
   if (path[4] === "sessions") {

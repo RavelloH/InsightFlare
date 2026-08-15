@@ -270,6 +270,7 @@ const dimensionRows = [
 ];
 
 const eventRecordRow = {
+  eventPk: 1,
   eventId: "evt-1",
   eventName: "Signup",
   occurredAt: from + 500,
@@ -1317,11 +1318,10 @@ describe("edge query handlers", () => {
         }),
       ],
       meta: {
-        page: 1,
         pageSize: 1,
         returned: 1,
         hasMore: true,
-        nextPage: 2,
+        nextCursor: expect.any(String),
       },
     });
     expect(await detail.json()).toMatchObject({

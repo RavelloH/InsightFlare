@@ -406,7 +406,7 @@ describe("fetchEventsRecords", () => {
     await fetchEventsRecords("site-1", window, undefined, {
       search: "test",
       eventName: "click",
-      page: 2,
+      cursor: "event-cursor",
       pageSize: 20,
       sortBy: "occurredAt",
       sortDir: "desc",
@@ -417,7 +417,7 @@ describe("fetchEventsRecords", () => {
       expect.objectContaining({
         search: "test",
         eventName: "click",
-        page: 2,
+        cursor: "event-cursor",
         pageSize: 20,
         sortBy: "occurredAt",
         sortDir: "desc",

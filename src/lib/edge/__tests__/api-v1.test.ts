@@ -805,6 +805,45 @@ describe("api v1 gateway", () => {
     });
   });
 
+  it("adapts private event keyset cursors without changing the v1 envelope", async () => {
+    routeQueryMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          data: [{ eventId: "evt-1" }],
+          meta: {
+            pageSize: 120,
+            returned: 1,
+            hasMore: true,
+            nextCursor: "next-private-cursor",
+          },
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const { response } = await authed(
+      "/api/v1/sites/site-1/events?limit=120&cursor=previous-private-cursor",
+      [siteMatch("site-1", "Blog")],
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: [{ eventId: "evt-1" }],
+      pagination: {
+        limit: 120,
+        hasMore: true,
+        nextCursor: "next-private-cursor",
+      },
+    });
+    const internalUrl = routeQueryMock.mock.calls.at(-1)?.[3] as URL;
+    expect(internalUrl.searchParams.get("pageSize")).toBe("120");
+    expect(internalUrl.searchParams.get("cursor")).toBe(
+      "previous-private-cursor",
+    );
+    expect(internalUrl.searchParams.has("page")).toBe(false);
+  });
+
   it("serves team analytics from the team dashboard runtime", async () => {
     const matches = [
       teamSitesListMatch([
