@@ -206,17 +206,26 @@ export async function queryEventAnalyticsContextCardsFromD1(
   WHERE TRIM(COALESCE(edges.${kind}Path, '')) != ''
   GROUP BY value`,
     ),
-  ].join("\nUNION ALL");
-  const rows = await queryD1All<{
-    cardType: string;
-    value: string | null;
-    label: string | null;
-    views: number;
-    sessions: number;
-    visitors: number;
-  }>(
-    env,
-    `${source.cte},
+  ];
+  const cardSourceChunks: string[][] = [];
+  // D1 currently rejects compound SELECT statements with more than five terms.
+  const maxCompoundTerms = 5;
+  for (let index = 0; index < cardSources.length; index += maxCompoundTerms) {
+    cardSourceChunks.push(cardSources.slice(index, index + maxCompoundTerms));
+  }
+  const rows = (
+    await Promise.all(
+      cardSourceChunks.map((sources) =>
+        queryD1All<{
+          cardType: string;
+          value: string | null;
+          label: string | null;
+          views: number;
+          sessions: number;
+          visitors: number;
+        }>(
+          env,
+          `${source.cte},
 session_visit_edges AS (
   SELECT
     session_id,
@@ -242,7 +251,7 @@ session_edges AS (
   GROUP BY session_id
 ),
 card_rows AS (
-${cardSources}
+${sources.join("\nUNION ALL")}
 ),
 ranked_cards AS (
   SELECT
@@ -263,8 +272,11 @@ FROM ranked_cards
 WHERE card_rank <= ?
 ORDER BY cardType ASC, card_rank ASC
 `,
-    [...source.bindings, limit],
-  );
+          [...source.bindings, limit],
+        ),
+      ),
+    )
+  ).flat();
   const byCard = new Map<
     string,
     Array<{

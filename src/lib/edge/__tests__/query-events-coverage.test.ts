@@ -141,53 +141,60 @@ describe("edge query events summary coverage", () => {
     );
   });
 
-  it("builds all event context cards from one ranked result set", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
-      {
-        cardType: "path",
-        value: "/pricing",
-        views: 8,
-        sessions: 4,
-        visitors: 3,
-      },
-      {
-        cardType: "entry",
-        value: "/",
-        views: 8,
-        sessions: 4,
-        visitors: 3,
-      },
-      {
-        cardType: "sourceDomain",
-        value: "",
-        views: 2,
-        sessions: 1,
-        visitors: 1,
-      },
-      {
-        cardType: "region",
-        value: "US::CA::California",
-        label: "California",
-        views: 8,
-        sessions: 4,
-        visitors: 3,
-      },
-      {
-        cardType: "browser",
-        value: "Chrome",
-        views: 8,
-        sessions: 4,
-        visitors: 3,
-      },
-      {
-        cardType: "query",
-        value: null,
-        label: null,
-        views: null,
-        sessions: null,
-        visitors: null,
-      },
-    ]);
+  it("builds all event context cards within D1 compound SELECT limits", async () => {
+    queryD1AllMock
+      .mockResolvedValueOnce([
+        {
+          cardType: "path",
+          value: "/pricing",
+          views: 8,
+          sessions: 4,
+          visitors: 3,
+        },
+        {
+          cardType: "sourceDomain",
+          value: "",
+          views: 2,
+          sessions: 1,
+          visitors: 1,
+        },
+        {
+          cardType: "query",
+          value: null,
+          label: null,
+          views: null,
+          sessions: null,
+          visitors: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          cardType: "browser",
+          value: "Chrome",
+          views: 8,
+          sessions: 4,
+          visitors: 3,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          cardType: "region",
+          value: "US::CA::California",
+          label: "California",
+          views: 8,
+          sessions: 4,
+          visitors: 3,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          cardType: "entry",
+          value: "/",
+          views: 8,
+          sessions: 4,
+          visitors: 3,
+        },
+      ]);
 
     const cards = await queryEventAnalyticsContextCardsFromD1(
       env,
@@ -210,8 +217,11 @@ describe("edge query events summary coverage", () => {
       label: "California",
     });
     expect(cards.client.browser[0]?.value).toBe("Chrome");
-    expect(queryD1AllMock).toHaveBeenCalledOnce();
-    expect(queryD1AllMock.mock.calls[0][1]).toContain("ranked_cards AS");
+    expect(queryD1AllMock).toHaveBeenCalledTimes(4);
+    for (const [, sql] of queryD1AllMock.mock.calls) {
+      expect(sql).toContain("ranked_cards AS");
+      expect((sql.match(/UNION ALL/g) ?? []).length).toBeLessThan(5);
+    }
   });
 
   it("maps empty combined summary results without a synthetic row", async () => {
