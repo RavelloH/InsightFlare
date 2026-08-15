@@ -280,6 +280,8 @@ describe("edge query dimensions low-level coverage", () => {
           sessions: 1,
           visitors: 1,
         },
+      ],
+      [
         {
           cardType: "organization",
           value: "Example ISP",
@@ -309,8 +311,14 @@ describe("edge query dimensions low-level coverage", () => {
     });
     expect(calls[0].bindings).toEqual([...visitBindings(), 10]);
     expect(calls[1].bindings).toEqual([...visitBindings(), 10]);
+    expect(calls[2].bindings).toEqual([...visitBindings(), 10]);
     expect(calls[0].sql).toContain("ranked_cards AS");
     expect(calls[1].sql).toContain("ranked_cards AS");
+    expect(calls[2].sql).toContain("ranked_cards AS");
+    expect(calls.slice(1)).toHaveLength(2);
+    for (const call of calls.slice(1)) {
+      expect((call.sql.match(/UNION ALL/g) ?? []).length).toBeLessThan(5);
+    }
   });
 });
 

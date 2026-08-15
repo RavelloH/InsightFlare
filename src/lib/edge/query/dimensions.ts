@@ -465,7 +465,42 @@ export async function queryOverviewGeoDimensionsFromD1(
   limit: number,
 ): Promise<GeoDimensionTabs> {
   const filter = buildVisitFilterSql(filters);
-  const sql = `
+  const cardSources = [
+    `SELECT 'country' AS card_type, country AS value, COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM filtered_visits WHERE country != '' GROUP BY country`,
+    `SELECT 'region', region, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE region != '' GROUP BY region`,
+    `SELECT 'city', city, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE city != '' GROUP BY city`,
+    `SELECT 'continent', continent, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE continent != '' GROUP BY continent`,
+    `SELECT 'timezone', timezone, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE timezone != '' GROUP BY timezone`,
+    `SELECT 'organization', organization, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE organization != '' GROUP BY organization`,
+  ];
+  // D1 currently rejects compound SELECT statements with more than five terms.
+  const maxCompoundTerms = 5;
+  const rows = (
+    await Promise.all(
+      Array.from(
+        { length: Math.ceil(cardSources.length / maxCompoundTerms) },
+        (_, index) =>
+          queryD1All<Record<string, unknown>>(
+            env,
+            `
 WITH
 ${buildVisitSourceCte()},
 filtered_visits AS (
@@ -482,35 +517,9 @@ filtered_visits AS (
   ${filter.clause}
 ),
 card_rows AS (
-  SELECT 'country' AS card_type, country AS value, COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM filtered_visits WHERE country != '' GROUP BY country
-  UNION ALL
-  SELECT 'region', region, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
-  FROM filtered_visits WHERE region != '' GROUP BY region
-  UNION ALL
-  SELECT 'city', city, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
-  FROM filtered_visits WHERE city != '' GROUP BY city
-  UNION ALL
-  SELECT 'continent', continent, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
-  FROM filtered_visits WHERE continent != '' GROUP BY continent
-  UNION ALL
-  SELECT 'timezone', timezone, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
-  FROM filtered_visits WHERE timezone != '' GROUP BY timezone
-  UNION ALL
-  SELECT 'organization', organization, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
-  FROM filtered_visits WHERE organization != '' GROUP BY organization
+${cardSources
+  .slice(index * maxCompoundTerms, (index + 1) * maxCompoundTerms)
+  .join("\n  UNION ALL\n")}
 ),
 ranked_cards AS (
   SELECT *, ROW_NUMBER() OVER (
@@ -523,12 +532,12 @@ SELECT card_type AS cardType, value, views, sessions, visitors
 FROM ranked_cards
 WHERE card_rank <= ?
 ORDER BY card_type ASC, card_rank ASC
-`;
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...visitSourceBindings(siteId, window),
-    ...filter.bindings,
-    limit,
-  ]);
+`,
+            [...visitSourceBindings(siteId, window), ...filter.bindings, limit],
+          ),
+      ),
+    )
+  ).flat();
   const byCard = new Map<string, GeoTabRow[]>();
   for (const row of rows) {
     const card = String(row.cardType ?? "");

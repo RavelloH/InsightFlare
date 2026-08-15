@@ -1297,7 +1297,9 @@ rollback = 旧 Worker version
   source 查询和按 card type 的 Top-N 排名。
 - Pages tabs、overview client dimensions 与 overview geo dimensions 已改为数据库侧
   `GROUP BY + ROW_NUMBER + LIMIT`，Worker 不再接收整段窗口的 raw visits；entry/exit
-  通过同一 SQL 的 session ranking 计算。
+  通过同一 SQL 的 session ranking 计算。生产 D1 对 compound `SELECT` 实测最多接受五个
+  分支，因此 geo 的六个 card 聚合额外拆为 `5 + 1` 两条并行查询；每条 SQL 均受此上限测试
+  保护并在 Worker 内合并结果。
 - Technology browser version breakdown 已将 top-browser 与 version 聚合合并到单次
   filtered source 查询，保留 browser/version limit、unknown/other bucket 和空结果行为。
 - Technology share trends（browser、client dimension、UTM 与 referrer）已将 top labels、
