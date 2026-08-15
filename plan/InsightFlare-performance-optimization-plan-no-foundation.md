@@ -1353,6 +1353,10 @@ rollback = 旧 Worker version
   breakdown 会在实际绑定数超过 100 时于 Worker 内返回结构化 400，而不会向 D1 发出必然失败的
   查询；由于该 SQL 使用全局 `DISTINCT`、bounce 和派生比例，未实现会改变统计语义的简单分块。
   未来若需支持更大的 team breakdown，必须先以 fixture parity 证明新的全局聚合读模型等价。
+- 已完成对 edge 层可变长度 D1 `IN (...)` / spread bindings 的静态复核：Scheduled Tasks
+  的当前页 group IDs 最多 100；ingest visit 批次最多 100、custom-event 批次最多 10；页面
+  card 的 pathname 列表来自受限 Top-N，geo region filter 最多两个 token。上述调用没有额外
+  固定绑定或已在单语句 100 参数上限以内，本轮无需变更。
 - 上述改动已通过真实 SQLite Scheduled Tasks 测试、Journey/Events 回归测试和 TypeScript
   类型检查；Pages/dimensions 与 technology 回归测试、TypeScript 与 lint 亦已通过。
 - Notification cache 已补充同窗口跨 metric 复用、站点/窗口隔离、报告复用、previous/
