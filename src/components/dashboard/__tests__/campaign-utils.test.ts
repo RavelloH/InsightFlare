@@ -77,4 +77,22 @@ describe("campaign breakdown utilities", () => {
     expect(rows.term).toEqual([]);
     expect(rows.content).toEqual([]);
   });
+
+  it("uses the legacy label while a dimension value is unavailable", () => {
+    const rows = buildCampaignRowsByTab(
+      {
+        source: [{ label: "newsletter", views: 7, sessions: 3 }],
+      } as unknown as CampaignRawRowsByTab,
+      "(not set)",
+    );
+
+    expect(rows.source).toMatchObject([
+      {
+        value: "newsletter",
+        label: "newsletter",
+        views: 7,
+        sessions: 3,
+      },
+    ]);
+  });
 });

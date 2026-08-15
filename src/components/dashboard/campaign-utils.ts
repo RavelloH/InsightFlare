@@ -31,7 +31,7 @@ export function buildCampaignRows(
   const safeRows = Array.isArray(rows) ? rows : [];
 
   return safeRows.map((row, index) => {
-    const value = normalizeDimensionValue(row.value);
+    const value = normalizeDimensionValue(row.value ?? row.label);
     return {
       key: value || createEmptyKey(tab, index),
       value,

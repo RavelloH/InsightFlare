@@ -542,6 +542,7 @@ describe("edge pages handlers", () => {
       ok: true,
       data: [
         {
+          value: "Chrome",
           label: "Chrome",
           views: 5,
           sessions: 3,

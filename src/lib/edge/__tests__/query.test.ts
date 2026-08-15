@@ -1220,7 +1220,13 @@ describe("edge query handlers", () => {
     expect(dimensionPayload).toMatchObject({ ok: true });
     expect(dimensionPayload.data).toEqual(
       expect.arrayContaining([
-        { label: "/pricing", views: 9, sessions: 6, visitors: 5 },
+        {
+          value: "/pricing",
+          label: "/pricing",
+          views: 9,
+          sessions: 6,
+          visitors: 5,
+        },
       ]),
     );
     expect(optionsPayload).toMatchObject({ ok: true });

@@ -92,6 +92,17 @@ export function mapTabs(rows: DimensionRow[]) {
   }));
 }
 
+export function mapDimensionRows(rows: DimensionRow[]) {
+  return rows.map((row) => ({
+    value: row.value,
+    // Keep label for existing public consumers while exposing the typed value.
+    label: row.value,
+    views: row.views,
+    sessions: row.sessions,
+    visitors: row.visitors,
+  }));
+}
+
 export function mapGeoTabs(rows: GeoTabRow[]) {
   return rows.map((row) => ({
     value: row.value,

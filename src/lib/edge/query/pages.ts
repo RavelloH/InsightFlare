@@ -19,6 +19,7 @@ import {
   buildVisitSourceCte,
   emptyOverviewAggregateRow,
   jsonResponseWith,
+  mapDimensionRows,
   mapPageCardMetrics,
   mapPages,
   mapReferrers,
@@ -638,5 +639,5 @@ export async function handleDimension(
     limit,
     d1Expr,
   );
-  return jsonResponseWith(ctx!, { ok: true, data: mapTabs(rows) });
+  return jsonResponseWith(ctx!, { ok: true, data: mapDimensionRows(rows) });
 }

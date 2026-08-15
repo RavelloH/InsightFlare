@@ -2,8 +2,10 @@ export interface DimensionData {
   ok: boolean;
   data: Array<{
     value: string;
+    label: string;
     views: number;
     sessions: number;
+    visitors?: number;
   }>;
 }
 
