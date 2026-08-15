@@ -3,8 +3,10 @@ import {
   type ExpandedCustomEventData,
 } from "./custom-event-json";
 import { FLUSHED_BUFFER_RETENTION_MS } from "./ingest-constants";
-import type { IngestFlushContext } from "./ingest-flush-types";
-import { logDoTrace } from "./ingest-log";
+import {
+  type IngestFlushContext,
+  recordFlushCounter,
+} from "./ingest-flush-types";
 import type { BufferedCustomEventRow, DictionaryKind } from "./ingest-types";
 import { clampString } from "./utils";
 
@@ -14,20 +16,7 @@ export async function flushCustomEventRowIndividually(
 ): Promise<boolean> {
   try {
     if (!(await hasPersistedVisit(context, row))) {
-      logDoTrace(
-        "d1_flush_custom_event_skipped",
-        {
-          eventId: row.eventId,
-          siteId: row.siteId,
-          visitId: row.visitId,
-          eventName: row.eventName,
-          occurredAt: row.occurredAt,
-          createdAt: row.createdAt,
-          flushAttempts: row.flushAttempts,
-          reason: "waiting_for_visit",
-        },
-        "warn",
-      );
+      context.observability?.warn("do.flush.custom_event_waiting_for_visit");
       markCustomEventRowsFailed(context, [row], "waiting_for_visit");
       return false;
     }
@@ -40,35 +29,20 @@ export async function flushCustomEventRowIndividually(
       row,
       expanded.data,
     );
-    await context.env.DB.batch(
-      prepareCustomEventStatements(context, row, expanded.data, ids),
+    const statements = prepareCustomEventStatements(
+      context,
+      row,
+      expanded.data,
+      ids,
     );
+    recordFlushCounter(context, "d1Statements", statements.length);
+    await context.env.DB.batch(statements);
     if (!(await hasPersistedCustomEvent(context, row.eventId))) {
-      logDoTrace(
-        "d1_flush_custom_event_skipped",
-        {
-          eventId: row.eventId,
-          siteId: row.siteId,
-          visitId: row.visitId,
-          eventName: row.eventName,
-          occurredAt: row.occurredAt,
-          createdAt: row.createdAt,
-          flushAttempts: row.flushAttempts,
-          reason: "insert_did_not_create_event",
-        },
-        "warn",
-      );
+      context.observability?.warn("do.flush.custom_event_insert_not_confirmed");
       markCustomEventRowsFailed(context, [row], "insert_did_not_create_event");
       return false;
     }
-    logDoTrace("d1_flush_custom_event_ok", {
-      eventId: row.eventId,
-      siteId: row.siteId,
-      visitId: row.visitId,
-      eventName: row.eventName,
-      nodes: expanded.data.nodes.length,
-      values: expanded.data.values.length,
-    });
+    recordFlushCounter(context, "flushedCustomEvents");
     markCustomEventRowsFlushed(context, [row]);
     return true;
   } catch (error) {
@@ -76,20 +50,9 @@ export async function flushCustomEventRowIndividually(
       String(error instanceof Error ? error.message : error),
       400,
     );
-    logDoTrace(
-      "d1_flush_custom_event_failed",
-      {
-        eventId: row.eventId,
-        siteId: row.siteId,
-        visitId: row.visitId,
-        eventName: row.eventName,
-        occurredAt: row.occurredAt,
-        createdAt: row.createdAt,
-        flushAttempts: row.flushAttempts,
-        error: message,
-      },
-      "error",
-    );
+    void message;
+    recordFlushCounter(context, "failedStatements");
+    context.observability?.error("do.flush.custom_event_failed");
     markCustomEventRowsFailed(context, [row], message);
     return false;
   }
@@ -105,11 +68,7 @@ function markCustomEventRowsFlushed(
     `UPDATE buffered_custom_events SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE event_id IN (${ids.map(() => "?").join(",")})`,
     ...ids,
   );
-  logDoTrace("do_custom_event_rows_marked_flushed", {
-    count: rows.length,
-    updated,
-    eventIds: ids.slice(0, 10),
-  });
+  void updated;
   deleteFlushedCustomEventRows(context, rows);
 }
 
@@ -124,15 +83,8 @@ function markCustomEventRowsFailed(
     `DELETE FROM buffered_custom_events WHERE event_id IN (${ids.map(() => "?").join(",")})`,
     ...ids,
   );
-  logDoTrace(
-    "do_failed_custom_event_rows_deleted",
-    {
-      count: deleted,
-      reason: errorMessage,
-      eventIds: ids.slice(0, 20),
-    },
-    "error",
-  );
+  void deleted;
+  void errorMessage;
 }
 
 function dictionarySql(kind: DictionaryKind): {
@@ -160,6 +112,7 @@ async function resolveDictionaryId(
   if (cached !== undefined) return cached;
 
   const spec = dictionarySql(kind);
+  recordFlushCounter(context, "d1Statements");
   await context.env.DB.prepare(
     `
       INSERT INTO ${spec.table} (site_id, ${spec.column}, created_at, last_seen_at)
@@ -171,6 +124,7 @@ async function resolveDictionaryId(
     .bind(siteId, value, seenAt, seenAt)
     .run();
 
+  recordFlushCounter(context, "d1Statements");
   const row = await context.env.DB.prepare(
     `
       SELECT id
@@ -227,6 +181,7 @@ async function hasPersistedVisit(
   context: IngestFlushContext,
   row: Pick<BufferedCustomEventRow, "siteId" | "visitId">,
 ): Promise<boolean> {
+  recordFlushCounter(context, "d1Statements");
   const persisted = await context.env.DB.prepare(
     `
       SELECT 1 AS ok
@@ -244,6 +199,7 @@ async function hasPersistedCustomEvent(
   context: IngestFlushContext,
   eventId: string,
 ): Promise<boolean> {
+  recordFlushCounter(context, "d1Statements");
   const persisted = await context.env.DB.prepare(
     `
       SELECT 1 AS ok
@@ -374,9 +330,6 @@ function deleteFlushedCustomEventRows(
     `DELETE FROM buffered_custom_events WHERE event_id IN (${ids.map(() => "?").join(",")})`,
     ...ids,
   );
-  logDoTrace("do_flushed_custom_event_rows_deleted", {
-    count: deleted,
-    cutoffMs,
-    eventIds: ids.slice(0, 20),
-  });
+  void deleted;
+  void cutoffMs;
 }

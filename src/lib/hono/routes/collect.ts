@@ -18,5 +18,6 @@ collectRoutes.post("/collect", (c) =>
     c.env,
     c.executionCtx as unknown as ExecutionContext,
     new URL(c.req.raw.url),
+    c.get("observabilityLogger"),
   ),
 );

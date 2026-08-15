@@ -1,4 +1,4 @@
-import { errorToMessage, logDoTrace, toUnixSeconds } from "./ingest-log";
+import { toUnixSeconds } from "./ingest-time";
 import type {
   BufferedCustomEventInput,
   BufferedVisitRow,
@@ -548,9 +548,8 @@ export async function insertVisit(
     createdAt,
     createdAt,
   ];
-  try {
-    const rowsWritten = context.sqlRun(
-      `
+  const rowsWritten = context.sqlRun(
+    `
       INSERT INTO buffered_visits (
           visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at,
           pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
@@ -564,25 +563,9 @@ export async function insertVisit(
         ) VALUES (${bindings.map(() => "?").join(", ")})
         ON CONFLICT(visit_id) DO NOTHING
       `,
-      ...bindings,
-    );
-    return rowsWritten > 0;
-  } catch (error) {
-    const message = errorToMessage(error);
-    logDoTrace(
-      "do_pageview_insert_failed",
-      {
-        traceId: record.traceId || "",
-        siteId: record.siteId,
-        visitId: record.visitId,
-        sessionId: record.sessionId,
-        pathname: record.pathname,
-        error: message,
-      },
-      "error",
-    );
-    throw error;
-  }
+    ...bindings,
+  );
+  return rowsWritten > 0;
 }
 
 export async function insertCustomEvent(

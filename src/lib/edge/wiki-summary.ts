@@ -299,7 +299,7 @@ export async function handleWikiSummaryRequest(
       CACHE_HEADERS,
     );
   } catch (error) {
-    console.error("[wiki-summary] upstream request failed", error);
+    void error;
     return jsonResponse(
       {
         ok: false,

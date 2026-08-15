@@ -4,7 +4,6 @@ import {
   RECENT_EVENT_RETENTION_MS,
   WS_PRESENCE_LEAVE_EVENT,
 } from "./ingest-constants";
-import { errorToMessage, logDoTrace } from "./ingest-log";
 import {
   type RealtimeSnapshotRecord,
   toRealtimePayload,
@@ -274,7 +273,7 @@ export function readActiveRealtimeVisits(
 export async function pushInitialRealtimeSnapshot(
   context: RealtimeContext,
   socket: WebSocket,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const cutoffMs = Date.now() - ACTIVE_NOW_WINDOW_MS;
     const events = readRecentRealtimeEvents(
@@ -304,18 +303,9 @@ export async function pushInitialRealtimeSnapshot(
         },
       }),
     );
-    logDoTrace("do_ws_snapshot_sent", {
-      sockets: context.sockets.size,
-      activeNow,
-      events: events.length,
-      visits: visits.length,
-    });
-  } catch (error) {
-    logDoTrace(
-      "ws_snapshot_init_failed",
-      { error: errorToMessage(error), sockets: context.sockets.size },
-      "error",
-    );
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -324,12 +314,6 @@ export async function pushRealtimeRecordToSockets(
   record: RealtimeSnapshotRecord,
 ): Promise<void> {
   if (sockets.size === 0) {
-    logDoTrace("do_ws_event_skipped", {
-      reason: "no_sockets",
-      eventType: record.eventType,
-      id: record.id,
-      visitId: record.visitId,
-    });
     return;
   }
 
@@ -357,12 +341,5 @@ export async function pushRealtimeRecordToSockets(
       // no-op
     }
   }
-  logDoTrace("do_ws_event_sent", {
-    eventType: record.eventType,
-    id: record.id,
-    visitId: record.visitId,
-    sent,
-    stale: staleSockets.length,
-    sockets: sockets.size,
-  });
+  void sent;
 }

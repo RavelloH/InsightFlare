@@ -44,8 +44,7 @@ export async function handleAuthLoginAdmin(
   try {
     await ensureBootstrapAdmin(env);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("bootstrap_admin_failed", { message });
+    void error;
     return jsonResponseFor(
       req,
       { ok: false, error: "bootstrap_admin_failed" },

@@ -299,7 +299,7 @@ describe("edge ingest flush edge coverage", () => {
     vi.restoreAllMocks();
   });
 
-  it("logs and rethrows buffered pageview insert failures", async () => {
+  it("rethrows buffered pageview insert failures without a standalone log", async () => {
     const error = new Error("insert failed");
     const context = {
       sqlRun: vi.fn(() => {
@@ -308,9 +308,7 @@ describe("edge ingest flush edge coverage", () => {
     };
 
     await expect(insertVisit(context, pageview())).rejects.toThrow(error);
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining("do_pageview_insert_failed"),
-    );
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("deletes custom events when dictionary ids cannot be resolved", async () => {
@@ -329,6 +327,13 @@ describe("edge ingest flush edge coverage", () => {
       prepare,
       batch: vi.fn(async () => []),
     } as unknown as D1Database;
+    const observability = {
+      increment: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    context.observability = observability;
 
     await expect(
       flushCustomEventRowIndividually(context, bufferedCustomEvent()),
@@ -338,10 +343,9 @@ describe("edge ingest flush edge coverage", () => {
       "DELETE FROM buffered_custom_events WHERE event_id IN (?)",
       "event-1",
     );
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "Failed to resolve custom event name dictionary id",
-      ),
+    expect(observability.increment).toHaveBeenCalledWith("failedStatements", 1);
+    expect(observability.error).toHaveBeenCalledWith(
+      "do.flush.custom_event_failed",
     );
   });
 

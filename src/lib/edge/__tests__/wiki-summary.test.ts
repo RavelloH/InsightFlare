@@ -517,9 +517,6 @@ describe("wiki summary route", () => {
   });
 
   it("returns 502 when upstream requests fail", async () => {
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response("rate limited", { status: 429 }),
     );
@@ -538,16 +535,9 @@ describe("wiki summary route", () => {
       ok: false,
       error: "Wiki upstream unavailable",
     });
-    expect(consoleError).toHaveBeenCalledWith(
-      "[wiki-summary] upstream request failed",
-      expect.any(Error),
-    );
   });
 
   it("returns 502 when Wikipedia summary requests fail", async () => {
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
     vi.mocked(fetch)
       .mockResolvedValueOnce(
         new Response(
@@ -577,9 +567,5 @@ describe("wiki summary route", () => {
       ok: false,
       error: "Wiki upstream unavailable",
     });
-    expect(consoleError).toHaveBeenCalledWith(
-      "[wiki-summary] upstream request failed",
-      expect.any(Error),
-    );
   });
 });

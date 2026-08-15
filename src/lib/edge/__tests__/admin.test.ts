@@ -752,7 +752,6 @@ describe("private admin edge handler", () => {
     });
 
     it("reports bootstrap failures during login", async () => {
-      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const { env } = createEnv([
         statement({ firstReject: new Error("boom") }),
       ]);
@@ -768,13 +767,9 @@ describe("private admin edge handler", () => {
         ok: false,
         error: { code: "login_upstream_failed" },
       });
-      expect(errorSpy).toHaveBeenCalledWith("bootstrap_admin_failed", {
-        message: "boom",
-      });
     });
 
     it("reports bootstrap reload failures while promoting or creating admins", async () => {
-      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const existing = userRow({
         id: "user-1",
         username: "bootstrap",
@@ -813,12 +808,6 @@ describe("private admin edge handler", () => {
       expect(await createFailure.json()).toMatchObject({
         ok: false,
         error: { code: "login_upstream_failed" },
-      });
-      expect(errorSpy).toHaveBeenCalledWith("bootstrap_admin_failed", {
-        message: "bootstrap admin promote failed",
-      });
-      expect(errorSpy).toHaveBeenCalledWith("bootstrap_admin_failed", {
-        message: "bootstrap admin create failed",
       });
     });
 

@@ -135,9 +135,8 @@ describe("response helpers", () => {
     });
   });
 
-  it("hides server error details in production and logs diagnostics", async () => {
+  it("hides server error details in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const req = new Request("https://example.test/fail", {
       method: "POST",
       headers: { "x-request-id": "request-3" },
@@ -153,9 +152,6 @@ describe("response helpers", () => {
       requestId: "request-3",
       error: { code: "boom", message: "An internal error occurred" },
     });
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('"event":"api_error"'),
-    );
   });
 
   it("extracts nested JSON error messages when available", () => {

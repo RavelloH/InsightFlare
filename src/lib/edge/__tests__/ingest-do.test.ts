@@ -2399,7 +2399,7 @@ describe("IngestDurableObject", () => {
     ).toBe(1);
   });
 
-  it("logs and ignores websocket initial snapshot send failures", async () => {
+  it("records websocket initial snapshot send failures in the invocation log", async () => {
     const ctx = createTestDo();
     const client = new FakeWebSocket();
     const server = new FakeWebSocket();
@@ -2426,7 +2426,14 @@ describe("IngestDurableObject", () => {
     expect(response.status).toBe(101);
     expect(server.accepted).toBe(true);
     expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining("ws_snapshot_init_failed"),
+      expect.objectContaining({
+        source: "do",
+        trigger: "request",
+        request: expect.objectContaining({ route: "/ws", status: 101 }),
+        logs: expect.arrayContaining([
+          expect.objectContaining({ message: "do.websocket.snapshot_failed" }),
+        ]),
+      }),
     );
   });
 
@@ -2472,11 +2479,15 @@ describe("IngestDurableObject", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('"event":"do_leave_no_rows_updated"'),
-    );
-    expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('"reason":"visit_not_open"'),
+    expect(console.log).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        source: "do",
+        traceId: "trace-1",
+        logs: expect.arrayContaining([
+          expect.objectContaining({ message: "do.ingest.leave_race_lost" }),
+          expect.objectContaining({ message: "do.ingest.leave_ignored" }),
+        ]),
+      }),
     );
     await expect(
       (

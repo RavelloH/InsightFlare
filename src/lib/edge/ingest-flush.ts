@@ -10,9 +10,12 @@ import {
   WS_PRESENCE_LEAVE_EVENT,
 } from "./ingest-constants";
 import { flushCustomEventRowIndividually } from "./ingest-custom-event-flush";
-import type { IngestFlushContext } from "./ingest-flush-types";
-import { errorToMessage, logDoTrace, toUnixSeconds } from "./ingest-log";
+import {
+  type IngestFlushContext,
+  recordFlushCounter,
+} from "./ingest-flush-types";
 import { UPSERT_VISIT_SQL, visitBindings } from "./ingest-sql";
+import { toUnixSeconds } from "./ingest-time";
 import type { BufferedCustomEventRow, BufferedVisitRow } from "./ingest-types";
 import { clampString } from "./utils";
 
@@ -146,36 +149,20 @@ export async function flushPendingToD1(
     if (visitRows.length === 0 && eventRows.length === 0) {
       return;
     }
-    logDoTrace("d1_flush_batch_start", {
-      batch: batches,
-      visitRows: visitRows.length,
-      customEventRows: eventRows.length,
-      visitIds: visitRows.slice(0, 10).map((row) => row.visitId),
-      eventIds: eventRows.slice(0, 10).map((row) => row.eventId),
-    });
+    context.observability?.info("do.flush.pending_batch");
 
     if (visitRows.length > 0) {
       try {
+        recordFlushCounter(context, "d1Statements", visitRows.length);
         await context.env.DB.batch(
           visitRows.map((row) => prepareVisitStatement(context, row)),
         );
-        logDoTrace("d1_flush_visit_batch_ok", {
-          batch: batches,
-          count: visitRows.length,
-          visitIds: visitRows.slice(0, 10).map((row) => row.visitId),
-        });
+        recordFlushCounter(context, "flushedVisits", visitRows.length);
         markVisitRowsFlushed(context, visitRows);
       } catch (error) {
-        logDoTrace(
-          "d1_flush_visit_batch_failed",
-          {
-            batch: batches,
-            count: visitRows.length,
-            visitIds: visitRows.slice(0, 10).map((row) => row.visitId),
-            error: errorToMessage(error),
-          },
-          "error",
-        );
+        void error;
+        recordFlushCounter(context, "failedStatements", visitRows.length);
+        context.observability?.error("do.flush.visit_batch_failed");
         await flushRowsIndividually(context, visitRows, []);
       }
     }
@@ -229,10 +216,7 @@ export async function cleanupBufferedRows(
     visitCutoff,
   );
   if (deletedVisits > 0) {
-    logDoTrace("do_visit_rows_deleted", {
-      count: deletedVisits,
-      cutoffMs: visitCutoff,
-    });
+    context.observability?.info("do.cleanup.visit_rows_deleted");
   }
   const deletedEvents = context.sqlRun(
     `
@@ -243,10 +227,7 @@ export async function cleanupBufferedRows(
     eventCutoff,
   );
   if (deletedEvents > 0) {
-    logDoTrace("do_custom_event_rows_deleted", {
-      count: deletedEvents,
-      cutoffMs: eventCutoff,
-    });
+    context.observability?.info("do.cleanup.custom_event_rows_deleted");
   }
   await cleanupOrphanedCustomEvents(context, now);
 }
@@ -303,11 +284,7 @@ export async function flushTimeouts(
     TIMEOUT_FINALIZE_BATCH_SIZE,
   );
   if (rows.length > 0) {
-    logDoTrace("do_timeout_flush_found", {
-      count: rows.length,
-      cutoffMs: now - VISIT_TIMEOUT_MS,
-      visitIds: rows.slice(0, 20).map((row) => row.visitId),
-    });
+    context.observability?.info("do.timeout_visits_found");
   }
 
   for (const visit of rows) {
@@ -333,14 +310,6 @@ export async function flushTimeouts(
       visit.visitId,
     );
     if (rowsWritten === 0) continue;
-    logDoTrace("do_visit_timed_out", {
-      siteId: visit.siteId,
-      visitId: visit.visitId,
-      visitorId: visit.visitorId,
-      startedAt: visit.startedAt,
-      lastActivityAt: visit.lastActivityAt,
-      finalizedAt: now,
-    });
     if (!context.hasOpenVisitsForVisitor(visit.siteId, visit.visitorId)) {
       await context.pushRealtimeRecord({
         id: `leave:${visit.visitId}`,
@@ -425,11 +394,7 @@ async function flushHiddenFallbacks(
     TIMEOUT_FINALIZE_BATCH_SIZE,
   );
   if (rows.length > 0) {
-    logDoTrace("do_hidden_fallback_found", {
-      count: rows.length,
-      cutoffMs: now - HIDDEN_LEAVE_GRACE_MS,
-      visitIds: rows.slice(0, 20).map((row) => row.visitId),
-    });
+    context.observability?.info("do.hidden_fallbacks_found");
   }
 
   for (const visit of rows) {
@@ -459,14 +424,6 @@ async function flushHiddenFallbacks(
       visit.visitId,
     );
     if (rowsWritten === 0) continue;
-    logDoTrace("do_hidden_fallback_closed_visit", {
-      siteId: visit.siteId,
-      visitId: visit.visitId,
-      visitorId: visit.visitorId,
-      startedAt: visit.startedAt,
-      hiddenAt,
-      durationMs,
-    });
     if (!context.hasOpenVisitsForVisitor(visit.siteId, visit.visitorId)) {
       await context.pushRealtimeRecord({
         id: `leave:${visit.visitId}`,
@@ -511,11 +468,7 @@ function markVisitRowsFlushed(
     `UPDATE buffered_visits SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE visit_id IN (${ids.map(() => "?").join(",")})`,
     ...ids,
   );
-  logDoTrace("do_visit_rows_marked_flushed", {
-    count: rows.length,
-    updated,
-    visitIds: ids.slice(0, 10),
-  });
+  void updated;
   deleteFlushedVisitRows(context, rows);
 }
 
@@ -530,15 +483,8 @@ function markVisitRowsFailed(
     `DELETE FROM buffered_visits WHERE visit_id IN (${ids.map(() => "?").join(",")})`,
     ...ids,
   );
-  logDoTrace(
-    "do_failed_visit_rows_deleted",
-    {
-      count: deleted,
-      reason: errorMessage,
-      visitIds: ids.slice(0, 20),
-    },
-    "error",
-  );
+  void deleted;
+  void errorMessage;
 }
 
 function prepareVisitStatement(
@@ -567,11 +513,8 @@ function deleteFlushedVisitRows(
     `DELETE FROM buffered_visits WHERE visit_id IN (${ids.map(() => "?").join(",")})`,
     ...ids,
   );
-  logDoTrace("do_flushed_visit_rows_deleted", {
-    count: deleted,
-    cutoffMs,
-    visitIds: ids.slice(0, 20),
-  });
+  void deleted;
+  void cutoffMs;
 }
 
 function visitEndedBeforeRealtimeCutoff(
@@ -613,33 +556,17 @@ async function flushVisitRowIndividually(
   row: BufferedVisitRow,
 ): Promise<void> {
   try {
+    recordFlushCounter(context, "d1Statements");
     await context.env.DB.batch([prepareVisitStatement(context, row)]);
-    logDoTrace("d1_flush_visit_ok", {
-      visitId: row.visitId,
-      siteId: row.siteId,
-      status: row.status,
-      startedAt: row.startedAt,
-      updatedAt: row.updatedAt,
-    });
+    recordFlushCounter(context, "flushedVisits");
     markVisitRowsFlushed(context, [row]);
   } catch (error) {
     const message = clampString(
       String(error instanceof Error ? error.message : error),
       400,
     );
-    logDoTrace(
-      "d1_flush_visit_failed",
-      {
-        visitId: row.visitId,
-        siteId: row.siteId,
-        status: row.status,
-        startedAt: row.startedAt,
-        updatedAt: row.updatedAt,
-        flushAttempts: row.flushAttempts,
-        error: message,
-      },
-      "error",
-    );
+    recordFlushCounter(context, "failedStatements");
+    context.observability?.error("do.flush.visit_failed");
     markVisitRowsFailed(context, [row], message);
   }
 }
@@ -694,13 +621,7 @@ async function cleanupOrphanedCustomEvents(
     `DELETE FROM buffered_custom_events WHERE event_id IN (${orphanEventIds.map(() => "?").join(",")})`,
     ...orphanEventIds,
   );
-  logDoTrace(
-    "do_orphan_custom_event_rows_deleted",
-    {
-      count: deleted,
-      eventIds: orphanEventIds.slice(0, 20),
-      cutoffMs,
-    },
-    "warn",
-  );
+  void deleted;
+  void cutoffMs;
+  context.observability?.warn("do.cleanup.orphan_custom_events_deleted");
 }

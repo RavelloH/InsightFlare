@@ -1,4 +1,5 @@
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import type { InvocationLogger } from "@/lib/edge/observability-logger";
 import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
 import type { Env as EdgeEnv } from "@/lib/edge/types";
 
@@ -27,6 +28,7 @@ export interface HonoApiSite {
 
 export type HonoVariables = {
   requestId: string;
+  observabilityLogger?: InvocationLogger;
   requestUrl?: URL;
   session?: EdgeSessionClaims;
   privateSite?: HonoSite;

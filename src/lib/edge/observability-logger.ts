@@ -108,6 +108,7 @@ export interface InvocationLogger {
   info(message: string): void;
   warn(message: string): void;
   error(message: string): void;
+  setTraceId(traceId: string | undefined): void;
   setRequest(request: InvocationRequest): void;
   setPerformance(performance: InvocationPerformancePatch): void;
   increment(counter: InvocationPerformanceCounter, amount?: number): void;
@@ -123,6 +124,7 @@ export function createInvocationLogger(
   const startedAtMs = now();
   const maxEvents = resolveMaxEvents(options.maxEvents);
   const events: InvocationLogEvent[] = [];
+  let traceId = options.traceId;
   let request: InvocationRequest | undefined;
   let performance: InvocationPerformancePatch = {};
   let logsTruncated = false;
@@ -145,7 +147,7 @@ export function createInvocationLogger(
       v: OBSERVABILITY_LOG_VERSION,
       source: options.source,
       trigger: options.trigger,
-      ...(options.traceId ? { traceId: options.traceId } : {}),
+      ...(traceId ? { traceId } : {}),
       startedAt,
       ...(request ? { request: { ...request } } : {}),
       performance: {
@@ -167,6 +169,9 @@ export function createInvocationLogger(
     },
     error(message) {
       record("error", message);
+    },
+    setTraceId(nextTraceId) {
+      traceId = nextTraceId;
     },
     setRequest(nextRequest) {
       request = { ...nextRequest };

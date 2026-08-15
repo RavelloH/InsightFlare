@@ -1,4 +1,5 @@
 import { isAnalyticsEngineDisabled } from "./analytics-engine";
+import type { InvocationLogger } from "./observability-logger";
 import type { Env, TrackerClientPayload } from "./types";
 import { clampString, coerceNumber, coerceString } from "./utils";
 
@@ -104,6 +105,7 @@ function payloadEventAt(
 export function writeNormalAnalyticsEvent(
   env: Env,
   input: NormalAnalyticsInput,
+  logger?: Pick<InvocationLogger, "warn" | "error">,
 ): void {
   if (isAnalyticsEngineDisabled(env)) {
     return;
@@ -111,6 +113,7 @@ export function writeNormalAnalyticsEvent(
 
   const dataset = env.NORMAL_ANALYTICS;
   if (!dataset) {
+    logger?.warn("collect.normal_analytics_missing_binding");
     return;
   }
 
@@ -173,13 +176,7 @@ export function writeNormalAnalyticsEvent(
       ],
     });
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "normal_analytics_write_failed",
-        traceId: input.traceId,
-        siteId: input.siteId,
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    void error;
+    logger?.error("collect.normal_analytics_write_failed");
   }
 }

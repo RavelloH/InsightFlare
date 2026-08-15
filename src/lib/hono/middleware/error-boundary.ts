@@ -5,11 +5,9 @@ import type { AppEnv } from "@/lib/hono/types";
 import { internalServerError } from "@/lib/hono/utils/response";
 
 export function handleHonoError(error: Error, c: Context<AppEnv>): Response {
-  console.error("hono_route_unhandled_error", {
-    method: c.req.raw.method,
-    url: c.req.raw.url,
-    error,
-  });
+  if ("get" in c && typeof c.get === "function") {
+    c.get("observabilityLogger")?.error("request.unhandled_error");
+  }
   return internalServerError(c.req.raw, error);
 }
 

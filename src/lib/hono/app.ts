@@ -2,6 +2,8 @@ import { Hono } from "hono";
 
 import { apiNoCacheMiddleware } from "./middleware/api-cache";
 import { handleHonoError } from "./middleware/error-boundary";
+import { observabilityMiddleware } from "./middleware/observability";
+import { requestIdMiddleware } from "./middleware/request-id";
 import { collectRoutes } from "./routes/collect";
 import { e2eRoutes } from "./routes/e2e";
 import { healthRoutes } from "./routes/health";
@@ -15,6 +17,8 @@ import type { AppEnv } from "./types";
 export const apiApp = new Hono<AppEnv>();
 
 apiApp.onError(handleHonoError);
+apiApp.use("*", requestIdMiddleware());
+apiApp.use("*", observabilityMiddleware());
 apiApp.use("*", apiNoCacheMiddleware());
 
 apiApp.route("/", healthRoutes);

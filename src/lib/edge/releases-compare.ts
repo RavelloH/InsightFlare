@@ -44,7 +44,6 @@ export async function handleReleasesCompareRequest(
     const data = await fetchGithubCompare(REPO_OWNER, REPO_NAME, base, head);
     return jsonResponseFor(request, { ok: true, data });
   } catch (error) {
-    console.error("[releases/compare] Failed to compare releases:", error);
     const message =
       error instanceof Error ? error.message : "Failed to compare releases.";
     return errorResponse(request, 502, "compare_failed", message);

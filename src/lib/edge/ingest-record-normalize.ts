@@ -4,7 +4,6 @@ import { visitorDailySaltSecret } from "@/lib/secrets";
 
 import { mergeUaClientHintsIntoHeaders } from "./client-hints";
 import { expandCustomEventData } from "./custom-event-json";
-import { logDoTrace } from "./ingest-log";
 import {
   clampTimestamp,
   normalizePerformancePayload,
@@ -379,20 +378,6 @@ export async function normalizeIngestRecord(
       if (inserted) {
         await context.ensureAlarm();
       }
-      logDoTrace(
-        inserted
-          ? "do_custom_event_buffered_waiting_for_visit"
-          : "do_custom_event_duplicate_waiting_for_visit",
-        {
-          traceId,
-          eventId,
-          siteId,
-          visitId,
-          eventName,
-          occurredAt: eventAt,
-          buffered: inserted,
-        },
-      );
       return {
         record: null,
         reason: "waiting_for_visit",

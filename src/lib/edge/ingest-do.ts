@@ -24,12 +24,6 @@ import {
   flushTimeouts as flushTimeoutsInFlushStore,
 } from "./ingest-flush";
 import {
-  compactClientForLog,
-  errorToMessage,
-  logDoTrace,
-  toUnixSeconds,
-} from "./ingest-log";
-import {
   jsonResponse,
   type RealtimeSnapshotRecord,
   toRealtimeScreenSize,
@@ -43,6 +37,7 @@ import {
 import { normalizeIngestRecord } from "./ingest-record-normalize";
 import { initializeIngestSqlSchema } from "./ingest-schema";
 import type { SqlBinding } from "./ingest-sql";
+import { toUnixSeconds } from "./ingest-time";
 import type {
   BufferedCustomEventInput,
   BufferedVisitRow,
@@ -50,6 +45,10 @@ import type {
   RecentVisitorSession,
   StoredOpenVisit,
 } from "./ingest-types";
+import {
+  createInvocationLogger,
+  type InvocationLogger,
+} from "./observability-logger";
 import type {
   Env,
   IngestEnvelopePayload,
@@ -78,15 +77,49 @@ export class IngestDurableObject extends DurableObject {
   }
 
   async fetch(request: Request): Promise<Response> {
-    await this.schemaReady;
     const url = new URL(request.url);
+    const logger = createInvocationLogger({
+      source: "do",
+      trigger: "request",
+    });
+    logger.info("do.request.started");
 
+    try {
+      await this.schemaReady;
+      const response = await this.handleRequest(request, url, logger);
+      logger.setRequest({
+        route: url.pathname,
+        method: request.method,
+        status: response.status,
+        outcome: response.status >= 400 ? "error" : "ok",
+      });
+      return response;
+    } catch (error) {
+      logger.error("do.request.unhandled_error");
+      logger.setRequest({
+        route: url.pathname,
+        method: request.method,
+        status: 500,
+        outcome: "error",
+      });
+      throw error;
+    } finally {
+      logger.info("do.request.completed");
+      logger.emit();
+    }
+  }
+
+  private async handleRequest(
+    request: Request,
+    url: URL,
+    logger: InvocationLogger,
+  ): Promise<Response> {
     if (url.pathname === "/ws") {
-      return this.handleWebSocket(request, url);
+      return this.handleWebSocket(request, url, logger);
     }
 
     if (url.pathname === "/ingest" && request.method === "POST") {
-      return this.handleIngest(request);
+      return this.handleIngest(request, logger);
     }
 
     if (url.pathname === "/snapshot" && request.method === "GET") {
@@ -102,11 +135,9 @@ export class IngestDurableObject extends DurableObject {
     }
 
     if (url.pathname === "/flush" && request.method === "POST") {
-      logDoTrace("do_manual_flush_start");
-      await this.flushTimeouts();
-      await this.flushPendingToD1();
-      await this.cleanupBufferedRows();
-      logDoTrace("do_manual_flush_done");
+      logger.info("do.flush.manual_started");
+      await this.runMaintenance(logger);
+      logger.info("do.flush.manual_completed");
       return jsonResponse({ ok: true });
     }
 
@@ -114,84 +145,75 @@ export class IngestDurableObject extends DurableObject {
   }
 
   async alarm(): Promise<void> {
-    await this.schemaReady;
-    logDoTrace("do_alarm_start");
-    await this.flushTimeouts();
-    await this.flushPendingToD1();
-    await this.cleanupBufferedRows();
-    if ((await this.hasOpenVisits()) || this.hasDirtyRows()) {
-      const scheduledAt = Date.now() + D1_FLUSH_INTERVAL_MS;
-      await this.doState.storage.setAlarm(scheduledAt);
-      logDoTrace("do_alarm_rescheduled", { scheduledAt });
-      return;
+    const logger = createInvocationLogger({ source: "do", trigger: "alarm" });
+    logger.info("do.alarm.started");
+    try {
+      await this.schemaReady;
+      await this.runMaintenance(logger);
+      if ((await this.hasOpenVisits()) || this.hasDirtyRows()) {
+        const scheduledAt = Date.now() + D1_FLUSH_INTERVAL_MS;
+        await this.doState.storage.setAlarm(scheduledAt);
+        logger.info("do.alarm.rescheduled");
+        return;
+      }
+      await this.doState.storage.deleteAlarm();
+      logger.info("do.alarm.cleared");
+    } catch (error) {
+      logger.error("do.alarm.failed");
+      throw error;
+    } finally {
+      logger.info("do.alarm.completed");
+      logger.emit();
     }
-    await this.doState.storage.deleteAlarm();
-    logDoTrace("do_alarm_cleared");
   }
 
-  private async handleIngest(request: Request): Promise<Response> {
+  private async handleIngest(
+    request: Request,
+    logger: InvocationLogger,
+  ): Promise<Response> {
     let envelope: IngestEnvelopePayload;
     try {
       envelope = (await request.json()) as IngestEnvelopePayload;
-    } catch (error) {
-      logDoTrace(
-        "do_ingest_bad_request",
-        { error: errorToMessage(error) },
-        "warn",
-      );
+    } catch {
+      logger.warn("do.ingest.bad_request");
       return new Response("Bad Request", { status: 400 });
     }
 
     const traceId = envelope.trace?.id || "";
-    logDoTrace("do_ingest_received", {
-      traceId,
-      acceptedAt: envelope.trace?.acceptedAt ?? null,
-      receivedAt: envelope.request?.receivedAt ?? null,
-      ...compactClientForLog(envelope.client),
-    });
+    logger.setTraceId(traceId || undefined);
+    logger.info("do.ingest.received");
 
     const normalized = await this.normalizeRecord(envelope);
     const record = normalized.record;
     if (!record) {
-      logDoTrace(
-        "do_ingest_ignored",
-        {
-          traceId,
-          reason: normalized.reason || "unknown",
-          ...(normalized.detail || {}),
-          ...compactClientForLog(envelope.client),
-        },
-        "warn",
-      );
+      logger.warn(`do.ingest.ignored.${normalized.reason || "unknown"}`);
       return new Response(`ignored:${normalized.reason || "unknown"}`, {
         status: 202,
       });
     }
 
     if (record.kind === "pageview") {
-      await this.handlePageview(record);
+      await this.handlePageview(record, logger);
     } else if (record.kind === "leave") {
-      await this.handleLeave(record);
+      await this.handleLeave(record, logger);
     } else if (record.kind === "visibility") {
-      await this.handleVisibility(record);
+      await this.handleVisibility(record, logger);
     } else if (record.kind === "identify") {
-      await this.handleIdentify(record);
+      await this.handleIdentify(record, logger);
     } else {
-      await this.handleCustomEvent(record);
+      await this.handleCustomEvent(record, logger);
     }
 
-    await this.ensureAlarm();
-    logDoTrace("do_ingest_handled", {
-      traceId: record.traceId || traceId,
-      kind: record.kind,
-      siteId: record.siteId,
-      visitId: record.visitId,
-      eventId: record.kind === "custom_event" ? record.eventId : "",
-    });
+    await this.ensureAlarm(logger);
+    logger.info("do.ingest.completed");
     return new Response("ok", { status: 202 });
   }
 
-  private async handleWebSocket(request: Request, url: URL): Promise<Response> {
+  private async handleWebSocket(
+    request: Request,
+    _url: URL,
+    logger: InvocationLogger,
+  ): Promise<Response> {
     const upgradeHeader = request.headers.get("Upgrade");
     if (upgradeHeader !== "websocket") {
       return new Response("Expected websocket upgrade", { status: 426 });
@@ -206,26 +228,18 @@ export class IngestDurableObject extends DurableObject {
 
     server.accept();
     this.sockets.add(server);
-    logDoTrace("do_ws_connected", {
-      sockets: this.sockets.size,
-      siteId: url.searchParams.get("siteId") || "",
-    });
-    void this.pushInitialSnapshotToSocket(server);
+    logger.info("do.websocket.connected");
+    if (await this.pushInitialSnapshotToSocket(server)) {
+      logger.info("do.websocket.snapshot_sent");
+    } else {
+      logger.error("do.websocket.snapshot_failed");
+    }
 
     server.addEventListener("close", () => {
       this.sockets.delete(server);
-      logDoTrace("do_ws_disconnected", {
-        sockets: this.sockets.size,
-        reason: "close",
-      });
     });
     server.addEventListener("error", () => {
       this.sockets.delete(server);
-      logDoTrace(
-        "do_ws_disconnected",
-        { sockets: this.sockets.size, reason: "error" },
-        "warn",
-      );
       try {
         server.close();
       } catch {
@@ -341,7 +355,10 @@ export class IngestDurableObject extends DurableObject {
     });
   }
 
-  private async handlePageview(record: NormalizedPageview): Promise<void> {
+  private async handlePageview(
+    record: NormalizedPageview,
+    logger: InvocationLogger,
+  ): Promise<void> {
     const now = toUnixSeconds(record.receivedAt);
 
     if (record.previousVisitId && record.previousVisitStartedAt !== null) {
@@ -371,37 +388,16 @@ export class IngestDurableObject extends DurableObject {
         record.previousVisitId,
       );
       if (closedPrevious > 0) {
-        logDoTrace("do_previous_visit_closed", {
-          traceId: record.traceId || "",
-          siteId: record.siteId,
-          visitId: record.previousVisitId,
-          nextVisitId: record.visitId,
-          durationMs,
-        });
+        logger.info("do.ingest.previous_visit_closed");
       }
     }
 
     const inserted = await this.insertVisit(record);
     if (!inserted) {
-      logDoTrace("do_pageview_duplicate_or_not_inserted", {
-        traceId: record.traceId || "",
-        siteId: record.siteId,
-        visitId: record.visitId,
-        sessionId: record.sessionId,
-        pathname: record.pathname,
-      });
+      logger.info("do.ingest.pageview_duplicate");
       return;
     }
-    logDoTrace("do_pageview_buffered", {
-      traceId: record.traceId || "",
-      siteId: record.siteId,
-      visitId: record.visitId,
-      sessionId: record.sessionId,
-      visitorId: record.visitorId,
-      startedAt: record.startedAt,
-      pathname: record.pathname,
-      sockets: this.sockets.size,
-    });
+    logger.info("do.ingest.pageview_buffered");
     await this.pushRealtimeRecord({
       id: record.visitId,
       eventType: "visit",
@@ -433,7 +429,10 @@ export class IngestDurableObject extends DurableObject {
     });
   }
 
-  private async handleLeave(record: NormalizedLeave): Promise<void> {
+  private async handleLeave(
+    record: NormalizedLeave,
+    logger: InvocationLogger,
+  ): Promise<void> {
     const visit = this.sqlOne<{
       visitId: string;
       startedAt: number;
@@ -529,18 +528,8 @@ export class IngestDurableObject extends DurableObject {
         visit.visitId,
       );
       closedVisit = rowsWritten > 0;
-      logDoTrace(
-        closedVisit ? "do_leave_closed_visit" : "do_leave_no_rows_updated",
-        {
-          traceId: record.traceId || "",
-          siteId: record.siteId,
-          visitId: record.visitId,
-          sessionId: visit.sessionId,
-          leaveAt,
-          durationMs,
-          durationSource,
-          exitReason,
-        },
+      logger.info(
+        closedVisit ? "do.ingest.leave_closed" : "do.ingest.leave_race_lost",
       );
     }
 
@@ -554,12 +543,7 @@ export class IngestDurableObject extends DurableObject {
     }
 
     if (!visit || !closedVisit) {
-      logDoTrace("do_leave_ignored", {
-        traceId: record.traceId || "",
-        siteId: record.siteId,
-        visitId: record.visitId,
-        reason: visit ? "visit_not_open" : "visit_not_found",
-      });
+      logger.info("do.ingest.leave_ignored");
       return;
     }
 
@@ -596,7 +580,10 @@ export class IngestDurableObject extends DurableObject {
     }
   }
 
-  private async handleVisibility(record: NormalizedVisibility): Promise<void> {
+  private async handleVisibility(
+    record: NormalizedVisibility,
+    logger: InvocationLogger,
+  ): Promise<void> {
     const updatedAt = toUnixSeconds(record.receivedAt);
     if (record.visibilityState === "hidden") {
       let rowsWritten = this.sqlRun(
@@ -638,16 +625,10 @@ export class IngestDurableObject extends DurableObject {
           record.visitId,
         );
       }
-      logDoTrace(
+      logger.info(
         rowsWritten > 0
-          ? "do_visibility_hidden_buffered"
-          : "do_visibility_hidden_ignored",
-        {
-          traceId: record.traceId || "",
-          siteId: record.siteId,
-          visitId: record.visitId,
-          eventAt: record.eventAt,
-        },
+          ? "do.ingest.visibility_hidden_buffered"
+          : "do.ingest.visibility_hidden_ignored",
       );
       return;
     }
@@ -673,16 +654,10 @@ export class IngestDurableObject extends DurableObject {
       record.eventAt,
       HIDDEN_LEAVE_GRACE_MS,
     );
-    logDoTrace(
+    logger.info(
       rowsWritten > 0
-        ? "do_visibility_visible_restored"
-        : "do_visibility_visible_ignored",
-      {
-        traceId: record.traceId || "",
-        siteId: record.siteId,
-        visitId: record.visitId,
-        eventAt: record.eventAt,
-      },
+        ? "do.ingest.visibility_visible_restored"
+        : "do.ingest.visibility_visible_ignored",
     );
   }
 
@@ -703,27 +678,14 @@ export class IngestDurableObject extends DurableObject {
 
   private async handleCustomEvent(
     record: NormalizedCustomEvent,
+    logger: InvocationLogger,
   ): Promise<void> {
     const inserted = await this.insertCustomEvent(record);
     if (!inserted) {
-      logDoTrace("do_custom_event_duplicate_or_not_inserted", {
-        traceId: record.traceId || "",
-        siteId: record.siteId,
-        visitId: record.visitId,
-        eventId: record.eventId,
-        eventName: record.eventName,
-      });
+      logger.info("do.ingest.custom_event_duplicate");
       return;
     }
-    logDoTrace("do_custom_event_buffered", {
-      traceId: record.traceId || "",
-      siteId: record.siteId,
-      visitId: record.visitId,
-      eventId: record.eventId,
-      eventName: record.eventName,
-      occurredAt: record.eventAt,
-      sockets: this.sockets.size,
-    });
+    logger.info("do.ingest.custom_event_buffered");
     await this.updateOpenVisitActivity(record.visitId, record.eventAt);
     await this.pushRealtimeRecord({
       id: record.eventId,
@@ -756,7 +718,10 @@ export class IngestDurableObject extends DurableObject {
     });
   }
 
-  private async handleIdentify(record: NormalizedIdentify): Promise<void> {
+  private async handleIdentify(
+    record: NormalizedIdentify,
+    logger: InvocationLogger,
+  ): Promise<void> {
     const updatedAt = toUnixSeconds(Date.now());
     let serverSessionId =
       this.sqlOne<{ sessionId: string }>(
@@ -842,14 +807,11 @@ export class IngestDurableObject extends DurableObject {
         record.visitId,
       );
     }
-    logDoTrace("do_identify_applied", {
-      traceId: record.traceId || "",
-      siteId: record.siteId,
-      visitId: record.visitId,
-      sessionId: serverSessionId,
-      bufferedVisitRowsUpdated: rowsUpdated,
-      updatedPersistedVisit: rowsUpdated === 0,
-    });
+    logger.info(
+      rowsUpdated > 0
+        ? "do.ingest.identify_buffered"
+        : "do.ingest.identify_persisted",
+    );
   }
 
   private async getVisitContext(
@@ -929,16 +891,13 @@ export class IngestDurableObject extends DurableObject {
     await pushRealtimeRecordToSockets(this.sockets, record);
   }
 
-  private async ensureAlarm(): Promise<void> {
+  private async ensureAlarm(logger?: InvocationLogger): Promise<void> {
     const now = Date.now();
     const existing = await this.doState.storage.getAlarm();
     if (!existing || existing <= now) {
       const scheduledAt = now + D1_FLUSH_INTERVAL_MS;
       await this.doState.storage.setAlarm(scheduledAt);
-      logDoTrace("do_alarm_scheduled", {
-        existing: existing ?? null,
-        scheduledAt,
-      });
+      logger?.info("do.alarm.scheduled");
     }
   }
 
@@ -966,8 +925,10 @@ export class IngestDurableObject extends DurableObject {
     return row !== null;
   }
 
-  private async pushInitialSnapshotToSocket(socket: WebSocket): Promise<void> {
-    await pushInitialRealtimeSnapshot(
+  private async pushInitialSnapshotToSocket(
+    socket: WebSocket,
+  ): Promise<boolean> {
+    return pushInitialRealtimeSnapshot(
       {
         sqlAll: this.sqlAll.bind(this),
         sqlOne: this.sqlOne.bind(this),
@@ -977,7 +938,7 @@ export class IngestDurableObject extends DurableObject {
     );
   }
 
-  private flushStoreContext() {
+  private flushStoreContext(logger: InvocationLogger) {
     return {
       env: this.doEnv,
       dictionaryIds: this.dictionaryIds,
@@ -991,18 +952,31 @@ export class IngestDurableObject extends DurableObject {
       insertBufferedVisitRow: this.insertBufferedVisitRow.bind(this),
       hasOpenVisitsForVisitor: this.hasOpenVisitsForVisitor.bind(this),
       pushRealtimeRecord: this.pushRealtimeRecord.bind(this),
+      observability: logger,
     };
   }
 
-  private async flushPendingToD1(): Promise<void> {
-    return flushPendingToD1InFlushStore(this.flushStoreContext());
+  private async flushPendingToD1(logger: InvocationLogger): Promise<void> {
+    return flushPendingToD1InFlushStore(this.flushStoreContext(logger));
   }
 
-  private async cleanupBufferedRows(): Promise<void> {
-    return cleanupBufferedRowsInFlushStore(this.flushStoreContext());
+  private async cleanupBufferedRows(logger: InvocationLogger): Promise<void> {
+    return cleanupBufferedRowsInFlushStore(this.flushStoreContext(logger));
   }
 
-  private async flushTimeouts(): Promise<void> {
-    return flushTimeoutsInFlushStore(this.flushStoreContext());
+  private async flushTimeouts(logger: InvocationLogger): Promise<void> {
+    return flushTimeoutsInFlushStore(this.flushStoreContext(logger));
+  }
+
+  private async runMaintenance(logger: InvocationLogger): Promise<void> {
+    logger.info("do.flush_timeouts.started");
+    await this.flushTimeouts(logger);
+    logger.info("do.flush_timeouts.completed");
+    logger.info("do.flush_pending.started");
+    await this.flushPendingToD1(logger);
+    logger.info("do.flush_pending.completed");
+    logger.info("do.cleanup.started");
+    await this.cleanupBufferedRows(logger);
+    logger.info("do.cleanup.completed");
   }
 }

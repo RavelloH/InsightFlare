@@ -860,7 +860,7 @@ describe("collect route", () => {
     }
   });
 
-  it("handles Durable Object forwarding failures asynchronously", async () => {
+  it("does not emit a second log when Durable Object forwarding fails asynchronously", async () => {
     const forwardError = new Error("DO unavailable");
     env.INGEST_DO.get.mockReturnValue({
       fetch: vi.fn().mockRejectedValue(forwardError),
@@ -879,12 +879,10 @@ describe("collect route", () => {
 
     expect(response.status).toBe(204);
     await expect(ctx.waitUntil.mock.calls[0]?.[0]).resolves.toBeUndefined();
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining("collect_forward_failed"),
-    );
+    expect(console.error).not.toHaveBeenCalled();
   });
 
-  it("logs non-ok Durable Object responses without failing collection", async () => {
+  it("does not emit a second log for non-ok Durable Object responses", async () => {
     env.INGEST_DO.get.mockReturnValue({
       fetch: vi
         .fn()
@@ -904,12 +902,10 @@ describe("collect route", () => {
 
     expect(response.status).toBe(204);
     await expect(ctx.waitUntil.mock.calls[0]?.[0]).resolves.toBeUndefined();
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining("collect_forward_failed"),
-    );
+    expect(console.error).not.toHaveBeenCalled();
   });
 
-  it("logs successful Durable Object responses even when the response body cannot be read", async () => {
+  it("does not read Durable Object response bodies after queuing the forward", async () => {
     env.INGEST_DO.get.mockReturnValue({
       fetch: vi.fn().mockResolvedValue({
         ok: true,
@@ -931,8 +927,6 @@ describe("collect route", () => {
 
     expect(response.status).toBe(204);
     await expect(ctx.waitUntil.mock.calls[0]?.[0]).resolves.toBeUndefined();
-    expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining("collect_forward_result"),
-    );
+    expect(console.log).not.toHaveBeenCalled();
   });
 });

@@ -121,22 +121,6 @@ export function errorResponse(
   const clientMessage =
     isProduction && status >= 500 ? "An internal error occurred" : message;
 
-  // 服务端日志记录详细错误
-  if (status >= 500) {
-    console.error(
-      JSON.stringify({
-        event: "api_error",
-        requestId,
-        status,
-        code,
-        message,
-        url: req?.url,
-        method: req?.method,
-        timestamp: new Date().toISOString(),
-      }),
-    );
-  }
-
   return createJsonResponse(
     {
       ok: false,

@@ -365,6 +365,7 @@ describe("Hono API app routing", () => {
       env,
       executionCtx,
       new URL("https://app.test/collect"),
+      expect.anything(),
     );
     expect(handleTrackerScriptRequest).toHaveBeenCalledWith(
       expect.any(Request),
@@ -417,6 +418,49 @@ describe("Hono API app routing", () => {
     expect(handlePublicQuery).not.toHaveBeenCalled();
     expect(handleCapabilities).toHaveBeenCalled();
     expect(handleApiV1).not.toHaveBeenCalled();
+  });
+
+  it("emits one aggregate Worker record with route and query diagnostics", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.mocked(dispatchQueryRoute).mockResolvedValueOnce(
+      new Response("overview", {
+        headers: {
+          "x-insightflare-cache": "MISS",
+          "x-insightflare-data-source": "raw",
+          "x-insightflare-d1-rows-read": "42",
+        },
+      }),
+    );
+
+    await apiApp.fetch(
+      request("/api/private/overview"),
+      env as any,
+      executionCtx,
+    );
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "worker",
+        trigger: "request",
+        request: expect.objectContaining({
+          method: "GET",
+          status: 200,
+          outcome: "ok",
+        }),
+        performance: expect.objectContaining({
+          cache: "MISS",
+          dataSource: "raw",
+          d1RowsRead: 42,
+          d1RowsReadAvailable: true,
+        }),
+        logs: expect.arrayContaining([
+          expect.objectContaining({ message: "request.started" }),
+          expect.objectContaining({ message: "request.completed" }),
+        ]),
+      }),
+    );
+    logSpy.mockRestore();
   });
 
   it("redirects the bare API root to API v1 without applying API no-cache defaults", async () => {

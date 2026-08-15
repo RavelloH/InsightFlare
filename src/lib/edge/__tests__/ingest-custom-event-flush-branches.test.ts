@@ -4,6 +4,7 @@ import { FLUSHED_BUFFER_RETENTION_MS } from "@/lib/edge/ingest-constants";
 import { flushCustomEventRowIndividually } from "@/lib/edge/ingest-custom-event-flush";
 import type { IngestFlushContext } from "@/lib/edge/ingest-flush-types";
 import type { BufferedCustomEventRow } from "@/lib/edge/ingest-types";
+import type { InvocationPerformanceCounter } from "@/lib/edge/observability-logger";
 
 const NOW = Date.UTC(2026, 4, 25, 12, 0, 0);
 
@@ -42,6 +43,12 @@ function createFlushContext(options: {
   calls: D1Call[];
   sqlRun: ReturnType<typeof vi.fn>;
   batch: ReturnType<typeof vi.fn>;
+  observability: {
+    increment: ReturnType<typeof vi.fn>;
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+  };
 } {
   const calls: D1Call[] = [];
   const sqlRun = vi.fn(() => 1);
@@ -90,6 +97,15 @@ function createFlushContext(options: {
     insertBufferedVisitRow: vi.fn(),
     hasOpenVisitsForVisitor: vi.fn(() => false),
     pushRealtimeRecord: vi.fn(async () => undefined),
+    observability: {
+      increment:
+        vi.fn<
+          (counter: InvocationPerformanceCounter, amount?: number) => void
+        >(),
+      info: vi.fn<(message: string) => void>(),
+      warn: vi.fn<(message: string) => void>(),
+      error: vi.fn<(message: string) => void>(),
+    },
     calls,
     batch,
   };
@@ -120,11 +136,8 @@ describe("custom event individual flush branch coverage", () => {
       "DELETE FROM buffered_custom_events WHERE event_id IN (?)",
       "event-1",
     );
-    expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining("waiting_for_visit"),
-    );
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining("do_failed_custom_event_rows_deleted"),
+    expect(context.observability.warn).toHaveBeenCalledWith(
+      "do.flush.custom_event_waiting_for_visit",
     );
   });
 
@@ -178,8 +191,13 @@ describe("custom event individual flush branch coverage", () => {
       "DELETE FROM buffered_custom_events WHERE event_id IN (?)",
       "event-1",
     );
-    expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining("d1_flush_custom_event_ok"),
+    const d1Statements = context.observability.increment.mock.calls
+      .filter(([counter]) => counter === "d1Statements")
+      .reduce((total, [, amount]) => total + (amount ?? 1), 0);
+    expect(d1Statements).toBe(14);
+    expect(context.observability.increment).toHaveBeenCalledWith(
+      "flushedCustomEvents",
+      1,
     );
   });
 
@@ -195,8 +213,8 @@ describe("custom event individual flush branch coverage", () => {
       "DELETE FROM buffered_custom_events WHERE event_id IN (?)",
       "event-1",
     );
-    expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining("insert_did_not_create_event"),
+    expect(context.observability.warn).toHaveBeenCalledWith(
+      "do.flush.custom_event_insert_not_confirmed",
     );
   });
 

@@ -3,6 +3,7 @@ import handler from "@tanstack/react-start/server-entry";
 import { initializeE2eClock } from "@/lib/edge/e2e-clock";
 import { runHourlyAggregation } from "@/lib/edge/hourly-rollup";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest-do";
+import { createInvocationLogger } from "@/lib/edge/observability-logger";
 import { getScheduledTaskDefinition } from "@/lib/edge/scheduled-task-registry";
 import { runScheduledTask } from "@/lib/edge/scheduled-task-runner";
 import type { Env } from "@/lib/edge/types";
@@ -79,6 +80,16 @@ function isServerFunctionRequest(pathname: string): boolean {
   return pathname === "/_serverFn" || pathname.startsWith("/_serverFn/");
 }
 
+function pageRouteForLog(pathname: string): string {
+  return isServerFunctionRequest(pathname) ? "server_function" : "page";
+}
+
+function markInternalPageRequest(request: Request): Request {
+  const headers = new Headers(request.headers);
+  headers.set("x-insightflare-internal-page-request", "1");
+  return new Request(request, { headers });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     initializeE2eClock(env);
@@ -87,40 +98,77 @@ export default {
       return apiApp.fetch(request, env, ctx);
     }
 
-    // Server functions are protocol requests, not localized page navigations.
-    // Let Start see the original /_serverFn path before page middleware can
-    // redirect it beneath a locale segment.
-    if (isServerFunctionRequest(pathname)) {
-      const response = await handler.fetch(request, {
-        context: { env, executionCtx: ctx },
-      });
-      return withPageHeaders(response, pathname, null, env.DEMO_MODE === "1");
-    }
-
-    const decision = await resolvePageRequest(
-      request,
-      env,
-      async (internalRequest) => apiApp.fetch(internalRequest, env, ctx),
-    );
-    if (decision.response) {
-      return withPageHeaders(
-        decision.response,
-        new URL(decision.response.headers.get("location") || request.url)
-          .pathname,
-        decision.locale,
-        env.DEMO_MODE === "1",
-      );
-    }
-
-    const response = await handler.fetch(request, {
-      context: { env, executionCtx: ctx },
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
     });
-    return withPageHeaders(
-      response,
-      pathname,
-      decision.locale,
-      env.DEMO_MODE === "1",
-    );
+    logger.info("request.started");
+
+    try {
+      // Server functions are protocol requests, not localized page navigations.
+      // Let Start see the original /_serverFn path before page middleware can
+      // redirect it beneath a locale segment.
+      if (isServerFunctionRequest(pathname)) {
+        const response = await handler.fetch(request, {
+          context: { env, executionCtx: ctx },
+        });
+        const result = withPageHeaders(
+          response,
+          pathname,
+          null,
+          env.DEMO_MODE === "1",
+        );
+        logger.setRequest({
+          route: pageRouteForLog(pathname),
+          method: request.method,
+          status: result.status,
+          outcome: result.status >= 400 ? "error" : "ok",
+        });
+        return result;
+      }
+
+      const decision = await resolvePageRequest(
+        request,
+        env,
+        async (internalRequest) =>
+          apiApp.fetch(markInternalPageRequest(internalRequest), env, ctx),
+      );
+      const result = decision.response
+        ? withPageHeaders(
+            decision.response,
+            new URL(decision.response.headers.get("location") || request.url)
+              .pathname,
+            decision.locale,
+            env.DEMO_MODE === "1",
+          )
+        : withPageHeaders(
+            await handler.fetch(request, {
+              context: { env, executionCtx: ctx },
+            }),
+            pathname,
+            decision.locale,
+            env.DEMO_MODE === "1",
+          );
+      logger.setRequest({
+        route: pageRouteForLog(pathname),
+        method: request.method,
+        status: result.status,
+        outcome: result.status >= 400 ? "error" : "ok",
+      });
+      return result;
+    } catch (error) {
+      logger.error("request.unhandled_error");
+      logger.setRequest({
+        route: pageRouteForLog(pathname),
+        method: request.method,
+        status: 500,
+        outcome: "error",
+      });
+      throw error;
+    } finally {
+      logger.info("request.completed");
+      logger.emit();
+    }
   },
 
   async scheduled(
@@ -128,7 +176,16 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ) {
-    if (shouldSkipScheduledTasks(env)) return;
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "alarm",
+    });
+    logger.info("scheduled.started");
+    if (shouldSkipScheduledTasks(env)) {
+      logger.info("scheduled.skipped");
+      logger.emit();
+      return;
+    }
     const task = getScheduledTaskDefinition("visit_hourly_rollup");
     const notificationTask = getScheduledTaskDefinition("notification_tick");
     ctx.waitUntil(
@@ -141,8 +198,11 @@ export default {
             triggerType: "cron",
           },
           controller.scheduledTime,
-          ({ logger }) =>
-            runHourlyAggregation(env, controller.scheduledTime, { logger }),
+          ({ logger: taskLogger }) =>
+            runHourlyAggregation(env, controller.scheduledTime, {
+              logger: taskLogger,
+            }),
+          logger,
         ),
         runScheduledTask(
           env,
@@ -153,8 +213,16 @@ export default {
           },
           controller.scheduledTime,
           runNotificationTick,
+          logger,
         ),
-      ]),
+      ])
+        .then(() => logger.info("scheduled.completed"))
+        .catch((error) => {
+          void error;
+          logger.error("scheduled.failed");
+          throw error;
+        })
+        .finally(() => logger.emit()),
     );
   },
 };
