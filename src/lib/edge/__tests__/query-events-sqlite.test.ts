@@ -290,21 +290,22 @@ describe("event detail D1 SQL", () => {
       const cardQueries = d1.calls.filter(({ sql }) =>
         sql.includes("\ncard_rows AS"),
       );
-      expect(cardQueries).toHaveLength(4);
-      for (const { sql } of cardQueries) {
-        expect((sql.match(/UNION ALL/g) ?? []).length).toBeLessThan(5);
-      }
+      expect(cardQueries).toHaveLength(1);
+      const cardQuery = cardQueries[0];
+      expect((cardQuery.sql.match(/card_group_\d+ AS \(/g) ?? []).length).toBe(
+        4,
+      );
       expect(
-        cardQueries.filter(({ sql }) => sql.includes("session_visit_edges")),
-      ).toHaveLength(1);
-      for (const cardQuery of cardQueries) {
-        const cardPlan = d1.database
-          .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
-          .all(...cardQuery.bindings) as Array<{ detail: string }>;
-        expect(cardPlan.map((row) => row.detail).join("\n")).toContain(
-          "MATERIALIZE filtered_events",
-        );
-      }
+        (cardQuery.sql.match(/SELECT \* FROM card_group_\d+/g) ?? []).length,
+      ).toBe(4);
+      const cardPlan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
+        .all(...cardQuery.bindings) as Array<{ detail: string }>;
+      const cardPlanDetails = cardPlan.map((row) => row.detail).join("\n");
+      expect(cardPlanDetails).toContain("MATERIALIZE filtered_events");
+      expect(
+        (cardPlanDetails.match(/MATERIALIZE filtered_events/g) ?? []).length,
+      ).toBe(1);
       const overviewQuery = d1.calls.find(({ sql }) =>
         sql.includes("overview_card_rows AS"),
       );
@@ -317,12 +318,9 @@ describe("event detail D1 SQL", () => {
       expect(planDetails).toContain("MATERIALIZE filtered_events");
       expect(planDetails).toContain("idx_custom_events_site_name_time");
 
-      const entryExitQuery = cardQueries.find(({ sql }) =>
-        sql.includes("session_visit_edges"),
-      );
       const entryExitPlan = d1.database
-        .prepare(`EXPLAIN QUERY PLAN ${entryExitQuery?.sql ?? "SELECT 1"}`)
-        .all(...(entryExitQuery?.bindings ?? [])) as Array<{ detail: string }>;
+        .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
+        .all(...cardQuery.bindings) as Array<{ detail: string }>;
       expect(entryExitPlan.map((row) => row.detail).join("\n")).toContain(
         "idx_visits_site_session_started_at",
       );

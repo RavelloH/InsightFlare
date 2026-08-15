@@ -167,7 +167,7 @@ export async function queryEventAnalyticsContextCardsFromD1(
       labelExpr: "as_organization",
     },
   ];
-  const cardSources: Array<{ sql: string; usesSessionEdges?: true }> = [
+  const cardSources: Array<{ sql: string }> = [
     ...dimensions.map(({ key, expr, includeEmpty }) => ({
       sql: `
   SELECT
@@ -195,7 +195,6 @@ export async function queryEventAnalyticsContextCardsFromD1(
   GROUP BY value, label`,
     })),
     ...(["entry", "exit"] as const).map((kind) => ({
-      usesSessionEdges: true as const,
       sql: `
   SELECT
     '${kind}' AS cardType,
@@ -210,22 +209,19 @@ export async function queryEventAnalyticsContextCardsFromD1(
   GROUP BY value`,
     })),
   ];
-  const cardSourceChunks: Array<
-    Array<{ sql: string; usesSessionEdges?: true }>
-  > = [];
+  const cardSourceChunks: Array<Array<{ sql: string }>> = [];
   // D1 currently rejects compound SELECT statements with more than five terms.
   const maxCompoundTerms = 5;
   for (let index = 0; index < cardSources.length; index += maxCompoundTerms) {
     cardSourceChunks.push(cardSources.slice(index, index + maxCompoundTerms));
   }
-  const rows = (
-    await Promise.all(
-      cardSourceChunks.map((sources) => {
-        const usesSessionEdges = sources.some(
-          (source) => source.usesSessionEdges,
-        );
-        const sessionEdgeCte = usesSessionEdges
-          ? `,
+  const cardGroupCtes = cardSourceChunks.map(
+    (sources, index) => `
+card_group_${index} AS (
+${sources.map(({ sql }) => sql).join("\nUNION ALL")}
+)`,
+  );
+  const sessionEdgeCte = `,
 event_sessions AS MATERIALIZED (
   SELECT DISTINCT session_id
   FROM filtered_events
@@ -257,23 +253,22 @@ session_edges AS (
     MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exitPath
   FROM session_visit_edges
   GROUP BY session_id
-)`
-          : "";
-        const bindings = usesSessionEdges
-          ? [...source.bindings, ...visitSourceBindings(siteId, window), limit]
-          : [...source.bindings, limit];
-        return queryD1All<{
-          cardType: string;
-          value: string | null;
-          label: string | null;
-          views: number;
-          sessions: number;
-          visitors: number;
-        }>(
-          env,
-          `${source.cte}${sessionEdgeCte},
+)`;
+  const rows = await queryD1All<{
+    cardType: string;
+    value: string | null;
+    label: string | null;
+    views: number;
+    sessions: number;
+    visitors: number;
+  }>(
+    env,
+    `${source.cte}${sessionEdgeCte},
+${cardGroupCtes.join(",")},
 card_rows AS (
-${sources.map(({ sql }) => sql).join("\nUNION ALL")}
+${cardSourceChunks
+  .map((_, index) => `SELECT * FROM card_group_${index}`)
+  .join("\nUNION ALL\n")}
 ),
 ranked_cards AS (
   SELECT
@@ -294,11 +289,8 @@ FROM ranked_cards
 WHERE card_rank <= ?
 ORDER BY cardType ASC, card_rank ASC
 `,
-          bindings,
-        );
-      }),
-    )
-  ).flat();
+    [...source.bindings, ...visitSourceBindings(siteId, window), limit],
+  );
   const byCard = new Map<
     string,
     Array<{
