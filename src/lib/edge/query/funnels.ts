@@ -216,7 +216,7 @@ async function queryFunnelCustomEvents(
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-${buildEventAnalyticsSourceCte()}
+${buildEventAnalyticsSourceCte({ eventNames: values })}
 SELECT
   es.session_id AS sessionId,
   es.visitor_id AS visitorId,
@@ -227,14 +227,12 @@ SELECT
 FROM event_source es
 WHERE TRIM(COALESCE(es.session_id, '')) != ''
   ${filterClause}
-  AND es.event_name IN (${values.map(() => "?").join(", ")})
 ORDER BY timestampMs ASC, sequence ASC, sourceId ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
-    ...eventSourceBindings(siteId, window),
+    ...eventSourceBindings(siteId, window, values),
     ...filter.bindings,
-    ...values,
   ]);
 
   return rows.map((row) => ({

@@ -109,6 +109,7 @@ event_source${options?.materialize ? " AS MATERIALIZED" : " AS"} (
 
 export function buildEventAnalyticsSourceCte(options?: {
   eventName?: string;
+  eventNames?: string[];
   cteName?: string;
 }): string {
   const cteName = options?.cteName ?? "event_source";
@@ -119,12 +120,23 @@ target_event_name AS (
   FROM custom_event_names
   WHERE site_id = ? AND name = ?
 ),`
-    : "";
+    : options?.eventNames?.length
+      ? `
+target_event_names AS (
+  SELECT id
+  FROM custom_event_names
+  WHERE site_id = ? AND name IN (${options.eventNames.map(() => "?").join(", ")})
+),`
+      : "";
   const eventNameJoin = options?.eventName
     ? `
   INNER JOIN target_event_name ten
     ON ten.id = ce.event_name_id`
-    : "";
+    : options?.eventNames?.length
+      ? `
+  INNER JOIN target_event_names ten
+    ON ten.id = ce.event_name_id`
+      : "";
   return `
 ${eventNameSource}
 ${cteName} AS (
@@ -211,11 +223,13 @@ export function visitSourceBindings(
 export function eventSourceBindings(
   siteId: string,
   window: QueryWindow,
-  eventName?: string,
+  eventName?: string | string[],
 ): Array<string | number> {
-  return eventName
+  return typeof eventName === "string"
     ? [siteId, eventName, siteId, window.fromMs, window.toMs]
-    : [siteId, window.fromMs, window.toMs];
+    : eventName?.length
+      ? [siteId, ...eventName, siteId, window.fromMs, window.toMs]
+      : [siteId, window.fromMs, window.toMs];
 }
 
 export function targetVisitSourceBindings(

@@ -12,6 +12,7 @@ import {
   queryEventRecordsFromD1,
 } from "@/lib/edge/query/events-records";
 import { queryEventTypeTrendFromD1 } from "@/lib/edge/query/events-trend";
+import { queryFunnelAnalysis } from "@/lib/edge/query/funnels";
 import {
   querySessionListPageFromD1,
   querySessionsFromD1,
@@ -464,6 +465,30 @@ describe("event detail D1 SQL", () => {
       expect(query?.sql).toContain("target_event_name AS");
       expect(query?.sql).not.toContain("TRIM(COALESCE(es.event_name");
       expect(planDetails).toContain("idx_custom_events_site_name_time");
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("uses the event-name index for funnel event steps", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      const analysis = await queryFunnelAnalysis(env, siteId, window, {}, [
+        { type: "event", value: eventName },
+      ]);
+
+      expect(analysis.summary.totalSessions).toBe(1);
+      const query = d1.calls.find((call) =>
+        call.sql.includes("target_event_names AS"),
+      );
+      expect(query?.sql).not.toContain("es.event_name IN");
+      const plan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${query?.sql ?? "SELECT 1"}`)
+        .all(...(query?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(plan.map((row) => row.detail).join("\n")).toContain(
+        "idx_custom_events_site_name_time",
+      );
     } finally {
       d1.close();
     }
