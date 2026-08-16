@@ -638,8 +638,16 @@ function bucketIndexForTimestamp(
   buckets: ReturnType<typeof buildTimeBuckets>,
   timestampMs: number,
 ): number | null {
-  for (const bucket of buckets) {
-    if (timestampMs >= bucket.fromMs && timestampMs < bucket.toMs) {
+  let lower = 0;
+  let upper = buckets.length - 1;
+  while (lower <= upper) {
+    const middle = lower + Math.floor((upper - lower) / 2);
+    const bucket = buckets[middle];
+    if (timestampMs < bucket.fromMs) {
+      upper = middle - 1;
+    } else if (timestampMs >= bucket.toMs) {
+      lower = middle + 1;
+    } else {
       return bucket.index;
     }
   }

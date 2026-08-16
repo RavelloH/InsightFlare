@@ -157,6 +157,81 @@ describe("queryTrendForSitesFromHourlyRollups", () => {
     );
     expect(result).toBeNull();
   });
+
+  it("keeps wide-window rollup rows within their matching time bucket", async () => {
+    const db = makeDbMock();
+    db.all
+      .mockResolvedValueOnce({
+        results: [{ siteId: "site-1", aggregatedUntilHour: 2 }],
+      })
+      .mockResolvedValueOnce({
+        results: [
+          {
+            siteId: "site-1",
+            hourBucket: -1,
+            views: 99,
+            durationMsSum: 0,
+            durationMsCount: 0,
+            visitors: 0,
+            sessions: 0,
+            bounces: 0,
+            visitorSetJson: "[]",
+            sessionCountsJson: "[]",
+          },
+          {
+            siteId: "site-1",
+            hourBucket: 1,
+            views: 1,
+            durationMsSum: 100,
+            durationMsCount: 1,
+            visitors: 1,
+            sessions: 1,
+            bounces: 1,
+            visitorSetJson: '["visitor-1"]',
+            sessionCountsJson: '[["session-1",1]]',
+          },
+          {
+            siteId: "site-1",
+            hourBucket: 3,
+            views: 99,
+            durationMsSum: 0,
+            durationMsCount: 0,
+            visitors: 0,
+            sessions: 0,
+            bounces: 0,
+            visitorSetJson: "[]",
+            sessionCountsJson: "[]",
+          },
+        ],
+      });
+    const env = { DB: db } as unknown as Env;
+
+    await expect(
+      queryTrendForSitesFromHourlyRollups(
+        env,
+        ["site-1"],
+        {
+          fromMs: 0,
+          toMs: 3 * 60 * 60 * 1000 - 1,
+          nowMs: 4 * 60 * 60 * 1000,
+          timeZone: "UTC",
+        },
+        "hour",
+      ),
+    ).resolves.toEqual([
+      {
+        siteId: "site-1",
+        bucket: 1,
+        timestampMs: 60 * 60 * 1000,
+        views: 1,
+        visitors: 1,
+        sessions: 1,
+        bounces: 1,
+        totalDuration: 100,
+        durationViews: 1,
+      },
+    ]);
+  });
 });
 
 describe("queryOverviewForSitesFromHourlyRollups edge cases", () => {
