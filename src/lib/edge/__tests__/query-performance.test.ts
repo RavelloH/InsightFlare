@@ -180,8 +180,7 @@ describe("edge query performance D1 helpers", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.sql).toContain("metric_thresholds AS");
     expect(calls[0]?.sql).toContain("FROM visits");
-    expect(calls[0]?.sql).toContain("CROSS JOIN metric_keys");
-    expect(calls[0]?.sql).toContain("WHEN 'cls' THEN perf_cls");
+    expect(calls[0]?.sql).toContain("perf_cls AS metricValue");
     expect(calls[0]?.bindings).toEqual([
       ...visitBindings,
       "us",
@@ -356,10 +355,8 @@ describe("edge query performance D1 helpers", () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.sql).toContain("PARTITION BY metric, bucket");
-    expect(calls[0]?.sql).toContain(
-      "VALUES ('ttfb'), ('fcp'), ('lcp'), ('cls'), ('inp')",
-    );
-    expect(calls[0]?.sql).toContain("CROSS JOIN metric_keys");
+    expect(calls[0]?.sql).toContain("'ttfb' AS metric");
+    expect(calls[0]?.sql).toContain("'inp' AS metric");
     expect(calls[0]?.bindings).toEqual([...visitBindings, "us"]);
     expect(result.lcp).toEqual([
       {

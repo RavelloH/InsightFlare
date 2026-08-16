@@ -40,24 +40,12 @@ function performanceMetricVisitsSql(
 ): string {
   const dimensionSql =
     dimensions.length > 0 ? `${dimensions.join(", ")}, ` : "";
-  const metricValueSql = `
-    CASE metric_keys.metric
-      WHEN 'ttfb' THEN perf_ttfb_ms
-      WHEN 'fcp' THEN perf_fcp_ms
-      WHEN 'lcp' THEN perf_lcp_ms
-      WHEN 'cls' THEN perf_cls
-      WHEN 'inp' THEN perf_inp_ms
-    END`;
-  return `
-WITH metric_keys(metric) AS (
-  VALUES ${PERFORMANCE_METRIC_KEYS.map((metric) => `('${metric}')`).join(", ")}
-)
-SELECT
-  ${dimensionSql}metric_keys.metric AS metric,
-  ${metricValueSql} AS metricValue
-FROM ${source}
-CROSS JOIN metric_keys
-WHERE ${metricValueSql} IS NOT NULL`;
+  return PERFORMANCE_METRIC_KEYS.map((metric) => {
+    const column = PERFORMANCE_METRIC_COLUMNS[metric];
+    return `SELECT ${dimensionSql}'${metric}' AS metric, ${column} AS metricValue
+  FROM ${source}
+  WHERE ${column} IS NOT NULL`;
+  }).join("\n  UNION ALL\n  ");
 }
 
 function emptyPerformanceSummaries(): Record<
