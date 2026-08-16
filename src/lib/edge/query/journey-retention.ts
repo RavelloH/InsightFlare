@@ -56,30 +56,29 @@ filtered_visits AS MATERIALIZED (
   WHERE visitor_id != ''
   ${filterAndClause}
 ),
+visitor_buckets AS MATERIALIZED (
+  SELECT
+    visitor_id,
+    bucket
+  FROM filtered_visits
+  WHERE bucket IS NOT NULL
+  GROUP BY visitor_id, bucket
+),
 cohort_assign AS (
   SELECT
     visitor_id,
     MIN(bucket) AS cohort_bucket
-  FROM filtered_visits
-  WHERE bucket IS NOT NULL
+  FROM visitor_buckets
   GROUP BY visitor_id
-),
-return_data AS (
-  SELECT
-    ca.cohort_bucket,
-    fv.bucket AS visit_bucket,
-    fv.visitor_id
-  FROM filtered_visits fv
-  JOIN cohort_assign ca ON fv.visitor_id = ca.visitor_id
-  WHERE fv.bucket IS NOT NULL
 )
 SELECT
   cohort_bucket AS cohortBucket,
-  visit_bucket AS visitBucket,
-  COUNT(DISTINCT visitor_id) AS visitors
-FROM return_data
-GROUP BY cohort_bucket, visit_bucket
-ORDER BY cohort_bucket ASC, visit_bucket ASC
+  vb.bucket AS visitBucket,
+  COUNT(*) AS visitors
+FROM visitor_buckets vb
+JOIN cohort_assign ca ON vb.visitor_id = ca.visitor_id
+GROUP BY cohort_bucket, vb.bucket
+ORDER BY cohort_bucket ASC, vb.bucket ASC
 `;
 
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
