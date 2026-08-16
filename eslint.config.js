@@ -19,6 +19,7 @@ export default [
       "dist/**",
       "node_modules/**",
       "output/**",
+      "plan/**",
       "playwright-report/**",
       "test-results/**",
       ".tmp/**",
