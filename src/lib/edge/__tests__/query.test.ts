@@ -460,7 +460,7 @@ function commonQueryMatches(): SqlMatch[] {
       [{ value: "Signup", views: 8, sessions: 5, visitors: 4 }],
     ),
     allMatch(
-      ["event_name AS eventName", "GROUP BY event_name", "LIMIT ?"],
+      ["series_aggregate AS", "ROW_NUMBER() OVER", "other_series AS"],
       [{ eventName: "Signup", events: 7, sessions: 4, visitors: 3 }],
     ),
     allMatch(
