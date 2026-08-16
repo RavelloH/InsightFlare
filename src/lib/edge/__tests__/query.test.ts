@@ -863,9 +863,10 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(
-      ["path_rollup AS", "ORDER BY pr.views"],
+      ["path_rollup AS", "page_rows AS MATERIALIZED", "'metric' AS rowKind"],
       [
         {
+          rowKind: "metric",
           pathname: "/pricing",
           views: 12,
           sessions: 8,
@@ -875,6 +876,7 @@ function commonQueryMatches(): SqlMatch[] {
           durationViews: 0,
         },
         {
+          rowKind: "metric",
           pathname: "/docs",
           views: 4,
           sessions: 3,
@@ -884,6 +886,7 @@ function commonQueryMatches(): SqlMatch[] {
           durationViews: 0,
         },
         {
+          rowKind: "metric",
           pathname: "/blog",
           views: 2,
           sessions: 2,
@@ -891,6 +894,25 @@ function commonQueryMatches(): SqlMatch[] {
           bounces: 2,
           totalDuration: 1_000,
           durationViews: 0,
+        },
+        {
+          rowKind: "title",
+          pathname: "/pricing",
+          title: "Pricing",
+          views: 9,
+        },
+        {
+          rowKind: "title",
+          pathname: "/pricing",
+          title: "Plans",
+          views: 3,
+        },
+        {
+          rowKind: "trend",
+          pathname: "/pricing",
+          bucket: 0,
+          views: 5,
+          visitors: 4,
         },
       ],
     ),

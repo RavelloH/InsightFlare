@@ -364,29 +364,23 @@ ORDER BY pathname ASC, bucket ASC
   }));
 }
 
-async function queryPageCardDetailsFromD1(
+async function queryPageDashboardCurrentFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
   interval: Interval,
   filters: DashboardFilters,
-  pathnames: string[],
-  titleLimit: number,
-): Promise<{ titles: PageCardTitleRow[]; trend: PageCardTrendRow[] }> {
-  const requestedPathnames = Array.from(
-    new Set(
-      pathnames
-        .map((pathname) => String(pathname ?? "").trim())
-        .filter((pathname) => pathname.length > 0),
-    ),
-  );
-  if (requestedPathnames.length === 0) return { titles: [], trend: [] };
-
+  options: { limit: number; offset: number; titleLimit: number },
+): Promise<{
+  rows: PageCardAggregateRow[];
+  titles: PageCardTitleRow[];
+  trend: PageCardTrendRow[];
+}> {
   const filter = buildVisitFilterSql(filters);
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "startedAt");
   const filteredClause = appendSqlConditions(filter.clause, [
-    `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`,
+    `TRIM(COALESCE(pathname, '')) != ''`,
   ]);
   const sql = `
 WITH
@@ -394,20 +388,67 @@ ${buildVisitSourceCte()},
 filtered_visits AS MATERIALIZED (
   SELECT
     pathname,
+    session_id AS sessionId,
+    visitor_id AS visitorId,
+    duration_ms AS durationMs,
     title,
-    started_at AS startedAt,
-    visitor_id AS visitorId
+    started_at AS startedAt
   FROM visit_source
   ${filteredClause}
 ),
-title_rollup AS (
+path_rollup AS (
   SELECT
     pathname,
-    TRIM(COALESCE(title, '')) AS title,
-    count(*) AS views
+    count(*) AS views,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    COALESCE(sum(CASE WHEN durationMs IS NOT NULL AND durationMs >= 0 THEN durationMs ELSE 0 END), 0) AS totalDuration
   FROM filtered_visits
-  WHERE TRIM(COALESCE(title, '')) != ''
-  GROUP BY pathname, TRIM(COALESCE(title, ''))
+  GROUP BY pathname
+),
+path_session_rollup AS (
+  SELECT
+    pathname,
+    sessionId,
+    count(*) AS visitCount
+  FROM filtered_visits
+  WHERE sessionId != ''
+  GROUP BY pathname, sessionId
+),
+path_bounce_rollup AS (
+  SELECT
+    pathname,
+    count(*) AS bounces
+  FROM path_session_rollup
+  WHERE visitCount = 1
+  GROUP BY pathname
+),
+page_rows AS MATERIALIZED (
+  SELECT
+    pr.pathname AS pathname,
+    pr.views AS views,
+    pr.sessions AS sessions,
+    pr.visitors AS visitors,
+    COALESCE(pb.bounces, 0) AS bounces,
+    pr.totalDuration AS totalDuration,
+    0 AS durationViews,
+    ROW_NUMBER() OVER (
+      ORDER BY pr.views DESC, pr.sessions DESC, pr.pathname ASC
+    ) AS pageRank
+  FROM path_rollup pr
+  LEFT JOIN path_bounce_rollup pb ON pb.pathname = pr.pathname
+  ORDER BY pr.views DESC, pr.sessions DESC, pr.pathname ASC
+  LIMIT ? OFFSET ?
+),
+title_rollup AS (
+  SELECT
+    fv.pathname,
+    TRIM(COALESCE(fv.title, '')) AS title,
+    count(*) AS views
+  FROM filtered_visits fv
+  INNER JOIN page_rows pr ON pr.pathname = fv.pathname
+  WHERE TRIM(COALESCE(fv.title, '')) != ''
+  GROUP BY fv.pathname, TRIM(COALESCE(fv.title, ''))
 ),
 ranked_titles AS (
   SELECT
@@ -419,20 +460,39 @@ ranked_titles AS (
 ),
 trend_rollup AS (
   SELECT
-    pathname,
+    fv.pathname,
     ${bucket.sql} AS bucket,
     count(*) AS views,
-    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors
-  FROM filtered_visits
-  GROUP BY pathname, bucket
+    count(DISTINCT CASE WHEN fv.visitorId != '' THEN fv.visitorId ELSE NULL END) AS visitors
+  FROM filtered_visits fv
+  INNER JOIN page_rows pr ON pr.pathname = fv.pathname
+  GROUP BY fv.pathname, bucket
 )
+SELECT
+  'metric' AS rowKind,
+  pathname,
+  views,
+  sessions,
+  visitors,
+  bounces,
+  totalDuration,
+  durationViews,
+  NULL AS title,
+  NULL AS bucket,
+  pageRank AS rowOrder
+FROM page_rows
+UNION ALL
 SELECT
   'title' AS rowKind,
   pathname,
-  title,
   views,
+  0 AS sessions,
+  0 AS visitors,
+  0 AS bounces,
+  0 AS totalDuration,
+  0 AS durationViews,
+  title,
   NULL AS bucket,
-  NULL AS visitors,
   titleRank AS rowOrder
 FROM ranked_titles
 WHERE titleRank <= ?
@@ -440,24 +500,42 @@ UNION ALL
 SELECT
   'trend' AS rowKind,
   pathname,
-  NULL AS title,
   views,
-  bucket,
+  0 AS sessions,
   visitors,
+  0 AS bounces,
+  0 AS totalDuration,
+  0 AS durationViews,
+  NULL AS title,
+  bucket,
   bucket AS rowOrder
 FROM trend_rollup
-ORDER BY rowKind ASC, pathname ASC, rowOrder ASC
+ORDER BY rowKind ASC, rowOrder ASC, pathname ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
     ...filter.bindings,
-    ...requestedPathnames,
+    options.limit,
+    options.offset,
     ...bucket.bindings,
-    titleLimit,
+    options.titleLimit,
   ]);
+  const metrics: PageCardAggregateRow[] = [];
   const titles: PageCardTitleRow[] = [];
   const trend: PageCardTrendRow[] = [];
   for (const row of rows) {
+    if (row.rowKind === "metric") {
+      metrics.push({
+        pathname: String(row.pathname ?? ""),
+        views: Number(row.views ?? 0),
+        sessions: Number(row.sessions ?? 0),
+        visitors: Number(row.visitors ?? 0),
+        bounces: Number(row.bounces ?? 0),
+        totalDuration: Number(row.totalDuration ?? 0),
+        durationViews: Number(row.durationViews ?? 0),
+      });
+      continue;
+    }
     if (row.rowKind === "title") {
       titles.push({
         pathname: String(row.pathname ?? ""),
@@ -477,7 +555,7 @@ ORDER BY rowKind ASC, pathname ASC, rowOrder ASC
       });
     }
   }
-  return { titles, trend };
+  return { rows: metrics, titles, trend };
 }
 
 export async function queryReferrerAggregate(
@@ -584,16 +662,19 @@ export async function handlePagesDashboard(
       "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
     );
   }
-  const requestedRows = await queryPageCardMetricsFromD1(
+  const current = await queryPageDashboardCurrentFromD1(
     env,
     siteId,
     window,
+    interval,
     filters,
     {
       limit: pageSize + 1,
       offset,
+      titleLimit: 3,
     },
   );
+  const requestedRows = current.rows;
   const hasMore = requestedRows.length > pageSize;
   const currentRows = hasMore
     ? requestedRows.slice(0, pageSize)
@@ -623,20 +704,13 @@ export async function handlePagesDashboard(
     timeZone: window.timeZone,
   };
 
-  const [previousRows, details] = await Promise.all([
-    queryPageCardMetricsFromD1(env, siteId, previousWindow, filters, {
-      pathnames,
-    }),
-    queryPageCardDetailsFromD1(
-      env,
-      siteId,
-      window,
-      interval,
-      filters,
-      pathnames,
-      3,
-    ),
-  ]);
+  const previousRows = await queryPageCardMetricsFromD1(
+    env,
+    siteId,
+    previousWindow,
+    filters,
+    { pathnames },
+  );
 
   const previousByPath = new Map<string, PageCardAggregateRow>();
   for (const row of previousRows) {
@@ -644,7 +718,7 @@ export async function handlePagesDashboard(
   }
 
   const titlesByPath = new Map<string, string[]>();
-  for (const row of details.titles) {
+  for (const row of current.titles) {
     const titles = titlesByPath.get(row.pathname) ?? [];
     if (titles.length >= 3) continue;
     const title = row.title.trim();
@@ -661,7 +735,7 @@ export async function handlePagesDashboard(
       visitors: number;
     }>
   >();
-  for (const row of details.trend) {
+  for (const row of current.trend) {
     const trend = trendByPath.get(row.pathname) ?? [];
     trend.push({
       timestampMs: row.timestampMs,

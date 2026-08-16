@@ -707,7 +707,7 @@ describe("edge pages handlers", () => {
       },
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0].bindings).toEqual([...visitBindings(), 5, 4]);
+    expect(calls[0].bindings).toEqual([...visitBindings(), 5, 4, 3]);
   });
 
   it("rejects deep dashboard pages before querying D1", async () => {
@@ -756,18 +756,8 @@ describe("edge pages handlers", () => {
       },
     ];
     const { env, calls } = createD1Env([
-      currentRows,
       [
-        {
-          pathname: "/pricing",
-          views: 5,
-          sessions: 5,
-          visitors: 2,
-          bounces: 2,
-          totalDuration: 25000,
-        },
-      ],
-      [
+        ...currentRows.map((row) => ({ rowKind: "metric", ...row })),
         {
           rowKind: "title",
           pathname: "/pricing",
@@ -794,6 +784,16 @@ describe("edge pages handlers", () => {
           bucket: 1,
           views: 4,
           visitors: 2,
+        },
+      ],
+      [
+        {
+          pathname: "/pricing",
+          views: 5,
+          sessions: 5,
+          visitors: 2,
+          bounces: 2,
+          totalDuration: 25000,
         },
       ],
     ]);
@@ -878,8 +878,8 @@ describe("edge pages handlers", () => {
         },
       ],
     });
-    expect(calls).toHaveLength(3);
-    expect(calls[0].bindings).toEqual([...visitBindings(), 3, 0]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].bindings).toEqual([...visitBindings(), 3, 0, 3]);
     expect(calls[1].bindings).toEqual([
       siteId,
       Math.max(window.fromMs - 1 - (window.toMs - window.fromMs), 0),
@@ -887,13 +887,134 @@ describe("edge pages handlers", () => {
       "/pricing",
       "/docs",
     ]);
-    expect(calls[2].bindings).toEqual([
-      ...visitBindings(),
-      "/pricing",
-      "/docs",
-      3,
-    ]);
-    expect(calls[2].sql).toContain("filtered_visits AS MATERIALIZED");
+    expect(calls[0].sql).toContain("page_rows AS MATERIALIZED");
+  });
+
+  it("reads current page dashboard cards and details from one indexed visits scan", async () => {
+    const database = new DatabaseSync(":memory:");
+    for (const migration of [
+      "migrations/0008_rebuild_analytics.sql",
+      "migrations/0013_add_visit_performance_metrics.sql",
+    ]) {
+      database.exec(readFileSync(migration, "utf8"));
+    }
+    const calls: QueryCall[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: (...bindings: QueryBinding[]) => {
+            calls.push({ sql, bindings });
+            return {
+              all: async () => ({
+                results: database.prepare(sql).all(...bindings) as D1Row[],
+              }),
+            };
+          },
+        }),
+      } as unknown as D1Database,
+    } as Env;
+    const insert = database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, pathname, title, hostname, duration_ms
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, ?, 'example.test', ?)
+    `);
+
+    try {
+      insert.run(
+        "pricing-first",
+        siteId,
+        "visitor-1",
+        "session-1",
+        baseMs,
+        baseMs,
+        "/pricing",
+        "Pricing",
+        100,
+      );
+      insert.run(
+        "pricing-second",
+        siteId,
+        "visitor-1",
+        "session-1",
+        baseMs + 1,
+        baseMs + 1,
+        "/pricing",
+        "Plans",
+        50,
+      );
+      insert.run(
+        "docs",
+        siteId,
+        "visitor-2",
+        "session-2",
+        baseMs + 2,
+        baseMs + 2,
+        "/docs",
+        "Docs",
+        25,
+      );
+
+      const response = await handlePagesDashboard(
+        env,
+        siteId,
+        url("/pages/dashboard", {
+          from: window.fromMs,
+          to: window.toMs,
+          page: 1,
+          pageSize: 2,
+          interval: "hour",
+        }),
+      );
+
+      await expect(response.json()).resolves.toMatchObject({
+        ok: true,
+        data: [
+          {
+            pathname: "/pricing",
+            titles: ["Plans", "Pricing"],
+            metrics: {
+              views: 2,
+              sessions: 1,
+              visitors: 1,
+              bounceRate: 0,
+              avgDurationMs: 150,
+            },
+            trend: [
+              {
+                timestampMs: baseMs,
+                views: 2,
+                visitors: 1,
+              },
+            ],
+          },
+          {
+            pathname: "/docs",
+            titles: ["Docs"],
+            metrics: {
+              views: 1,
+              sessions: 1,
+              visitors: 1,
+              bounceRate: 1,
+              avgDurationMs: 25,
+            },
+          },
+        ],
+      });
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.sql).toContain("page_rows AS MATERIALIZED");
+      const plan = database
+        .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
+        .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(
+        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+      ).toHaveLength(1);
+      expect(
+        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+      ).toBe(true);
+    } finally {
+      database.close();
+    }
   });
 });
 
