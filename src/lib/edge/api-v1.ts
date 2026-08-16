@@ -1103,11 +1103,6 @@ scoped AS MATERIALIZED (
   FROM visit_source
   ${whereClause}
 ),
-dimension_views AS (
-  SELECT dimensionValue, COUNT(*) AS views
-  FROM scoped
-  GROUP BY dimensionValue
-),
 ordered_values AS (
   SELECT
     dimensionValue,
@@ -1129,7 +1124,7 @@ thresholds AS (
 )
 SELECT
   thresholds.dimensionValue AS dimensionValue,
-  dimension_views.views AS views,
+  thresholds.sampleCount AS views,
   thresholds.sampleCount AS samples,
   thresholds.avgValue AS avg,
   MIN(CASE WHEN ordered_values.rowNum >= thresholds.p50Rank THEN ordered_values.metricValue END) AS p50,
@@ -1137,8 +1132,7 @@ SELECT
   MIN(CASE WHEN ordered_values.rowNum >= thresholds.p95Rank THEN ordered_values.metricValue END) AS p95
 FROM thresholds
 JOIN ordered_values ON ordered_values.dimensionValue = thresholds.dimensionValue
-JOIN dimension_views ON dimension_views.dimensionValue = thresholds.dimensionValue
-GROUP BY thresholds.dimensionValue, thresholds.sampleCount, thresholds.avgValue, dimension_views.views
+GROUP BY thresholds.dimensionValue, thresholds.sampleCount, thresholds.avgValue
 ORDER BY p75 DESC, views DESC, thresholds.dimensionValue ASC
 LIMIT ?
 `;

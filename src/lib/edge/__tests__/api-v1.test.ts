@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
@@ -78,10 +80,17 @@ interface Match {
   all?: Record<string, unknown>[];
 }
 
+interface PreparedSql {
+  sql: string;
+  bindings: Array<string | number | null>;
+}
+
 function createEnv(matches: Match[]) {
   const preparedSql: string[] = [];
+  const preparedStatements: PreparedSql[] = [];
   return {
     preparedSql,
+    preparedStatements,
     MAIN_SECRET: "api-secret",
     INGEST_DO: {
       idFromName: vi.fn(() => "stub-id"),
@@ -120,10 +129,14 @@ function createEnv(matches: Match[]) {
             return { success: true };
           },
         };
+        preparedStatements.push(statement);
         return statement;
       },
     } as unknown as D1Database,
-  } as unknown as Env & { preparedSql: string[] };
+  } as unknown as Env & {
+    preparedSql: string[];
+    preparedStatements: PreparedSql[];
+  };
 }
 
 function request(path: string, apiKey?: string, init?: RequestInit): Request {
@@ -2323,7 +2336,7 @@ describe("api v1 gateway", () => {
       [
         siteMatch("site-1", "Blog"),
         {
-          includes: ["dimension_views", "thresholds.dimensionValue"],
+          includes: ["ordered_values", "thresholds.dimensionValue"],
           all: [
             {
               dimensionValue: "/pricing",
@@ -2352,6 +2365,85 @@ describe("api v1 gateway", () => {
     expect(
       env.preparedSql.some((sql) => sql.includes("scoped AS MATERIALIZED")),
     ).toBe(true);
+  });
+
+  it("uses the percentile sample count for breakdown views without rescanning scoped", async () => {
+    const { env } = await authed(
+      "/api/v1/sites/site-1/performance/breakdowns/page.path?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z&metric=lcp",
+      [
+        siteMatch("site-1", "Blog"),
+        {
+          includes: ["ordered_values", "thresholds.dimensionValue"],
+          all: [],
+        },
+      ],
+    );
+    const query = env.preparedStatements.find(
+      (statement) =>
+        statement.sql.includes("scoped AS MATERIALIZED") &&
+        statement.sql.includes("thresholds.dimensionValue"),
+    );
+
+    expect(query).toBeDefined();
+    expect(query?.sql).not.toContain("dimension_views AS");
+
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec(`
+        CREATE TABLE visits (
+          visit_id TEXT PRIMARY KEY, site_id TEXT NOT NULL, visitor_id TEXT,
+          session_id TEXT, status TEXT, started_at INTEGER, last_activity_at INTEGER,
+          ended_at INTEGER, finalized_at INTEGER, duration_ms INTEGER,
+          duration_source TEXT, exit_reason TEXT, pathname TEXT, query_string TEXT,
+          hash_fragment TEXT, hostname TEXT, title TEXT, referrer_url TEXT,
+          referrer_host TEXT, utm_source TEXT, utm_medium TEXT, utm_campaign TEXT,
+          utm_term TEXT, utm_content TEXT, is_eu INTEGER, country TEXT, region TEXT,
+          region_code TEXT, city TEXT, continent TEXT, latitude REAL, longitude REAL,
+          postal_code TEXT, metro_code TEXT, timezone TEXT, as_organization TEXT,
+          ua_raw TEXT, browser TEXT, browser_version TEXT, os TEXT, os_version TEXT,
+          device_type TEXT, screen_width INTEGER, screen_height INTEGER, language TEXT,
+          perf_ttfb_ms REAL, perf_fcp_ms REAL, perf_lcp_ms REAL, perf_cls REAL,
+          perf_inp_ms REAL, ae_synced_at INTEGER
+        );
+        CREATE INDEX idx_visits_site_started_at ON visits(site_id, started_at);
+      `);
+      const insert = database.prepare(
+        "INSERT INTO visits (visit_id, site_id, started_at, pathname, perf_lcp_ms) VALUES (?, ?, ?, ?, ?)",
+      );
+      insert.run("one", "site-1", Date.UTC(2026, 5, 1, 1), "/pricing", 1000);
+      insert.run("two", "site-1", Date.UTC(2026, 5, 1, 2), "/pricing", 2000);
+      insert.run("three", "site-1", Date.UTC(2026, 5, 1, 3), "/docs", 3000);
+
+      const rows = database
+        .prepare(query?.sql ?? "SELECT 1")
+        .all(...(query?.bindings ?? [])) as Array<
+        Record<string, number | string>
+      >;
+      expect(rows).toEqual([
+        expect.objectContaining({
+          dimensionValue: "/docs",
+          views: 1,
+          samples: 1,
+        }),
+        expect.objectContaining({
+          dimensionValue: "/pricing",
+          views: 2,
+          samples: 2,
+        }),
+      ]);
+
+      const plan = database
+        .prepare(`EXPLAIN QUERY PLAN ${query?.sql ?? "SELECT 1"}`)
+        .all(...(query?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(
+        plan.filter((row) => row.detail.includes("SCAN scoped")),
+      ).toHaveLength(1);
+      expect(
+        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+      ).toBe(true);
+    } finally {
+      database.close();
+    }
   });
 
   it("rejects non-GET on performance endpoint", async () => {
