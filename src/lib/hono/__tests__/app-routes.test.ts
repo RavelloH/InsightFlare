@@ -410,7 +410,7 @@ describe("Hono API app routing", () => {
       "site-1",
       "overview",
       new URL("https://app.test/api/private/overview"),
-      { publicMode: false },
+      { publicMode: false, dashboardMode: true },
       expect.any(Request),
     );
     expect(handlePrivateQuery).not.toHaveBeenCalled();

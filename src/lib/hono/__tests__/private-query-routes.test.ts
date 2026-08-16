@@ -123,7 +123,7 @@ describe("Hono private query routes", () => {
       "site-1",
       "overview",
       new URL("https://app.test/api/private/overview?siteId=site-1"),
-      { publicMode: false },
+      { publicMode: false, dashboardMode: true },
       expect.any(Request),
     );
   });
@@ -183,7 +183,7 @@ describe("Hono private query routes", () => {
       "site-1",
       "funnels",
       new URL("https://app.test/api/private/funnels?siteId=site-1"),
-      { publicMode: false },
+      { publicMode: false, dashboardMode: true },
       expect.any(Request),
     );
   });
@@ -251,7 +251,25 @@ describe("Hono private query routes", () => {
       "site-1",
       "unknown",
       new URL("https://app.test/api/private/unknown?siteId=site-1"),
-      { publicMode: false },
+      { publicMode: false, dashboardMode: true },
+      expect.any(Request),
+    );
+  });
+
+  it("enables dashboard-only event detail response shaping", async () => {
+    const app = createApp();
+    const detailUrl =
+      "/api/private/event-type-detail?siteId=site-1&includeContext=false&includeBreakdowns=false&includeFields=false";
+
+    const response = await app.fetch(request(detailUrl), env as never, ctx);
+
+    expect(response.status).toBe(200);
+    expect(dispatchQueryRoute).toHaveBeenCalledWith(
+      env,
+      "site-1",
+      "event-type-detail",
+      new URL(`https://app.test${detailUrl}`),
+      { publicMode: false, dashboardMode: true },
       expect.any(Request),
     );
   });

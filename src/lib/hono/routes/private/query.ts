@@ -36,7 +36,10 @@ function privateQuery(pathname: string) {
       site.id,
       pathname,
       requestUrl(c),
-      { publicMode: false },
+      // Private query routes are the dashboard API. This opt-in permits the
+      // dashboard-only response shaping used by event detail while v1/public
+      // callers retain the complete compatibility response.
+      { publicMode: false, dashboardMode: true },
       c.req.raw,
     );
   };

@@ -216,7 +216,7 @@ describe("edge query entry handlers", () => {
       "site-private",
       "overview",
       url,
-      { publicMode: false },
+      { publicMode: false, dashboardMode: true },
       edgeRequest,
     );
   });

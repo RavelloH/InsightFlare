@@ -7,6 +7,7 @@ import {
   fetchEventsRecords,
   fetchEventsSummary,
   fetchEventsTrend,
+  fetchEventTypeContextCards,
   fetchEventTypeDetail,
   fetchEventTypeFields,
   fetchEventTypeFieldValues,
@@ -301,6 +302,15 @@ describe("fetchEventTypeDetail", () => {
 });
 
 describe("fetchEventTypeFields", () => {
+  it("returns empty fields without a request for an empty event name", async () => {
+    await expect(fetchEventTypeFields("site-1", window, "  ")).resolves.toEqual(
+      {
+        fields: [],
+      },
+    );
+    expect(fetchPrivateJsonMock).not.toHaveBeenCalled();
+  });
+
   it("uses the private fields endpoint and keeps filters", async () => {
     await fetchEventTypeFields("site-1", window, "click", {
       country: "CN",
@@ -311,6 +321,56 @@ describe("fetchEventTypeFields", () => {
       expect.objectContaining({ eventName: "click" }),
       { signal: undefined },
     );
+  });
+
+  it("falls back to empty fields when the request fails", async () => {
+    fetchPrivateJsonMock.mockRejectedValueOnce(new Error("fail"));
+
+    await expect(
+      fetchEventTypeFields("site-1", window, "click"),
+    ).resolves.toEqual({
+      fields: [],
+    });
+  });
+});
+
+describe("fetchEventTypeContextCards", () => {
+  it("skips requests until both event and card keys are available", async () => {
+    const cards = await fetchEventTypeContextCards(
+      "site-1",
+      window,
+      " ",
+      "path",
+    );
+
+    expect(cards).toEqual(emptyEventTypeDetail("").cards);
+    expect(fetchPrivateJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("loads the requested context card and returns its response shape", async () => {
+    const cards = emptyEventTypeDetail("click").cards;
+    cards.page.path = [
+      { label: "/pricing", views: 2, sessions: 1, visitors: 1 },
+    ];
+    fetchPrivateJsonMock.mockResolvedValueOnce({ cards } as any);
+
+    await expect(
+      fetchEventTypeContextCards("site-1", window, " click ", " path ", {
+        country: "CN",
+      }),
+    ).resolves.toEqual(cards);
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/event-type-context",
+      expect.objectContaining({ eventName: "click", cards: "path" }),
+    );
+  });
+
+  it("falls back to an empty card shape when context loading fails", async () => {
+    fetchPrivateJsonMock.mockRejectedValueOnce(new Error("fail"));
+
+    await expect(
+      fetchEventTypeContextCards("site-1", window, "click", "path"),
+    ).resolves.toEqual(emptyEventTypeDetail("click").cards);
   });
 });
 

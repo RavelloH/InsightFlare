@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
+import {
+  createInvocationLogger,
+  runWithInvocationLogger,
+} from "@/lib/edge/observability-logger";
 import type {
   DashboardFilters,
   EventRecordRow,
@@ -20,7 +24,9 @@ import {
   handleEventsRecords,
   handleEventsSummary,
   handleEventsTrend,
+  handleEventTypeContext,
   handleEventTypeDetail,
+  handleEventTypeFields,
   handleEventTypeFieldValues,
   handleEventTypes,
 } from "@/lib/edge/query/events";
@@ -568,6 +574,95 @@ describe("edge query event handlers low-level coverage", () => {
       error: { message: "eventId is required" },
     });
     expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("returns narrow field and context handler responses", async () => {
+    const { env, calls } = createD1Env([
+      [
+        {
+          path: "/plan",
+          valueType: 1,
+          events: 2,
+          occurrences: 3,
+          firstSeenAt: baseMs,
+          lastSeenAt: baseMs + 1,
+          stringValue: "pro",
+          numberValue: null,
+          booleanValue: null,
+        },
+      ],
+      [
+        {
+          cardType: "path",
+          value: "/pricing",
+          label: null,
+          views: 2,
+          sessions: 1,
+          visitors: 1,
+        },
+      ],
+    ]);
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const { fields, context, detail } = await runWithInvocationLogger(
+      logger,
+      async () => ({
+        fields: await handleEventTypeFields(
+          env,
+          siteId,
+          url("/event-type-fields", {
+            eventName: "Signup",
+            from: window.fromMs,
+            to: window.toMs,
+          }),
+        ),
+        context: await handleEventTypeContext(
+          env,
+          siteId,
+          url("/event-type-context", {
+            eventName: "Signup",
+            cards: "path",
+            from: window.fromMs,
+            to: window.toMs,
+          }),
+        ),
+        detail: await handleEventTypeDetail(
+          env,
+          siteId,
+          url("/event-type-detail", {
+            eventName: "Signup",
+            from: window.fromMs,
+            to: window.toMs,
+          }),
+          undefined,
+          {
+            includeContext: false,
+            includeBreakdowns: false,
+            includeFields: false,
+          },
+        ),
+      }),
+    );
+
+    await expect(fields.json()).resolves.toMatchObject({
+      ok: true,
+      eventName: "Signup",
+      fields: [{ path: "/plan", valueType: "string", exampleValue: "pro" }],
+    });
+    await expect(context.json()).resolves.toMatchObject({
+      ok: true,
+      eventName: "Signup",
+      cards: { page: { path: [{ label: "/pricing", views: 2 }] } },
+    });
+    await expect(detail.json()).resolves.toMatchObject({
+      ok: true,
+      fields: [],
+      cards: { page: { path: [] } },
+    });
+    expect(calls).toHaveLength(4);
+    expect(calls[1]?.sql).not.toContain("session_visit_edges");
   });
 
   it("maps event types from D1 rows", async () => {
