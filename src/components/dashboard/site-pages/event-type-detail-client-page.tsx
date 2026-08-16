@@ -273,7 +273,7 @@ export function EventTypeDetailClientPage({
               siteDomain={siteDomain}
               pathname={siteBasePath}
               filters={requestFilters}
-              loading={loading}
+              loading={initialLoading}
               pageCardFetchers={{
                 path: (requestedSiteId, requestedWindow, requestedFilters) =>
                   fetchEventTypeContextCards(

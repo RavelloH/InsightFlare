@@ -1916,15 +1916,23 @@ export function OverviewPagesSection({
   const pageCardInFlightRef = useRef<Record<PageCardTab, boolean>>(
     createOverviewCardTabFlightState(ALL_PAGE_CARD_TABS),
   );
+  const pageCardFetchersRef = useRef(pageCardFetchers);
+  pageCardFetchersRef.current = pageCardFetchers;
   const sourceCardInFlightRef = useRef<Record<SourceCardTab, boolean>>(
     createOverviewCardTabFlightState(SOURCE_CARD_TABS),
   );
+  const sourceCardFetchersRef = useRef(sourceCardFetchers);
+  sourceCardFetchersRef.current = sourceCardFetchers;
   const clientDimensionCardInFlightRef = useRef<
     Record<ClientDimensionCardTab, boolean>
   >(createOverviewCardTabFlightState(CLIENT_DIMENSION_CARD_TABS));
+  const clientCardFetchersRef = useRef(clientCardFetchers);
+  clientCardFetchersRef.current = clientCardFetchers;
   const geoDimensionCardInFlightRef = useRef<
     Record<GeoDimensionCardTab, boolean>
   >(createOverviewCardTabFlightState(GEO_DIMENSION_CARD_TABS));
+  const geoCardFetchersRef = useRef(geoCardFetchers);
+  geoCardFetchersRef.current = geoCardFetchers;
   const [pageCardTabData, setPageCardTabData] = useState<
     OverviewCardTabCache<PageCardTab>
   >(() => createOverviewCardTabCache(ALL_PAGE_CARD_TABS));
@@ -2010,6 +2018,7 @@ export function OverviewPagesSection({
     window.from,
     window.to,
     window.interval,
+    window.timeZone,
     hasCardDataOverride,
   ]);
 
@@ -2021,7 +2030,7 @@ export function OverviewPagesSection({
     pageCardInFlightRef.current[pageCardTab] = true;
 
     const loadPageCardTab =
-      pageCardFetchers?.[pageCardTab] ??
+      pageCardFetchersRef.current?.[pageCardTab] ??
       ((
         requestedSiteId: string,
         requestedWindow: TimeWindow,
@@ -2045,6 +2054,13 @@ export function OverviewPagesSection({
           [pageCardTab]: data,
         }));
       })
+      .catch(() => {
+        if (!active) return;
+        setPageCardTabData((prev) => ({
+          ...prev,
+          [pageCardTab]: [],
+        }));
+      })
       .finally(() => {
         pageCardInFlightRef.current[pageCardTab] = false;
       });
@@ -2060,8 +2076,8 @@ export function OverviewPagesSection({
     window.from,
     window.interval,
     window.to,
+    window.timeZone,
     hasCardDataOverride,
-    pageCardFetchers,
   ]);
 
   useEffect(() => {
@@ -2072,7 +2088,7 @@ export function OverviewPagesSection({
     sourceCardInFlightRef.current[sourceCardTab] = true;
 
     const loadSourceCardTab =
-      sourceCardFetchers?.[sourceCardTab] ??
+      sourceCardFetchersRef.current?.[sourceCardTab] ??
       ((
         requestedSiteId: string,
         requestedWindow: TimeWindow,
@@ -2094,6 +2110,13 @@ export function OverviewPagesSection({
           [sourceCardTab]: data,
         }));
       })
+      .catch(() => {
+        if (!active) return;
+        setSourceCardTabData((prev) => ({
+          ...prev,
+          [sourceCardTab]: [],
+        }));
+      })
       .finally(() => {
         sourceCardInFlightRef.current[sourceCardTab] = false;
       });
@@ -2109,8 +2132,8 @@ export function OverviewPagesSection({
     window.from,
     window.interval,
     window.to,
+    window.timeZone,
     hasCardDataOverride,
-    sourceCardFetchers,
   ]);
 
   useEffect(() => {
@@ -2121,7 +2144,7 @@ export function OverviewPagesSection({
     clientDimensionCardInFlightRef.current[clientDimensionCardTab] = true;
 
     const loadClientCardTab =
-      clientCardFetchers?.[clientDimensionCardTab] ??
+      clientCardFetchersRef.current?.[clientDimensionCardTab] ??
       ((
         requestedSiteId: string,
         requestedWindow: TimeWindow,
@@ -2143,6 +2166,13 @@ export function OverviewPagesSection({
           [clientDimensionCardTab]: data,
         }));
       })
+      .catch(() => {
+        if (!active) return;
+        setClientDimensionCardTabData((prev) => ({
+          ...prev,
+          [clientDimensionCardTab]: [],
+        }));
+      })
       .finally(() => {
         clientDimensionCardInFlightRef.current[clientDimensionCardTab] = false;
       });
@@ -2158,8 +2188,8 @@ export function OverviewPagesSection({
     window.from,
     window.interval,
     window.to,
+    window.timeZone,
     hasCardDataOverride,
-    clientCardFetchers,
   ]);
 
   useEffect(() => {
@@ -2170,7 +2200,7 @@ export function OverviewPagesSection({
     geoDimensionCardInFlightRef.current[geoDimensionCardTab] = true;
 
     const loadGeoCardTab =
-      geoCardFetchers?.[geoDimensionCardTab] ??
+      geoCardFetchersRef.current?.[geoDimensionCardTab] ??
       ((
         requestedSiteId: string,
         requestedWindow: TimeWindow,
@@ -2192,6 +2222,13 @@ export function OverviewPagesSection({
           [geoDimensionCardTab]: data,
         }));
       })
+      .catch(() => {
+        if (!active) return;
+        setGeoDimensionCardTabData((prev) => ({
+          ...prev,
+          [geoDimensionCardTab]: [],
+        }));
+      })
       .finally(() => {
         geoDimensionCardInFlightRef.current[geoDimensionCardTab] = false;
       });
@@ -2207,8 +2244,8 @@ export function OverviewPagesSection({
     window.from,
     window.interval,
     window.to,
+    window.timeZone,
     hasCardDataOverride,
-    geoCardFetchers,
   ]);
 
   const noDataText = messages.common.noData;

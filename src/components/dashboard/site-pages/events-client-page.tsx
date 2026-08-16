@@ -245,7 +245,11 @@ export function EventsClientPage({
     }
   }, [detailEventName]);
 
-  const { data, isFetching: loading } = useQuery({
+  const {
+    data,
+    isFetching: loading,
+    isPending,
+  } = useQuery({
     queryKey: [
       "dashboard",
       "events-overview",
@@ -267,6 +271,7 @@ export function EventsClientPage({
   });
   const summary = data?.summary ?? emptySummary();
   const trend = data?.trend ?? emptyTrend(timeWindow.interval);
+  const initialLoading = isPending && !data;
 
   const openEventType = useCallback(
     (eventName: string) => {
@@ -339,7 +344,7 @@ export function EventsClientPage({
           siteDomain={siteDomain}
           pathname={pathname}
           filters={filters}
-          loading={loading}
+          loading={initialLoading}
           cardDataOverride={eventCardDataOverride}
           visibleCards={["page"]}
           pageCardTabs={["path"]}
@@ -370,7 +375,7 @@ export function EventsClientPage({
           siteDomain={siteDomain}
           pathname={siteBasePath}
           filters={filters}
-          loading={loading}
+          loading={initialLoading}
           cardDataOverride={contextCardDataOverride}
           visibleCards={["page"]}
           pageCardTabs={["path", "title", "hostname"]}

@@ -300,7 +300,8 @@ html[data-native-scrollbars="true"]::-webkit-scrollbar {
     transform: translateY(0);
   }
   to {
-    opacity: 0;
-    transform: translateY(28px);
+    /* Keep the outgoing route visible while async route data resolves. */
+    opacity: 1;
+    transform: translateY(8px);
   }
 }
