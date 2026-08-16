@@ -139,7 +139,15 @@ export async function queryEventsSummaryFromD1(
   summary: EventSummaryRow;
   cards: EventSummaryCards;
 }> {
-  const source = buildEventFilteredSourceCte(siteId, window, filters);
+  const source = buildEventFilteredSourceCte(
+    siteId,
+    window,
+    filters,
+    undefined,
+    {
+      materialize: true,
+    },
+  );
   const rows = await queryD1All<{
     cardType: string;
     value: string | null;

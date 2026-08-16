@@ -136,6 +136,9 @@ describe("edge query events summary coverage", () => {
     });
 
     expect(queryD1AllMock).toHaveBeenCalledOnce();
+    expect(queryD1AllMock.mock.calls[0][1]).toContain(
+      "filtered_events AS MATERIALIZED",
+    );
     expect(queryD1AllMock.mock.calls[0][2]).toEqual(
       expect.arrayContaining([siteId, window.fromMs, window.toMs]),
     );
