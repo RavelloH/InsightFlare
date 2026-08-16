@@ -202,11 +202,12 @@ function eventRecordsSql(
   cursorClause: string,
   sort: ListSort<EventRecordSortKey>,
   paginationClause: string,
+  eventName?: string,
 ): string {
   return `
 WITH
 ${buildVisitSourceCte()},
-${buildEventAnalyticsSourceCte()},
+${buildEventAnalyticsSourceCte({ eventName })},
 filtered_events AS (
   SELECT *
   FROM event_source es
@@ -262,7 +263,6 @@ export async function queryEventRecordPageFromD1(
   },
 ): Promise<EventRecordPage> {
   const filter = buildEventFilterSql(filters, "es", {
-    eventName: options.eventName,
     search: options.search,
   });
   const cursor = options.cursor
@@ -270,10 +270,16 @@ export async function queryEventRecordPageFromD1(
     : { clause: "", bindings: [] };
   const rows = await queryD1All<EventRecordCursorRow>(
     env,
-    eventRecordsSql(filter.clause, cursor.clause, options.sort, "LIMIT ?"),
+    eventRecordsSql(
+      filter.clause,
+      cursor.clause,
+      options.sort,
+      "LIMIT ?",
+      options.eventName,
+    ),
     [
       ...visitSourceBindings(siteId, window),
-      ...eventSourceBindings(siteId, window),
+      ...eventSourceBindings(siteId, window, options.eventName),
       ...filter.bindings,
       ...cursor.bindings,
       options.pageSize + 1,
@@ -305,15 +311,20 @@ export async function queryEventRecordsFromD1(
   },
 ): Promise<EventRecordRow[]> {
   const filter = buildEventFilterSql(filters, "es", {
-    eventName: options.eventName,
     search: options.search,
   });
   const rows = await queryD1All<EventRecordCursorRow>(
     env,
-    eventRecordsSql(filter.clause, "", options.sort, "LIMIT ?\nOFFSET ?"),
+    eventRecordsSql(
+      filter.clause,
+      "",
+      options.sort,
+      "LIMIT ?\nOFFSET ?",
+      options.eventName,
+    ),
     [
       ...visitSourceBindings(siteId, window),
-      ...eventSourceBindings(siteId, window),
+      ...eventSourceBindings(siteId, window, options.eventName),
       ...filter.bindings,
       options.limit,
       options.offset,

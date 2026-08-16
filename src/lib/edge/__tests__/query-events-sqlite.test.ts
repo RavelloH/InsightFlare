@@ -438,6 +438,37 @@ describe("event detail D1 SQL", () => {
     }
   });
 
+  it("uses the event-name index for filtered event records", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      const records = await queryEventRecordsFromD1(
+        env,
+        siteId,
+        window,
+        {},
+        {
+          limit: 25,
+          offset: 0,
+          sort: { key: "occurredAt", direction: "desc" },
+          eventName,
+        },
+      );
+
+      expect(records.map((record) => record.eventId)).toEqual(["event-1"]);
+      const query = d1.calls.at(-1);
+      const plan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${query?.sql ?? "SELECT 1"}`)
+        .all(...(query?.bindings ?? [])) as Array<{ detail: string }>;
+      const planDetails = plan.map((row) => row.detail).join("\n");
+      expect(query?.sql).toContain("target_event_name AS");
+      expect(query?.sql).not.toContain("TRIM(COALESCE(es.event_name");
+      expect(planDetails).toContain("idx_custom_events_site_name_time");
+    } finally {
+      d1.close();
+    }
+  });
+
   it("queries only requested context cards without building session edges", async () => {
     const { env, d1 } = createSqliteEventEnv();
 

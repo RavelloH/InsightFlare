@@ -946,10 +946,12 @@ describe("edge query event handlers low-level coverage", () => {
     });
     expect(calls[0].sql).toContain("ORDER BY eventName ASC");
     expect(calls[0].sql).not.toContain("OFFSET");
+    expect(calls[0].sql).toContain("target_event_name AS");
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
-      ...eventBindings(),
+      siteId,
       "Signup",
+      ...eventBindings(),
       ...Array<string>(8).fill("%signup%"),
       "Register",
       "Register",
@@ -997,6 +999,52 @@ describe("edge query event handlers low-level coverage", () => {
     const encoded = serializeEventRecordCursor(cursor);
     expect(encoded.length).toBeLessThanOrEqual(12_288);
     expect(parseEventRecordCursor(encoded, sort)).toEqual(cursor);
+  });
+
+  it("rejects malformed event record cursor fields", () => {
+    const sort = { key: "eventName", direction: "asc" } as const;
+    const cursor = {
+      sortKey: sort.key,
+      sortDirection: sort.direction,
+      sortValue: "Signup",
+      occurredAt: baseMs,
+      eventId: "evt-valid",
+      eventPk: 1,
+    };
+    const encode = (value: Record<string, unknown>) =>
+      serializeEventRecordCursor(value as typeof cursor);
+
+    expect(parseEventRecordCursor("!", sort)).toBeNull();
+    expect(parseEventRecordCursor("a".repeat(12_289), sort)).toBeNull();
+    expect(parseEventRecordCursor(btoa("[]"), sort)).toBeNull();
+    expect(parseEventRecordCursor(btoa("null"), sort)).toBeNull();
+    expect(
+      parseEventRecordCursor(encode({ ...cursor, sortKey: "pathname" }), sort),
+    ).toBeNull();
+    expect(
+      parseEventRecordCursor(
+        encode({ ...cursor, sortDirection: "desc" }),
+        sort,
+      ),
+    ).toBeNull();
+    expect(
+      parseEventRecordCursor(encode({ ...cursor, sortValue: true }), sort),
+    ).toBeNull();
+    expect(
+      parseEventRecordCursor(encode({ ...cursor, sortValue: 1 }), sort),
+    ).toBeNull();
+    expect(
+      parseEventRecordCursor(
+        encode({ ...cursor, occurredAt: "invalid" }),
+        sort,
+      ),
+    ).toBeNull();
+    expect(
+      parseEventRecordCursor(encode({ ...cursor, eventId: 1 }), sort),
+    ).toBeNull();
+    expect(
+      parseEventRecordCursor(encode({ ...cursor, eventPk: -1 }), sort),
+    ).toBeNull();
   });
 
   it("maps event summaries and final event record pages without more rows", async () => {
