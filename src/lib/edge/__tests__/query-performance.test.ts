@@ -674,6 +674,17 @@ describe("edge query performance D1 helpers", () => {
       50,
     );
     insert.run("blog", at(40), "/blog", " ca ", 150, 80, 300, null, 100);
+    insert.run(
+      "pricing-without-performance",
+      at(45),
+      "/pricing",
+      "US",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
     insert.run("unknown", at(50), "", "", null, null, null, null, null);
     insert.run("outside-window", at(-1), "/outside", "US", 1, 1, 1, 1, 1);
 
@@ -698,7 +709,7 @@ describe("edge query performance D1 helpers", () => {
       ).resolves.toMatchObject([
         {
           pathname: "/pricing",
-          views: 2,
+          views: 3,
           metrics: {
             ttfb: { avg: 75, p50: 50, p75: 100, p95: 100, samples: 2 },
           },
@@ -709,7 +720,7 @@ describe("edge query performance D1 helpers", () => {
       ).resolves.toMatchObject([
         {
           country: "US",
-          views: 2,
+          views: 3,
           metrics: {
             lcp: { avg: 150, p50: 100, p75: 200, p95: 200, samples: 2 },
           },
@@ -753,9 +764,9 @@ describe("edge query performance D1 helpers", () => {
       expect(payload.trends.ttfb?.[0]).toMatchObject({ bucket: 0, p50: 50 });
       expect(payload.routes[0]).toMatchObject({
         pathname: "/pricing",
-        views: 2,
+        views: 3,
       });
-      expect(payload.countries[0]).toMatchObject({ country: "US", views: 2 });
+      expect(payload.countries[0]).toMatchObject({ country: "US", views: 3 });
       expect(d1.calls).toHaveLength(5);
       const dashboardPlan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${d1.calls[4]?.sql}`)
@@ -765,6 +776,10 @@ describe("edge query performance D1 helpers", () => {
           row.detail.includes("SEARCH visits USING INDEX"),
         ),
       ).toHaveLength(1);
+      expect(d1.calls[4]?.sql).toContain("performance_visits AS MATERIALIZED");
+      expect(d1.calls[4]?.sql).toContain(
+        "perf_ttfb_ms IS NOT NULL OR perf_fcp_ms IS NOT NULL",
+      );
     } finally {
       d1.close();
     }

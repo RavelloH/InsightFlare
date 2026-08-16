@@ -48,6 +48,12 @@ function performanceMetricVisitsSql(
   }).join("\n  UNION ALL\n  ");
 }
 
+function performanceMetricPresenceSql(): string {
+  return PERFORMANCE_METRIC_KEYS.map(
+    (metric) => `${PERFORMANCE_METRIC_COLUMNS[metric]} IS NOT NULL`,
+  ).join(" OR ");
+}
+
 function emptyPerformanceSummaries(): Record<
   PerformanceMetricKey,
   PerformanceSummaryRow
@@ -586,8 +592,21 @@ filtered_visits AS MATERIALIZED (
   FROM visit_source
   ${filter.clause}
 ),
+performance_visits AS MATERIALIZED (
+  SELECT
+    bucket,
+    pathname,
+    country,
+    perf_ttfb_ms,
+    perf_fcp_ms,
+    perf_lcp_ms,
+    perf_cls,
+    perf_inp_ms
+  FROM filtered_visits
+  WHERE ${performanceMetricPresenceSql()}
+),
 metric_visits AS MATERIALIZED (
-  ${performanceMetricVisitsSql("filtered_visits", [
+  ${performanceMetricVisitsSql("performance_visits", [
     "bucket",
     "pathname",
     "country",
