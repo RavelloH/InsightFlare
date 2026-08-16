@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
@@ -345,6 +346,119 @@ describe("edge query dimensions low-level coverage", () => {
     expect(tabs.exit).toEqual([
       { value: "/last", views: 1, sessions: 1, visitors: 1 },
     ]);
+  });
+
+  it("materializes page tab visits once while preserving all tab results", async () => {
+    const database = new DatabaseSync(":memory:");
+    for (const migration of [
+      "migrations/0008_rebuild_analytics.sql",
+      "migrations/0013_add_visit_performance_metrics.sql",
+    ]) {
+      database.exec(readFileSync(migration, "utf8"));
+    }
+    const calls: Array<{ sql: string; bindings: QueryBinding[] }> = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: (...bindings: QueryBinding[]) => {
+            calls.push({ sql, bindings });
+            return {
+              all: async () => ({
+                results: database.prepare(sql).all(...bindings) as D1Row[],
+              }),
+            };
+          },
+        }),
+      } as unknown as D1Database,
+    } as Env;
+    const insert = database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, pathname, title, hostname
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, ?, ?)
+    `);
+
+    try {
+      insert.run(
+        "session-first",
+        siteId,
+        "visitor-a",
+        "session-a",
+        baseMs + 1,
+        baseMs + 1,
+        "/first",
+        "First page",
+        "app.example.test",
+      );
+      insert.run(
+        "session-last",
+        siteId,
+        "visitor-a",
+        "session-a",
+        baseMs + 2,
+        baseMs + 2,
+        "/last",
+        "Last page",
+        "app.example.test",
+      );
+      insert.run(
+        "anonymous",
+        siteId,
+        "visitor-b",
+        "",
+        baseMs + 3,
+        baseMs + 3,
+        "/anonymous",
+        "Anonymous page",
+        "other.example.test",
+      );
+      insert.run(
+        "outside-window",
+        siteId,
+        "visitor-outside",
+        "session-outside",
+        window.toMs + 1,
+        window.toMs + 1,
+        "/outside",
+        "Outside page",
+        "outside.example.test",
+      );
+
+      await expect(
+        queryPageTabsFromD1(env, siteId, window, {}, 10),
+      ).resolves.toEqual({
+        path: [
+          { value: "/first", views: 1, sessions: 1, visitors: 1 },
+          { value: "/last", views: 1, sessions: 1, visitors: 1 },
+          { value: "/anonymous", views: 1, sessions: 0, visitors: 1 },
+        ],
+        title: [
+          { value: "First page", views: 1, sessions: 1, visitors: 1 },
+          { value: "Last page", views: 1, sessions: 1, visitors: 1 },
+          { value: "Anonymous page", views: 1, sessions: 0, visitors: 1 },
+        ],
+        hostname: [
+          { value: "app.example.test", views: 2, sessions: 1, visitors: 1 },
+          { value: "other.example.test", views: 1, sessions: 0, visitors: 1 },
+        ],
+        entry: [{ value: "/first", views: 1, sessions: 1, visitors: 1 }],
+        exit: [{ value: "/last", views: 1, sessions: 1, visitors: 1 }],
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
+      const plan = database
+        .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
+        .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(
+        plan.filter((row) => row.detail.includes("SEARCH visits USING")),
+      ).toHaveLength(1);
+      expect(
+        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+      ).toBe(true);
+    } finally {
+      database.close();
+    }
   });
 
   it("normalizes client and geo dimensions with missing row values", async () => {
