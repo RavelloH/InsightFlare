@@ -19,7 +19,9 @@ export async function queryEventTypeOverviewFromD1(
   window: QueryWindow,
   filters: DashboardFilters,
   eventName: string,
+  options?: { includeBreakdowns?: boolean },
 ) {
+  const includeBreakdowns = options?.includeBreakdowns !== false;
   const eventFilter = buildEventFilterSql(filters, "es");
   const bindings = [
     ...eventSourceBindings(siteId, window, eventName),
@@ -50,18 +52,8 @@ scoped_summary AS (
     value: string | null;
     scopedEvents: number | null;
   };
-  const overviewRows = await queryD1All<OverviewCardRow>(
-    env,
-    `${baseCte},
-overview_card_rows AS (
-  SELECT
-    count(*) AS events,
-    count(DISTINCT event_name) AS eventTypes,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
-    'summary' AS cardType,
-    NULL AS value
-  FROM filtered_events
+  const breakdownRows = includeBreakdowns
+    ? `
   UNION ALL
   SELECT
     count(*) AS events,
@@ -105,7 +97,21 @@ overview_card_rows AS (
     browser AS value
   FROM filtered_events
   WHERE TRIM(COALESCE(browser, '')) != ''
-  GROUP BY browser
+  GROUP BY browser`
+    : "";
+  const overviewRows = await queryD1All<OverviewCardRow>(
+    env,
+    `${baseCte},
+overview_card_rows AS (
+  SELECT
+    count(*) AS events,
+    count(DISTINCT event_name) AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
+    'summary' AS cardType,
+    NULL AS value
+  FROM filtered_events
+${breakdownRows}
 ),
 ranked_overview_cards AS (
   SELECT

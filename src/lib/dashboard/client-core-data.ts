@@ -462,6 +462,7 @@ export async function fetchEventTypeDetail(
       interval: window.interval,
       eventName: normalizedEventName,
       includeContext: false,
+      includeBreakdowns: false,
     },
     filters,
   );

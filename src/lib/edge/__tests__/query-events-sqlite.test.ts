@@ -461,6 +461,38 @@ describe("event detail D1 SQL", () => {
     }
   });
 
+  it("skips unused event overview breakdowns without changing summary metrics", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      const overview = await queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        {},
+        eventName,
+        { includeBreakdowns: false },
+      );
+
+      expect(overview.summary).toMatchObject({
+        events: 1,
+        eventTypes: 1,
+        shareOfAllEvents: 0.5,
+      });
+      expect(overview.breakdowns).toEqual({
+        pages: [],
+        countries: [],
+        devices: [],
+        browsers: [],
+      });
+      const query = d1.calls.at(-1);
+      expect(query?.sql).not.toContain("'page' AS cardType");
+      expect(query?.sql).not.toContain("'country' AS cardType");
+    } finally {
+      d1.close();
+    }
+  });
+
   it("matches Journey offset ordering with keyset pages for every list sort", async () => {
     const { env, d1 } = createSqliteEventEnv();
 

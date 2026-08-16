@@ -195,13 +195,17 @@ export async function handleEventTypeDetail(
   const interval = parseInterval(url);
   const logger = currentInvocationLogger();
   const includeContext = url.searchParams.get("includeContext") !== "false";
+  const includeBreakdowns =
+    url.searchParams.get("includeBreakdowns") !== "false";
   const measure = <T>(operation: string, action: () => Promise<T>) =>
     logger
       ? logger.measure(operation, () => runWithD1Operation(operation, action))
       : action();
   const [overview, trend, fields, cards] = await Promise.all([
     measure("event_type_detail.overview", () =>
-      queryEventTypeOverviewFromD1(env, siteId, window, filters, eventName),
+      queryEventTypeOverviewFromD1(env, siteId, window, filters, eventName, {
+        includeBreakdowns,
+      }),
     ),
     measure("event_type_detail.trend", () =>
       queryEventTypeTrendFromD1(
