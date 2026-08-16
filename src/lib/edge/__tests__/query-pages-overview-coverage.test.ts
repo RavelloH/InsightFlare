@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
@@ -245,6 +248,128 @@ describe("edge pages D1 queries", () => {
     ]);
     expect(calls[0].sql).not.toContain("LIMIT ? OFFSET ?");
     expect(calls[0].bindings).toEqual(visitBindings());
+  });
+
+  it("materializes page-card visits once while preserving path-level bounces", async () => {
+    const database = new DatabaseSync(":memory:");
+    for (const migration of [
+      "migrations/0008_rebuild_analytics.sql",
+      "migrations/0013_add_visit_performance_metrics.sql",
+    ]) {
+      database.exec(readFileSync(migration, "utf8"));
+    }
+    const calls: QueryCall[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: (...bindings: QueryBinding[]) => {
+            const call = { sql, bindings };
+            calls.push(call);
+            return {
+              all: async () => ({
+                results: database.prepare(sql).all(...bindings) as D1Row[],
+              }),
+            };
+          },
+        }),
+      } as unknown as D1Database,
+    } as Env;
+    const insert = database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, pathname, hostname, duration_ms
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', ?)
+    `);
+
+    try {
+      insert.run(
+        "root-first",
+        siteId,
+        "visitor-1",
+        "session-1",
+        baseMs,
+        baseMs,
+        "/",
+        100,
+      );
+      insert.run(
+        "root-last",
+        siteId,
+        "visitor-1",
+        "session-1",
+        baseMs + 1,
+        baseMs + 1,
+        "/",
+        200,
+      );
+      insert.run(
+        "pricing-first",
+        siteId,
+        "visitor-1",
+        "session-2",
+        baseMs + 2,
+        baseMs + 2,
+        "/pricing",
+        50,
+      );
+      insert.run(
+        "pricing-second",
+        siteId,
+        "visitor-2",
+        "session-3",
+        baseMs + 3,
+        baseMs + 3,
+        "/pricing",
+        null,
+      );
+      insert.run(
+        "outside-window",
+        siteId,
+        "visitor-3",
+        "session-4",
+        window.toMs + 1,
+        window.toMs + 1,
+        "/pricing",
+        999,
+      );
+
+      await expect(
+        queryPageCardMetricsFromD1(env, siteId, window, {}, undefined),
+      ).resolves.toEqual([
+        {
+          pathname: "/pricing",
+          views: 2,
+          sessions: 2,
+          visitors: 2,
+          bounces: 2,
+          totalDuration: 50,
+          durationViews: 0,
+        },
+        {
+          pathname: "/",
+          views: 2,
+          sessions: 1,
+          visitors: 1,
+          bounces: 0,
+          totalDuration: 300,
+          durationViews: 0,
+        },
+      ]);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
+      const plan = database
+        .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
+        .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(
+        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+      ).toHaveLength(1);
+      expect(
+        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+      ).toBe(true);
+    } finally {
+      database.close();
+    }
   });
 
   it("returns empty title and trend queries without touching D1 when pathnames are empty", async () => {
