@@ -344,6 +344,11 @@ describe("edge query technology D1 mapping", () => {
       expect(
         plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
       ).toHaveLength(1);
+      expect(d1.calls[0].sql).toContain("ranked_visits AS MATERIALIZED");
+      expect(d1.calls[0].sql).toContain("FIRST_VALUE(labelValue)");
+      expect(d1.calls[0].sql).not.toContain("visitor_latest AS");
+      expect(d1.calls[0].sql).not.toContain("assigned_visits AS");
+      expect(d1.calls[0].sql).not.toContain("bucket_visitor_latest AS");
     } finally {
       d1.close();
     }

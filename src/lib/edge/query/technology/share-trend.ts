@@ -57,41 +57,30 @@ filtered_visits AS MATERIALIZED (
   FROM visit_source
   ${filter.clause}
 ),
-visitor_latest AS (
+ranked_visits AS MATERIALIZED (
   SELECT
+    bucket,
+    visitId,
     visitorId,
-    labelValue AS assignedLabel
-  FROM (
-    SELECT
-      visitorId,
-      labelValue,
-      startedAt,
-      visitId,
-      ROW_NUMBER() OVER (
-        PARTITION BY visitorId
-        ORDER BY startedAt DESC, visitId DESC
-      ) AS rowNumber
-    FROM filtered_visits
-    WHERE visitorId != ''
-  )
-  WHERE rowNumber = 1
-),
-assigned_visits AS (
-  SELECT
-    visitor_latest.assignedLabel AS label,
-    filtered_visits.visitorId AS visitorId,
-    filtered_visits.sessionId AS sessionId
-  FROM visitor_latest
-  INNER JOIN filtered_visits
-    ON filtered_visits.visitorId = visitor_latest.visitorId
+    sessionId,
+    FIRST_VALUE(labelValue) OVER (
+      PARTITION BY visitorId
+      ORDER BY startedAt DESC, visitId DESC
+    ) AS globalLabel,
+    FIRST_VALUE(labelValue) OVER (
+      PARTITION BY bucket, visitorId
+      ORDER BY startedAt DESC, visitId DESC
+    ) AS bucketLabel
+  FROM filtered_visits
+  WHERE visitorId != ''
 ),
 top_aggregate AS (
   SELECT
-    label,
+    globalLabel AS label,
     count(*) AS views,
     count(DISTINCT visitorId) AS visitors,
     count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-  FROM assigned_visits
+  FROM ranked_visits
   WHERE label != ''
   GROUP BY label
 ),
@@ -112,50 +101,24 @@ series_rows AS (
   SELECT
     COALESCE(top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
     count(*) AS views,
-    count(DISTINCT filtered_visits.visitorId) AS visitors,
-    count(DISTINCT CASE WHEN filtered_visits.sessionId != '' THEN filtered_visits.sessionId ELSE NULL END) AS sessions
-  FROM visitor_latest
-  INNER JOIN filtered_visits
-    ON filtered_visits.visitorId = visitor_latest.visitorId
+    count(DISTINCT ranked_visits.visitorId) AS visitors,
+    count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
   LEFT JOIN top_rows
-    ON top_rows.label = visitor_latest.assignedLabel
+    ON top_rows.label = ranked_visits.globalLabel
   GROUP BY label
-),
-bucket_visitor_latest AS (
-  SELECT
-    bucket,
-    visitorId,
-    labelValue AS assignedLabel
-  FROM (
-    SELECT
-      bucket,
-      visitorId,
-      labelValue,
-      startedAt,
-      visitId,
-      ROW_NUMBER() OVER (
-        PARTITION BY bucket, visitorId
-        ORDER BY startedAt DESC, visitId DESC
-      ) AS rowNumber
-    FROM filtered_visits
-    WHERE visitorId != ''
-  )
-  WHERE rowNumber = 1
 ),
 bucket_rows AS (
   SELECT
-    bucket_visitor_latest.bucket AS bucket,
+    ranked_visits.bucket AS bucket,
     COALESCE(top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
     count(*) AS views,
-    count(DISTINCT filtered_visits.visitorId) AS visitors,
-    count(DISTINCT CASE WHEN filtered_visits.sessionId != '' THEN filtered_visits.sessionId ELSE NULL END) AS sessions
-  FROM bucket_visitor_latest
-  INNER JOIN filtered_visits
-    ON filtered_visits.bucket = bucket_visitor_latest.bucket
-    AND filtered_visits.visitorId = bucket_visitor_latest.visitorId
+    count(DISTINCT ranked_visits.visitorId) AS visitors,
+    count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
   LEFT JOIN top_rows
-    ON top_rows.label = bucket_visitor_latest.assignedLabel
-  GROUP BY bucket_visitor_latest.bucket, label
+    ON top_rows.label = ranked_visits.bucketLabel
+  GROUP BY ranked_visits.bucket, label
 ),
 tagged_rows AS (
   SELECT
