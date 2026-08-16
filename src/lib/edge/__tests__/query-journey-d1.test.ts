@@ -803,141 +803,15 @@ describe("edge journey list D1 queries", () => {
       ),
     ).resolves.toMatchObject([{ id: "event-3", kind: "custom" }]);
 
-    expect(calls[0].sql).toContain("custom_event_source AS");
-    expect(calls[0].sql).toContain("CROSS JOIN custom_events ce");
+    expect(calls[0].sql).toContain("INNER JOIN filtered_visits");
     expect(calls[0].sql).toContain("WHERE session_id = ?");
     expect(calls[0].bindings).toEqual([
       ...visitBindings(window),
+      ...eventBindings(window),
       "session-1",
       "/pricing",
-      ...eventBindings(window),
       20,
     ]);
-  });
-
-  it("drives target journey events through the visit event index", async () => {
-    const sqlite = createSqliteDetailEnv();
-    const window = queryWindow();
-    try {
-      sqlite.database
-        .prepare(
-          `INSERT INTO visits (
-            visit_id, site_id, visitor_id, session_id, status, started_at,
-            last_activity_at, pathname, hostname
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          "visit-timeline-target",
-          siteId,
-          "visitor-timeline-target",
-          "session-timeline-target",
-          "closed",
-          baseMs,
-          baseMs,
-          "/target",
-          "example.test",
-        );
-      sqlite.database
-        .prepare(
-          "INSERT INTO custom_event_names (id, site_id, name, last_seen_at) VALUES (?, ?, ?, ?)",
-        )
-        .run(1, siteId, "signup", baseMs);
-      sqlite.database
-        .prepare(
-          `INSERT INTO custom_events (
-            event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
-            received_at, sequence, node_count, value_count
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          1,
-          "event-timeline-target",
-          siteId,
-          "visit-timeline-target",
-          1,
-          baseMs + 1,
-          baseMs + 1,
-          1,
-          0,
-          0,
-        );
-      sqlite.database
-        .prepare(
-          `INSERT INTO visits (
-            visit_id, site_id, visitor_id, session_id, status, started_at,
-            last_activity_at, pathname, hostname
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          "visit-timeline-noise",
-          siteId,
-          "visitor-timeline-noise",
-          "session-timeline-noise",
-          "closed",
-          baseMs,
-          baseMs,
-          "/noise",
-          "example.test",
-        );
-      sqlite.database.exec(`
-        WITH RECURSIVE sequence(value) AS (
-          VALUES(2)
-          UNION ALL
-          SELECT value + 1 FROM sequence WHERE value < 5001
-        )
-        INSERT INTO custom_events (
-          event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
-          received_at, sequence, node_count, value_count
-        )
-        SELECT
-          value,
-          'event-timeline-noise-' || value,
-          '${siteId}',
-          'visit-timeline-noise',
-          1,
-          ${baseMs} + value,
-          ${baseMs} + value,
-          value,
-          0,
-          0
-        FROM sequence;
-        ANALYZE;
-      `);
-
-      await expect(
-        queryJourneyEventsFromD1(
-          sqlite.env,
-          siteId,
-          window,
-          {},
-          { type: "visitor", value: "visitor-timeline-target" },
-          20,
-        ),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            id: "event-timeline-target",
-            kind: "custom",
-          }),
-        ]),
-      );
-
-      const call = sqlite.calls.at(-1)!;
-      const plan = sqlite.explain(call);
-      expect(
-        plan.some((detail) =>
-          detail.includes("idx_visits_site_visitor_started_at"),
-        ),
-      ).toBe(true);
-      expect(
-        plan.some((detail) =>
-          detail.includes("idx_custom_events_site_visit_time"),
-        ),
-      ).toBe(true);
-      expect(plan.some((detail) => /SCAN ce(?:\s|$)/.test(detail))).toBe(false);
-    } finally {
-      sqlite.close();
-    }
   });
 });
 

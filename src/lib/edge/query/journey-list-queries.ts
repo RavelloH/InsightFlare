@@ -522,49 +522,11 @@ export async function queryJourneyEventsFromD1(
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS MATERIALIZED (
+${buildCustomEventSourceCte()},
+filtered_visits AS (
   SELECT *
   FROM visit_source
   ${targetClause}
-),
-custom_event_source AS (
-  SELECT
-    ce.event_id,
-    ce.visit_id,
-    cen.name AS event_name,
-    ce.occurred_at,
-    ce.sequence,
-    fv.session_id,
-    fv.visitor_id,
-    fv.pathname,
-    fv.hash_fragment,
-    fv.title,
-    fv.hostname,
-    fv.referrer_host,
-    fv.referrer_url,
-    fv.country,
-    fv.region,
-    fv.city,
-    fv.browser,
-    fv.browser_version,
-    fv.os,
-    fv.os_version,
-    fv.device_type,
-    fv.screen_width,
-    fv.screen_height,
-    fv.perf_ttfb_ms,
-    fv.perf_fcp_ms,
-    fv.perf_lcp_ms,
-    fv.perf_cls,
-    fv.perf_inp_ms
-  FROM filtered_visits fv
-  CROSS JOIN custom_events ce
-  INNER JOIN custom_event_names cen
-    ON cen.id = ce.event_name_id
-  WHERE ce.site_id = ?
-    AND ce.site_id = fv.site_id
-    AND ce.visit_id = fv.visit_id
-    AND ce.occurred_at BETWEEN ? AND ?
 ),
 page_events AS (
   SELECT
@@ -606,31 +568,33 @@ custom_event_rows AS (
     es.event_name AS eventType,
     es.occurred_at AS occurredAt,
     es.visit_id AS visitId,
-    es.session_id AS sessionId,
-    es.visitor_id AS visitorId,
-    es.pathname,
-    es.hash_fragment AS hash,
-    es.title,
-    es.hostname,
-    es.referrer_host AS referrerHost,
-    es.referrer_url AS referrerUrl,
-    es.country,
-    es.region,
-    es.city,
-    es.browser,
-    es.browser_version AS browserVersion,
-    es.os,
-    es.os_version AS osVersion,
-    es.device_type AS deviceType,
-    es.screen_width AS screenWidth,
-    es.screen_height AS screenHeight,
+    fv.session_id AS sessionId,
+    fv.visitor_id AS visitorId,
+    COALESCE(NULLIF(es.pathname, ''), fv.pathname) AS pathname,
+    COALESCE(NULLIF(es.hash_fragment, ''), fv.hash_fragment) AS hash,
+    COALESCE(NULLIF(es.title, ''), fv.title) AS title,
+    COALESCE(NULLIF(es.hostname, ''), fv.hostname) AS hostname,
+    COALESCE(NULLIF(es.referrer_host, ''), fv.referrer_host) AS referrerHost,
+    COALESCE(NULLIF(es.referrer_url, ''), fv.referrer_url) AS referrerUrl,
+    COALESCE(NULLIF(es.country, ''), fv.country) AS country,
+    COALESCE(NULLIF(es.region, ''), fv.region) AS region,
+    COALESCE(NULLIF(es.city, ''), fv.city) AS city,
+    COALESCE(NULLIF(es.browser, ''), fv.browser) AS browser,
+    fv.browser_version AS browserVersion,
+    COALESCE(NULLIF(es.os, ''), fv.os) AS os,
+    COALESCE(NULLIF(es.os_version, ''), fv.os_version) AS osVersion,
+    COALESCE(NULLIF(es.device_type, ''), fv.device_type) AS deviceType,
+    COALESCE(es.screen_width, fv.screen_width) AS screenWidth,
+    COALESCE(es.screen_height, fv.screen_height) AS screenHeight,
     0 AS durationMs,
-    es.perf_ttfb_ms AS perfTtfbMs,
-    es.perf_fcp_ms AS perfFcpMs,
-    es.perf_lcp_ms AS perfLcpMs,
-    es.perf_cls AS perfCls,
-    es.perf_inp_ms AS perfInpMs
-  FROM custom_event_source es
+    fv.perf_ttfb_ms AS perfTtfbMs,
+    fv.perf_fcp_ms AS perfFcpMs,
+    fv.perf_lcp_ms AS perfLcpMs,
+    fv.perf_cls AS perfCls,
+    fv.perf_inp_ms AS perfInpMs
+  FROM event_source es
+  INNER JOIN filtered_visits fv
+    ON fv.visit_id = es.visit_id
 )
 SELECT *
 FROM (
@@ -644,9 +608,9 @@ LIMIT ?
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
       ...visitSourceBindings(siteId, window),
+      ...eventSourceBindings(siteId, window),
       target.value,
       ...filter.bindings,
-      ...eventSourceBindings(siteId, window),
       limit,
     ])
   ).map(mapJourneyEventRow);
