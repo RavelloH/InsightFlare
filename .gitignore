@@ -18,4 +18,4 @@ logs/
 plan/
 playwright-report/
 test-results/
-.tmp/e2e/
+.tmp/
