@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { normalizePathname } from "@/lib/edge/query/core";
@@ -254,6 +257,123 @@ describe("edge team query coverage", () => {
     ]);
     expect(calls[0].sql).toContain("WHERE site_id IN (?, ?)");
     expect(calls[1].sql).toContain("ORDER BY bucket ASC, siteId ASC");
+  });
+
+  it("materializes the narrow team overview source once", async () => {
+    const database = new DatabaseSync(":memory:");
+    for (const migration of [
+      "migrations/0008_rebuild_analytics.sql",
+      "migrations/0013_add_visit_performance_metrics.sql",
+    ]) {
+      database.exec(readFileSync(migration, "utf8"));
+    }
+    const calls: Array<{ sql: string; bindings: QueryBinding[] }> = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: (...bindings: QueryBinding[]) => {
+            const call = { sql, bindings };
+            calls.push(call);
+            return {
+              all: async () => ({
+                results: database.prepare(sql).all(...bindings) as D1Row[],
+              }),
+            };
+          },
+        }),
+      } as unknown as D1Database,
+    } as Env;
+    const insert = database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, pathname, hostname, duration_ms
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, '/', 'example.test', ?)
+    `);
+
+    try {
+      insert.run(
+        "site-a-first",
+        "site-a",
+        "visitor-a",
+        "session-a",
+        baseMs,
+        baseMs,
+        20,
+      );
+      insert.run(
+        "site-a-last",
+        "site-a",
+        "visitor-a",
+        "session-a",
+        baseMs + 1,
+        baseMs + 1,
+        30,
+      );
+      insert.run(
+        "site-b-only",
+        "site-b",
+        "visitor-b",
+        "session-b",
+        baseMs + 2,
+        baseMs + 2,
+        40,
+      );
+      insert.run(
+        "outside-window",
+        "site-a",
+        "visitor-out",
+        "session-out",
+        window.toMs + 1,
+        window.toMs + 1,
+        999,
+      );
+
+      await expect(
+        queryTeamOverviewFromD1(env, ["site-a", "site-b"], window),
+      ).resolves.toEqual(
+        new Map([
+          [
+            "site-a",
+            {
+              views: 2,
+              sessions: 1,
+              visitors: 1,
+              bounces: 0,
+              totalDuration: 50,
+              durationViews: 2,
+            },
+          ],
+          [
+            "site-b",
+            {
+              views: 1,
+              sessions: 1,
+              visitors: 1,
+              bounces: 1,
+              totalDuration: 40,
+              durationViews: 1,
+            },
+          ],
+        ]),
+      );
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.sql).toContain("visit_source AS MATERIALIZED");
+      expect(calls[0]?.sql).toContain(
+        "SELECT site_id, visitor_id, session_id, duration_ms",
+      );
+      const plan = database
+        .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
+        .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(
+        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+      ).toHaveLength(1);
+      expect(
+        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+      ).toBe(true);
+    } finally {
+      database.close();
+    }
   });
 
   it("splits large team overview queries before D1 reaches 100 bindings", async () => {

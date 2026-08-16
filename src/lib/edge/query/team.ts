@@ -53,6 +53,16 @@ function siteIdChunks(siteIds: string[]): string[][] {
   return chunks;
 }
 
+function buildTeamOverviewSourceCte(siteCount: number): string {
+  const placeholders = Array.from({ length: siteCount }, () => "?").join(", ");
+  return `
+visit_source AS MATERIALIZED (
+  SELECT site_id, visitor_id, session_id, duration_ms
+  FROM visits
+  WHERE site_id IN (${placeholders}) AND started_at BETWEEN ? AND ?
+)`;
+}
+
 export async function queryTeamOverviewFromD1(
   env: Env,
   siteIds: string[],
@@ -64,7 +74,7 @@ export async function queryTeamOverviewFromD1(
   for (const chunk of siteIdChunks(siteIds)) {
     const sql = `
 WITH
-${buildVisitSourceCteForSites(chunk.length)},
+${buildTeamOverviewSourceCte(chunk.length)},
 session_rollup AS (
   SELECT site_id AS siteId, session_id, count(*) AS visit_count
   FROM visit_source
