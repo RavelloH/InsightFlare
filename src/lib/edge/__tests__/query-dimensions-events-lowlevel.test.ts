@@ -531,6 +531,9 @@ describe("edge query dimensions low-level coverage", () => {
     expect(calls[0].bindings).toEqual([...visitBindings(), 10]);
     expect(calls[1].bindings).toEqual([...visitBindings(), 10]);
     expect(calls[2].bindings).toEqual([...visitBindings(), 10]);
+    expect(calls[0].sql).toContain("filtered_visits AS MATERIALIZED");
+    expect(calls[1].sql).toContain("filtered_visits AS MATERIALIZED");
+    expect(calls[2].sql).toContain("filtered_visits AS MATERIALIZED");
     expect(calls[0].sql).toContain("ranked_cards AS");
     expect(calls[1].sql).toContain("ranked_cards AS");
     expect(calls[2].sql).toContain("ranked_cards AS");

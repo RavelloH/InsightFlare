@@ -389,7 +389,7 @@ export async function queryOverviewClientDimensionsFromD1(
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
+filtered_visits AS MATERIALIZED (
   SELECT
     session_id,
     TRIM(COALESCE(browser, '')) AS browser,
@@ -512,7 +512,7 @@ export async function queryOverviewGeoDimensionsFromD1(
             `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
+filtered_visits AS MATERIALIZED (
   SELECT
     session_id,
     visitor_id,
