@@ -123,7 +123,7 @@ function createEnv(matches: Match[]) {
         return statement;
       },
     } as unknown as D1Database,
-  } as unknown as Env;
+  } as unknown as Env & { preparedSql: string[] };
 }
 
 function request(path: string, apiKey?: string, init?: RequestInit): Request {

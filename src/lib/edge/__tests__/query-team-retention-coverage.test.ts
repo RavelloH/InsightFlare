@@ -715,6 +715,113 @@ describe("edge journey retention coverage", () => {
     expect(calls[0].bindings).toEqual([...visitBindings(), "us"]);
   });
 
+  it("materializes retention visits once while preserving cohort results", async () => {
+    const database = new DatabaseSync(":memory:");
+    database.exec(readFileSync("migrations/0008_rebuild_analytics.sql", "utf8"));
+    database.exec(
+      readFileSync("migrations/0013_add_visit_performance_metrics.sql", "utf8"),
+    );
+    const calls: Array<{ sql: string; bindings: QueryBinding[] }> = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: (...bindings: QueryBinding[]) => {
+            calls.push({ sql, bindings });
+            return {
+              all: async () => ({
+                results: database.prepare(sql).all(...bindings) as D1Row[],
+              }),
+            };
+          },
+        }),
+      } as unknown as D1Database,
+    } as Env;
+    const insert = database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, pathname, hostname
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, '/', 'example.test')
+    `);
+
+    try {
+      insert.run(
+        "visitor-a-first",
+        siteId,
+        "visitor-a",
+        "session-a",
+        baseMs + 1,
+        baseMs + 1,
+      );
+      insert.run(
+        "visitor-a-return",
+        siteId,
+        "visitor-a",
+        "session-b",
+        baseMs + 60 * 60 * 1000 + 1,
+        baseMs + 60 * 60 * 1000 + 1,
+      );
+      insert.run(
+        "visitor-b-first",
+        siteId,
+        "visitor-b",
+        "session-c",
+        baseMs + 60 * 60 * 1000 + 2,
+        baseMs + 60 * 60 * 1000 + 2,
+      );
+      insert.run(
+        "outside-window",
+        siteId,
+        "visitor-outside",
+        "session-d",
+        window.toMs + 1,
+        window.toMs + 1,
+      );
+
+      const response = await handleRetention(
+        env,
+        siteId,
+        url("/retention", {
+          from: window.fromMs,
+          to: window.toMs,
+          granularity: "hour",
+        }),
+      );
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        granularity: "hour",
+        cohorts: [
+          {
+            bucket: baseMs,
+            size: 1,
+            periods: [
+              { index: 0, visitors: 1, rate: 1 },
+              { index: 1, visitors: 1, rate: 1 },
+            ],
+          },
+          {
+            bucket: baseMs + 60 * 60 * 1000,
+            size: 1,
+            periods: [{ index: 0, visitors: 1, rate: 1 }],
+          },
+        ],
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
+      const plan = database
+        .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
+        .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(
+        plan.filter((row) => row.detail.includes("SEARCH visits USING")),
+      ).toHaveLength(1);
+      expect(
+        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+      ).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
+
   it("accepts interval as granularity and normalizes sparse cohort rows", async () => {
     const { env } = createD1Env([
       [

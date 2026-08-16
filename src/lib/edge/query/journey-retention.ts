@@ -47,7 +47,7 @@ export async function handleRetention(
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
+filtered_visits AS MATERIALIZED (
   SELECT
     visitor_id,
     started_at,
