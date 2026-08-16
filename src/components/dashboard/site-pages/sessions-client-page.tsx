@@ -68,6 +68,12 @@ const DEFAULT_SESSION_SORT: SessionSortState = {
   direction: "desc",
 };
 
+type NestedJourneyDetail = {
+  kind: "session" | "visitor";
+  id: string;
+  stackKey: string;
+};
+
 function appendUniqueSessions(
   current: JourneySession[],
   incoming: JourneySession[],
@@ -107,7 +113,8 @@ export function SessionsClientPage({
   const [sort, setSort] = useState<SessionSortState>(DEFAULT_SESSION_SORT);
   const searchParams = useLiveSearchParams();
   const detailSessionId = searchParams.get(DETAIL_QUERY_PARAM)?.trim() || "";
-  const [detailVisitorId, setDetailVisitorId] = useState("");
+  const [nestedDetails, setNestedDetails] = useState<NestedJourneyDetail[]>([]);
+  const nestedDetailKeyRef = useRef(0);
   const openedDetailFromListRef = useRef(false);
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
 
@@ -121,6 +128,7 @@ export function SessionsClientPage({
   useEffect(() => {
     if (!detailSessionId) {
       openedDetailFromListRef.current = false;
+      setNestedDetails([]);
     }
   }, [detailSessionId]);
 
@@ -224,6 +232,35 @@ export function SessionsClientPage({
     () => pathname.replace(/\/sessions(?:\/detail)?$/, "/visitors"),
     [pathname],
   );
+  const openNestedDetail = useCallback(
+    (kind: NestedJourneyDetail["kind"], id: string) => {
+      const normalizedId = id.trim();
+      if (!normalizedId) return;
+
+      setNestedDetails((current) => {
+        const topDetail = current.at(-1);
+        if (topDetail?.kind === kind && topDetail.id === normalizedId) {
+          return current;
+        }
+        nestedDetailKeyRef.current += 1;
+        return [
+          ...current,
+          {
+            kind,
+            id: normalizedId,
+            stackKey: `${kind}:${normalizedId}:${nestedDetailKeyRef.current}`,
+          },
+        ];
+      });
+    },
+    [],
+  );
+  const closeNestedDetail = useCallback((stackKey: string) => {
+    setNestedDetails((current) => {
+      const index = current.findIndex((item) => item.stackKey === stackKey);
+      return index < 0 ? current : current.slice(0, index);
+    });
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -266,7 +303,7 @@ export function SessionsClientPage({
           open={Boolean(detailSessionId)}
           onOpenChange={(nextOpen) => {
             if (!nextOpen) {
-              setDetailVisitorId("");
+              setNestedDetails([]);
               closeSessionDetail();
             }
           }}
@@ -277,29 +314,52 @@ export function SessionsClientPage({
             siteId={siteId}
             pathname={pathname}
             sessionId={detailSessionId}
-            onOpenVisitor={setDetailVisitorId}
+            onOpenVisitor={(visitorId) =>
+              openNestedDetail("visitor", visitorId)
+            }
           />
         </DetailDrawer>
       ) : null}
 
-      {detailSessionId && detailVisitorId ? (
+      {nestedDetails.map((nestedDetail) => (
         <DetailDrawer
-          ariaLabel={messages.visitors.title}
-          drawerKey={`session-visitor:${detailVisitorId}`}
-          open={Boolean(detailVisitorId)}
+          key={nestedDetail.stackKey}
+          ariaLabel={
+            nestedDetail.kind === "visitor"
+              ? messages.visitors.title
+              : messages.sessionDetail.visitDetailsTitle
+          }
+          drawerKey={nestedDetail.stackKey}
+          open
           onOpenChange={(nextOpen) => {
-            if (!nextOpen) setDetailVisitorId("");
+            if (!nextOpen) closeNestedDetail(nestedDetail.stackKey);
           }}
         >
-          <VisitorDetailClientPage
-            locale={locale}
-            messages={messages}
-            siteId={siteId}
-            pathname={visitorsPathname}
-            visitorId={detailVisitorId}
-          />
+          {nestedDetail.kind === "visitor" ? (
+            <VisitorDetailClientPage
+              locale={locale}
+              messages={messages}
+              siteId={siteId}
+              pathname={visitorsPathname}
+              visitorId={nestedDetail.id}
+              onOpenSession={(sessionId) =>
+                openNestedDetail("session", sessionId)
+              }
+            />
+          ) : (
+            <SessionDetailClientPage
+              locale={locale}
+              messages={messages}
+              siteId={siteId}
+              pathname={pathname}
+              sessionId={nestedDetail.id}
+              onOpenVisitor={(visitorId) =>
+                openNestedDetail("visitor", visitorId)
+              }
+            />
+          )}
         </DetailDrawer>
-      ) : null}
+      ))}
     </div>
   );
 }

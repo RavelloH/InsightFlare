@@ -30,7 +30,7 @@ const SHARE_TABS = [
 ] as const;
 
 function shareTabHref(locale: Locale, slug: string, key: string): string {
-  const base = `/${locale}/share/${encodeURIComponent(slug)}`;
+  const base = `/share/${encodeURIComponent(slug)}`;
   return key === "overview" ? base : `${base}/${key}`;
 }
 

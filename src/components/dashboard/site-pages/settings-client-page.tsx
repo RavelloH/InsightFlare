@@ -29,6 +29,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
 import {
@@ -702,7 +703,7 @@ export function SettingsClientPage({
 
   const publicLink =
     publicEnabled && publicSlug.trim() && origin
-      ? `${origin}/${locale}/share/${encodeURIComponent(publicSlug.trim())}`
+      ? `${origin}/share/${encodeURIComponent(publicSlug.trim())}`
       : "";
 
   return (
@@ -860,37 +861,54 @@ export function SettingsClientPage({
               </p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="site-settings-public-link">
-                {copy.publicLinkLabel}
-              </Label>
-              <div className="flex gap-2">
-                <Input
-                  id="site-settings-public-link"
-                  value={publicLink}
-                  placeholder={
-                    publicEnabled
-                      ? copy.publicLinkHint
-                      : copy.publicDisabledHint
-                  }
-                  readOnly
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    void handleCopyPublicLink();
-                  }}
-                  disabled={!publicLink}
+            <AutoResizer initial duration={0.24} ease={[0.22, 1, 0.36, 1]}>
+              <AutoTransition
+                initial={false}
+                duration={0.18}
+                type="fade"
+                presenceMode="wait"
+                transitionKey={publicEnabled ? "enabled" : "disabled"}
+              >
+                <div
+                  key={publicEnabled ? "enabled" : "disabled"}
+                  className="space-y-2"
                 >
-                  <RiFileCopyLine className="size-4" />
-                  <span>{messages.teamManagement.publicLinks.copyLink}</span>
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {publicEnabled ? copy.publicLinkHint : copy.publicDisabledHint}
-              </p>
-            </div>
+                  <Label htmlFor="site-settings-public-link">
+                    {copy.publicLinkLabel}
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="site-settings-public-link"
+                      value={publicLink}
+                      placeholder={
+                        publicEnabled
+                          ? copy.publicLinkHint
+                          : copy.publicDisabledHint
+                      }
+                      readOnly
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        void handleCopyPublicLink();
+                      }}
+                      disabled={!publicLink}
+                    >
+                      <RiFileCopyLine className="size-4" />
+                      <span>
+                        {messages.teamManagement.publicLinks.copyLink}
+                      </span>
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {publicEnabled
+                      ? copy.publicLinkHint
+                      : copy.publicDisabledHint}
+                  </p>
+                </div>
+              </AutoTransition>
+            </AutoResizer>
 
             <Button
               type="button"

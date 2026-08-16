@@ -339,6 +339,7 @@ export function EventsClientPage({
           siteDomain={siteDomain}
           pathname={pathname}
           filters={filters}
+          loading={loading}
           cardDataOverride={eventCardDataOverride}
           visibleCards={["page"]}
           pageCardTabs={["path"]}
@@ -369,6 +370,7 @@ export function EventsClientPage({
           siteDomain={siteDomain}
           pathname={siteBasePath}
           filters={filters}
+          loading={loading}
           cardDataOverride={contextCardDataOverride}
           visibleCards={["page"]}
           pageCardTabs={["path", "title", "hostname"]}

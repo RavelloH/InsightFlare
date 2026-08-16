@@ -509,197 +509,234 @@ function DoDiagnosticPanel({
         <CardDescription>{t.doDiagnosticDescription}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {!requested ? (
-          <div className="flex min-h-28 flex-col items-center justify-center gap-3 border bg-muted/20 p-4 text-center">
-            <Button
-              type="button"
-              variant="outline"
-              className="gap-2"
-              onClick={onRun}
-            >
-              <RiRefreshLine className="size-4" />
-              {t.doDiagnosticRun}
-            </Button>
-          </div>
-        ) : null}
-        {requested ? (
-          <>
-            <div className="grid gap-px overflow-hidden border bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
-              <DoDiagnosticCell
-                label={t.doDiagnosticTotalSites}
-                value={
-                  data ? formatMetricNumber(locale, data.totalSites) : "--"
-                }
-                detail={
-                  data
-                    ? `${t.doDiagnosticReachableSites}: ${formatMetricNumber(locale, data.reachableSites)}`
-                    : ""
-                }
-              />
-              <DoDiagnosticCell
-                label={t.doDiagnosticActiveAlarms}
-                value={
-                  totals
-                    ? formatMetricNumber(locale, totals.activeAlarms)
-                    : "--"
-                }
-                detail={
-                  totals
-                    ? `${t.doDiagnosticBufferedVisits}: ${formatMetricNumber(locale, totals.bufferedVisits)}`
-                    : ""
-                }
-              />
-              <DoDiagnosticCell
-                label={t.doDiagnosticOpenVisits}
-                value={
-                  totals ? formatMetricNumber(locale, totals.openVisits) : "--"
-                }
-                detail={
-                  totals
-                    ? `${t.doDiagnosticOpenStale}: ${formatMetricNumber(locale, totals.openStale)} / ${t.doDiagnosticOpenTimedOut}: ${formatMetricNumber(locale, totals.openTimedOut)}`
-                    : ""
-                }
-                tone={totals && totals.openTimedOut > 0 ? "warning" : "default"}
-              />
-              <DoDiagnosticCell
-                label={t.doDiagnosticStuckDirty}
-                value={
-                  totals
-                    ? formatMetricNumber(
-                        locale,
-                        totals.stuckDirtyVisits + totals.stuckDirtyCustomEvents,
-                      )
-                    : "--"
-                }
-                detail={
-                  totals
-                    ? `${t.doDiagnosticOpenHardAged}: ${formatMetricNumber(locale, totals.openHardAged)} / ${t.doDiagnosticOpenFutureSkew}: ${formatMetricNumber(locale, totals.openFutureSkewed)}`
-                    : ""
-                }
-                tone={hasAnomalies ? "warning" : "good"}
-              />
-            </div>
-
-            <div className="grid gap-2 text-sm sm:grid-cols-2">
-              <DoDiagnosticKv
-                label={t.doDiagnosticOldestOpen}
-                value={
-                  data?.oldestOpenStartedAt
-                    ? shortDateTime(locale, data.oldestOpenStartedAt, timeZone)
-                    : "--"
-                }
-              />
-              <DoDiagnosticKv
-                label={t.doDiagnosticFutureMaxActivity}
-                value={
-                  data?.futureMaxActivityAt
-                    ? shortDateTime(locale, data.futureMaxActivityAt, timeZone)
-                    : "--"
-                }
-                tone={data?.futureMaxActivityAt ? "warning" : "default"}
-              />
-              <DoDiagnosticKv
-                label={t.doDiagnosticMaxFlushAttempts}
-                value={
-                  totals
-                    ? `${formatMetricNumber(locale, totals.maxVisitFlushAttempts)} / ${formatMetricNumber(locale, totals.maxCustomEventFlushAttempts)}`
-                    : "--"
-                }
-                tone={
-                  totals &&
-                  Math.max(
-                    totals.maxVisitFlushAttempts,
-                    totals.maxCustomEventFlushAttempts,
-                  ) >= (thresholds?.stuckFlushAttempts ?? 5)
-                    ? "warning"
-                    : "default"
-                }
-              />
-              <DoDiagnosticKv
-                label={t.doDiagnosticBufferedCustomEvents}
-                value={
-                  totals
-                    ? `${formatMetricNumber(locale, totals.bufferedCustomEvents)} (dirty: ${formatMetricNumber(locale, totals.dirtyCustomEvents)})`
-                    : "--"
-                }
-              />
-            </div>
-
-            {data && data.unreachableSites > 0 ? (
-              <Badge variant="outline" className="gap-2 text-destructive">
-                <RiAlarmWarningLine className="size-3" />
-                {t.doDiagnosticUnreachable}:{" "}
-                {formatMetricNumber(locale, data.unreachableSites)}
-              </Badge>
-            ) : null}
-
-            <div className="border-t pt-4">
-              <div className="mb-2 flex items-baseline justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-medium">
-                    {t.doDiagnosticSiteList}
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    {t.doDiagnosticSiteListDescription}
-                  </p>
+        <AutoResizer initial duration={0.28} ease={[0.22, 1, 0.36, 1]}>
+          <AutoTransition
+            initial={false}
+            duration={0.2}
+            type="fade"
+            presenceMode="wait"
+            transitionKey={
+              !requested ? "idle" : loading && !data ? "loading" : "result"
+            }
+          >
+            {!requested ? (
+              <div
+                key="idle"
+                className="flex min-h-28 flex-col items-center justify-center gap-3 border bg-muted/20 p-4 text-center"
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2"
+                  disabled={loading}
+                  onClick={onRun}
+                >
+                  <RiRefreshLine className="size-4" />
+                  {t.doDiagnosticRun}
+                </Button>
+              </div>
+            ) : loading && !data ? (
+              <div
+                key="loading"
+                className="flex min-h-28 items-center justify-center gap-2 border bg-muted/20 p-4 text-sm text-muted-foreground"
+                aria-busy="true"
+              >
+                <Spinner className="size-4" />
+                {t.doDiagnosticLoading}
+              </div>
+            ) : (
+              <div key="result" className="space-y-4">
+                <div className="grid gap-px overflow-hidden border bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
+                  <DoDiagnosticCell
+                    label={t.doDiagnosticTotalSites}
+                    value={
+                      data ? formatMetricNumber(locale, data.totalSites) : "--"
+                    }
+                    detail={
+                      data
+                        ? `${t.doDiagnosticReachableSites}: ${formatMetricNumber(locale, data.reachableSites)}`
+                        : ""
+                    }
+                  />
+                  <DoDiagnosticCell
+                    label={t.doDiagnosticActiveAlarms}
+                    value={
+                      totals
+                        ? formatMetricNumber(locale, totals.activeAlarms)
+                        : "--"
+                    }
+                    detail={
+                      totals
+                        ? `${t.doDiagnosticBufferedVisits}: ${formatMetricNumber(locale, totals.bufferedVisits)}`
+                        : ""
+                    }
+                  />
+                  <DoDiagnosticCell
+                    label={t.doDiagnosticOpenVisits}
+                    value={
+                      totals
+                        ? formatMetricNumber(locale, totals.openVisits)
+                        : "--"
+                    }
+                    detail={
+                      totals
+                        ? `${t.doDiagnosticOpenStale}: ${formatMetricNumber(locale, totals.openStale)} / ${t.doDiagnosticOpenTimedOut}: ${formatMetricNumber(locale, totals.openTimedOut)}`
+                        : ""
+                    }
+                    tone={
+                      totals && totals.openTimedOut > 0 ? "warning" : "default"
+                    }
+                  />
+                  <DoDiagnosticCell
+                    label={t.doDiagnosticStuckDirty}
+                    value={
+                      totals
+                        ? formatMetricNumber(
+                            locale,
+                            totals.stuckDirtyVisits +
+                              totals.stuckDirtyCustomEvents,
+                          )
+                        : "--"
+                    }
+                    detail={
+                      totals
+                        ? `${t.doDiagnosticOpenHardAged}: ${formatMetricNumber(locale, totals.openHardAged)} / ${t.doDiagnosticOpenFutureSkew}: ${formatMetricNumber(locale, totals.openFutureSkewed)}`
+                        : ""
+                    }
+                    tone={hasAnomalies ? "warning" : "good"}
+                  />
                 </div>
+
+                <div className="grid gap-2 text-sm sm:grid-cols-2">
+                  <DoDiagnosticKv
+                    label={t.doDiagnosticOldestOpen}
+                    value={
+                      data?.oldestOpenStartedAt
+                        ? shortDateTime(
+                            locale,
+                            data.oldestOpenStartedAt,
+                            timeZone,
+                          )
+                        : "--"
+                    }
+                  />
+                  <DoDiagnosticKv
+                    label={t.doDiagnosticFutureMaxActivity}
+                    value={
+                      data?.futureMaxActivityAt
+                        ? shortDateTime(
+                            locale,
+                            data.futureMaxActivityAt,
+                            timeZone,
+                          )
+                        : "--"
+                    }
+                    tone={data?.futureMaxActivityAt ? "warning" : "default"}
+                  />
+                  <DoDiagnosticKv
+                    label={t.doDiagnosticMaxFlushAttempts}
+                    value={
+                      totals
+                        ? `${formatMetricNumber(locale, totals.maxVisitFlushAttempts)} / ${formatMetricNumber(locale, totals.maxCustomEventFlushAttempts)}`
+                        : "--"
+                    }
+                    tone={
+                      totals &&
+                      Math.max(
+                        totals.maxVisitFlushAttempts,
+                        totals.maxCustomEventFlushAttempts,
+                      ) >= (thresholds?.stuckFlushAttempts ?? 5)
+                        ? "warning"
+                        : "default"
+                    }
+                  />
+                  <DoDiagnosticKv
+                    label={t.doDiagnosticBufferedCustomEvents}
+                    value={
+                      totals
+                        ? `${formatMetricNumber(locale, totals.bufferedCustomEvents)} (dirty: ${formatMetricNumber(locale, totals.dirtyCustomEvents)})`
+                        : "--"
+                    }
+                  />
+                </div>
+
+                {data && data.unreachableSites > 0 ? (
+                  <Badge variant="outline" className="gap-2 text-destructive">
+                    <RiAlarmWarningLine className="size-3" />
+                    {t.doDiagnosticUnreachable}:{" "}
+                    {formatMetricNumber(locale, data.unreachableSites)}
+                  </Badge>
+                ) : null}
+
+                <div className="border-t pt-4">
+                  <div className="mb-2 flex items-baseline justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-medium">
+                        {t.doDiagnosticSiteList}
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        {t.doDiagnosticSiteListDescription}
+                      </p>
+                    </div>
+                    {thresholdHint ? (
+                      <p className="hidden text-right text-xs text-muted-foreground md:block">
+                        {thresholdHint}
+                      </p>
+                    ) : null}
+                  </div>
+                  <DataTableSwitch
+                    loading={loading}
+                    hasContent={visibleSites.length > 0}
+                    loadingLabel={t.doDiagnosticLoading}
+                    emptyLabel={
+                      data && data.totalSites === 0
+                        ? t.doDiagnosticEmpty
+                        : t.doDiagnosticHealthy
+                    }
+                    colSpan={7}
+                    header={
+                      <TableRow>
+                        <TableHead>{messages.common.site}</TableHead>
+                        <TableHead className="text-right">
+                          {t.doDiagnosticSiteOpen}
+                        </TableHead>
+                        <TableHead className="text-right">
+                          {t.doDiagnosticSiteHardAged}
+                        </TableHead>
+                        <TableHead className="text-right">
+                          {t.doDiagnosticSiteFuture}
+                        </TableHead>
+                        <TableHead className="text-right">
+                          {t.doDiagnosticSiteStuck}
+                        </TableHead>
+                        <TableHead className="text-right">
+                          {t.doDiagnosticSiteAlarm}
+                        </TableHead>
+                        <TableHead className="text-right">
+                          {t.doDiagnosticSiteResponseMs}
+                        </TableHead>
+                      </TableRow>
+                    }
+                    rows={visibleSites.map((site) => (
+                      <DoDiagnosticSiteRow
+                        key={site.siteId}
+                        locale={locale}
+                        messages={messages}
+                        site={site}
+                      />
+                    ))}
+                  />
+                </div>
+
                 {thresholdHint ? (
-                  <p className="hidden text-right text-xs text-muted-foreground md:block">
+                  <p className="text-xs text-muted-foreground md:hidden">
                     {thresholdHint}
                   </p>
                 ) : null}
               </div>
-              <DataTableSwitch
-                loading={loading}
-                hasContent={visibleSites.length > 0}
-                loadingLabel={t.doDiagnosticLoading}
-                emptyLabel={
-                  data && data.totalSites === 0
-                    ? t.doDiagnosticEmpty
-                    : t.doDiagnosticHealthy
-                }
-                colSpan={7}
-                header={
-                  <TableRow>
-                    <TableHead>{messages.common.site}</TableHead>
-                    <TableHead className="text-right">
-                      {t.doDiagnosticSiteOpen}
-                    </TableHead>
-                    <TableHead className="text-right">
-                      {t.doDiagnosticSiteHardAged}
-                    </TableHead>
-                    <TableHead className="text-right">
-                      {t.doDiagnosticSiteFuture}
-                    </TableHead>
-                    <TableHead className="text-right">
-                      {t.doDiagnosticSiteStuck}
-                    </TableHead>
-                    <TableHead className="text-right">
-                      {t.doDiagnosticSiteAlarm}
-                    </TableHead>
-                    <TableHead className="text-right">
-                      {t.doDiagnosticSiteResponseMs}
-                    </TableHead>
-                  </TableRow>
-                }
-                rows={visibleSites.map((site) => (
-                  <DoDiagnosticSiteRow
-                    key={site.siteId}
-                    locale={locale}
-                    messages={messages}
-                    site={site}
-                  />
-                ))}
-              />
-            </div>
-
-            {thresholdHint ? (
-              <p className="text-xs text-muted-foreground md:hidden">
-                {thresholdHint}
-              </p>
-            ) : null}
-          </>
-        ) : null}
+            )}
+          </AutoTransition>
+        </AutoResizer>
       </CardContent>
     </Card>
   );

@@ -12,6 +12,7 @@ import { toast } from "sonner";
 
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
 import { PageHeading } from "@/components/dashboard/page-heading";
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -686,132 +687,155 @@ export function AccountSettingsClient({
             </CardDescription>
           </CardHeader>
           <CardContent className="flex h-full flex-col">
-            {notificationPreferencesLoading || !draftNotificationPreferences ? (
-              <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-                <Spinner className="mr-2 size-4" />
-                {messages.common.loading}
-              </div>
-            ) : (
-              <form
-                className="flex h-full flex-col gap-5"
-                onSubmit={handleNotificationPreferencesSubmit}
+            <AutoResizer initial duration={0.28} ease={[0.22, 1, 0.36, 1]}>
+              <AutoTransition
+                initial={false}
+                duration={0.2}
+                type="fade"
+                presenceMode="wait"
+                transitionKey={
+                  notificationPreferencesLoading ||
+                  !draftNotificationPreferences
+                    ? "loading"
+                    : "preferences"
+                }
               >
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field>
-                    <FieldLabel>
-                      {notificationCopy.emailNotificationsLabel}
-                    </FieldLabel>
-                    <div className="flex items-start gap-3">
-                      <Checkbox
-                        checked={draftNotificationPreferences.email}
-                        disabled={notificationPreferencesSaving}
-                        onCheckedChange={(checked) =>
-                          updateDraftNotificationPreferences({
-                            email: !!checked,
-                          })
-                        }
-                      />
-                      <FieldDescription>
-                        {notificationCopy.emailNotificationsDescription}
-                      </FieldDescription>
-                    </div>
-                  </Field>
-                  <Field>
-                    <FieldLabel>
-                      {notificationCopy.reportsUnreadLabel}
-                    </FieldLabel>
-                    <div className="flex items-start gap-3">
-                      <Checkbox
-                        checked={
-                          draftNotificationPreferences.attention
-                            .reportsCreateUnread
-                        }
-                        disabled={notificationPreferencesSaving}
-                        onCheckedChange={(checked) =>
-                          updateDraftNotificationPreferences({
-                            attention: { reportsCreateUnread: !!checked },
-                          })
-                        }
-                      />
-                      <FieldDescription>
-                        {notificationCopy.reportsUnreadDescription}
-                      </FieldDescription>
-                    </div>
-                  </Field>
-                  <Field>
-                    <FieldLabel>
-                      {notificationCopy.milestonesUnreadLabel}
-                    </FieldLabel>
-                    <div className="flex items-start gap-3">
-                      <Checkbox
-                        checked={
-                          draftNotificationPreferences.attention
-                            .milestonesCreateUnread
-                        }
-                        disabled={notificationPreferencesSaving}
-                        onCheckedChange={(checked) =>
-                          updateDraftNotificationPreferences({
-                            attention: { milestonesCreateUnread: !!checked },
-                          })
-                        }
-                      />
-                      <FieldDescription>
-                        {notificationCopy.milestonesUnreadDescription}
-                      </FieldDescription>
-                    </div>
-                  </Field>
-                  <Field>
-                    <FieldLabel>
-                      {notificationCopy.alertsUnreadLabel}
-                    </FieldLabel>
-                    <div className="flex items-start gap-3">
-                      <Checkbox
-                        checked={
-                          draftNotificationPreferences.attention
-                            .alertsCreateUnread
-                        }
-                        disabled={notificationPreferencesSaving}
-                        onCheckedChange={(checked) =>
-                          updateDraftNotificationPreferences({
-                            attention: { alertsCreateUnread: !!checked },
-                          })
-                        }
-                      />
-                      <FieldDescription>
-                        {notificationCopy.alertsUnreadDescription}
-                      </FieldDescription>
-                    </div>
-                  </Field>
-                </div>
-
-                <div className="mt-auto flex justify-start">
-                  <Button
-                    type="submit"
-                    disabled={!canSaveNotificationPreferences}
+                {notificationPreferencesLoading ||
+                !draftNotificationPreferences ? (
+                  <div
+                    key="loading"
+                    className="flex h-32 items-center justify-center text-sm text-muted-foreground"
+                    aria-busy="true"
                   >
-                    <AutoTransition className="inline-flex items-center gap-2">
-                      {notificationPreferencesSaving ? (
-                        <span
-                          key="notification-preferences-saving"
-                          className="inline-flex items-center gap-2"
-                        >
-                          <Spinner className="size-4" />
-                          {copy.saving}
-                        </span>
-                      ) : (
-                        <span
-                          key="notification-preferences-save"
-                          className="inline-flex items-center gap-2"
-                        >
-                          <RiSave3Line className="size-4" />
-                          {copy.save}
-                        </span>
-                      )}
-                    </AutoTransition>
-                  </Button>
-                </div>
-              </form>
-            )}
+                    <Spinner className="mr-2 size-4" />
+                    {messages.common.loading}
+                  </div>
+                ) : (
+                  <form
+                    key="preferences"
+                    className="flex h-full flex-col gap-5"
+                    onSubmit={handleNotificationPreferencesSubmit}
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Field>
+                        <FieldLabel>
+                          {notificationCopy.emailNotificationsLabel}
+                        </FieldLabel>
+                        <div className="flex items-start gap-3">
+                          <Checkbox
+                            checked={draftNotificationPreferences.email}
+                            disabled={notificationPreferencesSaving}
+                            onCheckedChange={(checked) =>
+                              updateDraftNotificationPreferences({
+                                email: !!checked,
+                              })
+                            }
+                          />
+                          <FieldDescription>
+                            {notificationCopy.emailNotificationsDescription}
+                          </FieldDescription>
+                        </div>
+                      </Field>
+                      <Field>
+                        <FieldLabel>
+                          {notificationCopy.reportsUnreadLabel}
+                        </FieldLabel>
+                        <div className="flex items-start gap-3">
+                          <Checkbox
+                            checked={
+                              draftNotificationPreferences.attention
+                                .reportsCreateUnread
+                            }
+                            disabled={notificationPreferencesSaving}
+                            onCheckedChange={(checked) =>
+                              updateDraftNotificationPreferences({
+                                attention: { reportsCreateUnread: !!checked },
+                              })
+                            }
+                          />
+                          <FieldDescription>
+                            {notificationCopy.reportsUnreadDescription}
+                          </FieldDescription>
+                        </div>
+                      </Field>
+                      <Field>
+                        <FieldLabel>
+                          {notificationCopy.milestonesUnreadLabel}
+                        </FieldLabel>
+                        <div className="flex items-start gap-3">
+                          <Checkbox
+                            checked={
+                              draftNotificationPreferences.attention
+                                .milestonesCreateUnread
+                            }
+                            disabled={notificationPreferencesSaving}
+                            onCheckedChange={(checked) =>
+                              updateDraftNotificationPreferences({
+                                attention: {
+                                  milestonesCreateUnread: !!checked,
+                                },
+                              })
+                            }
+                          />
+                          <FieldDescription>
+                            {notificationCopy.milestonesUnreadDescription}
+                          </FieldDescription>
+                        </div>
+                      </Field>
+                      <Field>
+                        <FieldLabel>
+                          {notificationCopy.alertsUnreadLabel}
+                        </FieldLabel>
+                        <div className="flex items-start gap-3">
+                          <Checkbox
+                            checked={
+                              draftNotificationPreferences.attention
+                                .alertsCreateUnread
+                            }
+                            disabled={notificationPreferencesSaving}
+                            onCheckedChange={(checked) =>
+                              updateDraftNotificationPreferences({
+                                attention: { alertsCreateUnread: !!checked },
+                              })
+                            }
+                          />
+                          <FieldDescription>
+                            {notificationCopy.alertsUnreadDescription}
+                          </FieldDescription>
+                        </div>
+                      </Field>
+                    </div>
+
+                    <div className="mt-auto flex justify-start">
+                      <Button
+                        type="submit"
+                        disabled={!canSaveNotificationPreferences}
+                      >
+                        <AutoTransition className="inline-flex items-center gap-2">
+                          {notificationPreferencesSaving ? (
+                            <span
+                              key="notification-preferences-saving"
+                              className="inline-flex items-center gap-2"
+                            >
+                              <Spinner className="size-4" />
+                              {copy.saving}
+                            </span>
+                          ) : (
+                            <span
+                              key="notification-preferences-save"
+                              className="inline-flex items-center gap-2"
+                            >
+                              <RiSave3Line className="size-4" />
+                              {copy.save}
+                            </span>
+                          )}
+                        </AutoTransition>
+                      </Button>
+                    </div>
+                  </form>
+                )}
+              </AutoTransition>
+            </AutoResizer>
           </CardContent>
         </Card>
 
@@ -958,33 +982,43 @@ export function AccountSettingsClient({
                 <FieldLabel htmlFor="account-timezone-select">
                   {copy.customTimeZoneLabel}
                 </FieldLabel>
-                <FieldContent>
-                  <Select
-                    value={selectedCustomTimeZone}
-                    disabled={mode === "browser"}
-                    onValueChange={(value) => {
-                      setCustomTimeZone(value);
-                      if (mode !== "custom") setMode("custom");
-                    }}
+                <AutoResizer initial duration={0.24} ease={[0.22, 1, 0.36, 1]}>
+                  <AutoTransition
+                    initial={false}
+                    duration={0.18}
+                    type="fade"
+                    presenceMode="wait"
+                    transitionKey={mode}
                   >
-                    <SelectTrigger
-                      id="account-timezone-select"
-                      className="w-full"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-80">
-                      {timeZoneOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    {copy.customTimeZoneDescription}
-                  </FieldDescription>
-                </FieldContent>
+                    <FieldContent key={mode}>
+                      <Select
+                        value={selectedCustomTimeZone}
+                        disabled={mode === "browser"}
+                        onValueChange={(value) => {
+                          setCustomTimeZone(value);
+                          if (mode !== "custom") setMode("custom");
+                        }}
+                      >
+                        <SelectTrigger
+                          id="account-timezone-select"
+                          className="w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-80">
+                          {timeZoneOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>
+                        {copy.customTimeZoneDescription}
+                      </FieldDescription>
+                    </FieldContent>
+                  </AutoTransition>
+                </AutoResizer>
               </Field>
 
               <div className="mt-auto flex justify-start">

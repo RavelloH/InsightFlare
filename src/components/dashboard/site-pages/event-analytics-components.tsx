@@ -2369,7 +2369,15 @@ export function EventFieldsCard({
             </CardHeader>
             <CardContent className="space-y-2 pb-5">
               <div className="max-h-[38rem] overflow-auto pr-1 font-mono text-[13px] leading-6">
-                {fieldListError ? (
+                {fieldListLoading ? (
+                  <div
+                    className="flex min-h-32 items-center justify-center gap-2 border border-border/50 bg-muted/20 px-4 py-6 font-sans text-sm text-muted-foreground"
+                    aria-busy="true"
+                  >
+                    <Spinner className="size-4" />
+                    {labels.loading}
+                  </div>
+                ) : fieldListError ? (
                   <div className="rounded-none border border-border/50 bg-muted/20 px-4 py-6 font-sans text-sm text-muted-foreground">
                     {labels.loadError}
                   </div>
@@ -2430,8 +2438,8 @@ export function EventFieldsCard({
             <CardContent className="p-0">
               <DataTableSwitch
                 loading={
-                  Boolean(selectedField) &&
-                  (fieldListLoading || fieldValuesLoading)
+                  fieldListLoading ||
+                  (Boolean(selectedField) && fieldValuesLoading)
                 }
                 hasContent={
                   Boolean(selectedField) &&

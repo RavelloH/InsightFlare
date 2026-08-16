@@ -84,7 +84,7 @@ function PublicLinksPage() {
                     site.publicEnabled && site.publicSlug,
                   );
                   const publicUrl = enabled
-                    ? `${origin}/${locale}/share/${encodeURIComponent(site.publicSlug || "")}`
+                    ? `${origin}/share/${encodeURIComponent(site.publicSlug || "")}`
                     : "";
                   const settingsHref = `/${locale}/app/${teamContext.activeTeam.slug}/${site.slug}/settings`;
                   return (

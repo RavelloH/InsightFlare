@@ -1832,6 +1832,7 @@ function MetricAreaMap({
 
 interface OverviewPagesSectionProps extends OverviewClientPageProps {
   filters: DashboardFilters;
+  loading?: boolean;
   cardDataOverride?: OverviewPagesSectionCardData | null;
   visibleCards?: readonly OverviewPagesSectionCardKind[];
   pageCardTabs?: readonly PageCardTab[];
@@ -1869,6 +1870,7 @@ export function OverviewPagesSection({
   siteDomain,
   pathname,
   filters,
+  loading = false,
   cardDataOverride,
   visibleCards,
   pageCardTabs,
@@ -3068,41 +3070,46 @@ export function OverviewPagesSection({
       Object.fromEntries(
         ALL_PAGE_CARD_TABS.map((tab) => [
           tab,
-          !hasCardDataOverride && resolvedPageCardTabData[tab] === null,
+          loading ||
+            (!hasCardDataOverride && resolvedPageCardTabData[tab] === null),
         ]),
       ) as Record<PageCardTab, boolean>,
-    [hasCardDataOverride, resolvedPageCardTabData],
+    [hasCardDataOverride, loading, resolvedPageCardTabData],
   );
   const loadingBySourceCardTab = useMemo(
     () =>
       Object.fromEntries(
         SOURCE_CARD_TABS.map((tab) => [
           tab,
-          !hasCardDataOverride && resolvedSourceCardTabData[tab] === null,
+          loading ||
+            (!hasCardDataOverride && resolvedSourceCardTabData[tab] === null),
         ]),
       ) as Record<SourceCardTab, boolean>,
-    [hasCardDataOverride, resolvedSourceCardTabData],
+    [hasCardDataOverride, loading, resolvedSourceCardTabData],
   );
   const loadingByClientDimensionCardTab = useMemo(
     () =>
       Object.fromEntries(
         CLIENT_DIMENSION_CARD_TABS.map((tab) => [
           tab,
-          !hasCardDataOverride &&
-            resolvedClientDimensionCardTabData[tab] === null,
+          loading ||
+            (!hasCardDataOverride &&
+              resolvedClientDimensionCardTabData[tab] === null),
         ]),
       ) as Record<ClientDimensionCardTab, boolean>,
-    [hasCardDataOverride, resolvedClientDimensionCardTabData],
+    [hasCardDataOverride, loading, resolvedClientDimensionCardTabData],
   );
   const loadingByGeoDimensionCardTab = useMemo(
     () =>
       Object.fromEntries(
         GEO_DIMENSION_CARD_TABS.map((tab) => [
           tab,
-          !hasCardDataOverride && resolvedGeoDimensionCardTabData[tab] === null,
+          loading ||
+            (!hasCardDataOverride &&
+              resolvedGeoDimensionCardTabData[tab] === null),
         ]),
       ) as Record<GeoDimensionCardTab, boolean>,
-    [hasCardDataOverride, resolvedGeoDimensionCardTabData],
+    [hasCardDataOverride, loading, resolvedGeoDimensionCardTabData],
   );
   const searchConfig = useMemo(
     () => ({
