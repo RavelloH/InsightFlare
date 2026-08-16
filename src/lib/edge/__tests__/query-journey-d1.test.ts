@@ -82,6 +82,7 @@ function createD1Env(resultSets: D1Row[][]): {
 function createSqliteDetailEnv(): {
   env: Env;
   calls: QueryCall[];
+  database: DatabaseSync;
   close: () => void;
   explain: (call: QueryCall) => string[];
 } {
@@ -112,6 +113,7 @@ function createSqliteDetailEnv(): {
   return {
     env,
     calls,
+    database,
     close: () => database.close(),
     explain: (call) =>
       database
@@ -381,9 +383,107 @@ describe("edge journey detail D1 queries", () => {
   it("uses target-visit and target-event indexes from the shared detail source", async () => {
     const sqlite = createSqliteDetailEnv();
     try {
+      sqlite.database
+        .prepare(
+          `INSERT INTO visits (
+            visit_id, site_id, visitor_id, session_id, status, started_at,
+            last_activity_at, pathname, hostname
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "visit-plan",
+          siteId,
+          "visitor-plan",
+          "session-plan",
+          "closed",
+          baseMs,
+          baseMs,
+          "/target",
+          "example.test",
+        );
+      sqlite.database
+        .prepare(
+          `INSERT INTO visits (
+            visit_id, site_id, visitor_id, session_id, status, started_at,
+            last_activity_at, pathname, hostname
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "visit-noise",
+          siteId,
+          "visitor-noise",
+          "session-noise",
+          "closed",
+          baseMs,
+          baseMs,
+          "/noise",
+          "example.test",
+        );
+      sqlite.database
+        .prepare(
+          "INSERT INTO custom_event_names (id, site_id, name, last_seen_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(1, siteId, "signup", baseMs);
+      sqlite.database
+        .prepare(
+          `INSERT INTO custom_events (
+            event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+            received_at, sequence, node_count, value_count
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(1, "event-plan", siteId, "visit-plan", 1, baseMs, baseMs, 0, 0, 0);
+      sqlite.database.exec(`
+        WITH RECURSIVE sequence(value) AS (
+          VALUES(2)
+          UNION ALL
+          SELECT value + 1 FROM sequence WHERE value < 5001
+        )
+        INSERT INTO visits (
+          visit_id, site_id, visitor_id, session_id, status, started_at,
+          last_activity_at, pathname, hostname
+        )
+        SELECT
+          'visit-noise-' || value,
+          '${siteId}',
+          'visitor-noise-' || value,
+          'session-noise-' || value,
+          'closed',
+          ${baseMs} + value,
+          ${baseMs} + value,
+          '/noise',
+          'example.test'
+        FROM sequence;
+
+        WITH RECURSIVE sequence(value) AS (
+          VALUES(2)
+          UNION ALL
+          SELECT value + 1 FROM sequence WHERE value < 5001
+        )
+        INSERT INTO custom_events (
+          event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+          received_at, sequence, node_count, value_count
+        )
+        SELECT
+          value,
+          'event-noise-' || value,
+          '${siteId}',
+          'visit-noise',
+          1,
+          ${baseMs} + value,
+          ${baseMs} + value,
+          value,
+          0,
+          0
+        FROM sequence;
+        ANALYZE;
+      `);
+
       await expect(
         queryVisitorDetailFromD1(sqlite.env, siteId, "visitor-plan", "UTC"),
-      ).resolves.toBeNull();
+      ).resolves.toMatchObject({
+        visitor: { visitorId: "visitor-plan" },
+        metrics: { totalEvents: 1 },
+      });
 
       expect(sqlite.calls).toHaveLength(1);
       const plan = sqlite.explain(sqlite.calls[0]!);
@@ -397,6 +497,7 @@ describe("edge journey detail D1 queries", () => {
           detail.includes("idx_custom_events_site_visit_time"),
         ),
       ).toBe(true);
+      expect(plan.some((detail) => /SCAN ce(?:\s|$)/.test(detail))).toBe(false);
     } finally {
       sqlite.close();
     }

@@ -97,12 +97,13 @@ event_source${options?.materialize ? " AS MATERIALIZED" : " AS"} (
     fv.language, fv.timezone, fv.screen_width, fv.screen_height,
     fv.perf_ttfb_ms, fv.perf_fcp_ms, fv.perf_lcp_ms, fv.perf_cls, fv.perf_inp_ms,
     ce.ae_synced_at
-  FROM custom_events ce
+  FROM filtered_visits fv
+  CROSS JOIN custom_events ce
   INNER JOIN custom_event_names cen
     ON cen.id = ce.event_name_id
-  INNER JOIN filtered_visits fv
-    ON fv.site_id = ce.site_id AND fv.visit_id = ce.visit_id
   WHERE ce.site_id = ?
+    AND ce.site_id = fv.site_id
+    AND ce.visit_id = fv.visit_id
 )`;
 }
 
