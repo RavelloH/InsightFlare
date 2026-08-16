@@ -993,19 +993,28 @@ describe("edge query core SQL helpers", () => {
       geoTimezone: "America/Los_Angeles",
     });
 
-    expect(filter.clause).toContain("TRIM(COALESCE(title, '')) = ?");
     expect(filter.clause).toContain(
-      "ORDER BY edge.started_at ASC, edge.visit_id ASC LIMIT 1",
+      "TRIM(COALESCE(visit_source.title, '')) = ?",
+    );
+    expect(filter.clause).toContain("visit_source.session_id IN");
+    expect(filter.clause).toContain(
+      "ORDER BY edge.started_at ASC, edge.visit_id ASC",
     );
     expect(filter.clause).toContain(
-      "ORDER BY edge.started_at DESC, edge.visit_id DESC LIMIT 1",
+      "ORDER BY edge.started_at DESC, edge.visit_id DESC",
     );
     expect(filter.clause).toContain(
-      "LOWER(TRIM(COALESCE(referrer_host, ''))) = ?",
+      "LOWER(TRIM(COALESCE(visit_source.referrer_host, ''))) = ?",
     );
-    expect(filter.clause).toContain("TRIM(COALESCE(referrer_url, '')) = ''");
-    expect(filter.clause).toContain("TRIM(COALESCE(language, '')) = ?");
-    expect(filter.clause).toContain("TRIM(COALESCE(timezone, '')) = ?");
+    expect(filter.clause).toContain(
+      "TRIM(COALESCE(visit_source.referrer_url, '')) = ''",
+    );
+    expect(filter.clause).toContain(
+      "TRIM(COALESCE(visit_source.language, '')) = ?",
+    );
+    expect(filter.clause).toContain(
+      "TRIM(COALESCE(visit_source.timezone, '')) = ?",
+    );
     expect(filter.bindings).toEqual([
       "Docs",
       "/",

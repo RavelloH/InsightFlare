@@ -46,7 +46,7 @@ export function withoutGeoFilter(filters: DashboardFilters): DashboardFilters {
 
 export function buildVisitFilterSql(
   filters: DashboardFilters,
-  alias = "",
+  alias = "visit_source",
 ): { clause: string; bindings: string[] } {
   const prefix = alias ? `${alias}.` : "";
   const clauses: string[] = [];
@@ -82,19 +82,59 @@ export function buildVisitFilterSql(
   if (filters.hostname) {
     equalsCaseInsensitive(`${prefix}hostname`, filters.hostname);
   }
-  if (filters.entry) {
+  if (filters.entry || filters.exit) {
     clauses.push(`TRIM(COALESCE(${prefix}session_id, '')) != ''`);
-    clauses.push(
-      `COALESCE((SELECT edge.pathname FROM visit_source edge WHERE edge.session_id = ${prefix}session_id ORDER BY edge.started_at ASC, edge.visit_id ASC LIMIT 1), '') = ?`,
-    );
-    bindings.push(filters.entry);
-  }
-  if (filters.exit) {
-    clauses.push(`TRIM(COALESCE(${prefix}session_id, '')) != ''`);
-    clauses.push(
-      `COALESCE((SELECT edge.pathname FROM visit_source edge WHERE edge.session_id = ${prefix}session_id ORDER BY edge.started_at DESC, edge.visit_id DESC LIMIT 1), '') = ?`,
-    );
-    bindings.push(filters.exit);
+    const rankColumns = [
+      ...(filters.entry
+        ? [
+            `ROW_NUMBER() OVER (
+      PARTITION BY edge.session_id
+      ORDER BY edge.started_at ASC, edge.visit_id ASC
+    ) AS entry_rank`,
+          ]
+        : []),
+      ...(filters.exit
+        ? [
+            `ROW_NUMBER() OVER (
+      PARTITION BY edge.session_id
+      ORDER BY edge.started_at DESC, edge.visit_id DESC
+    ) AS exit_rank`,
+          ]
+        : []),
+    ];
+    const boundaryColumns = [
+      ...(filters.entry
+        ? ["MAX(CASE WHEN entry_rank = 1 THEN pathname END) AS entry_path"]
+        : []),
+      ...(filters.exit
+        ? ["MAX(CASE WHEN exit_rank = 1 THEN pathname END) AS exit_path"]
+        : []),
+    ];
+    const boundaryConditions = [
+      ...(filters.entry ? ["COALESCE(entry_path, '') = ?"] : []),
+      ...(filters.exit ? ["COALESCE(exit_path, '') = ?"] : []),
+    ];
+    clauses.push(`
+${prefix}session_id IN (
+  SELECT session_id
+  FROM (
+    SELECT
+      session_id,
+      ${boundaryColumns.join(",\n      ")}
+    FROM (
+      SELECT
+        edge.session_id,
+        edge.pathname,
+        ${rankColumns.join(",\n        ")}
+      FROM visit_source edge
+      WHERE TRIM(COALESCE(edge.session_id, '')) != ''
+    ) ranked_session_edges
+    GROUP BY session_id
+  ) session_boundaries
+  WHERE ${boundaryConditions.join(" AND ")}
+)`);
+    if (filters.entry) bindings.push(filters.entry);
+    if (filters.exit) bindings.push(filters.exit);
   }
   if (filters.sourceDomain) {
     if (filters.sourceDomain === DIRECT_REFERRER_FILTER_VALUE) {

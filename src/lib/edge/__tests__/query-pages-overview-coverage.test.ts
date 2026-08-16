@@ -1014,6 +1014,105 @@ describe("edge overview D1 queries and handlers", () => {
     }
   });
 
+  it("filters overview visits by each session's entry path", async () => {
+    const database = new DatabaseSync(":memory:");
+    for (const migration of [
+      "migrations/0008_rebuild_analytics.sql",
+      "migrations/0013_add_visit_performance_metrics.sql",
+    ]) {
+      database.exec(readFileSync(migration, "utf8"));
+    }
+    const calls: QueryCall[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: (...bindings: QueryBinding[]) => {
+            const call = { sql, bindings };
+            calls.push(call);
+            return {
+              all: async () => ({
+                results: database.prepare(sql).all(...bindings) as D1Row[],
+              }),
+            };
+          },
+        }),
+      } as unknown as D1Database,
+    } as Env;
+    const insert = database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, pathname, hostname, duration_ms
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', ?)
+    `);
+
+    try {
+      insert.run(
+        "matching-entry",
+        siteId,
+        "visitor-1",
+        "matching-session",
+        baseMs,
+        baseMs,
+        "/landing",
+        20,
+      );
+      insert.run(
+        "matching-follow-up",
+        siteId,
+        "visitor-1",
+        "matching-session",
+        baseMs + 1,
+        baseMs + 1,
+        "/pricing",
+        30,
+      );
+      insert.run(
+        "different-entry",
+        siteId,
+        "visitor-2",
+        "other-session",
+        baseMs + 2,
+        baseMs + 2,
+        "/docs",
+        99,
+      );
+      insert.run(
+        "empty-session",
+        siteId,
+        "visitor-3",
+        "",
+        baseMs + 3,
+        baseMs + 3,
+        "/landing",
+        999,
+      );
+
+      await expect(
+        queryOverviewFromD1(env, siteId, window, {
+          entry: "/landing",
+          exit: "/pricing",
+        }),
+      ).resolves.toEqual({
+        views: 2,
+        sessions: 1,
+        visitors: 1,
+        bounces: 0,
+        totalDuration: 50,
+        durationViews: 2,
+      });
+
+      expect(calls).toHaveLength(1);
+      const plan = database
+        .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
+        .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(
+        plan.some((row) => row.detail.includes("CORRELATED SCALAR SUBQUERY")),
+      ).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
   it("maps trend rows, bucket timestamps, and filter bindings", async () => {
     const filters: DashboardFilters = {
       sourceDomain: "Ref.Example",
