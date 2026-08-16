@@ -420,7 +420,6 @@ describe("edge team query coverage", () => {
         ],
         [],
         [],
-        [],
         [
           {
             siteId: "site-a",
@@ -534,12 +533,26 @@ describe("edge team query coverage", () => {
     });
     expect(calls[4]).toMatchObject({
       kind: "all",
-      bindings: ["site-a", "site-b"],
+      bindings: ["site-a", "site-b", window.fromMs, window.toMs],
     });
     expect(calls[5]).toMatchObject({
       kind: "all",
-      bindings: ["site-a", "site-b", window.fromMs, window.toMs],
+      bindings: [
+        "site-a",
+        "site-b",
+        window.fromMs - (window.toMs - window.fromMs) - 1,
+        window.fromMs - 1,
+      ],
     });
+    expect(calls[6]).toMatchObject({
+      kind: "all",
+    });
+    expect(calls[6].bindings.slice(0, 4)).toEqual([
+      "site-a",
+      "site-b",
+      window.fromMs,
+      window.toMs,
+    ]);
   });
 
   it("rejects invalid team dashboard windows before auth or database access", async () => {

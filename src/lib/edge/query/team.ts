@@ -1,6 +1,6 @@
 import {
+  queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollupsPartial,
-  queryTrendForSitesFromHourlyRollupsPartial,
 } from "@/lib/edge/hourly-rollup";
 import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
 import type { Env } from "@/lib/edge/types";
@@ -219,53 +219,72 @@ ORDER BY bucket ASC, siteId ASC
   );
 }
 
-async function queryTeamTrendAggregate(
+async function queryTeamCurrentAggregates(
   env: Env,
   siteIds: string[],
   window: QueryWindow,
   interval: Interval,
   diagnostics?: D1ReadDiagnostics,
-): Promise<{ value: TeamTrendRow[]; source: AnalyticsDataSource }> {
-  const rollup = await queryTrendForSitesFromHourlyRollupsPartial(
+): Promise<{
+  overview: {
+    value: Map<string, OverviewAggregateRow>;
+    source: AnalyticsDataSource;
+  };
+  trend: { value: TeamTrendRow[]; source: AnalyticsDataSource };
+}> {
+  const rollup = await queryOverviewAndTrendForSitesFromHourlyRollupsPartial(
     env,
     siteIds,
     window,
     interval,
     diagnostics,
   );
-  if (!rollup) {
-    return {
-      value: await queryTeamTrendFromD1(
-        env,
-        siteIds,
-        window,
-        interval,
-        diagnostics,
-      ),
-      source: "raw",
-    };
+
+  const overviewRawSiteIds = siteIds.filter(
+    (siteId) => !rollup.overview.has(siteId),
+  );
+  if (overviewRawSiteIds.length > 0) {
+    const raw = await queryTeamOverviewFromD1(
+      env,
+      overviewRawSiteIds,
+      window,
+      diagnostics,
+    );
+    for (const [siteId, value] of raw.entries())
+      rollup.overview.set(siteId, value);
   }
-  const rawSiteIds = siteIds.filter((siteId) => !rollup.has(siteId));
-  const raw = await queryTeamTrendFromD1(
+
+  const trendRawSiteIds = rollup.trend
+    ? siteIds.filter((siteId) => !rollup.trend?.has(siteId))
+    : siteIds;
+  const rawTrend = await queryTeamTrendFromD1(
     env,
-    rawSiteIds,
+    trendRawSiteIds,
     window,
     interval,
     diagnostics,
   );
-  const value = [
-    ...[...rollup.values()].flat().map((row) => ({
-      siteId: row.siteId,
-      bucket: row.bucket,
-      timestampMs: row.timestampMs,
-      views: row.views,
-      visitors: row.visitors,
-    })),
-    ...raw,
+  const trendValue = [
+    ...(rollup.trend ? [...rollup.trend.values()].flat() : []),
+    ...rawTrend,
   ];
+
+  const overviewSource: AnalyticsDataSource =
+    overviewRawSiteIds.length === 0
+      ? "rollup"
+      : overviewRawSiteIds.length === siteIds.length
+        ? "raw"
+        : "mixed";
+  const trendSource: AnalyticsDataSource =
+    trendRawSiteIds.length === 0
+      ? "rollup"
+      : trendRawSiteIds.length === siteIds.length
+        ? "raw"
+        : "mixed";
+
   return {
-    value,
-    source: rawSiteIds.length === 0 ? "rollup" : "mixed",
+    overview: { value: rollup.overview, source: overviewSource },
+    trend: { value: trendValue, source: trendSource },
   };
 }
 
@@ -384,11 +403,11 @@ export async function handleTeamDashboardForTeam(
     timeZone: window.timeZone,
   };
   const siteIds = sites.map((site) => site.id);
-  const [currentOverview, previousOverview, trend] = await Promise.all([
-    queryTeamOverviewAggregate(env, siteIds, window, diagnostics),
+  const [current, previousOverview] = await Promise.all([
+    queryTeamCurrentAggregates(env, siteIds, window, interval, diagnostics),
     queryTeamOverviewAggregate(env, siteIds, previousWindow, diagnostics),
-    queryTeamTrendAggregate(env, siteIds, window, interval, diagnostics),
   ]);
+  const { overview: currentOverview, trend } = current;
   const source: AnalyticsDataSource = [
     currentOverview.source,
     previousOverview.source,

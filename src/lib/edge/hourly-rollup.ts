@@ -716,6 +716,62 @@ function addRollupToTrend(
   }
 }
 
+function addStoredRollupToOverviewAndTrend(
+  overview: MetricAccumulator,
+  trend: SiteTrendAccumulator | null,
+  row: StoredRollupRow,
+  buckets: ReturnType<typeof buildTimeBuckets>,
+): void {
+  const hourStartMs = row.hourBucket * ONE_HOUR_MS;
+  const visitors = parseJsonStringArray(row.visitorSetJson);
+  const sessions = parseSessionCountsJson(row.sessionCountsJson);
+  const perf = rollupPerf(row);
+
+  overview.views += Number(row.views ?? 0);
+  overview.durationMsSum += Number(row.durationMsSum ?? 0);
+  overview.durationMsCount += Number(row.durationMsCount ?? 0);
+  mergePerf(overview.perf, perf);
+
+  let bucketAccumulator: BucketAccumulator | null = null;
+  if (trend) {
+    const bucket = bucketIndexForTimestamp(buckets, hourStartMs);
+    if (bucket !== null) {
+      bucketAccumulator = ensureTrendBucket(
+        trend,
+        bucket,
+        timeBucketTimestamp(buckets, bucket),
+      );
+      bucketAccumulator.views += Number(row.views ?? 0);
+      bucketAccumulator.durationMsSum += Number(row.durationMsSum ?? 0);
+      bucketAccumulator.durationMsCount += Number(row.durationMsCount ?? 0);
+      mergePerf(bucketAccumulator.perf, perf);
+    }
+  }
+
+  for (const visitorId of visitors) {
+    overview.visitors.add(visitorId);
+    bucketAccumulator?.visitors.add(visitorId);
+  }
+  for (const [sessionId, count] of sessions) {
+    addSessionCount(
+      overview.sessionCounts,
+      overview.sessionFirstAt,
+      sessionId,
+      count,
+      hourStartMs,
+    );
+    if (trend) {
+      addSessionCount(
+        trend.sessionCounts,
+        trend.sessionFirstAt,
+        sessionId,
+        count,
+        hourStartMs,
+      );
+    }
+  }
+}
+
 function addDetailToTrend(
   trend: SiteTrendAccumulator,
   row: DetailVisitRow,
@@ -794,6 +850,142 @@ export interface SiteTrendRow extends TrendAggregateRow {
   siteId: string;
 }
 
+export interface HourlyRollupOverviewAndTrend {
+  overview: Map<string, OverviewAggregateRow>;
+  trend: Map<string, SiteTrendRow[]> | null;
+}
+
+function trendRowsFromAccumulator(
+  siteId: string,
+  trend: SiteTrendAccumulator,
+  buckets: ReturnType<typeof buildTimeBuckets>,
+): SiteTrendRow[] {
+  for (const [sessionId, count] of trend.sessionCounts.entries()) {
+    const firstAt = trend.sessionFirstAt.get(sessionId);
+    if (firstAt === undefined) continue;
+    const bucket = bucketIndexForTimestamp(buckets, firstAt);
+    if (bucket === null) continue;
+    const bucketAccumulator = ensureTrendBucket(
+      trend,
+      bucket,
+      timeBucketTimestamp(buckets, bucket),
+    );
+    bucketAccumulator.sessionCounts.set(sessionId, count);
+  }
+  const rows: SiteTrendRow[] = [];
+  for (const bucketAccumulator of trend.bucketAccumulators.values()) {
+    let bounces = 0;
+    for (const count of bucketAccumulator.sessionCounts.values()) {
+      if (count === 1) bounces += 1;
+    }
+    rows.push({
+      siteId,
+      bucket: bucketAccumulator.bucket,
+      timestampMs: bucketAccumulator.timestampMs,
+      views: bucketAccumulator.views,
+      visitors: bucketAccumulator.visitors.size,
+      sessions: bucketAccumulator.sessionCounts.size,
+      bounces,
+      totalDuration: bucketAccumulator.durationMsSum,
+      durationViews: bucketAccumulator.durationMsCount,
+    });
+  }
+  return rows.sort((left, right) => left.bucket - right.bucket);
+}
+
+/**
+ * Reads a site's hourly rollups once when a caller needs both overview and
+ * trend data for the same window. The regular overview/trend helpers remain
+ * available for callers that only need one representation.
+ */
+export async function queryOverviewAndTrendForSitesFromHourlyRollupsPartial(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+  interval: Interval,
+  diagnostics?: D1ReadDiagnostics,
+): Promise<HourlyRollupOverviewAndTrend> {
+  const overview = new Map<string, OverviewAggregateRow>();
+  if (siteIds.length === 0) return { overview, trend: new Map() };
+
+  const buckets = buildTimeBuckets(window, interval);
+  const trend = canUseHourlyRollupsForTrend(buckets)
+    ? new Map<string, SiteTrendRow[]>()
+    : null;
+  const states = await queryAggregationStates(env, siteIds, diagnostics);
+
+  for (const group of groupSitesByRollupWindow(siteIds, states, window)) {
+    const overviewBySite = new Map<string, MetricAccumulator>();
+    const trendBySite = trend ? new Map<string, SiteTrendAccumulator>() : null;
+    const ensureOverview = (siteId: string) => {
+      const existing = overviewBySite.get(siteId);
+      if (existing) return existing;
+      const next = createMetricAccumulator();
+      overviewBySite.set(siteId, next);
+      return next;
+    };
+    const ensureTrend = (siteId: string) => {
+      if (!trendBySite) return null;
+      const existing = trendBySite.get(siteId);
+      if (existing) return existing;
+      const next = createSiteTrendAccumulator();
+      trendBySite.set(siteId, next);
+      return next;
+    };
+
+    for (const rollup of await queryStoredRollupsForSites(
+      env,
+      group.siteIds,
+      group.split.rollupStartHour,
+      group.split.rollupEndHour,
+      diagnostics,
+    )) {
+      const trendAccumulator = ensureTrend(rollup.siteId);
+      addStoredRollupToOverviewAndTrend(
+        ensureOverview(rollup.siteId),
+        trendAccumulator,
+        rollup,
+        buckets,
+      );
+    }
+
+    for (const detailWindow of [group.split.prefix, group.split.suffix]) {
+      if (!detailWindow) continue;
+      for (const row of await queryDetailVisitsForSites(
+        env,
+        group.siteIds,
+        detailWindow,
+        diagnostics,
+      )) {
+        addDetailVisit(ensureOverview(row.siteId), row);
+        const trendAccumulator = ensureTrend(row.siteId);
+        if (trendAccumulator) addDetailToTrend(trendAccumulator, row, buckets);
+      }
+    }
+
+    for (const siteId of group.siteIds) {
+      overview.set(
+        siteId,
+        overviewFromAccumulator(
+          overviewBySite.get(siteId) ?? createMetricAccumulator(),
+        ),
+      );
+      if (trend) {
+        trend.set(
+          siteId,
+          trendRowsFromAccumulator(
+            siteId,
+            trendBySite?.get(siteId) ?? createSiteTrendAccumulator(),
+            buckets,
+          ),
+        );
+      }
+    }
+  }
+
+  return { overview, trend };
+}
+
 export async function queryTrendForSitesFromHourlyRollupsPartial(
   env: Env,
   siteIds: string[],
@@ -839,40 +1031,13 @@ export async function queryTrendForSitesFromHourlyRollupsPartial(
     }
 
     for (const siteId of group.siteIds) {
-      const trend = bySite.get(siteId) ?? createSiteTrendAccumulator();
-      for (const [sessionId, count] of trend.sessionCounts.entries()) {
-        const firstAt = trend.sessionFirstAt.get(sessionId);
-        if (firstAt === undefined) continue;
-        const bucket = bucketIndexForTimestamp(buckets, firstAt);
-        if (bucket === null) continue;
-        const bucketAccumulator = ensureTrendBucket(
-          trend,
-          bucket,
-          timeBucketTimestamp(buckets, bucket),
-        );
-        bucketAccumulator.sessionCounts.set(sessionId, count);
-      }
-      const rows: SiteTrendRow[] = [];
-      for (const bucketAccumulator of trend.bucketAccumulators.values()) {
-        let bounces = 0;
-        for (const count of bucketAccumulator.sessionCounts.values()) {
-          if (count === 1) bounces += 1;
-        }
-        rows.push({
-          siteId,
-          bucket: bucketAccumulator.bucket,
-          timestampMs: bucketAccumulator.timestampMs,
-          views: bucketAccumulator.views,
-          visitors: bucketAccumulator.visitors.size,
-          sessions: bucketAccumulator.sessionCounts.size,
-          bounces,
-          totalDuration: bucketAccumulator.durationMsSum,
-          durationViews: bucketAccumulator.durationMsCount,
-        });
-      }
       result.set(
         siteId,
-        rows.sort((left, right) => left.bucket - right.bucket),
+        trendRowsFromAccumulator(
+          siteId,
+          bySite.get(siteId) ?? createSiteTrendAccumulator(),
+          buckets,
+        ),
       );
     }
   }

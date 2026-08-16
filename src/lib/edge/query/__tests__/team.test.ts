@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/lib/edge/types";
 
 vi.mock("@/lib/edge/hourly-rollup", () => ({
+  queryOverviewAndTrendForSitesFromHourlyRollupsPartial: vi.fn(),
   queryOverviewForSitesFromHourlyRollupsPartial: vi.fn(),
   queryTrendForSitesFromHourlyRollupsPartial: vi.fn(),
 }));
@@ -48,6 +49,7 @@ vi.mock("@/lib/edge/query/core", () => ({
 }));
 
 import {
+  queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollupsPartial,
   queryTrendForSitesFromHourlyRollupsPartial,
 } from "@/lib/edge/hourly-rollup";
@@ -70,6 +72,9 @@ const queryOverviewMock = vi.mocked(
   queryOverviewForSitesFromHourlyRollupsPartial,
 );
 const queryTrendMock = vi.mocked(queryTrendForSitesFromHourlyRollupsPartial);
+const queryOverviewAndTrendMock = vi.mocked(
+  queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
+);
 const parseWindowMock = vi.mocked(parseWindow);
 const resolvePrivateTeamMock = vi.mocked(resolvePrivateTeam);
 const resolvePrivateTeamForSessionMock = vi.mocked(
@@ -172,6 +177,11 @@ describe("handleTeamDashboard", () => {
     resolvePrivateTeamForSessionMock.mockReset();
     queryOverviewMock.mockReset();
     queryTrendMock.mockReset();
+    queryOverviewAndTrendMock.mockReset();
+    queryOverviewAndTrendMock.mockResolvedValue({
+      overview: new Map(),
+      trend: new Map(),
+    });
     queryD1AllMock.mockReset();
     queryD1AllMock.mockResolvedValue([]);
   });
@@ -237,6 +247,11 @@ describe("handleTeamDashboardForTeam", () => {
   beforeEach(() => {
     queryOverviewMock.mockReset();
     queryTrendMock.mockReset();
+    queryOverviewAndTrendMock.mockReset();
+    queryOverviewAndTrendMock.mockResolvedValue({
+      overview: new Map(),
+      trend: new Map(),
+    });
     queryD1AllMock.mockReset();
     queryD1AllMock.mockResolvedValue([]);
   });
