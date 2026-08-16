@@ -903,6 +903,117 @@ describe("edge overview D1 queries and handlers", () => {
     expect(calls[0].bindings).toEqual([...visitBindings(), "us", "Chrome"]);
   });
 
+  it("materializes filtered overview visits once while preserving aggregates", async () => {
+    const database = new DatabaseSync(":memory:");
+    for (const migration of [
+      "migrations/0008_rebuild_analytics.sql",
+      "migrations/0013_add_visit_performance_metrics.sql",
+    ]) {
+      database.exec(readFileSync(migration, "utf8"));
+    }
+    const calls: QueryCall[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: (...bindings: QueryBinding[]) => {
+            const call = { sql, bindings };
+            calls.push(call);
+            return {
+              all: async () => ({
+                results: database.prepare(sql).all(...bindings) as D1Row[],
+              }),
+            };
+          },
+        }),
+      } as unknown as D1Database,
+    } as Env;
+    const insert = database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, pathname, hostname, country, browser, duration_ms
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', ?, ?, ?)
+    `);
+
+    try {
+      insert.run(
+        "first-session-first-visit",
+        siteId,
+        "visitor-1",
+        "session-1",
+        baseMs,
+        baseMs,
+        "/",
+        "US",
+        "Chrome",
+        100,
+      );
+      insert.run(
+        "first-session-second-visit",
+        siteId,
+        "visitor-1",
+        "session-1",
+        baseMs + 1,
+        baseMs + 1,
+        "/docs",
+        "US",
+        "Chrome",
+        null,
+      );
+      insert.run(
+        "second-session-visit",
+        siteId,
+        "visitor-1",
+        "session-2",
+        baseMs + 2,
+        baseMs + 2,
+        "/pricing",
+        "US",
+        "Chrome",
+        50,
+      );
+      insert.run(
+        "excluded-country",
+        siteId,
+        "visitor-2",
+        "session-3",
+        baseMs + 3,
+        baseMs + 3,
+        "/",
+        "CA",
+        "Chrome",
+        999,
+      );
+
+      await expect(
+        queryOverviewFromD1(env, siteId, window, {
+          country: "US",
+          clientBrowser: "Chrome",
+        }),
+      ).resolves.toEqual({
+        views: 3,
+        sessions: 2,
+        visitors: 1,
+        bounces: 1,
+        totalDuration: 150,
+        durationViews: 2,
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
+      const plan = database
+        .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
+        .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(
+        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+      ).toHaveLength(1);
+      expect(
+        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+      ).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
+
   it("maps trend rows, bucket timestamps, and filter bindings", async () => {
     const filters: DashboardFilters = {
       sourceDomain: "Ref.Example",

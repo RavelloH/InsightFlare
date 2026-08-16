@@ -79,7 +79,7 @@ export async function queryOverviewFromD1(
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
+filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
   ${filter.clause}
