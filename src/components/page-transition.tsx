@@ -62,7 +62,6 @@ export function PageTransition({ children }: PageTransitionProps) {
   const navigationStartedRef = useRef(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const enterTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<NavigateRequest | null>(null);
   const previousPathnameRef = useRef(pathname);
   const [isReady, setIsReady] = useState(false);
@@ -125,14 +124,6 @@ export function PageTransition({ children }: PageTransitionProps) {
         if (!next) return;
         navigationStartedRef.current = true;
         performNavigation(next);
-        recoveryTimeoutRef.current = setTimeout(() => {
-          recoveryTimeoutRef.current = null;
-          if (!exitingRef.current) return;
-          exitingRef.current = false;
-          navigationStartedRef.current = false;
-          pendingRef.current = null;
-          setTransitionState("idle");
-        }, 1800);
       }, EXIT_DURATION_MS);
     },
     [performNavigation],
@@ -168,10 +159,6 @@ export function PageTransition({ children }: PageTransitionProps) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
-    if (recoveryTimeoutRef.current) {
-      clearTimeout(recoveryTimeoutRef.current);
-      recoveryTimeoutRef.current = null;
-    }
     const shouldEnter = exitingRef.current && !reduceMotion.current;
     exitingRef.current = false;
     navigationStartedRef.current = false;
@@ -199,10 +186,6 @@ export function PageTransition({ children }: PageTransitionProps) {
       exitingRef.current = false;
       navigationStartedRef.current = false;
       pendingRef.current = null;
-      if (recoveryTimeoutRef.current) {
-        clearTimeout(recoveryTimeoutRef.current);
-        recoveryTimeoutRef.current = null;
-      }
       setTransitionState("enter");
       enterTimeoutRef.current = setTimeout(() => {
         setTransitionState("idle");
@@ -220,10 +203,6 @@ export function PageTransition({ children }: PageTransitionProps) {
       if (enterTimeoutRef.current) {
         clearTimeout(enterTimeoutRef.current);
         enterTimeoutRef.current = null;
-      }
-      if (recoveryTimeoutRef.current) {
-        clearTimeout(recoveryTimeoutRef.current);
-        recoveryTimeoutRef.current = null;
       }
     };
   }, []);
