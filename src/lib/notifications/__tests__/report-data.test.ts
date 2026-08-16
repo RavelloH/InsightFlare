@@ -330,13 +330,19 @@ describe("notification report data", () => {
     expect(cache).toHaveLength(0);
   });
 
-  it("queries visits and visits_archive when loading site last seen time", async () => {
+  it("queries the current visits table when loading site last seen time", async () => {
     const { env, bind } = envWithLastSeen(1_800_000_123_000);
 
     await expect(loadSiteLastSeenAt(env as never, "site-1")).resolves.toBe(
       1_800_000_123,
     );
-    expect(bind).toHaveBeenCalledWith("site-1", "site-1");
+    expect(bind).toHaveBeenCalledWith("site-1");
+    expect(env.DB.prepare).toHaveBeenCalledWith(
+      expect.stringContaining("FROM visits"),
+    );
+    expect(env.DB.prepare).not.toHaveBeenCalledWith(
+      expect.stringContaining("visits_archive"),
+    );
   });
 
   it("returns the latest visits timestamp in seconds", async () => {
@@ -347,15 +353,7 @@ describe("notification report data", () => {
     );
   });
 
-  it("returns archive timestamps when live visits are empty", async () => {
-    const { env } = envWithLastSeen(1_700_000_000_000);
-
-    await expect(loadSiteLastSeenAt(env as never, "site-1")).resolves.toBe(
-      1_700_000_000,
-    );
-  });
-
-  it("returns null when neither table has data", async () => {
+  it("returns null when the site has no visits", async () => {
     const { env } = envWithLastSeen(null);
 
     await expect(
