@@ -850,13 +850,22 @@ async function queryAnalyticsAggregateRows(
     siteIds.length === 1
       ? visitSourceBindings(siteIds[0]!, window)
       : visitSourceBindingsForSites(siteIds, window);
-  const eventSitePlaceholders = siteIds.map(() => "?").join(", ");
+  const needsBounces = options.metrics.some(
+    (metric) => metric === "bounces" || metric === "bounceRate",
+  );
+  const needsEvents = options.metrics.includes("events");
+  const eventSitePlaceholders = needsEvents
+    ? siteIds.map(() => "?").join(", ")
+    : "";
+  const auxiliaryBindings = needsEvents
+    ? [...siteIds, window.fromMs, window.toMs]
+    : [];
   const bindingCount =
     sourceBindings.length +
     filters.bindings.length +
     complex.bindings.length +
-    siteIds.length +
-    3;
+    auxiliaryBindings.length +
+    1;
   if (bindingCount > D1_MAX_BOUND_PARAMETERS) {
     return jsonError(
       "validation_failed",
@@ -897,6 +906,39 @@ async function queryAnalyticsAggregateRows(
       : options.metrics.length > 0
         ? `${options.metrics[0]} DESC`
         : groupColumns.join(", ");
+  const auxiliaryCtes = [
+    needsBounces
+      ? `
+bounced_sessions AS (
+  SELECT session_id
+  FROM visit_source
+  WHERE session_id != ''
+  GROUP BY session_id
+  HAVING COUNT(*) = 1
+)`
+      : "",
+    needsEvents
+      ? `
+event_rollup AS (
+  SELECT visit_id, COUNT(*) AS event_count
+  FROM custom_events
+  WHERE site_id IN (${eventSitePlaceholders}) AND occurred_at BETWEEN ? AND ?
+  GROUP BY visit_id
+)`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(",\n");
+  const auxiliaryJoins = [
+    needsBounces
+      ? "LEFT JOIN bounced_sessions ON bounced_sessions.session_id = scoped.session_id"
+      : "",
+    needsEvents
+      ? "LEFT JOIN event_rollup ON event_rollup.visit_id = scoped.visit_id"
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const sql = `
 WITH
 ${sourceCte},
@@ -906,25 +948,11 @@ scoped AS (
     ${dimensionSelects.length ? `,\n    ${dimensionSelects.join(",\n    ")}` : ""}
   FROM visit_source
   ${whereClause}
-),
-bounced_sessions AS (
-  SELECT session_id
-  FROM visit_source
-  WHERE session_id != ''
-  GROUP BY session_id
-  HAVING COUNT(*) = 1
-),
-event_rollup AS (
-  SELECT visit_id, COUNT(*) AS event_count
-  FROM custom_events
-  WHERE site_id IN (${eventSitePlaceholders}) AND occurred_at BETWEEN ? AND ?
-  GROUP BY visit_id
-)
+)${auxiliaryCtes ? `,\n${auxiliaryCtes}` : ""}
 SELECT
   ${selectColumns.join(",\n  ")}
 FROM scoped
-LEFT JOIN bounced_sessions ON bounced_sessions.session_id = scoped.session_id
-LEFT JOIN event_rollup ON event_rollup.visit_id = scoped.visit_id
+${auxiliaryJoins}
 ${groupColumns.length ? `GROUP BY ${groupColumns.join(", ")}` : ""}
 ORDER BY ${orderSql || "views DESC"}
 LIMIT ?
@@ -933,9 +961,7 @@ LIMIT ?
     ...sourceBindings,
     ...filters.bindings,
     ...complex.bindings,
-    ...siteIds,
-    window.fromMs,
-    window.toMs,
+    ...auxiliaryBindings,
     options.limit,
   ]);
   return rows.map((row) => {

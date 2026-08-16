@@ -75,7 +75,8 @@ interface MockStatement {
 }
 
 interface Match {
-  includes: string[];
+  includes?: string[];
+  excludes?: string[];
   first?: Record<string, unknown> | null;
   all?: Record<string, unknown>[];
 }
@@ -114,14 +115,26 @@ function createEnv(matches: Match[]) {
             return this;
           },
           async first() {
-            const match = matches.find((item) =>
-              item.includes.every((needle) => statement.sql.includes(needle)),
+            const match = matches.find(
+              (item) =>
+                (item.includes ?? []).every((needle) =>
+                  statement.sql.includes(needle),
+                ) &&
+                (item.excludes ?? []).every(
+                  (needle) => !statement.sql.includes(needle),
+                ),
             );
             return match && "first" in match ? (match.first ?? null) : null;
           },
           async all() {
-            const match = matches.find((item) =>
-              item.includes.every((needle) => statement.sql.includes(needle)),
+            const match = matches.find(
+              (item) =>
+                (item.includes ?? []).every((needle) =>
+                  statement.sql.includes(needle),
+                ) &&
+                (item.excludes ?? []).every(
+                  (needle) => !statement.sql.includes(needle),
+                ),
             );
             return { results: match?.all ?? [] };
           },
@@ -1850,7 +1863,8 @@ describe("api v1 gateway", () => {
       [
         siteMatch("site-1", "Blog"),
         {
-          includes: ["event_rollup", "GROUP BY scoped.d0"],
+          includes: ["GROUP BY scoped.d0"],
+          excludes: ["event_rollup", "bounced_sessions"],
           all: [{ d0: "/pricing", views: 5 }],
         },
       ],
@@ -1873,6 +1887,36 @@ describe("api v1 gateway", () => {
     expect(body.data).toMatchObject({
       rows: [{ "page.path": "/pricing", views: 5 }],
     });
+  });
+
+  it("adds only the auxiliary analytics sources required by the requested metrics", async () => {
+    const { env, response } = await authed(
+      "/api/v1/sites/site-1/analytics/explore?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
+      [
+        siteMatch("site-1", "Blog"),
+        {
+          includes: ["bounced_sessions", "event_rollup"],
+          all: [{ bounces: 2, events: 5 }],
+        },
+      ],
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ metrics: ["bounces", "events"] }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { rows: [{ bounces: 2, events: 5 }] },
+    });
+    expect(
+      env.preparedSql.some(
+        (sql) =>
+          sql.includes("LEFT JOIN bounced_sessions") &&
+          sql.includes("LEFT JOIN event_rollup"),
+      ),
+    ).toBe(true);
   });
 
   it("rejects explore POST with invalid complex filters", async () => {
@@ -2572,7 +2616,8 @@ describe("api v1 gateway", () => {
     const matches = [
       sitesListMatch([{ id: "site-1", name: "One" }]),
       {
-        includes: ["event_rollup"],
+        includes: ["FROM scoped"],
+        excludes: ["event_rollup", "bounced_sessions"],
         all: [{ d0: "US", views: 12, sessions: 8, visitors: 6 }],
       },
     ];
@@ -2592,7 +2637,7 @@ describe("api v1 gateway", () => {
       name: `Site ${index}`,
     }));
     const { response } = await authed(
-      "/api/v1/team/analytics/breakdowns/geo.country?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
+      "/api/v1/team/analytics/breakdowns/geo.country?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z&metrics=events",
       [sitesListMatch(sites)],
     );
 
@@ -2945,7 +2990,8 @@ describe("api v1 gateway", () => {
       [
         siteMatch("site-1", "Blog"),
         {
-          includes: ["event_rollup", "ORDER BY views DESC"],
+          includes: ["ORDER BY views DESC"],
+          excludes: ["event_rollup", "bounced_sessions"],
           all: [{ d0: "/pricing", views: 12, sessions: 8, visitors: 6 }],
         },
       ],
@@ -2997,7 +3043,8 @@ describe("api v1 gateway", () => {
       [
         siteMatch("site-1", "Blog"),
         {
-          includes: ["event_rollup"],
+          includes: ["FROM scoped"],
+          excludes: ["event_rollup", "bounced_sessions"],
           all: [{ d0: "/pricing", views: 1 }],
         },
       ],
