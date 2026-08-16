@@ -56,6 +56,11 @@ const SYSTEM_EVENTS_CTE = `
   )
 `;
 
+const SYSTEM_EVENTS_MATERIALIZED_CTE = SYSTEM_EVENTS_CTE.replace(
+  "events AS (",
+  "events AS MATERIALIZED (",
+);
+
 function toFiniteNumber(value: unknown, fallback = 0): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -172,7 +177,7 @@ export async function handleSystemPerformanceAdmin(
       .first<Record<string, unknown>>(),
     env.DB.prepare(
       `
-        ${SYSTEM_EVENTS_CTE},
+        ${SYSTEM_EVENTS_MATERIALIZED_CTE},
         trend_aggregate AS (
           SELECT
             CAST(createdAtSec / ? AS INTEGER) * ? AS bucketSec,
