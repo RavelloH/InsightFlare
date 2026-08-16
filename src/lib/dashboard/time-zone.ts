@@ -22,6 +22,8 @@ export const COMMON_TIME_ZONES = [
 
 const partsFormatterCache = new Map<string, Intl.DateTimeFormat>();
 const timeZoneNameFormatterCache = new Map<string, Intl.DateTimeFormat>();
+const timeZoneValidityCache = new Map<string, boolean>();
+const MAX_TIME_ZONE_VALIDITY_CACHE_ENTRIES = 128;
 
 export interface ZonedDateTimeParts {
   year: number;
@@ -55,12 +57,22 @@ function getPartsFormatter(timeZone: string): Intl.DateTimeFormat {
 export function isValidTimeZone(value: string): boolean {
   const timeZone = value.trim();
   if (!timeZone) return false;
+  if (timeZone.length > 128) return false;
+  const cached = timeZoneValidityCache.get(timeZone);
+  if (cached !== undefined) return cached;
+
+  let valid = false;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone }).format(0);
-    return true;
+    valid = true;
   } catch {
-    return false;
+    valid = false;
   }
+  if (timeZoneValidityCache.size >= MAX_TIME_ZONE_VALIDITY_CACHE_ENTRIES) {
+    timeZoneValidityCache.clear();
+  }
+  timeZoneValidityCache.set(timeZone, valid);
+  return valid;
 }
 
 export function normalizeTimeZone(value: string | null | undefined): string {

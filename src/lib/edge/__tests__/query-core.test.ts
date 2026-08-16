@@ -420,6 +420,25 @@ describe("edge query core time helpers", () => {
     });
   });
 
+  it("keeps calendar-day boundaries across daylight saving changes", () => {
+    const buckets = buildTimeBuckets(
+      {
+        fromMs: Date.UTC(2026, 2, 7, 12),
+        toMs: Date.UTC(2026, 2, 10, 12),
+        nowMs,
+        timeZone: "America/New_York",
+      },
+      "day",
+    );
+
+    expect(buckets.map((bucket) => [bucket.fromMs, bucket.toMs])).toEqual([
+      [Date.UTC(2026, 2, 7, 5), Date.UTC(2026, 2, 8, 5)],
+      [Date.UTC(2026, 2, 8, 5), Date.UTC(2026, 2, 9, 4)],
+      [Date.UTC(2026, 2, 9, 4), Date.UTC(2026, 2, 10, 4)],
+      [Date.UTC(2026, 2, 10, 4), Date.UTC(2026, 2, 11, 4)],
+    ]);
+  });
+
   it("maps interval widths and falls back when no bucket can be generated", () => {
     expect(intervalBucketMs("minute")).toBe(60_000);
     expect(intervalBucketMs("hour")).toBe(3_600_000);
