@@ -141,7 +141,7 @@ describe("edge query events summary coverage", () => {
     );
   });
 
-  it("builds all event context cards from one expanded event stream", async () => {
+  it("builds all event context cards within D1 compound SELECT limits", async () => {
     queryD1AllMock.mockResolvedValueOnce([
       {
         cardType: "path",
@@ -213,8 +213,8 @@ describe("edge query events summary coverage", () => {
     expect(queryD1AllMock).toHaveBeenCalledOnce();
     const [, sql] = queryD1AllMock.mock.calls[0];
     expect(sql).toContain("ranked_cards AS");
-    expect((sql.match(/json_each\(json_object\(/g) ?? []).length).toBe(1);
-    expect(sql).not.toContain("card_group_");
+    expect((sql.match(/card_group_\d+ AS \(/g) ?? []).length).toBe(4);
+    expect((sql.match(/SELECT \* FROM card_group_\d+/g) ?? []).length).toBe(4);
   });
 
   it("maps empty combined summary results without a synthetic row", async () => {

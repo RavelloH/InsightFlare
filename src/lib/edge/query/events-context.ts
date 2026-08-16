@@ -16,6 +16,30 @@ import {
   visitSourceBindings,
 } from "./core";
 
+export const EVENT_CONTEXT_CARD_KEYS = [
+  "path",
+  "query",
+  "title",
+  "hostname",
+  "entry",
+  "exit",
+  "sourceDomain",
+  "sourceLink",
+  "browser",
+  "osVersion",
+  "deviceType",
+  "language",
+  "screenSize",
+  "country",
+  "region",
+  "city",
+  "continent",
+  "timezone",
+  "organization",
+] as const;
+
+export type EventContextCardKey = (typeof EVENT_CONTEXT_CARD_KEYS)[number];
+
 export async function queryEventDimensionRowsFromFilteredEvents(
   env: Env,
   baseCte: string,
@@ -113,6 +137,7 @@ export async function queryEventAnalyticsContextCardsFromD1(
   filters: DashboardFilters,
   limit: number,
   eventName?: string,
+  selectedKeys: readonly EventContextCardKey[] = EVENT_CONTEXT_CARD_KEYS,
 ): Promise<EventAnalyticsContextCards> {
   const source = buildEventFilteredSourceCte(
     siteId,
@@ -167,21 +192,68 @@ export async function queryEventAnalyticsContextCardsFromD1(
       labelExpr: "as_organization",
     },
   ];
-  const cardValues = [
-    ...dimensions.map(({ key, expr }) => ({ key, expr })),
-    ...geoDimensions.map(({ key, valueExpr }) => ({ key, expr: valueExpr })),
-    { key: "entry", expr: "COALESCE(edges.entryPath, '')" },
-    { key: "exit", expr: "COALESCE(edges.exitPath, '')" },
-  ];
-  const jsonPairs = cardValues
-    .map(({ key, expr }) => `'${key}', ${expr}`)
-    .join(",\n      ");
-  const geoCardKeys = geoDimensions.map(({ key }) => `'${key}'`).join(", ");
-  const nullableCardKeys = dimensions
-    .filter(({ includeEmpty }) => includeEmpty)
-    .map(({ key }) => `'${key}'`)
-    .join(", ");
-  const sessionEdgeCte = `,
+  const selectedKeySet = new Set(selectedKeys);
+  const cardSources: Array<{ key: EventContextCardKey; sql: string }> = [
+    ...dimensions.map(({ key, expr, includeEmpty }) => ({
+      key: key as EventContextCardKey,
+      sql: `
+  SELECT
+    '${key}' AS cardType,
+    ${expr} AS value,
+    NULL AS label,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM filtered_events
+  ${includeEmpty ? "" : `WHERE TRIM(COALESCE(${expr}, '')) != ''`}
+  GROUP BY value`,
+    })),
+    ...geoDimensions.map(({ key, valueExpr, labelExpr }) => ({
+      key: key as EventContextCardKey,
+      sql: `
+  SELECT
+    '${key}' AS cardType,
+    ${valueExpr} AS value,
+    ${labelExpr} AS label,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM filtered_events
+  WHERE TRIM(COALESCE(${valueExpr}, '')) != ''
+  GROUP BY value, label`,
+    })),
+    ...(["entry", "exit"] as const).map((kind) => ({
+      key: kind,
+      sql: `
+  SELECT
+    '${kind}' AS cardType,
+    edges.${kind}Path AS value,
+    NULL AS label,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN fe.session_id != '' THEN fe.session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN fe.visitor_id != '' THEN fe.visitor_id ELSE NULL END) AS visitors
+  FROM filtered_events fe
+  INNER JOIN session_edges edges ON edges.session_id = fe.session_id
+  WHERE TRIM(COALESCE(edges.${kind}Path, '')) != ''
+      GROUP BY value`,
+    })),
+  ].filter(({ key }) => selectedKeySet.has(key));
+  const cardSourceChunks: Array<Array<{ sql: string }>> = [];
+  // D1 currently rejects compound SELECT statements with more than five terms.
+  const maxCompoundTerms = 5;
+  for (let index = 0; index < cardSources.length; index += maxCompoundTerms) {
+    cardSourceChunks.push(cardSources.slice(index, index + maxCompoundTerms));
+  }
+  const cardGroupCtes = cardSourceChunks.map(
+    (sources, index) => `
+card_group_${index} AS (
+${sources.map(({ sql }) => sql).join("\nUNION ALL")}
+)`,
+  );
+  const needsSessionEdges =
+    selectedKeySet.has("entry") || selectedKeySet.has("exit");
+  const sessionEdgeCte = needsSessionEdges
+    ? `,
 event_sessions AS MATERIALIZED (
   SELECT DISTINCT session_id
   FROM filtered_events
@@ -213,7 +285,8 @@ session_edges AS (
     MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exitPath
   FROM session_visit_edges
   GROUP BY session_id
-)`;
+)`
+    : "";
   const rows = await queryD1All<{
     cardType: string;
     value: string | null;
@@ -224,31 +297,11 @@ session_edges AS (
   }>(
     env,
     `${source.cte}${sessionEdgeCte},
-event_card_values AS (
-  SELECT
-    card.key AS cardType,
-    card.value AS value,
-    CASE WHEN card.key IN (${geoCardKeys}) THEN card.value ELSE NULL END AS label,
-    fe.session_id,
-    fe.visitor_id
-  FROM filtered_events fe
-  LEFT JOIN session_edges edges ON edges.session_id = fe.session_id
-  CROSS JOIN json_each(json_object(
-      ${jsonPairs}
-  )) card
-),
+${cardGroupCtes.join(",")},
 card_rows AS (
-  SELECT
-    cardType,
-    value,
-    label,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM event_card_values
-  WHERE cardType IN (${nullableCardKeys})
-     OR TRIM(COALESCE(value, '')) != ''
-  GROUP BY cardType, value, label
+${cardSourceChunks
+  .map((_, index) => `SELECT * FROM card_group_${index}`)
+  .join("\nUNION ALL\n")}
 ),
 ranked_cards AS (
   SELECT
@@ -269,7 +322,11 @@ FROM ranked_cards
 WHERE card_rank <= ?
 ORDER BY cardType ASC, card_rank ASC
 `,
-    [...source.bindings, ...visitSourceBindings(siteId, window), limit],
+    [
+      ...source.bindings,
+      ...(needsSessionEdges ? visitSourceBindings(siteId, window) : []),
+      limit,
+    ],
   );
   const byCard = new Map<
     string,

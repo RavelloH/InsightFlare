@@ -27,6 +27,8 @@ import {
   type ResponseContext,
 } from "./core";
 import {
+  EVENT_CONTEXT_CARD_KEYS,
+  type EventContextCardKey,
   queryEventAnalyticsContextCardsFromD1,
   queryEventDimensionRowsFromFilteredEvents,
   queryEventGeoRowsFromFilteredEvents,
@@ -192,6 +194,7 @@ export async function handleEventTypeDetail(
   const filters = parseFilters(url);
   const interval = parseInterval(url);
   const logger = currentInvocationLogger();
+  const includeContext = url.searchParams.get("includeContext") !== "false";
   const measure = <T>(operation: string, action: () => Promise<T>) =>
     logger
       ? logger.measure(operation, () => runWithD1Operation(operation, action))
@@ -213,16 +216,18 @@ export async function handleEventTypeDetail(
     measure("event_type_detail.fields", () =>
       queryEventFieldsFromD1(env, siteId, window, filters, eventName, 100),
     ),
-    measure("event_type_detail.context_cards", () =>
-      queryEventAnalyticsContextCardsFromD1(
-        env,
-        siteId,
-        window,
-        filters,
-        100,
-        eventName,
-      ),
-    ),
+    includeContext
+      ? measure("event_type_detail.context_cards", () =>
+          queryEventAnalyticsContextCardsFromD1(
+            env,
+            siteId,
+            window,
+            filters,
+            100,
+            eventName,
+          ),
+        )
+      : Promise.resolve(emptyEventContextCards()),
   ]);
   return jsonResponseWith(ctx!, {
     ok: true,
@@ -237,6 +242,89 @@ export async function handleEventTypeDetail(
     },
     cards: mapEventAnalyticsContextCards(cards),
     fields: fields.map(mapEventField),
+  });
+}
+
+function parseEventContextCardKeys(url: URL): EventContextCardKey[] | null {
+  const raw = url.searchParams.get("cards")?.trim();
+  if (!raw) return null;
+  const selected = [...new Set(raw.split(",").map((key) => key.trim()))];
+  if (
+    selected.length === 0 ||
+    selected.length > EVENT_CONTEXT_CARD_KEYS.length ||
+    selected.some(
+      (key): key is EventContextCardKey =>
+        !EVENT_CONTEXT_CARD_KEYS.includes(key as EventContextCardKey),
+    )
+  ) {
+    return null;
+  }
+  return selected as EventContextCardKey[];
+}
+
+function emptyEventContextCards() {
+  return {
+    page: { path: [], query: [], title: [], hostname: [], entry: [], exit: [] },
+    source: { domain: [], link: [] },
+    client: {
+      browser: [],
+      osVersion: [],
+      deviceType: [],
+      language: [],
+      screenSize: [],
+    },
+    geo: {
+      country: [],
+      region: [],
+      city: [],
+      continent: [],
+      timezone: [],
+      organization: [],
+    },
+  };
+}
+
+export async function handleEventTypeContext(
+  env: Env,
+  siteId: string,
+  url: URL,
+  ctx?: ResponseContext,
+): Promise<Response> {
+  const eventName = parseEventName(url);
+  if (!eventName) return badRequest("eventName is required");
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const selectedKeys = parseEventContextCardKeys(url);
+  if (!selectedKeys) return badRequest("Valid context cards are required");
+  const filters = parseFilters(url);
+  const logger = currentInvocationLogger();
+  const cards = logger
+    ? await logger.measure("event_type_context", () =>
+        runWithD1Operation("event_type_context", () =>
+          queryEventAnalyticsContextCardsFromD1(
+            env,
+            siteId,
+            window,
+            filters,
+            100,
+            eventName,
+            selectedKeys,
+          ),
+        ),
+      )
+    : await queryEventAnalyticsContextCardsFromD1(
+        env,
+        siteId,
+        window,
+        filters,
+        100,
+        eventName,
+        selectedKeys,
+      );
+  return jsonResponseWith(ctx!, {
+    ok: true,
+    eventName,
+    cards: mapEventAnalyticsContextCards(cards),
   });
 }
 

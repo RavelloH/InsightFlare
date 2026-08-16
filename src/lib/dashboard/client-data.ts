@@ -20,6 +20,7 @@ export {
   fetchEventsRecords,
   fetchEventsSummary,
   fetchEventsTrend,
+  fetchEventTypeContextCards,
   fetchEventTypeDetail,
   fetchEventTypeFieldValues,
   fetchFunnelDetail,

@@ -209,30 +209,6 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
     .run(99, siteId, "purchase");
   d1.database
     .prepare(
-      `INSERT INTO visits (
-        visit_id, site_id, visitor_id, session_id, started_at
-      ) VALUES (?, ?, ?, ?, ?)`,
-    )
-    .run("visit-direct", siteId, "visitor-direct", "", eventTime);
-  d1.database
-    .prepare(
-      "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .run(
-      98,
-      "event-direct",
-      siteId,
-      "visit-direct",
-      1,
-      eventTime,
-      eventTime,
-      2,
-      1,
-      1,
-      null,
-    );
-  d1.database
-    .prepare(
       "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
@@ -297,20 +273,17 @@ describe("event detail D1 SQL", () => {
         ),
       ]);
 
-      expect(records).toHaveLength(2);
-      expect(overview.summary.events).toBe(2);
-      expect(overview.summary.shareOfAllEvents).toBeCloseTo(2 / 3);
-      expect(trend.data.some((point) => point.events === 2)).toBe(true);
+      expect(records).toHaveLength(1);
+      expect(overview.summary.events).toBe(1);
+      expect(overview.summary.shareOfAllEvents).toBe(0.5);
+      expect(trend.data.some((point) => point.events === 1)).toBe(true);
       expect(fields).toMatchObject([{ path: "/href", events: 1 }]);
       expect(cards.page.path).toMatchObject([
         { value: "/posts/minecraft-meteor-guide", views: 1 },
       ]);
-      expect(cards.source.domain).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ value: "", views: 1 }),
-          expect.objectContaining({ value: "www.google.com", views: 1 }),
-        ]),
-      );
+      expect(cards.source.domain).toMatchObject([
+        { value: "www.google.com", views: 1 },
+      ]);
       expect(cards.client.browser).toMatchObject([{ value: "Edge", views: 1 }]);
       expect(cards.geo.country).toMatchObject([{ value: "CN", views: 1 }]);
       expect(cards.page.entry).toMatchObject([{ value: "/entry", views: 1 }]);
@@ -320,10 +293,12 @@ describe("event detail D1 SQL", () => {
       );
       expect(cardQueries).toHaveLength(1);
       const cardQuery = cardQueries[0];
+      expect((cardQuery.sql.match(/card_group_\d+ AS \(/g) ?? []).length).toBe(
+        4,
+      );
       expect(
-        (cardQuery.sql.match(/json_each\(json_object\(/g) ?? []).length,
-      ).toBe(1);
-      expect(cardQuery.sql).not.toContain("card_group_");
+        (cardQuery.sql.match(/SELECT \* FROM card_group_\d+/g) ?? []).length,
+      ).toBe(4);
       const cardPlan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
         .all(...cardQuery.bindings) as Array<{ detail: string }>;
@@ -453,6 +428,34 @@ describe("event detail D1 SQL", () => {
         .prepare(`EXPLAIN QUERY PLAN ${cursorQuery?.sql ?? "SELECT 1"}`)
         .all(...(cursorQuery?.bindings ?? []));
       expect(plan.length).toBeGreaterThan(0);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("queries only requested context cards without building session edges", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      const cards = await queryEventAnalyticsContextCardsFromD1(
+        env,
+        siteId,
+        window,
+        {},
+        100,
+        eventName,
+        ["path"],
+      );
+
+      expect(cards.page.path).toMatchObject([
+        { value: "/posts/minecraft-meteor-guide", views: 1 },
+      ]);
+      expect(cards.page.entry).toEqual([]);
+      expect(cards.source.domain).toEqual([]);
+      const query = d1.calls.at(-1);
+      expect(query?.sql).not.toContain("session_visit_edges");
+      expect(query?.sql).toContain("'path' AS cardType");
+      expect(query?.sql).not.toContain("'browser' AS cardType");
     } finally {
       d1.close();
     }

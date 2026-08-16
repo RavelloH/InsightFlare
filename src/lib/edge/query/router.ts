@@ -11,6 +11,7 @@ import {
   handleEventsRecords,
   handleEventsSummary,
   handleEventsTrend,
+  handleEventTypeContext,
   handleEventTypeDetail,
   handleEventTypeFieldValues,
   handleEventTypes,
@@ -108,6 +109,7 @@ export const DASHBOARD_QUERY_PATHS = [
   "events-trend",
   "events-records",
   "event-type-field-values",
+  "event-type-context",
   "event-type-detail",
   "event-record-detail",
   "sessions",
@@ -186,6 +188,8 @@ export const QUERY_ROUTE_HANDLERS: Record<string, QueryRouteHandler> = {
     handleEventsRecords(env, siteId, url, responseContext),
   "event-type-field-values": ({ env, siteId, url, responseContext }) =>
     handleEventTypeFieldValues(env, siteId, url, responseContext),
+  "event-type-context": ({ env, siteId, url, responseContext }) =>
+    handleEventTypeContext(env, siteId, url, responseContext),
   "event-type-detail": ({ env, siteId, url, responseContext }) =>
     handleEventTypeDetail(env, siteId, url, responseContext),
   "event-record-detail": ({ env, siteId, url, responseContext }) =>

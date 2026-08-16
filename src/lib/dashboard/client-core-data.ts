@@ -461,6 +461,7 @@ export async function fetchEventTypeDetail(
       timeZone: window.timeZone,
       interval: window.interval,
       eventName: normalizedEventName,
+      includeContext: false,
     },
     filters,
   );
@@ -479,6 +480,37 @@ export async function fetchEventTypeDetail(
       emptyEventTypeDetail(normalizedEventName),
     ),
   );
+}
+
+export async function fetchEventTypeContextCards(
+  siteId: string,
+  window: TimeWindow,
+  eventName: string,
+  cards: string,
+  filters?: DashboardFilters,
+): Promise<EventTypeDetailData["cards"]> {
+  const normalizedEventName = eventName.trim();
+  const normalizedCards = cards.trim();
+  if (!normalizedEventName || !normalizedCards) {
+    return emptyEventTypeDetail(normalizedEventName).cards;
+  }
+  return fetchPrivateJson<Pick<EventTypeDetailData, "cards">>(
+    "/api/private/event-type-context",
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        timeZone: window.timeZone,
+        interval: window.interval,
+        eventName: normalizedEventName,
+        cards: normalizedCards,
+      },
+      filters,
+    ),
+  )
+    .then((data) => data.cards)
+    .catch(() => emptyEventTypeDetail(normalizedEventName).cards);
 }
 
 export async function fetchEventTypeFieldValues(

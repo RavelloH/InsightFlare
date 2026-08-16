@@ -1842,6 +1842,11 @@ interface OverviewPagesSectionProps extends OverviewClientPageProps {
   pageCardNavigableTabs?: readonly PageCardNavigableTab[];
   pageCardDetailTabs?: readonly PageCardDetailTab[];
   pageCardFetchers?: Partial<Record<PageCardTab, PageCardTabFetcher>>;
+  sourceCardFetchers?: Partial<Record<SourceCardTab, PageCardTabFetcher>>;
+  clientCardFetchers?: Partial<
+    Record<ClientDimensionCardTab, PageCardTabFetcher>
+  >;
+  geoCardFetchers?: Partial<Record<GeoDimensionCardTab, PageCardTabFetcher>>;
   pageCardTargetUrlResolvers?: Partial<
     Record<PageCardTab, PageCardTargetUrlResolver>
   >;
@@ -1872,6 +1877,9 @@ export function OverviewPagesSection({
   pageCardNavigableTabs,
   pageCardDetailTabs,
   pageCardFetchers,
+  sourceCardFetchers,
+  clientCardFetchers,
+  geoCardFetchers,
   pageCardTargetUrlResolvers,
   pageCardDetailHrefResolvers,
   pageCardDetailClickResolvers,
@@ -2061,9 +2069,22 @@ export function OverviewPagesSection({
     let active = true;
     sourceCardInFlightRef.current[sourceCardTab] = true;
 
-    fetchOverviewSourceCardTab(siteId, window, sourceCardTab, filters, {
-      limit: 100,
-    })
+    const loadSourceCardTab =
+      sourceCardFetchers?.[sourceCardTab] ??
+      ((
+        requestedSiteId: string,
+        requestedWindow: TimeWindow,
+        requestedFilters: DashboardFilters,
+      ) =>
+        fetchOverviewSourceCardTab(
+          requestedSiteId,
+          requestedWindow,
+          sourceCardTab,
+          requestedFilters,
+          { limit: 100 },
+        ));
+
+    loadSourceCardTab(siteId, window, filters)
       .then((data) => {
         if (!active) return;
         setSourceCardTabData((prev) => ({
@@ -2087,6 +2108,7 @@ export function OverviewPagesSection({
     window.interval,
     window.to,
     hasCardDataOverride,
+    sourceCardFetchers,
   ]);
 
   useEffect(() => {
@@ -2096,15 +2118,22 @@ export function OverviewPagesSection({
     let active = true;
     clientDimensionCardInFlightRef.current[clientDimensionCardTab] = true;
 
-    fetchOverviewClientDimensionTab(
-      siteId,
-      window,
-      clientDimensionCardTab,
-      filters,
-      {
-        limit: 100,
-      },
-    )
+    const loadClientCardTab =
+      clientCardFetchers?.[clientDimensionCardTab] ??
+      ((
+        requestedSiteId: string,
+        requestedWindow: TimeWindow,
+        requestedFilters: DashboardFilters,
+      ) =>
+        fetchOverviewClientDimensionTab(
+          requestedSiteId,
+          requestedWindow,
+          clientDimensionCardTab,
+          requestedFilters,
+          { limit: 100 },
+        ));
+
+    loadClientCardTab(siteId, window, filters)
       .then((data) => {
         if (!active) return;
         setClientDimensionCardTabData((prev) => ({
@@ -2128,6 +2157,7 @@ export function OverviewPagesSection({
     window.interval,
     window.to,
     hasCardDataOverride,
+    clientCardFetchers,
   ]);
 
   useEffect(() => {
@@ -2137,9 +2167,22 @@ export function OverviewPagesSection({
     let active = true;
     geoDimensionCardInFlightRef.current[geoDimensionCardTab] = true;
 
-    fetchOverviewGeoDimensionTab(siteId, window, geoDimensionCardTab, filters, {
-      limit: 100,
-    })
+    const loadGeoCardTab =
+      geoCardFetchers?.[geoDimensionCardTab] ??
+      ((
+        requestedSiteId: string,
+        requestedWindow: TimeWindow,
+        requestedFilters: DashboardFilters,
+      ) =>
+        fetchOverviewGeoDimensionTab(
+          requestedSiteId,
+          requestedWindow,
+          geoDimensionCardTab,
+          requestedFilters,
+          { limit: 100 },
+        ));
+
+    loadGeoCardTab(siteId, window, filters)
       .then((data) => {
         if (!active) return;
         setGeoDimensionCardTabData((prev) => ({
@@ -2163,6 +2206,7 @@ export function OverviewPagesSection({
     window.interval,
     window.to,
     hasCardDataOverride,
+    geoCardFetchers,
   ]);
 
   const noDataText = messages.common.noData;
