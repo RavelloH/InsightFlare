@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
@@ -164,7 +166,7 @@ describe("edge query dimensions low-level coverage", () => {
     expect(calls[1].bindings).toEqual([...visitBindings(), 3]);
   });
 
-  it("queries session path dimensions in both sort directions and maps fallback row values", async () => {
+  it("queries session path dimensions with set-based boundary ranking and maps fallback row values", async () => {
     const filters: DashboardFilters = { browser: "Chrome" };
     const { env, calls } = createD1Env([
       [{ value: null, views: "4", sessions: undefined, visitors: null }],
@@ -188,11 +190,104 @@ describe("edge query dimensions low-level coverage", () => {
     ]);
 
     expect(calls).toHaveLength(2);
-    expect(calls[0].sql).toContain("ORDER BY fv2.started_at DESC");
-    expect(calls[1].sql).toContain("ORDER BY fv2.started_at ASC");
+    expect(calls[0].sql).toContain("ranked_session_visits AS");
+    expect(calls[0].sql).toContain("ROW_NUMBER() OVER");
+    expect(calls[0].sql).toContain("latest_rank = 1");
+    expect(calls[1].sql).toContain("first_rank = 1");
+    expect(calls[0].sql).not.toContain("SELECT COALESCE(fv2.pathname");
     expect(calls[0].sql).toContain("WHERE TRIM(value) != ''");
     expect(calls[0].bindings).toEqual([...visitBindings(), "Chrome", 5]);
     expect(calls[1].bindings).toEqual([...visitBindings(), "Chrome", 3]);
+  });
+
+  it("keeps entry and exit tab results while using one indexed visit source", async () => {
+    const database = new DatabaseSync(":memory:");
+    database.exec(`
+      CREATE TABLE visits (
+        visit_id TEXT PRIMARY KEY, site_id TEXT NOT NULL,
+        visitor_id TEXT NOT NULL DEFAULT '', session_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL,
+        last_activity_at INTEGER, ended_at INTEGER, finalized_at INTEGER,
+        duration_ms INTEGER, duration_source TEXT, exit_reason TEXT,
+        pathname TEXT NOT NULL DEFAULT '', query_string TEXT NOT NULL DEFAULT '',
+        hash_fragment TEXT NOT NULL DEFAULT '', hostname TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL DEFAULT '', referrer_url TEXT NOT NULL DEFAULT '',
+        referrer_host TEXT NOT NULL DEFAULT '', utm_source TEXT NOT NULL DEFAULT '',
+        utm_medium TEXT NOT NULL DEFAULT '', utm_campaign TEXT NOT NULL DEFAULT '',
+        utm_term TEXT NOT NULL DEFAULT '', utm_content TEXT NOT NULL DEFAULT '',
+        is_eu INTEGER NOT NULL DEFAULT 0, country TEXT NOT NULL DEFAULT '',
+        region TEXT NOT NULL DEFAULT '', region_code TEXT NOT NULL DEFAULT '',
+        city TEXT NOT NULL DEFAULT '', continent TEXT NOT NULL DEFAULT '', latitude REAL,
+        longitude REAL, postal_code TEXT NOT NULL DEFAULT '', metro_code TEXT NOT NULL DEFAULT '',
+        timezone TEXT NOT NULL DEFAULT '', as_organization TEXT NOT NULL DEFAULT '',
+        ua_raw TEXT NOT NULL DEFAULT '', browser TEXT NOT NULL DEFAULT '',
+        browser_version TEXT NOT NULL DEFAULT '', os TEXT NOT NULL DEFAULT '',
+        os_version TEXT NOT NULL DEFAULT '', device_type TEXT NOT NULL DEFAULT '',
+        screen_width INTEGER, screen_height INTEGER, language TEXT NOT NULL DEFAULT '',
+        perf_ttfb_ms REAL, perf_fcp_ms REAL, perf_lcp_ms REAL, perf_cls REAL,
+        perf_inp_ms REAL, ae_synced_at INTEGER
+      );
+      CREATE INDEX idx_visits_site_started_at
+        ON visits(site_id, started_at);
+    `);
+    const insert = database.prepare(`
+      INSERT INTO visits (visit_id, site_id, visitor_id, session_id, started_at, pathname)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    for (const row of [
+      ["a-empty", "visitor-a", "session-a", baseMs, ""],
+      ["a-entry", "visitor-a", "session-a", baseMs + 1, "/entry"],
+      ["a-exit", "visitor-a", "session-a", baseMs + 2, "/exit"],
+      ["b-only", "visitor-b", "session-b", baseMs + 3, "/pricing"],
+      ["c-empty", "visitor-c", "session-c", baseMs + 4, ""],
+    ] as const) {
+      insert.run(row[0], siteId, row[1], row[2], row[3], row[4]);
+    }
+
+    const calls: QueryCall[] = [];
+    const env = {
+      DB: {
+        prepare(sql: string) {
+          return {
+            bind(...bindings: QueryBinding[]) {
+              calls.push({ sql, bindings });
+              return {
+                async all() {
+                  return {
+                    results: database.prepare(sql).all(...bindings),
+                  };
+                },
+              };
+            },
+          };
+        },
+      } as unknown as D1Database,
+    } as Env;
+
+    try {
+      await expect(
+        querySessionPathDimensionFromD1(env, siteId, window, {}, 10, "entry"),
+      ).resolves.toEqual([
+        { value: "/entry", views: 1, sessions: 1, visitors: 1 },
+        { value: "/pricing", views: 1, sessions: 1, visitors: 1 },
+      ]);
+      await expect(
+        querySessionPathDimensionFromD1(env, siteId, window, {}, 10, "exit"),
+      ).resolves.toEqual([
+        { value: "/exit", views: 1, sessions: 1, visitors: 1 },
+        { value: "/pricing", views: 1, sessions: 1, visitors: 1 },
+      ]);
+
+      const plan = database
+        .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
+        .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
+      const planDetails = plan.map((row) => row.detail).join("\n");
+      expect(planDetails).toContain("MATERIALIZE filtered_visits");
+      expect(planDetails).toContain("idx_visits_site_started_at");
+      expect(planDetails).not.toContain("CORRELATED SCALAR SUBQUERY");
+    } finally {
+      database.close();
+    }
   });
 
   it("builds page tab entries while skipping rows without session ids or pathnames", async () => {

@@ -79,34 +79,43 @@ export async function querySessionPathDimensionFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
   const filter = buildVisitFilterSql(filters);
-  const order = kind === "entry" ? "ASC" : "DESC";
+  const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT *
+filtered_visits AS MATERIALIZED (
+  SELECT
+    visitor_id,
+    session_id,
+    started_at,
+    visit_id,
+    TRIM(COALESCE(pathname, '')) AS pathname
   FROM visit_source
   ${filter.clause}
 ),
+ranked_session_visits AS (
+  SELECT
+    session_id,
+    visitor_id,
+    pathname,
+    ROW_NUMBER() OVER (
+      PARTITION BY session_id
+      ORDER BY started_at ASC, visit_id ASC
+    ) AS first_rank,
+    ROW_NUMBER() OVER (
+      PARTITION BY session_id
+      ORDER BY started_at DESC, visit_id DESC
+    ) AS latest_rank
+  FROM filtered_visits
+  WHERE session_id != '' AND pathname != ''
+),
 session_edges AS (
   SELECT
-    fv.session_id AS session_id,
-    (
-      SELECT COALESCE(fv2.visitor_id, '')
-      FROM filtered_visits fv2
-      WHERE fv2.session_id = fv.session_id
-      LIMIT 1
-    ) AS visitor_id,
-    (
-      SELECT COALESCE(fv2.pathname, '')
-      FROM filtered_visits fv2
-      WHERE fv2.session_id = fv.session_id
-      ORDER BY fv2.started_at ${order}, fv2.visit_id ${order}
-      LIMIT 1
-    ) AS value
-  FROM filtered_visits fv
-  WHERE fv.session_id != ''
-  GROUP BY fv.session_id
+    session_id,
+    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
+    MAX(CASE WHEN ${boundaryRank} = 1 THEN pathname END) AS value
+  FROM ranked_session_visits
+  GROUP BY session_id
 )
 SELECT
   value,
