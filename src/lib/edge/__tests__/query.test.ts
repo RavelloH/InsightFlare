@@ -895,10 +895,27 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(
-      ["ranked_titles AS"],
+      ["ranked_titles AS", "trend_rollup AS", "'title' AS rowKind"],
       [
-        { pathname: "/pricing", title: "Pricing", views: 9 },
-        { pathname: "/pricing", title: "Plans", views: 3 },
+        {
+          rowKind: "title",
+          pathname: "/pricing",
+          title: "Pricing",
+          views: 9,
+        },
+        {
+          rowKind: "title",
+          pathname: "/pricing",
+          title: "Plans",
+          views: 3,
+        },
+        {
+          rowKind: "trend",
+          pathname: "/pricing",
+          bucket: 0,
+          views: 5,
+          visitors: 4,
+        },
       ],
     ),
     allMatch(

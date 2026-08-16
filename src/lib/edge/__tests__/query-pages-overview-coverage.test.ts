@@ -768,13 +768,33 @@ describe("edge pages handlers", () => {
         },
       ],
       [
-        { pathname: "/pricing", title: " Pricing ", views: 8 },
-        { pathname: "/pricing", title: "Pricing", views: 2 },
-        { pathname: "/docs", title: "Docs", views: 4 },
-      ],
-      [
-        { pathname: "/pricing", bucket: 0, views: 6, visitors: 3 },
-        { pathname: "/docs", bucket: 1, views: 4, visitors: 2 },
+        {
+          rowKind: "title",
+          pathname: "/pricing",
+          title: " Pricing ",
+          views: 8,
+        },
+        {
+          rowKind: "title",
+          pathname: "/pricing",
+          title: "Pricing",
+          views: 2,
+        },
+        { rowKind: "title", pathname: "/docs", title: "Docs", views: 4 },
+        {
+          rowKind: "trend",
+          pathname: "/pricing",
+          bucket: 0,
+          views: 6,
+          visitors: 3,
+        },
+        {
+          rowKind: "trend",
+          pathname: "/docs",
+          bucket: 1,
+          views: 4,
+          visitors: 2,
+        },
       ],
     ]);
 
@@ -858,7 +878,7 @@ describe("edge pages handlers", () => {
         },
       ],
     });
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(3);
     expect(calls[0].bindings).toEqual([...visitBindings(), 3, 0]);
     expect(calls[1].bindings).toEqual([
       siteId,
@@ -873,11 +893,7 @@ describe("edge pages handlers", () => {
       "/docs",
       3,
     ]);
-    expect(calls[3].bindings).toEqual([
-      ...visitBindings(),
-      "/pricing",
-      "/docs",
-    ]);
+    expect(calls[2].sql).toContain("filtered_visits AS MATERIALIZED");
   });
 });
 

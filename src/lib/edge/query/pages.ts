@@ -364,6 +364,122 @@ ORDER BY pathname ASC, bucket ASC
   }));
 }
 
+async function queryPageCardDetailsFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: DashboardFilters,
+  pathnames: string[],
+  titleLimit: number,
+): Promise<{ titles: PageCardTitleRow[]; trend: PageCardTrendRow[] }> {
+  const requestedPathnames = Array.from(
+    new Set(
+      pathnames
+        .map((pathname) => String(pathname ?? "").trim())
+        .filter((pathname) => pathname.length > 0),
+    ),
+  );
+  if (requestedPathnames.length === 0) return { titles: [], trend: [] };
+
+  const filter = buildVisitFilterSql(filters);
+  const buckets = buildTimeBuckets(window, interval);
+  const bucket = timeBucketCase(buckets, "startedAt");
+  const filteredClause = appendSqlConditions(filter.clause, [
+    `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`,
+  ]);
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS MATERIALIZED (
+  SELECT
+    pathname,
+    title,
+    started_at AS startedAt,
+    visitor_id AS visitorId
+  FROM visit_source
+  ${filteredClause}
+),
+title_rollup AS (
+  SELECT
+    pathname,
+    TRIM(COALESCE(title, '')) AS title,
+    count(*) AS views
+  FROM filtered_visits
+  WHERE TRIM(COALESCE(title, '')) != ''
+  GROUP BY pathname, TRIM(COALESCE(title, ''))
+),
+ranked_titles AS (
+  SELECT
+    pathname,
+    title,
+    views,
+    ROW_NUMBER() OVER (PARTITION BY pathname ORDER BY views DESC, title ASC) AS titleRank
+  FROM title_rollup
+),
+trend_rollup AS (
+  SELECT
+    pathname,
+    ${bucket.sql} AS bucket,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors
+  FROM filtered_visits
+  GROUP BY pathname, bucket
+)
+SELECT
+  'title' AS rowKind,
+  pathname,
+  title,
+  views,
+  NULL AS bucket,
+  NULL AS visitors,
+  titleRank AS rowOrder
+FROM ranked_titles
+WHERE titleRank <= ?
+UNION ALL
+SELECT
+  'trend' AS rowKind,
+  pathname,
+  NULL AS title,
+  views,
+  bucket,
+  visitors,
+  bucket AS rowOrder
+FROM trend_rollup
+ORDER BY rowKind ASC, pathname ASC, rowOrder ASC
+`;
+  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...filter.bindings,
+    ...requestedPathnames,
+    ...bucket.bindings,
+    titleLimit,
+  ]);
+  const titles: PageCardTitleRow[] = [];
+  const trend: PageCardTrendRow[] = [];
+  for (const row of rows) {
+    if (row.rowKind === "title") {
+      titles.push({
+        pathname: String(row.pathname ?? ""),
+        title: String(row.title ?? ""),
+        views: Number(row.views ?? 0),
+      });
+      continue;
+    }
+    if (row.rowKind === "trend") {
+      const trendBucket = Number(row.bucket ?? 0);
+      trend.push({
+        pathname: String(row.pathname ?? ""),
+        bucket: trendBucket,
+        timestampMs: timeBucketTimestamp(buckets, trendBucket),
+        views: Number(row.views ?? 0),
+        visitors: Number(row.visitors ?? 0),
+      });
+    }
+  }
+  return { titles, trend };
+}
+
 export async function queryReferrerAggregate(
   env: Env,
   siteId: string,
@@ -507,12 +623,19 @@ export async function handlePagesDashboard(
     timeZone: window.timeZone,
   };
 
-  const [previousRows, titleRows, trendRows] = await Promise.all([
+  const [previousRows, details] = await Promise.all([
     queryPageCardMetricsFromD1(env, siteId, previousWindow, filters, {
       pathnames,
     }),
-    queryPageCardTitlesFromD1(env, siteId, window, filters, pathnames, 3),
-    queryPageCardTrendFromD1(env, siteId, window, interval, filters, pathnames),
+    queryPageCardDetailsFromD1(
+      env,
+      siteId,
+      window,
+      interval,
+      filters,
+      pathnames,
+      3,
+    ),
   ]);
 
   const previousByPath = new Map<string, PageCardAggregateRow>();
@@ -521,7 +644,7 @@ export async function handlePagesDashboard(
   }
 
   const titlesByPath = new Map<string, string[]>();
-  for (const row of titleRows) {
+  for (const row of details.titles) {
     const titles = titlesByPath.get(row.pathname) ?? [];
     if (titles.length >= 3) continue;
     const title = row.title.trim();
@@ -538,7 +661,7 @@ export async function handlePagesDashboard(
       visitors: number;
     }>
   >();
-  for (const row of trendRows) {
+  for (const row of details.trend) {
     const trend = trendByPath.get(row.pathname) ?? [];
     trend.push({
       timestampMs: row.timestampMs,
