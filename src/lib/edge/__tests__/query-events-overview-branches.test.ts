@@ -124,4 +124,61 @@ describe("edge query event type overview branch coverage", () => {
       },
     });
   });
+
+  it("normalizes missing summary fields and empty breakdown values", async () => {
+    queryD1AllMock.mockResolvedValueOnce([
+      {
+        cardType: "summary",
+        value: null,
+      },
+      {
+        cardType: "page",
+        value: null,
+        events: null,
+        sessions: null,
+        visitors: null,
+      },
+    ]);
+
+    await expect(
+      queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
+    ).resolves.toEqual({
+      summary: {
+        events: 0,
+        eventTypes: 0,
+        sessions: 0,
+        visitors: 0,
+        avgEventsPerSession: 0,
+        shareOfAllEvents: 0,
+      },
+      breakdowns: {
+        pages: [{ value: "", views: 0, sessions: 0, visitors: 0 }],
+        countries: [],
+        devices: [],
+        browsers: [],
+      },
+    });
+  });
+
+  it("keeps positive summary denominators safe when the event count is missing", async () => {
+    queryD1AllMock.mockResolvedValueOnce([
+      {
+        cardType: "summary",
+        value: null,
+        sessions: 2,
+        scopedEvents: 5,
+      },
+    ]);
+
+    await expect(
+      queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
+    ).resolves.toMatchObject({
+      summary: {
+        events: 0,
+        sessions: 2,
+        avgEventsPerSession: 0,
+        shareOfAllEvents: 0,
+      },
+    });
+  });
 });

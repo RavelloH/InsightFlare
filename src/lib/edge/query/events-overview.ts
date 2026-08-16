@@ -23,20 +23,16 @@ export async function queryEventTypeOverviewFromD1(
 ) {
   const includeBreakdowns = options?.includeBreakdowns !== false;
   const eventFilter = buildEventFilterSql(filters, "es");
+  const hasEventFilter = eventFilter.clause.length > 0;
   const bindings = [
     ...eventSourceBindings(siteId, window, eventName),
     ...eventFilter.bindings,
-    ...eventSourceBindings(siteId, window),
-    ...eventFilter.bindings,
+    ...(hasEventFilter
+      ? [...eventSourceBindings(siteId, window), ...eventFilter.bindings]
+      : [siteId, window.fromMs, window.toMs]),
   ];
-  const baseCte = `
-WITH
-${buildEventAnalyticsSourceCte({ eventName })},
-filtered_events AS MATERIALIZED (
-  SELECT *
-  FROM event_source es
-  ${eventFilter.clause}
-),
+  const scopedSummaryCte = hasEventFilter
+    ? `
 ${buildEventAnalyticsSourceCte({ cteName: "scoped_event_source" })},
 scoped_events AS (
   SELECT *
@@ -46,7 +42,22 @@ scoped_events AS (
 scoped_summary AS (
   SELECT count(*) AS events
   FROM scoped_events
+)`
+    : `
+scoped_summary AS (
+  SELECT count(*) AS events
+  FROM custom_events
+  WHERE site_id = ? AND occurred_at BETWEEN ? AND ?
 )`;
+  const baseCte = `
+WITH
+${buildEventAnalyticsSourceCte({ eventName })},
+filtered_events AS MATERIALIZED (
+  SELECT *
+  FROM event_source es
+  ${eventFilter.clause}
+),
+${scopedSummaryCte}`;
   type OverviewCardRow = EventSummaryRow & {
     cardType: "summary" | "page" | "country" | "device" | "browser";
     value: string | null;
@@ -163,20 +174,20 @@ ORDER BY cardType ASC, cardRank ASC
     sessions: 0,
     visitors: 0,
   };
+  const summaryEvents = Number(summary.events ?? 0);
+  const summaryEventTypes = Number(summary.eventTypes ?? 0);
+  const summarySessions = Number(summary.sessions ?? 0);
+  const summaryVisitors = Number(summary.visitors ?? 0);
+  const scopedEvents = Number(summaryRow?.scopedEvents ?? 0);
   return {
     summary: {
-      events: Number(summary.events ?? 0),
-      eventTypes: Number(summary.eventTypes ?? 0),
-      sessions: Number(summary.sessions ?? 0),
-      visitors: Number(summary.visitors ?? 0),
+      events: summaryEvents,
+      eventTypes: summaryEventTypes,
+      sessions: summarySessions,
+      visitors: summaryVisitors,
       avgEventsPerSession:
-        Number(summary.sessions ?? 0) > 0
-          ? Number(summary.events ?? 0) / Number(summary.sessions ?? 0)
-          : 0,
-      shareOfAllEvents:
-        Number(summaryRow?.scopedEvents ?? 0) > 0
-          ? Number(summary.events ?? 0) / Number(summaryRow?.scopedEvents ?? 0)
-          : 0,
+        summarySessions > 0 ? summaryEvents / summarySessions : 0,
+      shareOfAllEvents: scopedEvents > 0 ? summaryEvents / scopedEvents : 0,
     },
     breakdowns: {
       pages,

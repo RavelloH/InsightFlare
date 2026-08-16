@@ -717,7 +717,9 @@ describe("edge journey retention coverage", () => {
 
   it("materializes retention visits once while preserving cohort results", async () => {
     const database = new DatabaseSync(":memory:");
-    database.exec(readFileSync("migrations/0008_rebuild_analytics.sql", "utf8"));
+    database.exec(
+      readFileSync("migrations/0008_rebuild_analytics.sql", "utf8"),
+    );
     database.exec(
       readFileSync("migrations/0013_add_visit_performance_metrics.sql", "utf8"),
     );

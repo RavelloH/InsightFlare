@@ -962,7 +962,9 @@ describe("edge query technology D1 mapping", () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0].sql).toContain("TRIM(COALESCE(browser, '')) AS labelValue");
-    expect(calls[0].sql).toContain("LOWER(TRIM(COALESCE(country, ''))) = ?");
+    expect(calls[0].sql).toContain(
+      "LOWER(TRIM(COALESCE(visit_source.country, ''))) = ?",
+    );
     expect(calls[0].bindings).toEqual([
       ...visitBindings(siteId, window),
       "us",

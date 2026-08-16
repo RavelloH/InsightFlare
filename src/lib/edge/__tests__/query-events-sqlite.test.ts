@@ -114,6 +114,8 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
     );
     CREATE INDEX idx_custom_events_site_name_time
       ON custom_events(site_id, event_name_id, occurred_at, event_pk);
+    CREATE INDEX idx_custom_events_site_time
+      ON custom_events(site_id, occurred_at, event_pk);
     CREATE INDEX idx_visits_site_session_started_at
       ON visits(site_id, session_id, started_at, visit_id);
   `);
@@ -321,6 +323,9 @@ describe("event detail D1 SQL", () => {
       const planDetails = plan.map((row) => row.detail).join("\n");
       expect(planDetails).toContain("MATERIALIZE filtered_events");
       expect(planDetails).toContain("idx_custom_events_site_name_time");
+      expect(planDetails).toContain("idx_custom_events_site_time");
+      expect(planDetails.match(/SEARCH v /g) ?? []).toHaveLength(1);
+      expect(overviewQuery?.sql).not.toContain("scoped_event_source AS");
 
       const entryExitPlan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
@@ -488,6 +493,27 @@ describe("event detail D1 SQL", () => {
       const query = d1.calls.at(-1);
       expect(query?.sql).not.toContain("'page' AS cardType");
       expect(query?.sql).not.toContain("'country' AS cardType");
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("keeps the scoped event source when overview filters affect share metrics", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      await queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        { path: "/posts/minecraft-meteor-guide" },
+        eventName,
+        { includeBreakdowns: false },
+      );
+
+      const query = d1.calls.at(-1);
+      expect(query?.sql).toContain("scoped_event_source AS");
+      expect(query?.sql).toContain("TRIM(COALESCE(es.pathname, '')) = ?");
     } finally {
       d1.close();
     }

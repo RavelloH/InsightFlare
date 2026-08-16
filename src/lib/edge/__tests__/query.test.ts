@@ -1192,7 +1192,7 @@ describe("edge query handlers", () => {
       expect.arrayContaining(["us", "example.com"]),
     );
     expect(aggregateStatement?.sql).toContain(
-      "TRIM(COALESCE(referrer_host, '')) = ''",
+      "TRIM(COALESCE(visit_source.referrer_host, '')) = ''",
     );
   });
 

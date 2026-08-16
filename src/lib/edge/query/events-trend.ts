@@ -129,7 +129,7 @@ ${seriesNames.length > 0 ? `WHERE event_name NOT IN (${seriesNames.map(() => "?"
     visitors: number;
     isOther?: boolean;
   }> = seriesRows.map((row) => ({
-    key: seriesKeyByName.get(row.eventName) ?? row.eventName,
+    key: seriesKeyByName.get(row.eventName)!,
     eventName: row.eventName,
     label: row.eventName,
     events: row.events,
