@@ -1,6 +1,11 @@
 import type { Env } from "@/lib/edge/types";
 
-import type { JourneyEventRow, SessionRow, VisitorRow } from "./core";
+import type {
+  GeoPointRow,
+  JourneyEventRow,
+  SessionRow,
+  VisitorRow,
+} from "./core";
 import {
   buildDetailCustomEventSourceCte,
   buildTargetVisitSourceCte,
@@ -12,11 +17,11 @@ import {
   buildSessionAggregationSql,
   buildVisitorAggregationSql,
 } from "./journey-aggregation-sql";
-import { querySessionLocationPointsFromD1 } from "./journey-geo-queries";
 import type { DetailTarget } from "./journey-helpers";
 import {
   averageGapMs,
   detailTargetColumn,
+  mapGeoPointRow,
   mapJourneyEventRow,
   mapSessionRow,
   mapVisitorRow,
@@ -190,14 +195,14 @@ function compareDetailVisits(
   );
 }
 
-async function queryVisitorDetailSourceFromD1(
+async function queryDetailSourceFromD1(
   env: Env,
   siteId: string,
-  visitorId: string,
+  target: DetailTarget,
 ): Promise<VisitorDetailSourceRow[]> {
   const sql = `
 WITH
-${buildTargetVisitSourceCte("visitor_id")},
+${buildTargetVisitSourceCte(detailTargetColumn(target))},
 filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
@@ -282,7 +287,7 @@ SELECT
 FROM event_source
 `;
   return queryD1All<VisitorDetailSourceRow>(env, sql, [
-    ...targetVisitSourceBindings(siteId, visitorId),
+    ...targetVisitSourceBindings(siteId, target.value),
     ...detailCustomEventSourceBindings(siteId),
   ]);
 }
@@ -473,6 +478,32 @@ function deriveVisitorDetailRows(rows: VisitorDetailSourceRow[]): {
   return { visitor, sessions, events };
 }
 
+function deriveSessionLocationPoints(
+  rows: VisitorDetailSourceRow[],
+): GeoPointRow[] {
+  return rows
+    .filter(
+      (row) =>
+        row.sourceType === "visit" &&
+        Number.isFinite(Number(row.latitude)) &&
+        Number.isFinite(Number(row.longitude)) &&
+        Math.abs(Number(row.latitude)) <= 90 &&
+        Math.abs(Number(row.longitude)) <= 180,
+    )
+    .sort(compareDetailVisits)
+    .map((row) =>
+      mapGeoPointRow({
+        latitude: row.latitude,
+        longitude: row.longitude,
+        timestampMs: row.startedAt,
+        country: row.country,
+        region: row.region,
+        regionCode: row.regionCode,
+        city: row.city,
+      }),
+    );
+}
+
 export async function queryVisitorDetailFromD1(
   env: Env,
   siteId: string,
@@ -484,7 +515,10 @@ export async function queryVisitorDetailFromD1(
     sessions,
     events: baseEvents,
   } = deriveVisitorDetailRows(
-    await queryVisitorDetailSourceFromD1(env, siteId, visitorId),
+    await queryDetailSourceFromD1(env, siteId, {
+      type: "visitor",
+      value: visitorId,
+    }),
   );
   if (!visitor) return null;
 
@@ -540,17 +574,12 @@ export async function querySessionDetailFromD1(
   siteId: string,
   sessionId: string,
 ) {
-  const [sessions, baseEvents, locationPoints] = await Promise.all([
-    querySessionsForDetailFromD1(env, siteId, {
-      type: "session",
-      value: sessionId,
-    }),
-    queryJourneyEventsForDetailFromD1(env, siteId, {
-      type: "session",
-      value: sessionId,
-    }),
-    querySessionLocationPointsFromD1(env, siteId, sessionId),
-  ]);
+  const sourceRows = await queryDetailSourceFromD1(env, siteId, {
+    type: "session",
+    value: sessionId,
+  });
+  const { sessions, events: baseEvents } = deriveVisitorDetailRows(sourceRows);
+  const locationPoints = deriveSessionLocationPoints(sourceRows);
   const session = sessions.find((item) => item.sessionId === sessionId);
   if (!session) return null;
 

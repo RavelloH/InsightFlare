@@ -402,6 +402,30 @@ describe("edge journey detail D1 queries", () => {
     }
   });
 
+  it("uses session-target indexes from the shared session detail source", async () => {
+    const sqlite = createSqliteDetailEnv();
+    try {
+      await expect(
+        querySessionDetailFromD1(sqlite.env, siteId, "session-plan"),
+      ).resolves.toBeNull();
+
+      expect(sqlite.calls).toHaveLength(1);
+      const plan = sqlite.explain(sqlite.calls[0]!);
+      expect(
+        plan.some((detail) =>
+          detail.includes("idx_visits_site_session_started_at"),
+        ),
+      ).toBe(true);
+      expect(
+        plan.some((detail) =>
+          detail.includes("idx_custom_events_site_visit_time"),
+        ),
+      ).toBe(true);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it("keeps pageview metrics when a visitor has no session or custom event", async () => {
     const { env } = createD1Env([
       [
@@ -443,18 +467,12 @@ describe("edge journey detail D1 queries", () => {
 
   it("returns session detail with synthetic start and leave events", async () => {
     const { env } = createD1Env([
-      [sessionRow()],
-      [journeyEventRow()],
       [
-        {
+        visitorDetailVisitRow({
+          durationMs: 60_000,
           latitude: "37.7",
           longitude: "-122.4",
-          timestampMs: String(baseMs + 10_000),
-          country: "US",
-          region: "California",
-          regionCode: "CA",
-          city: "San Francisco",
-        },
+        }),
       ],
     ]);
 
@@ -463,13 +481,6 @@ describe("edge journey detail D1 queries", () => {
     expect(detail?.session).toMatchObject({
       sessionId: "session-1",
       durationMs: 60_000,
-      performance: {
-        ttfb: 120,
-        fcp: 300,
-        lcp: 1200,
-        cls: 0.02,
-        inp: 90,
-      },
     });
     expect(detail?.locationPoints).toEqual([
       {
@@ -498,26 +509,24 @@ describe("edge journey detail D1 queries", () => {
   it("sorts session detail events with id tie-breakers", async () => {
     const { env } = createD1Env([
       [
-        sessionRow({
-          active: 1,
+        visitorDetailVisitRow({
+          status: "open",
           startedAt: baseMs,
-          endedAt: baseMs + 30_000,
-        }),
-      ],
-      [
-        journeyEventRow({
-          id: "z-event",
+          eventId: undefined,
+          eventType: undefined,
           occurredAt: baseMs + 10_000,
-          visitId: "visit-z",
+          visitId: "visit-1",
         }),
-        journeyEventRow({
-          id: "a-event",
+        visitorDetailCustomEventRow({
+          eventId: "z-event",
           occurredAt: baseMs + 10_000,
-          visitId: "visit-a",
+        }),
+        visitorDetailCustomEventRow({
+          eventId: "a-event",
+          occurredAt: baseMs + 10_000,
           pathname: "/a",
         }),
       ],
-      [],
     ]);
 
     const detail = await querySessionDetailFromD1(env, siteId, "session-1");
@@ -525,12 +534,13 @@ describe("edge journey detail D1 queries", () => {
     expect(detail?.events.map((event) => event.id)).toEqual([
       "z-event",
       "a-event",
+      "visit-1",
       "session-start:session-1",
     ]);
   });
 
   it("returns null when a session detail lookup has no matching session row", async () => {
-    const { env } = createD1Env([[], [journeyEventRow()], []]);
+    const { env } = createD1Env([[]]);
 
     await expect(
       querySessionDetailFromD1(env, siteId, "session-missing"),
@@ -540,14 +550,11 @@ describe("edge journey detail D1 queries", () => {
   it("omits leave events for active session detail rows", async () => {
     const { env } = createD1Env([
       [
-        sessionRow({
-          active: 1,
+        visitorDetailVisitRow({
+          status: "open",
           endedAt: baseMs + 60_000,
-          exitPath: "/still-open",
         }),
       ],
-      [journeyEventRow()],
-      [],
     ]);
 
     const detail = await querySessionDetailFromD1(env, siteId, "session-1");
@@ -1273,9 +1280,7 @@ describe("edge journey handlers", () => {
   it("returns visitor and session detail handler payloads", async () => {
     const { env } = createD1Env([
       [visitorDetailVisitRow()],
-      [sessionRow()],
-      [journeyEventRow()],
-      [{ latitude: 1, longitude: 2, timestampMs: 3 }],
+      [visitorDetailVisitRow({ latitude: 1, longitude: 2, startedAt: 3 })],
     ]);
 
     const visitor = await handleVisitorDetail(
