@@ -168,23 +168,324 @@ ORDER BY occurredAt DESC, id DESC
   ).map(mapJourneyEventRow);
 }
 
+type VisitorDetailSourceRow = Record<string, unknown> & {
+  sourceType: "visit" | "custom";
+};
+
+function detailNumber(row: Record<string, unknown>, key: string): number {
+  return Number(row[key] ?? 0);
+}
+
+function detailText(row: Record<string, unknown>, key: string): string {
+  return String(row[key] ?? "");
+}
+
+function compareDetailVisits(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): number {
+  return (
+    detailNumber(left, "startedAt") - detailNumber(right, "startedAt") ||
+    detailText(left, "visitId").localeCompare(detailText(right, "visitId"))
+  );
+}
+
+async function queryVisitorDetailSourceFromD1(
+  env: Env,
+  siteId: string,
+  visitorId: string,
+): Promise<VisitorDetailSourceRow[]> {
+  const sql = `
+WITH
+${buildTargetVisitSourceCte("visitor_id")},
+filtered_visits AS MATERIALIZED (
+  SELECT *
+  FROM visit_source
+),
+${buildDetailCustomEventSourceCte({ materialize: true })}
+SELECT
+  'visit' AS sourceType,
+  visit_id AS visitId,
+  visitor_id AS visitorId,
+  session_id AS sessionId,
+  status,
+  started_at AS startedAt,
+  last_activity_at AS lastActivityAt,
+  ended_at AS endedAt,
+  duration_ms AS durationMs,
+  pathname,
+  hash_fragment AS hash,
+  title,
+  hostname,
+  referrer_host AS referrerHost,
+  referrer_url AS referrerUrl,
+  country,
+  region,
+  region_code AS regionCode,
+  city,
+  latitude,
+  longitude,
+  browser,
+  browser_version AS browserVersion,
+  os,
+  os_version AS osVersion,
+  device_type AS deviceType,
+  screen_width AS screenWidth,
+  screen_height AS screenHeight,
+  perf_ttfb_ms AS perfTtfbMs,
+  perf_fcp_ms AS perfFcpMs,
+  perf_lcp_ms AS perfLcpMs,
+  perf_cls AS perfCls,
+  perf_inp_ms AS perfInpMs,
+  NULL AS eventId,
+  NULL AS eventType,
+  NULL AS occurredAt
+FROM filtered_visits
+UNION ALL
+SELECT
+  'custom' AS sourceType,
+  visit_id AS visitId,
+  visitor_id AS visitorId,
+  session_id AS sessionId,
+  NULL AS status,
+  NULL AS startedAt,
+  NULL AS lastActivityAt,
+  NULL AS endedAt,
+  NULL AS durationMs,
+  pathname,
+  hash_fragment AS hash,
+  title,
+  hostname,
+  referrer_host AS referrerHost,
+  referrer_url AS referrerUrl,
+  country,
+  region,
+  NULL AS regionCode,
+  city,
+  NULL AS latitude,
+  NULL AS longitude,
+  browser,
+  browser_version AS browserVersion,
+  os,
+  os_version AS osVersion,
+  device_type AS deviceType,
+  screen_width AS screenWidth,
+  screen_height AS screenHeight,
+  perf_ttfb_ms AS perfTtfbMs,
+  perf_fcp_ms AS perfFcpMs,
+  perf_lcp_ms AS perfLcpMs,
+  perf_cls AS perfCls,
+  perf_inp_ms AS perfInpMs,
+  event_id AS eventId,
+  event_name AS eventType,
+  occurred_at AS occurredAt
+FROM event_source
+`;
+  return queryD1All<VisitorDetailSourceRow>(env, sql, [
+    ...targetVisitSourceBindings(siteId, visitorId),
+    ...detailCustomEventSourceBindings(siteId),
+  ]);
+}
+
+function deriveVisitorDetailRows(rows: VisitorDetailSourceRow[]): {
+  visitor: VisitorRow | null;
+  sessions: SessionRow[];
+  events: JourneyEventRow[];
+} {
+  const visits = rows.filter((row) => row.sourceType === "visit");
+  if (visits.length === 0) return { visitor: null, sessions: [], events: [] };
+
+  visits.sort(compareDetailVisits);
+  const customEvents = rows.filter((row) => row.sourceType === "custom");
+  const firstVisit = visits[0]!;
+  const latestVisit = visits.at(-1)!;
+  const sessionsById = new Map<string, Record<string, unknown>[]>();
+  const eventCountBySession = new Map<string, number>();
+
+  for (const event of customEvents) {
+    const sessionId = detailText(event, "sessionId");
+    if (!sessionId) continue;
+    eventCountBySession.set(
+      sessionId,
+      (eventCountBySession.get(sessionId) ?? 0) + 1,
+    );
+  }
+  for (const visit of visits) {
+    const sessionId = detailText(visit, "sessionId");
+    if (!sessionId) continue;
+    const sessionVisits = sessionsById.get(sessionId) ?? [];
+    sessionVisits.push(visit);
+    sessionsById.set(sessionId, sessionVisits);
+  }
+
+  const visitor = mapVisitorRow({
+    visitorId: detailText(firstVisit, "visitorId"),
+    sessionId: detailText(latestVisit, "sessionId"),
+    firstSeenAt: detailNumber(firstVisit, "startedAt"),
+    lastSeenAt: detailNumber(latestVisit, "startedAt"),
+    views: visits.length,
+    sessions: sessionsById.size,
+    events: customEvents.length,
+    country: detailText(latestVisit, "country"),
+    region: detailText(latestVisit, "region"),
+    regionCode: detailText(latestVisit, "regionCode"),
+    city: detailText(latestVisit, "city"),
+    referrerHost: detailText(firstVisit, "referrerHost"),
+    referrerUrl: detailText(firstVisit, "referrerUrl"),
+    browser: detailText(latestVisit, "browser"),
+    browserVersion: detailText(latestVisit, "browserVersion"),
+    os: detailText(latestVisit, "os"),
+    osVersion: detailText(latestVisit, "osVersion"),
+    deviceType: detailText(latestVisit, "deviceType"),
+    screenWidth: latestVisit.screenWidth,
+    screenHeight: latestVisit.screenHeight,
+  });
+  const sessions = [...sessionsById.entries()]
+    .map(([sessionId, sessionVisits]) => {
+      sessionVisits.sort(compareDetailVisits);
+      const first = sessionVisits[0]!;
+      const latest = sessionVisits.at(-1)!;
+      const firstGeo = sessionVisits.find((visit) => {
+        const latitude = Number(visit.latitude);
+        const longitude = Number(visit.longitude);
+        return (
+          Number.isFinite(latitude) &&
+          Number.isFinite(longitude) &&
+          Math.abs(latitude) <= 90 &&
+          Math.abs(longitude) <= 180
+        );
+      });
+      return mapSessionRow({
+        sessionId,
+        visitorId: detailText(first, "visitorId"),
+        startedAt: detailNumber(first, "startedAt"),
+        endedAt: Math.max(
+          ...sessionVisits.map((visit) =>
+            Number(
+              visit.endedAt ?? visit.lastActivityAt ?? visit.startedAt ?? 0,
+            ),
+          ),
+        ),
+        totalDurationMs: sessionVisits.reduce(
+          (total, visit) => total + detailNumber(visit, "durationMs"),
+          0,
+        ),
+        active: sessionVisits.some(
+          (visit) => detailText(visit, "status").toLowerCase() === "open",
+        )
+          ? 1
+          : 0,
+        views: sessionVisits.length,
+        events: eventCountBySession.get(sessionId) ?? 0,
+        bounce: sessionVisits.length <= 1 ? 1 : 0,
+        entryPath: detailText(first, "pathname"),
+        exitPath: detailText(latest, "pathname"),
+        referrerHost: detailText(first, "referrerHost"),
+        referrerUrl: detailText(first, "referrerUrl"),
+        country: detailText(first, "country"),
+        region: detailText(first, "region"),
+        regionCode: detailText(first, "regionCode"),
+        city: detailText(first, "city"),
+        latitude: firstGeo?.latitude ?? null,
+        longitude: firstGeo?.longitude ?? null,
+        browser: detailText(first, "browser"),
+        browserVersion: detailText(first, "browserVersion"),
+        os: detailText(first, "os"),
+        osVersion: detailText(first, "osVersion"),
+        deviceType: detailText(first, "deviceType"),
+        screenWidth: first.screenWidth,
+        screenHeight: first.screenHeight,
+      });
+    })
+    .sort(
+      (left, right) =>
+        right.startedAt - left.startedAt ||
+        left.sessionId.localeCompare(right.sessionId),
+    );
+  const events = [
+    ...visits.map((visit) =>
+      mapJourneyEventRow({
+        id: detailText(visit, "visitId"),
+        kind: "pageview",
+        eventType: "pageview",
+        occurredAt: detailNumber(visit, "startedAt"),
+        visitId: detailText(visit, "visitId"),
+        sessionId: detailText(visit, "sessionId"),
+        visitorId: detailText(visit, "visitorId"),
+        pathname: detailText(visit, "pathname"),
+        hash: detailText(visit, "hash"),
+        title: detailText(visit, "title"),
+        hostname: detailText(visit, "hostname"),
+        referrerHost: detailText(visit, "referrerHost"),
+        referrerUrl: detailText(visit, "referrerUrl"),
+        country: detailText(visit, "country"),
+        region: detailText(visit, "region"),
+        city: detailText(visit, "city"),
+        browser: detailText(visit, "browser"),
+        browserVersion: detailText(visit, "browserVersion"),
+        os: detailText(visit, "os"),
+        osVersion: detailText(visit, "osVersion"),
+        deviceType: detailText(visit, "deviceType"),
+        screenWidth: visit.screenWidth,
+        screenHeight: visit.screenHeight,
+        durationMs: detailNumber(visit, "durationMs"),
+        perfTtfbMs: visit.perfTtfbMs,
+        perfFcpMs: visit.perfFcpMs,
+        perfLcpMs: visit.perfLcpMs,
+        perfCls: visit.perfCls,
+        perfInpMs: visit.perfInpMs,
+      }),
+    ),
+    ...customEvents.map((event) =>
+      mapJourneyEventRow({
+        id: detailText(event, "eventId"),
+        kind: "custom",
+        eventType: detailText(event, "eventType"),
+        occurredAt: detailNumber(event, "occurredAt"),
+        visitId: detailText(event, "visitId"),
+        sessionId: detailText(event, "sessionId"),
+        visitorId: detailText(event, "visitorId"),
+        pathname: detailText(event, "pathname"),
+        hash: detailText(event, "hash"),
+        title: detailText(event, "title"),
+        hostname: detailText(event, "hostname"),
+        referrerHost: detailText(event, "referrerHost"),
+        referrerUrl: detailText(event, "referrerUrl"),
+        country: detailText(event, "country"),
+        region: detailText(event, "region"),
+        city: detailText(event, "city"),
+        browser: detailText(event, "browser"),
+        browserVersion: detailText(event, "browserVersion"),
+        os: detailText(event, "os"),
+        osVersion: detailText(event, "osVersion"),
+        deviceType: detailText(event, "deviceType"),
+        screenWidth: event.screenWidth,
+        screenHeight: event.screenHeight,
+        durationMs: 0,
+        perfTtfbMs: event.perfTtfbMs,
+        perfFcpMs: event.perfFcpMs,
+        perfLcpMs: event.perfLcpMs,
+        perfCls: event.perfCls,
+        perfInpMs: event.perfInpMs,
+      }),
+    ),
+  ];
+  return { visitor, sessions, events };
+}
+
 export async function queryVisitorDetailFromD1(
   env: Env,
   siteId: string,
   visitorId: string,
   timeZone: string,
 ) {
-  const [visitor, sessions, baseEvents] = await Promise.all([
-    queryVisitorForDetailFromD1(env, siteId, visitorId),
-    querySessionsForDetailFromD1(env, siteId, {
-      type: "visitor",
-      value: visitorId,
-    }),
-    queryJourneyEventsForDetailFromD1(env, siteId, {
-      type: "visitor",
-      value: visitorId,
-    }),
-  ]);
+  const {
+    visitor,
+    sessions,
+    events: baseEvents,
+  } = deriveVisitorDetailRows(
+    await queryVisitorDetailSourceFromD1(env, siteId, visitorId),
+  );
   if (!visitor) return null;
 
   const events = [...sessions.map(sessionStartEvent), ...baseEvents].sort(

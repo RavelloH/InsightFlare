@@ -81,9 +81,11 @@ visit_source AS (
 )`;
 }
 
-export function buildDetailCustomEventSourceCte(): string {
+export function buildDetailCustomEventSourceCte(options?: {
+  materialize?: boolean;
+}): string {
   return `
-event_source AS (
+event_source${options?.materialize ? " AS MATERIALIZED" : " AS"} (
   SELECT
     ce.event_id, ce.site_id, ce.visit_id, fv.visitor_id, fv.session_id,
     ce.occurred_at, cen.name AS event_name, '{}' AS event_data_json,

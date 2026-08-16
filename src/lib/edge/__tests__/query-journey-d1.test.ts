@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { QueryWindow } from "@/lib/edge/query/core";
@@ -73,6 +76,48 @@ function createD1Env(resultSets: D1Row[][]): {
       INGEST_DO: {} as DurableObjectNamespace,
     },
     calls,
+  };
+}
+
+function createSqliteDetailEnv(): {
+  env: Env;
+  calls: QueryCall[];
+  close: () => void;
+  explain: (call: QueryCall) => string[];
+} {
+  const database = new DatabaseSync(":memory:");
+  for (const migration of [
+    "migrations/0008_rebuild_analytics.sql",
+    "migrations/0013_add_visit_performance_metrics.sql",
+    "migrations/0017_structured_custom_events.sql",
+  ]) {
+    database.exec(readFileSync(migration, "utf8"));
+  }
+  const calls: QueryCall[] = [];
+  const env = {
+    DB: {
+      prepare: (sql: string) => ({
+        bind: (...bindings: QueryBinding[]) => {
+          const call = { sql, bindings };
+          calls.push(call);
+          return {
+            all: async () => ({
+              results: database.prepare(sql).all(...bindings) as D1Row[],
+            }),
+          };
+        },
+      }),
+    } as unknown as D1Database,
+  } as Env;
+  return {
+    env,
+    calls,
+    close: () => database.close(),
+    explain: (call) =>
+      database
+        .prepare(`EXPLAIN QUERY PLAN ${call.sql}`)
+        .all(...call.bindings)
+        .map((row) => String((row as { detail?: unknown }).detail ?? "")),
   };
 }
 
@@ -190,6 +235,56 @@ function journeyEventRow(overrides: D1Row = {}): D1Row {
   };
 }
 
+function visitorDetailVisitRow(overrides: D1Row = {}): D1Row {
+  return {
+    sourceType: "visit",
+    visitId: "visit-1",
+    visitorId: "visitor-1",
+    sessionId: "session-1",
+    status: "closed",
+    startedAt: baseMs + 10_000,
+    lastActivityAt: baseMs + 50_000,
+    endedAt: baseMs + 50_000,
+    durationMs: 40_000,
+    pathname: "/home",
+    hash: "",
+    title: "Home",
+    hostname: "example.com",
+    referrerHost: "ref.example",
+    referrerUrl: "https://ref.example/start",
+    country: "US",
+    region: "California",
+    regionCode: "CA",
+    city: "San Francisco",
+    latitude: 37.77,
+    longitude: -122.42,
+    browser: "Chrome",
+    browserVersion: "124",
+    os: "macOS",
+    osVersion: "14",
+    deviceType: "desktop",
+    screenWidth: 1440,
+    screenHeight: 900,
+    perfTtfbMs: 100,
+    perfFcpMs: 250,
+    perfLcpMs: 1100,
+    perfCls: 0.01,
+    perfInpMs: 80,
+    ...overrides,
+  };
+}
+
+function visitorDetailCustomEventRow(overrides: D1Row = {}): D1Row {
+  return {
+    ...visitorDetailVisitRow(),
+    sourceType: "custom",
+    eventId: "event-1",
+    eventType: "signup",
+    occurredAt: baseMs + 20_000,
+    ...overrides,
+  };
+}
+
 describe("edge journey detail D1 queries", () => {
   it("supports aggregation SQL callers without pagination", () => {
     expect(
@@ -215,30 +310,18 @@ describe("edge journey detail D1 queries", () => {
   it("combines visitor, session, and event rows into visitor detail metrics", async () => {
     const secondSessionStart = baseMs + 24 * 60 * 60 * 1000;
     const { env, calls } = createD1Env([
-      [visitorRow({ firstSeenAt: baseMs, lastSeenAt: secondSessionStart })],
       [
-        sessionRow(),
-        sessionRow({
+        visitorDetailVisitRow(),
+        visitorDetailVisitRow({
+          visitId: "visit-2",
           sessionId: "session-2",
-          startedAt: secondSessionStart,
-          endedAt: secondSessionStart + 30_000,
-          totalDurationMs: 30_000,
-          bounce: 1,
-          entryPath: "/checkout",
-          exitPath: "/checkout",
+          startedAt: secondSessionStart + 10_000,
+          endedAt: secondSessionStart + 40_000,
+          lastActivityAt: secondSessionStart + 40_000,
+          durationMs: 30_000,
+          pathname: "/checkout",
         }),
-      ],
-      [
-        journeyEventRow(),
-        journeyEventRow({
-          id: "event-1",
-          kind: "custom",
-          eventType: "signup",
-          occurredAt: baseMs + 20_000,
-          visitId: "visit-1",
-          pathname: "/signup",
-          durationMs: 0,
-        }),
+        visitorDetailCustomEventRow({ pathname: "/signup" }),
       ],
     ]);
 
@@ -252,55 +335,83 @@ describe("edge journey detail D1 queries", () => {
     expect(detail?.metrics).toMatchObject({
       totalEvents: 1,
       sessions: 2,
-      views: 1,
+      views: 2,
       avgEventsPerSession: 0.5,
-      bounceRate: 0.5,
-      avgDurationMs: 45_000,
-      p90DurationMs: 60_000,
+      bounceRate: 1,
+      avgDurationMs: 35_000,
+      p90DurationMs: 40_000,
       daysActive: 2,
       conversionEvents: 1,
       avgTimeBetweenSessionsMs: 24 * 60 * 60 * 1000,
     });
-    expect(detail?.visitedPages).toEqual([{ pathname: "/home", views: 1 }]);
+    expect(detail?.visitedPages).toEqual([
+      { pathname: "/checkout", views: 1 },
+      { pathname: "/home", views: 1 },
+    ]);
     expect(detail?.eventDistribution).toEqual([
+      { eventType: "pageview", count: 2 },
       { eventType: "session start", count: 2 },
-      { eventType: "pageview", count: 1 },
       { eventType: "signup", count: 1 },
     ]);
     expect(detail?.performance.ttfb).toMatchObject({
       avg: 100,
       p75: 100,
-      samples: 1,
+      samples: 2,
     });
     expect(detail?.events.map((event) => event.id)).toContain(
       "session-start:session-2",
     );
-    expect(calls.map((call) => call.bindings)).toEqual([
-      [siteId, "visitor-1", siteId],
-      [siteId, "visitor-1", siteId],
-      [siteId, "visitor-1", siteId],
-    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.bindings).toEqual([siteId, "visitor-1", siteId]);
+    expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
+    expect(calls[0]?.sql).toContain("event_source AS MATERIALIZED");
   });
 
-  it("returns null visitor detail without consuming session or event rows", async () => {
-    const { env, calls } = createD1Env([
-      [],
-      [sessionRow()],
-      [journeyEventRow()],
-    ]);
+  it("returns null visitor detail from an empty shared source", async () => {
+    const { env, calls } = createD1Env([[]]);
 
     await expect(
       queryVisitorDetailFromD1(env, siteId, "visitor-missing", "UTC"),
     ).resolves.toBeNull();
 
-    expect(calls).toHaveLength(3);
-    expect(calls.every((call) => call.bindings[1] === "visitor-missing")).toBe(
-      true,
-    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.bindings).toEqual([siteId, "visitor-missing", siteId]);
   });
 
-  it("returns zeroed visitor detail metrics when no sessions or events exist", async () => {
-    const { env } = createD1Env([[visitorRow()], [], []]);
+  it("uses target-visit and target-event indexes from the shared detail source", async () => {
+    const sqlite = createSqliteDetailEnv();
+    try {
+      await expect(
+        queryVisitorDetailFromD1(sqlite.env, siteId, "visitor-plan", "UTC"),
+      ).resolves.toBeNull();
+
+      expect(sqlite.calls).toHaveLength(1);
+      const plan = sqlite.explain(sqlite.calls[0]!);
+      expect(
+        plan.some((detail) =>
+          detail.includes("idx_visits_site_visitor_started_at"),
+        ),
+      ).toBe(true);
+      expect(
+        plan.some((detail) =>
+          detail.includes("idx_custom_events_site_visit_time"),
+        ),
+      ).toBe(true);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("keeps pageview metrics when a visitor has no session or custom event", async () => {
+    const { env } = createD1Env([
+      [
+        visitorDetailVisitRow({
+          sessionId: "",
+          startedAt: baseMs,
+          durationMs: 0,
+        }),
+      ],
+    ]);
 
     const detail = await queryVisitorDetailFromD1(
       env,
@@ -313,20 +424,20 @@ describe("edge journey detail D1 queries", () => {
       metrics: {
         totalEvents: 0,
         sessions: 0,
-        views: 0,
+        views: 1,
         avgEventsPerSession: 0,
         bounceRate: 0,
         avgDurationMs: 0,
         p90DurationMs: 0,
-        daysActive: 0,
+        daysActive: 1,
         conversionEvents: 0,
         avgTimeBetweenSessionsMs: 0,
       },
       sessions: [],
-      events: [],
-      visitedPages: [],
-      eventDistribution: [],
-      activity: [],
+      events: [expect.objectContaining({ id: "visit-1", kind: "pageview" })],
+      visitedPages: [{ pathname: "/home", views: 1 }],
+      eventDistribution: [{ eventType: "pageview", count: 1 }],
+      activity: [expect.objectContaining({ count: 1 })],
     });
   });
 
@@ -1161,9 +1272,7 @@ describe("edge journey handlers", () => {
 
   it("returns visitor and session detail handler payloads", async () => {
     const { env } = createD1Env([
-      [visitorRow()],
-      [sessionRow()],
-      [journeyEventRow()],
+      [visitorDetailVisitRow()],
       [sessionRow()],
       [journeyEventRow()],
       [{ latitude: 1, longitude: 2, timestampMs: 3 }],
