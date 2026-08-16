@@ -36,62 +36,26 @@ export async function queryEventsTrendFromD1(
   const baseCte = `
 WITH
 ${buildEventAnalyticsSourceCte()},
-filtered_events AS MATERIALIZED (
+filtered_events AS (
   SELECT *
   FROM event_source es
   ${filter.clause}
 )`;
-  const seriesRows = await queryD1All<
-    EventTrendSeriesRow & { isOther?: number }
-  >(
+  const seriesRows = await queryD1All<EventTrendSeriesRow>(
     env,
-    `${baseCte},
-series_aggregate AS (
-  SELECT
-    event_name AS eventName,
-    count(*) AS events,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM filtered_events
-  GROUP BY event_name
-),
-ranked_series AS (
-  SELECT
-    eventName,
-    events,
-    sessions,
-    visitors,
-    ROW_NUMBER() OVER (
-      ORDER BY events DESC, sessions DESC, eventName ASC
-    ) AS seriesRank
-  FROM series_aggregate
-),
-  top_series AS (
-  SELECT eventName, events, sessions, visitors, seriesRank
-  FROM ranked_series
-  WHERE seriesRank <= ?
-),
-other_series AS (
-  SELECT
-    ? AS eventName,
-    count(*) AS events,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM filtered_events
-  WHERE event_name NOT IN (SELECT eventName FROM top_series)
-)
-SELECT eventName, events, sessions, visitors, 0 AS isOther, seriesRank
-FROM top_series
-UNION ALL
-SELECT eventName, events, sessions, visitors, 1 AS isOther, NULL AS seriesRank
-FROM other_series
-WHERE events > 0
-ORDER BY isOther ASC, seriesRank ASC
+    `${baseCte}
+SELECT
+  event_name AS eventName,
+  count(*) AS events,
+  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+FROM filtered_events
+GROUP BY event_name
+ORDER BY events DESC, sessions DESC, eventName ASC
+LIMIT ?
 `,
-    [...sourceBindings, ...filterBindings, limit, SHARE_TREND_OTHER_LABEL],
+    [...sourceBindings, ...filterBindings, limit],
   );
-  const topSeriesRows = seriesRows.filter((row) => Number(row.isOther) !== 1);
-  const otherSeriesRow = seriesRows.find((row) => Number(row.isOther) === 1);
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "occurred_at");
   const seriesKeyByName = new Map<string, string>();
@@ -102,7 +66,7 @@ ORDER BY isOther ASC, seriesRank ASC
       shareTrendSeriesKey(row.eventName, usedKeys, "event"),
     );
   }
-  const seriesNames = topSeriesRows.map((row) => row.eventName);
+  const seriesNames = seriesRows.map((row) => row.eventName);
   const namesClause =
     seriesNames.length > 0
       ? `CASE WHEN event_name IN (${seriesNames.map(() => "?").join(", ")}) THEN event_name ELSE ? END`
@@ -136,6 +100,26 @@ ORDER BY bucket ASC
   const hasOther = trendRows.some(
     (row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN,
   );
+  const [otherSeriesRow] = hasOther
+    ? await queryD1All<EventTrendSeriesRow>(
+        env,
+        `${baseCte}
+SELECT
+  ? AS eventName,
+  count(*) AS events,
+  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+FROM filtered_events
+${seriesNames.length > 0 ? `WHERE event_name NOT IN (${seriesNames.map(() => "?").join(", ")})` : ""}
+`,
+        [
+          ...sourceBindings,
+          ...filterBindings,
+          SHARE_TREND_OTHER_LABEL,
+          ...seriesNames,
+        ],
+      )
+    : [];
   const series: Array<{
     key: string;
     eventName: string;
@@ -144,7 +128,7 @@ ORDER BY bucket ASC
     sessions: number;
     visitors: number;
     isOther?: boolean;
-  }> = topSeriesRows.map((row) => ({
+  }> = seriesRows.map((row) => ({
     key: seriesKeyByName.get(row.eventName)!,
     eventName: row.eventName,
     label: row.eventName,

@@ -2,11 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  type QueryWindow,
-  SHARE_TREND_OTHER_KEY,
-  SHARE_TREND_OTHER_LABEL,
-} from "@/lib/edge/query/core";
+import type { QueryWindow } from "@/lib/edge/query/core";
 import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/query/events-context";
 import { queryEventFieldsFromD1 } from "@/lib/edge/query/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/query/events-overview";
@@ -15,10 +11,7 @@ import {
   queryEventRecordPageFromD1,
   queryEventRecordsFromD1,
 } from "@/lib/edge/query/events-records";
-import {
-  queryEventsTrendFromD1,
-  queryEventTypeTrendFromD1,
-} from "@/lib/edge/query/events-trend";
+import { queryEventTypeTrendFromD1 } from "@/lib/edge/query/events-trend";
 import {
   querySessionListPageFromD1,
   querySessionsFromD1,
@@ -252,47 +245,6 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
 }
 
 describe("event detail D1 SQL", () => {
-  it("combines top and Other series aggregation without changing trend data", async () => {
-    const { env, d1 } = createSqliteEventEnv();
-
-    try {
-      const result = await queryEventsTrendFromD1(
-        env,
-        siteId,
-        window,
-        "hour",
-        {},
-        1,
-      );
-
-      expect(result.series).toEqual([
-        {
-          key: "outbound-click",
-          eventName: "outbound_click",
-          label: "outbound_click",
-          events: 1,
-          sessions: 1,
-          visitors: 1,
-        },
-        {
-          key: SHARE_TREND_OTHER_KEY,
-          eventName: SHARE_TREND_OTHER_LABEL,
-          label: SHARE_TREND_OTHER_LABEL,
-          events: 1,
-          sessions: 1,
-          visitors: 1,
-          isOther: true,
-        },
-      ]);
-      expect(result.data.some((point) => point.totalEvents === 2)).toBe(true);
-      expect(d1.calls).toHaveLength(2);
-      expect(d1.calls[0]?.sql).toContain("filtered_events AS MATERIALIZED");
-      expect(d1.calls[0]?.sql).toContain("other_series AS");
-    } finally {
-      d1.close();
-    }
-  });
-
   it("returns the same event context and payload data as the event records query", async () => {
     const { env, d1 } = createSqliteEventEnv();
 

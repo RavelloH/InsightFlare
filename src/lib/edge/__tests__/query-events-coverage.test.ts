@@ -520,23 +520,24 @@ describe("edge query events trend coverage", () => {
       totalEvents: 4,
       eventsBySeries: { [SHARE_TREND_OTHER_KEY]: 4 },
     });
-    expect(queryD1AllMock.mock.calls[0][1]).toContain("other_series AS");
-    expect(queryD1AllMock.mock.calls[0][2]).toContain(SHARE_TREND_OTHER_LABEL);
+    expect(queryD1AllMock.mock.calls[2][1]).toContain(
+      "WHERE event_name NOT IN (?, ?)",
+    );
   });
 
   it("uses the other token when no top event series are selected", async () => {
     queryD1AllMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { bucket: 0, seriesKey: SHARE_TREND_OTHER_TOKEN, events: 2 },
+      ])
       .mockResolvedValueOnce([
         {
           eventName: SHARE_TREND_OTHER_LABEL,
           events: 7,
           sessions: 5,
           visitors: 4,
-          isOther: 1,
         },
-      ])
-      .mockResolvedValueOnce([
-        { bucket: 0, seriesKey: SHARE_TREND_OTHER_TOKEN, events: 2 },
       ]);
 
     const result = await queryEventsTrendFromD1(
@@ -560,7 +561,9 @@ describe("edge query events trend coverage", () => {
       },
     ]);
     expect(queryD1AllMock.mock.calls[1][2]).toContain(SHARE_TREND_OTHER_TOKEN);
-    expect(queryD1AllMock).toHaveBeenCalledTimes(2);
+    expect(queryD1AllMock.mock.calls[2][1]).not.toContain(
+      "WHERE event_name NOT IN",
+    );
   });
 
   it("maps event type trend rows and ignores out-of-range buckets", async () => {
