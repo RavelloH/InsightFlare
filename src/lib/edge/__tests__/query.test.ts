@@ -1291,7 +1291,7 @@ describe("edge query handlers", () => {
     expect(dimensionStatement?.bindings.at(-1)).toBe(200);
   });
 
-  it("shapes events summary, trend, records, type detail, field values, and record detail", async () => {
+  it("shapes events summary, trend, records, type detail, fields, field values, and record detail", async () => {
     const { env } = createEnv({
       matches: [...authMatches(), ...commonQueryMatches()],
     });
@@ -1317,6 +1317,10 @@ describe("edge query handlers", () => {
         "event-type-field-values",
         "eventName=Signup&fieldPath=/plan&fieldValueType=string",
       ),
+      env,
+    );
+    const fields = await privateQuery(
+      privatePath("event-type-fields", "eventName=Signup"),
       env,
     );
     const recordDetail = await privateQuery(
@@ -1380,6 +1384,17 @@ describe("edge query handlers", () => {
         avgEventsPerSession: 2.4,
         shareOfAllEvents: 1,
       },
+      fields: [
+        {
+          path: "/plan",
+          valueType: "string",
+          exampleValue: "pro",
+        },
+      ],
+    });
+    expect(await fields.json()).toMatchObject({
+      ok: true,
+      eventName: "Signup",
       fields: [
         {
           path: "/plan",

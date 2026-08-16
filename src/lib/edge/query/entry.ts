@@ -47,7 +47,14 @@ export async function handlePrivateQuery(
   // dashboards (and two viewers of the same site) don't repeatedly re-issue
   // the same aggregation SQL against D1.
   return withDashboardCache(ctx, url, () =>
-    routeQuery(env, site.id, pathname, url, { publicMode: false }, request),
+    routeQuery(
+      env,
+      site.id,
+      pathname,
+      url,
+      { publicMode: false, dashboardMode: true },
+      request,
+    ),
   );
 }
 

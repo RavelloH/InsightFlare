@@ -8,6 +8,7 @@ import {
   fetchEventsSummary,
   fetchEventsTrend,
   fetchEventTypeDetail,
+  fetchEventTypeFields,
   fetchEventTypeFieldValues,
   fetchFunnelDetail,
   fetchFunnels,
@@ -283,6 +284,33 @@ describe("fetchEventTypeDetail", () => {
 
     const result = await fetchEventTypeDetail("site-1", window, "click");
     expect(result).toEqual(emptyEventTypeDetail("click"));
+  });
+
+  it("requests the private summary-only detail shape", async () => {
+    await fetchEventTypeDetail("site-1", window, "click");
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/event-type-detail",
+      expect.objectContaining({
+        includeContext: "false",
+        includeBreakdowns: "false",
+        includeFields: "false",
+      }),
+    );
+  });
+});
+
+describe("fetchEventTypeFields", () => {
+  it("uses the private fields endpoint and keeps filters", async () => {
+    await fetchEventTypeFields("site-1", window, "click", {
+      country: "CN",
+    });
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/event-type-fields",
+      expect.objectContaining({ eventName: "click" }),
+      { signal: undefined },
+    );
   });
 });
 

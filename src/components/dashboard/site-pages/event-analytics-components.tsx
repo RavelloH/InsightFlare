@@ -92,7 +92,7 @@ import { buildComplementaryOklchPalette } from "@/lib/dashboard/chart-colors";
 import {
   fetchEventRecordDetail,
   fetchEventsRecords,
-  fetchEventTypeDetail,
+  fetchEventTypeFields,
   fetchEventTypeFieldValues,
 } from "@/lib/dashboard/client-data";
 import {
@@ -1840,6 +1840,8 @@ export function EventFieldsCard({
   loading: boolean;
   fields: EventField[];
 }) {
+  const fieldsSectionRef = useRef<HTMLElement | null>(null);
+  const [fieldsVisible, setFieldsVisible] = useState(false);
   const reduceDataRowMotion = useReducedMotion() ?? false;
   const [payloadFilters, setPayloadFilters] = useState<
     EventPayloadFilterRule[]
@@ -1863,6 +1865,47 @@ export function EventFieldsCard({
     () => JSON.stringify(effectiveFilters ?? {}),
     [effectiveFilters],
   );
+  const baseFiltersKey = useMemo(
+    () => JSON.stringify(filters ?? {}),
+    [filters],
+  );
+  useEffect(() => {
+    const section = fieldsSectionRef.current;
+    if (!section) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setFieldsVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setFieldsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "320px 0px", threshold: 0.01 },
+    );
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, []);
+  const fieldsQuery = useQuery({
+    queryKey: [
+      "dashboard",
+      "event-type-fields",
+      siteId,
+      eventName,
+      timeWindow.from,
+      timeWindow.to,
+      timeWindow.interval,
+      timeWindow.timeZone,
+      baseFiltersKey,
+    ],
+    queryFn: ({ signal }) =>
+      fetchEventTypeFields(siteId, timeWindow, eventName, filters, {
+        signal,
+      }),
+    enabled: typeof window !== "undefined" && fieldsVisible && !loading,
+  });
   const filteredFieldsQuery = useQuery({
     queryKey: [
       "dashboard",
@@ -1876,24 +1919,32 @@ export function EventFieldsCard({
       effectiveFiltersKey,
     ],
     queryFn: ({ signal }) =>
-      fetchEventTypeDetail(siteId, timeWindow, eventName, effectiveFilters, {
+      fetchEventTypeFields(siteId, timeWindow, eventName, effectiveFilters, {
         signal,
       }),
     enabled:
-      typeof window !== "undefined" && activePayloadFilterCount > 0 && !loading,
+      typeof window !== "undefined" &&
+      fieldsVisible &&
+      activePayloadFilterCount > 0 &&
+      !loading,
   });
+  const baseFields = fieldsQuery.data?.fields ?? fields;
   const filteredFields = filteredFieldsQuery.data?.fields ?? [];
   const filteredFieldsLoading = filteredFieldsQuery.isPending;
   const filteredFieldsError = filteredFieldsQuery.isError;
   const activeFields =
     activePayloadFilterCount > 0
       ? filteredFieldsLoading && filteredFields.length === 0
-        ? fields
+        ? baseFields
         : filteredFields
-      : fields;
+      : baseFields;
   const fieldListLoading =
-    loading || (activePayloadFilterCount > 0 && filteredFieldsLoading);
-  const fieldListError = activePayloadFilterCount > 0 && filteredFieldsError;
+    loading ||
+    (fieldsVisible && fieldsQuery.isPending) ||
+    (activePayloadFilterCount > 0 && filteredFieldsLoading);
+  const fieldListError =
+    fieldsQuery.isError ||
+    (activePayloadFilterCount > 0 && filteredFieldsError);
   const fieldTree = useMemo(
     () => buildEventFieldTree(activeFields),
     [activeFields],
@@ -2285,7 +2336,7 @@ export function EventFieldsCard({
 
   return (
     <>
-      <section className="space-y-3">
+      <section ref={fieldsSectionRef} className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="inline-flex items-center gap-2 text-sm font-medium">

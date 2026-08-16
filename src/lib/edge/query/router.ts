@@ -13,6 +13,7 @@ import {
   handleEventsTrend,
   handleEventTypeContext,
   handleEventTypeDetail,
+  handleEventTypeFields,
   handleEventTypeFieldValues,
   handleEventTypes,
 } from "./events";
@@ -108,6 +109,7 @@ export const DASHBOARD_QUERY_PATHS = [
   "events-summary",
   "events-trend",
   "events-records",
+  "event-type-fields",
   "event-type-field-values",
   "event-type-context",
   "event-type-detail",
@@ -133,6 +135,7 @@ export interface QueryRouteContext {
 
 export interface QueryRouteOptions {
   publicMode: boolean;
+  dashboardMode?: boolean;
   deferJsonSerialization?: boolean;
 }
 
@@ -186,12 +189,27 @@ export const QUERY_ROUTE_HANDLERS: Record<string, QueryRouteHandler> = {
     handleEventsTrend(env, siteId, url, responseContext),
   "events-records": ({ env, siteId, url, responseContext }) =>
     handleEventsRecords(env, siteId, url, responseContext),
+  "event-type-fields": ({ env, siteId, url, responseContext }) =>
+    handleEventTypeFields(env, siteId, url, responseContext),
   "event-type-field-values": ({ env, siteId, url, responseContext }) =>
     handleEventTypeFieldValues(env, siteId, url, responseContext),
   "event-type-context": ({ env, siteId, url, responseContext }) =>
     handleEventTypeContext(env, siteId, url, responseContext),
-  "event-type-detail": ({ env, siteId, url, responseContext }) =>
-    handleEventTypeDetail(env, siteId, url, responseContext),
+  "event-type-detail": ({ env, siteId, url, options, responseContext }) =>
+    handleEventTypeDetail(
+      env,
+      siteId,
+      url,
+      responseContext,
+      options.dashboardMode
+        ? {
+            includeContext: url.searchParams.get("includeContext") !== "false",
+            includeBreakdowns:
+              url.searchParams.get("includeBreakdowns") !== "false",
+            includeFields: url.searchParams.get("includeFields") !== "false",
+          }
+        : undefined,
+    ),
   "event-record-detail": ({ env, siteId, url, responseContext }) =>
     handleEventRecordDetail(env, siteId, url, responseContext),
   sessions: ({ env, siteId, url, responseContext }) =>

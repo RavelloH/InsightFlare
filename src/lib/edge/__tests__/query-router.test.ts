@@ -20,6 +20,7 @@ const handlerMocks = vi.hoisted(() => {
       handleEventsSummary: vi.fn(respond("events-summary")),
       handleEventsTrend: vi.fn(respond("events-trend")),
       handleEventTypeDetail: vi.fn(respond("event-type-detail")),
+      handleEventTypeFields: vi.fn(respond("event-type-fields")),
       handleEventTypeFieldValues: vi.fn(respond("event-type-field-values")),
       handleEventTypes: vi.fn(respond("event-types")),
     },
@@ -161,6 +162,7 @@ describe("edge query router", () => {
 
   it("blocks sensitive detail queries in public mode", async () => {
     const blockedPaths = [
+      "event-type-fields",
       "funnels",
       "sessions",
       "session-detail",
@@ -219,15 +221,54 @@ describe("edge query router", () => {
     await expect(responseText("events-summary")).resolves.toBe(
       "events-summary",
     );
+    await expect(responseText("event-type-fields")).resolves.toBe(
+      "event-type-fields",
+    );
     await expect(responseText("sessions")).resolves.toBe("sessions");
     await expect(responseText("performance")).resolves.toBe("performance");
     await expect(responseText("browser-radar")).resolves.toBe("browser-radar");
 
     expect(handlerMocks.pages.handlePagesDashboard).toHaveBeenCalledTimes(1);
     expect(handlerMocks.events.handleEventsSummary).toHaveBeenCalledTimes(1);
+    expect(handlerMocks.events.handleEventTypeFields).toHaveBeenCalledTimes(1);
     expect(handlerMocks.journeys.handleSessions).toHaveBeenCalledTimes(1);
     expect(handlerMocks.performance.handlePerformance).toHaveBeenCalledTimes(1);
     expect(handlerMocks.technology.handleBrowserRadar).toHaveBeenCalledTimes(1);
+  });
+
+  it("only enables partial event detail shapes for dashboard requests", async () => {
+    const detailUrl = new URL(
+      "https://edge.test/api/private/event-type-detail?includeContext=false&includeBreakdowns=false&includeFields=false",
+    );
+
+    await routeQuery(env, siteId, "event-type-detail", detailUrl, {
+      publicMode: false,
+    });
+    await routeQuery(env, siteId, "event-type-detail", detailUrl, {
+      publicMode: false,
+      dashboardMode: true,
+    });
+
+    expect(handlerMocks.events.handleEventTypeDetail).toHaveBeenNthCalledWith(
+      1,
+      env,
+      siteId,
+      detailUrl,
+      undefined,
+      undefined,
+    );
+    expect(handlerMocks.events.handleEventTypeDetail).toHaveBeenNthCalledWith(
+      2,
+      env,
+      siteId,
+      detailUrl,
+      undefined,
+      {
+        includeContext: false,
+        includeBreakdowns: false,
+        includeFields: false,
+      },
+    );
   });
 
   it("passes dimension expressions and fixed tab keys to shared handlers", async () => {

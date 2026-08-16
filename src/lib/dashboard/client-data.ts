@@ -22,6 +22,7 @@ export {
   fetchEventsTrend,
   fetchEventTypeContextCards,
   fetchEventTypeDetail,
+  fetchEventTypeFields,
   fetchEventTypeFieldValues,
   fetchFunnelDetail,
   fetchFunnels,

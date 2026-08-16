@@ -186,6 +186,11 @@ export async function handleEventTypeDetail(
   siteId: string,
   url: URL,
   ctx?: ResponseContext,
+  options?: {
+    includeContext?: boolean;
+    includeBreakdowns?: boolean;
+    includeFields?: boolean;
+  },
 ): Promise<Response> {
   const eventName = parseEventName(url);
   if (!eventName) return badRequest("eventName is required");
@@ -194,9 +199,9 @@ export async function handleEventTypeDetail(
   const filters = parseFilters(url);
   const interval = parseInterval(url);
   const logger = currentInvocationLogger();
-  const includeContext = url.searchParams.get("includeContext") !== "false";
-  const includeBreakdowns =
-    url.searchParams.get("includeBreakdowns") !== "false";
+  const includeContext = options?.includeContext ?? true;
+  const includeBreakdowns = options?.includeBreakdowns ?? true;
+  const includeFields = options?.includeFields ?? true;
   const measure = <T>(operation: string, action: () => Promise<T>) =>
     logger
       ? logger.measure(operation, () => runWithD1Operation(operation, action))
@@ -217,9 +222,11 @@ export async function handleEventTypeDetail(
         eventName,
       ),
     ),
-    measure("event_type_detail.fields", () =>
-      queryEventFieldsFromD1(env, siteId, window, filters, eventName, 100),
-    ),
+    includeFields
+      ? measure("event_type_detail.fields", () =>
+          queryEventFieldsFromD1(env, siteId, window, filters, eventName, 100),
+        )
+      : Promise.resolve([]),
     includeContext
       ? measure("event_type_detail.context_cards", () =>
           queryEventAnalyticsContextCardsFromD1(
@@ -245,6 +252,39 @@ export async function handleEventTypeDetail(
       browsers: mapTabs(overview.breakdowns.browsers),
     },
     cards: mapEventAnalyticsContextCards(cards),
+    fields: fields.map(mapEventField),
+  });
+}
+
+export async function handleEventTypeFields(
+  env: Env,
+  siteId: string,
+  url: URL,
+  ctx?: ResponseContext,
+): Promise<Response> {
+  const eventName = parseEventName(url);
+  if (!eventName) return badRequest("eventName is required");
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilters(url);
+  const logger = currentInvocationLogger();
+  const fields = logger
+    ? await logger.measure("event_type_fields", () =>
+        runWithD1Operation("event_type_fields", () =>
+          queryEventFieldsFromD1(env, siteId, window, filters, eventName, 100),
+        ),
+      )
+    : await queryEventFieldsFromD1(
+        env,
+        siteId,
+        window,
+        filters,
+        eventName,
+        100,
+      );
+  return jsonResponseWith(ctx!, {
+    ok: true,
+    eventName,
     fields: fields.map(mapEventField),
   });
 }
