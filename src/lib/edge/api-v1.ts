@@ -1096,7 +1096,7 @@ async function queryPerformanceBreakdownData(
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-scoped AS (
+scoped AS MATERIALIZED (
   SELECT
     ${definition.labelExpr} AS dimensionValue,
     ${PERFORMANCE_METRIC_COLUMNS[metric]} AS metricValue

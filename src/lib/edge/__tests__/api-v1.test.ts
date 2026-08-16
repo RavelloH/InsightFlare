@@ -79,7 +79,9 @@ interface Match {
 }
 
 function createEnv(matches: Match[]) {
+  const preparedSql: string[] = [];
   return {
+    preparedSql,
     MAIN_SECRET: "api-secret",
     INGEST_DO: {
       idFromName: vi.fn(() => "stub-id"),
@@ -94,6 +96,7 @@ function createEnv(matches: Match[]) {
     },
     DB: {
       prepare(sql: string) {
+        preparedSql.push(sql);
         const statement: MockStatement = {
           sql,
           bindings: [],
@@ -2315,7 +2318,7 @@ describe("api v1 gateway", () => {
   });
 
   it("returns performance breakdowns by documented dimension", async () => {
-    const { response } = await authed(
+    const { response, env } = await authed(
       "/api/v1/sites/site-1/performance/breakdowns/page.path?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z&metric=lcp",
       [
         siteMatch("site-1", "Blog"),
@@ -2346,6 +2349,9 @@ describe("api v1 gateway", () => {
         },
       ],
     });
+    expect(
+      env.preparedSql.some((sql) => sql.includes("scoped AS MATERIALIZED")),
+    ).toBe(true);
   });
 
   it("rejects non-GET on performance endpoint", async () => {
