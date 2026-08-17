@@ -97,7 +97,7 @@
   },
   "devDependencies": {
     "@babel/plugin-transform-runtime": "7.29.7",
-    "@cloudflare/vite-plugin": "1.44.0",
+    "@cloudflare/vite-plugin": "^1.52.1",
     "@cloudflare/workers-types": "5.20260708.1",
     "@eslint/js": "~9.39.4",
     "@playwright/test": "1.61.1",
@@ -128,7 +128,7 @@
     "typescript-eslint": "^8.59.4",
     "vite": "8.1.4",
     "vitest": "^4.1.7",
-    "wrangler": "4.110.0",
+    "wrangler": "^4.123.0",
     "yaml": "^2.9.0"
   },
   "cloudflare": {
