@@ -32,7 +32,10 @@ import {
   queryShareTrendFromD1,
   queryUtmDimensionTrendFromD1,
 } from "@/lib/edge/query/technology/share-trend";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
+
+import { filterFixture } from "./filter-fixtures";
 
 type D1Row = Record<string, unknown>;
 
@@ -131,7 +134,7 @@ describe("edge technology query coverage", () => {
         env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         Number.NaN,
         2,
       ),
@@ -189,7 +192,14 @@ describe("edge technology query coverage", () => {
     ]);
 
     await expect(
-      queryBrowserVersionBreakdownFromD1(env, siteId, window, {}, 2.9, 2),
+      queryBrowserVersionBreakdownFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2.9,
+        2,
+      ),
     ).resolves.toEqual([
       {
         browser: "Chrome",
@@ -250,7 +260,14 @@ describe("edge technology query coverage", () => {
     ]);
 
     await expect(
-      queryBrowserVersionBreakdownFromD1(env, siteId, window, {}, 1, 99),
+      queryBrowserVersionBreakdownFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        1,
+        99,
+      ),
     ).resolves.toEqual([
       {
         browser: "Chrome",
@@ -347,7 +364,7 @@ describe("edge technology query coverage", () => {
       env,
       siteId,
       window,
-      {},
+      EMPTY_FILTER_DOCUMENT,
       99,
       0,
       "TRIM(COALESCE(os, ''))",
@@ -521,7 +538,7 @@ describe("edge technology query coverage", () => {
         noBrowsers.env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         3,
         3,
         "TRIM(COALESCE(os, ''))",
@@ -533,7 +550,7 @@ describe("edge technology query coverage", () => {
         noDimensions.env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         3,
         3,
         "TRIM(COALESCE(os, ''))",
@@ -575,7 +592,7 @@ describe("edge technology query coverage", () => {
       env,
       siteId,
       window,
-      {},
+      EMPTY_FILTER_DOCUMENT,
       1,
       2,
       3,
@@ -657,7 +674,7 @@ describe("edge technology query coverage", () => {
       env,
       siteId,
       window,
-      {},
+      EMPTY_FILTER_DOCUMENT,
       3,
       2,
       clientDimensionDefinition("browser"),
@@ -738,7 +755,7 @@ describe("edge technology query coverage", () => {
         noPrimary.env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         3,
         3,
         clientDimensionDefinition("browser"),
@@ -750,7 +767,7 @@ describe("edge technology query coverage", () => {
         noSecondary.env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         3,
         3,
         clientDimensionDefinition("browser"),
@@ -806,7 +823,7 @@ describe("edge technology query coverage", () => {
         env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         2,
         1,
         clientDimensionDefinition("deviceType"),
@@ -855,7 +872,7 @@ describe("edge technology query coverage", () => {
       siteId,
       window,
       "hour",
-      {},
+      EMPTY_FILTER_DOCUMENT,
       3,
       "TRIM(COALESCE(browser, ''))",
       "browser",
@@ -911,7 +928,7 @@ describe("edge technology query coverage", () => {
       siteId,
       window,
       "hour",
-      {},
+      EMPTY_FILTER_DOCUMENT,
       99,
       "TRIM(COALESCE(browser, ''))",
       "browser",
@@ -957,7 +974,7 @@ describe("edge technology query coverage", () => {
         siteId,
         window,
         "hour",
-        {},
+        EMPTY_FILTER_DOCUMENT,
         3,
         "TRIM(COALESCE(browser, ''))",
         "browser",
@@ -996,7 +1013,7 @@ describe("edge technology query coverage", () => {
         siteId,
         window,
         "hour",
-        {},
+        EMPTY_FILTER_DOCUMENT,
         0,
         "TRIM(COALESCE(browser, ''))",
         "browser",
@@ -1033,7 +1050,7 @@ describe("edge technology query coverage", () => {
         siteId,
         window,
         "hour",
-        {},
+        EMPTY_FILTER_DOCUMENT,
         3,
         "TRIM(COALESCE(browser, ''))",
         "browser",
@@ -1049,7 +1066,14 @@ describe("edge technology query coverage", () => {
     const referrerEnv = createD1Env([[], []]);
 
     await expect(
-      queryBrowserTrendFromD1(browserEnv.env, siteId, window, "hour", {}, 3),
+      queryBrowserTrendFromD1(
+        browserEnv.env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        3,
+      ),
     ).resolves.toEqual({ series: [], data: [] });
     await expect(
       queryBrowserEngineTrendFromD1(
@@ -1057,7 +1081,7 @@ describe("edge technology query coverage", () => {
         siteId,
         window,
         "hour",
-        {},
+        EMPTY_FILTER_DOCUMENT,
         3,
       ),
     ).resolves.toEqual({ series: [], data: [] });
@@ -1067,7 +1091,7 @@ describe("edge technology query coverage", () => {
         siteId,
         window,
         "hour",
-        {},
+        EMPTY_FILTER_DOCUMENT,
         "deviceType",
         3,
       ),
@@ -1078,13 +1102,20 @@ describe("edge technology query coverage", () => {
         siteId,
         window,
         "hour",
-        {},
+        EMPTY_FILTER_DOCUMENT,
         "source",
         3,
       ),
     ).resolves.toEqual({ series: [], data: [] });
     await expect(
-      queryReferrerTrendFromD1(referrerEnv.env, siteId, window, "hour", {}, 3),
+      queryReferrerTrendFromD1(
+        referrerEnv.env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        3,
+      ),
     ).resolves.toEqual({ series: [], data: [] });
 
     expect(browserEnv.calls[0].sql).toContain("TRIM(COALESCE(browser, ''))");
@@ -1114,7 +1145,14 @@ describe("edge technology query coverage", () => {
     ]);
 
     await expect(
-      queryBrowserVersionBreakdownFromD1(env, siteId, window, {}, 3, 2),
+      queryBrowserVersionBreakdownFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        3,
+        2,
+      ),
     ).resolves.toEqual([
       {
         browser: "Chrome",
@@ -1172,7 +1210,7 @@ describe("edge technology query coverage", () => {
         env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         3,
         3,
         "TRIM(COALESCE(os, ''))",
@@ -1254,7 +1292,7 @@ describe("edge technology query coverage", () => {
         env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         3,
         3,
         clientDimensionDefinition("browser"),
@@ -1323,7 +1361,7 @@ describe("edge technology query coverage", () => {
         siteId,
         window,
         "hour",
-        {},
+        EMPTY_FILTER_DOCUMENT,
         3,
         "TRIM(COALESCE(browser, ''))",
         "browser",
@@ -1369,9 +1407,14 @@ describe("edge technology query coverage", () => {
     ]);
 
     await expect(
-      queryBrowserRadarFromD1(browserEnv.env, siteId, window, {
-        browser: "Chrome",
-      }),
+      queryBrowserRadarFromD1(
+        browserEnv.env,
+        siteId,
+        window,
+        filterFixture({
+          browser: "Chrome",
+        }),
+      ),
     ).resolves.toEqual([
       {
         browser: "Chrome",
@@ -1386,7 +1429,13 @@ describe("edge technology query coverage", () => {
       },
     ]);
     await expect(
-      queryReferrerRadarFromD1(referrerEnv.env, siteId, window, {}, 5),
+      queryReferrerRadarFromD1(
+        referrerEnv.env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        5,
+      ),
     ).resolves.toEqual([
       {
         referrer: "",

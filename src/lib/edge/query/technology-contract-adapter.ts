@@ -1,4 +1,8 @@
 import {
+  type FilterDocument,
+  parseFilterUrlForAudience,
+} from "@/lib/edge/query-contract";
+import {
   executeQueryOperation,
   type QueryContext,
   siteQueryContext,
@@ -29,7 +33,6 @@ import {
 import {
   badRequest,
   jsonResponseWith,
-  parseFilters,
   parseInterval,
   parseLimit,
   parseQueryLimit,
@@ -37,7 +40,7 @@ import {
   resolveCrossBreakdownDimension,
   type ResponseContext,
 } from "./core";
-import { legacyFilters, toQueryTime } from "./overview-contract-adapter";
+import { toQueryTime } from "./overview-contract-adapter";
 
 async function executeTechnology<T>(
   operation: "share-trend" | "radar" | "cross-dimension",
@@ -50,19 +53,19 @@ async function executeTechnology<T>(
     window: ReturnType<typeof parseWindow> extends infer W
       ? Exclude<W, null>
       : never,
-    filters: ReturnType<typeof parseFilters>,
+    filters: FilterDocument,
   ) => Promise<T>,
   shape: (value: T) => Record<string, unknown>,
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     operation,
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => ({ value: shape(await reader(window, filters)) }),
   );

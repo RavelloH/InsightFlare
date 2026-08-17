@@ -1,3 +1,4 @@
+import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
   executeQueryOperation,
   siteQueryContext,
@@ -7,7 +8,6 @@ import type { Env } from "@/lib/edge/types";
 import {
   badRequest,
   jsonResponseWith,
-  parseFilters,
   parseInterval,
   parseLimit,
   parseWindow,
@@ -18,7 +18,7 @@ import {
   queryRetentionFromD1,
   type RetentionResult,
 } from "./journey-retention";
-import { legacyFilters, toQueryTime } from "./overview-contract-adapter";
+import { toQueryTime } from "./overview-contract-adapter";
 import { queryPerformanceDashboardFromD1 } from "./performance";
 
 export async function handleRetentionContract(
@@ -35,14 +35,14 @@ export async function handleRetentionContract(
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(parseFilters(url)),
+      filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
     },
     async () => ({
       value: await queryRetentionFromD1(
         env,
         siteId,
         window,
-        parseFilters(url),
+        parseFilterUrlForAudience(queryContext.policy.audience, url),
         parseRetentionGranularity(
           url.searchParams.get("granularity") ??
             url.searchParams.get("interval"),
@@ -69,7 +69,7 @@ export async function handlePerformanceContract(
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(parseFilters(url)),
+      filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
     },
     async () => ({
       value: await queryPerformanceDashboardFromD1(
@@ -77,7 +77,7 @@ export async function handlePerformanceContract(
         siteId,
         window,
         interval,
-        parseFilters(url),
+        parseFilterUrlForAudience(queryContext.policy.audience, url),
         parseLimit(url, 18, 50),
       ),
     }),

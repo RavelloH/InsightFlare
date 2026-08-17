@@ -1,5 +1,7 @@
 import type { ZonedInterval } from "@/lib/dashboard/time-zone";
 
+import type { FilterDocument } from "./filters";
+
 /** Branded primitives keep protocol strings and unvalidated numbers out of the domain layer. */
 export type Brand<T, Name extends string> = T & {
   readonly __brand: Name;
@@ -35,17 +37,6 @@ export interface CalendarBucketPlan {
   readonly buckets: readonly CalendarBucket[];
   readonly hourAligned: boolean;
   readonly truncated: boolean;
-}
-
-export interface QueryFilterClause {
-  readonly kind: string;
-  readonly [key: string]: unknown;
-}
-
-/** Filter semantics are deliberately versioned and opaque until the filter redesign. */
-export interface QueryFilterSet {
-  readonly version: number;
-  readonly clauses: readonly QueryFilterClause[];
 }
 
 export type QueryAudience = "private-dashboard" | "public-share" | "api-v1";
@@ -210,7 +201,7 @@ export type CanonicalObject = Readonly<Record<string, unknown>>;
 export interface BaseQuery {
   readonly context: QueryContext;
   readonly time: QueryTime;
-  readonly filters?: QueryFilterSet;
+  readonly filters?: FilterDocument;
 }
 
 export interface DimensionQuery extends BaseQuery {

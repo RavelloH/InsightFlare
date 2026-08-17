@@ -11,6 +11,7 @@ import {
   queryEventsTrendFromD1,
   queryEventTypeTrendFromD1,
 } from "@/lib/edge/query/events-trend";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
 const queryD1AllMock = vi.hoisted(() => vi.fn());
@@ -62,7 +63,7 @@ describe("edge query events trend defensive branches", () => {
       siteId,
       window,
       "hour",
-      {},
+      EMPTY_FILTER_DOCUMENT,
       1,
     );
 
@@ -106,7 +107,7 @@ describe("edge query events trend defensive branches", () => {
       siteId,
       window,
       "hour",
-      {},
+      EMPTY_FILTER_DOCUMENT,
       "signup",
     );
 

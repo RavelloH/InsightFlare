@@ -239,7 +239,7 @@ describe("funnel query handler", () => {
       return [];
     });
     const { request, url } = makeRequest(
-      "/api/private/funnel?id=funnel-1&from=1&to=1000&device=desktop",
+      "/api/private/funnel?id=funnel-1&from=1&to=1000&filter[client.deviceType]=desktop",
     );
 
     const response = await handleFunnel(env, "site-1", url, undefined, request);

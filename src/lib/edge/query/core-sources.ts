@@ -5,7 +5,7 @@ import {
 import type { Env } from "@/lib/edge/types";
 
 import { buildEventFilterSql } from "./core-filters";
-import type { DashboardFilters, QueryWindow } from "./core-types";
+import type { FilterDocument, QueryWindow } from "./core-types";
 import { type D1ReadDiagnostics, recordD1RowsRead } from "./diagnostics";
 
 export const VISIT_SOURCE_COLUMNS = `
@@ -189,7 +189,7 @@ ${eventNameJoin}
 export function buildEventFilteredSourceCte(
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   eventName?: string,
   options?: { materialize?: boolean },
 ): {

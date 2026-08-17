@@ -18,9 +18,6 @@ import {
   utmDimensionDefinition,
 } from "@/lib/edge/query/core-dimensions";
 import {
-  normalizeEventPayloadFilterPath,
-  normalizeEventPayloadFilterValue,
-  parseEventPayloadFilters,
   parseLimit,
   parseQueryLimit,
   parseSessionListSort,
@@ -172,30 +169,6 @@ describe("edge query core dimension and parser edge coverage", () => {
     expect(
       parseSessionListSort(url("/x", { sortBy: "durationMs", sortDir: "asc" })),
     ).toEqual({ key: "durationMs", direction: "asc" });
-  });
-
-  it("normalizes event payload filter paths, values, and JSON arrays", () => {
-    expect(normalizeEventPayloadFilterPath("$.cart.items[0].sku")).toBe(
-      "/cart/items/*/sku",
-    );
-    expect(normalizeEventPayloadFilterPath(" / plan / tier ")).toBe(
-      "/plan/tier",
-    );
-    expect(normalizeEventPayloadFilterPath("/")).toBeNull();
-    expect(normalizeEventPayloadFilterValue("x".repeat(300))).toHaveLength(240);
-    expect(normalizeEventPayloadFilterValue(Number.NaN)).toBeUndefined();
-    expect(
-      parseEventPayloadFilters(
-        JSON.stringify([
-          { path: "$.plan", operator: "!=", value: "pro" },
-          { path: "/", value: "skip" },
-          { path: "$.active", value: true },
-        ]),
-      ),
-    ).toEqual([
-      { path: "/plan", operator: "ne", value: "pro" },
-      { path: "/active", operator: "eq", value: true },
-    ]);
   });
 });
 
@@ -725,7 +698,7 @@ describe("edge journey retention coverage", () => {
         from: window.startMs,
         to: window.endExclusiveMs,
         granularity: "bad",
-        country: "US",
+        "filter[geo.country]": "US",
       }),
     );
 

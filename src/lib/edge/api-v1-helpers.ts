@@ -70,24 +70,6 @@ export const ANALYTICS_DIMENSIONS = [
 export type AnalyticsMetric = (typeof ANALYTICS_METRICS)[number];
 export type AnalyticsDimension = (typeof ANALYTICS_DIMENSIONS)[number];
 
-export const FILTER_OPERATORS = [
-  "eq",
-  "neq",
-  "in",
-  "notIn",
-  "contains",
-  "startsWith",
-  "endsWith",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "exists",
-  "notExists",
-] as const;
-
-export type FilterOperator = (typeof FILTER_OPERATORS)[number];
-
 export interface ApiMeta {
   requestId?: string;
   generatedAt: string;
@@ -117,18 +99,10 @@ export interface CursorPagination {
   cursor: string | null;
 }
 
-export interface ComplexFilter {
-  field: string;
-  op: FilterOperator;
-  value?: unknown;
-}
-
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-const FILTER_PARAM_RE = /^filter\[(.+)]$/;
 const METRIC_SET = new Set<string>(ANALYTICS_METRICS);
 const DIMENSION_SET = new Set<string>(ANALYTICS_DIMENSIONS);
 const PRESET_SET = new Set<string>(TIME_PRESETS);
-const OPERATOR_SET = new Set<string>(FILTER_OPERATORS);
 
 export function generatedAt(): string {
   return new Date().toISOString();
@@ -477,58 +451,6 @@ export function validateCrossBreakdownDimension(
     );
   }
   return base;
-}
-
-export function parseFilter(url: URL): Record<string, string> | Response {
-  const filters: Record<string, string> = {};
-  for (const [key, value] of url.searchParams.entries()) {
-    const match = key.match(FILTER_PARAM_RE);
-    if (!match) continue;
-    const field = match[1] || "";
-    if (!DIMENSION_SET.has(field)) {
-      return jsonError("validation_failed", "Unknown filter field", 400, {
-        field,
-      });
-    }
-    filters[field] = value.slice(0, 500);
-  }
-  return filters;
-}
-
-export function parseComplexFilters(
-  input: unknown,
-): ComplexFilter[] | Response {
-  if (input === undefined) return [];
-  if (!Array.isArray(input)) {
-    return jsonError("validation_failed", "filters must be an array", 400, {
-      field: "filters",
-    });
-  }
-  const filters: ComplexFilter[] = [];
-  for (const item of input) {
-    if (!item || typeof item !== "object") {
-      return jsonError("validation_failed", "Invalid filter", 400);
-    }
-    const candidate = item as Record<string, unknown>;
-    const field = String(candidate.field || "");
-    const op = String(candidate.op || "eq");
-    if (!DIMENSION_SET.has(field)) {
-      return jsonError("validation_failed", "Unknown filter field", 400, {
-        field,
-      });
-    }
-    if (!OPERATOR_SET.has(op)) {
-      return jsonError("validation_failed", "Invalid filter operator", 400, {
-        op,
-      });
-    }
-    filters.push({
-      field,
-      op: op as FilterOperator,
-      ...(candidate.value !== undefined ? { value: candidate.value } : {}),
-    });
-  }
-  return filters;
 }
 
 export function parseSort(raw: string | null): ParsedSort | null {

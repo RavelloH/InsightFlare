@@ -35,7 +35,10 @@ import {
   queryEventsTrendFromD1,
   queryEventTypeTrendFromD1,
 } from "@/lib/edge/query/events-trend";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
+
+import { filterFixture } from "./filter-fixtures";
 
 const queryD1AllMock = vi.hoisted(() => vi.fn());
 
@@ -67,7 +70,12 @@ describe("edge query events summary coverage", () => {
     queryD1AllMock.mockResolvedValueOnce([]);
 
     await expect(
-      queryEventSummaryMetricsFromD1(env, siteId, window, {}),
+      queryEventSummaryMetricsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+      ),
     ).resolves.toEqual({
       events: 0,
       eventTypes: 0,
@@ -118,7 +126,7 @@ describe("edge query events summary coverage", () => {
     ]);
 
     await expect(
-      queryEventsSummaryFromD1(env, siteId, window, {}),
+      queryEventsSummaryFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT),
     ).resolves.toEqual({
       summary: { events: 8, eventTypes: 2, sessions: 4, visitors: 3 },
       cards: {
@@ -196,7 +204,7 @@ describe("edge query events summary coverage", () => {
       env,
       siteId,
       window,
-      {},
+      EMPTY_FILTER_DOCUMENT,
       10,
       "Signup",
     );
@@ -224,7 +232,7 @@ describe("edge query events summary coverage", () => {
     queryD1AllMock.mockResolvedValueOnce([]);
 
     await expect(
-      queryEventsSummaryFromD1(env, siteId, window, {}),
+      queryEventsSummaryFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT),
     ).resolves.toMatchObject({
       summary: { events: 0, eventTypes: 0, sessions: 0, visitors: 0 },
       cards: { event: { name: [] } },
@@ -320,10 +328,10 @@ describe("edge query events summary coverage", () => {
         env,
         siteId,
         window,
-        {
+        filterFixture({
           sourceDomain: "Ref.Example",
           clientDeviceType: "mobile",
-        },
+        }),
         3,
       ),
     ).resolves.toEqual([
@@ -335,7 +343,7 @@ describe("edge query events summary coverage", () => {
     expect(sql).toContain("LEFT JOIN visit_source vs");
     expect(sql).toContain("FROM event_rollup");
     expect(sql).toContain("LOWER(TRIM(COALESCE(vc.referrer_host, ''))) = ?");
-    expect(sql).toContain("TRIM(COALESCE(vc.device_type, '')) = ?");
+    expect(sql).toContain("LOWER(TRIM(COALESCE(vc.device_type, ''))) = ?");
     expect(bindings).toEqual([
       siteId,
       window.startMs,
@@ -343,8 +351,8 @@ describe("edge query events summary coverage", () => {
       siteId,
       window.startMs,
       window.endExclusiveMs,
-      "ref.example",
       "mobile",
+      "ref.example",
       3,
     ]);
   });
@@ -360,7 +368,7 @@ describe("edge query events summary coverage", () => {
     ]);
 
     await expect(
-      queryEventTypeAggregate(env, siteId, window, {}, 1),
+      queryEventTypeAggregate(env, siteId, window, EMPTY_FILTER_DOCUMENT, 1),
     ).resolves.toEqual([{ value: "", views: 0, sessions: 0, visitors: 0 }]);
   });
 
@@ -406,7 +414,13 @@ describe("edge query events summary coverage", () => {
     ]);
 
     await expect(
-      queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
+      queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "signup",
+      ),
     ).resolves.toEqual({
       summary: {
         events: 0,
@@ -429,7 +443,13 @@ describe("edge query events summary coverage", () => {
     queryD1AllMock.mockResolvedValueOnce([]);
 
     await expect(
-      queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
+      queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "signup",
+      ),
     ).resolves.toEqual({
       summary: {
         events: 0,
@@ -482,7 +502,7 @@ describe("edge query events trend coverage", () => {
       siteId,
       window,
       "hour",
-      { browser: "Chrome" },
+      filterFixture({ browser: "Chrome" }),
       2,
     );
 
@@ -548,7 +568,7 @@ describe("edge query events trend coverage", () => {
       siteId,
       window,
       "hour",
-      {},
+      EMPTY_FILTER_DOCUMENT,
       0,
     );
 
@@ -580,7 +600,7 @@ describe("edge query events trend coverage", () => {
       siteId,
       window,
       "hour",
-      {},
+      EMPTY_FILTER_DOCUMENT,
       "signup",
     );
 

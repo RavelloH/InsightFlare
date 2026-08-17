@@ -1,10 +1,11 @@
+import { type FilterDocument } from "./filters";
+import { EMPTY_FILTER_DOCUMENT } from "./helpers";
 import { assertDetailAllowed, assertOperationAllowed } from "./policy";
 import type {
   AnalyticsResult,
   PageItem,
   PagesQuery,
   PagesResult,
-  QueryFilterSet,
   QuerySource,
   QueryTime,
   ReferrerItem,
@@ -15,7 +16,7 @@ import type {
 export interface PagesReaderInput {
   readonly context: PagesQuery["context"];
   readonly time: QueryTime;
-  readonly filters: QueryFilterSet;
+  readonly filters: FilterDocument;
   readonly limit: number;
   readonly includeDetails: boolean;
 }
@@ -23,7 +24,7 @@ export interface PagesReaderInput {
 export interface ReferrersReaderInput {
   readonly context: ReferrersQuery["context"];
   readonly time: QueryTime;
-  readonly filters: QueryFilterSet;
+  readonly filters: FilterDocument;
   readonly limit: number;
   readonly includeFullUrl: boolean;
 }
@@ -54,7 +55,7 @@ export async function executePages(
   const result = await reader.readPages({
     context: input.context,
     time: input.time,
-    filters: input.filters ?? { version: 1, clauses: [] },
+    filters: input.filters ?? EMPTY_FILTER_DOCUMENT,
     limit: input.limit,
     includeDetails: input.includeDetails,
   });
@@ -82,7 +83,7 @@ export async function executeReferrers(
   const result = await reader.readReferrers({
     context: input.context,
     time: input.time,
-    filters: input.filters ?? { version: 1, clauses: [] },
+    filters: input.filters ?? EMPTY_FILTER_DOCUMENT,
     limit: input.limit,
     includeFullUrl: input.includeFullUrl,
   });

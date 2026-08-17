@@ -1,4 +1,5 @@
 import { resolveReportingTimeZone } from "@/lib/dashboard/time-zone";
+import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
   executeQueryOperation,
   siteQueryContext,
@@ -9,7 +10,6 @@ import {
   badRequest,
   jsonResponseWith,
   mapVisitors,
-  parseFilters,
   parseLimit,
   parseListSearch,
   parseQueryLimit,
@@ -32,7 +32,7 @@ import {
   queryVisitorAggregate,
   queryVisitorDetailFromD1,
 } from "./journeys";
-import { legacyFilters, toQueryTime } from "./overview-contract-adapter";
+import { toQueryTime } from "./overview-contract-adapter";
 
 export async function handleVisitorsContract(
   env: Env,
@@ -52,13 +52,13 @@ export async function handleVisitorsContract(
   const rawCursor = url.searchParams.get("cursor");
   const cursor = rawCursor ? parseVisitorListCursor(rawCursor, sort) : null;
   if (rawCursor && !cursor) return badRequest("Invalid cursor");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "visitors",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => {
       const page = paged
@@ -118,13 +118,13 @@ export async function handleSessionsContract(
   const rawCursor = url.searchParams.get("cursor");
   const cursor = rawCursor ? parseSessionListCursor(rawCursor, sort) : null;
   if (rawCursor && !cursor) return badRequest("Invalid cursor");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "sessions",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => {
       const page = paged
@@ -185,7 +185,7 @@ export async function handleVisitorDetailContract(
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters({}),
+      filters: { version: 1, root: null },
     },
     async () => ({
       value: await queryVisitorDetailFromD1(
@@ -216,7 +216,7 @@ export async function handleSessionDetailContract(
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters({}),
+      filters: { version: 1, root: null },
     },
     async () => ({
       value: await querySessionDetailFromD1(env, siteId, sessionId),

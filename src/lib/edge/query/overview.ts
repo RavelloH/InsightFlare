@@ -1,5 +1,5 @@
 import {
-  hasDashboardFilters,
+  hasFilterDocument,
   queryOverviewForSitesFromHourlyRollups,
   queryTrendForSitesFromHourlyRollups,
 } from "@/lib/edge/hourly-rollup";
@@ -7,7 +7,7 @@ import type { Env } from "@/lib/edge/types";
 
 import type {
   ClientDimensionKey,
-  DashboardFilters,
+  FilterDocument,
   Interval,
   OverviewAggregateRow,
   PreferredSourceResult,
@@ -33,7 +33,7 @@ export async function queryOverviewFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<OverviewAggregateRow> {
   const filter = buildVisitFilterSql(filters);
@@ -84,7 +84,7 @@ export async function queryTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<TrendAggregateRow[]> {
   const filter = buildVisitFilterSql(filters);
@@ -171,10 +171,10 @@ export async function queryOverviewAggregate(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<PreferredSourceResult<OverviewAggregateRow>> {
-  if (!hasDashboardFilters(filters)) {
+  if (!hasFilterDocument(filters)) {
     const rollup = await queryOverviewForSitesFromHourlyRollups(
       env,
       [siteId],
@@ -204,10 +204,10 @@ export async function queryTrendAggregate(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<PreferredSourceResult<TrendAggregateRow[]>> {
-  if (!hasDashboardFilters(filters)) {
+  if (!hasFilterDocument(filters)) {
     const rollup = await queryTrendForSitesFromHourlyRollups(
       env,
       [siteId],
@@ -243,7 +243,7 @@ export async function buildOverviewClientDimensionTabs(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ) {
   return queryOverviewClientDimensionsFromD1(
@@ -259,7 +259,7 @@ export async function buildOverviewGeoDimensionTabs(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ) {
   return queryOverviewGeoDimensionsFromD1(env, siteId, window, filters, limit);

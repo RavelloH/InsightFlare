@@ -14,7 +14,6 @@ import {
   buildVisitFilterSql,
   buildVisitSourceCte,
   buildVisitSourceCteForSites,
-  parseFilters,
   parseInterval,
   PERFORMANCE_METRIC_COLUMNS,
   type PerformanceMetricKey,
@@ -47,9 +46,7 @@ import {
   type AnalyticsMetric,
   API_V1_VERSION,
   BATCH_MAX_REQUESTS,
-  type ComplexFilter,
   epochSecondsToIso,
-  FILTER_OPERATORS,
   INTERVALS,
   jsonError,
   jsonList,
@@ -57,10 +54,8 @@ import {
   jsonSuccess,
   methodNotAllowed,
   normalizeUnknownDirect,
-  parseComplexFilters,
   parseCursorPagination,
   type ParsedTimeRange,
-  parseFilter,
   parseMetrics,
   parseSort,
   parseTimeRange,
@@ -96,6 +91,12 @@ import {
   queryApiV1VisitorDetail,
   queryApiV1Visitors,
 } from "./api-v1-query-adapter";
+import {
+  FILTER_OPERATOR_IDS,
+  type FilterDocument,
+  parseApiV1FilterDocument,
+  parseApiV1FilterUrl,
+} from "./query-contract";
 import {
   readSiteScriptSettings,
   upsertSiteScriptSettings,
@@ -169,28 +170,6 @@ const DIMENSION_TO_QUERY_NAME: Partial<Record<AnalyticsDimension, string>> = {
   "geo.timeZone": "overview-geo-timezone",
   "geo.organization": "overview-geo-organization",
   "event.name": "event-types",
-};
-
-const FILTER_TO_LEGACY_PARAM: Partial<Record<AnalyticsDimension, string>> = {
-  "geo.country": "geoCountry",
-  "geo.region": "geoRegion",
-  "geo.city": "geoCity",
-  "geo.continent": "geoContinent",
-  "geo.timeZone": "geoTimezone",
-  "geo.organization": "geoOrganization",
-  "client.browser": "clientBrowser",
-  "client.osVersion": "clientOsVersion",
-  "client.deviceType": "clientDeviceType",
-  "client.language": "clientLanguage",
-  "client.screenSize": "clientScreenSize",
-  "page.path": "path",
-  "page.title": "title",
-  "page.hostname": "hostname",
-  "session.entryPath": "entry",
-  "session.exitPath": "exit",
-  "referrer.domain": "sourceDomain",
-  "referrer.url": "sourceLink",
-  "event.name": "eventName",
 };
 
 function apiBase(url: URL): string {
@@ -483,13 +462,6 @@ function buildInternalUrl(url: URL, timeRange?: ParsedTimeRange): URL {
     next.searchParams.set("timeZone", timeRange.timeZone);
     next.searchParams.delete("preset");
   }
-  const filters = parseFilter(url);
-  if (!(filters instanceof Response)) {
-    for (const [field, value] of Object.entries(filters)) {
-      const legacy = FILTER_TO_LEGACY_PARAM[field as AnalyticsDimension];
-      if (legacy) next.searchParams.set(legacy, value);
-    }
-  }
   const sort = parseSort(url.searchParams.get("sort"));
   if (sort) {
     next.searchParams.set("sortBy", sort.field);
@@ -518,6 +490,25 @@ function apiV1QueryFailure(
   const status =
     error.kind === "internal" || error.kind === "data-unavailable" ? 500 : 400;
   return jsonError("invalid_request", error.kind, status, undefined, request);
+}
+
+function parseApiV1Filters(
+  input: URL | unknown,
+  request: Request,
+): FilterDocument | Response {
+  try {
+    return input instanceof URL
+      ? parseApiV1FilterUrl(input)
+      : parseApiV1FilterDocument(input);
+  } catch (error) {
+    return jsonError(
+      "validation_failed",
+      error instanceof Error ? error.message : "Invalid filters",
+      400,
+      undefined,
+      request,
+    );
+  }
 }
 
 function normalizeBreakdownRows(value: unknown, metrics: AnalyticsMetric[]) {
@@ -679,97 +670,15 @@ function urlWithBodyTimeRange(url: URL, record: Record<string, unknown>): URL {
   return next;
 }
 
-function complexFilterSql(
-  filters: ComplexFilter[],
-  request: Request,
-): { clause: string; bindings: Array<string | number> } | Response {
-  const clauses: string[] = [];
-  const bindings: Array<string | number> = [];
-  for (const filter of filters) {
-    const definition = resolveCrossBreakdownDimension(filter.field);
-    if (!definition) {
-      return jsonError(
-        "validation_failed",
-        "Unsupported filter field",
-        400,
-        { field: filter.field },
-        request,
-      );
-    }
-    const expr = definition.labelExpr;
-    const value = filter.value;
-    const bindScalar = (raw: unknown) => {
-      if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-      if (typeof raw === "boolean") return raw ? 1 : 0;
-      if (raw === null || raw === undefined) return "";
-      return String(raw);
-    };
-
-    if (filter.op === "exists") {
-      clauses.push(`TRIM(COALESCE(${expr}, '')) != ''`);
-      continue;
-    }
-    if (filter.op === "notExists") {
-      clauses.push(`TRIM(COALESCE(${expr}, '')) = ''`);
-      continue;
-    }
-    if (filter.op === "in" || filter.op === "notIn") {
-      const values = Array.isArray(value) ? value : [];
-      if (values.length === 0) {
-        clauses.push(filter.op === "in" ? "1 = 0" : "1 = 1");
-        continue;
-      }
-      clauses.push(
-        `${expr} ${filter.op === "in" ? "IN" : "NOT IN"} (${values
-          .map(() => "?")
-          .join(", ")})`,
-      );
-      bindings.push(...values.map(bindScalar));
-      continue;
-    }
-    if (filter.op === "contains") {
-      clauses.push(`${expr} LIKE ?`);
-      bindings.push(`%${bindScalar(value)}%`);
-      continue;
-    }
-    if (filter.op === "startsWith") {
-      clauses.push(`${expr} LIKE ?`);
-      bindings.push(`${bindScalar(value)}%`);
-      continue;
-    }
-    if (filter.op === "endsWith") {
-      clauses.push(`${expr} LIKE ?`);
-      bindings.push(`%${bindScalar(value)}`);
-      continue;
-    }
-    const operator =
-      filter.op === "neq"
-        ? "!="
-        : filter.op === "gt"
-          ? ">"
-          : filter.op === "gte"
-            ? ">="
-            : filter.op === "lt"
-              ? "<"
-              : filter.op === "lte"
-                ? "<="
-                : "=";
-    clauses.push(`${expr} ${operator} ?`);
-    bindings.push(bindScalar(value));
-  }
-  return { clause: clauses.join(" AND "), bindings };
-}
-
 async function queryAnalyticsAggregateRows(
   env: Env,
   siteIds: string[],
   window: QueryWindow,
-  url: URL,
+  filters: FilterDocument,
   request: Request,
   options: {
     dimensions: string[];
     metrics: AnalyticsMetric[];
-    complexFilters?: ComplexFilter[];
     limit: number;
     orderBy?: AnalyticsOrderBy[];
   },
@@ -785,10 +694,8 @@ async function queryAnalyticsAggregateRows(
     dimension,
     definition: resolveCrossBreakdownDimension(dimension)!,
   }));
-  const filters = buildVisitFilterSql(parseFilters(url));
-  const complex = complexFilterSql(options.complexFilters ?? [], request);
-  if (complex instanceof Response) return complex;
-  const whereClause = sqlWhereWithExtra(filters.clause, complex.clause);
+  const compiledFilters = buildVisitFilterSql(filters);
+  const whereClause = compiledFilters.clause;
   const sourceCte =
     siteIds.length === 1
       ? buildVisitSourceCte()
@@ -809,8 +716,7 @@ async function queryAnalyticsAggregateRows(
     : [];
   const bindingCount =
     sourceBindings.length +
-    filters.bindings.length +
-    complex.bindings.length +
+    compiledFilters.bindings.length +
     auxiliaryBindings.length +
     1;
   if (bindingCount > D1_MAX_BOUND_PARAMETERS) {
@@ -906,8 +812,7 @@ LIMIT ?
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...sourceBindings,
-    ...filters.bindings,
-    ...complex.bindings,
+    ...compiledFilters.bindings,
     ...auxiliaryBindings,
     options.limit,
   ]);
@@ -928,6 +833,7 @@ async function queryTeamAnalyticsBreakdown(
   siteIds: string[],
   window: QueryWindow,
   url: URL,
+  filters: FilterDocument,
   request: Request,
   dimension: AnalyticsDimension,
   metrics: AnalyticsMetric[],
@@ -938,7 +844,7 @@ async function queryTeamAnalyticsBreakdown(
     env,
     siteIds,
     window,
-    url,
+    filters,
     request,
     {
       dimensions: [dimension],
@@ -979,13 +885,13 @@ async function queryPerformanceSummaryData(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  url: URL,
+  filters: FilterDocument,
 ) {
   const summaries = await queryPerformanceSummariesFromD1(
     env,
     siteId,
     window,
-    parseFilters(url),
+    filters,
   );
   return {
     ttfb: performanceSummaryValue(summaries.ttfb),
@@ -1002,8 +908,8 @@ async function queryPerformanceTimeseriesData(
   siteId: string,
   window: QueryWindow,
   url: URL,
+  filters: FilterDocument,
 ) {
-  const filters = parseFilters(url);
   const interval = parseInterval(url);
   const buckets = buildTimeBuckets(window, interval);
   const series = await queryAllPerformanceTrendsFromD1(
@@ -1042,6 +948,7 @@ async function queryPerformanceBreakdownData(
   siteId: string,
   window: QueryWindow,
   url: URL,
+  filters: FilterDocument,
   request: Request,
   dimension: AnalyticsDimension,
 ): Promise<Array<Record<string, unknown>> | Response> {
@@ -1057,9 +964,9 @@ async function queryPerformanceBreakdownData(
       request,
     );
   }
-  const filters = buildVisitFilterSql(parseFilters(url));
+  const compiledFilters = buildVisitFilterSql(filters);
   const whereClause = sqlWhereWithExtra(
-    filters.clause,
+    compiledFilters.clause,
     `${PERFORMANCE_METRIC_COLUMNS[metric]} IS NOT NULL`,
   );
   const limit = parseExploreLimit(Number(url.searchParams.get("limit") ?? 100));
@@ -1109,7 +1016,7 @@ LIMIT ?
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
-    ...filters.bindings,
+    ...compiledFilters.bindings,
     limit,
   ]);
   return rows.map((row) => {
@@ -1364,6 +1271,8 @@ async function handleTeamAnalytics(
   const resource = path[2];
   const timeRange = parseTimeRange(url);
   if (timeRange instanceof Response) return timeRange;
+  const filters = parseApiV1Filters(url, request);
+  if (filters instanceof Response) return filters;
   if (resource === "breakdowns" && path[3]) {
     const dimension = validateDimension(path[3]);
     if (dimension instanceof Response) return dimension;
@@ -1382,6 +1291,7 @@ async function handleTeamAnalytics(
           sites.map((site) => site.id),
           toQueryWindow(timeRange),
           internalUrl,
+          filters,
           request,
           dimension,
           metrics,
@@ -1845,7 +1755,7 @@ function analyticsSchema(siteId: string) {
       description: `Analytics dimension: ${key}.`,
     })),
     filters: [...ANALYTICS_DIMENSIONS],
-    operators: [...FILTER_OPERATORS],
+    operators: [...FILTER_OPERATOR_IDS],
     intervals: [...INTERVALS],
     presets: [...TIME_PRESETS],
     timeRange: {
@@ -1878,7 +1788,7 @@ export async function handleAnalytics(
 
   const timeRange = parseTimeRange(url);
   if (timeRange instanceof Response) return timeRange;
-  const filters = parseFilter(url);
+  const filters = parseApiV1Filters(url, request);
   if (filters instanceof Response) return filters;
 
   if (resource === "overview") {
@@ -2022,8 +1932,11 @@ export async function handleAnalytics(
     if (dimensions instanceof Response) return dimensions;
     const invalidDimension = validateAnalyticsDimensions(dimensions, request);
     if (invalidDimension) return invalidDimension;
-    const complexFilters = parseComplexFilters(record.filters);
-    if (complexFilters instanceof Response) return complexFilters;
+    const filters = parseApiV1Filters(
+      record.filters ?? { version: 1, root: null },
+      request,
+    );
+    if (filters instanceof Response) return filters;
     const orderBy = parseExploreOrderBy(record.orderBy);
     if (orderBy instanceof Response) return orderBy;
     const limit = parseExploreLimit(record.limit);
@@ -2037,12 +1950,11 @@ export async function handleAnalytics(
           env,
           [siteId],
           toQueryWindow(exploreTimeRange),
-          buildInternalUrl(bodyUrl, exploreTimeRange),
+          filters,
           request,
           {
             dimensions,
             metrics,
-            complexFilters,
             limit,
             orderBy,
           },
@@ -2056,7 +1968,7 @@ export async function handleAnalytics(
         rows,
         metrics,
         dimensions,
-        filters: complexFilters,
+        filters,
       },
       { request, meta: { timeRange: exploreTimeRange } },
     );
@@ -2595,7 +2507,7 @@ export async function handlePerformance(
   if (request.method !== "GET") return methodNotAllowed(request);
   const timeRange = parseTimeRange(url);
   if (timeRange instanceof Response) return timeRange;
-  const filters = parseFilter(url);
+  const filters = parseApiV1Filters(url, request);
   if (filters instanceof Response) return filters;
   const window = toQueryWindow(timeRange);
   const internalUrl = buildInternalUrl(url, timeRange);
@@ -2605,7 +2517,7 @@ export async function handlePerformance(
       siteId,
       internalUrl,
       timeRange,
-      () => queryPerformanceSummaryData(env, siteId, window, internalUrl),
+      () => queryPerformanceSummaryData(env, siteId, window, filters),
     );
     if (!result.ok) return apiV1QueryFailure(result.error, request);
     const data = result.data;
@@ -2616,7 +2528,14 @@ export async function handlePerformance(
       siteId,
       internalUrl,
       timeRange,
-      () => queryPerformanceTimeseriesData(env, siteId, window, internalUrl),
+      () =>
+        queryPerformanceTimeseriesData(
+          env,
+          siteId,
+          window,
+          internalUrl,
+          filters,
+        ),
     );
     if (!result.ok) return apiV1QueryFailure(result.error, request);
     const data = result.data;
@@ -2640,6 +2559,7 @@ export async function handlePerformance(
           siteId,
           window,
           internalUrl,
+          filters,
           request,
           dimension,
         ),

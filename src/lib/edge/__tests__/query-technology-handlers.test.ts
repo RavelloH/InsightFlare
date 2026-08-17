@@ -19,6 +19,8 @@ import {
 } from "@/lib/edge/query/technology-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
+import { filterFixture } from "./filter-fixtures";
+
 const queryMocks = vi.hoisted(() => ({
   queryBrowserCrossBreakdownFromD1: vi.fn(),
   queryBrowserEngineTrendFromD1: vi.fn(),
@@ -171,8 +173,8 @@ describe("edge query technology handlers", () => {
       testUrl({
         interval: "hour",
         limit: "99",
-        country: " US ",
-        clientDeviceType: "desktop",
+        "filter[geo.country]": " US ",
+        "filter[client.deviceType]": "desktop",
       }),
     );
 
@@ -188,7 +190,7 @@ describe("edge query technology handlers", () => {
       siteId,
       parsedWindow(),
       "hour",
-      expect.objectContaining({ country: "US", clientDeviceType: "desktop" }),
+      filterFixture({ country: "US", clientDeviceType: "desktop" }),
       12,
     );
   });

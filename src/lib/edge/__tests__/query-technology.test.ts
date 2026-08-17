@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
+import type { QueryWindow } from "@/lib/edge/query/core";
 import {
   BROWSER_VERSION_UNKNOWN_TOKEN,
   clientDimensionDefinition,
@@ -19,7 +19,11 @@ import {
   queryShareTrendFromD1,
 } from "@/lib/edge/query/technology";
 import { queryCrossDimensionFromD1 } from "@/lib/edge/query/technology/client-cross";
+import type { FilterDocument } from "@/lib/edge/query-contract";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
+
+import { filterFixture } from "./filter-fixtures";
 
 type D1Row = Record<string, unknown>;
 
@@ -288,7 +292,7 @@ describe("edge query technology D1 mapping", () => {
           "site-1",
           window,
           "hour",
-          { country: "US", clientDeviceType: "desktop" },
+          filterFixture({ country: "US", clientDeviceType: "desktop" }),
           2,
           "TRIM(COALESCE(browser, ''))",
           "browser",
@@ -412,7 +416,7 @@ describe("edge query technology D1 mapping", () => {
           env,
           "site-1",
           window,
-          {},
+          EMPTY_FILTER_DOCUMENT,
           2,
           1,
           clientDimensionDefinition("browser"),
@@ -576,7 +580,7 @@ describe("edge query technology D1 mapping", () => {
         env,
         "site-1",
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         2,
         1,
         "TRIM(COALESCE(os, ''))",
@@ -694,7 +698,7 @@ describe("edge query technology D1 mapping", () => {
 
     try {
       await expect(
-        queryBrowserRadarFromD1(env, "site-1", window, {}),
+        queryBrowserRadarFromD1(env, "site-1", window, EMPTY_FILTER_DOCUMENT),
       ).resolves.toEqual([
         {
           browser: "Chrome",
@@ -720,7 +724,13 @@ describe("edge query technology D1 mapping", () => {
         },
       ]);
       await expect(
-        queryReferrerRadarFromD1(env, "site-1", window, {}, 2),
+        queryReferrerRadarFromD1(
+          env,
+          "site-1",
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          2,
+        ),
       ).resolves.toEqual([
         {
           referrer: "news.example",
@@ -835,7 +845,7 @@ describe("edge query technology D1 mapping", () => {
       env,
       siteId,
       window,
-      {},
+      EMPTY_FILTER_DOCUMENT,
       2,
       2,
     );
@@ -887,10 +897,10 @@ describe("edge query technology D1 mapping", () => {
   it("maps shared trend rows with top labels, other bucket, filters, and time buckets", async () => {
     const siteId = "site-1";
     const window = queryWindow();
-    const filters: DashboardFilters = {
+    const filters: FilterDocument = filterFixture({
       country: "US",
       clientDeviceType: "desktop",
-    };
+    });
     const { env, calls } = createD1Env([
       [
         { label: "Chrome", views: "12", visitors: "7", sessions: "5" },
@@ -967,8 +977,8 @@ describe("edge query technology D1 mapping", () => {
     );
     expect(calls[0].bindings).toEqual([
       ...visitBindings(siteId, window),
-      "us",
       "desktop",
+      "us",
       12,
     ]);
     expect(calls[0].sql).toContain("top_rows");

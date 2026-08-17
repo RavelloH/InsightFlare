@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  hasDashboardFilters,
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollups,
   queryTrendForSitesFromHourlyRollups,
 } from "@/lib/edge/hourly-rollup";
+import {
+  analyticsFilterRegistry,
+  EMPTY_FILTER_DOCUMENT,
+  hasFilters,
+  normalizeFilterDocument,
+} from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
 function makeDbMock(firstResult: unknown = null, allResults: unknown[] = []) {
@@ -19,32 +24,30 @@ function makeDbMock(firstResult: unknown = null, allResults: unknown[] = []) {
   };
 }
 
-describe("hasDashboardFilters", () => {
+function document(field: string, value: string) {
+  return normalizeFilterDocument(
+    {
+      version: 1,
+      root: {
+        kind: "condition",
+        target: { kind: "field", field },
+        operator: "eq",
+        value,
+      },
+    },
+    analyticsFilterRegistry,
+  );
+}
+
+describe("hasFilters", () => {
   it("returns false for empty filters", () => {
-    expect(hasDashboardFilters({})).toBe(false);
+    expect(hasFilters(EMPTY_FILTER_DOCUMENT)).toBe(false);
   });
 
-  it("returns false when all values are undefined/null/empty", () => {
-    expect(
-      hasDashboardFilters({
-        country: undefined,
-        browser: null as unknown as undefined,
-        device: "",
-        path: undefined,
-      }),
-    ).toBe(false);
-  });
-
-  it("returns true when a string filter is set", () => {
-    expect(hasDashboardFilters({ country: "US" })).toBe(true);
-  });
-
-  it("returns true when a path filter is set", () => {
-    expect(hasDashboardFilters({ path: "/home" })).toBe(true);
-  });
-
-  it("returns true when a device filter is set", () => {
-    expect(hasDashboardFilters({ device: "desktop" })).toBe(true);
+  it("returns true for effective typed filters", () => {
+    expect(hasFilters(document("geo.country", "US"))).toBe(true);
+    expect(hasFilters(document("page.path", "/home"))).toBe(true);
+    expect(hasFilters(document("client.deviceType", "desktop"))).toBe(true);
   });
 });
 

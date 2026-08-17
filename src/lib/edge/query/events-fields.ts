@@ -1,9 +1,9 @@
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
   EventFieldRow,
   EventFieldValueRow,
+  FilterDocument,
   QueryWindow,
 } from "./core";
 import {
@@ -18,7 +18,7 @@ export async function queryEventFieldsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   eventName: string,
   limit: number,
 ): Promise<EventFieldRow[]> {
@@ -72,7 +72,7 @@ export async function queryEventFieldValuesFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   eventName: string,
   fieldPath: string,
   fieldValueType: string,

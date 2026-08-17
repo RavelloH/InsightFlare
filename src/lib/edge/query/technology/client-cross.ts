@@ -3,7 +3,7 @@ import type {
   BrowserCrossBreakdownDimensionRow,
   BrowserCrossBreakdownItemRow,
   ClientCrossAggregateRow,
-  DashboardFilters,
+  FilterDocument,
   QueryWindow,
 } from "@/lib/edge/query/core";
 import {
@@ -28,7 +28,7 @@ export async function queryCrossDimensionFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   primaryLimit: number,
   secondaryLimit: number,
   primaryDimension: DimensionDefinition,

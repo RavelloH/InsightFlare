@@ -2,8 +2,8 @@ import type { Env } from "@/lib/edge/types";
 
 import type {
   ClientDimensionTabs,
-  DashboardFilters,
   DimensionRow,
+  FilterDocument,
   GeoDimensionTabs,
   GeoTabRow,
   QueryWindow,
@@ -24,7 +24,7 @@ export async function queryDimensionFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   selectExpr: string,
   options?: { excludeEmpty?: boolean },
@@ -73,7 +73,7 @@ export async function querySessionPathDimensionFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   kind: "entry" | "exit",
   diagnostics?: D1ReadDiagnostics,
@@ -147,7 +147,7 @@ export async function queryVisitDimensionFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   selectExpr: string,
   options?: { excludeEmpty?: boolean },
@@ -169,7 +169,7 @@ export async function querySessionBoundaryDimensionFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   kind: "entry" | "exit",
   diagnostics?: D1ReadDiagnostics,
@@ -189,7 +189,7 @@ export async function queryPageTabsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<{
   path: DimensionRow[];
@@ -338,7 +338,7 @@ export async function queryReferrersFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   includeFullUrl: boolean,
   diagnostics?: D1ReadDiagnostics,
@@ -382,7 +382,7 @@ export async function queryOverviewClientDimensionsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<ClientDimensionTabs> {
   const filter = buildVisitFilterSql(filters);
@@ -470,7 +470,7 @@ export async function queryOverviewGeoDimensionsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<GeoDimensionTabs> {
   const filter = buildVisitFilterSql(filters);

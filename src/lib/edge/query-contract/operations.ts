@@ -1,4 +1,6 @@
-import { normalizeQueryFilterSet } from "./helpers";
+import { analyticsFilterRegistry } from "./filter-registry";
+import { assertFilterAudience } from "./filters";
+import { EMPTY_FILTER_DOCUMENT } from "./helpers";
 import { assertOperationAllowed } from "./policy";
 import type {
   AnalyticsResult,
@@ -25,17 +27,22 @@ export async function executeQueryOperation<T>(
   const operationError = assertOperationAllowed(input.context, operation);
   if (operationError) return { ok: false, error: operationError };
 
-  const filters = normalizeQueryFilterSet(input.filters);
-  const maxClauses = input.context.policy.limits.maxFilterClauses;
-  if (maxClauses !== undefined && filters.clauses.length > maxClauses) {
+  const filters = input.filters ?? EMPTY_FILTER_DOCUMENT;
+  try {
+    assertFilterAudience(
+      filters,
+      analyticsFilterRegistry,
+      input.context.policy.audience,
+    );
+  } catch {
     return {
       ok: false,
       error: {
         kind: "invalid-input",
         issues: [
           {
-            path: "filters.clauses",
-            code: "too_many_clauses",
+            path: "filters",
+            code: "invalid_or_unauthorized_filter",
           },
         ],
       },

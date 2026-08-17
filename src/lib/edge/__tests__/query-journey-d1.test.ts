@@ -34,7 +34,10 @@ import {
   handleVisitorDetailContract as handleVisitorDetail,
   handleVisitorsContract as handleVisitors,
 } from "@/lib/edge/query/journeys-contract-adapter";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
+
+import { filterFixture } from "./filter-fixtures";
 
 type D1Row = Record<string, unknown>;
 type QueryBinding = string | number | null;
@@ -720,7 +723,7 @@ describe("edge journey list D1 queries", () => {
     ]);
 
     await expect(
-      queryVisitorAggregate(env, siteId, window, {}, 6),
+      queryVisitorAggregate(env, siteId, window, EMPTY_FILTER_DOCUMENT, 6),
     ).resolves.toMatchObject([{ visitorId: "visitor-2" }]);
 
     expect(calls[0].sql).toContain("ORDER BY lastSeenAt DESC");
@@ -737,7 +740,7 @@ describe("edge journey list D1 queries", () => {
         env,
         siteId,
         window,
-        { country: "US" },
+        filterFixture({ country: "US" }),
         5,
         "123",
         10,
@@ -767,7 +770,7 @@ describe("edge journey list D1 queries", () => {
         env,
         siteId,
         window,
-        { device: "desktop" },
+        filterFixture({ device: "desktop" }),
         7,
         { type: "session", value: "session-1" },
         2,
@@ -799,7 +802,7 @@ describe("edge journey list D1 queries", () => {
         env,
         siteId,
         window,
-        { path: "/pricing" },
+        filterFixture({ path: "/pricing" }),
         { type: "session", value: "session-1" },
         20,
       ),
@@ -826,7 +829,7 @@ describe("edge journey geo D1 queries", () => {
     ]);
 
     await expect(
-      queryGeoPointAggregate(env, siteId, window, {}, 5),
+      queryGeoPointAggregate(env, siteId, window, EMPTY_FILTER_DOCUMENT, 5),
     ).resolves.toEqual({
       points: [
         {
@@ -861,7 +864,7 @@ describe("edge journey geo D1 queries", () => {
     ]);
 
     await expect(
-      queryGeoPointsFromD1(env, siteId, window, { country: "IT" }, 25),
+      queryGeoPointsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, 25),
     ).resolves.toEqual({
       points: [
         {
@@ -879,11 +882,11 @@ describe("edge journey geo D1 queries", () => {
       regionCounts: [],
       cityCounts: [],
     });
-    expect(calls[0].bindings).toEqual([...visitBindings(window), "it", 25]);
+    expect(calls[0].bindings).toEqual([...visitBindings(window), 25]);
     expect(calls[0].sql).not.toContain(
       "WHERE LOWER(TRIM(COALESCE(country, ''))) = ?\n  WHERE",
     );
-    expect(calls[0].sql).toContain("AND\n    latitude IS NOT NULL");
+    expect(calls[0].sql).toContain("WHERE\n    latitude IS NOT NULL");
     expect(calls[1].sql).toContain("GROUP BY country");
   });
 
@@ -892,7 +895,7 @@ describe("edge journey geo D1 queries", () => {
     const { env } = createD1Env([[], [{ country: null }]]);
 
     await expect(
-      queryGeoPointsFromD1(env, siteId, window, {}, 10),
+      queryGeoPointsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, 10),
     ).resolves.toMatchObject({
       countryCounts: [{ country: "", views: 0, sessions: 0, visitors: 0 }],
       regionCounts: [],
@@ -918,7 +921,13 @@ describe("edge journey geo D1 queries", () => {
     ]);
 
     await expect(
-      queryGeoPointsFromD1(env, siteId, window, { geo: "US" }, 10),
+      queryGeoPointsFromD1(
+        env,
+        siteId,
+        window,
+        filterFixture({ geo: "US" }),
+        10,
+      ),
     ).resolves.toMatchObject({
       countryCounts: [],
       regionCounts: [
@@ -957,7 +966,7 @@ describe("edge journey geo D1 queries", () => {
         env,
         siteId,
         window,
-        { geo: "US::CA::California" },
+        filterFixture({ geo: "US::CA::California" }),
         10,
       ),
     ).resolves.toMatchObject({
@@ -991,7 +1000,13 @@ describe("edge journey geo D1 queries", () => {
     ]);
 
     await expect(
-      queryGeoPointsFromD1(regionEnv.env, siteId, window, { geo: "US" }, 10),
+      queryGeoPointsFromD1(
+        regionEnv.env,
+        siteId,
+        window,
+        filterFixture({ geo: "US" }),
+        10,
+      ),
     ).resolves.toMatchObject({
       regionCounts: [
         {
@@ -1020,7 +1035,7 @@ describe("edge journey geo D1 queries", () => {
         cityEnv.env,
         siteId,
         window,
-        { geo: "US::NY::NY" },
+        filterFixture({ geo: "US::NY::NY" }),
         10,
       ),
     ).resolves.toMatchObject({
@@ -1054,7 +1069,13 @@ describe("edge journey geo D1 queries", () => {
     ]);
 
     await expect(
-      queryGeoPointsFromD1(regionEnv.env, siteId, window, { geo: "CA" }, 10),
+      queryGeoPointsFromD1(
+        regionEnv.env,
+        siteId,
+        window,
+        filterFixture({ geo: "CA" }),
+        10,
+      ),
     ).resolves.toMatchObject({
       regionCounts: [
         {
@@ -1088,7 +1109,7 @@ describe("edge journey geo D1 queries", () => {
         cityEnv.env,
         siteId,
         window,
-        { geo: "CA::ON::Ontario" },
+        filterFixture({ geo: "CA::ON::Ontario" }),
         10,
       ),
     ).resolves.toMatchObject({

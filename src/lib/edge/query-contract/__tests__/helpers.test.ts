@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  analyticsFilterRegistry,
   buildCalendarBucketPlan,
   createQueryTime,
   createTimeRange,
+  EMPTY_FILTER_DOCUMENT,
   exclusiveRangeToInclusive,
   executeOverview,
   executePages,
@@ -12,7 +14,7 @@ import {
   executeTrend,
   hasFilters,
   inclusiveRangeToExclusive,
-  normalizeQueryFilterSet,
+  normalizeFilterDocument,
   normalizeReportingTimeZone,
   previousComparableRange,
   siteQueryContext,
@@ -97,23 +99,52 @@ describe("query contract time helpers", () => {
     ).toThrow("maxBuckets");
   });
 
-  it("uses structural filter presence only", () => {
+  it("uses typed document filter presence", () => {
     expect(hasFilters(undefined)).toBe(false);
-    expect(hasFilters({ version: 1, clauses: [] })).toBe(false);
-    expect(hasFilters({ version: 1, clauses: [{ kind: "future" }] })).toBe(
-      true,
-    );
+    expect(hasFilters(EMPTY_FILTER_DOCUMENT)).toBe(false);
+    expect(
+      hasFilters(
+        normalizeFilterDocument(
+          {
+            version: 1,
+            root: {
+              kind: "condition",
+              target: { kind: "field", field: "geo.country" },
+              operator: "eq",
+              value: "US",
+            },
+          },
+          analyticsFilterRegistry,
+        ),
+      ),
+    ).toBe(true);
   });
 
-  it("normalizes a copy of filter clauses and rejects invalid versions", () => {
-    const clauses = [{ kind: "legacy-dashboard", value: { country: "US" } }];
-    const normalized = normalizeQueryFilterSet({ version: 1, clauses });
-    expect(normalized).toEqual({ version: 1, clauses });
-    expect(normalized.clauses).not.toBe(clauses);
-    expect(Object.isFrozen(normalized.clauses)).toBe(true);
-    expect(() => normalizeQueryFilterSet({ version: 0, clauses: [] })).toThrow(
-      "Filter set version",
+  it("normalizes typed documents and rejects invalid versions", () => {
+    const normalized = normalizeFilterDocument(
+      {
+        version: 1,
+        root: {
+          kind: "and",
+          children: [
+            {
+              kind: "condition",
+              target: { kind: "field", field: "geo.country" },
+              operator: "eq",
+              value: "US",
+            },
+          ],
+        },
+      },
+      analyticsFilterRegistry,
     );
+    expect(normalized.root).toMatchObject({ kind: "condition", value: "us" });
+    expect(() =>
+      normalizeFilterDocument(
+        { version: 0, root: null },
+        analyticsFilterRegistry,
+      ),
+    ).toThrow("Expected filter document version 1");
   });
 
   it("denies public page and referrer detail before a reader is invoked", async () => {
@@ -178,7 +209,7 @@ describe("query contract time helpers", () => {
     expect(reader).not.toHaveBeenCalled();
   });
 
-  it("validates opaque filters and maps reader failures to domain errors", async () => {
+  it("validates typed filters and maps reader failures to domain errors", async () => {
     const time = createQueryTime(100, 200, "UTC", 200);
     const context = siteQueryContext("site-1", "private-dashboard");
     const tooMany = await executeQueryOperation(
@@ -192,13 +223,16 @@ describe("query contract time helpers", () => {
           },
         },
         time,
-        filters: { version: 1, clauses: [{ kind: "a" }, { kind: "b" }] },
+        filters: { version: 1, root: { kind: "invalid" } } as never,
       },
       vi.fn(async () => ({ value: {} })),
     );
     expect(tooMany).toMatchObject({
       ok: false,
-      error: { kind: "invalid-input", issues: [{ code: "too_many_clauses" }] },
+      error: {
+        kind: "invalid-input",
+        issues: [{ code: "invalid_or_unauthorized_filter" }],
+      },
     });
 
     await expect(

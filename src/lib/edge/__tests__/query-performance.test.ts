@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 import { handlePerformanceContract as handlePerformance } from "@/lib/edge/query/analysis-contract-adapter";
-import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
+import type { QueryWindow } from "@/lib/edge/query/core";
 import {
   queryAllPerformanceTrendsFromD1,
   queryPerformanceCountriesFromD1,
@@ -11,7 +11,11 @@ import {
   queryPerformanceSummariesFromD1,
   queryPerformanceTrendFromD1,
 } from "@/lib/edge/query/performance";
+import type { FilterDocument } from "@/lib/edge/query-contract";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
+
+import { filterFixture } from "./filter-fixtures";
 
 interface PreparedQuery {
   sql: string;
@@ -151,11 +155,11 @@ describe("edge query performance D1 helpers", () => {
         },
       ],
     ]);
-    const filters: DashboardFilters = {
+    const filters: FilterDocument = filterFixture({
       country: "US",
       hostname: "Example.COM",
       clientDeviceType: "desktop",
-    };
+    });
 
     const result = await queryPerformanceSummariesFromD1(
       env,
@@ -183,9 +187,9 @@ describe("edge query performance D1 helpers", () => {
     expect(calls[0]?.sql).toContain("perf_cls AS metricValue");
     expect(calls[0]?.bindings).toEqual([
       ...visitBindings,
+      "desktop",
       "us",
       "example.com",
-      "desktop",
     ]);
   });
 
@@ -215,7 +219,7 @@ describe("edge query performance D1 helpers", () => {
       env,
       siteId,
       window,
-      {},
+      EMPTY_FILTER_DOCUMENT,
     );
 
     expect(result.ttfb).toEqual({
@@ -261,7 +265,7 @@ describe("edge query performance D1 helpers", () => {
       siteId,
       window,
       "hour",
-      { path: "/pricing" },
+      filterFixture({ path: "/pricing" }),
       "lcp",
     );
 
@@ -306,7 +310,14 @@ describe("edge query performance D1 helpers", () => {
     ]);
 
     await expect(
-      queryPerformanceTrendFromD1(env, siteId, window, "hour", {}, "ttfb"),
+      queryPerformanceTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        "ttfb",
+      ),
     ).resolves.toEqual([
       {
         bucket: 0,
@@ -350,7 +361,7 @@ describe("edge query performance D1 helpers", () => {
       siteId,
       window,
       "hour",
-      { country: "US" },
+      filterFixture({ country: "US" }),
     );
 
     expect(calls).toHaveLength(1);
@@ -425,7 +436,7 @@ describe("edge query performance D1 helpers", () => {
       env,
       siteId,
       window,
-      { browser: "Chrome" },
+      filterFixture({ browser: "Chrome" }),
       2,
     );
 
@@ -479,7 +490,13 @@ describe("edge query performance D1 helpers", () => {
     ]);
 
     await expect(
-      queryPerformanceRoutesFromD1(env, siteId, window, {}, 1),
+      queryPerformanceRoutesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        1,
+      ),
     ).resolves.toMatchObject([
       {
         pathname: "/",
@@ -553,10 +570,15 @@ describe("edge query performance D1 helpers", () => {
       ],
     ]);
 
-    const result = await queryPerformanceCountriesFromD1(env, siteId, window, {
-      geoContinent: "NA",
-      geoOrganization: "Example ISP",
-    });
+    const result = await queryPerformanceCountriesFromD1(
+      env,
+      siteId,
+      window,
+      filterFixture({
+        geoContinent: "NA",
+        geoOrganization: "Example ISP",
+      }),
+    );
 
     expect(result).toHaveLength(2);
     expect(result[0]).toMatchObject({
@@ -583,7 +605,7 @@ describe("edge query performance D1 helpers", () => {
     });
     expect(calls[0]?.sql).toContain("country_views AS");
     expect(calls[0]?.sql).toContain("UPPER(TRIM(COALESCE(country, '')))");
-    expect(calls[0]?.bindings).toEqual([...visitBindings, "NA", "Example ISP"]);
+    expect(calls[0]?.bindings).toEqual([...visitBindings, "na", "Example ISP"]);
   });
 
   it("normalizes sparse country metric rows", async () => {
@@ -623,7 +645,12 @@ describe("edge query performance D1 helpers", () => {
     ]);
 
     await expect(
-      queryPerformanceCountriesFromD1(env, siteId, window, {}),
+      queryPerformanceCountriesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+      ),
     ).resolves.toMatchObject([
       {
         country: "CA",
@@ -701,14 +728,25 @@ describe("edge query performance D1 helpers", () => {
 
     try {
       await expect(
-        queryPerformanceSummariesFromD1(env, siteId, window, {}),
+        queryPerformanceSummariesFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+        ),
       ).resolves.toMatchObject({
         ttfb: { avg: 100, p50: 100, p75: 150, p95: 150, samples: 3 },
         lcp: { avg: 200, p50: 200, p75: 300, p95: 300, samples: 3 },
         fcp: { avg: 80, p50: 80, p75: 80, p95: 80, samples: 1 },
       });
       await expect(
-        queryAllPerformanceTrendsFromD1(env, siteId, window, "hour", {}),
+        queryAllPerformanceTrendsFromD1(
+          env,
+          siteId,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+        ),
       ).resolves.toMatchObject({
         ttfb: [
           { bucket: 0, avg: 75, p50: 50, p75: 100, p95: 100, samples: 2 },
@@ -716,7 +754,13 @@ describe("edge query performance D1 helpers", () => {
         ],
       });
       await expect(
-        queryPerformanceRoutesFromD1(env, siteId, window, {}, 1),
+        queryPerformanceRoutesFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          1,
+        ),
       ).resolves.toMatchObject([
         {
           pathname: "/pricing",
@@ -727,7 +771,12 @@ describe("edge query performance D1 helpers", () => {
         },
       ]);
       await expect(
-        queryPerformanceCountriesFromD1(env, siteId, window, {}),
+        queryPerformanceCountriesFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+        ),
       ).resolves.toMatchObject([
         {
           country: "US",

@@ -1,3 +1,4 @@
+import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
   executeQueryOperation,
   siteQueryContext,
@@ -10,7 +11,6 @@ import {
   jsonResponseWith,
   mapGeoTabs,
   mapTabs,
-  parseFilters,
   parseLimit,
   parseWindow,
   type ResponseContext,
@@ -22,7 +22,7 @@ import {
   regionValueExpr,
 } from "./core-dimensions";
 import { querySessionBoundaryDimensionFromD1 } from "./dimensions";
-import { legacyFilters, toQueryTime } from "./overview-contract-adapter";
+import { toQueryTime } from "./overview-contract-adapter";
 import { queryDimensionAggregate, queryReferrerAggregate } from "./pages";
 
 export type OverviewTab =
@@ -59,7 +59,10 @@ export async function handleOverviewTabContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const rawFilters = parseFilters(url);
+  const rawFilters = parseFilterUrlForAudience(
+    queryContext.policy.audience,
+    url,
+  );
   const kind = category(tab);
   const filters =
     tab === "geo.country" ? withoutGeoFilter(rawFilters) : rawFilters;
@@ -69,7 +72,7 @@ export async function handleOverviewTabContract(
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => {
       const limit = parseLimit(url, 100, 200);

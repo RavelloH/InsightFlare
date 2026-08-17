@@ -5,12 +5,12 @@ import {
   startOfZonedInterval,
 } from "@/lib/dashboard/time-zone";
 
+import { FILTER_DOCUMENT_VERSION, type FilterDocument } from "./filters";
 import type {
   CalendarBucket,
   CalendarBucketPlan,
   CalendarGranularity,
   EpochMs,
-  QueryFilterSet,
   QueryTime,
   ReportingTimeZone,
   TimeRange,
@@ -91,23 +91,15 @@ export function previousComparableRange(range: TimeRange): TimeRange {
   return createTimeRange(range.startMs - duration, range.startMs);
 }
 
-export function hasFilters(
-  filters: QueryFilterSet | null | undefined,
-): boolean {
-  return Boolean(filters && filters.clauses.length > 0);
-}
+export const EMPTY_FILTER_DOCUMENT: FilterDocument = Object.freeze({
+  version: FILTER_DOCUMENT_VERSION,
+  root: null,
+});
 
-export function normalizeQueryFilterSet(
-  filters: QueryFilterSet | null | undefined,
-): QueryFilterSet {
-  if (!filters) return { version: 1, clauses: [] };
-  if (!Number.isSafeInteger(filters.version) || filters.version < 1) {
-    throw new RangeError("Filter set version must be a positive integer");
-  }
-  return {
-    version: filters.version,
-    clauses: Object.freeze(filters.clauses.slice()),
-  };
+export function hasFilters(
+  filters: FilterDocument | null | undefined,
+): boolean {
+  return Boolean(filters?.root);
 }
 
 export function buildCalendarBucketPlan(input: {

@@ -1,3 +1,7 @@
+import {
+  ANALYTICS_FILTER_REGISTRY_REVISION,
+  filterIdsForAudience,
+} from "./filter-registry";
 import type {
   AnalyticsDomainError,
   DetailCapability,
@@ -85,11 +89,11 @@ function policy(
   allowedDetails: ReadonlySet<DetailCapability>,
 ): QueryPolicy {
   return {
-    revision: "query-contract-v1",
+    revision: `query-contract-v1/${ANALYTICS_FILTER_REGISTRY_REVISION}`,
     audience,
     allowedOperations: new Set(allowedOperations),
     allowedDimensions: new Set(),
-    allowedFilters: new Set(),
+    allowedFilters: filterIdsForAudience(audience),
     allowedDetails,
     limits: DEFAULT_LIMITS,
     allowedPagination: new Set(["none", "offset", "keyset"]),

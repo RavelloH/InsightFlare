@@ -3,12 +3,9 @@ import { appNow } from "@/lib/edge/e2e-clock";
 import { coerceNumber, ONE_DAY_MS } from "@/lib/edge/utils";
 
 import {
-  type DashboardFilters,
   DEFAULT_EVENT_RECORD_SORT,
   DEFAULT_SESSION_LIST_SORT,
   DEFAULT_VISITOR_LIST_SORT,
-  type EventPayloadFilterRule,
-  type EventPayloadFilterValue,
   type EventRecordSortKey,
   type FilterOptionKey,
   type Interval,
@@ -178,146 +175,32 @@ export function normalizeFilterValue(value: string | null): string | undefined {
   return normalized.length > 0 ? normalized : undefined;
 }
 
-export function normalizeEventPayloadFilterPath(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().slice(0, 240);
-  if (!normalized || normalized === "/") return null;
-  if (normalized.startsWith("/")) {
-    const segments = normalized
-      .split("/")
-      .map((segment) => segment.trim())
-      .filter(Boolean);
-    return segments.length > 0 ? `/${segments.join("/")}` : null;
-  }
-
-  const dotPath = normalized
-    .replace(/^\$\.?/, "")
-    .replace(/\[(?:\d+|\*)\]/g, ".*")
-    .split(".")
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-  return dotPath.length > 0 ? `/${dotPath.join("/")}` : null;
-}
-
-export function normalizeEventPayloadFilterValue(
-  value: unknown,
-): EventPayloadFilterValue | undefined {
-  if (value === null) return null;
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") return value.slice(0, 240);
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  return undefined;
-}
-
-export function parseEventPayloadFilters(
-  value: string | null,
-): EventPayloadFilterRule[] | undefined {
-  if (typeof value !== "string" || value.trim().length === 0) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-  if (!Array.isArray(parsed)) return undefined;
-
-  const rules: EventPayloadFilterRule[] = [];
-  for (const item of parsed.slice(0, 12)) {
-    if (!item || typeof item !== "object") continue;
-    const candidate = item as {
-      path?: unknown;
-      operator?: unknown;
-      value?: unknown;
-    };
-    const path = normalizeEventPayloadFilterPath(candidate.path);
-    const operator =
-      candidate.operator === "ne" || candidate.operator === "!=" ? "ne" : "eq";
-    const filterValue = normalizeEventPayloadFilterValue(candidate.value);
-    if (!path || filterValue === undefined) continue;
-    rules.push({ path, operator, value: filterValue });
-  }
-
-  return rules.length > 0 ? rules : undefined;
-}
-
-export function parseFilters(url: URL): DashboardFilters {
-  const geo =
-    normalizeFilterValue(url.searchParams.get("geo")) ||
-    normalizeFilterValue(url.searchParams.get("geoCountry")) ||
-    normalizeFilterValue(url.searchParams.get("geoRegion")) ||
-    normalizeFilterValue(url.searchParams.get("geoCity"));
-  return {
-    country: normalizeFilterValue(url.searchParams.get("country")),
-    device: normalizeFilterValue(url.searchParams.get("device")),
-    browser: normalizeFilterValue(url.searchParams.get("browser")),
-    path: normalizeFilterValue(url.searchParams.get("path")),
-    query: normalizeFilterValue(url.searchParams.get("query")),
-    title: normalizeFilterValue(url.searchParams.get("title")),
-    hostname: normalizeFilterValue(url.searchParams.get("hostname")),
-    entry: normalizeFilterValue(url.searchParams.get("entry")),
-    exit: normalizeFilterValue(url.searchParams.get("exit")),
-    sourceDomain: normalizeFilterValue(url.searchParams.get("sourceDomain")),
-    sourceLink: normalizeFilterValue(url.searchParams.get("sourceLink")),
-    clientBrowser: normalizeFilterValue(url.searchParams.get("clientBrowser")),
-    clientOsVersion: normalizeFilterValue(
-      url.searchParams.get("clientOsVersion"),
-    ),
-    clientDeviceType: normalizeFilterValue(
-      url.searchParams.get("clientDeviceType"),
-    ),
-    clientLanguage: normalizeFilterValue(
-      url.searchParams.get("clientLanguage"),
-    ),
-    clientScreenSize: normalizeFilterValue(
-      url.searchParams.get("clientScreenSize"),
-    ),
-    geo,
-    geoContinent: normalizeFilterValue(url.searchParams.get("geoContinent")),
-    geoTimezone: normalizeFilterValue(url.searchParams.get("geoTimezone")),
-    geoOrganization: normalizeFilterValue(
-      url.searchParams.get("geoOrganization"),
-    ),
-    eventPayloadFilters: parseEventPayloadFilters(
-      url.searchParams.get("eventPayloadFilters"),
-    ),
-  };
-}
-
 export function parseFilterOptionKey(url: URL): FilterOptionKey | null {
   const raw = normalizeFilterValue(url.searchParams.get("filterKey"));
   if (!raw) return null;
   const keys: FilterOptionKey[] = [
-    "country",
-    "device",
-    "browser",
-    "path",
-    "title",
-    "hostname",
-    "entry",
-    "exit",
-    "sourceDomain",
-    "sourceLink",
-    "clientBrowser",
-    "clientOsVersion",
-    "clientDeviceType",
-    "clientLanguage",
-    "clientScreenSize",
-    "geo",
-    "geoContinent",
-    "geoTimezone",
-    "geoOrganization",
+    "geo.country",
+    "client.deviceType",
+    "client.browser",
+    "page.path",
+    "page.title",
+    "page.hostname",
+    "session.entryPath",
+    "session.exitPath",
+    "referrer.domain",
+    "referrer.url",
+    "client.osVersion",
+    "client.language",
+    "client.screenSize",
+    "geo.region",
+    "geo.city",
+    "geo.continent",
+    "geo.timeZone",
+    "geo.organization",
   ];
   return keys.includes(raw as FilterOptionKey)
     ? (raw as FilterOptionKey)
     : null;
-}
-
-export function withoutFilterKey(
-  filters: DashboardFilters,
-  key: FilterOptionKey,
-): DashboardFilters {
-  const { [key]: _, ...next } = filters;
-  return next;
 }
 
 export function parseBooleanFlag(url: URL, key: string): boolean {

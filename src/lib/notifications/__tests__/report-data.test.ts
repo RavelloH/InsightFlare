@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+
 const queryOverviewAggregate = vi.hoisted(() => vi.fn());
 const queryPagesAggregate = vi.hoisted(() => vi.fn());
 const queryReferrerAggregate = vi.hoisted(() => vi.fn());
@@ -164,7 +166,7 @@ describe("notification report data", () => {
       env,
       "site-1",
       expect.objectContaining({ label: "2026-06-29" }),
-      {},
+      EMPTY_FILTER_DOCUMENT,
       5,
       false,
     );

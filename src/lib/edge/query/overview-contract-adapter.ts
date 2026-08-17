@@ -1,10 +1,10 @@
+import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
   executeOverview,
   executeTrend,
   type OverviewMetrics,
   type OverviewReader,
   type OverviewReaderInput,
-  type QueryFilterSet,
   type QueryTime,
   siteQueryContext,
   type TrendPoint,
@@ -13,12 +13,11 @@ import {
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
-import type { DashboardFilters, QueryWindow, TrendAggregateRow } from "./core";
+import type { QueryWindow, TrendAggregateRow } from "./core";
 import {
   badRequest,
   jsonResponseWith,
   parseBooleanFlag,
-  parseFilters,
   parseInterval,
   parseWindow,
   percentChange,
@@ -42,21 +41,6 @@ export function toQueryTime(window: QueryWindow): QueryTime {
     reportingTimeZone: window.timeZone as QueryTime["reportingTimeZone"],
     capturedAtMs: window.nowMs as QueryTime["capturedAtMs"],
   };
-}
-
-export function legacyFilters(filters: DashboardFilters): QueryFilterSet {
-  return {
-    version: 1,
-    clauses: [{ kind: "legacy-dashboard", value: filters }],
-  };
-}
-
-export function dashboardFilters(filters: QueryFilterSet): DashboardFilters {
-  const clause = filters.clauses.find(
-    (candidate) => candidate.kind === "legacy-dashboard",
-  );
-  const value = clause?.value;
-  return value && typeof value === "object" ? (value as DashboardFilters) : {};
 }
 
 function sourceFromDiagnostic(
@@ -112,7 +96,7 @@ export function createOverviewReader(
           nowMs: input.time.capturedAtMs,
           timeZone: input.time.reportingTimeZone,
         },
-        dashboardFilters(input.filters),
+        input.filters,
         diagnostics,
       );
       return {
@@ -139,7 +123,7 @@ export function createOverviewReader(
           timeZone: input.time.reportingTimeZone,
         },
         input.interval,
-        dashboardFilters(input.filters),
+        input.filters,
         diagnostics,
       );
       return {
@@ -169,7 +153,7 @@ export async function handleOverviewContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const diagnostics = createD1ReadDiagnostics();
   const currentTime = toQueryTime(window);
   const previousTime = parseBooleanFlag(url, "includeChange")
@@ -181,7 +165,7 @@ export async function handleOverviewContract(
     {
       context: queryContext,
       time: currentTime,
-      filters: legacyFilters(filters),
+      filters,
       previousTime,
       detailInterval: includeDetail ? parseInterval(url) : undefined,
     },
@@ -234,7 +218,7 @@ export async function handleTrendContract(
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(parseFilters(url)),
+      filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
       interval: parseInterval(url),
     },
   );

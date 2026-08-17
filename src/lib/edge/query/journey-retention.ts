@@ -1,6 +1,6 @@
 import type { Env } from "@/lib/edge/types";
 
-import type { DashboardFilters, Interval, QueryWindow } from "./core";
+import type { FilterDocument, Interval, QueryWindow } from "./core";
 import {
   buildTimeBuckets,
   buildVisitFilterSql,
@@ -38,7 +38,7 @@ export async function queryRetentionFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   granularity: Interval,
 ): Promise<RetentionResult> {
   const buckets = buildTimeBuckets(window, granularity);

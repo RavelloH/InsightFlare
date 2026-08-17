@@ -19,7 +19,10 @@ import {
   queryVisitorListPageFromD1,
   queryVisitorsFromD1,
 } from "@/lib/edge/query/journey-list-queries";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
+
+import { filterFixture } from "./filter-fixtures";
 
 type Binding = string | number | null;
 type D1Row = Record<string, unknown>;
@@ -251,26 +254,40 @@ describe("event detail D1 SQL", () => {
 
     try {
       const [records, overview, trend, fields, cards] = await Promise.all([
-        queryEventRecordsFromD1(
+        queryEventRecordsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, {
+          limit: 25,
+          offset: 0,
+          sort: { key: "occurredAt", direction: "desc" },
+          eventName,
+        }),
+        queryEventTypeOverviewFromD1(
           env,
           siteId,
           window,
-          {},
-          {
-            limit: 25,
-            offset: 0,
-            sort: { key: "occurredAt", direction: "desc" },
-            eventName,
-          },
+          EMPTY_FILTER_DOCUMENT,
+          eventName,
         ),
-        queryEventTypeOverviewFromD1(env, siteId, window, {}, eventName),
-        queryEventTypeTrendFromD1(env, siteId, window, "hour", {}, eventName),
-        queryEventFieldsFromD1(env, siteId, window, {}, eventName, 100),
+        queryEventTypeTrendFromD1(
+          env,
+          siteId,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          eventName,
+        ),
+        queryEventFieldsFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          eventName,
+          100,
+        ),
         queryEventAnalyticsContextCardsFromD1(
           env,
           siteId,
           window,
-          {},
+          EMPTY_FILTER_DOCUMENT,
           100,
           eventName,
         ),
@@ -398,7 +415,7 @@ describe("event detail D1 SQL", () => {
           env,
           siteId,
           window,
-          {},
+          EMPTY_FILTER_DOCUMENT,
           {
             limit: 20,
             offset: 0,
@@ -412,7 +429,7 @@ describe("event detail D1 SQL", () => {
             env,
             siteId,
             window,
-            {},
+            EMPTY_FILTER_DOCUMENT,
             {
               pageSize: 2,
               sort,
@@ -447,7 +464,7 @@ describe("event detail D1 SQL", () => {
         env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         {
           limit: 25,
           offset: 0,
@@ -474,9 +491,13 @@ describe("event detail D1 SQL", () => {
     const { env, d1 } = createSqliteEventEnv();
 
     try {
-      const analysis = await queryFunnelAnalysis(env, siteId, window, {}, [
-        { type: "event", value: eventName },
-      ]);
+      const analysis = await queryFunnelAnalysis(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        [{ type: "event", value: eventName }],
+      );
 
       expect(analysis.summary.totalSessions).toBe(1);
       const query = d1.calls.find((call) =>
@@ -502,7 +523,7 @@ describe("event detail D1 SQL", () => {
         env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         100,
         eventName,
         ["path"],
@@ -530,7 +551,7 @@ describe("event detail D1 SQL", () => {
         env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         eventName,
         { includeBreakdowns: false },
       );
@@ -562,7 +583,7 @@ describe("event detail D1 SQL", () => {
         env,
         siteId,
         window,
-        { path: "/posts/minecraft-meteor-guide" },
+        filterFixture({ path: "/posts/minecraft-meteor-guide" }),
         eventName,
         { includeBreakdowns: false },
       );
@@ -607,7 +628,7 @@ describe("event detail D1 SQL", () => {
           env,
           siteId,
           window,
-          {},
+          EMPTY_FILTER_DOCUMENT,
           20,
           undefined,
           0,
@@ -620,7 +641,7 @@ describe("event detail D1 SQL", () => {
             env,
             siteId,
             window,
-            {},
+            EMPTY_FILTER_DOCUMENT,
             { pageSize: 2, sort, cursor },
           );
           received.push(...page.rows);
@@ -643,7 +664,7 @@ describe("event detail D1 SQL", () => {
           env,
           siteId,
           window,
-          {},
+          EMPTY_FILTER_DOCUMENT,
           20,
           undefined,
           0,
@@ -656,7 +677,7 @@ describe("event detail D1 SQL", () => {
             env,
             siteId,
             window,
-            {},
+            EMPTY_FILTER_DOCUMENT,
             { pageSize: 2, sort, cursor },
           );
           received.push(...page.rows);

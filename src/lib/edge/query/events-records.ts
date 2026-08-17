@@ -2,9 +2,9 @@ import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
   EventRecordRow,
   EventRecordSortKey,
+  FilterDocument,
   ListSort,
   QueryWindow,
 } from "./core";
@@ -253,7 +253,7 @@ export async function queryEventRecordPageFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   options: {
     pageSize: number;
     sort: ListSort<EventRecordSortKey>;
@@ -301,7 +301,7 @@ export async function queryEventRecordsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   options: {
     limit: number;
     offset: number;

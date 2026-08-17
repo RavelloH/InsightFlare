@@ -1,7 +1,7 @@
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
+  FilterDocument,
   Interval,
   PerformanceCountryRow,
   PerformanceMetricKey,
@@ -163,7 +163,7 @@ export async function queryPerformanceSummariesFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
 ): Promise<Record<PerformanceMetricKey, PerformanceSummaryRow>> {
   const filter = buildVisitFilterSql(filters);
   const sql = `
@@ -225,7 +225,7 @@ export async function queryPerformanceTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   metric: PerformanceMetricKey,
 ): Promise<PerformanceTrendPointRow[]> {
   const filter = buildVisitFilterSql(filters);
@@ -299,7 +299,7 @@ export async function queryAllPerformanceTrendsFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
 ): Promise<Record<PerformanceMetricKey, PerformanceTrendPointRow[]>> {
   const filter = buildVisitFilterSql(filters);
   const buckets = buildTimeBuckets(window, interval);
@@ -376,7 +376,7 @@ export async function queryPerformanceRoutesFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<PerformanceRouteRow[]> {
   const filter = buildVisitFilterSql(filters);
@@ -467,7 +467,7 @@ export async function queryPerformanceCountriesFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
 ): Promise<PerformanceCountryRow[]> {
   const filter = buildVisitFilterSql(filters);
   const countryExpr = "UPPER(TRIM(COALESCE(country, '')))";
@@ -556,7 +556,7 @@ export async function queryPerformanceDashboardFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   routeLimit: number,
 ): Promise<{
   summaries: Record<PerformanceMetricKey, PerformanceSummaryRow>;

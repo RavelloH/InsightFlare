@@ -2,6 +2,7 @@ import {
   currentInvocationLogger,
   runWithD1Operation,
 } from "@/lib/edge/observability-logger";
+import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
   executeQueryOperation,
   siteQueryContext,
@@ -22,7 +23,6 @@ import {
   parseEventId,
   parseEventName,
   parseEventRecordSort,
-  parseFilters,
   parseInterval,
   parseLimit,
   parseListSearch,
@@ -48,7 +48,7 @@ import { queryEventTypeAggregate } from "./events-summary";
 import { queryEventsSummaryFromD1 } from "./events-summary";
 import { queryEventsTrendFromD1 } from "./events-trend";
 import { queryEventTypeTrendFromD1 } from "./events-trend";
-import { legacyFilters, toQueryTime } from "./overview-contract-adapter";
+import { toQueryTime } from "./overview-contract-adapter";
 
 export async function handleEventTypesContract(
   env: Env,
@@ -59,13 +59,13 @@ export async function handleEventTypesContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "event-types",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => ({
       value: mapTabs(
@@ -92,13 +92,13 @@ export async function handleEventsSummaryContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "event-summary",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => {
       const data = await queryEventsSummaryFromD1(env, siteId, window, filters);
@@ -132,13 +132,13 @@ export async function handleEventsTrendContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const interval = parseInterval(url);
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "event-trend",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => ({
       value: {
@@ -173,13 +173,13 @@ export async function handleEventRecordsContract(
   const rawCursor = url.searchParams.get("cursor");
   const cursor = rawCursor ? parseEventRecordCursor(rawCursor, sort) : null;
   if (rawCursor && !cursor) return badRequest("Invalid cursor");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "event-records",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => {
       const page = await queryEventRecordPageFromD1(
@@ -229,13 +229,13 @@ export async function handleEventFieldValuesContract(
   if (!fieldValueType) return badRequest("fieldValueType is required");
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "event-fields",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => ({
       value: {
@@ -316,13 +316,13 @@ export async function handleEventTypeFieldsContract(
   if (!eventName) return badRequest("eventName is required");
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "event-fields",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => ({
       value: {
@@ -359,13 +359,13 @@ export async function handleEventTypeContextContract(
   if (!window) return badRequest("Invalid time window");
   const selectedKeys = parseEventContextCardKeys(url);
   if (!selectedKeys) return badRequest("Valid context cards are required");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "event-context",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => ({
       value: {
@@ -406,7 +406,7 @@ export async function handleEventTypeDetailContract(
   if (!eventName) return badRequest("eventName is required");
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const includeContext = options?.includeContext ?? true;
   const includeBreakdowns = options?.includeBreakdowns ?? true;
   const includeFields = options?.includeFields ?? true;
@@ -415,7 +415,7 @@ export async function handleEventTypeDetailContract(
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => {
       const [overview, trend, fields, cards] = await Promise.all([
@@ -501,7 +501,7 @@ export async function handleEventRecordDetailContract(
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters({}),
+      filters: { version: 1, root: null },
     },
     async () => ({
       value: await queryEventRecordDetailFromD1(env, siteId, eventId),

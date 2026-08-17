@@ -15,7 +15,6 @@ import {
   parseEventFieldValueType,
   parseEventName,
   parseEventRecordSort,
-  parseFilters,
   parseInterval,
   parseLimit,
   parseListSearch,
@@ -70,7 +69,6 @@ import {
 } from "./query/journey-retention";
 import {
   createOverviewReader,
-  legacyFilters,
   toQueryTime,
 } from "./query/overview-contract-adapter";
 import {
@@ -86,6 +84,7 @@ import {
   executeQueryOperation,
   executeTrend,
   type OverviewResult,
+  parseApiV1FilterUrl,
   siteQueryContext,
   teamQueryContext,
   type TrendResult,
@@ -101,12 +100,8 @@ function queryTime(timeRange: ParsedTimeRange) {
   });
 }
 
-function legacyFilterSet(url: URL, timeRange: ParsedTimeRange) {
-  const internalUrl = new URL(url);
-  internalUrl.searchParams.set("from", String(timeRange.startMs));
-  internalUrl.searchParams.set("to", String(timeRange.endExclusiveMs));
-  internalUrl.searchParams.set("timeZone", timeRange.timeZone);
-  return legacyFilters(parseFilters(internalUrl));
+function apiV1FilterSet(url: URL) {
+  return parseApiV1FilterUrl(url);
 }
 
 /**
@@ -122,7 +117,7 @@ export function queryApiV1Overview(
   return executeOverview(createOverviewReader(env, siteId), {
     context: siteQueryContext(siteId, "api-v1"),
     time: queryTime(timeRange),
-    filters: legacyFilterSet(url, timeRange),
+    filters: apiV1FilterSet(url),
   });
 }
 
@@ -136,7 +131,7 @@ export function queryApiV1Trend(
   return executeTrend(createOverviewReader(env, siteId), {
     context: siteQueryContext(siteId, "api-v1"),
     time: queryTime(timeRange),
-    filters: legacyFilterSet(url, timeRange),
+    filters: apiV1FilterSet(url),
     interval,
   });
 }
@@ -202,7 +197,7 @@ function apiV1QueryBase(url: URL, timeRange: ParsedTimeRange) {
   return {
     context: siteQueryContext("", "api-v1"),
     time: queryTime(timeRange),
-    filters: legacyFilterSet(url, timeRange),
+    filters: apiV1FilterSet(url),
   };
 }
 
@@ -286,7 +281,7 @@ export function queryApiV1FunnelAnalysis(
           nowMs: Date.now(),
           timeZone: timeRange.timeZone,
         },
-        {},
+        apiV1FilterSet(new URL("https://internal.invalid")),
         steps,
       ),
     }),
@@ -329,7 +324,7 @@ export function queryApiV1SavedFunnelAnalysis<Funnel extends object>(
                     nowMs: Date.now(),
                     timeZone: timeRange.timeZone,
                   },
-                  {},
+                  apiV1FilterSet(new URL("https://internal.invalid")),
                   loaded.steps,
                 )
               : null,
@@ -368,7 +363,7 @@ export async function queryApiV1EventRecords(
           nowMs: Date.now(),
           timeZone: timeRange.timeZone,
         },
-        parseFilters(url),
+        apiV1FilterSet(url),
         {
           pageSize: pagination.limit,
           sort,
@@ -416,7 +411,7 @@ export async function queryApiV1EventTypes(
             nowMs: Date.now(),
             timeZone: timeRange.timeZone,
           },
-          parseFilters(url),
+          apiV1FilterSet(url),
           parseLimit(url, 20, 200),
         ),
       ),
@@ -459,7 +454,7 @@ export async function queryApiV1EventFieldValues(
             nowMs: Date.now(),
             timeZone: timeRange.timeZone,
           },
-          parseFilters(url),
+          apiV1FilterSet(url),
           eventName,
           fieldPath,
           fieldValueType,
@@ -492,7 +487,7 @@ export async function queryApiV1EventsSummary(
           nowMs: Date.now(),
           timeZone: timeRange.timeZone,
         },
-        parseFilters(url),
+        apiV1FilterSet(url),
       );
       return {
         value: {
@@ -540,7 +535,7 @@ export async function queryApiV1EventsTrend(
             timeZone: timeRange.timeZone,
           },
           interval,
-          parseFilters(url),
+          apiV1FilterSet(url),
           parseLimit(url, 8, 12),
           parseEventName(url),
         )),
@@ -574,7 +569,7 @@ export async function queryApiV1Retention(
           nowMs: Date.now(),
           timeZone: timeRange.timeZone,
         },
-        parseFilters(url),
+        apiV1FilterSet(url),
         granularity,
       ),
     }),
@@ -616,7 +611,7 @@ export async function queryApiV1CrossBreakdown(
           nowMs: Date.now(),
           timeZone: timeRange.timeZone,
         },
-        parseFilters(url),
+        apiV1FilterSet(url),
         parseQueryLimit(url, "primaryLimit", 5, 1, 12),
         parseQueryLimit(url, "secondaryLimit", 6, 1, 8),
         primaryDimension,
@@ -647,7 +642,7 @@ export async function queryApiV1Breakdown(
     },
     async () => {
       const limit = parseLimit(url, 20, 200);
-      const filters = parseFilters(url);
+      const filters = apiV1FilterSet(url);
       const rows =
         dimension === "session.entryPath"
           ? await querySessionBoundaryDimensionFromD1(
@@ -736,7 +731,7 @@ export async function queryApiV1EventTypeDetail(
         nowMs: Date.now(),
         timeZone: timeRange.timeZone,
       };
-      const filters = parseFilters(url);
+      const filters = apiV1FilterSet(url);
       const [overview, trend, fields, cards] = await Promise.all([
         queryEventTypeOverviewFromD1(env, siteId, window, filters, eventName, {
           includeBreakdowns: true,
@@ -806,7 +801,7 @@ export async function queryApiV1Visitors(
           nowMs: Date.now(),
           timeZone: timeRange.timeZone,
         },
-        parseFilters(url),
+        apiV1FilterSet(url),
         {
           pageSize: pagination.limit,
           sort,
@@ -858,7 +853,7 @@ export async function queryApiV1Sessions(
           nowMs: Date.now(),
           timeZone: timeRange.timeZone,
         },
-        parseFilters(url),
+        apiV1FilterSet(url),
         {
           pageSize: pagination.limit,
           sort,
@@ -949,7 +944,7 @@ export async function queryApiV1JourneyEvents(
             nowMs: Date.now(),
             timeZone: timeRange.timeZone,
           },
-          parseFilters(url),
+          apiV1FilterSet(url),
           target,
           pagination.limit,
         ),
@@ -989,7 +984,7 @@ export async function queryApiV1JourneySessions(
             nowMs: Date.now(),
             timeZone: timeRange.timeZone,
           },
-          parseFilters(url),
+          apiV1FilterSet(url),
           pagination.limit,
           target,
         )) as unknown as readonly Record<string, unknown>[],

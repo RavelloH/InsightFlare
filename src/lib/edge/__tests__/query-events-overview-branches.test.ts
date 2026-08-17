@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as QueryCore from "@/lib/edge/query/core";
 import type { QueryWindow } from "@/lib/edge/query/core";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/query/events-overview";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
 const queryD1AllMock = vi.hoisted(() => vi.fn());
@@ -73,7 +74,13 @@ describe("edge query event type overview branch coverage", () => {
     ]);
 
     await expect(
-      queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
+      queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "signup",
+      ),
     ).resolves.toEqual({
       summary: {
         events: 6,
@@ -106,7 +113,13 @@ describe("edge query event type overview branch coverage", () => {
     ]);
 
     await expect(
-      queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
+      queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "signup",
+      ),
     ).resolves.toEqual({
       summary: {
         events: 0,
@@ -141,7 +154,13 @@ describe("edge query event type overview branch coverage", () => {
     ]);
 
     await expect(
-      queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
+      queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "signup",
+      ),
     ).resolves.toEqual({
       summary: {
         events: 0,
@@ -171,7 +190,13 @@ describe("edge query event type overview branch coverage", () => {
     ]);
 
     await expect(
-      queryEventTypeOverviewFromD1(env, siteId, window, {}, "signup"),
+      queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "signup",
+      ),
     ).resolves.toMatchObject({
       summary: {
         events: 0,

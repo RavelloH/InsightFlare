@@ -11,9 +11,7 @@ import {
   jsonSuccess,
   methodNotAllowed,
   normalizeUnknownDirect,
-  parseComplexFilters,
   parseCursorPagination,
-  parseFilter,
   parseMetrics,
   parsePreset,
   parseSort,
@@ -21,6 +19,10 @@ import {
   requireScope,
   validateDimension,
 } from "@/lib/edge/api-v1-helpers";
+import {
+  parseApiV1FilterDocument,
+  parseApiV1FilterUrl,
+} from "@/lib/edge/query-contract";
 
 function url(path: string): URL {
   return new URL(`https://edge.test${path}`);
@@ -122,7 +124,7 @@ describe("api v1 helpers", () => {
     expect(invalidZone).toBeInstanceOf(Response);
   });
 
-  it("parses metrics, filters, sort, and cursor pagination", async () => {
+  it("parses metrics, typed filters, sort, and cursor pagination", async () => {
     expect(parseMetrics("views,sessions,visitors")).toEqual([
       "views",
       "sessions",
@@ -131,25 +133,9 @@ describe("api v1 helpers", () => {
     expect(parseMetrics("views,nope")).toBeInstanceOf(Response);
 
     expect(
-      parseFilter(
-        url(
-          "/api/v1/sites/s/events?filter[geo.country]=US&filter[client.browser]=Chrome&filter[page.path]=/posts/hello",
-        ),
-      ),
-    ).toEqual({
-      "geo.country": "US",
-      "client.browser": "Chrome",
-      "page.path": "/posts/hello",
-    });
-    const invalidFilter = parseFilter(
-      url("/api/v1/sites/s/events?filter[unknown.field]=x"),
-    );
-    expect(invalidFilter).toBeInstanceOf(Response);
-    if (invalidFilter instanceof Response) {
-      expect(await invalidFilter.json()).toMatchObject({
-        error: { details: { field: "unknown.field" } },
-      });
-    }
+      parseApiV1FilterUrl(url("/api/v1/sites/s/events?filter[geo.country]=US"))
+        .root,
+    ).toMatchObject({ kind: "condition", value: "us" });
 
     expect(parseSort("-lastSeenAt")).toEqual({
       field: "lastSeenAt",
@@ -172,21 +158,20 @@ describe("api v1 helpers", () => {
     ).toBeInstanceOf(Response);
   });
 
-  it("validates dimensions and complex filters", () => {
+  it("validates dimensions and structured filters", () => {
     expect(validateDimension("geo.country")).toBe("geo.country");
     expect(validateDimension("country")).toBeInstanceOf(Response);
     expect(
-      parseComplexFilters([
-        { field: "page.path", op: "startsWith", value: "/posts/" },
-        { field: "geo.country", op: "in", value: ["US", "JP"] },
-      ]),
-    ).toEqual([
-      { field: "page.path", op: "startsWith", value: "/posts/" },
-      { field: "geo.country", op: "in", value: ["US", "JP"] },
-    ]);
-    expect(
-      parseComplexFilters([{ field: "page.path", op: "near", value: "x" }]),
-    ).toBeInstanceOf(Response);
+      parseApiV1FilterDocument({
+        version: 1,
+        root: {
+          kind: "condition",
+          target: { kind: "field", field: "page.path" },
+          operator: "startsWith",
+          value: "/posts/",
+        },
+      }).root,
+    ).toMatchObject({ operator: "startsWith" });
   });
 
   // ── additional coverage ──────────────────────────────────────────
@@ -382,13 +367,6 @@ describe("api v1 helpers", () => {
     expect(parseMetrics("views,views,sessions")).toEqual(["views", "sessions"]);
   });
 
-  it("parseFilter ignores non-matching params", () => {
-    const result = parseFilter(
-      url("/api/v1/sites/s?limit=10&filter[page.path]=/home"),
-    );
-    expect(result).toEqual({ "page.path": "/home" });
-  });
-
   it("parseSort returns null for null, empty, or whitespace", () => {
     expect(parseSort(null)).toBeNull();
     expect(parseSort("")).toBeNull();
@@ -416,41 +394,6 @@ describe("api v1 helpers", () => {
       url("/api/v1/sites/s/events?cursor=abc123"),
     );
     expect(result).toEqual({ limit: 100, cursor: "abc123" });
-  });
-
-  it("parseComplexFilters returns empty array for undefined input", () => {
-    expect(parseComplexFilters(undefined)).toEqual([]);
-  });
-
-  it("parseComplexFilters rejects non-array input", async () => {
-    const res = parseComplexFilters("not-an-array" as unknown);
-    expect(res).toBeInstanceOf(Response);
-    if (res instanceof Response) {
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as TestEnvelope;
-      expect(body.error?.details?.field).toBe("filters");
-    }
-  });
-
-  it("parseComplexFilters rejects non-object items", async () => {
-    const res = parseComplexFilters([null, 42]);
-    expect(res).toBeInstanceOf(Response);
-  });
-
-  it("parseComplexFilters rejects unknown filter fields", async () => {
-    const res = parseComplexFilters([
-      { field: "unknown.field", op: "eq", value: "x" },
-    ]);
-    expect(res).toBeInstanceOf(Response);
-    if (res instanceof Response) {
-      const body = (await res.json()) as TestEnvelope;
-      expect(body.error?.details?.field).toBe("unknown.field");
-    }
-  });
-
-  it("parseComplexFilters omits value when not provided", () => {
-    const result = parseComplexFilters([{ field: "page.path", op: "exists" }]);
-    expect(result).toEqual([{ field: "page.path", op: "exists" }]);
   });
 
   it("validateDimension returns the dimension when valid", () => {

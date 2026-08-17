@@ -1,3 +1,5 @@
+import { type FilterDocument } from "./filters";
+import { EMPTY_FILTER_DOCUMENT } from "./helpers";
 import { assertOperationAllowed } from "./policy";
 import type {
   AnalyticsResult,
@@ -5,7 +7,6 @@ import type {
   OverviewQuery,
   OverviewResult,
   QueryContext,
-  QueryFilterSet,
   QuerySource,
   QueryTime,
   TrendPoint,
@@ -16,7 +17,7 @@ import type {
 export interface OverviewReaderInput {
   readonly context: QueryContext;
   readonly time: QueryTime;
-  readonly filters: QueryFilterSet;
+  readonly filters: FilterDocument;
 }
 
 export interface TrendReaderInput extends OverviewReaderInput {
@@ -53,7 +54,7 @@ export async function executeOverview(
   const operationError = assertOperationAllowed(input.context, "overview");
   if (operationError) return denied(operationError);
 
-  const filters = input.filters ?? { version: 1, clauses: [] };
+  const filters = input.filters ?? EMPTY_FILTER_DOCUMENT;
   const current = await reader.readOverview({
     context: input.context,
     time: input.time,
@@ -106,7 +107,7 @@ export async function executeTrend(
   const result = await reader.readTrend({
     context: input.context,
     time: input.time,
-    filters: input.filters ?? { version: 1, clauses: [] },
+    filters: input.filters ?? EMPTY_FILTER_DOCUMENT,
     interval: input.interval,
   });
   return {

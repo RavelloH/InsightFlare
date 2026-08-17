@@ -1,3 +1,4 @@
+import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
   executeQueryOperation,
   siteQueryContext,
@@ -8,14 +9,13 @@ import {
   badRequest,
   jsonResponseWith,
   mapDimensionRows,
-  parseFilters,
   parseLimit,
   parseWindow,
   type ResponseContext,
   withoutGeoFilter,
 } from "./core";
 import { utmDimensionDefinition } from "./core-dimensions";
-import { legacyFilters, toQueryTime } from "./overview-contract-adapter";
+import { toQueryTime } from "./overview-contract-adapter";
 import { queryDimensionAggregate } from "./pages";
 
 export type SimpleDimensionKey =
@@ -62,7 +62,10 @@ export async function handleSimpleDimensionContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const definition = dimensionDefinition(dimension);
-  const rawFilters = parseFilters(url);
+  const rawFilters = parseFilterUrlForAudience(
+    queryContext.policy.audience,
+    url,
+  );
   const filters = definition.ignoreGeo
     ? withoutGeoFilter(rawFilters)
     : rawFilters;
@@ -71,7 +74,7 @@ export async function handleSimpleDimensionContract(
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => ({
       value: mapDimensionRows(

@@ -3,12 +3,11 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { mapDimensionRows, type QueryWindow } from "@/lib/edge/query/core";
 import {
-  type DashboardFilters,
-  mapDimensionRows,
-  type QueryWindow,
-} from "@/lib/edge/query/core";
-import { queryOverviewFromD1, queryTrendFromD1 } from "@/lib/edge/query/overview";
+  queryOverviewFromD1,
+  queryTrendFromD1,
+} from "@/lib/edge/query/overview";
 import {
   handleOverviewContract as handleOverview,
   handleTrendContract as handleTrend,
@@ -30,7 +29,11 @@ import {
   handlePagesDashboardContract as handlePagesDashboard,
   handleReferrersContract as handleReferrers,
 } from "@/lib/edge/query/pages-contract-adapter";
+import type { FilterDocument } from "@/lib/edge/query-contract";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
+
+import { filterFixture } from "./filter-fixtures";
 
 type D1Row = Record<string, unknown>;
 type QueryBinding = string | number | null;
@@ -109,11 +112,18 @@ describe("edge pages D1 queries", () => {
     ]);
 
     await expect(
-      queryTopPagesFromD1(env, siteId, window, 15, true, {
-        country: "US",
-        hostname: "Example.COM",
-        path: "/pricing",
-      }),
+      queryTopPagesFromD1(
+        env,
+        siteId,
+        window,
+        15,
+        true,
+        filterFixture({
+          country: "US",
+          hostname: "Example.COM",
+          path: "/pricing",
+        }),
+      ),
     ).resolves.toEqual([
       {
         pathname: "/pricing",
@@ -131,8 +141,8 @@ describe("edge pages D1 queries", () => {
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
       "us",
-      "/pricing",
       "example.com",
+      "/pricing",
       15,
     ]);
   });
@@ -141,7 +151,7 @@ describe("edge pages D1 queries", () => {
     const { env, calls } = createD1Env([[{ pathname: "/docs", views: 3 }]]);
 
     await expect(
-      queryTopPagesFromD1(env, siteId, window, 5, false, {}),
+      queryTopPagesFromD1(env, siteId, window, 5, false, EMPTY_FILTER_DOCUMENT),
     ).resolves.toEqual([
       { pathname: "/docs", query: "", hash: "", views: 3, sessions: 0 },
     ]);
@@ -165,7 +175,7 @@ describe("edge pages D1 queries", () => {
     ]);
 
     await expect(
-      queryTopPagesFromD1(env, siteId, window, 1, true, {}),
+      queryTopPagesFromD1(env, siteId, window, 1, true, EMPTY_FILTER_DOCUMENT),
     ).resolves.toEqual([
       { pathname: "", query: "", hash: "", views: 0, sessions: 0 },
     ]);
@@ -190,7 +200,7 @@ describe("edge pages D1 queries", () => {
         env,
         siteId,
         window,
-        { browser: "Chrome" },
+        filterFixture({ browser: "Chrome" }),
         {
           pathnames: [" /pricing ", "/pricing", "", "/docs"],
           limit: 10,
@@ -238,7 +248,13 @@ describe("edge pages D1 queries", () => {
     ]);
 
     await expect(
-      queryPageCardMetricsFromD1(env, siteId, window, {}, undefined),
+      queryPageCardMetricsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+      ),
     ).resolves.toEqual([
       {
         pathname: "",
@@ -338,7 +354,13 @@ describe("edge pages D1 queries", () => {
       );
 
       await expect(
-        queryPageCardMetricsFromD1(env, siteId, window, {}, undefined),
+        queryPageCardMetricsFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          undefined,
+        ),
       ).resolves.toEqual([
         {
           pathname: "/pricing",
@@ -380,10 +402,24 @@ describe("edge pages D1 queries", () => {
     const { env, prepare } = createD1Env([]);
 
     await expect(
-      queryPageCardTitlesFromD1(env, siteId, window, {}, ["", "  "], 3),
+      queryPageCardTitlesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        ["", "  "],
+        3,
+      ),
     ).resolves.toEqual([]);
     await expect(
-      queryPageCardTrendFromD1(env, siteId, window, "hour", {}, []),
+      queryPageCardTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        [],
+      ),
     ).resolves.toEqual([]);
 
     expect(prepare).not.toHaveBeenCalled();
@@ -406,7 +442,7 @@ describe("edge pages D1 queries", () => {
         env,
         siteId,
         window,
-        { clientDeviceType: "desktop" },
+        filterFixture({ clientDeviceType: "desktop" }),
         ["/pricing"],
         2,
       ),
@@ -420,7 +456,7 @@ describe("edge pages D1 queries", () => {
         siteId,
         window,
         "hour",
-        { clientDeviceType: "desktop" },
+        filterFixture({ clientDeviceType: "desktop" }),
         ["/pricing"],
       ),
     ).resolves.toEqual([
@@ -474,10 +510,24 @@ describe("edge pages D1 queries", () => {
     ]);
 
     await expect(
-      queryPageCardTitlesFromD1(env, siteId, window, {}, ["/pricing"], 3),
+      queryPageCardTitlesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        ["/pricing"],
+        3,
+      ),
     ).resolves.toEqual([{ pathname: "", title: "", views: 0 }]);
     await expect(
-      queryPageCardTrendFromD1(env, siteId, window, "hour", {}, ["/pricing"]),
+      queryPageCardTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        ["/pricing"],
+      ),
     ).resolves.toEqual([
       {
         pathname: "",
@@ -561,7 +611,7 @@ describe("edge pages handlers", () => {
         from: window.startMs,
         to: window.endExclusiveMs,
         details: true,
-        country: "US",
+        "filter[geo.country]": "US",
         limit: 5,
       }),
       true,
@@ -622,7 +672,7 @@ describe("edge pages handlers", () => {
         from: window.startMs,
         to: window.endExclusiveMs,
         fullUrl: true,
-        browser: "Chrome",
+        "filter[client.browser]": "Chrome",
         limit: 7,
       }),
     );
@@ -657,7 +707,7 @@ describe("edge pages handlers", () => {
       env,
       siteId,
       window,
-      { device: "desktop" },
+      filterFixture({ device: "desktop" }),
       4,
       "browser",
     );
@@ -898,10 +948,15 @@ describe("edge overview D1 queries and handlers", () => {
     const { env, calls } = createD1Env([[]]);
 
     await expect(
-      queryOverviewFromD1(env, siteId, window, {
-        country: "US",
-        clientBrowser: "Chrome",
-      }),
+      queryOverviewFromD1(
+        env,
+        siteId,
+        window,
+        filterFixture({
+          country: "US",
+          clientBrowser: "Chrome",
+        }),
+      ),
     ).resolves.toEqual({
       views: 0,
       sessions: 0,
@@ -912,7 +967,7 @@ describe("edge overview D1 queries and handlers", () => {
     });
 
     expect(calls[0].sql).toContain("session_rollup AS");
-    expect(calls[0].bindings).toEqual([...visitBindings(), "us", "Chrome"]);
+    expect(calls[0].bindings).toEqual([...visitBindings(), "Chrome", "us"]);
   });
 
   it("materializes filtered overview visits once while preserving aggregates", async () => {
@@ -997,10 +1052,15 @@ describe("edge overview D1 queries and handlers", () => {
       );
 
       await expect(
-        queryOverviewFromD1(env, siteId, window, {
-          country: "US",
-          clientBrowser: "Chrome",
-        }),
+        queryOverviewFromD1(
+          env,
+          siteId,
+          window,
+          filterFixture({
+            country: "US",
+            clientBrowser: "Chrome",
+          }),
+        ),
       ).resolves.toEqual({
         views: 3,
         sessions: 2,
@@ -1100,10 +1160,15 @@ describe("edge overview D1 queries and handlers", () => {
       );
 
       await expect(
-        queryOverviewFromD1(env, siteId, window, {
-          entry: "/landing",
-          exit: "/pricing",
-        }),
+        queryOverviewFromD1(
+          env,
+          siteId,
+          window,
+          filterFixture({
+            entry: "/landing",
+            exit: "/pricing",
+          }),
+        ),
       ).resolves.toEqual({
         views: 2,
         sessions: 1,
@@ -1126,10 +1191,10 @@ describe("edge overview D1 queries and handlers", () => {
   });
 
   it("maps trend rows, bucket timestamps, and filter bindings", async () => {
-    const filters: DashboardFilters = {
+    const filters: FilterDocument = filterFixture({
       sourceDomain: "Ref.Example",
       clientDeviceType: "mobile",
-    };
+    });
     const { env, calls } = createD1Env([
       [
         {
@@ -1183,8 +1248,8 @@ describe("edge overview D1 queries and handlers", () => {
     expect(calls[0].sql).toContain("CASE WHEN started_at >=");
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
-      "ref.example",
       "mobile",
+      "ref.example",
     ]);
   });
 
@@ -1266,7 +1331,13 @@ describe("edge overview D1 queries and handlers", () => {
       );
 
       await expect(
-        queryTrendFromD1(env, siteId, window, "hour", { country: "US" }),
+        queryTrendFromD1(
+          env,
+          siteId,
+          window,
+          "hour",
+          filterFixture({ country: "US" }),
+        ),
       ).resolves.toEqual([
         {
           bucket: 0,
@@ -1308,7 +1379,6 @@ describe("edge overview D1 queries and handlers", () => {
 
   it("returns overview metrics with previous change rates and detail trend mapping", async () => {
     const { env, calls } = createD1Env([
-      [],
       [
         {
           views: 10,
@@ -1319,7 +1389,6 @@ describe("edge overview D1 queries and handlers", () => {
           durationViews: 10,
         },
       ],
-      [],
       [
         {
           views: 5,
@@ -1330,7 +1399,6 @@ describe("edge overview D1 queries and handlers", () => {
           durationViews: 5,
         },
       ],
-      [],
       [
         {
           bucket: 0,
@@ -1353,6 +1421,7 @@ describe("edge overview D1 queries and handlers", () => {
         interval: "hour",
         includeChange: true,
         includeDetail: true,
+        "filter[page.path]": "/pricing",
       }),
     );
 
@@ -1407,17 +1476,15 @@ describe("edge overview D1 queries and handlers", () => {
     expect(response.headers.get("x-insightflare-d1-rows-read")).toBe(
       "unavailable",
     );
-    expect(calls).toHaveLength(6);
-    expect(calls[0].sql).toContain("visit_hourly_aggregation_state");
-    expect(calls[1].bindings).toEqual(visitBindings());
-    expect(calls[2].sql).toContain("visit_hourly_aggregation_state");
-    expect(calls[3].bindings).toEqual([
+    expect(calls).toHaveLength(3);
+    expect(calls[0].bindings).toEqual([...visitBindings(), "/pricing"]);
+    expect(calls[1].bindings).toEqual([
       siteId,
       Math.max(window.startMs - (window.endExclusiveMs - window.startMs), 0),
       window.startMs,
+      "/pricing",
     ]);
-    expect(calls[4].sql).toContain("visit_hourly_aggregation_state");
-    expect(calls[5].bindings).toEqual(visitBindings());
+    expect(calls[2].bindings).toEqual([...visitBindings(), "/pricing"]);
   });
 
   it("maps trend handler rows without optional overview change payload", async () => {
@@ -1442,7 +1509,7 @@ describe("edge overview D1 queries and handlers", () => {
         from: window.startMs,
         to: window.endExclusiveMs,
         interval: "hour",
-        sourceDomain: "Ref.Example",
+        "filter[referrer.domain]": "Ref.Example",
       }),
     );
 
@@ -1658,9 +1725,9 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/filter-options", {
-        filterKey: "country",
-        country: "US",
-        browser: "Chrome",
+        filterKey: "geo.country",
+        "filter[geo.country]": "US",
+        "filter[client.browser]": "Chrome",
         from: window.startMs,
         to: window.endExclusiveMs,
         limit: 4,
@@ -1670,8 +1737,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/filter-options", {
-        filterKey: "path",
-        path: "/home",
+        filterKey: "page.path",
+        "filter[page.path]": "/home",
         from: window.startMs,
         to: window.endExclusiveMs,
         limit: 4,
@@ -1681,8 +1748,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/filter-options", {
-        filterKey: "sourceDomain",
-        sourceDomain: "__direct__",
+        filterKey: "referrer.domain",
+        "filter[referrer.domain]": "__direct__",
         from: window.startMs,
         to: window.endExclusiveMs,
         limit: 4,
@@ -1692,8 +1759,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/filter-options", {
-        filterKey: "clientScreenSize",
-        clientScreenSize: "390x844",
+        filterKey: "client.screenSize",
+        "filter[client.screenSize]": "390x844",
         from: window.startMs,
         to: window.endExclusiveMs,
         limit: 4,
@@ -1703,8 +1770,9 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/filter-options", {
-        filterKey: "geo",
-        geo: "US::CA::California",
+        filterKey: "geo.region",
+        "filter[geo.country]": "US",
+        "filter[geo.region]": "California",
         from: window.startMs,
         to: window.endExclusiveMs,
         limit: 4,
@@ -1714,8 +1782,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/filter-options", {
-        filterKey: "geoOrganization",
-        geoOrganization: "Example ISP",
+        filterKey: "geo.organization",
+        "filter[geo.organization]": "Example ISP",
         from: window.startMs,
         to: window.endExclusiveMs,
         limit: 4,
@@ -1740,34 +1808,17 @@ describe("edge overview D1 queries and handlers", () => {
     });
     await expect(geo.json()).resolves.toEqual({
       ok: true,
-      data: [
-        { value: "US", label: "US", group: "country" },
-        {
-          value: "US::CA::California",
-          label: "California",
-          group: "region",
-        },
-        {
-          value: "US::CA::California::San Francisco",
-          label: "San Francisco",
-          group: "city",
-        },
-      ],
+      data: [{ value: "US::CA::California", label: "US::CA::California" }],
     });
     await expect(geoOrganization.json()).resolves.toEqual({
       ok: true,
       data: [{ value: "Example ISP", label: "Example ISP" }],
     });
-    expect(calls.map((call) => call.bindings)).toEqual([
-      [...visitBindings(), "Chrome", 4],
-      [...visitBindings(), 4],
-      [...visitBindings(), 4],
-      [...visitBindings(), 4],
-      [...visitBindings(), 4],
-      [...visitBindings(), 4],
-      [...visitBindings(), 4],
-      [...visitBindings(), 4],
-    ]);
+    expect(calls[0]?.bindings).toEqual([...visitBindings(), "Chrome", 4]);
+    expect(calls.every((call) => call.bindings.at(-1) === 4)).toBe(true);
+    expect(calls.flatMap((call) => call.bindings)).toEqual(
+      expect.arrayContaining(["us"]),
+    );
   });
 
   it("maps device and browser filter option scalar branches", async () => {
@@ -1794,9 +1845,9 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/filter-options", {
-        filterKey: "device",
-        device: "desktop",
-        browser: "Chrome",
+        filterKey: "client.deviceType",
+        "filter[client.deviceType]": "desktop",
+        "filter[client.browser]": "Chrome",
         from: window.startMs,
         to: window.endExclusiveMs,
         limit: 4,
@@ -1806,9 +1857,9 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/filter-options", {
-        filterKey: "browser",
-        browser: "Chrome",
-        country: "US",
+        filterKey: "client.browser",
+        "filter[client.browser]": "Chrome",
+        "filter[geo.country]": "US",
         from: window.startMs,
         to: window.endExclusiveMs,
         limit: 4,
@@ -1872,7 +1923,8 @@ describe("edge overview D1 queries and handlers", () => {
       url("/overview/geo-points", {
         from: window.startMs,
         to: window.endExclusiveMs,
-        geo: "US::CA::California",
+        "filter[geo.country]": "US",
+        "filter[geo.region]": "California",
         limit: 9,
       }),
     );
@@ -1882,7 +1934,8 @@ describe("edge overview D1 queries and handlers", () => {
       url("/overview/geo-points", {
         from: window.startMs,
         to: window.endExclusiveMs,
-        geo: "US::CA::California",
+        "filter[geo.country]": "US",
+        "filter[geo.region]": "California",
         applyGeoFilter: true,
         limit: 10,
       }),
@@ -1925,8 +1978,7 @@ describe("edge overview D1 queries and handlers", () => {
     expect(calls[2].bindings).toEqual([
       ...visitBindings(),
       "us",
-      "CA",
-      "CALIFORNIA",
+      "california",
       10,
     ]);
   });

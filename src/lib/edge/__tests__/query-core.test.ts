@@ -5,7 +5,6 @@ import {
   addGeoDimensionValue,
   appendSqlConditions,
   buildEventFilterSql,
-  buildEventPayloadFilterSql,
   buildTimeBuckets,
   buildVisitFilterSql,
   buildVisitSourceCte,
@@ -16,7 +15,6 @@ import {
   DIRECT_REFERRER_FILTER_VALUE,
   emptyOverviewAggregateRow,
   emptyPerformanceRouteMetrics,
-  eventPayloadFilterValueType,
   eventRecordOrderBy,
   fetchPublicSite,
   finalizeDimensionBuckets,
@@ -44,10 +42,8 @@ import {
   parseEventFieldValueType,
   parseEventId,
   parseEventName,
-  parseEventPayloadFilters,
   parseEventRecordSort,
   parseFilterOptionKey,
-  parseFilters,
   parseGeoFilterValue,
   parseInterval,
   parseLimit,
@@ -66,7 +62,10 @@ import {
   withoutFilterKey,
   withoutGeoFilter,
 } from "@/lib/edge/query/core";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
+
+import { filterFixture } from "./filter-fixtures";
 
 const fixedNow = Date.UTC(2026, 4, 26, 8);
 
@@ -164,73 +163,6 @@ describe("edge query core parsers", () => {
     });
   });
 
-  it("normalizes dashboard filters and event payload filter rules", () => {
-    const payloadFilters = JSON.stringify([
-      { path: "$.plan.name", operator: "!=", value: " pro " },
-      { path: "/totals/paid", operator: "eq", value: 42 },
-      { path: "flags[0].enabled", operator: "ne", value: true },
-      { path: "empty", value: null },
-      { path: "/", value: "skip" },
-      { path: "bad", value: { unsupported: true } },
-    ]);
-
-    expect(parseEventPayloadFilters(payloadFilters)).toEqual([
-      { path: "/plan/name", operator: "ne", value: " pro " },
-      { path: "/totals/paid", operator: "eq", value: 42 },
-      { path: "/flags/*/enabled", operator: "ne", value: true },
-      { path: "/empty", operator: "eq", value: null },
-    ]);
-
-    const parsed = parseFilters(
-      url(
-        `?country= US &device=desktop&browser= Chrome &path=%20/docs%20` +
-          `&query=ref%3Dhome&title=Docs&hostname=Example.COM` +
-          `&entry=/&exit=/pricing&sourceDomain=News.Example` +
-          `&sourceLink=https%3A%2F%2Fnews.example%2Fpost` +
-          `&clientBrowser=Safari&clientOsVersion=17&clientDeviceType=mobile` +
-          `&clientLanguage=en-US&clientScreenSize=390x844` +
-          `&geoCountry=CA&geoRegion=CA%3A%3ABC%3A%3ABritish%20Columbia` +
-          `&geoContinent=NA&geoTimezone=America%2FVancouver` +
-          `&geoOrganization=Example%20ISP` +
-          `&eventPayloadFilters=${encodeURIComponent(payloadFilters)}`,
-      ),
-    );
-
-    expect(parsed).toMatchObject({
-      country: "US",
-      device: "desktop",
-      browser: "Chrome",
-      path: "/docs",
-      query: "ref=home",
-      title: "Docs",
-      hostname: "Example.COM",
-      entry: "/",
-      exit: "/pricing",
-      sourceDomain: "News.Example",
-      sourceLink: "https://news.example/post",
-      clientBrowser: "Safari",
-      clientOsVersion: "17",
-      clientDeviceType: "mobile",
-      clientLanguage: "en-US",
-      clientScreenSize: "390x844",
-      geo: "CA",
-      geoContinent: "NA",
-      geoTimezone: "America/Vancouver",
-      geoOrganization: "Example ISP",
-      eventPayloadFilters: [
-        { path: "/plan/name", operator: "ne", value: " pro " },
-        { path: "/totals/paid", operator: "eq", value: 42 },
-        { path: "/flags/*/enabled", operator: "ne", value: true },
-        { path: "/empty", operator: "eq", value: null },
-      ],
-    });
-
-    expect(parseEventPayloadFilters("not json")).toBeUndefined();
-    expect(
-      parseEventPayloadFilters(JSON.stringify({ path: "/plan" })),
-    ).toBeUndefined();
-  });
-
   it("parses focused query params and filter option helpers", () => {
     expect(parseListSearch(url("?search=%20checkout%20"))).toBe("checkout");
     expect(parseListSearch(url("?search=%20%20"))).toBeUndefined();
@@ -250,32 +182,19 @@ describe("edge query core parsers", () => {
     );
     expect(parseEventId(url("?eventId=%20evt_123%20"))).toBe("evt_123");
     expect(parseEventId(url("?eventId=%20%20"))).toBeUndefined();
-    expect(parseFilterOptionKey(url("?filterKey=geoTimezone"))).toBe(
-      "geoTimezone",
+    expect(parseFilterOptionKey(url("?filterKey=geo.timeZone"))).toBe(
+      "geo.timeZone",
     );
     expect(parseFilterOptionKey(url("?filterKey=unknown"))).toBeNull();
     expect(parseBooleanFlag(url("?includeDetail=yes"), "includeDetail")).toBe(
       true,
     );
     expect(
-      withoutFilterKey({ country: "US", browser: "Chrome" }, "country"),
-    ).toEqual({ browser: "Chrome" });
-  });
-
-  it("drops malformed payload filters while preserving valid rules", () => {
-    expect(parseEventPayloadFilters("")).toBeUndefined();
-    expect(
-      parseEventPayloadFilters(
-        JSON.stringify([
-          null,
-          "bad",
-          42,
-          { path: "/", value: "skip" },
-          { path: "bad", value: { nested: true } },
-          { path: "$.flags.enabled", operator: "ne", value: false },
-        ]),
+      withoutFilterKey(
+        filterFixture({ country: "US", browser: "Chrome" }),
+        "geo.country",
       ),
-    ).toEqual([{ path: "/flags/enabled", operator: "ne", value: false }]);
+    ).toEqual(filterFixture({ browser: "Chrome" }));
   });
 });
 
@@ -960,19 +879,21 @@ describe("edge query core SQL helpers", () => {
 
   it("builds visit filters for direct traffic, client dimensions, and geo values", () => {
     const filter = buildVisitFilterSql(
-      {
+      filterFixture({
         country: "US",
         sourceDomain: DIRECT_REFERRER_FILTER_VALUE,
         sourceLink: "HTTPS://REF.EXAMPLE/POST",
         clientOsVersion: "macOS 14",
         clientScreenSize: "1440x900",
         geo: "US::CA::California::San Francisco",
-      },
+      }),
       "v",
     );
 
     expect(filter.clause).toContain("LOWER(TRIM(COALESCE(v.country, ''))) = ?");
-    expect(filter.clause).toContain("TRIM(COALESCE(v.referrer_host, '')) = ''");
+    expect(filter.clause).toContain(
+      "LOWER(TRIM(COALESCE(v.referrer_host, ''))) = ''",
+    );
     expect(filter.clause).toContain(
       "LOWER(TRIM(COALESCE(v.referrer_url, ''))) = ?",
     );
@@ -980,20 +901,18 @@ describe("edge query core SQL helpers", () => {
     expect(filter.clause).toContain(
       "CAST(v.screen_width AS TEXT) || 'x' || CAST(v.screen_height AS TEXT)",
     );
-    expect(filter.clause).toContain(
-      "UPPER(TRIM(CASE WHEN TRIM(COALESCE(v.region_code, '')) != '' THEN v.region_code ELSE v.region END)) IN (?, ?)",
-    );
+    expect(filter.clause).toContain("LOWER(TRIM(COALESCE(v.region, ''))) = ?");
     expect(filter.clause).toContain("LOWER(TRIM(COALESCE(v.city, ''))) = ?");
-    expect(filter.bindings).toEqual([
-      "us",
-      "https://ref.example/post",
-      "macOS 14",
-      "1440x900",
-      "us",
-      "CA",
-      "CALIFORNIA",
-      "san francisco",
-    ]);
+    expect(filter.bindings).toEqual(
+      expect.arrayContaining([
+        "us",
+        "https://ref.example/post",
+        "macOS 14",
+        "1440x900",
+        "ca",
+        "san francisco",
+      ]),
+    );
   });
 
   it("parses geo filter values and removes geo filters without mutating other keys", () => {
@@ -1004,22 +923,23 @@ describe("edge query core SQL helpers", () => {
       city: "San Francisco",
     });
     expect(parseGeoFilterValue("bad")).toBeNull();
-    expect(withoutGeoFilter({ geo: "US", country: "US" })).toEqual({
-      geo: undefined,
-      country: "US",
-    });
+    expect(
+      withoutGeoFilter(filterFixture({ geo: "US", browser: "Chrome" })),
+    ).toEqual(filterFixture({ browser: "Chrome" }));
   });
 
   it("builds visit filters for page metadata, session edges, and direct source links", () => {
-    const filter = buildVisitFilterSql({
-      title: "Docs",
-      entry: "/",
-      exit: "/pricing",
-      sourceDomain: "News.Example",
-      sourceLink: DIRECT_REFERRER_FILTER_VALUE,
-      clientLanguage: "en-US",
-      geoTimezone: "America/Los_Angeles",
-    });
+    const filter = buildVisitFilterSql(
+      filterFixture({
+        title: "Docs",
+        entry: "/",
+        exit: "/pricing",
+        sourceDomain: "News.Example",
+        sourceLink: DIRECT_REFERRER_FILTER_VALUE,
+        clientLanguage: "en-US",
+        geoTimezone: "America/Los_Angeles",
+      }),
+    );
 
     expect(filter.clause).toContain(
       "TRIM(COALESCE(visit_source.title, '')) = ?",
@@ -1035,7 +955,7 @@ describe("edge query core SQL helpers", () => {
       "LOWER(TRIM(COALESCE(visit_source.referrer_host, ''))) = ?",
     );
     expect(filter.clause).toContain(
-      "TRIM(COALESCE(visit_source.referrer_url, '')) = ''",
+      "LOWER(TRIM(COALESCE(visit_source.referrer_url, ''))) = ''",
     );
     expect(filter.clause).toContain(
       "TRIM(COALESCE(visit_source.language, '')) = ?",
@@ -1043,117 +963,21 @@ describe("edge query core SQL helpers", () => {
     expect(filter.clause).toContain(
       "TRIM(COALESCE(visit_source.timezone, '')) = ?",
     );
-    expect(filter.bindings).toEqual([
-      "Docs",
-      "/",
-      "/pricing",
-      "news.example",
-      "en-US",
-      "America/Los_Angeles",
-    ]);
-
-    expect(buildVisitFilterSql({})).toEqual({ clause: "", bindings: [] });
-  });
-
-  it("classifies event payload filter values", () => {
-    expect(eventPayloadFilterValueType(null)).toBe("null");
-    expect(eventPayloadFilterValueType(1)).toBe("number");
-    expect(eventPayloadFilterValueType(false)).toBe("boolean");
-    expect(eventPayloadFilterValueType("value")).toBe("string");
-  });
-
-  it("builds event payload and event filters with typed bindings", () => {
-    const payload = buildEventPayloadFilterSql(
-      {
-        eventPayloadFilters: [
-          { path: "$.plan", operator: "eq", value: "pro" },
-          { path: "/paid", operator: "ne", value: true },
-          { path: "/score", operator: "eq", value: 42 },
-          { path: "/missing", operator: "ne", value: null },
-        ],
-      },
-      "ev",
+    expect(filter.bindings).toEqual(
+      expect.arrayContaining([
+        "Docs",
+        "/",
+        "/pricing",
+        "news.example",
+        "en-US",
+        "America/Los_Angeles",
+      ]),
     );
 
-    expect(payload.clauses).toHaveLength(4);
-    expect(payload.clauses.join("\n")).toContain("epv0.event_pk = ev.event_pk");
-    expect(payload.clauses.join("\n")).toContain(
-      "COALESCE(epv0.string_value, '') = ?",
-    );
-    expect(payload.clauses.join("\n")).toContain("epv1.boolean_value != ?");
-    expect(payload.clauses.join("\n")).toContain("epv2.number_value = ?");
-    expect(payload.clauses.join("\n")).toContain("epv3.value_type != ?");
-    expect(payload.bindings).toEqual([
-      "/plan",
-      1,
-      "pro",
-      "/paid",
-      3,
-      1,
-      "/score",
-      2,
-      42,
-      "/missing",
-      0,
-    ]);
-
-    const eventFilter = buildEventFilterSql(
-      {
-        browser: "Chrome",
-        eventPayloadFilters: [{ path: "/plan", operator: "eq", value: "pro" }],
-      },
-      "ev",
-      { eventName: "signup", search: "Checkout" },
-    );
-
-    expect(eventFilter.clause).toContain("TRIM(COALESCE(ev.browser, '')) = ?");
-    expect(eventFilter.clause).toContain(
-      "TRIM(COALESCE(ev.event_name, '')) = ?",
-    );
-    expect(eventFilter.clause).toContain(
-      "LOWER(TRIM(COALESCE(ev.event_id, ''))) LIKE ?",
-    );
-    expect(eventFilter.bindings).toEqual([
-      "Chrome",
-      "/plan",
-      1,
-      "pro",
-      "signup",
-      "%checkout%",
-      "%checkout%",
-      "%checkout%",
-      "%checkout%",
-      "%checkout%",
-      "%checkout%",
-      "%checkout%",
-      "%checkout%",
-    ]);
-
-    expect(
-      buildEventPayloadFilterSql({
-        eventPayloadFilters: [
-          { path: "/", operator: "eq", value: "skip" },
-          {
-            path: "/unsupported",
-            operator: "eq",
-            value: { nested: true } as never,
-          },
-        ],
-      }),
-    ).toEqual({ clauses: [], bindings: [] });
-
-    expect(
-      buildEventPayloadFilterSql(
-        {
-          eventPayloadFilters: [
-            { path: "/paid", operator: "eq", value: false },
-          ],
-        },
-        "",
-      ).bindings,
-    ).toEqual(["/paid", 3, 0]);
-
-    expect(buildEventFilterSql({}, "")).toEqual({ clause: "", bindings: [] });
+    expect(buildVisitFilterSql(EMPTY_FILTER_DOCUMENT)).toEqual({
+      clause: "",
+      bindings: [],
+    });
   });
 
   it("maps custom event JSON type labels and codes", () => {

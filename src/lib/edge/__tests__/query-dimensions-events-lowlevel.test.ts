@@ -8,11 +8,7 @@ import {
   createInvocationLogger,
   runWithInvocationLogger,
 } from "@/lib/edge/observability-logger";
-import type {
-  DashboardFilters,
-  EventRecordRow,
-  QueryWindow,
-} from "@/lib/edge/query/core";
+import type { EventRecordRow, QueryWindow } from "@/lib/edge/query/core";
 import {
   queryOverviewClientDimensionsFromD1,
   queryOverviewGeoDimensionsFromD1,
@@ -43,7 +39,11 @@ import {
   queryEventRecordDetailFromD1,
   serializeEventRecordCursor,
 } from "@/lib/edge/query/events-records";
+import type { FilterDocument } from "@/lib/edge/query-contract";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
+
+import { filterFixture } from "./filter-fixtures";
 
 vi.mock("@/lib/edge/custom-event-read", () => ({
   readCustomEventDetail: vi.fn(),
@@ -156,10 +156,24 @@ describe("edge query dimensions low-level coverage", () => {
     ]);
 
     await expect(
-      queryVisitDimensionFromD1(env, siteId, window, {}, 2, "country"),
+      queryVisitDimensionFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        "country",
+      ),
     ).resolves.toEqual([{ value: "", views: 0, sessions: 0, visitors: 0 }]);
     await expect(
-      queryReferrersFromD1(env, siteId, window, {}, 3, false),
+      queryReferrersFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        3,
+        false,
+      ),
     ).resolves.toEqual([{ referrer: "", views: 0, sessions: 0, visitors: 0 }]);
 
     expect(calls[0].bindings).toEqual([...visitBindings(), 2]);
@@ -168,7 +182,7 @@ describe("edge query dimensions low-level coverage", () => {
   });
 
   it("queries session path dimensions with set-based boundary ranking and maps fallback row values", async () => {
-    const filters: DashboardFilters = { browser: "Chrome" };
+    const filters: FilterDocument = filterFixture({ browser: "Chrome" });
     const { env, calls } = createD1Env([
       [{ value: null, views: "4", sessions: undefined, visitors: null }],
       [{ value: "/entry", views: 2, sessions: "1", visitors: "1" }],
@@ -267,13 +281,27 @@ describe("edge query dimensions low-level coverage", () => {
 
     try {
       await expect(
-        querySessionPathDimensionFromD1(env, siteId, window, {}, 10, "entry"),
+        querySessionPathDimensionFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          10,
+          "entry",
+        ),
       ).resolves.toEqual([
         { value: "/entry", views: 1, sessions: 1, visitors: 1 },
         { value: "/pricing", views: 1, sessions: 1, visitors: 1 },
       ]);
       await expect(
-        querySessionPathDimensionFromD1(env, siteId, window, {}, 10, "exit"),
+        querySessionPathDimensionFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          10,
+          "exit",
+        ),
       ).resolves.toEqual([
         { value: "/exit", views: 1, sessions: 1, visitors: 1 },
         { value: "/pricing", views: 1, sessions: 1, visitors: 1 },
@@ -333,7 +361,13 @@ describe("edge query dimensions low-level coverage", () => {
       ],
     ]);
 
-    const tabs = await queryPageTabsFromD1(env, siteId, window, {}, 10);
+    const tabs = await queryPageTabsFromD1(
+      env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      10,
+    );
 
     expect(tabs.path).toEqual([
       { value: "/first", views: 1, sessions: 1, visitors: 1 },
@@ -425,7 +459,7 @@ describe("edge query dimensions low-level coverage", () => {
       );
 
       await expect(
-        queryPageTabsFromD1(env, siteId, window, {}, 10),
+        queryPageTabsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, 10),
       ).resolves.toEqual({
         path: [
           { value: "/first", views: 1, sessions: 1, visitors: 1 },
@@ -512,7 +546,13 @@ describe("edge query dimensions low-level coverage", () => {
     ]);
 
     await expect(
-      queryOverviewClientDimensionsFromD1(env, siteId, window, {}, 10),
+      queryOverviewClientDimensionsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+      ),
     ).resolves.toMatchObject({
       browser: [{ value: "Safari", views: 1, sessions: 1, visitors: 0 }],
       osVersion: [
@@ -522,7 +562,13 @@ describe("edge query dimensions low-level coverage", () => {
       screenSize: [{ value: "390x844", views: 1, sessions: 1, visitors: 0 }],
     });
     await expect(
-      queryOverviewGeoDimensionsFromD1(env, siteId, window, {}, 10),
+      queryOverviewGeoDimensionsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+      ),
     ).resolves.toMatchObject({
       country: [],
       continent: [{ value: "NA", label: "NA" }],
@@ -563,7 +609,14 @@ describe("edge query event fields and records low-level coverage", () => {
     ]);
 
     await expect(
-      queryEventFieldsFromD1(env, siteId, window, {}, "Signup", 9),
+      queryEventFieldsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "Signup",
+        9,
+      ),
     ).resolves.toEqual([
       {
         path: "/plan",
@@ -582,7 +635,7 @@ describe("edge query event fields and records low-level coverage", () => {
         env,
         siteId,
         window,
-        {},
+        EMPTY_FILTER_DOCUMENT,
         "Signup",
         "/plan",
         "unsupported",
@@ -621,7 +674,7 @@ describe("edge query event fields and records low-level coverage", () => {
         env,
         siteId,
         window,
-        { clientDeviceType: "mobile" },
+        filterFixture({ clientDeviceType: "mobile" }),
         "Purchase",
         "/amount",
         "number",
@@ -1187,7 +1240,13 @@ describe("edge query event type overview low-level coverage", () => {
     const { env, calls } = createD1Env([[]]);
 
     await expect(
-      queryEventTypeOverviewFromD1(env, siteId, window, {}, "Signup"),
+      queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "Signup",
+      ),
     ).resolves.toEqual({
       summary: {
         events: 0,

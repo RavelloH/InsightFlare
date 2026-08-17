@@ -1,10 +1,10 @@
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
   DimensionRow,
   EventSummaryCards,
   EventSummaryRow,
+  FilterDocument,
   QueryWindow,
 } from "./core";
 import {
@@ -21,7 +21,7 @@ async function queryCustomEventNamesFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<DimensionRow[]> {
   const filter = buildVisitFilterSql(filters, "vc");
@@ -95,7 +95,7 @@ export async function queryEventTypeAggregate(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<DimensionRow[]> {
   return queryCustomEventNamesFromD1(env, siteId, window, filters, limit);
@@ -105,7 +105,7 @@ export async function queryEventSummaryMetricsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
 ): Promise<EventSummaryRow> {
   const source = buildEventFilteredSourceCte(siteId, window, filters);
   const [summaryRow] = await queryD1All<EventSummaryRow>(
@@ -134,7 +134,7 @@ export async function queryEventsSummaryFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
 ): Promise<{
   summary: EventSummaryRow;
   cards: EventSummaryCards;

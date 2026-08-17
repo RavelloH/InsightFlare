@@ -1,3 +1,4 @@
+import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
   executeQueryOperation,
   siteQueryContext,
@@ -6,14 +7,11 @@ import type { Env } from "@/lib/edge/types";
 
 import {
   badRequest,
-  dedupeFilterOptions,
   jsonResponseWith,
   mapDimensionRowsToFilterOptions,
-  mapGeoRowsToFilterOptions,
   mapReferrerRowsToFilterOptions,
   parseBooleanSearchParam,
   parseFilterOptionKey,
-  parseFilters,
   parseLimit,
   parseWindow,
   type ResponseContext,
@@ -25,15 +23,13 @@ import {
   buildOverviewClientDimensionTabs,
   buildOverviewGeoDimensionTabs,
 } from "./overview";
-import { legacyFilters, toQueryTime } from "./overview-contract-adapter";
+import { toQueryTime } from "./overview-contract-adapter";
 import {
   queryDimensionAggregate,
   queryPageTabsAggregate,
   queryReferrerAggregate,
 } from "./pages";
 
-/** Minimal typed boundary for the existing filter protocol. Filter AST meaning
- * remains deliberately delegated to the later filter redesign. */
 export async function handleFilterOptionsContract(
   env: Env,
   siteId: string,
@@ -45,26 +41,29 @@ export async function handleFilterOptionsContract(
   if (!filterKey) return badRequest("Invalid filter key");
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = withoutFilterKey(parseFilters(url), filterKey);
+  const filters = withoutFilterKey(
+    parseFilterUrlForAudience(queryContext.policy.audience, url),
+    filterKey,
+  );
   const result = await executeQueryOperation(
     "filter-options",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => {
       const limit = parseLimit(url, 200, 500);
       let data = [] as ReturnType<typeof mapDimensionRowsToFilterOptions>;
       if (
-        filterKey === "country" ||
-        filterKey === "device" ||
-        filterKey === "browser"
+        filterKey === "geo.country" ||
+        filterKey === "client.deviceType" ||
+        filterKey === "client.browser"
       ) {
         const expression = {
-          country: "country",
-          device: "device_type",
-          browser: "browser",
+          "geo.country": "country",
+          "client.deviceType": "device_type",
+          "client.browser": "browser",
         }[filterKey];
         data = mapDimensionRowsToFilterOptions(
           await queryDimensionAggregate(
@@ -77,7 +76,13 @@ export async function handleFilterOptionsContract(
           ),
         );
       } else if (
-        ["path", "title", "hostname", "entry", "exit"].includes(filterKey)
+        [
+          "page.path",
+          "page.title",
+          "page.hostname",
+          "session.entryPath",
+          "session.exitPath",
+        ].includes(filterKey)
       ) {
         const tabs = await queryPageTabsAggregate(
           env,
@@ -86,14 +91,27 @@ export async function handleFilterOptionsContract(
           filters,
           limit,
         );
+        const key = (
+          {
+            "page.path": "path",
+            "page.title": "title",
+            "page.hostname": "hostname",
+            "session.entryPath": "entry",
+            "session.exitPath": "exit",
+          } as Partial<Record<typeof filterKey, string>>
+        )[filterKey];
+        if (!key) return { value: { data } };
         const rows = (
           tabs as unknown as Record<
             string,
             Parameters<typeof mapDimensionRowsToFilterOptions>[0]
           >
-        )[filterKey];
+        )[key];
         data = mapDimensionRowsToFilterOptions(rows);
-      } else if (filterKey === "sourceDomain" || filterKey === "sourceLink") {
+      } else if (
+        filterKey === "referrer.domain" ||
+        filterKey === "referrer.url"
+      ) {
         data = mapReferrerRowsToFilterOptions(
           await queryReferrerAggregate(
             env,
@@ -101,17 +119,13 @@ export async function handleFilterOptionsContract(
             window,
             filters,
             limit,
-            filterKey === "sourceLink",
+            filterKey === "referrer.url",
           ),
         );
       } else if (
-        [
-          "clientBrowser",
-          "clientOsVersion",
-          "clientDeviceType",
-          "clientLanguage",
-          "clientScreenSize",
-        ].includes(filterKey)
+        ["client.osVersion", "client.language", "client.screenSize"].includes(
+          filterKey,
+        )
       ) {
         const tabs = await buildOverviewClientDimensionTabs(
           env,
@@ -121,18 +135,14 @@ export async function handleFilterOptionsContract(
           limit,
         );
         const key = {
-          clientBrowser: "browser",
-          clientOsVersion: "osVersion",
-          clientDeviceType: "deviceType",
-          clientLanguage: "language",
-          clientScreenSize: "screenSize",
+          "client.osVersion": "osVersion",
+          "client.language": "language",
+          "client.screenSize": "screenSize",
         }[
           filterKey as
-            | "clientBrowser"
-            | "clientOsVersion"
-            | "clientDeviceType"
-            | "clientLanguage"
-            | "clientScreenSize"
+            | "client.osVersion"
+            | "client.language"
+            | "client.screenSize"
         ];
         const rows = (
           tabs as unknown as Record<
@@ -141,21 +151,14 @@ export async function handleFilterOptionsContract(
           >
         )[key];
         data = mapDimensionRowsToFilterOptions(rows);
-      } else if (filterKey === "geo") {
-        const tabs = await buildOverviewGeoDimensionTabs(
-          env,
-          siteId,
-          window,
-          filters,
-          limit,
-        );
-        data = dedupeFilterOptions([
-          ...mapGeoRowsToFilterOptions(tabs.country, "country"),
-          ...mapGeoRowsToFilterOptions(tabs.region, "region"),
-          ...mapGeoRowsToFilterOptions(tabs.city, "city"),
-        ]);
       } else if (
-        ["geoContinent", "geoTimezone", "geoOrganization"].includes(filterKey)
+        [
+          "geo.region",
+          "geo.city",
+          "geo.continent",
+          "geo.timeZone",
+          "geo.organization",
+        ].includes(filterKey)
       ) {
         const tabs = await buildOverviewGeoDimensionTabs(
           env,
@@ -165,10 +168,19 @@ export async function handleFilterOptionsContract(
           limit,
         );
         const key = {
-          geoContinent: "continent",
-          geoTimezone: "timezone",
-          geoOrganization: "organization",
-        }[filterKey as "geoContinent" | "geoTimezone" | "geoOrganization"];
+          "geo.region": "region",
+          "geo.city": "city",
+          "geo.continent": "continent",
+          "geo.timeZone": "timezone",
+          "geo.organization": "organization",
+        }[
+          filterKey as
+            | "geo.region"
+            | "geo.city"
+            | "geo.continent"
+            | "geo.timeZone"
+            | "geo.organization"
+        ];
         const rows = (
           tabs as unknown as Record<
             string,
@@ -194,14 +206,16 @@ export async function handleOverviewGeoPointsContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseBooleanSearchParam(url, "applyGeoFilter")
-    ? parseFilters(url)
-    : withoutGeoFilter(parseFilters(url));
+    ? parseFilterUrlForAudience(queryContext.policy.audience, url)
+    : withoutGeoFilter(
+        parseFilterUrlForAudience(queryContext.policy.audience, url),
+      );
   const result = await executeQueryOperation(
     "geo-points",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => {
       const aggregate = await queryGeoPointAggregate(

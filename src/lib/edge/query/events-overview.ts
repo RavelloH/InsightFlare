@@ -1,9 +1,9 @@
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
   DimensionRow,
   EventSummaryRow,
+  FilterDocument,
   QueryWindow,
 } from "./core";
 import {
@@ -17,7 +17,7 @@ export async function queryEventTypeOverviewFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   eventName: string,
   options?: { includeBreakdowns?: boolean },
 ) {

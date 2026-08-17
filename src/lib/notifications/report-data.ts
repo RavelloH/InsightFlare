@@ -1,9 +1,10 @@
-import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
+import type { FilterDocument, QueryWindow } from "@/lib/edge/query/core";
 import { queryOverviewAggregate } from "@/lib/edge/query/overview";
 import {
   queryPagesAggregate,
   queryReferrerAggregate,
 } from "@/lib/edge/query/pages";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
 import {
@@ -404,9 +405,29 @@ async function loadReportDataUncached(
     timezone: input.timezone,
   });
   const [overview, pages, referrers] = await Promise.all([
-    loadOverviewAggregate(env, input.siteId, window, {}, input.cache),
-    queryPagesAggregate(env, input.siteId, window, {}, 5, false),
-    queryReferrerAggregate(env, input.siteId, window, {}, 5, false),
+    loadOverviewAggregate(
+      env,
+      input.siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      input.cache,
+    ),
+    queryPagesAggregate(
+      env,
+      input.siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      5,
+      false,
+    ),
+    queryReferrerAggregate(
+      env,
+      input.siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      5,
+      false,
+    ),
   ]);
   return {
     siteName: site.name,
@@ -481,7 +502,7 @@ async function loadMetricValueUncached(
     env,
     input.siteId,
     window,
-    {},
+    EMPTY_FILTER_DOCUMENT,
     input.cache,
   );
   return {
@@ -551,7 +572,7 @@ async function loadPreviousMetricValueUncached(
     env,
     input.siteId,
     previousWindow,
-    {},
+    EMPTY_FILTER_DOCUMENT,
     input.cache,
   );
   return {
@@ -609,7 +630,7 @@ async function loadCumulativeMetricValueUncached(
     env,
     input.siteId,
     window,
-    {},
+    EMPTY_FILTER_DOCUMENT,
     input.cache,
   );
   return overview.value[input.metric];
@@ -647,7 +668,7 @@ async function loadOverviewAggregate(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   cache?: NotificationInvocationCache,
 ) {
   if (!cache) return queryOverviewAggregate(env, siteId, window, filters);

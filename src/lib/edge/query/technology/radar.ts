@@ -1,5 +1,5 @@
 import type {
-  DashboardFilters,
+  FilterDocument,
   QueryWindow,
   ReferrerRadarRow,
 } from "@/lib/edge/query/core";
@@ -15,7 +15,7 @@ export async function queryBrowserRadarFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
 ): Promise<
   Array<{
     browser: string;
@@ -143,7 +143,7 @@ export async function queryReferrerRadarFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<ReferrerRadarRow[]> {
   const filter = buildVisitFilterSql(filters);

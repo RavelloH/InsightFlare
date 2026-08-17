@@ -1,4 +1,5 @@
 import { appNow } from "@/lib/edge/e2e-clock";
+import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
   executeQueryOperation,
   siteQueryContext,
@@ -10,7 +11,6 @@ import {
   badRequest,
   jsonResponseWith,
   notFound,
-  parseFilters,
   parseWindow,
   type QueryWindow,
   type ResponseContext,
@@ -20,7 +20,7 @@ import {
   queryFunnelDefinition,
   queryFunnelDefinitions,
 } from "./funnels";
-import { legacyFilters, toQueryTime } from "./overview-contract-adapter";
+import { toQueryTime } from "./overview-contract-adapter";
 
 /** Read-only funnel protocol mapping. Create/delete remain commands outside
  * the analytics query contract. */
@@ -50,7 +50,7 @@ export async function handleFunnelAnalysisContract(
         // Definition listing has no analytic time range. Keep it contract-bound
         // to the default dashboard range without altering its source query.
         time: toQueryTime(listWindow),
-        filters: legacyFilters({}),
+        filters: { version: 1, root: null },
       },
       async () => ({
         value: { funnels: await queryFunnelDefinitions(env, siteId) },
@@ -61,13 +61,13 @@ export async function handleFunnelAnalysisContract(
   }
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "funnel-analysis",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters: filters,
     },
     async () => {
       const funnel = await queryFunnelDefinition(env, siteId, funnelId);

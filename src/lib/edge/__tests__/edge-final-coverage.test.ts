@@ -17,12 +17,8 @@ import {
 import {
   customEventJsonTypeCode,
   customEventJsonTypeLabel,
-  normalizeEventPayloadFilterPath,
-  normalizeEventPayloadFilterValue,
-  parseEventPayloadFilters,
   parseEventRecordSort,
   parseFilterOptionKey,
-  parseFilters,
   parseListSearch,
   parseSessionListSort,
 } from "@/lib/edge/query/core-parsers";
@@ -395,60 +391,5 @@ describe("edge query parser and mapper edge coverage", () => {
       ),
     ).toEqual([{ value: "::::", label: "::::", group: "city" }]);
     expect(geoTabLabel("unknown", "organization")).toBe("unknown");
-  });
-
-  it("parses list sorting, searches, filters, and custom event value types defensively", () => {
-    expect(parseSessionListSort(url({ sortBy: "startedAt" }))).toEqual({
-      key: "startedAt",
-      direction: "desc",
-    });
-    expect(
-      parseSessionListSort(url({ sortBy: "views", sortDir: "asc" })),
-    ).toEqual({
-      key: "views",
-      direction: "asc",
-    });
-    expect(parseEventRecordSort(url({ sortBy: "eventName" }))).toEqual({
-      key: "eventName",
-      direction: "desc",
-    });
-    expect(
-      parseEventRecordSort(url({ sortBy: "pathname", sortDir: "asc" })),
-    ).toEqual({
-      key: "pathname",
-      direction: "asc",
-    });
-    expect(parseEventRecordSort(url({ sortBy: "bad" }))).toEqual({
-      key: "occurredAt",
-      direction: "desc",
-    });
-    expect(parseListSearch(url({ search: "  " }))).toBeUndefined();
-    expect(
-      parseListSearch(url({ search: ` ${"x".repeat(200)} ` })),
-    ).toHaveLength(160);
-    expect(parseFilterOptionKey(url({}))).toBeNull();
-    expect(parseFilterOptionKey(url({ filterKey: "bad" }))).toBeNull();
-    expect(
-      parseFilters(
-        url({
-          geoCity: "US::CA::California::San Francisco",
-          eventPayloadFilters: "not json",
-        }),
-      ),
-    ).toMatchObject({
-      geo: "US::CA::California::San Francisco",
-      eventPayloadFilters: undefined,
-    });
-    expect(parseEventPayloadFilters("{}")).toBeUndefined();
-    expect(
-      parseEventPayloadFilters(JSON.stringify([{ path: "/", value: 1 }])),
-    ).toBeUndefined();
-    expect(normalizeEventPayloadFilterPath("items[12].sku")).toBe(
-      "/items/*/sku",
-    );
-    expect(normalizeEventPayloadFilterValue(null)).toBeNull();
-    expect(customEventJsonTypeLabel(99)).toBe("null");
-    expect(customEventJsonTypeCode("array")).toBe(5);
-    expect(customEventJsonTypeCode("bad")).toBeNull();
   });
 });

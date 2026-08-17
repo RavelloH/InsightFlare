@@ -1,7 +1,7 @@
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
+  FilterDocument,
   JourneyEventRow,
   ListSort,
   QueryWindow,
@@ -257,7 +257,7 @@ export async function queryVisitorsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   targetVisitorId?: string,
   offset = 0,
@@ -316,7 +316,7 @@ export async function queryVisitorListPageFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   options: {
     pageSize: number;
     sort: ListSort<VisitorListSortKey>;
@@ -380,7 +380,7 @@ export async function querySessionsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   target?: { type: "visitor" | "session"; value: string },
   offset = 0,
@@ -445,7 +445,7 @@ export async function querySessionListPageFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   options: {
     pageSize: number;
     sort: ListSort<SessionListSortKey>;
@@ -509,7 +509,7 @@ export async function queryJourneyEventsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   target: { type: "visitor" | "session"; value: string },
   limit: number,
 ): Promise<JourneyEventRow[]> {

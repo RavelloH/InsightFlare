@@ -12,6 +12,9 @@ export const PUBLIC_PRIVACY = {
   detailedReferrerUrl: "hidden",
 } as const;
 
+import type { AnalyticsFilterFieldId } from "@/lib/edge/query-contract";
+export type { FilterDocument } from "@/lib/edge/query-contract";
+
 export type Interval = "minute" | "hour" | "day" | "week" | "month";
 
 export interface QueryWindow {
@@ -38,38 +41,6 @@ export interface TeamSiteRow {
   publicSlug: string | null;
   createdAt: number;
   updatedAt: number;
-}
-
-export interface DashboardFilters {
-  country?: string;
-  device?: string;
-  browser?: string;
-  path?: string;
-  query?: string;
-  title?: string;
-  hostname?: string;
-  entry?: string;
-  exit?: string;
-  sourceDomain?: string;
-  sourceLink?: string;
-  clientBrowser?: string;
-  clientOsVersion?: string;
-  clientDeviceType?: string;
-  clientLanguage?: string;
-  clientScreenSize?: string;
-  geo?: string;
-  geoContinent?: string;
-  geoTimezone?: string;
-  geoOrganization?: string;
-  eventPayloadFilters?: EventPayloadFilterRule[];
-}
-
-export type EventPayloadFilterValue = string | number | boolean | null;
-
-export interface EventPayloadFilterRule {
-  path: string;
-  operator: "eq" | "ne";
-  value: EventPayloadFilterValue;
 }
 
 export type SortDirection = "asc" | "desc";
@@ -606,10 +577,7 @@ export interface SiteQueryResponseOptions {
   publicSite?: PublicSiteEnvelope;
 }
 
-export type FilterOptionKey = Exclude<
-  keyof DashboardFilters,
-  "eventPayloadFilters"
->;
+export type FilterOptionKey = Exclude<AnalyticsFilterFieldId, "event.payload">;
 
 export interface DashboardFilterOption {
   value: string;

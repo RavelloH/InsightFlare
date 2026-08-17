@@ -9,7 +9,7 @@ import type {
   BrowserVersionAggregateRow,
   BrowserVersionBreakdownRow,
   BrowserVersionSliceRow,
-  DashboardFilters,
+  FilterDocument,
   Interval,
   QueryWindow,
 } from "@/lib/edge/query/core";
@@ -35,7 +35,7 @@ export async function queryBrowserTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<{
   series: BrowserTrendSeriesRow[];
@@ -58,7 +58,7 @@ export async function queryBrowserEngineTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<{
   series: BrowserTrendSeriesRow[];
@@ -80,7 +80,7 @@ export async function queryBrowserVersionBreakdownFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   browserLimit: number,
   versionLimit: number,
 ): Promise<BrowserVersionBreakdownRow[]> {
@@ -275,7 +275,7 @@ export async function queryBrowserCrossDimensionFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   browserLimit: number,
   dimensionLimit: number,
   dimensionExpr: string,
@@ -661,7 +661,7 @@ export async function queryBrowserCrossBreakdownFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   browserLimit: number,
   osLimit: number,
   deviceTypeLimit: number,

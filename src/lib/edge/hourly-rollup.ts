@@ -1,6 +1,6 @@
 import { buildTimeBuckets, timeBucketTimestamp } from "./query/core-time";
 import type {
-  DashboardFilters,
+  FilterDocument,
   Interval,
   OverviewAggregateRow,
   QueryWindow,
@@ -152,7 +152,7 @@ interface SiteTrendAccumulator {
   sessionFirstAt: Map<string, number>;
 }
 
-export function hasDashboardFilters(filters: DashboardFilters): boolean {
+export function hasFilterDocument(filters: FilterDocument): boolean {
   return Object.values(filters).some((value) => {
     if (Array.isArray(value)) return value.length > 0;
     return value !== undefined && value !== null && value !== "";

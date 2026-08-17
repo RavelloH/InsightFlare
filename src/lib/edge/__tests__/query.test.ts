@@ -1206,7 +1206,7 @@ describe("edge query handlers", () => {
     const response = await privateQuery(
       privatePath(
         "overview",
-        "includeChange=1&includeDetail=yes&interval=hour&country=US&hostname=Example.COM&sourceDomain=__direct__",
+        "includeChange=1&includeDetail=yes&interval=hour&filter[geo.country]=US&filter[page.hostname]=Example.COM&filter[referrer.domain]=__direct__",
       ),
       env,
     );
@@ -1261,7 +1261,7 @@ describe("edge query handlers", () => {
       expect.arrayContaining(["us", "example.com"]),
     );
     expect(aggregateStatement?.sql).toContain(
-      "TRIM(COALESCE(visit_source.referrer_host, '')) = ''",
+      "LOWER(TRIM(COALESCE(visit_source.referrer_host, ''))) = ''",
     );
   });
 
@@ -1318,7 +1318,7 @@ describe("edge query handlers", () => {
       env,
     );
     const options = await privateQuery(
-      privatePath("filter-options", "filterKey=sourceLink&limit=999"),
+      privatePath("filter-options", "filterKey=referrer.url&limit=999"),
       env,
     );
     const invalidOptions = await privateQuery(
@@ -1992,7 +1992,7 @@ describe("edge query handlers", () => {
     ];
     for (const route of dimensionRoutes) {
       const response = await privateQuery(
-        privatePath(route, "geo=US&limit=0"),
+        privatePath(route, "filter[geo.country]=US&limit=0"),
         env,
       );
       expect(response.status).toBe(200);
@@ -2022,18 +2022,12 @@ describe("edge query handlers", () => {
     }
 
     const geoOptions = await privateQuery(
-      privatePath("filter-options", "filterKey=geo"),
+      privatePath("filter-options", "filterKey=geo.country"),
       env,
     );
     expect(await geoOptions.json()).toMatchObject({
       ok: true,
-      data: expect.arrayContaining([
-        expect.objectContaining({ value: "US", group: "country" }),
-        expect.objectContaining({ value: "US::CA::California" }),
-        expect.objectContaining({
-          value: "US::CA::California::San Francisco",
-        }),
-      ]),
+      data: expect.arrayContaining([expect.objectContaining({ value: "US" })]),
     });
 
     const emptyTrend = await privateQuery(

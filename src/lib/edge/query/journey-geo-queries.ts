@@ -5,7 +5,7 @@ import {
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
+  FilterDocument,
   GeoCountryCountRow,
   GeoDimensionCountRow,
   GeoPointAggregate,
@@ -16,7 +16,6 @@ import {
   buildTargetVisitSourceCte,
   buildVisitFilterSql,
   buildVisitSourceCte,
-  parseGeoFilterValue,
   queryD1All,
   targetVisitSourceBindings,
   visitSourceBindings,
@@ -63,12 +62,34 @@ export async function queryGeoPointsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<GeoPointAggregate> {
   const filter = buildVisitFilterSql(filters);
-  const parsedGeo = parseGeoFilterValue(filters.geo);
+  const conditions =
+    filters.root?.kind === "and"
+      ? filters.root.children
+      : [filters.root].filter(Boolean);
+  const valueFor = (field: string) => {
+    const condition = conditions.find(
+      (item) =>
+        item?.kind === "condition" &&
+        item.target.kind === "field" &&
+        item.target.field === field &&
+        item.operator === "eq" &&
+        typeof item.value === "string",
+    );
+    return condition?.kind === "condition" &&
+      typeof condition.value === "string"
+      ? condition.value
+      : undefined;
+  };
+  const parsedGeo = {
+    country: valueFor("geo.country"),
+    regionCode: valueFor("geo.region"),
+    city: valueFor("geo.city"),
+  };
   const coordinateClause = filter.clause ? "AND" : "WHERE";
   const pointsSql = `
 WITH
@@ -155,7 +176,7 @@ LIMIT 300
         visitors: Number(row.visitors ?? 0),
       })),
     );
-  } else if (!parsedGeo.regionCode && !parsedGeo.regionName) {
+  } else if (!parsedGeo.regionCode) {
     const regionSql = `
 WITH
 ${buildVisitSourceCte()},

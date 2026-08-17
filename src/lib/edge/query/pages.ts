@@ -1,8 +1,8 @@
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
   DimensionRow,
+  FilterDocument,
   Interval,
   PageCardAggregateRow,
   PageCardTitleRow,
@@ -38,7 +38,7 @@ export async function queryTopPagesFromD1(
   window: QueryWindow,
   limit: number,
   includeDetails: boolean,
-  filters: DashboardFilters,
+  filters: FilterDocument,
 ): Promise<PageRow[]> {
   const filter = buildVisitFilterSql(filters);
   const queryExpr = includeDetails ? "query_string" : "''";
@@ -81,7 +81,7 @@ export async function queryPagesFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   includeDetails: boolean,
 ): Promise<PageRow[]> {
@@ -99,7 +99,7 @@ export async function queryPagesAggregate(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   includeDetails: boolean,
 ): Promise<PageRow[]> {
@@ -110,7 +110,7 @@ export async function queryPageTabsAggregate(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<{
   path: DimensionRow[];
@@ -126,7 +126,7 @@ export async function queryPageCardMetricsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   options?: {
     pathnames?: string[];
     limit?: number;
@@ -226,7 +226,7 @@ export async function queryPageCardTitlesFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   pathnames: string[],
   titleLimit: number,
 ): Promise<PageCardTitleRow[]> {
@@ -295,7 +295,7 @@ export async function queryPageCardTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   pathnames: string[],
 ): Promise<PageCardTrendRow[]> {
   const requestedPathnames = Array.from(
@@ -354,7 +354,7 @@ async function queryPageCardDetailsFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   pathnames: string[],
   titleLimit: number,
 ): Promise<{ titles: PageCardTitleRow[]; trend: PageCardTrendRow[] }> {
@@ -469,7 +469,7 @@ export async function queryReferrerAggregate(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   includeFullUrl: boolean,
   diagnostics?: D1ReadDiagnostics,
@@ -489,7 +489,7 @@ export async function queryDimensionAggregate(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   d1Expr: string,
   options?: { excludeEmpty?: boolean },
@@ -552,7 +552,7 @@ export interface PagesDashboardResult {
 
 export interface PagesDashboardReaderInput {
   readonly window: QueryWindow;
-  readonly filters: DashboardFilters;
+  readonly filters: FilterDocument;
   readonly interval: Interval;
   readonly page: number;
   readonly pageSize: number;

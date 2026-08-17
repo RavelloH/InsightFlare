@@ -1,9 +1,9 @@
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
   DimensionRow,
   EventAnalyticsContextCards,
+  FilterDocument,
   GeoTabRow,
   QueryWindow,
 } from "./core";
@@ -134,7 +134,7 @@ export async function queryEventAnalyticsContextCardsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   eventName?: string,
   selectedKeys: readonly EventContextCardKey[] = EVENT_CONTEXT_CARD_KEYS,

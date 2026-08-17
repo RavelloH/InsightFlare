@@ -1,10 +1,10 @@
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
   EventTrendPointRow,
   EventTrendSeriesRow,
   EventTypeTrendPointRow,
+  FilterDocument,
   Interval,
   QueryWindow,
 } from "./core";
@@ -26,7 +26,7 @@ export async function queryEventsTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   eventName?: string,
 ) {
@@ -178,7 +178,7 @@ export async function queryEventTypeTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   eventName: string,
 ) {
   const filter = buildEventFilterSql(filters, "es");

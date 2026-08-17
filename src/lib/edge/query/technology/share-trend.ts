@@ -3,7 +3,7 @@ import type {
   BrowserTrendPointRow,
   BrowserTrendSeriesRow,
   ClientDimensionKey,
-  DashboardFilters,
+  FilterDocument,
   Interval,
   QueryWindow,
   UtmDimensionKey,
@@ -31,7 +31,7 @@ export async function queryShareTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   labelExpr: string,
   fallbackKeyBase: string,
@@ -291,7 +291,7 @@ export async function queryClientDimensionTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   dimension: ClientDimensionKey,
   limit: number,
 ): Promise<{
@@ -316,7 +316,7 @@ export async function queryUtmDimensionTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   dimension: UtmDimensionKey,
   limit: number,
 ): Promise<{
@@ -341,7 +341,7 @@ export async function queryReferrerTrendFromD1(
   siteId: string,
   window: QueryWindow,
   interval: Interval,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
 ): Promise<{
   series: BrowserTrendSeriesRow[];

@@ -17,6 +17,7 @@ import {
   handleToken,
   handleTokenCheck,
 } from "@/lib/edge/api-v1";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 import { j } from "@/lib/response";
 
@@ -1256,7 +1257,7 @@ describe("api v1 gateway", () => {
       expect.anything(),
       "site-1",
       expect.objectContaining({ timeZone: "UTC" }),
-      {},
+      EMPTY_FILTER_DOCUMENT,
       [
         { type: "pageview", value: "/pricing" },
         { type: "event", value: "signup" },
@@ -2071,7 +2072,15 @@ describe("api v1 gateway", () => {
         body: JSON.stringify({
           metrics: ["views"],
           dimensions: ["page.path"],
-          filters: [{ field: "page.path", op: "startsWith", value: "/" }],
+          filters: {
+            version: 1,
+            root: {
+              kind: "condition",
+              target: { kind: "field", field: "page.path" },
+              operator: "startsWith",
+              value: "/",
+            },
+          },
         }),
       },
     );
@@ -3202,11 +3211,31 @@ describe("api v1 gateway", () => {
           },
           metrics: ["views", "views", "sessions", "visitors"],
           dimensions: ["page.path"],
-          filters: [
-            { field: "page.path", op: "contains", value: "price" },
-            { field: "client.deviceType", op: "in", value: ["desktop"] },
-            { field: "geo.country", op: "exists" },
-          ],
+          filters: {
+            version: 1,
+            root: {
+              kind: "and",
+              children: [
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "page.path" },
+                  operator: "contains",
+                  value: "price",
+                },
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "client.deviceType" },
+                  operator: "in",
+                  value: ["desktop"],
+                },
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "geo.country" },
+                  operator: "exists",
+                },
+              ],
+            },
+          },
           orderBy: [
             { field: "views", direction: "desc" },
             { field: "ignored", direction: "asc" },
@@ -3254,18 +3283,68 @@ describe("api v1 gateway", () => {
           },
           metrics: ["views"],
           dimensions: ["page.path"],
-          filters: [
-            { field: "page.path", op: "notExists" },
-            { field: "page.title", op: "in", value: [] },
-            { field: "page.hostname", op: "notIn", value: [] },
-            { field: "referrer.domain", op: "startsWith", value: "docs" },
-            { field: "referrer.url", op: "endsWith", value: "/pricing" },
-            { field: "client.browser", op: "neq", value: "Firefox" },
-            { field: "client.deviceType", op: "gt", value: 1 },
-            { field: "client.language", op: "gte", value: true },
-            { field: "geo.country", op: "lt", value: null },
-            { field: "geo.city", op: "lte" },
-          ],
+          filters: {
+            version: 1,
+            root: {
+              kind: "and",
+              children: [
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "page.path" },
+                  operator: "notExists",
+                },
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "page.title" },
+                  operator: "in",
+                  value: ["Docs", "Pricing"],
+                },
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "page.hostname" },
+                  operator: "notIn",
+                  value: ["invalid.example"],
+                },
+                {
+                  kind: "not",
+                  child: {
+                    kind: "condition",
+                    target: { kind: "field", field: "client.deviceType" },
+                    operator: "eq",
+                    value: "mobile",
+                  },
+                },
+                {
+                  kind: "or",
+                  children: [
+                    {
+                      kind: "condition",
+                      target: { kind: "field", field: "referrer.domain" },
+                      operator: "startsWith",
+                      value: "docs",
+                    },
+                    {
+                      kind: "condition",
+                      target: { kind: "field", field: "referrer.url" },
+                      operator: "endsWith",
+                      value: "/pricing",
+                    },
+                  ],
+                },
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "client.browser" },
+                  operator: "neq",
+                  value: "Firefox",
+                },
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "geo.country" },
+                  operator: "exists",
+                },
+              ],
+            },
+          },
           orderBy: [],
         }),
       },

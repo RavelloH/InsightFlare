@@ -1,6 +1,7 @@
+import { parsePrivateFilterUrl } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
-import type { DashboardFilters, QueryWindow } from "./core";
+import type { FilterDocument, QueryWindow } from "./core";
 import {
   badRequest,
   buildEventAnalyticsSourceCte,
@@ -11,7 +12,6 @@ import {
   jsonResponseWith,
   notAllowed,
   notFound,
-  parseFilters,
   parseWindow,
   queryD1All,
   type ResponseContext,
@@ -158,7 +158,7 @@ async function queryFunnelPageviewEvents(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   steps: FunnelStepConfig[],
 ): Promise<FunnelEvent[]> {
   const values = uniqueStepValues(steps, "pageview");
@@ -203,7 +203,7 @@ async function queryFunnelCustomEvents(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   steps: FunnelStepConfig[],
 ): Promise<FunnelEvent[]> {
   const values = uniqueStepValues(steps, "event");
@@ -361,7 +361,7 @@ export async function queryFunnelAnalysis(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   steps: FunnelStepConfig[],
 ): Promise<FunnelAnalysis> {
   const [pageviews, events] = await Promise.all([
@@ -399,7 +399,7 @@ async function handleFunnelDetail(
     return badRequest("Funnel has fewer than 2 steps");
   }
 
-  const filters = parseFilters(url);
+  const filters = parsePrivateFilterUrl(url);
   const analysis = await queryFunnelAnalysis(
     env,
     siteId,

@@ -1,16 +1,16 @@
+import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
   executePages,
   executeQueryOperation,
   executeReferrers,
   type PageItem,
   type PagesReader,
-  type QueryFilterSet,
   type ReferrerItem,
   siteQueryContext,
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
-import type { DashboardFilters, QueryWindow } from "./core";
+import type { QueryWindow } from "./core";
 import {
   badRequest,
   jsonResponseWith,
@@ -19,18 +19,13 @@ import {
   mapTabs,
   paginationOffset,
   parseBooleanFlag,
-  parseFilters,
   parseInterval,
   parseLimit,
   parseQueryLimit,
   parseWindow,
   type ResponseContext,
 } from "./core";
-import {
-  dashboardFilters,
-  legacyFilters,
-  toQueryTime,
-} from "./overview-contract-adapter";
+import { toQueryTime } from "./overview-contract-adapter";
 import {
   queryPagesAggregate,
   queryPagesDashboard,
@@ -54,7 +49,7 @@ function createReader(env: Env, siteId: string): PagesReader {
         env,
         siteId,
         windowFor(input.time),
-        dashboardFilters(input.filters),
+        input.filters,
         input.limit,
         input.includeDetails,
       );
@@ -76,7 +71,7 @@ function createReader(env: Env, siteId: string): PagesReader {
         env,
         siteId,
         windowFor(input.time),
-        dashboardFilters(input.filters),
+        input.filters,
         input.limit,
         input.includeFullUrl,
       );
@@ -108,12 +103,12 @@ export async function handlePagesContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const limit = parseLimit(url, 20, 200);
   const result = await executePages(createReader(env, siteId), {
     context: queryContext,
     time: toQueryTime(window),
-    filters: legacyFilters(filters),
+    filters,
     limit,
     includeDetails: parseBooleanFlag(url, "details"),
   });
@@ -128,7 +123,7 @@ export async function handlePagesContract(
       {
         context: queryContext,
         time: toQueryTime(window),
-        filters: legacyFilters(filters),
+        filters,
       },
       async () => ({
         value: await queryPageTabsAggregate(
@@ -169,7 +164,7 @@ export async function handleReferrersContract(
   const result = await executeReferrers(createReader(env, siteId), {
     context: queryContext,
     time: toQueryTime(window),
-    filters: legacyFilters(parseFilters(url)),
+    filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
     limit: parseLimit(url, fallbackLimit, 200),
     includeFullUrl: allowFullUrlParam && parseBooleanFlag(url, "fullUrl"),
   });
@@ -197,13 +192,13 @@ export async function handlePagesDashboardContract(
       "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
     );
   }
-  const filters = parseFilters(url);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
     "pages-dashboard",
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: legacyFilters(filters),
+      filters,
     },
     async () => ({
       value: await queryPagesDashboard(env, siteId, {
@@ -218,10 +213,4 @@ export async function handlePagesDashboardContract(
   );
   if (!result.ok) return badRequest(result.error.kind);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
-}
-
-export function legacyFilterSetForPages(
-  filters: DashboardFilters,
-): QueryFilterSet {
-  return legacyFilters(filters);
 }

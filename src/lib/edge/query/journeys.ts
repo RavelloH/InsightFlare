@@ -1,7 +1,7 @@
 import type { Env } from "@/lib/edge/types";
 
 import type {
-  DashboardFilters,
+  FilterDocument,
   GeoPointAggregate,
   ListSort,
   QueryWindow,
@@ -61,7 +61,7 @@ export async function queryVisitorAggregate(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   offset = 0,
   sort: ListSort<VisitorListSortKey> = DEFAULT_VISITOR_LIST_SORT,
@@ -84,7 +84,7 @@ export async function queryGeoPointAggregate(
   env: Env,
   siteId: string,
   window: QueryWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
   limit: number,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<GeoPointAggregate> {
