@@ -6,17 +6,17 @@ import type {
   BrowserTrendSeriesRow,
 } from "@/lib/edge/query/core";
 import {
-  handleBrowserCrossBreakdown,
-  handleBrowserEngineTrend,
-  handleBrowserRadar,
-  handleBrowserTrend,
-  handleBrowserVersionBreakdown,
-  handleClientDimensionTrend,
-  handleCrossBreakdown,
-  handleReferrerDimensionTrend,
-  handleReferrerRadar,
-  handleUtmDimensionTrend,
-} from "@/lib/edge/query/technology/handlers";
+  handleBrowserCrossBreakdownContract as handleBrowserCrossBreakdown,
+  handleBrowserEngineTrendContract as handleBrowserEngineTrend,
+  handleBrowserRadarContract as handleBrowserRadar,
+  handleBrowserTrendContract as handleBrowserTrend,
+  handleBrowserVersionBreakdownContract as handleBrowserVersionBreakdown,
+  handleClientDimensionTrendContract as handleClientDimensionTrend,
+  handleCrossBreakdownContract as handleCrossBreakdown,
+  handleReferrerDimensionTrendContract as handleReferrerDimensionTrend,
+  handleReferrerRadarContract as handleReferrerRadar,
+  handleUtmDimensionTrendContract as handleUtmDimensionTrend,
+} from "@/lib/edge/query/technology-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
 const queryMocks = vi.hoisted(() => ({

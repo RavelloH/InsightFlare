@@ -16,8 +16,6 @@ import {
   serializeVisitorListCursor,
 } from "@/lib/edge/query/journey-list-queries";
 import {
-  handleSessionDetail,
-  handleVisitorDetail,
   queryGeoPointAggregate,
   queryGeoPointsFromD1,
   queryJourneyEventsForDetailFromD1,
@@ -31,7 +29,9 @@ import {
   queryVisitorsFromD1,
 } from "@/lib/edge/query/journeys";
 import {
+  handleSessionDetailContract as handleSessionDetail,
   handleSessionsContract as handleSessions,
+  handleVisitorDetailContract as handleVisitorDetail,
   handleVisitorsContract as handleVisitors,
 } from "@/lib/edge/query/journeys-contract-adapter";
 import type { Env } from "@/lib/edge/types";
@@ -1381,6 +1381,7 @@ describe("edge journey handlers", () => {
   });
 
   it("returns visitor and session detail handler payloads", async () => {
+    const window = queryWindow();
     const { env } = createD1Env([
       [visitorDetailVisitRow()],
       [visitorDetailVisitRow({ latitude: 1, longitude: 2, startedAt: 3 })],
@@ -1389,14 +1390,21 @@ describe("edge journey handlers", () => {
     const visitor = await handleVisitorDetail(
       env,
       siteId,
-      new URL(
-        "https://edge.test/visitor-detail?visitorId=visitor-1&timeZone=Bad/Zone",
-      ),
+      url("/visitor-detail", {
+        visitorId: "visitor-1",
+        timeZone: "Bad/Zone",
+        from: window.startMs,
+        to: window.endExclusiveMs,
+      }),
     );
     const session = await handleSessionDetail(
       env,
       siteId,
-      new URL("https://edge.test/session-detail?sessionId=session-1"),
+      url("/session-detail", {
+        sessionId: "session-1",
+        from: window.startMs,
+        to: window.endExclusiveMs,
+      }),
     );
 
     await expect(visitor.json()).resolves.toMatchObject({

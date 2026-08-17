@@ -73,7 +73,6 @@ export default defineConfig({
         "src/lib/edge/ingest-types.ts",
         "src/lib/realtime/mock/events-helpers.ts",
         "src/tracker/sdk.ts",
-        "src/lib/edge/query.ts",
         "src/lib/system-performance.ts",
         "src/components/dashboard/site-pages/use-dashboard-query.ts",
       ],

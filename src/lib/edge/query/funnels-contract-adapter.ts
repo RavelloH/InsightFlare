@@ -1,8 +1,10 @@
+import { appNow } from "@/lib/edge/e2e-clock";
 import {
   executeQueryOperation,
   siteQueryContext,
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
+import { ONE_DAY_MS } from "@/lib/edge/utils";
 
 import {
   badRequest,
@@ -10,6 +12,7 @@ import {
   notFound,
   parseFilters,
   parseWindow,
+  type QueryWindow,
   type ResponseContext,
 } from "./core";
 import {
@@ -30,8 +33,16 @@ export async function handleFunnelAnalysisContract(
 ): Promise<Response> {
   const funnelId = url.searchParams.get("id")?.trim();
   if (!funnelId) {
-    const listWindow = parseWindow(new URL("https://internal.invalid"));
-    if (!listWindow) return badRequest("Invalid time window");
+    // Definition listing has no analytic time range. Reproduce parseWindow's
+    // no-param default window (now-24h -> now, timeZone falls back to UTC)
+    // without requiring a throwaway URL.
+    const nowMs = appNow();
+    const listWindow: QueryWindow = {
+      startMs: Math.floor(nowMs - ONE_DAY_MS),
+      endExclusiveMs: Math.floor(nowMs),
+      nowMs,
+      timeZone: "UTC",
+    };
     const result = await executeQueryOperation(
       "funnel-analysis",
       {

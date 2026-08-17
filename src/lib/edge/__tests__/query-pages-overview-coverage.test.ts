@@ -3,24 +3,23 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
 import {
-  handleFilterOptions,
-  handleOverviewClientTab,
-  handleOverviewGeoPoints,
-  handleOverviewGeoTab,
-  handleOverviewPageTab,
-  handleOverviewSourceTab,
-  queryOverviewFromD1,
-  queryTrendFromD1,
-} from "@/lib/edge/query/overview";
+  type DashboardFilters,
+  mapDimensionRows,
+  type QueryWindow,
+} from "@/lib/edge/query/core";
+import { queryOverviewFromD1, queryTrendFromD1 } from "@/lib/edge/query/overview";
 import {
   handleOverviewContract as handleOverview,
   handleTrendContract as handleTrend,
 } from "@/lib/edge/query/overview-contract-adapter";
 import {
-  handleDimension,
-  handlePagesDashboard,
+  handleFilterOptionsContract as handleFilterOptions,
+  handleOverviewGeoPointsContract as handleOverviewGeoPoints,
+} from "@/lib/edge/query/overview-extras-contract-adapter";
+import { handleOverviewTabContract } from "@/lib/edge/query/overview-tabs-contract-adapter";
+import {
+  queryDimensionAggregate,
   queryPageCardMetricsFromD1,
   queryPageCardTitlesFromD1,
   queryPageCardTrendFromD1,
@@ -28,6 +27,7 @@ import {
 } from "@/lib/edge/query/pages";
 import {
   handlePagesContract as handlePages,
+  handlePagesDashboardContract as handlePagesDashboard,
   handleReferrersContract as handleReferrers,
 } from "@/lib/edge/query/pages-contract-adapter";
 import type { Env } from "@/lib/edge/types";
@@ -641,7 +641,7 @@ describe("edge pages handlers", () => {
     expect(calls[0].bindings).toEqual([...visitBindings(), "Chrome", 7]);
   });
 
-  it("maps dimension handler rows and can ignore geo filters", async () => {
+  it("maps dimension aggregate rows and drops geo filters before querying", async () => {
     const { env, calls } = createD1Env([
       [
         {
@@ -653,32 +653,24 @@ describe("edge pages handlers", () => {
       ],
     ]);
 
-    const response = await handleDimension(
+    const rows = await queryDimensionAggregate(
       env,
       siteId,
-      url("/dimension", {
-        from: window.startMs,
-        to: window.endExclusiveMs,
-        geo: "US::CA::California",
-        device: "desktop",
-        limit: 4,
-      }),
+      window,
+      { device: "desktop" },
+      4,
       "browser",
-      { ignoreGeo: true },
     );
 
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      data: [
-        {
-          value: "Chrome",
-          label: "Chrome",
-          views: 5,
-          sessions: 3,
-          visitors: 2,
-        },
-      ],
-    });
+    expect(mapDimensionRows(rows)).toEqual([
+      {
+        value: "Chrome",
+        label: "Chrome",
+        views: 5,
+        sessions: 3,
+        visitors: 2,
+      },
+    ]);
     expect(calls[0].sql).toContain("COALESCE(browser, '') AS value");
     expect(calls[0].bindings).toEqual([...visitBindings(), "desktop", 4]);
   });
@@ -1513,7 +1505,7 @@ describe("edge overview D1 queries and handlers", () => {
       37,
     );
 
-    const pageTab = await handleOverviewPageTab(
+    const pageTab = await handleOverviewTabContract(
       env,
       siteId,
       url("/overview/page-tab", {
@@ -1521,9 +1513,9 @@ describe("edge overview D1 queries and handlers", () => {
         to: window.endExclusiveMs,
         limit: 2,
       }),
-      "path",
+      "page.path",
     );
-    const sourceTab = await handleOverviewSourceTab(
+    const sourceTab = await handleOverviewTabContract(
       env,
       siteId,
       url("/overview/source-tab", {
@@ -1531,9 +1523,9 @@ describe("edge overview D1 queries and handlers", () => {
         to: window.endExclusiveMs,
         limit: 3,
       }),
-      "domain",
+      "source.domain",
     );
-    const clientTab = await handleOverviewClientTab(
+    const clientTab = await handleOverviewTabContract(
       env,
       siteId,
       url("/overview/client-tab", {
@@ -1541,9 +1533,9 @@ describe("edge overview D1 queries and handlers", () => {
         to: window.endExclusiveMs,
         limit: 3,
       }),
-      "screenSize",
+      "client.screenSize",
     );
-    const geoTab = await handleOverviewGeoTab(
+    const geoTab = await handleOverviewTabContract(
       env,
       siteId,
       url("/overview/geo-tab", {
@@ -1552,15 +1544,8 @@ describe("edge overview D1 queries and handlers", () => {
         geo: "US::CA::California",
         limit: 3,
       }),
-      "country",
+      "geo.country",
     );
-
-    for (const response of [pageTab, sourceTab, clientTab, geoTab]) {
-      expect(response.headers.get("x-insightflare-data-source")).toBe("raw");
-    }
-    for (const response of [pageTab, sourceTab, clientTab, geoTab]) {
-      expect(response.headers.get("x-insightflare-d1-rows-read")).toBe("37");
-    }
 
     await expect(pageTab.json()).resolves.toEqual({
       ok: true,

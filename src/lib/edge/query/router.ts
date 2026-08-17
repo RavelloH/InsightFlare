@@ -34,6 +34,7 @@ export const PUBLIC_QUERY_PATHS = [
   "browser-engine-trend",
   "browser-version-breakdown",
   "browser-cross-breakdown",
+  "client-cross-breakdown",
   "browser-radar",
   "referrer-radar",
   "referrer-dimension-trend",
@@ -144,8 +145,10 @@ export function operationForQueryRoute(pathname: string): QueryOperation {
   if (pathname === "visitor-detail") return "visitor-detail";
   if (pathname === "sessions") return "sessions";
   if (pathname === "session-detail") return "session-detail";
-  if (pathname.includes("radar")) return "radar";
+  if (pathname.includes("radar") || pathname === "browser-version-breakdown")
+    return "radar";
   if (pathname.includes("cross-breakdown")) return "cross-dimension";
   if (pathname.includes("trend")) return "share-trend";
+  if (pathname.startsWith("overview-source-")) return "referrers";
   return "dimension";
 }

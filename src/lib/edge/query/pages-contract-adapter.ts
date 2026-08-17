@@ -123,19 +123,30 @@ export async function handlePagesContract(
     data: mapPages([...result.data.items]),
   };
   if (includeTabs) {
-    const tabs = await queryPageTabsAggregate(
-      env,
-      siteId,
-      window,
-      filters,
-      limit,
+    const tabsResult = await executeQueryOperation(
+      "pages",
+      {
+        context: queryContext,
+        time: toQueryTime(window),
+        filters: legacyFilters(filters),
+      },
+      async () => ({
+        value: await queryPageTabsAggregate(
+          env,
+          siteId,
+          window,
+          filters,
+          limit,
+        ),
+      }),
     );
+    if (!tabsResult.ok) return badRequest(tabsResult.error.kind);
     payload.tabs = {
-      path: mapTabs(tabs.path),
-      title: mapTabs(tabs.title),
-      hostname: mapTabs(tabs.hostname),
-      entry: mapTabs(tabs.entry),
-      exit: mapTabs(tabs.exit),
+      path: mapTabs(tabsResult.data.path),
+      title: mapTabs(tabsResult.data.title),
+      hostname: mapTabs(tabsResult.data.hostname),
+      entry: mapTabs(tabsResult.data.entry),
+      exit: mapTabs(tabsResult.data.exit),
     };
   }
   return jsonResponseWith(ctx!, payload);

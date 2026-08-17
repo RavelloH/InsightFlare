@@ -13,28 +13,17 @@ import type {
 } from "./core";
 import {
   appendSqlConditions,
-  badRequest,
   buildTimeBuckets,
   buildVisitFilterSql,
   buildVisitSourceCte,
   emptyOverviewAggregateRow,
-  jsonResponseWith,
-  mapDimensionRows,
   mapPageCardMetrics,
   normalizePathname,
-  paginationOffset,
-  parseFilters,
-  parseInterval,
-  parseLimit,
-  parseQueryLimit,
-  parseWindow,
   percentChange,
   queryD1All,
-  type ResponseContext,
   timeBucketCase,
   timeBucketTimestamp,
   visitSourceBindings,
-  withoutGeoFilter,
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import {
@@ -707,59 +696,4 @@ export async function queryPagesDashboard(
       nextPage: hasMore ? page + 1 : null,
     },
   };
-}
-
-export async function handlePagesDashboard(
-  env: Env,
-  siteId: string,
-  url: URL,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const page = parseQueryLimit(url, "page", 1, 1, 10_000);
-  const pageSize = parseQueryLimit(url, "pageSize", 12, 1, 24);
-  const offset = paginationOffset(page, pageSize);
-  if (offset === null) {
-    return badRequest(
-      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
-    );
-  }
-  const result = await queryPagesDashboard(env, siteId, {
-    window,
-    filters: parseFilters(url),
-    interval: parseInterval(url),
-    page,
-    pageSize,
-    offset,
-  });
-  return jsonResponseWith(ctx!, { ok: true, ...result });
-}
-
-export async function handleDimension(
-  env: Env,
-  siteId: string,
-  url: URL,
-  d1Expr: string,
-  options?: {
-    ignoreGeo?: boolean;
-  },
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const rawFilters = parseFilters(url);
-  const filters = options?.ignoreGeo
-    ? withoutGeoFilter(rawFilters)
-    : rawFilters;
-  const limit = parseLimit(url, 20, 200);
-  const rows = await queryDimensionAggregate(
-    env,
-    siteId,
-    window,
-    filters,
-    limit,
-    d1Expr,
-  );
-  return jsonResponseWith(ctx!, { ok: true, data: mapDimensionRows(rows) });
 }
