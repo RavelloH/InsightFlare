@@ -115,7 +115,7 @@ function mapFunnelDefinition(row: Record<string, unknown>): FunnelDefinition {
   };
 }
 
-async function queryFunnelDefinitions(
+export async function queryFunnelDefinitions(
   env: Env,
   siteId: string,
 ): Promise<FunnelDefinition[]> {
@@ -127,7 +127,7 @@ async function queryFunnelDefinitions(
   return rows.map(mapFunnelDefinition);
 }
 
-async function queryFunnelDefinition(
+export async function queryFunnelDefinition(
   env: Env,
   siteId: string,
   funnelId: string,

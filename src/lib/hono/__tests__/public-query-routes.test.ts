@@ -8,8 +8,7 @@ import {
 } from "@/lib/edge/dashboard-cache";
 import type * as QueryCoreModule from "@/lib/edge/query/core";
 import { fetchPublicSite } from "@/lib/edge/query/core";
-import type * as QueryRouterModule from "@/lib/edge/query/router";
-import { dispatchQueryRoute } from "@/lib/edge/query/router";
+import { handleOverviewContract } from "@/lib/edge/query/overview-contract-adapter";
 import { publicQueryRoutes } from "@/lib/hono/routes/public/query";
 import type { AppEnv } from "@/lib/hono/types";
 
@@ -35,15 +34,18 @@ vi.mock("@/lib/edge/query/core", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/edge/query/router", async (importOriginal) => {
-  const actual = await importOriginal<typeof QueryRouterModule>();
-  return {
-    ...actual,
-    dispatchQueryRoute: vi.fn(),
-  };
-});
+vi.mock("@/lib/edge/query/overview-contract-adapter", () => ({
+  handleOverviewContract: vi.fn(),
+  handleTrendContract: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/query/pages-contract-adapter", () => ({
+  handlePagesContract: vi.fn(),
+  handleReferrersContract: vi.fn(),
+}));
 
 const env = { DB: {} };
+const dispatchQueryRoute = vi.fn();
 const ctx = {
   passThroughOnException: vi.fn(),
   waitUntil: vi.fn(),
@@ -68,6 +70,7 @@ describe("Hono public query routes", () => {
       domain: "public.test",
     });
     vi.mocked(dispatchQueryRoute).mockResolvedValue(new Response("query"));
+    vi.mocked(handleOverviewContract).mockResolvedValue(new Response("query"));
   });
 
   it("returns public site metadata through the public cache wrapper", async () => {
@@ -148,14 +151,14 @@ describe("Hono public query routes", () => {
         request: expect.any(Request),
       }),
     );
-    expect(dispatchQueryRoute).toHaveBeenCalledWith(
+    expect(handleOverviewContract).toHaveBeenCalledWith(
       env,
       "site-1",
-      "overview",
       new URL("https://app.test/api/public/share/demo/overview?preset=today"),
-      { publicMode: true },
-      expect.any(Request),
+      expect.objectContaining({ requestId: expect.any(String) }),
+      expect.objectContaining({ subject: { kind: "site", siteId: "site-1" } }),
     );
+    expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 
   it("rejects public mutations before site lookup and cache", async () => {
@@ -204,13 +207,6 @@ describe("Hono public query routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(dispatchQueryRoute).toHaveBeenCalledWith(
-      env,
-      "site-1",
-      "events-records",
-      new URL("https://app.test/api/public/share/demo/events-records"),
-      { publicMode: true },
-      expect.any(Request),
-    );
+    expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 });

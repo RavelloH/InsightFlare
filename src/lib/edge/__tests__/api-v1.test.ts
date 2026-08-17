@@ -20,9 +20,30 @@ import {
 import type { Env } from "@/lib/edge/types";
 import { j } from "@/lib/response";
 
-vi.mock("@/lib/edge/query/router", () => ({
-  routeQuery: vi.fn(),
-}));
+vi.mock("@/lib/edge/api-v1-query-adapter", async () => {
+  const actual = await vi.importActual("@/lib/edge/api-v1-query-adapter");
+  return {
+    ...(actual as Record<string, unknown>),
+    queryApiV1EventRecordDetail: vi.fn(),
+    queryApiV1EventRecords: vi.fn(),
+    queryApiV1EventFieldValues: vi.fn(),
+    queryApiV1EventsSummary: vi.fn(),
+    queryApiV1EventsTrend: vi.fn(),
+    queryApiV1EventTypes: vi.fn(),
+    queryApiV1EventTypeDetail: vi.fn(),
+    queryApiV1JourneyEvents: vi.fn(),
+    queryApiV1JourneySessions: vi.fn(),
+    queryApiV1Retention: vi.fn(),
+    queryApiV1CrossBreakdown: vi.fn(),
+    queryApiV1Breakdown: vi.fn(),
+    queryApiV1Overview: vi.fn(),
+    queryApiV1SessionDetail: vi.fn(),
+    queryApiV1Sessions: vi.fn(),
+    queryApiV1Trend: vi.fn(),
+    queryApiV1VisitorDetail: vi.fn(),
+    queryApiV1Visitors: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/edge/query/funnels", async () => {
   const actual = await vi.importActual("@/lib/edge/query/funnels");
@@ -52,14 +73,52 @@ import {
   deleteSiteData,
   ensurePublicSlugAvailable,
 } from "@/lib/edge/admin-sites";
+import {
+  queryApiV1Breakdown,
+  queryApiV1CrossBreakdown,
+  queryApiV1EventFieldValues,
+  queryApiV1EventRecordDetail,
+  queryApiV1EventRecords,
+  queryApiV1EventsSummary,
+  queryApiV1EventsTrend,
+  queryApiV1EventTypeDetail,
+  queryApiV1EventTypes,
+  queryApiV1JourneyEvents,
+  queryApiV1JourneySessions,
+  queryApiV1Overview,
+  queryApiV1Retention,
+  queryApiV1SessionDetail,
+  queryApiV1Sessions,
+  queryApiV1Trend,
+  queryApiV1VisitorDetail,
+  queryApiV1Visitors,
+} from "@/lib/edge/api-v1-query-adapter";
 import { queryFunnelAnalysis } from "@/lib/edge/query/funnels";
-import { routeQuery } from "@/lib/edge/query/router";
 import {
   readSiteScriptSettings,
   upsertSiteScriptSettings,
 } from "@/lib/edge/site-settings-store";
 
-const routeQueryMock = vi.mocked(routeQuery);
+// Retained as a sentinel for assertions that API v1 no longer bridges routes.
+const routeQueryMock = vi.fn();
+const queryApiV1EventRecordsMock = vi.mocked(queryApiV1EventRecords);
+const queryApiV1EventRecordDetailMock = vi.mocked(queryApiV1EventRecordDetail);
+const queryApiV1EventFieldValuesMock = vi.mocked(queryApiV1EventFieldValues);
+const queryApiV1EventsSummaryMock = vi.mocked(queryApiV1EventsSummary);
+const queryApiV1EventsTrendMock = vi.mocked(queryApiV1EventsTrend);
+const queryApiV1EventTypesMock = vi.mocked(queryApiV1EventTypes);
+const queryApiV1EventTypeDetailMock = vi.mocked(queryApiV1EventTypeDetail);
+const queryApiV1JourneyEventsMock = vi.mocked(queryApiV1JourneyEvents);
+const queryApiV1JourneySessionsMock = vi.mocked(queryApiV1JourneySessions);
+const queryApiV1RetentionMock = vi.mocked(queryApiV1Retention);
+const queryApiV1CrossBreakdownMock = vi.mocked(queryApiV1CrossBreakdown);
+const queryApiV1BreakdownMock = vi.mocked(queryApiV1Breakdown);
+const queryApiV1OverviewMock = vi.mocked(queryApiV1Overview);
+const queryApiV1SessionDetailMock = vi.mocked(queryApiV1SessionDetail);
+const queryApiV1SessionsMock = vi.mocked(queryApiV1Sessions);
+const queryApiV1TrendMock = vi.mocked(queryApiV1Trend);
+const queryApiV1VisitorDetailMock = vi.mocked(queryApiV1VisitorDetail);
+const queryApiV1VisitorsMock = vi.mocked(queryApiV1Visitors);
 const queryFunnelAnalysisMock = vi.mocked(queryFunnelAnalysis);
 const readSiteScriptSettingsMock = vi.mocked(readSiteScriptSettings);
 const upsertSiteScriptSettingsMock = vi.mocked(upsertSiteScriptSettings);
@@ -333,6 +392,149 @@ describe("api v1 gateway", () => {
         { headers: { "content-type": "application/json" } },
       ),
     );
+    queryApiV1OverviewMock.mockResolvedValue({
+      ok: true,
+      data: {
+        current: {
+          views: 10,
+          sessions: 8,
+          visitors: 7,
+          bounces: 2,
+          totalDurationMs: 12_000,
+          durationViews: 8,
+        },
+      },
+      meta: {
+        time: {} as never,
+        source: "raw",
+        approximateVisitors: false,
+      },
+    });
+    queryApiV1TrendMock.mockResolvedValue({
+      ok: true,
+      data: {
+        interval: "day",
+        points: [
+          {
+            bucket: 0,
+            timestampMs: Date.UTC(2026, 5, 1) as never,
+            views: 2,
+            sessions: 1,
+            visitors: 1,
+            bounces: 0,
+            totalDurationMs: 0,
+            durationViews: 0,
+          },
+        ],
+      },
+      meta: {
+        time: {} as never,
+        source: "raw",
+        approximateVisitors: false,
+      },
+    });
+    queryApiV1EventRecordsMock.mockResolvedValue({
+      ok: true,
+      data: {
+        data: [],
+        pagination: { limit: 100, nextCursor: null, hasMore: false },
+      },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1VisitorsMock.mockResolvedValue({
+      ok: true,
+      data: {
+        data: [],
+        pagination: { limit: 100, nextCursor: null, hasMore: false },
+      },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1SessionsMock.mockResolvedValue({
+      ok: true,
+      data: {
+        data: [],
+        pagination: { limit: 100, nextCursor: null, hasMore: false },
+      },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1EventRecordDetailMock.mockResolvedValue({
+      ok: true,
+      data: null,
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1EventFieldValuesMock.mockResolvedValue({
+      ok: true,
+      data: [],
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1EventsSummaryMock.mockResolvedValue({
+      ok: true,
+      data: { summary: {}, cards: {} },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1EventsTrendMock.mockResolvedValue({
+      ok: true,
+      data: { interval: "day", series: [], data: [] },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1EventTypesMock.mockResolvedValue({
+      ok: true,
+      data: [],
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1EventTypeDetailMock.mockResolvedValue({
+      ok: true,
+      data: {
+        eventName: "event",
+        summary: {},
+        trend: {},
+        breakdowns: {},
+        cards: {},
+        fields: [],
+      },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1JourneyEventsMock.mockResolvedValue({
+      ok: true,
+      data: {
+        data: [],
+        pagination: { limit: 100, nextCursor: null, hasMore: false },
+      },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1JourneySessionsMock.mockResolvedValue({
+      ok: true,
+      data: {
+        data: [],
+        pagination: { limit: 100, nextCursor: null, hasMore: false },
+      },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1RetentionMock.mockResolvedValue({
+      ok: true,
+      data: { granularity: "week", cohorts: [] },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1CrossBreakdownMock.mockResolvedValue({
+      ok: true,
+      data: { columns: [], rows: [], totalVisitors: 0 },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1BreakdownMock.mockResolvedValue({
+      ok: true,
+      data: [],
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1VisitorDetailMock.mockResolvedValue({
+      ok: true,
+      data: null,
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
+    queryApiV1SessionDetailMock.mockResolvedValue({
+      ok: true,
+      data: null,
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
     readSiteScriptSettingsMock.mockResolvedValue(null);
     upsertSiteScriptSettingsMock.mockResolvedValue({
       trackingStrength: "smart",
@@ -746,49 +948,37 @@ describe("api v1 gateway", () => {
       meta: { timeRange: expect.any(Object) },
     });
 
-    routeQueryMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          interval: "day",
-          data: [{ timestampMs: 1_000, views: 2, sessions: 1, visitors: 1 }],
-        }),
-        { headers: { "content-type": "application/json" } },
-      ),
-    );
     const timeseries = await authed(
       "/api/v1/sites/site-1/analytics/timeseries?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z&interval=day",
       [siteMatch("site-1", "Blog")],
     );
     expect(timeseries.response.status).toBe(200);
     expect(await timeseries.response.json()).toMatchObject({
-      data: [expect.objectContaining({ start: "1970-01-01T00:00:01.000Z" })],
+      data: [
+        expect.objectContaining({
+          start: "2026-06-01T00:00:00.000Z",
+          end: "2026-06-02T00:00:00.000Z",
+        }),
+      ],
       meta: { interval: "day" },
     });
 
-    routeQueryMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          data: [
-            { value: "US", label: "United States", views: 4, sessions: 3 },
-          ],
-        }),
-        { headers: { "content-type": "application/json" } },
-      ),
-    );
+    queryApiV1BreakdownMock.mockResolvedValueOnce({
+      ok: true,
+      data: [{ value: "US", label: "United States", views: 4, sessions: 3 }],
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
     const breakdown = await authed(
       "/api/v1/sites/site-1/analytics/breakdowns/geo.country?preset=last_30_days&metrics=views,sessions",
       [siteMatch("site-1", "Blog")],
     );
     expect(breakdown.response.status).toBe(200);
-    expect(routeQueryMock).toHaveBeenLastCalledWith(
+    expect(queryApiV1BreakdownMock).toHaveBeenLastCalledWith(
       expect.anything(),
       "site-1",
-      "overview-geo-country",
       expect.any(URL),
-      { publicMode: false, deferJsonSerialization: true },
-      expect.any(Request),
+      expect.objectContaining({ startMs: expect.any(Number) }),
+      "geo.country",
     );
     expect(await breakdown.response.json()).toMatchObject({
       data: [{ key: "US", label: "United States", views: 4, sessions: 3 }],
@@ -835,21 +1025,18 @@ describe("api v1 gateway", () => {
   });
 
   it("adapts private event keyset cursors without changing the v1 envelope", async () => {
-    routeQueryMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          data: [{ eventId: "evt-1" }],
-          meta: {
-            pageSize: 120,
-            returned: 1,
-            hasMore: true,
-            nextCursor: "next-private-cursor",
-          },
-        }),
-        { headers: { "content-type": "application/json" } },
-      ),
-    );
+    queryApiV1EventRecordsMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        data: [{ eventId: "evt-1" }],
+        pagination: {
+          limit: 120,
+          hasMore: true,
+          nextCursor: "next-private-cursor",
+        },
+      },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
 
     const { response } = await authed(
       "/api/v1/sites/site-1/events?limit=120&cursor=previous-private-cursor",
@@ -865,30 +1052,34 @@ describe("api v1 gateway", () => {
         nextCursor: "next-private-cursor",
       },
     });
-    const internalUrl = routeQueryMock.mock.calls.at(-1)?.[3] as URL;
-    expect(internalUrl.searchParams.get("pageSize")).toBe("120");
-    expect(internalUrl.searchParams.get("cursor")).toBe(
-      "previous-private-cursor",
+    expect(queryApiV1EventRecordsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "site-1",
+      expect.any(URL),
+      expect.objectContaining({ startMs: expect.any(Number) }),
+      { limit: 120, cursor: "previous-private-cursor" },
     );
-    expect(internalUrl.searchParams.has("page")).toBe(false);
   });
 
   it("adapts private Journey keyset cursors without changing the v1 envelope", async () => {
-    const journeyResponse = () =>
-      new Response(
-        JSON.stringify({
-          ok: true,
-          data: [{ id: "journey-1" }],
-          meta: {
-            pageSize: 50,
-            returned: 1,
-            hasMore: true,
-            nextCursor: "next-journey-cursor",
-          },
-        }),
-        { headers: { "content-type": "application/json" } },
-      );
-    routeQueryMock.mockImplementation(async () => journeyResponse());
+    const page = {
+      ok: true as const,
+      data: {
+        data: [{ id: "journey-1" }],
+        pagination: {
+          limit: 50,
+          hasMore: true,
+          nextCursor: "next-journey-cursor",
+        },
+      },
+      meta: {
+        time: {} as never,
+        source: "raw" as const,
+        approximateVisitors: false,
+      },
+    };
+    queryApiV1VisitorsMock.mockResolvedValueOnce(page);
+    queryApiV1SessionsMock.mockResolvedValueOnce(page);
 
     const visitors = await authed(
       "/api/v1/sites/site-1/visitors?limit=50&cursor=visitor-cursor",
@@ -913,14 +1104,20 @@ describe("api v1 gateway", () => {
         nextCursor: "next-journey-cursor",
       },
     });
-    const visitorUrl = routeQueryMock.mock.calls.at(-2)?.[3] as URL;
-    const sessionUrl = routeQueryMock.mock.calls.at(-1)?.[3] as URL;
-    expect(visitorUrl.searchParams.get("pageSize")).toBe("50");
-    expect(visitorUrl.searchParams.get("cursor")).toBe("visitor-cursor");
-    expect(visitorUrl.searchParams.has("page")).toBe(false);
-    expect(sessionUrl.searchParams.get("pageSize")).toBe("50");
-    expect(sessionUrl.searchParams.get("cursor")).toBe("session-cursor");
-    expect(sessionUrl.searchParams.has("page")).toBe(false);
+    expect(queryApiV1VisitorsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "site-1",
+      expect.any(URL),
+      expect.anything(),
+      { limit: 50, cursor: "visitor-cursor" },
+    );
+    expect(queryApiV1SessionsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "site-1",
+      expect.any(URL),
+      expect.anything(),
+      { limit: 50, cursor: "session-cursor" },
+    );
   });
 
   it("serves team analytics from the team dashboard runtime", async () => {
@@ -2129,7 +2326,7 @@ describe("api v1 gateway", () => {
         JSON.stringify({
           ok: true,
           data: {
-            data: [{ timestampMs: 1000, views: 5 }],
+            data: [{ bucket: 0, timestampMs: Date.UTC(2026, 5, 1), views: 5 }],
           },
         }),
         { headers: { "content-type": "application/json" } },
@@ -2665,15 +2862,13 @@ describe("api v1 gateway", () => {
     expect(response.status).toBe(404);
   });
 
-  // ── additional coverage: runLegacyQuery error path ──────────────
+  // ── additional coverage: typed query error mapping ──────────────
 
-  it("returns error when legacy query response is not ok", async () => {
-    routeQueryMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ok: false, error: "Query failed" }), {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+  it("maps a typed internal query failure without an HTTP bridge", async () => {
+    queryApiV1OverviewMock.mockResolvedValueOnce({
+      ok: false,
+      error: { kind: "internal", operation: "overview" },
+    });
     const { response } = await authed(
       "/api/v1/sites/site-1/analytics/overview?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
       [siteMatch("site-1", "Blog")],
@@ -2681,6 +2876,7 @@ describe("api v1 gateway", () => {
     expect(response.status).toBe(500);
     const body = (await response.json()) as { error: { code: string } };
     expect(body.error.code).toBe("invalid_request");
+    expect(routeQueryMock).not.toHaveBeenCalled();
   });
 
   it("returns error when team analytics query fails", async () => {
@@ -3131,36 +3327,50 @@ describe("api v1 gateway", () => {
   });
 
   it("covers team analytics overview, timeseries, sites, and validation branches", async () => {
-    const teamDashboard = await import("@/lib/edge/query/team");
-    vi.spyOn(teamDashboard, "handleTeamDashboardForTeam").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          data: {
-            sites: [
-              {
-                id: "site-1",
-                name: "Site One",
-                overview: {
-                  views: 10,
-                  sessions: 5,
-                  visitors: 4,
-                  bounces: 1,
-                  totalDurationMs: 1000,
-                },
-              },
-            ],
-            trend: [
-              {
-                timestampMs: Date.UTC(2026, 5, 1),
-                sites: [{ views: 3, visitors: 2 }],
-              },
-            ],
+    const queryAdapter = await import("@/lib/edge/api-v1-query-adapter");
+    vi.spyOn(queryAdapter, "queryApiV1TeamDashboard").mockResolvedValue({
+      ok: true,
+      data: {
+        sites: [
+          {
+            id: "site-1",
+            teamId: "team-1",
+            name: "Site One",
+            domain: "site-one.test",
+            publicEnabled: 1,
+            publicSlug: "site-one",
+            createdAt: 0,
+            updatedAt: 0,
+            overview: {
+              views: 10,
+              sessions: 5,
+              visitors: 4,
+              bounces: 1,
+              totalDurationMs: 1000,
+              avgDurationMs: 200,
+              bounceRate: 0.2,
+              approximateVisitors: false,
+            },
+            changeRates: {
+              views: null,
+              visitors: null,
+              sessions: null,
+              bounceRate: null,
+              avgDurationMs: null,
+              pagesPerSession: null,
+            },
           },
-        }),
-        { headers: { "content-type": "application/json" } },
-      ),
-    );
+        ],
+        trend: [
+          {
+            bucket: 0,
+            timestampMs: Date.UTC(2026, 5, 1),
+            sites: [{ siteId: "site-1", views: 3, visitors: 2 }],
+          },
+        ],
+      },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
 
     for (const path of [
       "/api/v1/team",

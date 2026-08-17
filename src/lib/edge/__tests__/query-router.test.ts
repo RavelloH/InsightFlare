@@ -1,512 +1,70 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import type { routeQuery as routeQueryFn } from "@/lib/edge/query/router";
-import type { Env } from "@/lib/edge/types";
+import {
+  applyPublicQueryPolicy,
+  DASHBOARD_QUERY_PATHS,
+  operationForQueryRoute,
+  PUBLIC_QUERY_PATHS,
+} from "@/lib/edge/query/router";
+import {
+  assertOperationAllowed,
+  siteQueryContext,
+} from "@/lib/edge/query-contract";
 
-const handlerMocks = vi.hoisted(() => {
-  const respond = (name: string) => async (): Promise<Response> =>
-    new Response(name);
-
-  return {
-    core: {
-      notFound: vi.fn(() => new Response("not-found", { status: 404 })),
-      utmDimensionDefinition: vi.fn((key: string) => ({
-        labelExpr: `utm_${key}_expr`,
-      })),
-    },
-    events: {
-      handleEventRecordDetail: vi.fn(respond("event-record-detail")),
-      handleEventsRecords: vi.fn(respond("events-records")),
-      handleEventsSummary: vi.fn(respond("events-summary")),
-      handleEventsTrend: vi.fn(respond("events-trend")),
-      handleEventTypeDetail: vi.fn(respond("event-type-detail")),
-      handleEventTypeFields: vi.fn(respond("event-type-fields")),
-      handleEventTypeFieldValues: vi.fn(respond("event-type-field-values")),
-      handleEventTypes: vi.fn(respond("event-types")),
-    },
-    journeys: {
-      handleRetention: vi.fn(respond("retention")),
-      handleSessionDetail: vi.fn(respond("session-detail")),
-      handleSessions: vi.fn(respond("sessions")),
-      handleVisitorDetail: vi.fn(respond("visitor-detail")),
-      handleVisitors: vi.fn(respond("visitors")),
-    },
-    overview: {
-      handleFilterOptions: vi.fn(respond("filter-options")),
-      handleOverview: vi.fn(respond("overview")),
-      handleOverviewClientTab: vi.fn(respond("overview-client-tab")),
-      handleOverviewGeoPoints: vi.fn(respond("overview-geo-points")),
-      handleOverviewGeoTab: vi.fn(respond("overview-geo-tab")),
-      handleOverviewPageTab: vi.fn(respond("overview-page-tab")),
-      handleOverviewSourceTab: vi.fn(respond("overview-source-tab")),
-      handleTrend: vi.fn(respond("trend")),
-    },
-    pages: {
-      handleDimension: vi.fn(respond("dimension")),
-      handlePages: vi.fn(respond("pages")),
-      handlePagesDashboard: vi.fn(respond("pages-dashboard")),
-      handleReferrers: vi.fn(respond("referrers")),
-    },
-    funnels: {
-      handleFunnel: vi.fn(respond("funnel")),
-    },
-    performance: {
-      handlePerformance: vi.fn(respond("performance")),
-    },
-    technology: {
-      handleBrowserCrossBreakdown: vi.fn(respond("browser-cross-breakdown")),
-      handleBrowserEngineTrend: vi.fn(respond("browser-engine-trend")),
-      handleBrowserRadar: vi.fn(respond("browser-radar")),
-      handleBrowserTrend: vi.fn(respond("browser-trend")),
-      handleBrowserVersionBreakdown: vi.fn(
-        respond("browser-version-breakdown"),
-      ),
-      handleClientDimensionTrend: vi.fn(respond("client-dimension-trend")),
-      handleCrossBreakdown: vi.fn(respond("client-cross-breakdown")),
-      handleReferrerDimensionTrend: vi.fn(respond("referrer-dimension-trend")),
-      handleReferrerRadar: vi.fn(respond("referrer-radar")),
-      handleUtmDimensionTrend: vi.fn(respond("utm-dimension-trend")),
-    },
-  };
-});
-
-vi.mock("@/lib/edge/query/core", () => handlerMocks.core);
-vi.mock("@/lib/edge/query/events", () => handlerMocks.events);
-vi.mock("@/lib/edge/query/funnels", () => handlerMocks.funnels);
-vi.mock("@/lib/edge/query/journeys", () => handlerMocks.journeys);
-vi.mock("@/lib/edge/query/overview", () => handlerMocks.overview);
-vi.mock("@/lib/edge/query/pages", () => handlerMocks.pages);
-vi.mock("@/lib/edge/query/performance", () => handlerMocks.performance);
-vi.mock("@/lib/edge/query/technology", () => handlerMocks.technology);
-
-const { routeQuery } = (await import("@/lib/edge/query/router")) as {
-  routeQuery: typeof routeQueryFn;
-};
-
-const env = {} as Env;
-const siteId = "site-1";
-const url = new URL("https://edge.test/api/private/overview");
-
-async function route(pathname: string, publicMode = false) {
-  return routeQuery(env, siteId, pathname, url, { publicMode });
-}
-
-async function responseText(pathname: string, publicMode = false) {
-  return (await route(pathname, publicMode)).text();
-}
-
-describe("edge query router", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+describe("query route policy", () => {
+  it("exposes only the intended public paths", () => {
+    expect(PUBLIC_QUERY_PATHS).toContain("overview");
+    expect(PUBLIC_QUERY_PATHS).toContain("filter-options");
+    expect(PUBLIC_QUERY_PATHS).not.toContain("page-query");
+    expect(PUBLIC_QUERY_PATHS).not.toContain("page-hash");
+    expect(PUBLIC_QUERY_PATHS).not.toContain("overview-source-link");
+    expect(DASHBOARD_QUERY_PATHS).toContain("event-record-detail");
+    expect(DASHBOARD_QUERY_PATHS).toContain("funnels");
   });
 
-  it("keeps overview and trend available to public queries", async () => {
-    await expect(responseText("overview", true)).resolves.toBe("overview");
-    await expect(responseText("trend", true)).resolves.toBe("trend");
-
-    expect(handlerMocks.overview.handleOverview).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      undefined,
+  it("maps protocol paths to typed operation capabilities", () => {
+    expect(operationForQueryRoute("overview")).toBe("overview");
+    expect(operationForQueryRoute("event-type-fields")).toBe("event-fields");
+    expect(operationForQueryRoute("session-detail")).toBe("session-detail");
+    expect(operationForQueryRoute("browser-radar")).toBe("radar");
+    expect(operationForQueryRoute("client-cross-breakdown")).toBe(
+      "cross-dimension",
     );
-    expect(handlerMocks.overview.handleTrend).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      undefined,
-    );
-    expect(handlerMocks.core.notFound).not.toHaveBeenCalled();
   });
 
-  it("routes the public sharing query allowlist", async () => {
-    const publicPaths = [
-      "overview",
-      "trend",
-      "pages",
-      "pages-dashboard",
-      "referrers",
-      "retention",
-      "performance",
-      "overview-geo-points",
-      "overview-geo-country",
-      "overview-source-domain",
-      "overview-source-link",
-      "overview-client-browser",
-      "overview-client-device-type",
-      "browser-trend",
-      "browser-engine-trend",
-      "browser-version-breakdown",
-      "browser-cross-breakdown",
-      "browser-radar",
-      "referrer-radar",
-      "referrer-dimension-trend",
-      "client-dimension-trend",
-      "client-cross-breakdown",
-      "utm-source",
-      "utm-medium",
-      "utm-campaign",
-      "utm-term",
-      "utm-content",
-      "utm-dimension-trend",
-      "page-query",
-      "page-hash",
-      "event-types",
-    ];
-
-    for (const path of publicPaths) {
-      const response = await route(path, true);
-      expect(response.status, path).toBe(200);
+  it("denies public sensitive filters and dimensions before source selection", () => {
+    for (const query of [
+      "?query=secret",
+      "?sourceLink=https%3A%2F%2Fexample.com%2Fsecret",
+      "?filterKey=sourceLink",
+      "?primaryDimension=page.query",
+      "?secondaryDimension=referrer.url",
+    ]) {
+      expect(
+        applyPublicQueryPolicy(new URL(`https://edge.test/share${query}`))
+          .allowed,
+      ).toBe(false);
     }
   });
 
-  it("blocks sensitive detail queries in public mode", async () => {
-    const blockedPaths = [
-      "event-type-fields",
-      "funnels",
-      "sessions",
-      "session-detail",
-      "visitors",
-      "visitor-detail",
-      "events-records",
-      "event-record-detail",
-    ];
-
-    for (const path of blockedPaths) {
-      const response = await route(path, true);
-      expect(response.status, path).toBe(404);
-    }
-
-    expect(handlerMocks.funnels.handleFunnel).not.toHaveBeenCalled();
-    expect(handlerMocks.journeys.handleSessions).not.toHaveBeenCalled();
-    expect(handlerMocks.journeys.handleSessionDetail).not.toHaveBeenCalled();
-    expect(handlerMocks.journeys.handleVisitors).not.toHaveBeenCalled();
-    expect(handlerMocks.journeys.handleVisitorDetail).not.toHaveBeenCalled();
-    expect(handlerMocks.events.handleEventsRecords).not.toHaveBeenCalled();
-    expect(handlerMocks.events.handleEventRecordDetail).not.toHaveBeenCalled();
+  it("removes public detail switches without changing permitted inputs", () => {
+    const source = new URL(
+      "https://edge.test/share/pages?details=true&fullUrl=true&preset=today",
+    );
+    const decision = applyPublicQueryPolicy(source);
+    expect(decision.allowed).toBe(true);
+    expect(decision.url.searchParams.has("details")).toBe(false);
+    expect(decision.url.searchParams.has("fullUrl")).toBe(false);
+    expect(decision.url.searchParams.get("preset")).toBe("today");
   });
 
-  it("blocks all non-public routes before dispatching handlers", async () => {
-    const response = await route("sessions", true);
-
-    expect(response.status).toBe(404);
-    await expect(response.text()).resolves.toBe("not-found");
-    expect(handlerMocks.journeys.handleSessions).not.toHaveBeenCalled();
-    expect(handlerMocks.core.notFound).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps campaign, retention, and page detail support queries available to public routes", async () => {
-    await expect(responseText("retention", true)).resolves.toBe("retention");
-    await expect(responseText("utm-source", true)).resolves.toBe("dimension");
-    await expect(responseText("utm-dimension-trend", true)).resolves.toBe(
-      "utm-dimension-trend",
-    );
-    await expect(responseText("event-types", true)).resolves.toBe(
-      "event-types",
-    );
-
-    expect(handlerMocks.journeys.handleRetention).toHaveBeenCalledTimes(1);
-    expect(handlerMocks.pages.handleDimension).toHaveBeenCalledTimes(1);
+  it("does not grant private-only operations to public contexts", () => {
+    const publicContext = siteQueryContext("site-1", "public-share");
     expect(
-      handlerMocks.technology.handleUtmDimensionTrend,
-    ).toHaveBeenCalledTimes(1);
-    expect(handlerMocks.events.handleEventTypes).toHaveBeenCalledTimes(1);
-    expect(handlerMocks.core.notFound).not.toHaveBeenCalled();
-  });
-
-  it("routes private dashboard, event, journey, performance, and technology paths", async () => {
-    await expect(responseText("pages-dashboard")).resolves.toBe(
-      "pages-dashboard",
-    );
-    await expect(responseText("events-summary")).resolves.toBe(
-      "events-summary",
-    );
-    await expect(responseText("event-type-fields")).resolves.toBe(
-      "event-type-fields",
-    );
-    await expect(responseText("sessions")).resolves.toBe("sessions");
-    await expect(responseText("performance")).resolves.toBe("performance");
-    await expect(responseText("browser-radar")).resolves.toBe("browser-radar");
-
-    expect(handlerMocks.pages.handlePagesDashboard).toHaveBeenCalledTimes(1);
-    expect(handlerMocks.events.handleEventsSummary).toHaveBeenCalledTimes(1);
-    expect(handlerMocks.events.handleEventTypeFields).toHaveBeenCalledTimes(1);
-    expect(handlerMocks.journeys.handleSessions).toHaveBeenCalledTimes(1);
-    expect(handlerMocks.performance.handlePerformance).toHaveBeenCalledTimes(1);
-    expect(handlerMocks.technology.handleBrowserRadar).toHaveBeenCalledTimes(1);
-  });
-
-  it("only enables partial event detail shapes for dashboard requests", async () => {
-    const detailUrl = new URL(
-      "https://edge.test/api/private/event-type-detail?includeContext=false&includeBreakdowns=false&includeFields=false",
-    );
-
-    await routeQuery(env, siteId, "event-type-detail", detailUrl, {
-      publicMode: false,
+      assertOperationAllowed(publicContext, "event-record-detail"),
+    ).toMatchObject({
+      kind: "capability-denied",
     });
-    await routeQuery(env, siteId, "event-type-detail", detailUrl, {
-      publicMode: false,
-      dashboardMode: true,
-    });
-
-    expect(handlerMocks.events.handleEventTypeDetail).toHaveBeenNthCalledWith(
-      1,
-      env,
-      siteId,
-      detailUrl,
-      undefined,
-      undefined,
-    );
-    expect(handlerMocks.events.handleEventTypeDetail).toHaveBeenNthCalledWith(
-      2,
-      env,
-      siteId,
-      detailUrl,
-      undefined,
-      {
-        includeContext: false,
-        includeBreakdowns: false,
-        includeFields: false,
-      },
-    );
-  });
-
-  it("passes dimension expressions and fixed tab keys to shared handlers", async () => {
-    await expect(responseText("page-hash")).resolves.toBe("dimension");
-    await expect(responseText("page-query")).resolves.toBe("dimension");
-    await expect(responseText("utm-medium")).resolves.toBe("dimension");
-    await expect(responseText("utm-campaign")).resolves.toBe("dimension");
-    await expect(responseText("utm-term")).resolves.toBe("dimension");
-    await expect(responseText("utm-content")).resolves.toBe("dimension");
-    await expect(responseText("countries")).resolves.toBe("dimension");
-    await expect(responseText("overview-page-title")).resolves.toBe(
-      "overview-page-tab",
-    );
-    await expect(responseText("overview-page-hostname")).resolves.toBe(
-      "overview-page-tab",
-    );
-    await expect(responseText("overview-page-entry")).resolves.toBe(
-      "overview-page-tab",
-    );
-    await expect(responseText("overview-page-exit")).resolves.toBe(
-      "overview-page-tab",
-    );
-    await expect(responseText("overview-source-link")).resolves.toBe(
-      "overview-source-tab",
-    );
-    await expect(responseText("overview-client-browser")).resolves.toBe(
-      "overview-client-tab",
-    );
-    await expect(responseText("overview-client-os-version")).resolves.toBe(
-      "overview-client-tab",
-    );
-    await expect(responseText("overview-client-device-type")).resolves.toBe(
-      "overview-client-tab",
-    );
-    await expect(responseText("overview-client-language")).resolves.toBe(
-      "overview-client-tab",
-    );
-    await expect(responseText("overview-client-screen-size")).resolves.toBe(
-      "overview-client-tab",
-    );
-    await expect(responseText("overview-geo-city")).resolves.toBe(
-      "overview-geo-tab",
-    );
-    await expect(responseText("overview-geo-continent")).resolves.toBe(
-      "overview-geo-tab",
-    );
-    await expect(responseText("overview-geo-timezone")).resolves.toBe(
-      "overview-geo-tab",
-    );
-    await expect(responseText("overview-geo-organization")).resolves.toBe(
-      "overview-geo-tab",
-    );
-
-    expect(handlerMocks.pages.handleDimension).toHaveBeenNthCalledWith(
-      1,
-      env,
-      siteId,
-      url,
-      "hash_fragment",
-      undefined,
-      undefined,
-    );
-    expect(handlerMocks.pages.handleDimension).toHaveBeenNthCalledWith(
-      2,
-      env,
-      siteId,
-      url,
-      "query_string",
-      undefined,
-      undefined,
-    );
-    expect(handlerMocks.core.utmDimensionDefinition).toHaveBeenCalledWith(
-      "medium",
-    );
-    expect(handlerMocks.core.utmDimensionDefinition).toHaveBeenCalledWith(
-      "campaign",
-    );
-    expect(handlerMocks.core.utmDimensionDefinition).toHaveBeenCalledWith(
-      "term",
-    );
-    expect(handlerMocks.core.utmDimensionDefinition).toHaveBeenCalledWith(
-      "content",
-    );
-    expect(handlerMocks.pages.handleDimension).toHaveBeenNthCalledWith(
-      4,
-      env,
-      siteId,
-      url,
-      "utm_campaign_expr",
-      undefined,
-      undefined,
-    );
-    expect(handlerMocks.pages.handleDimension).toHaveBeenNthCalledWith(
-      7,
-      env,
-      siteId,
-      url,
-      "country",
-      { ignoreGeo: true },
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewPageTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "title",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewPageTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "hostname",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewPageTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "entry",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewPageTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "exit",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewSourceTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "link",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewClientTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "browser",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewClientTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "osVersion",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewClientTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "deviceType",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewClientTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "language",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewClientTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "screenSize",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewGeoTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "city",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewGeoTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "continent",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewGeoTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "timezone",
-      undefined,
-    );
-    expect(handlerMocks.overview.handleOverviewGeoTab).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      "organization",
-      undefined,
-    );
-  });
-
-  it("routes public pages and referrers advertised by the edge client", async () => {
-    await expect(responseText("pages", true)).resolves.toBe("pages");
-    await expect(responseText("referrers", true)).resolves.toBe("referrers");
-
-    expect(handlerMocks.pages.handlePages).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      false,
-      undefined,
-    );
-    expect(handlerMocks.pages.handleReferrers).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      8,
-      false,
-      undefined,
-    );
-  });
-
-  it("routes the private funnel resource to its handler", async () => {
-    await expect(responseText("funnels")).resolves.toBe("funnel");
-
-    expect(handlerMocks.funnels.handleFunnel).toHaveBeenCalledWith(
-      env,
-      siteId,
-      url,
-      undefined,
-      undefined,
-    );
-  });
-
-  it("returns not found for unknown private routes", async () => {
-    const response = await route("missing-route");
-
-    expect(response.status).toBe(404);
-    await expect(response.text()).resolves.toBe("not-found");
+    expect(assertOperationAllowed(publicContext, "overview")).toBeNull();
   });
 });

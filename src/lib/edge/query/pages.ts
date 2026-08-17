@@ -21,12 +21,8 @@ import {
   jsonResponseWith,
   mapDimensionRows,
   mapPageCardMetrics,
-  mapPages,
-  mapReferrers,
-  mapTabs,
   normalizePathname,
   paginationOffset,
-  parseBooleanFlag,
   parseFilters,
   parseInterval,
   parseLimit,
@@ -522,68 +518,68 @@ export async function queryDimensionAggregate(
   );
 }
 
-export async function handlePages(
-  env: Env,
-  siteId: string,
-  url: URL,
-  includeTabs: boolean,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
-  const limit = parseLimit(url, 20, 200);
-  const includeDetails = parseBooleanFlag(url, "details");
-  const pages = await queryPagesAggregate(
-    env,
-    siteId,
-    window,
-    filters,
-    limit,
-    includeDetails,
-  );
-  const payload: Record<string, unknown> = {
-    ok: true,
-    data: mapPages(pages),
-  };
-  if (includeTabs) {
-    const tabs = await queryPageTabsAggregate(
-      env,
-      siteId,
-      window,
-      filters,
-      limit,
-    );
-    payload.tabs = {
-      path: mapTabs(tabs.path),
-      title: mapTabs(tabs.title),
-      hostname: mapTabs(tabs.hostname),
-      entry: mapTabs(tabs.entry),
-      exit: mapTabs(tabs.exit),
-    };
-  }
-  return jsonResponseWith(ctx!, payload);
+export interface PageDashboardMetrics {
+  readonly views: number;
+  readonly visitors: number;
+  readonly sessions: number;
+  readonly bounceRate: number;
+  readonly pagesPerSession: number;
+  readonly avgDurationMs: number;
 }
 
-export async function handlePagesDashboard(
+export interface PageDashboardItem {
+  readonly pathname: string;
+  readonly titles: readonly string[];
+  readonly trend: readonly {
+    readonly timestampMs: number;
+    readonly views: number;
+    readonly visitors: number;
+  }[];
+  readonly metrics: PageDashboardMetrics;
+  readonly changeRates: Readonly<
+    Record<
+      | "views"
+      | "visitors"
+      | "sessions"
+      | "bounceRate"
+      | "pagesPerSession"
+      | "avgDurationMs",
+      number | null
+    >
+  >;
+}
+
+export interface PagesDashboardResult {
+  readonly interval: Interval;
+  readonly data: readonly PageDashboardItem[];
+  readonly meta: {
+    readonly page: number;
+    readonly pageSize: number;
+    readonly returned: number;
+    readonly hasMore: boolean;
+    readonly nextPage: number | null;
+  };
+}
+
+export interface PagesDashboardReaderInput {
+  readonly window: QueryWindow;
+  readonly filters: DashboardFilters;
+  readonly interval: Interval;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly offset: number;
+}
+
+/**
+ * Pure dashboard-page reader. Pagination parsing and HTTP serialization stay
+ * in its protocol adapter.
+ */
+export async function queryPagesDashboard(
   env: Env,
   siteId: string,
-  url: URL,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-
-  const filters = parseFilters(url);
-  const interval = parseInterval(url);
-  const page = parseQueryLimit(url, "page", 1, 1, 10_000);
-  const pageSize = parseQueryLimit(url, "pageSize", 12, 1, 24);
-  const offset = paginationOffset(page, pageSize);
-  if (offset === null) {
-    return badRequest(
-      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
-    );
-  }
+  input: PagesDashboardReaderInput,
+): Promise<PagesDashboardResult> {
+  const { filters, interval, offset, page, pageSize, window } = input;
   const requestedRows = await queryPageCardMetricsFromD1(
     env,
     siteId,
@@ -599,8 +595,7 @@ export async function handlePagesDashboard(
     ? requestedRows.slice(0, pageSize)
     : requestedRows;
   if (currentRows.length === 0) {
-    return jsonResponseWith(ctx!, {
-      ok: true,
+    return {
       interval,
       data: [],
       meta: {
@@ -610,15 +605,17 @@ export async function handlePagesDashboard(
         hasMore: false,
         nextPage: null,
       },
-    });
+    };
   }
 
   const pathnames = currentRows.map((row) => row.pathname);
-  const previousTo = Math.max(window.fromMs - 1, 0);
-  const previousFrom = Math.max(previousTo - (window.toMs - window.fromMs), 0);
+  const previousStartMs = Math.max(
+    window.startMs - (window.endExclusiveMs - window.startMs),
+    0,
+  );
   const previousWindow: QueryWindow = {
-    fromMs: previousFrom,
-    toMs: previousTo,
+    startMs: previousStartMs,
+    endExclusiveMs: window.startMs,
     nowMs: window.nowMs,
     timeZone: window.timeZone,
   };
@@ -671,8 +668,7 @@ export async function handlePagesDashboard(
     trendByPath.set(row.pathname, trend);
   }
 
-  return jsonResponseWith(ctx!, {
-    ok: true,
+  return {
     interval,
     data: currentRows.map((row) => {
       const previousRow =
@@ -710,31 +706,34 @@ export async function handlePagesDashboard(
       hasMore,
       nextPage: hasMore ? page + 1 : null,
     },
-  });
+  };
 }
 
-export async function handleReferrers(
+export async function handlePagesDashboard(
   env: Env,
   siteId: string,
   url: URL,
-  fallbackLimit = 20,
-  allowFullUrlParam = true,
   ctx?: ResponseContext,
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
-  const limit = parseLimit(url, fallbackLimit, 200);
-  const includeFullUrl = allowFullUrlParam && parseBooleanFlag(url, "fullUrl");
-  const rows = await queryReferrerAggregate(
-    env,
-    siteId,
+  const page = parseQueryLimit(url, "page", 1, 1, 10_000);
+  const pageSize = parseQueryLimit(url, "pageSize", 12, 1, 24);
+  const offset = paginationOffset(page, pageSize);
+  if (offset === null) {
+    return badRequest(
+      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
+    );
+  }
+  const result = await queryPagesDashboard(env, siteId, {
     window,
-    filters,
-    limit,
-    includeFullUrl,
-  );
-  return jsonResponseWith(ctx!, { ok: true, data: mapReferrers(rows) });
+    filters: parseFilters(url),
+    interval: parseInterval(url),
+    page,
+    pageSize,
+    offset,
+  });
+  return jsonResponseWith(ctx!, { ok: true, ...result });
 }
 
 export async function handleDimension(

@@ -20,8 +20,8 @@ vi.mock("@/lib/edge/query/core", async () => {
 const env = {} as Env;
 const siteId = "site-1";
 const window: QueryWindow = {
-  fromMs: Date.UTC(2026, 0, 1),
-  toMs: Date.UTC(2026, 0, 1, 1),
+  startMs: Date.UTC(2026, 0, 1),
+  endExclusiveMs: Date.UTC(2026, 0, 1, 1),
   nowMs: Date.UTC(2026, 0, 1, 2),
   timeZone: "UTC",
 };

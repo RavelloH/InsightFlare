@@ -2,7 +2,6 @@ import {
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollupsPartial,
 } from "@/lib/edge/hourly-rollup";
-import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -12,33 +11,24 @@ import type {
   TeamSiteRow,
 } from "./core";
 import {
-  badRequest,
   buildTimeBuckets,
   buildVisitSourceCteForSites,
-  jsonResponseWith,
   mapOverviewAggregate,
-  parseInterval,
-  parseWindow,
   percentChange,
-  PRIVATE_CACHE_HEADERS,
   queryD1All,
-  resolvePrivateTeam,
-  resolvePrivateTeamForSession,
-  type ResponseContext,
   timeBucketCase,
   timeBucketTimestamp,
   visitSourceBindingsForSites,
 } from "./core";
 import {
   type AnalyticsDataSource,
-  analyticsDiagnosticHeaders,
   createD1ReadDiagnostics,
   type D1ReadDiagnostics,
   recordD1RowsRead,
 } from "./diagnostics";
 
 // D1 permits at most 100 bound parameters per statement; visit sources use
-// two additional bindings for the time window.
+// two additional bindings for the half-open time window.
 const MAX_SITE_IDS_PER_D1_QUERY = 98;
 
 function siteIdChunks(siteIds: string[]): string[][] {
@@ -59,7 +49,7 @@ function buildTeamOverviewSourceCte(siteCount: number): string {
 visit_source AS MATERIALIZED (
   SELECT site_id, visitor_id, session_id, duration_ms
   FROM visits
-  WHERE site_id IN (${placeholders}) AND started_at BETWEEN ? AND ?
+  WHERE site_id IN (${placeholders}) AND started_at >= ? AND started_at < ?
 )`;
 }
 
@@ -315,59 +305,61 @@ export async function listTeamSites(
   return result.results;
 }
 
-export async function handleTeamDashboard(
-  request: Request,
-  env: Env,
-  url: URL,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const team = await resolvePrivateTeam(request, env, url);
-  if (team instanceof Response) return team;
-
-  return handleTeamDashboardForTeam(
-    env,
-    url,
-    team.id,
-    window,
-    team.allowedSiteIds,
-    ctx,
-  );
+export interface TeamDashboardQueryResult {
+  readonly data: TeamDashboardData;
+  readonly source: AnalyticsDataSource;
 }
 
-export async function handleTeamDashboardForSession(
-  request: Request,
-  env: Env,
-  url: URL,
-  session: EdgeSessionClaims,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const team = await resolvePrivateTeamForSession(request, env, url, session);
-  if (team instanceof Response) return team;
-
-  return handleTeamDashboardForTeam(
-    env,
-    url,
-    team.id,
-    window,
-    team.allowedSiteIds,
-    ctx,
-  );
+export interface TeamDashboardOverview {
+  readonly views: number;
+  readonly sessions: number;
+  readonly visitors: number;
+  readonly bounces: number;
+  readonly totalDurationMs: number;
+  readonly avgDurationMs: number;
+  readonly bounceRate: number;
+  readonly approximateVisitors: boolean;
 }
 
-export async function handleTeamDashboardForTeam(
+export interface TeamDashboardSite extends TeamSiteRow {
+  readonly overview: TeamDashboardOverview;
+  readonly changeRates: Readonly<
+    Record<
+      | "views"
+      | "visitors"
+      | "sessions"
+      | "bounceRate"
+      | "avgDurationMs"
+      | "pagesPerSession",
+      number | null
+    >
+  >;
+}
+
+export interface TeamDashboardTrendBucket {
+  readonly bucket: number;
+  readonly timestampMs: number;
+  readonly sites: readonly {
+    readonly siteId: string;
+    readonly views: number;
+    readonly visitors: number;
+  }[];
+}
+
+export interface TeamDashboardData {
+  readonly sites: readonly TeamDashboardSite[];
+  readonly trend: readonly TeamDashboardTrendBucket[];
+}
+
+/** Typed team dashboard reader shared by private and API v1 adapters. */
+export async function queryTeamDashboardForTeam(
   env: Env,
-  url: URL,
   teamId: string,
   window: QueryWindow,
+  interval: Interval,
   allowedSiteIds?: string[],
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const interval = parseInterval(url);
-  const diagnostics = createD1ReadDiagnostics();
+  diagnostics = createD1ReadDiagnostics(),
+): Promise<TeamDashboardQueryResult> {
   const allSites = await listTeamSites(env, teamId, diagnostics);
   const allowed =
     allowedSiteIds && allowedSiteIds.length > 0
@@ -377,28 +369,15 @@ export async function handleTeamDashboardForTeam(
     ? allSites.filter((site) => allowed.has(site.id))
     : allSites;
   if (sites.length === 0) {
-    return jsonResponseWith(
-      ctx!,
-      {
-        ok: true,
-        data: {
-          sites: [],
-          trend: [],
-        },
-      },
-      200,
-      {
-        ...PRIVATE_CACHE_HEADERS,
-        ...analyticsDiagnosticHeaders("raw", diagnostics),
-      },
-    );
+    return { data: { sites: [], trend: [] }, source: "raw" };
   }
 
-  const previousTo = Math.max(window.fromMs - 1, 0);
-  const previousFrom = Math.max(previousTo - (window.toMs - window.fromMs), 0);
+  const durationMs = window.endExclusiveMs - window.startMs;
+  const previousEndExclusiveMs = window.startMs;
+  const previousStartMs = Math.max(previousEndExclusiveMs - durationMs, 0);
   const previousWindow: QueryWindow = {
-    fromMs: previousFrom,
-    toMs: previousTo,
+    startMs: previousStartMs,
+    endExclusiveMs: previousEndExclusiveMs,
     nowMs: window.nowMs,
     timeZone: window.timeZone,
   };
@@ -497,21 +476,13 @@ export async function handleTeamDashboardForTeam(
     trendByBucket.set(bucket, existing);
   }
 
-  return jsonResponseWith(
-    ctx!,
-    {
-      ok: true,
-      data: {
-        sites: sitePayload,
-        trend: [...trendByBucket.values()].sort(
-          (left, right) => left.bucket - right.bucket,
-        ),
-      },
+  return {
+    data: {
+      sites: sitePayload,
+      trend: [...trendByBucket.values()].sort(
+        (left, right) => left.bucket - right.bucket,
+      ),
     },
-    200,
-    {
-      ...PRIVATE_CACHE_HEADERS,
-      ...analyticsDiagnosticHeaders(source, diagnostics),
-    },
-  );
+    source,
+  };
 }

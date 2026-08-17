@@ -52,8 +52,8 @@ vi.mock("@/lib/edge/query/core", async () => {
 const env = {} as Env;
 const siteId = "site_123";
 const window: QueryWindow = {
-  fromMs: Date.UTC(2026, 0, 1),
-  toMs: Date.UTC(2026, 0, 1, 2),
+  startMs: Date.UTC(2026, 0, 1),
+  endExclusiveMs: Date.UTC(2026, 0, 1, 2),
   nowMs: Date.UTC(2026, 0, 2),
   timeZone: "UTC",
 };
@@ -140,7 +140,7 @@ describe("edge query events summary coverage", () => {
       "filtered_events AS MATERIALIZED",
     );
     expect(queryD1AllMock.mock.calls[0][2]).toEqual(
-      expect.arrayContaining([siteId, window.fromMs, window.toMs]),
+      expect.arrayContaining([siteId, window.startMs, window.endExclusiveMs]),
     );
   });
 
@@ -338,11 +338,11 @@ describe("edge query events summary coverage", () => {
     expect(sql).toContain("TRIM(COALESCE(vc.device_type, '')) = ?");
     expect(bindings).toEqual([
       siteId,
-      window.fromMs,
-      window.toMs,
+      window.startMs,
+      window.endExclusiveMs,
       siteId,
-      window.fromMs,
-      window.toMs,
+      window.startMs,
+      window.endExclusiveMs,
       "ref.example",
       "mobile",
       3,

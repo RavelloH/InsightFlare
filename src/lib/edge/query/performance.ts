@@ -12,22 +12,15 @@ import type {
 } from "./core";
 import {
   appendSqlConditions,
-  badRequest,
   buildTimeBuckets,
   buildVisitFilterSql,
   buildVisitSourceCte,
   emptyPerformanceRouteMetrics,
-  jsonResponseWith,
   normalizePathname,
-  parseFilters,
-  parseInterval,
-  parseLimit,
-  parseWindow,
   PERFORMANCE_METRIC_COLUMNS,
   PERFORMANCE_METRIC_KEYS,
   performanceMetricColumn,
   queryD1All,
-  type ResponseContext,
   roundPerformanceValue,
   timeBucketCase,
   timeBucketTimestamp,
@@ -558,7 +551,7 @@ ORDER BY country_views.views DESC, thresholds.country ASC, thresholds.metric ASC
   return mapPerformanceCountries(rows);
 }
 
-async function queryPerformanceDashboardFromD1(
+export async function queryPerformanceDashboardFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
@@ -889,35 +882,4 @@ ORDER BY rowType ASC, metric ASC, bucket ASC, pathname ASC, country ASC
       rows.filter((row) => row.rowType === "country"),
     ),
   };
-}
-
-export async function handlePerformance(
-  env: Env,
-  siteId: string,
-  url: URL,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
-  const interval = parseInterval(url);
-  const routeLimit = parseLimit(url, 18, 50);
-  const { summaries, trends, routes, countries } =
-    await queryPerformanceDashboardFromD1(
-      env,
-      siteId,
-      window,
-      interval,
-      filters,
-      routeLimit,
-    );
-
-  return jsonResponseWith(ctx!, {
-    ok: true,
-    interval,
-    summaries,
-    trends,
-    routes,
-    countries,
-  });
 }

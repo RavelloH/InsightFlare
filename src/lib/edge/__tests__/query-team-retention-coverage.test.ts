@@ -3,7 +3,13 @@ import { DatabaseSync } from "node:sqlite";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { normalizePathname } from "@/lib/edge/query/core";
+import { handleRetentionContract as handleRetention } from "@/lib/edge/query/analysis-contract-adapter";
+import {
+  badRequest,
+  normalizePathname,
+  parseWindow,
+  resolvePrivateTeam,
+} from "@/lib/edge/query/core";
 import {
   browserMajorVersionExpr,
   clientDimensionDefinition,
@@ -20,12 +26,11 @@ import {
   parseSessionListSort,
   parseVisitorListSort,
 } from "@/lib/edge/query/core-parsers";
-import { handleRetention } from "@/lib/edge/query/journey-retention";
 import {
-  handleTeamDashboard,
   queryTeamOverviewFromD1,
   queryTeamTrendFromD1,
 } from "@/lib/edge/query/team";
+import { executePrivateTeamDashboard } from "@/lib/edge/query-adapters/private";
 import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
 import type { Env } from "@/lib/edge/types";
 
@@ -47,8 +52,8 @@ interface QueryCall {
 const siteId = "site-team-retention";
 const baseMs = Date.UTC(2026, 0, 5, 0);
 const window = {
-  fromMs: baseMs,
-  toMs: baseMs + 2 * 60 * 60 * 1000,
+  startMs: baseMs,
+  endExclusiveMs: baseMs + 2 * 60 * 60 * 1000,
   nowMs: baseMs + 3 * 60 * 60 * 1000,
   timeZone: "UTC",
 };
@@ -90,11 +95,11 @@ function createD1Env(resultSets: D1Row[][], firstRows: D1Row[] = []) {
 }
 
 function visitBindingsForSites(siteIds: string[]) {
-  return [...siteIds, window.fromMs, window.toMs];
+  return [...siteIds, window.startMs, window.endExclusiveMs];
 }
 
 function visitBindings(targetWindow = window) {
-  return [siteId, targetWindow.fromMs, targetWindow.toMs];
+  return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
 }
 
 function url(path: string, params: Record<string, string | number | boolean>) {
@@ -103,6 +108,22 @@ function url(path: string, params: Record<string, string | number | boolean>) {
     parsed.searchParams.set(key, String(value));
   }
   return parsed;
+}
+
+async function handleTeamDashboard(
+  request: Request,
+  env: Env,
+  target: URL,
+): Promise<Response> {
+  if (!parseWindow(target)) return badRequest("Invalid time window");
+  const team = await resolvePrivateTeam(request, env, target);
+  if (team instanceof Response) return team;
+  return executePrivateTeamDashboard({
+    env,
+    teamId: team.id,
+    allowedSiteIds: team.allowedSiteIds,
+    url: target,
+  });
 }
 
 describe("edge query core dimension and parser edge coverage", () => {
@@ -323,8 +344,8 @@ describe("edge team query coverage", () => {
         "site-a",
         "visitor-out",
         "session-out",
-        window.toMs + 1,
-        window.toMs + 1,
+        window.endExclusiveMs,
+        window.endExclusiveMs,
         999,
       );
 
@@ -455,8 +476,8 @@ describe("edge team query coverage", () => {
       env,
       url("/api/private/team-dashboard", {
         teamId: "team-1",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         interval: "hour",
       }),
     );
@@ -504,12 +525,12 @@ describe("edge team query coverage", () => {
         trend: [
           {
             bucket: 0,
-            timestampMs: window.fromMs,
+            timestampMs: window.startMs,
             sites: [{ siteId: "site-a", views: 6, visitors: 3 }],
           },
           {
             bucket: 1,
-            timestampMs: window.fromMs + 60 * 60 * 1000,
+            timestampMs: window.startMs + 60 * 60 * 1000,
             sites: [{ siteId: "site-b", views: 3, visitors: 2 }],
           },
         ],
@@ -533,15 +554,15 @@ describe("edge team query coverage", () => {
     });
     expect(calls[4]).toMatchObject({
       kind: "all",
-      bindings: ["site-a", "site-b", window.fromMs, window.toMs],
+      bindings: ["site-a", "site-b", window.startMs, window.endExclusiveMs],
     });
     expect(calls[5]).toMatchObject({
       kind: "all",
       bindings: [
         "site-a",
         "site-b",
-        window.fromMs - (window.toMs - window.fromMs) - 1,
-        window.fromMs - 1,
+        window.startMs - (window.endExclusiveMs - window.startMs),
+        window.startMs,
       ],
     });
     expect(calls[6]).toMatchObject({
@@ -550,8 +571,8 @@ describe("edge team query coverage", () => {
     expect(calls[6].bindings.slice(0, 4)).toEqual([
       "site-a",
       "site-b",
-      window.fromMs,
-      window.toMs,
+      window.startMs,
+      window.endExclusiveMs,
     ]);
   });
 
@@ -564,7 +585,7 @@ describe("edge team query coverage", () => {
       url("/api/private/team-dashboard", {
         teamId: "team-1",
         from: "bad",
-        to: window.toMs,
+        to: window.endExclusiveMs,
       }),
     );
 
@@ -586,8 +607,8 @@ describe("edge team query coverage", () => {
       env,
       url("/api/private/team-dashboard", {
         teamId: "team-1",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
       }),
     );
 
@@ -608,8 +629,8 @@ describe("edge team query coverage", () => {
       env,
       url("/api/private/team-dashboard", {
         teamId: "team-empty",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
       }),
     );
 
@@ -653,17 +674,20 @@ describe("edge team query coverage", () => {
       INGEST_DO: {} as DurableObjectNamespace,
     } as Env;
 
-    await expect(
-      handleTeamDashboard(
-        new Request("https://edge.test/api/private/team-dashboard"),
-        failingEnv,
-        url("/api/private/team-dashboard", {
-          teamId: "team-1",
-          from: window.fromMs,
-          to: window.toMs,
-        }),
-      ),
-    ).rejects.toThrow("sites unavailable");
+    const response = await handleTeamDashboard(
+      new Request("https://edge.test/api/private/team-dashboard"),
+      failingEnv,
+      url("/api/private/team-dashboard", {
+        teamId: "team-1",
+        from: window.startMs,
+        to: window.endExclusiveMs,
+      }),
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal" },
+    });
   });
 });
 
@@ -698,8 +722,8 @@ describe("edge journey retention coverage", () => {
       env,
       siteId,
       url("/retention", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         granularity: "bad",
         country: "US",
       }),
@@ -710,7 +734,7 @@ describe("edge journey retention coverage", () => {
       granularity: "week",
       cohorts: [
         {
-          bucket: window.fromMs,
+          bucket: window.startMs,
           size: 4,
           periods: [
             { index: 0, visitors: 4, rate: 1 },
@@ -788,16 +812,16 @@ describe("edge journey retention coverage", () => {
         siteId,
         "visitor-outside",
         "session-d",
-        window.toMs + 1,
-        window.toMs + 1,
+        window.endExclusiveMs,
+        window.endExclusiveMs,
       );
 
       const response = await handleRetention(
         env,
         siteId,
         url("/retention", {
-          from: window.fromMs,
-          to: window.toMs,
+          from: window.startMs,
+          to: window.endExclusiveMs,
           granularity: "hour",
         }),
       );
@@ -849,8 +873,8 @@ describe("edge journey retention coverage", () => {
       env,
       siteId,
       url("/retention", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         interval: "day",
       }),
     );
@@ -860,7 +884,7 @@ describe("edge journey retention coverage", () => {
       granularity: "day",
       cohorts: [
         {
-          bucket: window.fromMs,
+          bucket: window.startMs,
           size: 0,
           periods: [{ index: 0, visitors: 0, rate: 0 }],
         },
@@ -880,8 +904,8 @@ describe("edge journey retention coverage", () => {
       env,
       siteId,
       url("/retention", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
       }),
     );
 

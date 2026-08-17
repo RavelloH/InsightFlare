@@ -54,19 +54,18 @@ import {
   queryTrendForSitesFromHourlyRollupsPartial,
 } from "@/lib/edge/hourly-rollup";
 import {
+  badRequest,
   parseWindow,
   queryD1All,
   resolvePrivateTeam,
   resolvePrivateTeamForSession,
 } from "@/lib/edge/query/core";
 import {
-  handleTeamDashboard,
-  handleTeamDashboardForSession,
-  handleTeamDashboardForTeam,
   listTeamSites,
   queryTeamOverviewFromD1,
   queryTeamTrendFromD1,
 } from "@/lib/edge/query/team";
+import { executePrivateTeamDashboard } from "@/lib/edge/query-adapters/private";
 
 const queryOverviewMock = vi.mocked(
   queryOverviewForSitesFromHourlyRollupsPartial,
@@ -99,8 +98,8 @@ function makeEnv(results: Record<string, unknown>[] = []): Env {
   return { DB: db } as unknown as Env;
 }
 
-function makeWindow(fromMs = 1000, toMs = 2000) {
-  return { fromMs, toMs, nowMs: 3000, timeZone: "UTC" };
+function makeWindow(startMs = 1000, endExclusiveMs = 2000) {
+  return { startMs, endExclusiveMs, nowMs: 3000, timeZone: "UTC" };
 }
 
 function makeUrl(path: string, params?: Record<string, string>): URL {
@@ -109,6 +108,56 @@ function makeUrl(path: string, params?: Record<string, string>): URL {
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   }
   return url;
+}
+
+async function handleTeamDashboard(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response> {
+  if (!parseWindow(url)) return badRequest("Invalid time window");
+  const team = await resolvePrivateTeam(request, env, url);
+  if (team instanceof Response) return team;
+  return executePrivateTeamDashboard({
+    env,
+    teamId: team.id,
+    allowedSiteIds: team.allowedSiteIds,
+    url,
+  });
+}
+
+async function handleTeamDashboardForSession(
+  request: Request,
+  env: Env,
+  url: URL,
+  session: Parameters<typeof resolvePrivateTeamForSession>[3],
+): Promise<Response> {
+  if (!parseWindow(url)) return badRequest("Invalid time window");
+  const team = await resolvePrivateTeamForSession(request, env, url, session);
+  if (team instanceof Response) return team;
+  return executePrivateTeamDashboard({
+    env,
+    teamId: team.id,
+    allowedSiteIds: team.allowedSiteIds,
+    url,
+  });
+}
+
+function handleTeamDashboardForTeam(
+  env: Env,
+  url: URL,
+  teamId: string,
+  _window: ReturnType<typeof parseWindow> extends infer Window
+    ? Exclude<Window, null>
+    : never,
+  allowedSiteIds?: string[],
+): Promise<Response> {
+  return executePrivateTeamDashboard({
+    env,
+    teamId,
+    allowedSiteIds: allowedSiteIds ?? [],
+    url,
+  });
 }
 
 describe("queryTeamOverviewFromD1", () => {

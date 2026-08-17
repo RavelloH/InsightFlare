@@ -63,8 +63,8 @@ const siteId = "site-event-detail";
 const eventName = "outbound_click";
 const eventTime = Date.UTC(2026, 7, 14, 10);
 const window: QueryWindow = {
-  fromMs: eventTime - 60 * 60 * 1000,
-  toMs: eventTime + 60 * 60 * 1000,
+  startMs: eventTime - 60 * 60 * 1000,
+  endExclusiveMs: eventTime + 60 * 60 * 1000,
   nowMs: eventTime + 60 * 60 * 1000,
   timeZone: "UTC",
 };

@@ -1,42 +1,46 @@
 import type { Env } from "@/lib/edge/types";
 
+import type { DashboardFilters, Interval, QueryWindow } from "./core";
 import {
-  badRequest,
   buildTimeBuckets,
   buildVisitFilterSql,
   buildVisitSourceCte,
-  jsonResponseWith,
-  parseFilters,
-  parseWindow,
   queryD1All,
-  type ResponseContext,
   timeBucketCase,
   timeBucketTimestamp,
   visitSourceBindings,
 } from "./core";
 
-export async function handleRetention(
+export function parseRetentionGranularity(value: string | null): Interval {
+  return value === "minute" ||
+    value === "hour" ||
+    value === "day" ||
+    value === "week" ||
+    value === "month"
+    ? value
+    : "week";
+}
+
+export interface RetentionResult {
+  readonly granularity: Interval;
+  readonly cohorts: readonly {
+    readonly bucket: number;
+    readonly size: number;
+    readonly periods: readonly {
+      readonly index: number;
+      readonly visitors: number;
+      readonly rate: number;
+    }[];
+  }[];
+}
+
+export async function queryRetentionFromD1(
   env: Env,
   siteId: string,
-  url: URL,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
-  const rawGranularity =
-    url.searchParams.get("granularity") ||
-    url.searchParams.get("interval") ||
-    "week";
-  const granularity =
-    rawGranularity === "minute" ||
-    rawGranularity === "hour" ||
-    rawGranularity === "day" ||
-    rawGranularity === "week" ||
-    rawGranularity === "month"
-      ? rawGranularity
-      : "week";
-
+  window: QueryWindow,
+  filters: DashboardFilters,
+  granularity: Interval,
+): Promise<RetentionResult> {
   const buckets = buildTimeBuckets(window, granularity);
   const bucket = timeBucketCase(buckets, "started_at");
 
@@ -101,27 +105,23 @@ ORDER BY cohort_bucket ASC, vb.bucket ASC
     }
     const cohort = cohortMap.get(cb)!;
     cohort.periods.set(vb, visitors);
-    if (vb === cb) {
-      cohort.size = visitors;
-    }
+    if (vb === cb) cohort.size = visitors;
   }
 
-  const cohorts = Array.from(cohortMap.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([bucket, { size, periods }]) => ({
-      bucket: timeBucketTimestamp(buckets, bucket),
-      size,
-      periods: Array.from(periods.entries())
-        .sort(([a], [b]) => a - b)
-        .map(([vb, visitors]) => {
-          const index = Math.max(0, vb - bucket);
-          return {
-            index,
+  return {
+    granularity,
+    cohorts: Array.from(cohortMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([bucket, { size, periods }]) => ({
+        bucket: timeBucketTimestamp(buckets, bucket),
+        size,
+        periods: Array.from(periods.entries())
+          .sort(([a], [b]) => a - b)
+          .map(([vb, visitors]) => ({
+            index: Math.max(0, vb - bucket),
             visitors,
             rate: size > 0 ? visitors / size : 0,
-          };
-        }),
-    }));
-
-  return jsonResponseWith(ctx!, { ok: true, granularity, cohorts });
+          })),
+      })),
+  };
 }

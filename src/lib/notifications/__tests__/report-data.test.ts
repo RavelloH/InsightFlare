@@ -54,8 +54,8 @@ describe("notification report data", () => {
         timezone: "Mars/Base",
       }),
     ).toMatchObject({
-      fromMs: 0,
-      toMs: 3_600_000,
+      startMs: 0,
+      endExclusiveMs: 3_600_000,
       nowMs: 3_600_000,
       timeZone: "UTC",
       label: "last 1 hour",
@@ -67,8 +67,8 @@ describe("notification report data", () => {
         timezone: "Asia/Shanghai",
       }),
     ).toMatchObject({
-      fromMs: 3_600_000,
-      toMs: 90_000_000,
+      startMs: 3_600_000,
+      endExclusiveMs: 90_000_000,
       timeZone: "Asia/Shanghai",
       label: "last 24 hours",
     });

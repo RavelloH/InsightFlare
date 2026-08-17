@@ -30,8 +30,8 @@ interface QueryCall {
 
 function queryWindow(): QueryWindow {
   return {
-    fromMs: Date.UTC(2026, 0, 1, 0, 10),
-    toMs: Date.UTC(2026, 0, 1, 1, 10),
+    startMs: Date.UTC(2026, 0, 1, 0, 10),
+    endExclusiveMs: Date.UTC(2026, 0, 1, 1, 10),
     nowMs: Date.UTC(2026, 0, 1, 2),
     timeZone: "UTC",
   };
@@ -76,7 +76,7 @@ function createD1Env(resultSets: D1Row[][]): {
 }
 
 function visitBindings(siteId: string, window: QueryWindow) {
-  return [siteId, window.fromMs, window.toMs];
+  return [siteId, window.startMs, window.endExclusiveMs];
 }
 
 type Binding = string | number | null;

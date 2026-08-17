@@ -23,16 +23,16 @@ import {
   queryVisitDimensionFromD1,
 } from "@/lib/edge/query/dimensions";
 import {
-  handleEventRecordDetail,
-  handleEventsRecords,
-  handleEventsSummary,
-  handleEventsTrend,
-  handleEventTypeContext,
-  handleEventTypeDetail,
-  handleEventTypeFields,
-  handleEventTypeFieldValues,
-  handleEventTypes,
-} from "@/lib/edge/query/events";
+  handleEventFieldValuesContract as handleEventTypeFieldValues,
+  handleEventRecordDetailContract as handleEventRecordDetail,
+  handleEventRecordsContract as handleEventsRecords,
+  handleEventsSummaryContract as handleEventsSummary,
+  handleEventsTrendContract as handleEventsTrend,
+  handleEventTypeContextContract as handleEventTypeContext,
+  handleEventTypeDetailContract as handleEventTypeDetail,
+  handleEventTypeFieldsContract as handleEventTypeFields,
+  handleEventTypesContract as handleEventTypes,
+} from "@/lib/edge/query/events-contract-adapter";
 import {
   queryEventFieldsFromD1,
   queryEventFieldValuesFromD1,
@@ -62,8 +62,8 @@ const readCustomEventDetailMock = vi.mocked(readCustomEventDetail);
 const siteId = "site-lowlevel";
 const baseMs = Date.UTC(2026, 0, 4, 8);
 const window: QueryWindow = {
-  fromMs: baseMs,
-  toMs: baseMs + 2 * 60 * 60 * 1000,
+  startMs: baseMs,
+  endExclusiveMs: baseMs + 2 * 60 * 60 * 1000,
   nowMs: baseMs + 3 * 60 * 60 * 1000,
   timeZone: "UTC",
 };
@@ -96,11 +96,11 @@ function createD1Env(resultSets: D1Row[][]): {
 }
 
 function visitBindings(targetWindow = window): QueryBinding[] {
-  return [siteId, targetWindow.fromMs, targetWindow.toMs];
+  return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
 }
 
 function eventBindings(targetWindow = window): QueryBinding[] {
-  return [siteId, targetWindow.fromMs, targetWindow.toMs];
+  return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
 }
 
 function url(
@@ -417,8 +417,8 @@ describe("edge query dimensions low-level coverage", () => {
         siteId,
         "visitor-outside",
         "session-outside",
-        window.toMs + 1,
-        window.toMs + 1,
+        window.endExclusiveMs,
+        window.endExclusiveMs,
         "/outside",
         "Outside page",
         "outside.example.test",
@@ -704,8 +704,8 @@ describe("edge query event handlers low-level coverage", () => {
       env,
       siteId,
       url("/event-type-detail", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
       }),
     );
     const invalidDetailWindow = await handleEventTypeDetail(
@@ -719,8 +719,8 @@ describe("edge query event handlers low-level coverage", () => {
       url("/event-field-values", {
         fieldPath: "/paid",
         fieldValueType: "boolean",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
       }),
     );
     const missingFieldPath = await handleEventTypeFieldValues(
@@ -729,8 +729,8 @@ describe("edge query event handlers low-level coverage", () => {
       url("/event-field-values", {
         eventName: "Signup",
         fieldValueType: "boolean",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
       }),
     );
     const missingFieldType = await handleEventTypeFieldValues(
@@ -739,8 +739,8 @@ describe("edge query event handlers low-level coverage", () => {
       url("/event-field-values", {
         eventName: "Signup",
         fieldPath: "/paid",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
       }),
     );
     const missingEventId = await handleEventRecordDetail(
@@ -826,8 +826,8 @@ describe("edge query event handlers low-level coverage", () => {
           siteId,
           url("/event-type-fields", {
             eventName: "Signup",
-            from: window.fromMs,
-            to: window.toMs,
+            from: window.startMs,
+            to: window.endExclusiveMs,
           }),
         ),
         context: await handleEventTypeContext(
@@ -836,8 +836,8 @@ describe("edge query event handlers low-level coverage", () => {
           url("/event-type-context", {
             eventName: "Signup",
             cards: "path",
-            from: window.fromMs,
-            to: window.toMs,
+            from: window.startMs,
+            to: window.endExclusiveMs,
           }),
         ),
         detail: await handleEventTypeDetail(
@@ -845,9 +845,10 @@ describe("edge query event handlers low-level coverage", () => {
           siteId,
           url("/event-type-detail", {
             eventName: "Signup",
-            from: window.fromMs,
-            to: window.toMs,
+            from: window.startMs,
+            to: window.endExclusiveMs,
           }),
+          undefined,
           undefined,
           {
             includeContext: false,
@@ -886,8 +887,8 @@ describe("edge query event handlers low-level coverage", () => {
       env,
       siteId,
       url("/event-types", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 4,
       }),
     );
@@ -923,8 +924,8 @@ describe("edge query event handlers low-level coverage", () => {
       env,
       siteId,
       url("/events-records", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         pageSize: 1,
         sortBy: "eventName",
         sortDir: "asc",
@@ -971,8 +972,8 @@ describe("edge query event handlers low-level coverage", () => {
       env,
       siteId,
       url("/events-records", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         pageSize: 120,
         cursor: "not-a-valid-cursor",
       }),
@@ -1065,16 +1066,16 @@ describe("edge query event handlers low-level coverage", () => {
       env,
       siteId,
       url("/events-summary", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
       }),
     );
     const records = await handleEventsRecords(
       env,
       siteId,
       url("/events-records", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         page: 1,
         pageSize: 2,
       }),
@@ -1142,15 +1143,19 @@ describe("edge query event handlers low-level coverage", () => {
         eventName: "Signup",
         fieldPath: "/paid",
         fieldValueType: "boolean",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 3,
       }),
     );
     const detailResponse = await handleEventRecordDetail(
       env,
       siteId,
-      url("/event-detail", { eventId: "evt-1" }),
+      url("/event-detail", {
+        eventId: "evt-1",
+        from: window.startMs,
+        to: window.endExclusiveMs,
+      }),
     );
 
     await expect(valuesResponse.json()).resolves.toEqual({

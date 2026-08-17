@@ -11,14 +11,13 @@ import {
 import {
   parseSessionListCursor,
   parseVisitorListCursor,
+  querySessionsFromD1,
   serializeSessionListCursor,
   serializeVisitorListCursor,
 } from "@/lib/edge/query/journey-list-queries";
 import {
   handleSessionDetail,
-  handleSessions,
   handleVisitorDetail,
-  handleVisitors,
   queryGeoPointAggregate,
   queryGeoPointsFromD1,
   queryJourneyEventsForDetailFromD1,
@@ -26,12 +25,15 @@ import {
   querySessionDetailFromD1,
   querySessionLocationPointsFromD1,
   querySessionsForDetailFromD1,
-  querySessionsFromD1,
   queryVisitorAggregate,
   queryVisitorDetailFromD1,
   queryVisitorForDetailFromD1,
   queryVisitorsFromD1,
 } from "@/lib/edge/query/journeys";
+import {
+  handleSessionsContract as handleSessions,
+  handleVisitorsContract as handleVisitors,
+} from "@/lib/edge/query/journeys-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
 type D1Row = Record<string, unknown>;
@@ -47,8 +49,8 @@ const baseMs = Date.UTC(2026, 0, 1);
 
 function queryWindow(): QueryWindow {
   return {
-    fromMs: baseMs,
-    toMs: baseMs + 2 * 60 * 60 * 1000,
+    startMs: baseMs,
+    endExclusiveMs: baseMs + 2 * 60 * 60 * 1000,
     nowMs: baseMs + 24 * 60 * 60 * 1000,
     timeZone: "UTC",
   };
@@ -124,11 +126,11 @@ function createSqliteDetailEnv(): {
 }
 
 function visitBindings(window: QueryWindow): QueryBinding[] {
-  return [siteId, window.fromMs, window.toMs];
+  return [siteId, window.startMs, window.endExclusiveMs];
 }
 
 function eventBindings(window: QueryWindow): QueryBinding[] {
-  return [siteId, window.fromMs, window.toMs];
+  return [siteId, window.startMs, window.endExclusiveMs];
 }
 
 function url(path: string, params: Record<string, string | number | boolean>) {
@@ -1118,8 +1120,8 @@ describe("edge journey handlers", () => {
       env,
       siteId,
       url("/visitors", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         pageSize: 1,
         sortBy: "views",
         sortDir: "asc",
@@ -1166,8 +1168,8 @@ describe("edge journey handlers", () => {
         visitors.env,
         siteId,
         url("/visitors", {
-          from: window.fromMs,
-          to: window.toMs,
+          from: window.startMs,
+          to: window.endExclusiveMs,
           pageSize: 120,
           cursor: visitorCursor,
           sortBy: "sessions",
@@ -1179,8 +1181,8 @@ describe("edge journey handlers", () => {
         sessions.env,
         siteId,
         url("/sessions", {
-          from: window.fromMs,
-          to: window.toMs,
+          from: window.startMs,
+          to: window.endExclusiveMs,
           pageSize: 120,
           cursor: sessionCursor,
           sortBy: "durationMs",
@@ -1199,8 +1201,8 @@ describe("edge journey handlers", () => {
       env,
       siteId,
       url("/sessions", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 3,
         search: "pricing",
       }),
@@ -1233,8 +1235,8 @@ describe("edge journey handlers", () => {
       env,
       siteId,
       url("/sessions", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         pageSize: 1,
         sortBy: "views",
         sortDir: "asc",
@@ -1274,8 +1276,8 @@ describe("edge journey handlers", () => {
         env,
         siteId,
         url("/visitors", {
-          from: window.fromMs,
-          to: window.toMs,
+          from: window.startMs,
+          to: window.endExclusiveMs,
           pageSize: 1,
           cursor,
           sortBy: "views",

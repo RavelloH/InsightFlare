@@ -43,8 +43,8 @@ interface QueryCall {
 
 const siteId = "site-technology";
 const window: QueryWindow = {
-  fromMs: Date.UTC(2026, 0, 1, 0),
-  toMs: Date.UTC(2026, 0, 1, 2),
+  startMs: Date.UTC(2026, 0, 1, 0),
+  endExclusiveMs: Date.UTC(2026, 0, 1, 2),
   nowMs: Date.UTC(2026, 0, 1, 3),
   timeZone: "UTC",
 };
@@ -119,7 +119,7 @@ function createD1Env(resultSets: D1Row[][]): {
 }
 
 function visitBindings() {
-  return [siteId, window.fromMs, window.toMs];
+  return [siteId, window.startMs, window.endExclusiveMs];
 }
 
 describe("edge technology query coverage", () => {
@@ -928,7 +928,7 @@ describe("edge technology query coverage", () => {
         isOther: true,
       },
     ]);
-    expect(result.data).toHaveLength(3);
+    expect(result.data).toHaveLength(2);
     expect(result.data[0]).toMatchObject({
       bucket: 0,
       totalVisitors: 5,
@@ -936,11 +936,6 @@ describe("edge technology query coverage", () => {
     });
     expect(result.data[1]).toMatchObject({
       bucket: 1,
-      totalVisitors: 0,
-      visitorsBySeries: { chrome: 0, other: 0 },
-    });
-    expect(result.data[2]).toMatchObject({
-      bucket: 2,
       totalVisitors: 0,
       visitorsBySeries: { chrome: 0, other: 0 },
     });
@@ -1351,11 +1346,6 @@ describe("edge technology query coverage", () => {
         },
         {
           bucket: 1,
-          totalVisitors: 0,
-          visitorsBySeries: { chrome: 0 },
-        },
-        {
-          bucket: 2,
           totalVisitors: 0,
           visitorsBySeries: { chrome: 0 },
         },

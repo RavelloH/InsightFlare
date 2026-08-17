@@ -25,7 +25,7 @@ export function buildVisitSourceCte(): string {
 visit_source AS (
   SELECT ${VISIT_SOURCE_COLUMNS}
   FROM visits
-  WHERE site_id = ? AND started_at BETWEEN ? AND ?
+  WHERE site_id = ? AND started_at >= ? AND started_at < ?
 )`;
 }
 
@@ -66,7 +66,7 @@ event_source AS (
   INNER JOIN visits v
     ON v.site_id = ce.site_id
    AND v.visit_id = ce.visit_id
-  WHERE ce.site_id = ? AND ce.occurred_at BETWEEN ? AND ?
+  WHERE ce.site_id = ? AND ce.occurred_at >= ? AND ce.occurred_at < ?
 )`;
 }
 
@@ -182,7 +182,7 @@ ${eventNameJoin}
   INNER JOIN visits v
     ON v.site_id = ce.site_id
    AND v.visit_id = ce.visit_id
-  WHERE ce.site_id = ? AND ce.occurred_at BETWEEN ? AND ?
+  WHERE ce.site_id = ? AND ce.occurred_at >= ? AND ce.occurred_at < ?
 )`;
 }
 
@@ -217,7 +217,7 @@ export function visitSourceBindings(
   siteId: string,
   window: QueryWindow,
 ): Array<string | number> {
-  return [siteId, window.fromMs, window.toMs];
+  return [siteId, window.startMs, window.endExclusiveMs];
 }
 
 export function eventSourceBindings(
@@ -226,10 +226,10 @@ export function eventSourceBindings(
   eventName?: string | string[],
 ): Array<string | number> {
   return typeof eventName === "string"
-    ? [siteId, eventName, siteId, window.fromMs, window.toMs]
+    ? [siteId, eventName, siteId, window.startMs, window.endExclusiveMs]
     : eventName?.length
-      ? [siteId, ...eventName, siteId, window.fromMs, window.toMs]
-      : [siteId, window.fromMs, window.toMs];
+      ? [siteId, ...eventName, siteId, window.startMs, window.endExclusiveMs]
+      : [siteId, window.startMs, window.endExclusiveMs];
 }
 
 export function targetVisitSourceBindings(
@@ -251,7 +251,7 @@ export function buildVisitSourceCteForSites(siteCount: number): string {
 visit_source AS (
   SELECT ${VISIT_SOURCE_COLUMNS}
   FROM visits
-  WHERE site_id IN (${placeholders}) AND started_at BETWEEN ? AND ?
+  WHERE site_id IN (${placeholders}) AND started_at >= ? AND started_at < ?
 )`;
 }
 
@@ -259,7 +259,7 @@ export function visitSourceBindingsForSites(
   siteIds: string[],
   window: QueryWindow,
 ): Array<string | number> {
-  return [...siteIds, window.fromMs, window.toMs];
+  return [...siteIds, window.startMs, window.endExclusiveMs];
 }
 
 export async function queryD1All<T extends object>(

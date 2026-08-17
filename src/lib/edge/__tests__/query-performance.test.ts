@@ -2,9 +2,9 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { handlePerformanceContract as handlePerformance } from "@/lib/edge/query/analysis-contract-adapter";
 import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
 import {
-  handlePerformance,
   queryAllPerformanceTrendsFromD1,
   queryPerformanceCountriesFromD1,
   queryPerformanceRoutesFromD1,
@@ -114,12 +114,12 @@ function createSqlitePerformanceEnv(): { env: Env; d1: SqliteD1Database } {
 
 const siteId = "site-1";
 const window: QueryWindow = {
-  fromMs: Date.UTC(2026, 0, 2, 1, 30),
-  toMs: Date.UTC(2026, 0, 2, 3, 5),
+  startMs: Date.UTC(2026, 0, 2, 1, 30),
+  endExclusiveMs: Date.UTC(2026, 0, 2, 3, 5),
   nowMs: Date.UTC(2026, 0, 2, 3, 5),
   timeZone: "UTC",
 };
-const visitBindings = [siteId, window.fromMs, window.toMs];
+const visitBindings = [siteId, window.startMs, window.endExclusiveMs];
 
 describe("edge query performance D1 helpers", () => {
   it("maps metric summaries, leaves missing metrics empty, and binds filters", async () => {
@@ -687,6 +687,17 @@ describe("edge query performance D1 helpers", () => {
     );
     insert.run("unknown", at(50), "", "", null, null, null, null, null);
     insert.run("outside-window", at(-1), "/outside", "US", 1, 1, 1, 1, 1);
+    insert.run(
+      "end-exclusive",
+      window.endExclusiveMs,
+      "/excluded",
+      "US",
+      1,
+      1,
+      1,
+      1,
+      1,
+    );
 
     try {
       await expect(
@@ -751,7 +762,7 @@ describe("edge query performance D1 helpers", () => {
         env,
         siteId,
         new URL(
-          `https://edge.test/performance?from=${window.fromMs}&to=${window.toMs}&interval=hour`,
+          `https://edge.test/performance?from=${window.startMs}&to=${window.endExclusiveMs}&interval=hour`,
         ),
       );
       const payload = (await response.json()) as {

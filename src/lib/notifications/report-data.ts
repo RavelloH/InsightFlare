@@ -136,9 +136,15 @@ function dateLabel(parts: { year: number; month: number; day: number }) {
   return `${String(parts.year).padStart(4, "0")}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
 
-function rangeLabel(fromMs: number, toMs: number, timeZone: string): string {
-  const from = dateLabel(partsInTimezone(new Date(fromMs), timeZone));
-  const to = dateLabel(partsInTimezone(new Date(toMs), timeZone));
+function rangeLabel(
+  startMs: number,
+  endExclusiveMs: number,
+  timeZone: string,
+): string {
+  const from = dateLabel(partsInTimezone(new Date(startMs), timeZone));
+  const to = dateLabel(
+    partsInTimezone(new Date(Math.max(startMs, endExclusiveMs - 1)), timeZone),
+  );
   return from === to ? from : `${from} to ${to}`;
 }
 
@@ -151,8 +157,8 @@ export function notificationWindowFor(input: {
   const timeZone = cleanTimezone(input.timezone);
   if (input.window === "last_1h") {
     return {
-      fromMs: nowMs - 60 * 60 * 1000,
-      toMs: nowMs,
+      startMs: nowMs - 60 * 60 * 1000,
+      endExclusiveMs: nowMs,
       nowMs,
       timeZone,
       label: "last 1 hour",
@@ -160,8 +166,8 @@ export function notificationWindowFor(input: {
   }
   if (input.window === "last_24h") {
     return {
-      fromMs: nowMs - 24 * 60 * 60 * 1000,
-      toMs: nowMs,
+      startMs: nowMs - 24 * 60 * 60 * 1000,
+      endExclusiveMs: nowMs,
       nowMs,
       timeZone,
       label: "last 24 hours",
@@ -186,8 +192,8 @@ export function notificationWindowFor(input: {
   });
   const yesterdayParts = partsInTimezone(new Date(startYesterday), timeZone);
   return {
-    fromMs: startYesterday,
-    toMs: Math.max(startYesterday, startToday - 1),
+    startMs: startYesterday,
+    endExclusiveMs: startToday,
     nowMs,
     timeZone,
     label: dateLabel(yesterdayParts),
@@ -224,14 +230,14 @@ export function notificationReportWindowFor(input: {
       minute: 0,
       timeZone,
     });
-    const fromMs = startThisWeek - 7 * 24 * 60 * 60 * 1000;
-    const toMs = Math.max(fromMs, startThisWeek - 1);
+    const startMs = startThisWeek - 7 * 24 * 60 * 60 * 1000;
+    const endExclusiveMs = startThisWeek;
     return {
-      fromMs,
-      toMs,
+      startMs,
+      endExclusiveMs,
       nowMs,
       timeZone,
-      label: rangeLabel(fromMs, toMs, timeZone),
+      label: rangeLabel(startMs, endExclusiveMs, timeZone),
     };
   }
 
@@ -246,7 +252,7 @@ export function notificationReportWindowFor(input: {
     });
     const previousMonth = local.month === 1 ? 12 : local.month - 1;
     const previousYear = local.month === 1 ? local.year - 1 : local.year;
-    const fromMs = zonedTimeToUtcMs({
+    const startMs = zonedTimeToUtcMs({
       year: previousYear,
       month: previousMonth,
       day: 1,
@@ -255,8 +261,8 @@ export function notificationReportWindowFor(input: {
       timeZone,
     });
     return {
-      fromMs,
-      toMs: Math.max(fromMs, startThisMonth - 1),
+      startMs,
+      endExclusiveMs: startThisMonth,
       nowMs,
       timeZone,
       label: `${previousYear}-${String(previousMonth).padStart(2, "0")}`,
@@ -277,7 +283,7 @@ export function notificationReportWindowFor(input: {
       currentQuarterStartMonth === 1 ? 10 : currentQuarterStartMonth - 3;
     const previousQuarterYear =
       currentQuarterStartMonth === 1 ? local.year - 1 : local.year;
-    const fromMs = zonedTimeToUtcMs({
+    const startMs = zonedTimeToUtcMs({
       year: previousQuarterYear,
       month: previousQuarterStartMonth,
       day: 1,
@@ -287,8 +293,8 @@ export function notificationReportWindowFor(input: {
     });
     const quarter = Math.floor((previousQuarterStartMonth - 1) / 3) + 1;
     return {
-      fromMs,
-      toMs: Math.max(fromMs, startThisQuarter - 1),
+      startMs,
+      endExclusiveMs: startThisQuarter,
       nowMs,
       timeZone,
       label: `${previousQuarterYear} Q${quarter}`,
@@ -304,7 +310,7 @@ export function notificationReportWindowFor(input: {
     timeZone,
   });
   const previousYear = local.year - 1;
-  const fromMs = zonedTimeToUtcMs({
+  const startMs = zonedTimeToUtcMs({
     year: previousYear,
     month: 1,
     day: 1,
@@ -313,8 +319,8 @@ export function notificationReportWindowFor(input: {
     timeZone,
   });
   return {
-    fromMs,
-    toMs: Math.max(fromMs, startThisYear - 1),
+    startMs,
+    endExclusiveMs: startThisYear,
     nowMs,
     timeZone,
     label: String(previousYear),
@@ -407,8 +413,8 @@ async function loadReportDataUncached(
     siteDomain: site.domain,
     reportType: input.reportType,
     range: {
-      from: Math.floor(window.fromMs / 1000),
-      to: Math.floor(window.toMs / 1000),
+      from: Math.floor(window.startMs / 1000),
+      to: Math.floor(window.endExclusiveMs / 1000),
       label: window.label,
     },
     metrics: {
@@ -447,8 +453,8 @@ export async function loadMetricValue(
     input.siteId,
     input.metric,
     input.window,
-    Math.trunc(window.fromMs),
-    Math.trunc(window.toMs),
+    Math.trunc(window.startMs),
+    Math.trunc(window.endExclusiveMs),
     window.timeZone,
   ] satisfies NotificationMetricCacheKey);
   if (input.cache) {
@@ -483,8 +489,8 @@ async function loadMetricValueUncached(
     window: input.window,
     value: overview.value[input.metric],
     range: {
-      from: Math.floor(window.fromMs / 1000),
-      to: Math.floor(window.toMs / 1000),
+      from: Math.floor(window.startMs / 1000),
+      to: Math.floor(window.endExclusiveMs / 1000),
     },
   };
 }
@@ -505,10 +511,13 @@ export async function loadPreviousMetricValue(
     now: input.now,
     timezone: input.timezone,
   });
-  const width = Math.max(1, currentWindow.toMs - currentWindow.fromMs);
+  const width = Math.max(
+    1,
+    currentWindow.endExclusiveMs - currentWindow.startMs,
+  );
   const previousWindow = {
-    fromMs: Math.max(0, currentWindow.fromMs - width),
-    toMs: Math.max(0, currentWindow.fromMs - 1),
+    startMs: Math.max(0, currentWindow.startMs - width),
+    endExclusiveMs: Math.max(1, currentWindow.startMs),
     nowMs: currentWindow.nowMs,
     timeZone: currentWindow.timeZone,
   };
@@ -516,8 +525,8 @@ export async function loadPreviousMetricValue(
     input.siteId,
     input.metric,
     input.window,
-    Math.trunc(previousWindow.fromMs),
-    Math.trunc(previousWindow.toMs),
+    Math.trunc(previousWindow.startMs),
+    Math.trunc(previousWindow.endExclusiveMs),
     previousWindow.timeZone,
   ] satisfies NotificationMetricCacheKey);
   if (input.cache) {
@@ -550,8 +559,8 @@ async function loadPreviousMetricValueUncached(
     window: input.window,
     value: overview.value[input.metric],
     range: {
-      from: Math.floor(previousWindow.fromMs / 1000),
-      to: Math.floor(previousWindow.toMs / 1000),
+      from: Math.floor(previousWindow.startMs / 1000),
+      to: Math.floor(previousWindow.endExclusiveMs / 1000),
     },
   };
 }
@@ -568,8 +577,8 @@ export async function loadCumulativeMetricValue(
 ): Promise<number> {
   const nowMs = Math.max(0, Math.trunc(input.now)) * 1000;
   const window = {
-    fromMs: 0,
-    toMs: nowMs,
+    startMs: 0,
+    endExclusiveMs: Math.max(1, nowMs),
     nowMs,
     timeZone: cleanTimezone(input.timezone),
   } satisfies QueryWindow;
@@ -644,8 +653,8 @@ async function loadOverviewAggregate(
   if (!cache) return queryOverviewAggregate(env, siteId, window, filters);
   const key = notificationCacheKey([
     siteId,
-    window.fromMs,
-    window.toMs,
+    window.startMs,
+    window.endExclusiveMs,
     window.nowMs,
     window.timeZone,
     filters,

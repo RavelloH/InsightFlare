@@ -95,14 +95,16 @@ export interface ApiMeta {
 }
 
 export interface TimeRange {
+  /** Inclusive ISO-8601 range boundary. */
   from: string;
+  /** Exclusive ISO-8601 range boundary. */
   to: string;
   timeZone: string;
 }
 
 export interface ParsedTimeRange extends TimeRange {
-  fromMs: number;
-  toMs: number;
+  startMs: number;
+  endExclusiveMs: number;
 }
 
 export interface ParsedSort {
@@ -317,18 +319,18 @@ export function parsePreset(
     parts.month,
     parts.day,
   );
-  let fromMs = today;
-  let toMs = addDays(today, 1);
+  let startMs = today;
+  let endExclusiveMs = addDays(today, 1);
 
   if (preset === "yesterday") {
-    fromMs = addDays(today, -1);
-    toMs = today;
+    startMs = addDays(today, -1);
+    endExclusiveMs = today;
   } else if (preset === "last_7_days") {
-    fromMs = addDays(today, -6);
-    toMs = addDays(today, 1);
+    startMs = addDays(today, -6);
+    endExclusiveMs = addDays(today, 1);
   } else if (preset === "last_30_days") {
-    fromMs = addDays(today, -29);
-    toMs = addDays(today, 1);
+    startMs = addDays(today, -29);
+    endExclusiveMs = addDays(today, 1);
   } else if (preset === "this_week" || preset === "last_week") {
     const weekdayIndex = [
       "Sun",
@@ -341,8 +343,8 @@ export function parsePreset(
     ].indexOf(parts.weekday);
     const daysFromMonday = (weekdayIndex + 6) % 7;
     const weekStart = addDays(today, -daysFromMonday);
-    fromMs = preset === "this_week" ? weekStart : addDays(weekStart, -7);
-    toMs = preset === "this_week" ? addDays(weekStart, 7) : weekStart;
+    startMs = preset === "this_week" ? weekStart : addDays(weekStart, -7);
+    endExclusiveMs = preset === "this_week" ? addDays(weekStart, 7) : weekStart;
   } else if (preset === "this_month" || preset === "last_month") {
     const thisMonth = zonedMidnightUtcMs(timeZone, parts.year, parts.month, 1);
     const nextMonth = zonedMidnightUtcMs(
@@ -357,16 +359,16 @@ export function parsePreset(
       parts.month - 1,
       1,
     );
-    fromMs = preset === "this_month" ? thisMonth : previousMonth;
-    toMs = preset === "this_month" ? nextMonth : thisMonth;
+    startMs = preset === "this_month" ? thisMonth : previousMonth;
+    endExclusiveMs = preset === "this_month" ? nextMonth : thisMonth;
   }
 
   return {
-    from: new Date(fromMs).toISOString(),
-    to: new Date(toMs).toISOString(),
+    from: new Date(startMs).toISOString(),
+    to: new Date(endExclusiveMs).toISOString(),
     timeZone,
-    fromMs,
-    toMs,
+    startMs,
+    endExclusiveMs,
   };
 }
 
@@ -403,16 +405,16 @@ export function parseTimeRange(
 
   const fromRaw = url.searchParams.get("from");
   const toRaw = url.searchParams.get("to");
-  const toMs = parseIsoDateTime(toRaw) ?? now.getTime();
-  const fromMs = parseIsoDateTime(fromRaw) ?? toMs - 7 * ONE_DAY_MS;
+  const endExclusiveMs = parseIsoDateTime(toRaw) ?? now.getTime();
+  const startMs = parseIsoDateTime(fromRaw) ?? endExclusiveMs - 7 * ONE_DAY_MS;
 
   if (
     (fromRaw !== null && parseIsoDateTime(fromRaw) === null) ||
     (toRaw !== null && parseIsoDateTime(toRaw) === null) ||
-    !Number.isFinite(fromMs) ||
-    !Number.isFinite(toMs) ||
-    fromMs < 0 ||
-    toMs <= fromMs
+    !Number.isFinite(startMs) ||
+    !Number.isFinite(endExclusiveMs) ||
+    startMs < 0 ||
+    endExclusiveMs <= startMs
   ) {
     return jsonError("validation_failed", "Invalid time range", 400, {
       fields: ["from", "to"],
@@ -420,11 +422,11 @@ export function parseTimeRange(
   }
 
   return {
-    from: new Date(fromMs).toISOString(),
-    to: new Date(toMs).toISOString(),
+    from: new Date(startMs).toISOString(),
+    to: new Date(endExclusiveMs).toISOString(),
     timeZone,
-    fromMs,
-    toMs,
+    startMs,
+    endExclusiveMs,
   };
 }
 

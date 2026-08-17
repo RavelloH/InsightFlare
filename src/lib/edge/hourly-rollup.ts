@@ -384,28 +384,32 @@ function splitRollupWindow(
   aggregatedUntilHour: number,
 ): {
   rollupStartHour: number;
-  rollupEndHour: number;
+  rollupEndExclusiveHour: number;
   prefix: QueryWindow | null;
   suffix: QueryWindow | null;
 } | null {
-  const firstFullHour = Math.ceil(window.fromMs / ONE_HOUR_MS);
-  const lastFullHour = Math.floor((window.toMs + 1) / ONE_HOUR_MS) - 1;
-  const rollupEndHour = Math.min(lastFullHour, aggregatedUntilHour);
-  if (firstFullHour > rollupEndHour) return null;
+  const firstFullHour = Math.ceil(window.startMs / ONE_HOUR_MS);
+  const endExclusiveHour = Math.floor(window.endExclusiveMs / ONE_HOUR_MS);
+  const aggregatedEndExclusiveHour = aggregatedUntilHour + 1;
+  const rollupEndExclusiveHour = Math.min(
+    endExclusiveHour,
+    aggregatedEndExclusiveHour,
+  );
+  if (firstFullHour >= rollupEndExclusiveHour) return null;
 
   const rollupStartMs = firstFullHour * ONE_HOUR_MS;
-  const rollupEndExclusiveMs = (rollupEndHour + 1) * ONE_HOUR_MS;
+  const rollupEndExclusiveMs = rollupEndExclusiveHour * ONE_HOUR_MS;
   const prefix =
-    window.fromMs < rollupStartMs
-      ? { ...window, toMs: rollupStartMs - 1 }
+    window.startMs < rollupStartMs
+      ? { ...window, endExclusiveMs: rollupStartMs }
       : null;
   const suffix =
-    rollupEndExclusiveMs <= window.toMs
-      ? { ...window, fromMs: rollupEndExclusiveMs }
+    rollupEndExclusiveMs < window.endExclusiveMs
+      ? { ...window, startMs: rollupEndExclusiveMs }
       : null;
   return {
     rollupStartHour: firstFullHour,
-    rollupEndHour,
+    rollupEndExclusiveHour,
     prefix,
     suffix,
   };
@@ -456,11 +460,11 @@ function groupSitesByRollupWindow(
     if (!split) continue;
     const key = [
       split.rollupStartHour,
-      split.rollupEndHour,
-      split.prefix?.fromMs ?? "",
-      split.prefix?.toMs ?? "",
-      split.suffix?.fromMs ?? "",
-      split.suffix?.toMs ?? "",
+      split.rollupEndExclusiveHour,
+      split.prefix?.startMs ?? "",
+      split.prefix?.endExclusiveMs ?? "",
+      split.suffix?.startMs ?? "",
+      split.suffix?.endExclusiveMs ?? "",
     ].join(":");
     const existing = groups.get(key);
     if (existing) {
@@ -478,7 +482,9 @@ async function queryDetailAccumulatorsForSites(
   window: QueryWindow,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<Map<string, MetricAccumulator>> {
-  if (siteIds.length === 0 || window.toMs < window.fromMs) return new Map();
+  if (siteIds.length === 0 || window.endExclusiveMs <= window.startMs) {
+    return new Map();
+  }
   const accumulators = new Map<string, MetricAccumulator>();
   for (const chunk of siteIdChunks(siteIds, 2)) {
     const placeholders = chunk.map(() => "?").join(", ");
@@ -497,10 +503,10 @@ async function queryDetailAccumulatorsForSites(
         perf_inp_ms AS perfInpMs
       FROM visits
       WHERE site_id IN (${placeholders})
-        AND started_at BETWEEN ? AND ?
+        AND started_at >= ? AND started_at < ?
     `,
     )
-      .bind(...chunk, window.fromMs, window.toMs)
+      .bind(...chunk, window.startMs, window.endExclusiveMs)
       .all<DetailVisitRow>();
     recordD1RowsRead(diagnostics, result);
 
@@ -518,10 +524,10 @@ async function queryStoredRollupsForSites(
   env: Env,
   siteIds: string[],
   startHour: number,
-  endHour: number,
+  endExclusiveHour: number,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<StoredRollupRow[]> {
-  if (siteIds.length === 0 || endHour < startHour) return [];
+  if (siteIds.length === 0 || endExclusiveHour <= startHour) return [];
   const rollups: StoredRollupRow[] = [];
   for (const chunk of siteIdChunks(siteIds, 2)) {
     const placeholders = chunk.map(() => "?").join(", ");
@@ -550,11 +556,11 @@ async function queryStoredRollupsForSites(
         perf_inp_count AS perfInpCount
       FROM visit_hourly_rollups
       WHERE site_id IN (${placeholders})
-        AND hour_bucket BETWEEN ? AND ?
+        AND hour_bucket >= ? AND hour_bucket < ?
       ORDER BY hour_bucket ASC
     `,
     )
-      .bind(...chunk, startHour, endHour)
+      .bind(...chunk, startHour, endExclusiveHour)
       .all<StoredRollupRow>();
     recordD1RowsRead(diagnostics, result);
     rollups.push(...result.results);
@@ -589,7 +595,7 @@ export async function queryOverviewForSitesFromHourlyRollupsPartial(
       env,
       group.siteIds,
       group.split.rollupStartHour,
-      group.split.rollupEndHour,
+      group.split.rollupEndExclusiveHour,
       diagnostics,
     )) {
       addStoredRollup(ensure(rollup.siteId), rollup);
@@ -643,9 +649,9 @@ function bucketIndexForTimestamp(
   while (lower <= upper) {
     const middle = lower + Math.floor((upper - lower) / 2);
     const bucket = buckets[middle];
-    if (timestampMs < bucket.fromMs) {
+    if (timestampMs < bucket.startMs) {
       upper = middle - 1;
-    } else if (timestampMs >= bucket.toMs) {
+    } else if (timestampMs >= bucket.endExclusiveMs) {
       lower = middle + 1;
     } else {
       return bucket.index;
@@ -659,7 +665,8 @@ function canUseHourlyRollupsForTrend(
 ): boolean {
   return buckets.every(
     (bucket) =>
-      bucket.fromMs % ONE_HOUR_MS === 0 && bucket.toMs % ONE_HOUR_MS === 0,
+      bucket.startMs % ONE_HOUR_MS === 0 &&
+      bucket.endExclusiveMs % ONE_HOUR_MS === 0,
   );
 }
 
@@ -811,7 +818,9 @@ async function queryDetailVisitsForSites(
   window: QueryWindow,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<DetailVisitRow[]> {
-  if (siteIds.length === 0 || window.toMs < window.fromMs) return [];
+  if (siteIds.length === 0 || window.endExclusiveMs <= window.startMs) {
+    return [];
+  }
   const visits: DetailVisitRow[] = [];
   for (const chunk of siteIdChunks(siteIds, 2)) {
     const placeholders = chunk.map(() => "?").join(", ");
@@ -830,11 +839,11 @@ async function queryDetailVisitsForSites(
         perf_inp_ms AS perfInpMs
       FROM visits
       WHERE site_id IN (${placeholders})
-        AND started_at BETWEEN ? AND ?
+        AND started_at >= ? AND started_at < ?
       ORDER BY started_at ASC
     `,
     )
-      .bind(...chunk, window.fromMs, window.toMs)
+      .bind(...chunk, window.startMs, window.endExclusiveMs)
       .all<DetailVisitRow>();
     recordD1RowsRead(diagnostics, result);
     visits.push(...result.results);
@@ -937,7 +946,7 @@ export async function queryOverviewAndTrendForSitesFromHourlyRollupsPartial(
       env,
       group.siteIds,
       group.split.rollupStartHour,
-      group.split.rollupEndHour,
+      group.split.rollupEndExclusiveHour,
       diagnostics,
     )) {
       const trendAccumulator = ensureTrend(rollup.siteId);
@@ -1012,7 +1021,7 @@ export async function queryTrendForSitesFromHourlyRollupsPartial(
       env,
       group.siteIds,
       group.split.rollupStartHour,
-      group.split.rollupEndHour,
+      group.split.rollupEndExclusiveHour,
       diagnostics,
     )) {
       addRollupToTrend(ensure(rollup.siteId), rollup, buckets);

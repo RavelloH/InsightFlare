@@ -24,13 +24,11 @@ import {
   visitSourceBindings,
   visitSourceBindingsForSites,
 } from "./query/core";
-import { normalizeFunnelSteps, queryFunnelAnalysis } from "./query/funnels";
+import { normalizeFunnelSteps } from "./query/funnels";
 import {
   queryAllPerformanceTrendsFromD1,
   queryPerformanceSummariesFromD1,
 } from "./query/performance";
-import { routeQuery } from "./query/router";
-import { handleTeamDashboardForTeam } from "./query/team";
 import {
   createSiteWithDefaultSettings,
   deleteSiteData,
@@ -50,7 +48,6 @@ import {
   API_V1_VERSION,
   BATCH_MAX_REQUESTS,
   type ComplexFilter,
-  type CursorPagination,
   epochSecondsToIso,
   FILTER_OPERATORS,
   INTERVALS,
@@ -73,6 +70,33 @@ import {
   validateDimension,
 } from "./api-v1-helpers";
 import {
+  apiV1OverviewMetrics,
+  queryApiV1Breakdown,
+  queryApiV1CrossBreakdown,
+  queryApiV1EventFieldValues,
+  queryApiV1EventRecordDetail,
+  queryApiV1EventRecords,
+  queryApiV1EventsSummary,
+  queryApiV1EventsTrend,
+  queryApiV1EventTypeDetail,
+  queryApiV1EventTypes,
+  queryApiV1Explore,
+  queryApiV1FunnelAnalysis,
+  queryApiV1JourneyEvents,
+  queryApiV1JourneySessions,
+  queryApiV1Overview,
+  queryApiV1Performance,
+  queryApiV1Retention,
+  queryApiV1SavedFunnelAnalysis,
+  queryApiV1SessionDetail,
+  queryApiV1Sessions,
+  queryApiV1TeamBreakdown,
+  queryApiV1TeamDashboard,
+  queryApiV1Trend,
+  queryApiV1VisitorDetail,
+  queryApiV1Visitors,
+} from "./api-v1-query-adapter";
+import {
   readSiteScriptSettings,
   upsertSiteScriptSettings,
 } from "./site-settings-store";
@@ -93,15 +117,6 @@ interface TeamRow {
   id: string;
   name: string;
   createdAt: number;
-}
-
-interface LegacyPayload {
-  ok?: boolean;
-  data?: unknown;
-  interval?: unknown;
-  pagination?: unknown;
-  error?: unknown;
-  [key: string]: unknown;
 }
 
 interface BatchRequestInput {
@@ -246,8 +261,8 @@ function trackingPayload(
 
 function toQueryWindow(timeRange: ParsedTimeRange) {
   return {
-    fromMs: timeRange.fromMs,
-    toMs: timeRange.toMs,
+    startMs: timeRange.startMs,
+    endExclusiveMs: timeRange.endExclusiveMs,
     nowMs: Date.now(),
     timeZone: timeRange.timeZone,
   };
@@ -463,8 +478,8 @@ async function teamByPrincipal(
 function buildInternalUrl(url: URL, timeRange?: ParsedTimeRange): URL {
   const next = new URL(url.toString());
   if (timeRange) {
-    next.searchParams.set("from", String(timeRange.fromMs));
-    next.searchParams.set("to", String(timeRange.toMs));
+    next.searchParams.set("from", String(timeRange.startMs));
+    next.searchParams.set("to", String(timeRange.endExclusiveMs));
     next.searchParams.set("timeZone", timeRange.timeZone);
     next.searchParams.delete("preset");
   }
@@ -483,83 +498,6 @@ function buildInternalUrl(url: URL, timeRange?: ParsedTimeRange): URL {
   return next;
 }
 
-async function legacyJson(response: Response): Promise<LegacyPayload> {
-  try {
-    return await readJsonResponse<LegacyPayload>(response);
-  } catch {
-    return {};
-  }
-}
-
-function stripLegacyPayload(payload: LegacyPayload): {
-  data: unknown;
-  meta: Record<string, unknown>;
-  pagination?: {
-    limit: number;
-    nextCursor: string | null;
-    hasMore: boolean;
-  };
-} {
-  const {
-    ok: _ok,
-    requestId: _requestId,
-    timestamp: _timestamp,
-    siteId: _siteId,
-    error: _error,
-    data,
-    interval,
-    pagination,
-    meta: payloadMeta,
-    ...rest
-  } = payload;
-  const meta: Record<string, unknown> = {};
-  if (interval) meta.interval = interval;
-  for (const [key, value] of Object.entries(rest)) {
-    if (value !== undefined) meta[key] = value;
-  }
-  if (
-    payloadMeta &&
-    typeof payloadMeta === "object" &&
-    !Array.isArray(payloadMeta) &&
-    typeof (payloadMeta as Record<string, unknown>).pageSize === "number" &&
-    typeof (payloadMeta as Record<string, unknown>).hasMore === "boolean" &&
-    ((payloadMeta as Record<string, unknown>).nextCursor === null ||
-      typeof (payloadMeta as Record<string, unknown>).nextCursor === "string")
-  ) {
-    const privatePagination = payloadMeta as Record<string, unknown>;
-    return {
-      data,
-      meta,
-      pagination: {
-        limit: privatePagination.pageSize as number,
-        nextCursor: privatePagination.nextCursor as string | null,
-        hasMore: privatePagination.hasMore as boolean,
-      },
-    };
-  }
-  if (
-    pagination &&
-    typeof pagination === "object" &&
-    "pageSize" in pagination
-  ) {
-    const page = Number((pagination as Record<string, unknown>).page ?? 1);
-    const pageSize = Number(
-      (pagination as Record<string, unknown>).pageSize ?? 100,
-    );
-    const total = Number((pagination as Record<string, unknown>).total ?? 0);
-    return {
-      data,
-      meta,
-      pagination: {
-        limit: pageSize,
-        nextCursor: page * pageSize < total ? `page:${page + 1}` : null,
-        hasMore: page * pageSize < total,
-      },
-    };
-  }
-  return { data, meta };
-}
-
 function filterMetrics(value: unknown, metrics: AnalyticsMetric[]): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
@@ -571,6 +509,15 @@ function filterMetrics(value: unknown, metrics: AnalyticsMetric[]): unknown {
     out.approximateVisitors = record.approximateVisitors;
   }
   return out;
+}
+
+function apiV1QueryFailure(
+  error: { kind: string },
+  request: Request,
+): Response {
+  const status =
+    error.kind === "internal" || error.kind === "data-unavailable" ? 500 : 400;
+  return jsonError("invalid_request", error.kind, status, undefined, request);
 }
 
 function normalizeBreakdownRows(value: unknown, metrics: AnalyticsMetric[]) {
@@ -858,7 +805,7 @@ async function queryAnalyticsAggregateRows(
     ? siteIds.map(() => "?").join(", ")
     : "";
   const auxiliaryBindings = needsEvents
-    ? [...siteIds, window.fromMs, window.toMs]
+    ? [...siteIds, window.startMs, window.endExclusiveMs]
     : [];
   const bindingCount =
     sourceBindings.length +
@@ -1070,15 +1017,13 @@ async function queryPerformanceTimeseriesData(
   for (const metric of Object.keys(series) as PerformanceMetricKey[]) {
     const points = series[metric];
     for (const point of points) {
-      const bucket = buckets[point.bucket] ?? {
-        timestampMs: point.timestampMs,
-        toMs: point.timestampMs + 1,
-      };
+      const bucket = buckets[point.bucket];
+      if (!bucket) continue;
       const row =
         rows.get(point.bucket) ??
         ({
-          start: new Date(bucket.timestampMs).toISOString(),
-          end: new Date(bucket.toMs).toISOString(),
+          start: new Date(bucket.startMs).toISOString(),
+          end: new Date(bucket.endExclusiveMs).toISOString(),
         } satisfies Record<string, unknown>);
       row[metric] = performanceSummaryValue(point);
       rows.set(point.bucket, row);
@@ -1184,89 +1129,46 @@ LIMIT ?
   });
 }
 
-function normalizeTimeseriesRows(value: unknown) {
+function normalizeTimeseriesRows(
+  value: unknown,
+  buckets: ReturnType<typeof buildTimeBuckets>,
+) {
   if (!Array.isArray(value)) return [];
-  return value.map((row) => {
+  return value.flatMap((row) => {
     const record = row && typeof row === "object" ? row : {};
     const source = record as Record<string, unknown>;
-    const startMs = Number(source.timestampMs ?? source.bucket ?? 0);
-    const endMs = Number.isFinite(startMs) ? startMs + 1 : 0;
+    const bucketIndex = Number(source.bucket);
+    const bucket =
+      Number.isInteger(bucketIndex) && bucketIndex >= 0
+        ? buckets[bucketIndex]
+        : undefined;
+    const startMs = Number(source.startMs ?? bucket?.startMs);
+    const endExclusiveMs = Number(
+      source.endExclusiveMs ?? bucket?.endExclusiveMs,
+    );
+    if (
+      !Number.isFinite(startMs) ||
+      !Number.isFinite(endExclusiveMs) ||
+      endExclusiveMs <= startMs
+    ) {
+      return [];
+    }
     const {
       bucket: _bucket,
       timestampMs: _timestampMs,
+      startMs: _startMs,
+      endExclusiveMs: _endExclusiveMs,
       source: _source,
       ...metrics
     } = source;
-    return {
-      start: new Date(startMs).toISOString(),
-      end: new Date(endMs).toISOString(),
-      ...metrics,
-    };
+    return [
+      {
+        start: new Date(startMs).toISOString(),
+        end: new Date(endExclusiveMs).toISOString(),
+        ...metrics,
+      },
+    ];
   });
-}
-
-async function runLegacyQuery(
-  request: Request,
-  env: Env,
-  siteId: string,
-  url: URL,
-  queryName: string,
-  options: {
-    timeRange?: ParsedTimeRange;
-    transform?: (data: unknown, payload: LegacyPayload) => unknown;
-    meta?: Record<string, unknown>;
-    paginated?: boolean;
-    pagination?: CursorPagination;
-  } = {},
-): Promise<Response> {
-  const internalUrl = buildInternalUrl(url, options.timeRange);
-  if (
-    ["events-records", "visitors", "sessions"].includes(queryName) &&
-    options.pagination
-  ) {
-    internalUrl.searchParams.set("pageSize", String(options.pagination.limit));
-    internalUrl.searchParams.delete("page");
-    if (options.pagination.cursor) {
-      internalUrl.searchParams.set("cursor", options.pagination.cursor);
-    } else {
-      internalUrl.searchParams.delete("cursor");
-    }
-  }
-  const response = await routeQuery(
-    env,
-    siteId,
-    queryName,
-    internalUrl,
-    { publicMode: false, deferJsonSerialization: true },
-    request,
-  );
-  const payload = await legacyJson(response);
-  if (!response.ok) {
-    return jsonError(
-      "invalid_request",
-      typeof payload.error === "string" ? payload.error : "Request failed",
-      response.status,
-      undefined,
-      request,
-    );
-  }
-  const stripped = stripLegacyPayload(payload);
-  const data = options.transform
-    ? options.transform(stripped.data, payload)
-    : stripped.data;
-  const meta = { ...stripped.meta, ...(options.meta ?? {}) };
-  if (options.paginated || stripped.pagination) {
-    const pagination = stripped.pagination ?? {
-      limit: 100,
-      nextCursor: null,
-      hasMore: false,
-    };
-    return jsonPaginated(Array.isArray(data) ? data : [], pagination, {
-      request,
-      meta,
-    });
-  }
-  return jsonSuccess(data ?? {}, { request, meta });
 }
 
 function requireSiteScope(
@@ -1469,48 +1371,46 @@ async function handleTeamAnalytics(
     if (metrics instanceof Response) return metrics;
     const sites = await listSites(env, principal);
     const internalUrl = buildInternalUrl(url, timeRange);
-    const rows = await queryTeamAnalyticsBreakdown(
-      env,
+    const result = await queryApiV1TeamBreakdown(
+      principal.teamId,
       sites.map((site) => site.id),
-      toQueryWindow(timeRange),
       internalUrl,
-      request,
-      dimension,
-      metrics,
+      timeRange,
+      () =>
+        queryTeamAnalyticsBreakdown(
+          env,
+          sites.map((site) => site.id),
+          toQueryWindow(timeRange),
+          internalUrl,
+          request,
+          dimension,
+          metrics,
+        ),
     );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    const rows = result.data;
     if (rows instanceof Response) return rows;
     return jsonList(rows, { request, meta: { timeRange, dimension, metrics } });
   }
   const internalUrl = buildInternalUrl(url, timeRange);
-  const dashboard = await handleTeamDashboardForTeam(
+  const dashboard = await queryApiV1TeamDashboard(
     env,
-    internalUrl,
     principal.teamId,
-    toQueryWindow(timeRange),
     hasFullSiteAccess(principal) ? undefined : principal.siteIds,
-    {
-      requestId: request.headers.get("cf-ray") || "team-analytics",
-      deferJsonSerialization: true,
-    },
+    timeRange,
+    parseInterval(internalUrl),
   );
-  const payload = await legacyJson(dashboard);
   if (!dashboard.ok) {
     return jsonError(
       "invalid_request",
       "Team analytics query failed",
-      dashboard.status,
+      500,
       undefined,
       request,
     );
   }
-  const data =
-    payload.data && typeof payload.data === "object"
-      ? (payload.data as {
-          sites?: Array<Record<string, unknown>>;
-          trend?: Array<Record<string, unknown>>;
-        })
-      : {};
-  const sites = data.sites ?? [];
+  const data = dashboard.data;
+  const sites = data.sites;
   if (resource === "overview") {
     const overview = sites.reduce<{
       views: number;
@@ -1520,15 +1420,11 @@ async function handleTeamAnalytics(
       totalDurationMs: number;
     }>(
       (acc, site) => {
-        const metrics =
-          site.overview && typeof site.overview === "object"
-            ? (site.overview as Record<string, unknown>)
-            : {};
-        acc.views += Number(metrics.views ?? 0);
-        acc.sessions += Number(metrics.sessions ?? 0);
-        acc.visitors += Number(metrics.visitors ?? 0);
-        acc.bounces += Number(metrics.bounces ?? 0);
-        acc.totalDurationMs += Number(metrics.totalDurationMs ?? 0);
+        acc.views += site.overview.views;
+        acc.sessions += site.overview.sessions;
+        acc.visitors += site.overview.visitors;
+        acc.bounces += site.overview.bounces;
+        acc.totalDurationMs += site.overview.totalDurationMs;
         return acc;
       },
       {
@@ -1559,8 +1455,17 @@ async function handleTeamAnalytics(
     );
   }
   if (resource === "timeseries") {
-    const rows = (data.trend ?? []).map((row) => {
-      const timestampMs = Number(row.timestampMs ?? row.bucket ?? 0);
+    const buckets = buildTimeBuckets(
+      toQueryWindow(timeRange),
+      parseInterval(internalUrl),
+    );
+    const rows = (data.trend ?? []).flatMap((row) => {
+      const bucketIndex = Number(row.bucket);
+      const bucket =
+        Number.isInteger(bucketIndex) && bucketIndex >= 0
+          ? buckets[bucketIndex]
+          : undefined;
+      if (!bucket) return [];
       const rowSites = Array.isArray(row.sites) ? row.sites : [];
       const totals = rowSites.reduce(
         (acc, site) => {
@@ -1574,12 +1479,14 @@ async function handleTeamAnalytics(
         },
         { views: 0, visitors: 0 },
       );
-      return {
-        start: new Date(timestampMs).toISOString(),
-        end: new Date(timestampMs + 1).toISOString(),
-        views: totals.views,
-        visitors: totals.visitors,
-      };
+      return [
+        {
+          start: new Date(bucket.startMs).toISOString(),
+          end: new Date(bucket.endExclusiveMs).toISOString(),
+          views: totals.views,
+          visitors: totals.visitors,
+        },
+      ];
     });
     return jsonList(rows, {
       request,
@@ -1981,11 +1888,22 @@ export async function handleAnalytics(
       ANALYTICS_METRICS,
     );
     if (metrics instanceof Response) return metrics;
-    return runLegacyQuery(request, env, siteId, url, "overview", {
+    const result = await queryApiV1Overview(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      transform: (data) => filterMetrics(data, metrics),
-      meta: { timeRange },
-    });
+    );
+    if (!result.ok) {
+      return apiV1QueryFailure(result.error, request);
+    }
+    return jsonSuccess(
+      filterMetrics(apiV1OverviewMetrics(result.data), metrics),
+      {
+        request,
+        meta: { timeRange },
+      },
+    );
   }
   if (resource === "timeseries") {
     if (request.method !== "GET") return methodNotAllowed(request);
@@ -1999,18 +1917,29 @@ export async function handleAnalytics(
         request,
       );
     }
-    return runLegacyQuery(request, env, siteId, url, "trend", {
+    const result = await queryApiV1Trend(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      transform: normalizeTimeseriesRows,
-      meta: { timeRange, interval },
-    });
+      interval as (typeof INTERVALS)[number],
+    );
+    if (!result.ok) {
+      return apiV1QueryFailure(result.error, request);
+    }
+    return jsonList(
+      normalizeTimeseriesRows(
+        result.data.points,
+        buildTimeBuckets(toQueryWindow(timeRange), parseInterval(url)),
+      ),
+      { request, meta: { timeRange, interval } },
+    );
   }
   if (resource === "breakdowns" && path[4]) {
     if (request.method !== "GET") return methodNotAllowed(request);
     const dimension = validateDimension(path[4]);
     if (dimension instanceof Response) return dimension;
-    const queryName = DIMENSION_TO_QUERY_NAME[dimension];
-    if (!queryName) {
+    if (!DIMENSION_TO_QUERY_NAME[dimension]) {
       return jsonError(
         "validation_failed",
         "Unsupported dimension",
@@ -2021,9 +1950,16 @@ export async function handleAnalytics(
     }
     const metrics = parseMetrics(url.searchParams.get("metrics"));
     if (metrics instanceof Response) return metrics;
-    return runLegacyQuery(request, env, siteId, url, queryName, {
+    const result = await queryApiV1Breakdown(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      transform: (data) => normalizeBreakdownRows(data, metrics),
+      dimension,
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonList(normalizeBreakdownRows(result.data, metrics), {
+      request,
       meta: { timeRange, dimension, metrics },
     });
   }
@@ -2037,25 +1973,34 @@ export async function handleAnalytics(
     );
     if (primary instanceof Response) return primary;
     if (secondary instanceof Response) return secondary;
-    const internalUrl = new URL(url.toString());
+    const internalUrl = buildInternalUrl(url, timeRange);
     internalUrl.searchParams.set("primaryDimension", primary);
     internalUrl.searchParams.set("secondaryDimension", secondary);
-    return runLegacyQuery(
-      request,
+    const result = await queryApiV1CrossBreakdown(
       env,
       siteId,
       internalUrl,
-      "client-cross-breakdown",
-      {
-        timeRange,
-        meta: { timeRange, primary, secondary },
-      },
+      timeRange,
+      primary,
+      secondary,
     );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonSuccess(result.data, {
+      request,
+      meta: { timeRange, primary, secondary },
+    });
   }
   if (resource === "compare") {
     if (request.method !== "GET") return methodNotAllowed(request);
-    return runLegacyQuery(request, env, siteId, url, "overview", {
+    const result = await queryApiV1Overview(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonSuccess(apiV1OverviewMetrics(result.data), {
+      request,
       meta: {
         timeRange,
         compare: url.searchParams.get("compare") || "previous_period",
@@ -2083,20 +2028,28 @@ export async function handleAnalytics(
     if (orderBy instanceof Response) return orderBy;
     const limit = parseExploreLimit(record.limit);
     if (limit instanceof Response) return limit;
-    const rows = await queryAnalyticsAggregateRows(
-      env,
-      [siteId],
-      toQueryWindow(exploreTimeRange),
+    const result = await queryApiV1Explore(
+      siteId,
       buildInternalUrl(bodyUrl, exploreTimeRange),
-      request,
-      {
-        dimensions,
-        metrics,
-        complexFilters,
-        limit,
-        orderBy,
-      },
+      exploreTimeRange,
+      () =>
+        queryAnalyticsAggregateRows(
+          env,
+          [siteId],
+          toQueryWindow(exploreTimeRange),
+          buildInternalUrl(bodyUrl, exploreTimeRange),
+          request,
+          {
+            dimensions,
+            metrics,
+            complexFilters,
+            limit,
+            orderBy,
+          },
+        ),
     );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    const rows = result.data;
     if (rows instanceof Response) return rows;
     return jsonSuccess(
       {
@@ -2110,10 +2063,15 @@ export async function handleAnalytics(
   }
   if (resource === "retention" && path[4] === "cohorts") {
     if (request.method !== "GET") return methodNotAllowed(request);
-    return runLegacyQuery(request, env, siteId, url, "retention", {
+    const result = await queryApiV1Retention(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      meta: { timeRange },
-    });
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    // Retention's legacy wire shape stored the typed payload in metadata.
+    return jsonSuccess({}, { request, meta: { timeRange, ...result.data } });
   }
 
   return jsonError(
@@ -2141,72 +2099,113 @@ export async function handleEvents(
   if (timeRange instanceof Response) return timeRange;
   if (path[2] === "event-types") {
     if (request.method !== "GET") return methodNotAllowed(request);
-    return runLegacyQuery(
-      request,
+    if (!path[3]) {
+      const result = await queryApiV1EventTypes(
+        env,
+        siteId,
+        buildInternalUrl(url, timeRange),
+        timeRange,
+      );
+      if (!result.ok) return apiV1QueryFailure(result.error, request);
+      return jsonList([...result.data], { request, meta: { timeRange } });
+    }
+    const result = await queryApiV1EventTypeDetail(
       env,
       siteId,
-      url,
-      path[3] ? "event-type-detail" : "event-types",
-      {
-        timeRange,
-        ...(path[3] ? { meta: { eventName: path[3] } } : {}),
-      },
+      buildInternalUrl(url, timeRange),
+      timeRange,
+      path[3],
     );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonSuccess({}, { request, meta: { timeRange, ...result.data } });
   }
   if (path[2] === "event-fields" && path[3] === "values") {
     if (request.method !== "GET") return methodNotAllowed(request);
-    return runLegacyQuery(
-      request,
+    const result = await queryApiV1EventFieldValues(
       env,
       siteId,
-      url,
-      "event-type-field-values",
-      { timeRange },
+      buildInternalUrl(url, timeRange),
+      timeRange,
     );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonList([...result.data], { request, meta: { timeRange } });
   }
   if (path[2] === "events" && path[3] === "summary") {
     if (request.method !== "GET") return methodNotAllowed(request);
-    return runLegacyQuery(request, env, siteId, url, "events-summary", {
+    const result = await queryApiV1EventsSummary(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-    });
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    // Legacy V1 exposed these as response metadata rather than `data`.
+    return jsonSuccess({}, { request, meta: { timeRange, ...result.data } });
   }
   if (path[2] === "events" && path[3] === "timeseries") {
     if (request.method !== "GET") return methodNotAllowed(request);
-    return runLegacyQuery(request, env, siteId, url, "events-trend", {
+    const result = await queryApiV1EventsTrend(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      transform: (data, payload) =>
-        normalizeTimeseriesRows(
-          (data as Record<string, unknown>)?.data ?? payload.data,
-        ),
-    });
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    const trendData = result.data.data;
+    return jsonList(
+      normalizeTimeseriesRows(
+        trendData,
+        buildTimeBuckets(toQueryWindow(timeRange), parseInterval(url)),
+      ),
+      {
+        request,
+        meta: {
+          timeRange,
+          interval: result.data.interval,
+          series: result.data.series,
+        },
+      },
+    );
   }
   if (path[2] === "events" && path[3] === "search") {
     if (request.method !== "POST") return methodNotAllowed(request);
-    return runLegacyQuery(request, env, siteId, url, "events-records", {
+    const result = await queryApiV1EventRecords(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      paginated: true,
       pagination,
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonPaginated([...result.data.data], result.data.pagination, {
+      request,
+      meta: { timeRange },
     });
   }
   if (path[2] === "events" && path[3]) {
     if (request.method !== "GET") return methodNotAllowed(request);
-    const internalUrl = new URL(url.toString());
-    internalUrl.searchParams.set("eventId", path[3]);
-    return runLegacyQuery(
-      request,
+    const result = await queryApiV1EventRecordDetail(
       env,
       siteId,
-      internalUrl,
-      "event-record-detail",
-      { timeRange },
+      path[3],
+      timeRange,
     );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonSuccess(result.data ?? {}, { request, meta: { timeRange } });
   }
   if (path[2] === "events") {
     if (request.method !== "GET") return methodNotAllowed(request);
-    return runLegacyQuery(request, env, siteId, url, "events-records", {
+    const result = await queryApiV1EventRecords(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      paginated: true,
       pagination,
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonPaginated([...result.data.data], result.data.pagination, {
+      request,
+      meta: { timeRange },
     });
   }
   return jsonError(
@@ -2236,56 +2235,82 @@ export async function handleJourneys(
     if (request.method !== "GET") return methodNotAllowed(request);
     const pagination = parseCursorPagination(url);
     if (pagination instanceof Response) return pagination;
-    return runLegacyQuery(request, env, siteId, url, "visitors", {
+    const result = await queryApiV1Visitors(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      paginated: true,
       pagination,
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonPaginated([...result.data.data], result.data.pagination, {
+      request,
+      meta: { timeRange },
     });
   }
   if (kind === "visitors" && id && !path[4]) {
     if (request.method !== "GET") return methodNotAllowed(request);
-    const internalUrl = new URL(url.toString());
-    internalUrl.searchParams.set("visitorId", id);
-    return runLegacyQuery(request, env, siteId, internalUrl, "visitor-detail", {
-      timeRange,
-    });
+    const result = await queryApiV1VisitorDetail(env, siteId, id, timeRange);
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonSuccess(result.data ?? {}, { request, meta: { timeRange } });
   }
   if (kind === "sessions" && !id) {
     if (request.method !== "GET") return methodNotAllowed(request);
     const pagination = parseCursorPagination(url);
     if (pagination instanceof Response) return pagination;
-    return runLegacyQuery(request, env, siteId, url, "sessions", {
+    const result = await queryApiV1Sessions(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      paginated: true,
       pagination,
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonPaginated([...result.data.data], result.data.pagination, {
+      request,
+      meta: { timeRange },
     });
   }
   if (kind === "sessions" && id && !path[4]) {
     if (request.method !== "GET") return methodNotAllowed(request);
-    const internalUrl = new URL(url.toString());
-    internalUrl.searchParams.set("sessionId", id);
-    return runLegacyQuery(request, env, siteId, internalUrl, "session-detail", {
-      timeRange,
-    });
+    const result = await queryApiV1SessionDetail(env, siteId, id, timeRange);
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonSuccess(result.data ?? {}, { request, meta: { timeRange } });
   }
   if (path[4] === "events") {
     if (request.method !== "GET") return methodNotAllowed(request);
     const pagination = parseCursorPagination(url);
     if (pagination instanceof Response) return pagination;
-    return runLegacyQuery(request, env, siteId, url, "events-records", {
+    const result = await queryApiV1JourneyEvents(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      paginated: true,
       pagination,
+      { type: kind === "visitors" ? "visitor" : "session", value: id },
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonPaginated([...result.data.data], result.data.pagination, {
+      request,
+      meta: { timeRange },
     });
   }
   if (path[4] === "sessions") {
     if (request.method !== "GET") return methodNotAllowed(request);
     const pagination = parseCursorPagination(url);
     if (pagination instanceof Response) return pagination;
-    return runLegacyQuery(request, env, siteId, url, "sessions", {
+    const result = await queryApiV1JourneySessions(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
       timeRange,
-      paginated: true,
       pagination,
+      { type: kind === "visitors" ? "visitor" : "session", value: id },
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonPaginated([...result.data.data], result.data.pagination, {
+      request,
+      meta: { timeRange },
     });
   }
   return jsonError(
@@ -2497,18 +2522,31 @@ export async function handleFunnels(
       FunnelAnalyzeInputSchema,
     );
     if (!parsed.ok) return parsed.response;
-    const analysis = await queryFunnelAnalysis(
+    const result = await queryApiV1FunnelAnalysis(
       env,
       siteId,
-      toQueryWindow(timeRange),
-      {},
+      timeRange,
       parsed.data.steps,
     );
-    return jsonSuccess(analysis, { request, meta: { timeRange } });
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonSuccess(result.data, { request, meta: { timeRange } });
   }
   if (path[3] && path[4] === "analysis") {
     if (request.method !== "GET") return methodNotAllowed(request);
-    const funnel = await getFunnel(env, siteId, path[3]);
+    const result = await queryApiV1SavedFunnelAnalysis(
+      env,
+      siteId,
+      timeRange,
+      async () => {
+        const funnel = await getFunnel(env, siteId, path[3]);
+        return {
+          funnel,
+          steps: funnel ? parseFunnelSteps(funnel.config_json) : [],
+        };
+      },
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    const funnel = result.data.funnel;
     if (!funnel) {
       return jsonError(
         "resource_not_found",
@@ -2518,8 +2556,7 @@ export async function handleFunnels(
         request,
       );
     }
-    const steps = parseFunnelSteps(funnel.config_json);
-    if (steps.length < 2) {
+    if (!result.data.analysis) {
       return jsonError(
         "validation_failed",
         "Funnel has fewer than 2 steps",
@@ -2528,15 +2565,8 @@ export async function handleFunnels(
         request,
       );
     }
-    const analysis = await queryFunnelAnalysis(
-      env,
-      siteId,
-      toQueryWindow(timeRange),
-      {},
-      steps,
-    );
     return jsonSuccess(
-      { funnel: funnelPayload(funnel), analysis },
+      { funnel: funnelPayload(funnel), analysis: result.data.analysis },
       { request, meta: { timeRange } },
     );
   }
@@ -2571,21 +2601,25 @@ export async function handlePerformance(
   const internalUrl = buildInternalUrl(url, timeRange);
   const resource = path[3] || "summary";
   if (resource === "summary") {
-    const data = await queryPerformanceSummaryData(
-      env,
+    const result = await queryApiV1Performance(
       siteId,
-      window,
       internalUrl,
+      timeRange,
+      () => queryPerformanceSummaryData(env, siteId, window, internalUrl),
     );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    const data = result.data;
     return jsonSuccess(data, { request, meta: { timeRange } });
   }
   if (resource === "timeseries") {
-    const data = await queryPerformanceTimeseriesData(
-      env,
+    const result = await queryApiV1Performance(
       siteId,
-      window,
       internalUrl,
+      timeRange,
+      () => queryPerformanceTimeseriesData(env, siteId, window, internalUrl),
     );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    const data = result.data;
     return jsonList(data.rows, {
       request,
       meta: { timeRange, interval: data.interval },
@@ -2596,14 +2630,22 @@ export async function handlePerformance(
     if (dimension instanceof Response) return dimension;
     const metric = parsePerformanceMetric(url);
     if (metric instanceof Response) return metric;
-    const rows = await queryPerformanceBreakdownData(
-      env,
+    const result = await queryApiV1Performance(
       siteId,
-      window,
       internalUrl,
-      request,
-      dimension,
+      timeRange,
+      () =>
+        queryPerformanceBreakdownData(
+          env,
+          siteId,
+          window,
+          internalUrl,
+          request,
+          dimension,
+        ),
     );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    const rows = result.data;
     if (rows instanceof Response) return rows;
     return jsonList(rows, {
       request,

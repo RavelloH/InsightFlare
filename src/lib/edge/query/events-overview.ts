@@ -29,7 +29,7 @@ export async function queryEventTypeOverviewFromD1(
     ...eventFilter.bindings,
     ...(hasEventFilter
       ? [...eventSourceBindings(siteId, window), ...eventFilter.bindings]
-      : [siteId, window.fromMs, window.toMs]),
+      : [siteId, window.startMs, window.endExclusiveMs]),
   ];
   const scopedSummaryCte = hasEventFilter
     ? `
@@ -47,7 +47,7 @@ scoped_summary AS (
 scoped_summary AS (
   SELECT count(*) AS events
   FROM custom_events
-  WHERE site_id = ? AND occurred_at BETWEEN ? AND ?
+  WHERE site_id = ? AND occurred_at >= ? AND occurred_at < ?
 )`;
   const baseCte = `
 WITH

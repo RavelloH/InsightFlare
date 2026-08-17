@@ -15,8 +15,10 @@ export const PUBLIC_PRIVACY = {
 export type Interval = "minute" | "hour" | "day" | "week" | "month";
 
 export interface QueryWindow {
-  fromMs: number;
-  toMs: number;
+  /** Inclusive epoch-millisecond query boundary. */
+  startMs: number;
+  /** Exclusive epoch-millisecond query boundary. */
+  endExclusiveMs: number;
   nowMs: number;
   timeZone: string;
 }

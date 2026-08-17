@@ -1,9 +1,9 @@
 import {
-  addCalendarDays,
-  addCalendarMonths,
-  zonedParts,
-  zonedTimeToUtcMs,
-} from "@/lib/dashboard/time-zone";
+  buildCalendarBucketPlan,
+  createTimeRange,
+  normalizeReportingTimeZone,
+  previousComparableRange,
+} from "@/lib/edge/query-contract";
 import { ONE_DAY_MS, ONE_HOUR_MS } from "@/lib/edge/utils";
 
 import { type Interval, type QueryWindow } from "./core-types";
@@ -56,8 +56,8 @@ export function intervalBucketMs(interval: Interval): number {
 export interface TimeBucket {
   index: number;
   timestampMs: number;
-  fromMs: number;
-  toMs: number;
+  startMs: number;
+  endExclusiveMs: number;
 }
 
 export interface TimeBucketCase {
@@ -72,99 +72,33 @@ export function sqlIntegerLiteral(value: number): string {
   return String(Math.trunc(value));
 }
 
-function startOfIntervalParts(
-  timestampMs: number,
-  interval: Interval,
-  timeZone: string,
-) {
-  const parts = zonedParts(timestampMs, timeZone);
-  if (interval === "minute") {
-    return { ...parts, second: 0, millisecond: 0 };
-  }
-  if (interval === "hour") {
-    return { ...parts, minute: 0, second: 0, millisecond: 0 };
-  }
-  if (interval === "day") {
-    return { ...parts, hour: 0, minute: 0, second: 0, millisecond: 0 };
-  }
-  if (interval === "week") {
-    const dayOfWeek = new Date(
-      Date.UTC(parts.year, parts.month - 1, parts.day),
-    ).getUTCDay();
-    const mondayOffset = (dayOfWeek + 6) % 7;
-    const weekStart = addCalendarDays(parts, -mondayOffset);
-    return {
-      ...parts,
-      ...weekStart,
-      hour: 0,
-      minute: 0,
-      second: 0,
-      millisecond: 0,
-    };
-  }
-  return {
-    ...parts,
-    day: 1,
-    hour: 0,
-    minute: 0,
-    second: 0,
-    millisecond: 0,
-  };
-}
-
-function advanceIntervalParts(
-  parts: ReturnType<typeof zonedParts>,
-  interval: Interval,
-) {
-  if (interval === "minute") return { ...parts, minute: parts.minute + 1 };
-  if (interval === "hour") return { ...parts, hour: parts.hour + 1 };
-  if (interval === "day") return { ...parts, ...addCalendarDays(parts, 1) };
-  if (interval === "week") return { ...parts, ...addCalendarDays(parts, 7) };
-  return { ...parts, ...addCalendarMonths(parts, 1) };
-}
-
 export function buildTimeBuckets(
   window: QueryWindow,
   interval: Interval,
 ): TimeBucket[] {
-  const buckets: TimeBucket[] = [];
-  let currentParts = startOfIntervalParts(
-    window.fromMs,
-    interval,
-    window.timeZone,
+  const plan = buildCalendarBucketPlan({
+    range: createTimeRange(window.startMs, window.endExclusiveMs),
+    granularity: interval,
+    reportingTimeZone: normalizeReportingTimeZone(window.timeZone),
+  });
+  return plan.buckets.map((bucket) => ({
+    index: bucket.index,
+    timestampMs: bucket.startMs,
+    startMs: bucket.startMs,
+    endExclusiveMs: bucket.endExclusiveMs,
+  }));
+}
+
+export function previousComparableWindow(window: QueryWindow): QueryWindow {
+  const range = previousComparableRange(
+    createTimeRange(window.startMs, window.endExclusiveMs),
   );
-  let current = zonedTimeToUtcMs(window.timeZone, currentParts);
-  const hardLimit = 2000;
-
-  for (let index = 0; index < hardLimit && current <= window.toMs; index += 1) {
-    const nextParts = advanceIntervalParts(currentParts, interval);
-    let next = zonedTimeToUtcMs(window.timeZone, nextParts);
-    if (!Number.isFinite(next) || next <= current) {
-      next = current + intervalBucketMs(interval);
-      currentParts = zonedParts(next, window.timeZone);
-    } else {
-      currentParts = nextParts;
-    }
-    buckets.push({
-      index,
-      timestampMs: current,
-      fromMs: current,
-      toMs: next,
-    });
-    current = next;
-  }
-
-  if (buckets.length === 0) {
-    const fallbackStart = Math.max(0, Math.floor(window.fromMs));
-    buckets.push({
-      index: 0,
-      timestampMs: fallbackStart,
-      fromMs: fallbackStart,
-      toMs: Math.max(fallbackStart + 1, Math.floor(window.toMs) + 1),
-    });
-  }
-
-  return buckets;
+  return {
+    startMs: range.startMs,
+    endExclusiveMs: range.endExclusiveMs,
+    nowMs: window.nowMs,
+    timeZone: window.timeZone,
+  };
 }
 
 export function timeBucketCase(
@@ -172,7 +106,7 @@ export function timeBucketCase(
   columnExpression: string,
 ): TimeBucketCase {
   const clauses = buckets.map((bucket) => {
-    return `WHEN ${columnExpression} >= ${sqlIntegerLiteral(bucket.fromMs)} AND ${columnExpression} < ${sqlIntegerLiteral(bucket.toMs)} THEN ${bucket.index}`;
+    return `WHEN ${columnExpression} >= ${sqlIntegerLiteral(bucket.startMs)} AND ${columnExpression} < ${sqlIntegerLiteral(bucket.endExclusiveMs)} THEN ${bucket.index}`;
   });
   return {
     sql: `CASE ${clauses.join(" ")} ELSE NULL END`,

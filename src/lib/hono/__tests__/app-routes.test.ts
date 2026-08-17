@@ -20,14 +20,13 @@ import {
   handleLegacyAuthLogout,
 } from "@/lib/edge/legacy-auth";
 import { handleMapTileRequest } from "@/lib/edge/map-tiles";
-import { handlePrivateQuery, handlePublicQuery } from "@/lib/edge/query";
 import type * as QueryCoreModule from "@/lib/edge/query/core";
 import {
   fetchPublicSite,
   resolvePrivateSiteForSession,
 } from "@/lib/edge/query/core";
+import { handleOverviewContract } from "@/lib/edge/query/overview-contract-adapter";
 import type * as QueryRouterModule from "@/lib/edge/query/router";
-import { dispatchQueryRoute } from "@/lib/edge/query/router";
 import { handleReleasesCompareRequest } from "@/lib/edge/releases-compare";
 import { handleTrackerScriptRequest } from "@/lib/edge/script-endpoint";
 import { handleWikiSummaryRequest } from "@/lib/edge/wiki-summary";
@@ -69,11 +68,6 @@ vi.mock("@/lib/edge/releases-compare", () => ({
   handleReleasesCompareRequest: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/query", () => ({
-  handlePrivateQuery: vi.fn(),
-  handlePublicQuery: vi.fn(),
-}));
-
 vi.mock("@/lib/edge/query/core", async (importOriginal) => {
   const actual = await importOriginal<typeof QueryCoreModule>();
   return {
@@ -87,9 +81,18 @@ vi.mock("@/lib/edge/query/router", async (importOriginal) => {
   const actual = await importOriginal<typeof QueryRouterModule>();
   return {
     ...actual,
-    dispatchQueryRoute: vi.fn(),
   };
 });
+
+vi.mock("@/lib/edge/query/overview-contract-adapter", () => ({
+  handleOverviewContract: vi.fn(),
+  handleTrendContract: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/query/pages-contract-adapter", () => ({
+  handlePagesContract: vi.fn(),
+  handleReferrersContract: vi.fn(),
+}));
 
 vi.mock("@/lib/edge/api-v1", () => ({
   apiV1Segments: (url: URL) =>
@@ -142,6 +145,7 @@ vi.mock("@/lib/edge/session-auth", () => ({
 const { requireSession } = await import("@/lib/edge/session-auth");
 
 const env = { DB: {}, INGEST_DO: {}, ARCHIVE_BUCKET: {} };
+const dispatchQueryRoute = vi.fn();
 const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() };
 const executionCtx = ctx as unknown as ExecutionContext;
 const session = {
@@ -196,9 +200,6 @@ describe("Hono API app routing", () => {
     vi.mocked(handlePrivateArchiveManifest).mockResolvedValue(
       new Response("archive"),
     );
-    vi.mocked(handlePrivateQuery).mockResolvedValue(
-      new Response("private-query"),
-    );
     vi.mocked(resolvePrivateSiteForSession).mockResolvedValue({
       id: "site-1",
       name: "Site",
@@ -212,8 +213,8 @@ describe("Hono API app routing", () => {
     vi.mocked(dispatchQueryRoute).mockResolvedValue(
       new Response("private-query"),
     );
-    vi.mocked(handlePublicQuery).mockResolvedValue(
-      new Response("public-query"),
+    vi.mocked(handleOverviewContract).mockResolvedValue(
+      new Response("private-query"),
     );
     vi.mocked(handleApiV1).mockResolvedValue(new Response("v1"));
     vi.mocked(handleRoot).mockResolvedValue(new Response("root"));
@@ -405,24 +406,21 @@ describe("Hono API app routing", () => {
     expect(handlePrivateArchiveManifest).toHaveBeenCalled();
     expect(handlePrivateArchive).not.toHaveBeenCalled();
     expect(resolvePrivateSiteForSession).toHaveBeenCalled();
-    expect(dispatchQueryRoute).toHaveBeenCalledWith(
+    expect(handleOverviewContract).toHaveBeenCalledWith(
       env,
       "site-1",
-      "overview",
       new URL("https://app.test/api/private/overview"),
-      { publicMode: false, dashboardMode: true },
-      expect.any(Request),
+      expect.objectContaining({ requestId: expect.any(String) }),
+      expect.objectContaining({ subject: { kind: "site", siteId: "site-1" } }),
     );
-    expect(handlePrivateQuery).not.toHaveBeenCalled();
     expect(fetchPublicSite).toHaveBeenCalled();
-    expect(handlePublicQuery).not.toHaveBeenCalled();
     expect(handleCapabilities).toHaveBeenCalled();
     expect(handleApiV1).not.toHaveBeenCalled();
   });
 
   it("emits one aggregate Worker record with route and query diagnostics", async () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.mocked(dispatchQueryRoute).mockResolvedValueOnce(
+    vi.mocked(handleOverviewContract).mockResolvedValueOnce(
       new Response("overview", {
         headers: {
           "x-insightflare-cache": "MISS",

@@ -34,18 +34,18 @@ export function parseWindow(url: URL): QueryWindow | null {
   ) {
     return null;
   }
-  const fromMs = Math.floor(parsedFrom ?? defaultFrom);
-  const toMs = Math.floor(parsedTo ?? nowMs);
+  const startMs = Math.floor(parsedFrom ?? defaultFrom);
+  const endExclusiveMs = Math.floor(parsedTo ?? nowMs);
   const timeZone = resolveReportingTimeZone(url.searchParams.get("timeZone"));
   if (
-    !Number.isFinite(fromMs) ||
-    !Number.isFinite(toMs) ||
-    fromMs < 0 ||
-    toMs < fromMs
+    !Number.isFinite(startMs) ||
+    !Number.isFinite(endExclusiveMs) ||
+    startMs < 0 ||
+    endExclusiveMs <= startMs
   ) {
     return null;
   }
-  return { fromMs, toMs, nowMs, timeZone };
+  return { startMs, endExclusiveMs, nowMs, timeZone };
 }
 
 export function parseLimit(url: URL, fallback = 20, max = 500): number {

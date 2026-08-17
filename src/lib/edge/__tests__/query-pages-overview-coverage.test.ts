@@ -6,26 +6,30 @@ import { describe, expect, it, vi } from "vitest";
 import type { DashboardFilters, QueryWindow } from "@/lib/edge/query/core";
 import {
   handleFilterOptions,
-  handleOverview,
   handleOverviewClientTab,
   handleOverviewGeoPoints,
   handleOverviewGeoTab,
   handleOverviewPageTab,
   handleOverviewSourceTab,
-  handleTrend,
   queryOverviewFromD1,
   queryTrendFromD1,
 } from "@/lib/edge/query/overview";
 import {
+  handleOverviewContract as handleOverview,
+  handleTrendContract as handleTrend,
+} from "@/lib/edge/query/overview-contract-adapter";
+import {
   handleDimension,
-  handlePages,
   handlePagesDashboard,
-  handleReferrers,
   queryPageCardMetricsFromD1,
   queryPageCardTitlesFromD1,
   queryPageCardTrendFromD1,
   queryTopPagesFromD1,
 } from "@/lib/edge/query/pages";
+import {
+  handlePagesContract as handlePages,
+  handleReferrersContract as handleReferrers,
+} from "@/lib/edge/query/pages-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
 type D1Row = Record<string, unknown>;
@@ -39,8 +43,8 @@ interface QueryCall {
 const siteId = "site-pages";
 const baseMs = Date.UTC(2026, 0, 2, 1);
 const window: QueryWindow = {
-  fromMs: baseMs,
-  toMs: baseMs + 2 * 60 * 60 * 1000,
+  startMs: baseMs,
+  endExclusiveMs: baseMs + 2 * 60 * 60 * 1000,
   nowMs: baseMs + 3 * 60 * 60 * 1000,
   timeZone: "UTC",
 };
@@ -79,7 +83,7 @@ function createD1Env(
 }
 
 function visitBindings(targetWindow = window): QueryBinding[] {
-  return [siteId, targetWindow.fromMs, targetWindow.toMs];
+  return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
 }
 
 function url(path: string, params: Record<string, string | number | boolean>) {
@@ -327,8 +331,8 @@ describe("edge pages D1 queries", () => {
         siteId,
         "visitor-3",
         "session-4",
-        window.toMs + 1,
-        window.toMs + 1,
+        window.endExclusiveMs,
+        window.endExclusiveMs,
         "/pricing",
         999,
       );
@@ -554,8 +558,8 @@ describe("edge pages handlers", () => {
       env,
       siteId,
       url("/pages", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         details: true,
         country: "US",
         limit: 5,
@@ -615,8 +619,8 @@ describe("edge pages handlers", () => {
       env,
       siteId,
       url("/referrers", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         fullUrl: true,
         browser: "Chrome",
         limit: 7,
@@ -653,8 +657,8 @@ describe("edge pages handlers", () => {
       env,
       siteId,
       url("/dimension", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         geo: "US::CA::California",
         device: "desktop",
         limit: 4,
@@ -686,8 +690,8 @@ describe("edge pages handlers", () => {
       env,
       siteId,
       url("/pages/dashboard", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         page: 2,
         pageSize: 4,
         interval: "hour",
@@ -717,8 +721,8 @@ describe("edge pages handlers", () => {
       env,
       siteId,
       url("/pages/dashboard", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         page: 10_000,
         pageSize: 24,
       }),
@@ -802,8 +806,8 @@ describe("edge pages handlers", () => {
       env,
       siteId,
       url("/pages/dashboard", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         page: 1,
         pageSize: 2,
         interval: "hour",
@@ -882,8 +886,8 @@ describe("edge pages handlers", () => {
     expect(calls[0].bindings).toEqual([...visitBindings(), 3, 0]);
     expect(calls[1].bindings).toEqual([
       siteId,
-      Math.max(window.fromMs - 1 - (window.toMs - window.fromMs), 0),
-      window.fromMs - 1,
+      Math.max(window.startMs - (window.endExclusiveMs - window.startMs), 0),
+      window.startMs,
       "/pricing",
       "/docs",
     ]);
@@ -1352,8 +1356,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/overview", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         interval: "hour",
         includeChange: true,
         includeDetail: true,
@@ -1417,8 +1421,8 @@ describe("edge overview D1 queries and handlers", () => {
     expect(calls[2].sql).toContain("visit_hourly_aggregation_state");
     expect(calls[3].bindings).toEqual([
       siteId,
-      Math.max(window.fromMs - 1 - (window.toMs - window.fromMs), 0),
-      window.fromMs - 1,
+      Math.max(window.startMs - (window.endExclusiveMs - window.startMs), 0),
+      window.startMs,
     ]);
     expect(calls[4].sql).toContain("visit_hourly_aggregation_state");
     expect(calls[5].bindings).toEqual(visitBindings());
@@ -1443,8 +1447,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/trend", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         interval: "hour",
         sourceDomain: "Ref.Example",
       }),
@@ -1513,8 +1517,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/overview/page-tab", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 2,
       }),
       "path",
@@ -1523,8 +1527,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/overview/source-tab", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 3,
       }),
       "domain",
@@ -1533,8 +1537,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/overview/client-tab", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 3,
       }),
       "screenSize",
@@ -1543,8 +1547,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/overview/geo-tab", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         geo: "US::CA::California",
         limit: 3,
       }),
@@ -1672,8 +1676,8 @@ describe("edge overview D1 queries and handlers", () => {
         filterKey: "country",
         country: "US",
         browser: "Chrome",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 4,
       }),
     );
@@ -1683,8 +1687,8 @@ describe("edge overview D1 queries and handlers", () => {
       url("/filter-options", {
         filterKey: "path",
         path: "/home",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 4,
       }),
     );
@@ -1694,8 +1698,8 @@ describe("edge overview D1 queries and handlers", () => {
       url("/filter-options", {
         filterKey: "sourceDomain",
         sourceDomain: "__direct__",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 4,
       }),
     );
@@ -1705,8 +1709,8 @@ describe("edge overview D1 queries and handlers", () => {
       url("/filter-options", {
         filterKey: "clientScreenSize",
         clientScreenSize: "390x844",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 4,
       }),
     );
@@ -1716,8 +1720,8 @@ describe("edge overview D1 queries and handlers", () => {
       url("/filter-options", {
         filterKey: "geo",
         geo: "US::CA::California",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 4,
       }),
     );
@@ -1727,8 +1731,8 @@ describe("edge overview D1 queries and handlers", () => {
       url("/filter-options", {
         filterKey: "geoOrganization",
         geoOrganization: "Example ISP",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 4,
       }),
     );
@@ -1808,8 +1812,8 @@ describe("edge overview D1 queries and handlers", () => {
         filterKey: "device",
         device: "desktop",
         browser: "Chrome",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 4,
       }),
     );
@@ -1820,8 +1824,8 @@ describe("edge overview D1 queries and handlers", () => {
         filterKey: "browser",
         browser: "Chrome",
         country: "US",
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         limit: 4,
       }),
     );
@@ -1848,7 +1852,7 @@ describe("edge overview D1 queries and handlers", () => {
         {
           latitude: "37.7",
           longitude: "-122.4",
-          timestampMs: String(window.fromMs),
+          timestampMs: String(window.startMs),
           country: "US",
           region: "California",
           regionCode: "CA",
@@ -1881,8 +1885,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/overview/geo-points", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         geo: "US::CA::California",
         limit: 9,
       }),
@@ -1891,8 +1895,8 @@ describe("edge overview D1 queries and handlers", () => {
       env,
       siteId,
       url("/overview/geo-points", {
-        from: window.fromMs,
-        to: window.toMs,
+        from: window.startMs,
+        to: window.endExclusiveMs,
         geo: "US::CA::California",
         applyGeoFilter: true,
         limit: 10,
@@ -1905,7 +1909,7 @@ describe("edge overview D1 queries and handlers", () => {
         {
           latitude: 37.7,
           longitude: -122.4,
-          timestampMs: window.fromMs,
+          timestampMs: window.startMs,
           country: "US",
           region: "California",
           regionCode: "CA",

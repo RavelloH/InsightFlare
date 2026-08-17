@@ -1,60 +1,6 @@
-import type { Env } from "@/lib/edge/types";
+import type { QueryOperation } from "@/lib/edge/query-contract";
 
-import {
-  getRequestId,
-  notFound,
-  type ResponseContext,
-  utmDimensionDefinition,
-} from "./core";
-import {
-  handleEventRecordDetail,
-  handleEventsRecords,
-  handleEventsSummary,
-  handleEventsTrend,
-  handleEventTypeContext,
-  handleEventTypeDetail,
-  handleEventTypeFields,
-  handleEventTypeFieldValues,
-  handleEventTypes,
-} from "./events";
-import { handleFunnel } from "./funnels";
-import {
-  handleRetention,
-  handleSessionDetail,
-  handleSessions,
-  handleVisitorDetail,
-  handleVisitors,
-} from "./journeys";
-import {
-  handleFilterOptions,
-  handleOverview,
-  handleOverviewClientTab,
-  handleOverviewGeoPoints,
-  handleOverviewGeoTab,
-  handleOverviewPageTab,
-  handleOverviewSourceTab,
-  handleTrend,
-} from "./overview";
-import {
-  handleDimension,
-  handlePages,
-  handlePagesDashboard,
-  handleReferrers,
-} from "./pages";
-import { handlePerformance } from "./performance";
-import {
-  handleBrowserCrossBreakdown,
-  handleBrowserEngineTrend,
-  handleBrowserRadar,
-  handleBrowserTrend,
-  handleBrowserVersionBreakdown,
-  handleClientDimensionTrend,
-  handleCrossBreakdown,
-  handleReferrerDimensionTrend,
-  handleReferrerRadar,
-  handleUtmDimensionTrend,
-} from "./technology";
-
+/** Protocol route exposure. Query execution belongs to the three adapters. */
 export const PUBLIC_QUERY_PATHS = [
   "overview",
   "trend",
@@ -66,15 +12,12 @@ export const PUBLIC_QUERY_PATHS = [
   "countries",
   "filter-options",
   "event-types",
-  "page-hash",
-  "page-query",
   "overview-page-path",
   "overview-page-title",
   "overview-page-hostname",
   "overview-page-entry",
   "overview-page-exit",
   "overview-source-domain",
-  "overview-source-link",
   "overview-client-browser",
   "overview-client-os-version",
   "overview-client-device-type",
@@ -95,7 +38,6 @@ export const PUBLIC_QUERY_PATHS = [
   "referrer-radar",
   "referrer-dimension-trend",
   "client-dimension-trend",
-  "client-cross-breakdown",
   "utm-dimension-trend",
   "utm-source",
   "utm-medium",
@@ -122,263 +64,88 @@ export const DASHBOARD_QUERY_PATHS = [
   "team-dashboard",
 ] as const;
 
-const PUBLIC_QUERY_PATH_SET = new Set<string>(PUBLIC_QUERY_PATHS);
+const PUBLIC_HIDDEN_FILTER_PARAMS = new Set(["query", "sourceLink"]);
+const PUBLIC_HIDDEN_FILTER_OPTION_KEYS = new Set(["sourceLink"]);
+const PUBLIC_HIDDEN_CROSS_DIMENSIONS = new Set([
+  "page.query",
+  "page.hash",
+  "referrer.url",
+  "query_string",
+  "hash_fragment",
+  "referrer_url",
+]);
 
-export interface QueryRouteContext {
-  env: Env;
-  siteId: string;
-  url: URL;
-  options: QueryRouteOptions;
-  request?: Request;
-  responseContext?: ResponseContext;
-}
-
-export interface QueryRouteOptions {
-  publicMode: boolean;
-  dashboardMode?: boolean;
-  deferJsonSerialization?: boolean;
-}
-
-export type QueryRouteHandler = (
-  context: QueryRouteContext,
-) => Promise<Response>;
-
-export const QUERY_ROUTE_HANDLERS: Record<string, QueryRouteHandler> = {
-  overview: ({ env, siteId, url, responseContext }) =>
-    handleOverview(env, siteId, url, responseContext),
-  trend: ({ env, siteId, url, responseContext }) =>
-    handleTrend(env, siteId, url, responseContext),
-  pages: ({ env, siteId, url, options, responseContext }) =>
-    handlePages(env, siteId, url, !options.publicMode, responseContext),
-  referrers: ({ env, siteId, url, options, responseContext }) =>
-    handleReferrers(
-      env,
-      siteId,
-      url,
-      options.publicMode ? 8 : 20,
-      !options.publicMode,
-      responseContext,
-    ),
-  funnels: ({ env, siteId, url, request, responseContext }) =>
-    handleFunnel(env, siteId, url, responseContext, request as Request),
-  "pages-dashboard": ({ env, siteId, url, responseContext }) =>
-    handlePagesDashboard(env, siteId, url, responseContext),
-  "page-hash": ({ env, siteId, url, responseContext }) =>
-    handleDimension(
-      env,
-      siteId,
-      url,
-      "hash_fragment",
-      undefined,
-      responseContext,
-    ),
-  "page-query": ({ env, siteId, url, responseContext }) =>
-    handleDimension(
-      env,
-      siteId,
-      url,
-      "query_string",
-      undefined,
-      responseContext,
-    ),
-  "event-types": ({ env, siteId, url, responseContext }) =>
-    handleEventTypes(env, siteId, url, responseContext),
-  "events-summary": ({ env, siteId, url, responseContext }) =>
-    handleEventsSummary(env, siteId, url, responseContext),
-  "events-trend": ({ env, siteId, url, responseContext }) =>
-    handleEventsTrend(env, siteId, url, responseContext),
-  "events-records": ({ env, siteId, url, responseContext }) =>
-    handleEventsRecords(env, siteId, url, responseContext),
-  "event-type-fields": ({ env, siteId, url, responseContext }) =>
-    handleEventTypeFields(env, siteId, url, responseContext),
-  "event-type-field-values": ({ env, siteId, url, responseContext }) =>
-    handleEventTypeFieldValues(env, siteId, url, responseContext),
-  "event-type-context": ({ env, siteId, url, responseContext }) =>
-    handleEventTypeContext(env, siteId, url, responseContext),
-  "event-type-detail": ({ env, siteId, url, options, responseContext }) =>
-    handleEventTypeDetail(
-      env,
-      siteId,
-      url,
-      responseContext,
-      options.dashboardMode
-        ? {
-            includeContext: url.searchParams.get("includeContext") !== "false",
-            includeBreakdowns:
-              url.searchParams.get("includeBreakdowns") !== "false",
-            includeFields: url.searchParams.get("includeFields") !== "false",
-          }
-        : undefined,
-    ),
-  "event-record-detail": ({ env, siteId, url, responseContext }) =>
-    handleEventRecordDetail(env, siteId, url, responseContext),
-  sessions: ({ env, siteId, url, responseContext }) =>
-    handleSessions(env, siteId, url, responseContext),
-  "session-detail": ({ env, siteId, url, responseContext }) =>
-    handleSessionDetail(env, siteId, url, responseContext),
-  "visitor-detail": ({ env, siteId, url, responseContext }) =>
-    handleVisitorDetail(env, siteId, url, responseContext),
-  visitors: ({ env, siteId, url, responseContext }) =>
-    handleVisitors(env, siteId, url, responseContext),
-  retention: ({ env, siteId, url, responseContext }) =>
-    handleRetention(env, siteId, url, responseContext),
-  performance: ({ env, siteId, url, responseContext }) =>
-    handlePerformance(env, siteId, url, responseContext),
-  "browser-trend": ({ env, siteId, url, responseContext }) =>
-    handleBrowserTrend(env, siteId, url, responseContext),
-  "browser-engine-trend": ({ env, siteId, url, responseContext }) =>
-    handleBrowserEngineTrend(env, siteId, url, responseContext),
-  "browser-version-breakdown": ({ env, siteId, url, responseContext }) =>
-    handleBrowserVersionBreakdown(env, siteId, url, responseContext),
-  "browser-cross-breakdown": ({ env, siteId, url, responseContext }) =>
-    handleBrowserCrossBreakdown(env, siteId, url, responseContext),
-  "browser-radar": ({ env, siteId, url, responseContext }) =>
-    handleBrowserRadar(env, siteId, url, responseContext),
-  "referrer-radar": ({ env, siteId, url, responseContext }) =>
-    handleReferrerRadar(env, siteId, url, responseContext),
-  "referrer-dimension-trend": ({ env, siteId, url, responseContext }) =>
-    handleReferrerDimensionTrend(env, siteId, url, responseContext),
-  "client-dimension-trend": ({ env, siteId, url, responseContext }) =>
-    handleClientDimensionTrend(env, siteId, url, responseContext),
-  "utm-dimension-trend": ({ env, siteId, url, responseContext }) =>
-    handleUtmDimensionTrend(env, siteId, url, responseContext),
-  "client-cross-breakdown": ({ env, siteId, url, responseContext }) =>
-    handleCrossBreakdown(env, siteId, url, responseContext),
-  "utm-source": ({ env, siteId, url, responseContext }) =>
-    handleDimension(
-      env,
-      siteId,
-      url,
-      utmDimensionDefinition("source").labelExpr,
-      undefined,
-      responseContext,
-    ),
-  "utm-medium": ({ env, siteId, url, responseContext }) =>
-    handleDimension(
-      env,
-      siteId,
-      url,
-      utmDimensionDefinition("medium").labelExpr,
-      undefined,
-      responseContext,
-    ),
-  "utm-campaign": ({ env, siteId, url, responseContext }) =>
-    handleDimension(
-      env,
-      siteId,
-      url,
-      utmDimensionDefinition("campaign").labelExpr,
-      undefined,
-      responseContext,
-    ),
-  "utm-term": ({ env, siteId, url, responseContext }) =>
-    handleDimension(
-      env,
-      siteId,
-      url,
-      utmDimensionDefinition("term").labelExpr,
-      undefined,
-      responseContext,
-    ),
-  "utm-content": ({ env, siteId, url, responseContext }) =>
-    handleDimension(
-      env,
-      siteId,
-      url,
-      utmDimensionDefinition("content").labelExpr,
-      undefined,
-      responseContext,
-    ),
-  countries: ({ env, siteId, url, responseContext }) =>
-    handleDimension(
-      env,
-      siteId,
-      url,
-      "country",
-      { ignoreGeo: true },
-      responseContext,
-    ),
-  "filter-options": ({ env, siteId, url, responseContext }) =>
-    handleFilterOptions(env, siteId, url, responseContext),
-  "overview-page-path": ({ env, siteId, url, responseContext }) =>
-    handleOverviewPageTab(env, siteId, url, "path", responseContext),
-  "overview-page-title": ({ env, siteId, url, responseContext }) =>
-    handleOverviewPageTab(env, siteId, url, "title", responseContext),
-  "overview-page-hostname": ({ env, siteId, url, responseContext }) =>
-    handleOverviewPageTab(env, siteId, url, "hostname", responseContext),
-  "overview-page-entry": ({ env, siteId, url, responseContext }) =>
-    handleOverviewPageTab(env, siteId, url, "entry", responseContext),
-  "overview-page-exit": ({ env, siteId, url, responseContext }) =>
-    handleOverviewPageTab(env, siteId, url, "exit", responseContext),
-  "overview-source-domain": ({ env, siteId, url, responseContext }) =>
-    handleOverviewSourceTab(env, siteId, url, "domain", responseContext),
-  "overview-source-link": ({ env, siteId, url, responseContext }) =>
-    handleOverviewSourceTab(env, siteId, url, "link", responseContext),
-  "overview-client-browser": ({ env, siteId, url, responseContext }) =>
-    handleOverviewClientTab(env, siteId, url, "browser", responseContext),
-  "overview-client-os-version": ({ env, siteId, url, responseContext }) =>
-    handleOverviewClientTab(env, siteId, url, "osVersion", responseContext),
-  "overview-client-device-type": ({ env, siteId, url, responseContext }) =>
-    handleOverviewClientTab(env, siteId, url, "deviceType", responseContext),
-  "overview-client-language": ({ env, siteId, url, responseContext }) =>
-    handleOverviewClientTab(env, siteId, url, "language", responseContext),
-  "overview-client-screen-size": ({ env, siteId, url, responseContext }) =>
-    handleOverviewClientTab(env, siteId, url, "screenSize", responseContext),
-  "overview-geo-country": ({ env, siteId, url, responseContext }) =>
-    handleOverviewGeoTab(env, siteId, url, "country", responseContext),
-  "overview-geo-region": ({ env, siteId, url, responseContext }) =>
-    handleOverviewGeoTab(env, siteId, url, "region", responseContext),
-  "overview-geo-city": ({ env, siteId, url, responseContext }) =>
-    handleOverviewGeoTab(env, siteId, url, "city", responseContext),
-  "overview-geo-continent": ({ env, siteId, url, responseContext }) =>
-    handleOverviewGeoTab(env, siteId, url, "continent", responseContext),
-  "overview-geo-timezone": ({ env, siteId, url, responseContext }) =>
-    handleOverviewGeoTab(env, siteId, url, "timezone", responseContext),
-  "overview-geo-organization": ({ env, siteId, url, responseContext }) =>
-    handleOverviewGeoTab(env, siteId, url, "organization", responseContext),
-  "overview-geo-points": ({ env, siteId, url, responseContext }) =>
-    handleOverviewGeoPoints(env, siteId, url, responseContext),
-};
-
-export function queryRouteHandler(
-  pathname: string,
-  options: QueryRouteOptions,
-): QueryRouteHandler | null {
-  if (options.publicMode && !PUBLIC_QUERY_PATH_SET.has(pathname)) {
-    return null;
-  }
-  return QUERY_ROUTE_HANDLERS[pathname] ?? null;
-}
-
-export async function dispatchQueryRoute(
-  env: Env,
-  siteId: string,
-  pathname: string,
-  url: URL,
-  options: QueryRouteOptions,
-  request?: Request,
-): Promise<Response> {
-  const responseContext: ResponseContext | undefined = request
-    ? {
-        requestId: getRequestId(request),
-        deferJsonSerialization: options.deferJsonSerialization,
-      }
-    : undefined;
-  const handler = queryRouteHandler(pathname, options);
-  if (!handler) return notFound();
-  return handler({ env, siteId, url, options, request, responseContext });
+export interface PublicQueryPolicyDecision {
+  readonly allowed: boolean;
+  readonly url: URL;
 }
 
 /**
- * Compatibility wrapper. Production Hono routing calls dispatchQueryRoute.
+ * Public sharing policy runs in the public protocol adapter before any source
+ * reader is selected. Detailed filter semantics remain a future concern.
  */
-export async function routeQuery(
-  env: Env,
-  siteId: string,
-  pathname: string,
-  url: URL,
-  options: QueryRouteOptions,
-  request?: Request,
-): Promise<Response> {
-  return dispatchQueryRoute(env, siteId, pathname, url, options, request);
+export function applyPublicQueryPolicy(url: URL): PublicQueryPolicyDecision {
+  const filterKey = url.searchParams.get("filterKey")?.trim();
+  const dimensions = [
+    url.searchParams.get("primaryDimension"),
+    url.searchParams.get("secondaryDimension"),
+  ];
+  const requestsHiddenFilter = [...PUBLIC_HIDDEN_FILTER_PARAMS].some((key) =>
+    url.searchParams.has(key),
+  );
+  const requestsHiddenDimension = dimensions.some(
+    (dimension) =>
+      dimension !== null &&
+      PUBLIC_HIDDEN_CROSS_DIMENSIONS.has(dimension.trim().toLowerCase()),
+  );
+  if (
+    requestsHiddenFilter ||
+    (filterKey !== undefined &&
+      PUBLIC_HIDDEN_FILTER_OPTION_KEYS.has(filterKey)) ||
+    requestsHiddenDimension
+  ) {
+    return { allowed: false, url };
+  }
+  if (!url.searchParams.has("details") && !url.searchParams.has("fullUrl")) {
+    return { allowed: true, url };
+  }
+  const sanitizedUrl = new URL(url);
+  sanitizedUrl.searchParams.delete("details");
+  sanitizedUrl.searchParams.delete("fullUrl");
+  return { allowed: true, url: sanitizedUrl };
+}
+
+export function operationForQueryRoute(pathname: string): QueryOperation {
+  if (pathname === "overview") return "overview";
+  if (pathname === "trend") return "trend";
+  if (pathname === "pages") return "pages";
+  if (pathname === "pages-dashboard") return "pages-dashboard";
+  if (pathname === "referrers") return "referrers";
+  if (pathname === "filter-options") return "filter-options";
+  if (pathname === "overview-geo-points") return "geo-points";
+  if (pathname === "retention") return "retention";
+  if (pathname === "performance") return "performance";
+  if (pathname === "funnels") return "funnel-analysis";
+  if (pathname === "team-dashboard") return "team-dashboard";
+  if (pathname === "events-summary") return "event-summary";
+  if (pathname === "events-trend") return "event-trend";
+  if (pathname === "event-types") return "event-types";
+  if (pathname === "event-type-detail") return "event-type-detail";
+  if (
+    pathname === "event-type-fields" ||
+    pathname === "event-type-field-values"
+  ) {
+    return "event-fields";
+  }
+  if (pathname === "event-type-context") return "event-context";
+  if (pathname === "events-records") return "event-records";
+  if (pathname === "event-record-detail") return "event-record-detail";
+  if (pathname === "visitors") return "visitors";
+  if (pathname === "visitor-detail") return "visitor-detail";
+  if (pathname === "sessions") return "sessions";
+  if (pathname === "session-detail") return "session-detail";
+  if (pathname.includes("radar")) return "radar";
+  if (pathname.includes("cross-breakdown")) return "cross-dimension";
+  if (pathname.includes("trend")) return "share-trend";
+  return "dimension";
 }

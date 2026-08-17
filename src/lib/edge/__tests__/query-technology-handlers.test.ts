@@ -83,8 +83,8 @@ async function responseJson(response: Response): Promise<unknown> {
 
 function parsedWindow() {
   return expect.objectContaining({
-    fromMs,
-    toMs,
+    startMs: fromMs,
+    endExclusiveMs: toMs,
     timeZone: "Asia/Shanghai",
   });
 }

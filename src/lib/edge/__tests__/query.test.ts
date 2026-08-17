@@ -1,6 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handlePrivateQuery, handlePublicQuery } from "@/lib/edge/query";
+import {
+  badRequest,
+  fetchPublicSite,
+  notAllowed,
+  parseWindow,
+  resolvePrivateSite,
+  resolvePrivateTeam,
+} from "@/lib/edge/query/core";
+import {
+  executePrivateQuery,
+  executePrivateTeamDashboard,
+} from "@/lib/edge/query-adapters/private";
+import { executePublicQuery } from "@/lib/edge/query-adapters/public";
 import {
   type EdgeSessionClaims,
   requireSession,
@@ -185,7 +197,36 @@ async function privateQuery(
   init?: RequestInit,
 ): Promise<Response> {
   const edgeRequest = request(path, init);
-  return handlePrivateQuery(edgeRequest, env, new URL(edgeRequest.url));
+  const url = new URL(edgeRequest.url);
+  const pathname = url.pathname.replace(/^\/api\/private\//, "");
+  if (
+    edgeRequest.method !== "GET" &&
+    (pathname !== "funnels" ||
+      (edgeRequest.method !== "POST" && edgeRequest.method !== "DELETE"))
+  ) {
+    return notAllowed();
+  }
+  if (pathname === "team-dashboard") {
+    if (!parseWindow(url)) return badRequest("Invalid time window");
+    const team = await resolvePrivateTeam(edgeRequest, env, url);
+    if (team instanceof Response) return team;
+    return executePrivateTeamDashboard({
+      env,
+      teamId: team.id,
+      allowedSiteIds: team.allowedSiteIds,
+      url,
+    });
+  }
+  const site = await resolvePrivateSite(edgeRequest, env, url);
+  if (site instanceof Response) return site;
+  return executePrivateQuery({
+    env,
+    siteId: site.id,
+    pathname,
+    url,
+    request: edgeRequest,
+    dashboardMode: true,
+  });
 }
 
 async function publicQuery(
@@ -194,7 +235,18 @@ async function publicQuery(
   init?: RequestInit,
 ): Promise<Response> {
   const edgeRequest = request(path, init);
-  return handlePublicQuery(edgeRequest, env, new URL(edgeRequest.url));
+  if (edgeRequest.method !== "GET") return notAllowed();
+  const url = new URL(edgeRequest.url);
+  const site = await fetchPublicSite(env, url);
+  if (site instanceof Response) return site;
+  const segments = url.pathname.split("/").filter(Boolean);
+  return executePublicQuery({
+    env,
+    siteId: site.id,
+    pathname: segments.slice(3).join("/"),
+    url,
+    request: edgeRequest,
+  });
 }
 
 const windowParams = `from=${from}&to=${to}`;

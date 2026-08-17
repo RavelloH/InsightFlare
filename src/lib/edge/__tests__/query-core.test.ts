@@ -8,6 +8,7 @@ import {
   buildEventPayloadFilterSql,
   buildTimeBuckets,
   buildVisitFilterSql,
+  buildVisitSourceCte,
   clientDimensionDefinition,
   customEventJsonTypeCode,
   customEventJsonTypeLabel,
@@ -61,6 +62,7 @@ import {
   sourceLabel,
   timeBucketCase,
   timeBucketTimestamp,
+  visitSourceBindings,
   withoutFilterKey,
   withoutGeoFilter,
 } from "@/lib/edge/query/core";
@@ -87,15 +89,15 @@ describe("edge query core parsers", () => {
         url("?from=1700000000123.9&to=1700003600999.5&timeZone=Asia/Tokyo"),
       ),
     ).toEqual({
-      fromMs: 1_700_000_000_123,
-      toMs: 1_700_003_600_999,
+      startMs: 1_700_000_000_123,
+      endExclusiveMs: 1_700_003_600_999,
       nowMs: fixedNow,
       timeZone: "Asia/Tokyo",
     });
 
     expect(parseWindow(url("?timeZone=Bad/Zone"))).toEqual({
-      fromMs: fixedNow - 86_400_000,
-      toMs: fixedNow,
+      startMs: fixedNow - 86_400_000,
+      endExclusiveMs: fixedNow,
       nowMs: fixedNow,
       timeZone: "UTC",
     });
@@ -103,6 +105,7 @@ describe("edge query core parsers", () => {
     expect(parseWindow(url("?from=nope&to=wat"))).toBeNull();
     expect(parseWindow(url("?from=-1&to=10"))).toBeNull();
     expect(parseWindow(url("?from=20&to=10"))).toBeNull();
+    expect(parseWindow(url("?from=10&to=10"))).toBeNull();
   });
 
   it("parses intervals and clamps limits", () => {
@@ -368,8 +371,8 @@ describe("edge query core dimensions", () => {
 describe("edge query core time helpers", () => {
   const nowMs = Date.UTC(2026, 4, 26);
 
-  function window(fromMs: number, toMs: number): QueryWindow {
-    return { fromMs, toMs, nowMs, timeZone: "UTC" };
+  function window(startMs: number, endExclusiveMs: number): QueryWindow {
+    return { startMs, endExclusiveMs, nowMs, timeZone: "UTC" };
   }
 
   it("labels query windows as detail data", () => {
@@ -378,8 +381,8 @@ describe("edge query core time helpers", () => {
 
   it("builds zoned buckets and SQL bucket cases", () => {
     const queryWindow: QueryWindow = {
-      fromMs: Date.UTC(2026, 0, 2, 1, 30),
-      toMs: Date.UTC(2026, 0, 2, 3, 5),
+      startMs: Date.UTC(2026, 0, 2, 1, 30),
+      endExclusiveMs: Date.UTC(2026, 0, 2, 3, 5),
       nowMs,
       timeZone: "UTC",
     };
@@ -390,20 +393,20 @@ describe("edge query core time helpers", () => {
       {
         index: 0,
         timestampMs: Date.UTC(2026, 0, 2, 1),
-        fromMs: Date.UTC(2026, 0, 2, 1),
-        toMs: Date.UTC(2026, 0, 2, 2),
+        startMs: Date.UTC(2026, 0, 2, 1),
+        endExclusiveMs: Date.UTC(2026, 0, 2, 2),
       },
       {
         index: 1,
         timestampMs: Date.UTC(2026, 0, 2, 2),
-        fromMs: Date.UTC(2026, 0, 2, 2),
-        toMs: Date.UTC(2026, 0, 2, 3),
+        startMs: Date.UTC(2026, 0, 2, 2),
+        endExclusiveMs: Date.UTC(2026, 0, 2, 3),
       },
       {
         index: 2,
         timestampMs: Date.UTC(2026, 0, 2, 3),
-        fromMs: Date.UTC(2026, 0, 2, 3),
-        toMs: Date.UTC(2026, 0, 2, 4),
+        startMs: Date.UTC(2026, 0, 2, 3),
+        endExclusiveMs: Date.UTC(2026, 0, 2, 4),
       },
     ]);
 
@@ -423,15 +426,17 @@ describe("edge query core time helpers", () => {
   it("keeps calendar-day boundaries across daylight saving changes", () => {
     const buckets = buildTimeBuckets(
       {
-        fromMs: Date.UTC(2026, 2, 7, 12),
-        toMs: Date.UTC(2026, 2, 10, 12),
+        startMs: Date.UTC(2026, 2, 7, 12),
+        endExclusiveMs: Date.UTC(2026, 2, 10, 12),
         nowMs,
         timeZone: "America/New_York",
       },
       "day",
     );
 
-    expect(buckets.map((bucket) => [bucket.fromMs, bucket.toMs])).toEqual([
+    expect(
+      buckets.map((bucket) => [bucket.startMs, bucket.endExclusiveMs]),
+    ).toEqual([
       [Date.UTC(2026, 2, 7, 5), Date.UTC(2026, 2, 8, 5)],
       [Date.UTC(2026, 2, 8, 5), Date.UTC(2026, 2, 9, 4)],
       [Date.UTC(2026, 2, 9, 4), Date.UTC(2026, 2, 10, 4)],
@@ -439,31 +444,35 @@ describe("edge query core time helpers", () => {
     ]);
   });
 
-  it("maps interval widths and falls back when no bucket can be generated", () => {
+  it("maps interval widths and rejects empty query windows", () => {
     expect(intervalBucketMs("minute")).toBe(60_000);
     expect(intervalBucketMs("hour")).toBe(3_600_000);
     expect(intervalBucketMs("day")).toBe(86_400_000);
     expect(intervalBucketMs("week")).toBe(7 * 86_400_000);
     expect(intervalBucketMs("month")).toBe(30 * 86_400_000);
 
-    const fromMs = Date.UTC(2026, 0, 2, 1, 30);
-    const buckets = buildTimeBuckets(
-      {
-        fromMs,
-        toMs: Date.UTC(2026, 0, 2, 0, 59),
-        nowMs,
-        timeZone: "UTC",
-      },
-      "hour",
-    );
+    expect(() =>
+      buildTimeBuckets(
+        {
+          startMs: Date.UTC(2026, 0, 2, 1, 30),
+          endExclusiveMs: Date.UTC(2026, 0, 2, 1, 30),
+          nowMs,
+          timeZone: "UTC",
+        },
+        "hour",
+      ),
+    ).toThrow("half-open");
+  });
 
-    expect(buckets).toEqual([
-      {
-        index: 0,
-        timestampMs: fromMs,
-        fromMs,
-        toMs: fromMs + 1,
-      },
+  it("uses a start-inclusive, end-exclusive source window", () => {
+    const queryWindow = window(100, 200);
+    expect(buildVisitSourceCte()).toContain(
+      "started_at >= ? AND started_at < ?",
+    );
+    expect(visitSourceBindings("site-1", queryWindow)).toEqual([
+      "site-1",
+      100,
+      200,
     ]);
   });
 });

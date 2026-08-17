@@ -77,7 +77,7 @@ describe("api v1 helpers", () => {
     if (!(parsed instanceof Response)) {
       expect(parsed.from).toBe("2026-06-01T00:00:00.000Z");
       expect(parsed.to).toBe("2026-06-08T00:00:00.000Z");
-      expect(parsed.fromMs).toBeLessThan(parsed.toMs);
+      expect(parsed.startMs).toBeLessThan(parsed.endExclusiveMs);
     }
 
     const defaulted = parseTimeRange(
@@ -305,7 +305,7 @@ describe("api v1 helpers", () => {
       const result = parsePreset(preset, "UTC", now);
       expect(result).not.toBeNull();
       if (result) {
-        expect(result.fromMs).toBeLessThan(result.toMs);
+        expect(result.startMs).toBeLessThan(result.endExclusiveMs);
         expect(result.timeZone).toBe("UTC");
       }
     }
@@ -367,7 +367,9 @@ describe("api v1 helpers", () => {
     );
     expect(res).not.toBeInstanceOf(Response);
     if (!(res instanceof Response)) {
-      expect(res.toMs).toBe(new Date("2026-06-26T12:00:00Z").getTime());
+      expect(res.endExclusiveMs).toBe(
+        new Date("2026-06-26T12:00:00Z").getTime(),
+      );
     }
   });
 

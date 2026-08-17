@@ -28,22 +28,16 @@ import {
   mapDimensionRowsToFilterOptions,
   mapGeoRowsToFilterOptions,
   mapGeoTabs,
-  mapOverviewAggregate,
   mapReferrerRowsToFilterOptions,
   mapTabs,
-  mapTrendRows,
-  parseBooleanFlag,
   parseBooleanSearchParam,
   parseFilterOptionKey,
   parseFilters,
-  parseInterval,
   parseLimit,
   parseWindow,
-  percentChange,
   queryD1All,
   regionValueExpr,
   type ResponseContext,
-  sourceLabel,
   timeBucketCase,
   timeBucketTimestamp,
   visitSourceBindings,
@@ -51,7 +45,6 @@ import {
   withoutGeoFilter,
 } from "./core";
 import {
-  type AnalyticsDataSource,
   analyticsDiagnosticHeaders,
   createD1ReadDiagnostics,
   type D1ReadDiagnostics,
@@ -302,152 +295,6 @@ export async function buildOverviewGeoDimensionTabs(
   limit: number,
 ) {
   return queryOverviewGeoDimensionsFromD1(env, siteId, window, filters, limit);
-}
-
-export async function handleOverview(
-  env: Env,
-  siteId: string,
-  url: URL,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
-  const includeChange = parseBooleanFlag(url, "includeChange");
-  const includeDetail = parseBooleanFlag(url, "includeDetail");
-  const interval = parseInterval(url);
-  const diagnostics = createD1ReadDiagnostics();
-
-  const current = await queryOverviewAggregate(
-    env,
-    siteId,
-    window,
-    filters,
-    diagnostics,
-  );
-  const dataSources: AnalyticsDataSource[] = [
-    current.diagnosticSource ?? "raw",
-  ];
-  const currentMetrics = mapOverviewAggregate(current.value, {
-    approximateVisitors: Boolean(current.approximateVisitors),
-  });
-  const payload: Record<string, unknown> = {
-    ok: true,
-    data: currentMetrics,
-  };
-
-  if (includeChange) {
-    const previousTo = Math.max(window.fromMs - 1, 0);
-    const previousFrom = Math.max(
-      previousTo - (window.toMs - window.fromMs),
-      0,
-    );
-    const previousWindow: QueryWindow = {
-      fromMs: previousFrom,
-      toMs: previousTo,
-      nowMs: window.nowMs,
-      timeZone: window.timeZone,
-    };
-    const previous = await queryOverviewAggregate(
-      env,
-      siteId,
-      previousWindow,
-      filters,
-      diagnostics,
-    );
-    dataSources.push(previous.diagnosticSource ?? "raw");
-    const previousMetrics = mapOverviewAggregate(previous.value, {
-      approximateVisitors: Boolean(previous.approximateVisitors),
-    });
-    payload.previousData = previousMetrics;
-    payload.changeRates = {
-      views: percentChange(currentMetrics.views, previousMetrics.views),
-      sessions: percentChange(
-        currentMetrics.sessions,
-        previousMetrics.sessions,
-      ),
-      visitors: percentChange(
-        currentMetrics.visitors,
-        previousMetrics.visitors,
-      ),
-      bounces: percentChange(currentMetrics.bounces, previousMetrics.bounces),
-      bounceRate: percentChange(
-        currentMetrics.bounceRate,
-        previousMetrics.bounceRate,
-      ),
-      avgDurationMs: percentChange(
-        currentMetrics.avgDurationMs,
-        previousMetrics.avgDurationMs,
-      ),
-    };
-  }
-
-  if (includeDetail) {
-    const detail = await queryTrendAggregate(
-      env,
-      siteId,
-      window,
-      interval,
-      filters,
-      diagnostics,
-    );
-    dataSources.push(detail.diagnosticSource ?? "raw");
-    payload.detail = {
-      interval,
-      data: mapTrendRows(
-        detail.value,
-        detail.source === "ae" ? "detail" : sourceLabel(window),
-      ),
-    };
-  }
-
-  return jsonResponseWith(
-    ctx!,
-    payload,
-    200,
-    analyticsDiagnosticHeaders(
-      dataSources.every((source) => source === "rollup")
-        ? "rollup"
-        : dataSources.every((source) => source === "raw")
-          ? "raw"
-          : "mixed",
-      diagnostics,
-    ),
-  );
-}
-
-export async function handleTrend(
-  env: Env,
-  siteId: string,
-  url: URL,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const filters = parseFilters(url);
-  const interval = parseInterval(url);
-  const diagnostics = createD1ReadDiagnostics();
-  const trend = await queryTrendAggregate(
-    env,
-    siteId,
-    window,
-    interval,
-    filters,
-    diagnostics,
-  );
-  return jsonResponseWith(
-    ctx!,
-    {
-      ok: true,
-      interval,
-      data: mapTrendRows(
-        trend.value,
-        trend.source === "ae" ? "detail" : sourceLabel(window),
-      ),
-    },
-    200,
-    analyticsDiagnosticHeaders(trend.diagnosticSource ?? "raw", diagnostics),
-  );
 }
 
 export type OverviewPageTabKey =

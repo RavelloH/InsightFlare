@@ -7,9 +7,9 @@ import {
   resolvePrivateSiteForSession,
   resolvePrivateTeamForSession,
 } from "@/lib/edge/query/core";
-import type * as QueryRouterModule from "@/lib/edge/query/router";
-import { dispatchQueryRoute } from "@/lib/edge/query/router";
-import { handleTeamDashboardForTeam } from "@/lib/edge/query/team";
+import { handleOverviewContract } from "@/lib/edge/query/overview-contract-adapter";
+import type * as PrivateQueryAdapter from "@/lib/edge/query-adapters/private";
+import { executePrivateTeamDashboard } from "@/lib/edge/query-adapters/private";
 import { privateQueryRoutes } from "@/lib/hono/routes/private/query";
 import type { AppEnv } from "@/lib/hono/types";
 
@@ -32,19 +32,31 @@ vi.mock("@/lib/edge/query/core", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/edge/query/router", async (importOriginal) => {
-  const actual = await importOriginal<typeof QueryRouterModule>();
-  return {
-    ...actual,
-    dispatchQueryRoute: vi.fn(),
-  };
+vi.mock("@/lib/edge/query/overview-contract-adapter", () => ({
+  handleOverviewContract: vi.fn(),
+  handleTrendContract: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/query/pages-contract-adapter", () => ({
+  handlePagesContract: vi.fn(),
+  handleReferrersContract: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/query-adapters/private", async (importOriginal) => {
+  const actual = await importOriginal<typeof PrivateQueryAdapter>();
+  return { ...actual, executePrivateTeamDashboard: vi.fn() };
 });
 
-vi.mock("@/lib/edge/query/team", () => ({
-  handleTeamDashboardForTeam: vi.fn(),
+vi.mock("@/lib/edge/query/funnels", () => ({
+  handleFunnel: vi.fn(async () => new Response("funnel")),
+}));
+
+vi.mock("@/lib/edge/query/events-contract-adapter", () => ({
+  handleEventTypeDetailContract: vi.fn(async () => new Response("query")),
 }));
 
 const env = { DB: {} };
+const dispatchQueryRoute = vi.fn();
 const ctx = {
   passThroughOnException: vi.fn(),
   waitUntil: vi.fn(),
@@ -80,11 +92,12 @@ describe("Hono private query routes", () => {
       domain: "app.test",
     });
     vi.mocked(dispatchQueryRoute).mockResolvedValue(new Response("query"));
+    vi.mocked(handleOverviewContract).mockResolvedValue(new Response("query"));
     vi.mocked(resolvePrivateTeamForSession).mockResolvedValue({
       id: "team-1",
       allowedSiteIds: ["site-1"],
     });
-    vi.mocked(handleTeamDashboardForTeam).mockResolvedValue(
+    vi.mocked(executePrivateTeamDashboard).mockResolvedValue(
       new Response("team"),
     );
   });
@@ -118,14 +131,14 @@ describe("Hono private query routes", () => {
         request: expect.any(Request),
       }),
     );
-    expect(dispatchQueryRoute).toHaveBeenCalledWith(
+    expect(handleOverviewContract).toHaveBeenCalledWith(
       env,
       "site-1",
-      "overview",
       new URL("https://app.test/api/private/overview?siteId=site-1"),
-      { publicMode: false, dashboardMode: true },
-      expect.any(Request),
+      expect.objectContaining({ requestId: expect.any(String) }),
+      expect.objectContaining({ subject: { kind: "site", siteId: "site-1" } }),
     );
+    expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 
   it("does not enter the cache generator when private site resolution fails", async () => {
@@ -178,14 +191,6 @@ describe("Hono private query routes", () => {
     expect(postResponse.status).toBe(200);
     expect(deleteResponse.status).toBe(200);
     expect(withDashboardCache).not.toHaveBeenCalled();
-    expect(dispatchQueryRoute).toHaveBeenCalledWith(
-      env,
-      "site-1",
-      "funnels",
-      new URL("https://app.test/api/private/funnels?siteId=site-1"),
-      { publicMode: false, dashboardMode: true },
-      expect.any(Request),
-    );
   });
 
   it("caches the team dashboard after team access resolves", async () => {
@@ -222,20 +227,21 @@ describe("Hono private query routes", () => {
         request: expect.any(Request),
       }),
     );
-    expect(handleTeamDashboardForTeam).toHaveBeenCalledWith(
-      env,
-      new URL(
-        "https://app.test/api/private/team-dashboard?teamId=team-1&from=100&to=200",
-      ),
-      "team-1",
-      expect.objectContaining({ fromMs: 100, toMs: 200 }),
-      ["site-1"],
+    expect(executePrivateTeamDashboard).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env,
+        teamId: "team-1",
+        allowedSiteIds: ["site-1"],
+        url: new URL(
+          "https://app.test/api/private/team-dashboard?teamId=team-1&from=100&to=200",
+        ),
+      }),
     );
     expect(resolvePrivateSiteForSession).not.toHaveBeenCalled();
     expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 
-  it("falls back unknown GET queries through the legacy query dispatcher", async () => {
+  it("returns 404 for unknown GET queries without the legacy dispatcher", async () => {
     const app = createApp();
 
     const response = await app.fetch(
@@ -244,33 +250,18 @@ describe("Hono private query routes", () => {
       ctx,
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(404);
     expect(withDashboardCache).toHaveBeenCalled();
-    expect(dispatchQueryRoute).toHaveBeenCalledWith(
-      env,
-      "site-1",
-      "unknown",
-      new URL("https://app.test/api/private/unknown?siteId=site-1"),
-      { publicMode: false, dashboardMode: true },
-      expect.any(Request),
-    );
+    expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
 
   it("enables dashboard-only event detail response shaping", async () => {
     const app = createApp();
     const detailUrl =
-      "/api/private/event-type-detail?siteId=site-1&includeContext=false&includeBreakdowns=false&includeFields=false";
+      "/api/private/event-type-detail?siteId=site-1&eventName=checkout&includeContext=false&includeBreakdowns=false&includeFields=false";
 
     const response = await app.fetch(request(detailUrl), env as never, ctx);
 
     expect(response.status).toBe(200);
-    expect(dispatchQueryRoute).toHaveBeenCalledWith(
-      env,
-      "site-1",
-      "event-type-detail",
-      new URL(`https://app.test${detailUrl}`),
-      { publicMode: false, dashboardMode: true },
-      expect.any(Request),
-    );
   });
 });

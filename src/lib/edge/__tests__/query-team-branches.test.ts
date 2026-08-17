@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleTeamDashboard, listTeamSites } from "@/lib/edge/query/team";
+import {
+  badRequest,
+  parseWindow,
+  resolvePrivateTeam,
+} from "@/lib/edge/query/core";
+import { listTeamSites } from "@/lib/edge/query/team";
+import { executePrivateTeamDashboard } from "@/lib/edge/query-adapters/private";
 import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
 import type { Env } from "@/lib/edge/types";
 
@@ -73,6 +79,22 @@ function url(params: Record<string, string | number>) {
     parsed.searchParams.set(key, String(value));
   }
   return parsed;
+}
+
+async function handleTeamDashboard(
+  request: Request,
+  env: Env,
+  target: URL,
+): Promise<Response> {
+  if (!parseWindow(target)) return badRequest("Invalid time window");
+  const team = await resolvePrivateTeam(request, env, target);
+  if (team instanceof Response) return team;
+  return executePrivateTeamDashboard({
+    env,
+    teamId: team.id,
+    allowedSiteIds: team.allowedSiteIds,
+    url: target,
+  });
 }
 
 describe("edge team query low branch coverage", () => {

@@ -397,8 +397,8 @@ describe("hourly visit rollups", () => {
     await runHourlyAggregation(env, scheduledTime);
 
     const window = {
-      fromMs: coldHourMs,
-      toMs: hotHourMs + 60 * 60 * 1000 - 1,
+      startMs: coldHourMs,
+      endExclusiveMs: hotHourMs + 60 * 60 * 1000,
       nowMs: scheduledTime,
       timeZone: "UTC",
     };
@@ -468,8 +468,8 @@ describe("hourly visit rollups", () => {
         env,
         ["site-1"],
         {
-          fromMs: coldHourMs,
-          toMs: coldHourMs + 60 * 60 * 1000 - 1,
+          startMs: coldHourMs,
+          endExclusiveMs: coldHourMs + 60 * 60 * 1000,
           nowMs: scheduledTime,
           timeZone: "UTC",
         },
@@ -481,8 +481,8 @@ describe("hourly visit rollups", () => {
         env,
         ["site-1"],
         {
-          fromMs: Date.UTC(2026, 4, 24, 18, 30),
-          toMs: Date.UTC(2026, 4, 25, 18, 29, 59, 999),
+          startMs: Date.UTC(2026, 4, 24, 18, 30),
+          endExclusiveMs: Date.UTC(2026, 4, 25, 18, 30),
           nowMs: scheduledTime,
           timeZone: "Asia/Kolkata",
         },

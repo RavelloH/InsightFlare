@@ -273,9 +273,10 @@ session_visit_edges AS (
     ) AS latest_rank
   FROM event_sessions es
   INNER JOIN visits v
-    ON v.site_id = ?
+   ON v.site_id = ?
    AND v.session_id = es.session_id
-   AND v.started_at BETWEEN ? AND ?
+   AND v.started_at >= ?
+   AND v.started_at < ?
   WHERE TRIM(COALESCE(v.pathname, '')) != ''
 ),
 session_edges AS (

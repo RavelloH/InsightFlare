@@ -3,16 +3,14 @@ import { Hono } from "hono";
 
 import { withDashboardCache } from "@/lib/edge/dashboard-cache";
 import {
-  badRequest,
   notAllowed,
-  parseWindow,
   resolvePrivateTeamForSession,
 } from "@/lib/edge/query/core";
+import { DASHBOARD_QUERY_PATHS } from "@/lib/edge/query/router";
 import {
-  DASHBOARD_QUERY_PATHS,
-  dispatchQueryRoute,
-} from "@/lib/edge/query/router";
-import { handleTeamDashboardForTeam } from "@/lib/edge/query/team";
+  executePrivateQuery,
+  executePrivateTeamDashboard,
+} from "@/lib/edge/query-adapters/private";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import {
   requireMethodMiddleware,
@@ -31,17 +29,14 @@ function privateQuery(pathname: string) {
     if (!site) {
       throw new Error("private site context missing");
     }
-    return dispatchQueryRoute(
-      c.env,
-      site.id,
+    return executePrivateQuery({
+      env: c.env,
+      siteId: site.id,
       pathname,
-      requestUrl(c),
-      // Private query routes are the dashboard API. This opt-in permits the
-      // dashboard-only response shaping used by event detail while v1/public
-      // callers retain the complete compatibility response.
-      { publicMode: false, dashboardMode: true },
-      c.req.raw,
-    );
+      url: requestUrl(c),
+      request: c.req.raw,
+      dashboardMode: true,
+    });
   };
 }
 
@@ -54,8 +49,6 @@ privateQueryRoutes.all("/team-dashboard", async (c) => {
     throw new Error("private session context missing");
   }
   const url = requestUrl(c);
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
   const team = await resolvePrivateTeamForSession(
     c.req.raw,
     c.env,
@@ -68,13 +61,12 @@ privateQueryRoutes.all("/team-dashboard", async (c) => {
     executionContext(c),
     url,
     () =>
-      handleTeamDashboardForTeam(
-        c.env,
+      executePrivateTeamDashboard({
+        env: c.env,
+        teamId: team.id,
+        allowedSiteIds: team.allowedSiteIds,
         url,
-        team.id,
-        window,
-        team.allowedSiteIds,
-      ),
+      }),
     {
       identity: {
         scope: "private-team",

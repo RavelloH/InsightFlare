@@ -52,8 +52,8 @@ describe("queryOverviewForSitesFromHourlyRollups", () => {
   it("returns empty Map for empty siteIds", async () => {
     const env = { DB: makeDbMock() } as unknown as Env;
     const result = await queryOverviewForSitesFromHourlyRollups(env, [], {
-      fromMs: 1000,
-      toMs: 2000,
+      startMs: 1000,
+      endExclusiveMs: 2000,
       nowMs: 3000,
       timeZone: "UTC",
     });
@@ -69,7 +69,7 @@ describe("queryOverviewForSitesFromHourlyRollups", () => {
     const result = await queryOverviewForSitesFromHourlyRollups(
       env,
       ["site-1"],
-      { fromMs: 1000, toMs: 2000, nowMs: 3000, timeZone: "UTC" },
+      { startMs: 1000, endExclusiveMs: 2000, nowMs: 3000, timeZone: "UTC" },
     );
     expect(result).toBeNull();
   });
@@ -89,8 +89,8 @@ describe("queryOverviewForSitesFromHourlyRollups", () => {
     const env = { DB: db } as unknown as Env;
 
     const result = await queryOverviewForSitesFromHourlyRollups(env, siteIds, {
-      fromMs: 60 * 60 * 1000,
-      toMs: 2 * 60 * 60 * 1000 - 1,
+      startMs: 60 * 60 * 1000,
+      endExclusiveMs: 2 * 60 * 60 * 1000,
       nowMs: 3 * 60 * 60 * 1000,
       timeZone: "UTC",
     });
@@ -107,11 +107,11 @@ describe("queryOverviewForSitesFromHourlyRollups", () => {
     });
     const env = { DB: db } as unknown as Env;
 
-    // Window fromMs=100, toMs=200 is way before hour 10 (which is 10*3600000=36000000)
+    // Window [100, 200) is way before hour 10 (which is 10*3600000=36000000).
     const result = await queryOverviewForSitesFromHourlyRollups(
       env,
       ["site-1"],
-      { fromMs: 100, toMs: 200, nowMs: 3000, timeZone: "UTC" },
+      { startMs: 100, endExclusiveMs: 200, nowMs: 3000, timeZone: "UTC" },
     );
     expect(result).toBeNull();
   });
@@ -123,7 +123,7 @@ describe("queryTrendForSitesFromHourlyRollups", () => {
     const result = await queryTrendForSitesFromHourlyRollups(
       env,
       [],
-      { fromMs: 1000, toMs: 2000, nowMs: 3000, timeZone: "UTC" },
+      { startMs: 1000, endExclusiveMs: 2000, nowMs: 3000, timeZone: "UTC" },
       "day",
     );
     expect(result).toEqual([]);
@@ -137,7 +137,7 @@ describe("queryTrendForSitesFromHourlyRollups", () => {
     const result = await queryTrendForSitesFromHourlyRollups(
       env,
       ["site-1"],
-      { fromMs: 1000, toMs: 2000, nowMs: 3000, timeZone: "UTC" },
+      { startMs: 1000, endExclusiveMs: 2000, nowMs: 3000, timeZone: "UTC" },
       "day",
     );
     expect(result).toBeNull();
@@ -153,7 +153,7 @@ describe("queryTrendForSitesFromHourlyRollups", () => {
     const result = await queryTrendForSitesFromHourlyRollups(
       env,
       ["site-1"],
-      { fromMs: 100, toMs: 200, nowMs: 3000, timeZone: "UTC" },
+      { startMs: 100, endExclusiveMs: 200, nowMs: 3000, timeZone: "UTC" },
       "hour",
     );
     expect(result).toBeNull();
@@ -212,8 +212,8 @@ describe("queryTrendForSitesFromHourlyRollups", () => {
         env,
         ["site-1"],
         {
-          fromMs: 0,
-          toMs: 3 * 60 * 60 * 1000 - 1,
+          startMs: 0,
+          endExclusiveMs: 3 * 60 * 60 * 1000,
           nowMs: 4 * 60 * 60 * 1000,
           timeZone: "UTC",
         },
@@ -243,7 +243,7 @@ describe("queryOverviewAndTrendForSitesFromHourlyRollupsPartial", () => {
       queryOverviewAndTrendForSitesFromHourlyRollupsPartial(
         env,
         [],
-        { fromMs: 0, toMs: 1, nowMs: 2, timeZone: "UTC" },
+        { startMs: 0, endExclusiveMs: 1, nowMs: 2, timeZone: "UTC" },
         "hour",
       ),
     ).resolves.toEqual({ overview: new Map(), trend: new Map() });
@@ -264,8 +264,8 @@ describe("queryOverviewAndTrendForSitesFromHourlyRollupsPartial", () => {
       env,
       ["site-1"],
       {
-        fromMs: 100,
-        toMs: 2 * 60 * 60 * 1000 + 100,
+        startMs: 100,
+        endExclusiveMs: 2 * 60 * 60 * 1000 + 100,
         nowMs: 3 * 60 * 60 * 1000,
         timeZone: "UTC",
       },
@@ -347,7 +347,12 @@ describe("queryOverviewAndTrendForSitesFromHourlyRollupsPartial", () => {
     const result = await queryOverviewAndTrendForSitesFromHourlyRollupsPartial(
       env,
       ["site-1"],
-      { fromMs: 100, toMs: 2 * hour + 100, nowMs: 3 * hour, timeZone: "UTC" },
+      {
+        startMs: 100,
+        endExclusiveMs: 2 * hour + 101,
+        nowMs: 3 * hour,
+        timeZone: "UTC",
+      },
       "hour",
     );
 
@@ -391,8 +396,8 @@ describe("queryOverviewAndTrendForSitesFromHourlyRollupsPartial", () => {
       env,
       ["site-1"],
       {
-        fromMs: 0,
-        toMs: 3 * 60 * 60 * 1000 - 1,
+        startMs: 0,
+        endExclusiveMs: 3 * 60 * 60 * 1000,
         nowMs: 4 * 60 * 60 * 1000,
         timeZone: "UTC",
       },
@@ -435,7 +440,7 @@ describe("queryOverviewForSitesFromHourlyRollups edge cases", () => {
     const result = await queryOverviewForSitesFromHourlyRollups(
       env,
       ["site-1", "site-2"],
-      { fromMs: 1000, toMs: 2000, nowMs: 3000, timeZone: "UTC" },
+      { startMs: 1000, endExclusiveMs: 2000, nowMs: 3000, timeZone: "UTC" },
     );
     expect(result).toBeNull();
   });
