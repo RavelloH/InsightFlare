@@ -1,13 +1,31 @@
 import { analyticsFilterRegistry } from "./filter-registry";
-import { assertFilterAudience } from "./filters";
+import { assertFilterAudience, filterConditionCount } from "./filters";
 import { EMPTY_FILTER_DOCUMENT } from "./helpers";
 import { assertOperationAllowed } from "./policy";
 import type {
+  AnalyticsDomainError,
   AnalyticsResult,
   BaseQuery,
   QueryOperation,
   QuerySource,
 } from "./types";
+
+export function validateQueryFilters(
+  context: BaseQuery["context"],
+  filters: BaseQuery["filters"],
+): AnalyticsDomainError | null {
+  const max = context.policy.limits.maxFilterClauses;
+  if (
+    typeof max === "number" &&
+    filterConditionCount(filters ?? EMPTY_FILTER_DOCUMENT) > max
+  ) {
+    return {
+      kind: "invalid-input",
+      issues: [{ path: "filters", code: "too_many_filter_clauses" }],
+    };
+  }
+  return null;
+}
 
 export interface OperationReaderResult<T> {
   readonly value: T;
@@ -28,26 +46,35 @@ export async function executeQueryOperation<T>(
   if (operationError) return { ok: false, error: operationError };
 
   const filters = input.filters ?? EMPTY_FILTER_DOCUMENT;
-  try {
-    assertFilterAudience(
-      filters,
-      analyticsFilterRegistry,
-      input.context.policy.audience,
-    );
-  } catch {
-    return {
-      ok: false,
-      error: {
-        kind: "invalid-input",
+  const filterAudienceError = (() => {
+    try {
+      assertFilterAudience(
+        filters,
+        analyticsFilterRegistry,
+        input.context.policy.audience,
+      );
+      return null;
+    } catch {
+      return {
+        kind: "invalid-input" as const,
         issues: [
           {
             path: "filters",
             code: "invalid_or_unauthorized_filter",
           },
         ],
-      },
+      };
+    }
+  })();
+  if (filterAudienceError) {
+    return {
+      ok: false,
+      error: filterAudienceError,
     };
   }
+
+  const filterError = validateQueryFilters(input.context, filters);
+  if (filterError) return { ok: false, error: filterError };
 
   try {
     const result = await reader();

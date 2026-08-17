@@ -30,12 +30,12 @@ export async function queryEventsTrendFromD1(
   limit: number,
   eventName?: string,
 ) {
-  const filter = buildEventFilterSql(filters, "es", { eventName });
-  const sourceBindings = [...eventSourceBindings(siteId, window)];
+  const filter = buildEventFilterSql(filters, "es");
+  const sourceBindings = [...eventSourceBindings(siteId, window, eventName)];
   const filterBindings = filter.bindings;
   const baseCte = `
 WITH
-${buildEventAnalyticsSourceCte()},
+${buildEventAnalyticsSourceCte({ eventName })},
 filtered_events AS (
   SELECT *
   FROM event_source es

@@ -16,6 +16,9 @@ import {
 
 export type FilterSqlBinding = string | number;
 
+/** Keep small predicates simple; use one JSON binding when the set is large. */
+export const JSON_EACH_SET_THRESHOLD = 8;
+
 export interface FilterSql {
   readonly clause: string;
   readonly bindings: readonly FilterSqlBinding[];
@@ -34,6 +37,8 @@ type Compiler = {
   readonly bindings: FilterSqlBinding[];
   payloadIndex: number;
 };
+
+const FILTER_SQL_CACHE = new WeakMap<FilterDocument, Map<string, FilterSql>>();
 
 const FIELD_COLUMNS: Readonly<Record<string, string>> = {
   "page.path": "pathname",
@@ -108,6 +113,30 @@ function push(compiler: Compiler, value: FilterSqlBinding): string {
   return "?";
 }
 
+function jsonSet(values: readonly FilterValue[]): string {
+  const encoded = JSON.stringify(values.map((value) => scalar(value)));
+  if (encoded === undefined) {
+    throw new TypeError("Filter set values must be JSON serializable.");
+  }
+  return encoded;
+}
+
+function setComparison(
+  compiler: Compiler,
+  normalized: string,
+  operator: FilterOperator,
+  values: readonly FilterValue[],
+): string {
+  const sqlOperator = operator === "notIn" ? "NOT IN" : "IN";
+  if (values.length >= JSON_EACH_SET_THRESHOLD) {
+    return `${normalized} ${sqlOperator} (SELECT value FROM json_each(${push(compiler, jsonSet(values))}))`;
+  }
+  const placeholders = values
+    .map((item) => push(compiler, scalar(item)))
+    .join(", ");
+  return `${normalized} ${sqlOperator} (${placeholders})`;
+}
+
 function scalar(value: FilterValue): FilterSqlBinding {
   if (value === null || typeof value === "boolean") {
     throw new TypeError(
@@ -152,10 +181,7 @@ function comparison(
     if (operator === "between") {
       return `${normalized} BETWEEN ${push(compiler, scalar(value[0]!))} AND ${push(compiler, scalar(value[1]!))}`;
     }
-    const placeholders = value
-      .map((item) => push(compiler, scalar(item)))
-      .join(", ");
-    return `${normalized} ${operator === "notIn" ? "NOT IN" : "IN"} (${placeholders})`;
+    return setComparison(compiler, normalized, operator, value);
   }
   const binding = scalar(value as FilterValue);
   if (
@@ -271,6 +297,13 @@ function payloadComparison(
     );
   }
   if (condition.operator === "in" || condition.operator === "notIn") {
+    if (values.length >= JSON_EACH_SET_THRESHOLD) {
+      const valueSet = push(compiler, jsonSet(values));
+      const typeBinding = push(compiler, type);
+      return exists(
+        ` AND ${valueColumn} ${condition.operator === "in" ? "IN" : "NOT IN"} (SELECT value FROM json_each(${valueSet})) AND ${valueAlias}.value_type = ${typeBinding}`,
+      );
+    }
     const bindings = values
       .map((value) => push(compiler, scalar(value)))
       .join(", ");
@@ -345,8 +378,23 @@ export function compileFilterDocument(
   document: FilterDocument,
   options: FilterCompilerOptions = {},
 ): FilterSql {
+  const cacheKey = [
+    options.alias ?? "visit_source",
+    options.sessionSource ?? "visit_source",
+    options.eventAlias ?? options.alias ?? "event_source",
+  ].join("\u0000");
+  const cachedByOptions = FILTER_SQL_CACHE.get(document);
+  const cached = cachedByOptions?.get(cacheKey);
+  if (cached) return cached;
+
   const normalized = normalizeFilterDocument(document, analyticsFilterRegistry);
-  if (!normalized.root) return { clause: "", bindings: [] };
+  if (!normalized.root) {
+    const result = { clause: "", bindings: [] } as const;
+    (cachedByOptions ?? new Map()).set(cacheKey, result);
+    if (!cachedByOptions)
+      FILTER_SQL_CACHE.set(document, new Map([[cacheKey, result]]));
+    return result;
+  }
   const compiler: Compiler = {
     alias: validAlias(options.alias ?? "visit_source", "alias"),
     sessionSource: validAlias(
@@ -360,8 +408,12 @@ export function compileFilterDocument(
     bindings: [],
     payloadIndex: 0,
   };
-  return {
+  const result = {
     clause: `WHERE ${expression(compiler, normalized.root)}`,
     bindings: compiler.bindings,
   };
+  const optionsCache = cachedByOptions ?? new Map<string, FilterSql>();
+  optionsCache.set(cacheKey, result);
+  if (!cachedByOptions) FILTER_SQL_CACHE.set(document, optionsCache);
+  return result;
 }

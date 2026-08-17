@@ -11,7 +11,11 @@ import {
   queryEventRecordPageFromD1,
   queryEventRecordsFromD1,
 } from "@/lib/edge/query/events-records";
-import { queryEventTypeTrendFromD1 } from "@/lib/edge/query/events-trend";
+import { queryEventSummaryMetricsFromD1 } from "@/lib/edge/query/events-summary";
+import {
+  queryEventsTrendFromD1,
+  queryEventTypeTrendFromD1,
+} from "@/lib/edge/query/events-trend";
 import { queryFunnelAnalysis } from "@/lib/edge/query/funnels";
 import {
   querySessionListPageFromD1,
@@ -249,6 +253,60 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
 }
 
 describe("event detail D1 SQL", () => {
+  it("uses the event-name index for the all-events trend source", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      await queryEventsTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        5,
+        eventName,
+      );
+      const query = d1.calls[0];
+      const plan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${query?.sql ?? "SELECT 1"}`)
+        .all(...(query?.bindings ?? [])) as Array<{ detail: string }>;
+      expect(query?.sql).toContain("target_event_name AS");
+      expect(query?.sql).not.toContain("TRIM(COALESCE(es.event_name");
+      expect(plan.map((row) => row.detail).join("\n")).toContain(
+        "idx_custom_events_site_name_time",
+      );
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("adds a scoped visit source for session-boundary event filters", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      const summary = await queryEventSummaryMetricsFromD1(
+        env,
+        siteId,
+        window,
+        filterFixture({ entry: "/entry" }),
+      );
+      expect(summary.events).toBe(2);
+      const query = d1.calls.at(-1);
+      expect(query?.sql).toContain("visit_source AS");
+      expect(query?.sql).toContain("ROW_NUMBER() OVER");
+      expect(query?.bindings.slice(0, 6)).toEqual([
+        siteId,
+        window.startMs,
+        window.endExclusiveMs,
+        siteId,
+        window.startMs,
+        window.endExclusiveMs,
+      ]);
+    } finally {
+      d1.close();
+    }
+  });
+
   it("returns the same event context and payload data as the event records query", async () => {
     const { env, d1 } = createSqliteEventEnv();
 

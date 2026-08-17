@@ -1,5 +1,6 @@
 import { type FilterDocument } from "./filters";
 import { EMPTY_FILTER_DOCUMENT } from "./helpers";
+import { validateQueryFilters } from "./operations";
 import { assertOperationAllowed } from "./policy";
 import type {
   AnalyticsResult,
@@ -55,6 +56,8 @@ export async function executeOverview(
   if (operationError) return denied(operationError);
 
   const filters = input.filters ?? EMPTY_FILTER_DOCUMENT;
+  const filterError = validateQueryFilters(input.context, filters);
+  if (filterError) return { ok: false, error: filterError };
   const current = await reader.readOverview({
     context: input.context,
     time: input.time,
@@ -104,10 +107,13 @@ export async function executeTrend(
 ): Promise<AnalyticsResult<TrendResult>> {
   const operationError = assertOperationAllowed(input.context, "trend");
   if (operationError) return denied(operationError);
+  const filters = input.filters ?? EMPTY_FILTER_DOCUMENT;
+  const filterError = validateQueryFilters(input.context, filters);
+  if (filterError) return { ok: false, error: filterError };
   const result = await reader.readTrend({
     context: input.context,
     time: input.time,
-    filters: input.filters ?? EMPTY_FILTER_DOCUMENT,
+    filters,
     interval: input.interval,
   });
   return {

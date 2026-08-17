@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  hasFilterDocument,
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollups,
   queryTrendForSitesFromHourlyRollups,
@@ -48,6 +49,13 @@ describe("hasFilters", () => {
     expect(hasFilters(document("geo.country", "US"))).toBe(true);
     expect(hasFilters(document("page.path", "/home"))).toBe(true);
     expect(hasFilters(document("client.deviceType", "desktop"))).toBe(true);
+  });
+});
+
+describe("hasFilterDocument", () => {
+  it("does not treat the document version as an active filter", () => {
+    expect(hasFilterDocument(EMPTY_FILTER_DOCUMENT)).toBe(false);
+    expect(hasFilterDocument(document("geo.country", "US"))).toBe(true);
   });
 });
 

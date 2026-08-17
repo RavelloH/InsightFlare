@@ -72,6 +72,22 @@ export function withoutGeoFilter(filters: FilterDocument): FilterDocument {
   );
 }
 
+export function usesSessionBoundaryFilter(filters: FilterDocument): boolean {
+  const visit = (expression: FilterExpression | null): boolean => {
+    if (!expression) return false;
+    if (expression.kind === "condition") {
+      return (
+        expression.target.kind === "field" &&
+        (expression.target.field === "session.entryPath" ||
+          expression.target.field === "session.exitPath")
+      );
+    }
+    if (expression.kind === "not") return visit(expression.child);
+    return expression.children.some(visit);
+  };
+  return visit(filters.root);
+}
+
 export function buildVisitFilterSql(
   filters: FilterDocument,
   alias = "visit_source",
@@ -83,9 +99,17 @@ export function buildVisitFilterSql(
 export function buildEventFilterSql(
   filters: FilterDocument,
   alias = "es",
-  options?: { eventName?: string; search?: string },
+  options?: {
+    eventName?: string;
+    search?: string;
+    sessionSource?: string;
+  },
 ): { clause: string; bindings: Array<string | number> } {
-  const compiled = compileFilterDocument(filters, { alias, eventAlias: alias });
+  const compiled = compileFilterDocument(filters, {
+    alias,
+    eventAlias: alias,
+    sessionSource: options?.sessionSource,
+  });
   const clauses = compiled.clause
     ? [compiled.clause.replace(/^WHERE\s+/i, "")]
     : [];

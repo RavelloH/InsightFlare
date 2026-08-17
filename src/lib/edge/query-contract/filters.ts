@@ -736,6 +736,19 @@ export function hasEffectiveFilters(document: FilterDocument): boolean {
   return document.root !== null;
 }
 
+export function filterConditionCount(document: FilterDocument): number {
+  const count = (expression: FilterExpression | null): number => {
+    if (!expression) return 0;
+    if (expression.kind === "condition") return 1;
+    if (expression.kind === "not") return count(expression.child);
+    return expression.children.reduce(
+      (total, child) => total + count(child),
+      0,
+    );
+  };
+  return count(document.root);
+}
+
 export function assertFilterAudience(
   document: FilterDocument,
   registry: FilterFieldRegistry,

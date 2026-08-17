@@ -153,10 +153,7 @@ interface SiteTrendAccumulator {
 }
 
 export function hasFilterDocument(filters: FilterDocument): boolean {
-  return Object.values(filters).some((value) => {
-    if (Array.isArray(value)) return value.length > 0;
-    return value !== undefined && value !== null && value !== "";
-  });
+  return filters.root !== null;
 }
 
 function createPerfTotals(): PerfTotals {

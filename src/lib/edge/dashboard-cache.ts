@@ -4,12 +4,19 @@
 // not by cookies or bearer tokens. This lets authorized viewers share a
 // result without allowing authentication state into the cache key.
 
+import {
+  ANALYTICS_FILTER_REGISTRY_REVISION,
+  analyticsFilterRegistry,
+  filterFingerprint,
+  parseFilterParams,
+} from "@/lib/edge/query-contract";
+
 const DASHBOARD_CACHE_NAME = "insightflare-dashboard-query";
 const DEFAULT_TTL_SECONDS = 60;
 const PUBLIC_QUERY_CACHE_NAME = "insightflare-public-query";
 export const PUBLIC_QUERY_CACHE_TTL_SECONDS = 300;
 const CACHE_KEY_ORIGIN = "https://analytics-cache.insightflare.internal";
-const CACHE_SCHEMA_VERSION = "v2";
+const CACHE_SCHEMA_VERSION = `v2-${ANALYTICS_FILTER_REGISTRY_REVISION}`;
 const DYNAMIC_RESPONSE_FIELDS = new Set(["requestId", "timestamp"]);
 export const PUBLIC_QUERY_CACHE_OPTIONS = {
   ttlSeconds: PUBLIC_QUERY_CACHE_TTL_SECONDS,
@@ -52,9 +59,28 @@ export interface DashboardCacheIdentity {
   audienceId?: string;
 }
 
-function sortedSearchParams(url: URL, omitKeys: ReadonlySet<string>): string {
+function semanticFilterFingerprint(url: URL): string | undefined {
+  if (![...url.searchParams.keys()].some((key) => key.startsWith("filter["))) {
+    return undefined;
+  }
+  try {
+    return filterFingerprint(
+      parseFilterParams(url, analyticsFilterRegistry),
+      analyticsFilterRegistry,
+    );
+  } catch {
+    // Invalid filters are handled by the query route; do not change its error path.
+    return undefined;
+  }
+}
+
+function sortedSearchParams(
+  url: URL,
+  omitKeys: ReadonlySet<string>,
+  omitPredicate?: (key: string) => boolean,
+): string {
   const sortedEntries = [...url.searchParams.entries()]
-    .filter(([key]) => !omitKeys.has(key))
+    .filter(([key]) => !omitKeys.has(key) && !omitPredicate?.(key))
     .sort(([leftKey, leftValue], [rightKey, rightValue]) => {
       if (leftKey !== rightKey) return leftKey < rightKey ? -1 : 1;
       if (leftValue !== rightValue) return leftValue < rightValue ? -1 : 1;
@@ -78,6 +104,7 @@ function buildCacheKeyRequest(
   }
 
   const cacheUrl = new URL(CACHE_KEY_ORIGIN);
+  const filterKey = semanticFilterFingerprint(normalized);
   cacheUrl.pathname = [
     "analytics",
     CACHE_SCHEMA_VERSION,
@@ -86,7 +113,12 @@ function buildCacheKeyRequest(
     identity.audienceId ? encodeURIComponent(identity.audienceId) : "shared",
     encodeURIComponent(identity.route),
   ].join("/");
-  cacheUrl.search = sortedSearchParams(normalized, new Set(["siteId"]));
+  cacheUrl.search = sortedSearchParams(
+    normalized,
+    new Set(["siteId"]),
+    filterKey ? (key) => key.startsWith("filter[") : undefined,
+  );
+  if (filterKey) cacheUrl.searchParams.set("filterFingerprint", filterKey);
   return new Request(cacheUrl.toString(), { method: "GET" });
 }
 

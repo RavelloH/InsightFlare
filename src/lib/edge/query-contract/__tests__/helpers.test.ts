@@ -235,6 +235,52 @@ describe("query contract time helpers", () => {
       },
     });
 
+    const twoConditions = normalizeFilterDocument(
+      {
+        version: 1,
+        root: {
+          kind: "and",
+          children: [
+            {
+              kind: "condition",
+              target: { kind: "field", field: "geo.country" },
+              operator: "eq",
+              value: "US",
+            },
+            {
+              kind: "condition",
+              target: { kind: "field", field: "page.path" },
+              operator: "eq",
+              value: "/docs",
+            },
+          ],
+        },
+      },
+      analyticsFilterRegistry,
+    );
+    const limited = await executeQueryOperation(
+      "event-records",
+      {
+        context: {
+          ...context,
+          policy: {
+            ...context.policy,
+            limits: { ...context.policy.limits, maxFilterClauses: 1 },
+          },
+        },
+        time,
+        filters: twoConditions,
+      },
+      vi.fn(async () => ({ value: {} })),
+    );
+    expect(limited).toMatchObject({
+      ok: false,
+      error: {
+        kind: "invalid-input",
+        issues: [{ code: "too_many_filter_clauses" }],
+      },
+    });
+
     await expect(
       executeQueryOperation("event-records", { context, time }, async () => {
         throw new Error("D1 unavailable");

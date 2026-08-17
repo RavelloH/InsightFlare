@@ -98,7 +98,70 @@ describe("edge dashboard cache wrapper", () => {
     );
 
     expect((match.mock.calls[0]![0] as Request).url).toBe(
-      "https://analytics-cache.insightflare.internal/analytics/v2/private/site-1/shared/overview?from=1&to=2",
+      "https://analytics-cache.insightflare.internal/analytics/v2-analytics-filter-v1/private/site-1/shared/overview?from=1&to=2",
+    );
+  });
+
+  it("uses the semantic filter fingerprint instead of filter URL ordering", async () => {
+    const match = vi.fn().mockResolvedValue(undefined);
+    const put = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({ match, put }),
+    });
+    const identity = {
+      scope: "private" as const,
+      tenantId: "site-1",
+      route: "overview",
+    };
+
+    await withDashboardCache(
+      undefined,
+      new URL(
+        "https://example.test/api/private/overview?filter[geo.country]=in:US,JP",
+      ),
+      vi.fn().mockResolvedValue(new Response("fresh")),
+      { identity },
+    );
+    await withDashboardCache(
+      undefined,
+      new URL(
+        "https://example.test/api/private/overview?filter[geo.country]=in:JP,US",
+      ),
+      vi.fn().mockResolvedValue(new Response("fresh")),
+      { identity },
+    );
+
+    expect((match.mock.calls[0]![0] as Request).url).toBe(
+      (match.mock.calls[1]![0] as Request).url,
+    );
+  });
+
+  it("keeps invalid filter parameters in the cache key", async () => {
+    const match = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({
+        match,
+        put: vi.fn().mockResolvedValue(undefined),
+      }),
+    });
+
+    await withDashboardCache(
+      undefined,
+      new URL(
+        "https://example.test/api/private/overview?filter[unknown]=value",
+      ),
+      vi.fn().mockResolvedValue(new Response("fresh")),
+      {
+        identity: {
+          scope: "private",
+          tenantId: "site-1",
+          route: "overview",
+        },
+      },
+    );
+
+    expect((match.mock.calls[0]![0] as Request).url).toContain(
+      "filter%5Bunknown%5D=value",
     );
   });
 

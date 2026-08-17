@@ -4,7 +4,7 @@ import {
 } from "@/lib/edge/observability-logger";
 import type { Env } from "@/lib/edge/types";
 
-import { buildEventFilterSql } from "./core-filters";
+import { buildEventFilterSql, usesSessionBoundaryFilter } from "./core-filters";
 import type { FilterDocument, QueryWindow } from "./core-types";
 import { type D1ReadDiagnostics, recordD1RowsRead } from "./diagnostics";
 
@@ -196,17 +196,27 @@ export function buildEventFilteredSourceCte(
   cte: string;
   bindings: Array<string | number>;
 } {
-  const filter = buildEventFilterSql(filters, "es");
+  const needsVisitSource = usesSessionBoundaryFilter(filters);
+  const filter = buildEventFilterSql(filters, "es", {
+    sessionSource: needsVisitSource ? "visit_source" : undefined,
+  });
+  const sourceCtes = [
+    needsVisitSource ? buildVisitSourceCte() : "",
+    buildEventAnalyticsSourceCte({ eventName }),
+  ]
+    .filter(Boolean)
+    .join(",\n");
   return {
     cte: `
 WITH
-${buildEventAnalyticsSourceCte({ eventName })},
+${sourceCtes},
 filtered_events ${options?.materialize ? "AS MATERIALIZED" : "AS"} (
   SELECT *
   FROM event_source es
   ${filter.clause}
 )`,
     bindings: [
+      ...(needsVisitSource ? visitSourceBindings(siteId, window) : []),
       ...eventSourceBindings(siteId, window, eventName),
       ...filter.bindings,
     ],
