@@ -85,8 +85,8 @@ async function fetchSystemPerformance(
   signal?: AbortSignal,
 ): Promise<SystemPerformanceData> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    return handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    return demoRequest({
       path: "/api/private/admin/system-performance",
       params: { minutes },
     }) as SystemPerformanceData;
@@ -118,8 +118,8 @@ async function fetchDoDiagnostic(
   signal?: AbortSignal,
 ): Promise<DoDiagnosticAggregate> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    return handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    return demoRequest({
       path: "/api/private/admin/do-diagnostic",
       params: {},
     }) as DoDiagnosticAggregate;

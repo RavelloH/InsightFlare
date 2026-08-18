@@ -102,8 +102,8 @@ function withFilters(
 
 async function fetchEdgeJson<T>(options: FetchEdgeOptions): Promise<T> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    return handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    return demoRequest({
       path: options.path,
       method: options.method,
       params: options.params as Record<string, string | number> | undefined,

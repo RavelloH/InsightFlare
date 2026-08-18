@@ -121,8 +121,8 @@ async function fetchEmailConfig(
   signal?: AbortSignal,
 ): Promise<PublicNotificationEmailConfig> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: API_PATH,
     }) as ApiResponse<PublicNotificationEmailConfig>;
     return result.data ?? defaultConfig();
@@ -146,8 +146,8 @@ async function saveEmailConfig(
   body: Record<string, unknown>,
 ): Promise<PublicNotificationEmailConfig> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: API_PATH,
       method: "PATCH",
       body,
@@ -174,8 +174,8 @@ async function saveEmailConfig(
 
 async function deleteEmailConfig(): Promise<PublicNotificationEmailConfig> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: API_PATH,
       method: "DELETE",
     }) as ApiResponse<PublicNotificationEmailConfig>;
@@ -202,8 +202,8 @@ async function sendTestEmail(to: string): Promise<TestEmailResponse> {
   const body = { to };
 
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path,
       method: "POST",
       body,

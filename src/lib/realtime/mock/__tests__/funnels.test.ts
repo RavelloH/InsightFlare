@@ -1,77 +1,101 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+  FunnelDefinition,
+  FunnelDetailData,
+  FunnelMutationData,
+} from "@/lib/edge-client";
 import {
   createDemoFunnel,
   deleteDemoFunnel,
   generateDemoFunnels,
 } from "@/lib/realtime/mock/funnels";
+import type { ErrorEnvelope } from "@/lib/response-envelope";
 
 const SITE_ID = "demo-site-001";
+
+type FunnelResult = ReturnType<typeof generateDemoFunnels>;
+
+function listOf(result: FunnelResult): FunnelDefinition[] {
+  if (result.ok === true && "data" in result && "funnels" in result.data) {
+    return result.data.funnels;
+  }
+  throw new Error("expected funnel list");
+}
+
+function detailOf(result: FunnelResult): FunnelDetailData["data"] {
+  if (result.ok === true && "data" in result && "analysis" in result.data) {
+    return result.data;
+  }
+  throw new Error("expected funnel detail");
+}
+
+function createdOf(
+  result: ReturnType<typeof createDemoFunnel>,
+): FunnelMutationData["data"] {
+  if (result.ok === true) return result.data;
+  throw new Error("expected created funnel");
+}
+
+function errorOf(result: { ok: boolean }): ErrorEnvelope {
+  if (result.ok === false && "error" in result) {
+    return result as unknown as ErrorEnvelope;
+  }
+  throw new Error("expected error envelope");
+}
 
 describe("mock/funnels", () => {
   describe("generateDemoFunnels", () => {
     it("returns a list of funnels when no id param is provided", () => {
       const result = generateDemoFunnels(SITE_ID, {});
       expect(result.ok).toBe(true);
-      expect("funnels" in result).toBe(true);
-      if ("funnels" in result) {
-        expect(result.funnels.length).toBeGreaterThanOrEqual(2);
-        for (const funnel of result.funnels) {
-          expect(funnel.siteId).toBe(SITE_ID);
-          expect(funnel.steps.length).toBeGreaterThanOrEqual(2);
-        }
+      const funnels = listOf(result);
+      expect(funnels.length).toBeGreaterThanOrEqual(2);
+      for (const funnel of funnels) {
+        expect(funnel.siteId).toBe(SITE_ID);
+        expect(funnel.steps.length).toBeGreaterThanOrEqual(2);
       }
     });
 
     it("returns detail with analysis when a matching id is provided", () => {
       const list = generateDemoFunnels(SITE_ID, {});
-      const firstId = "funnels" in list ? list.funnels[0]?.id : undefined;
+      const firstId = listOf(list)[0]?.id;
       expect(firstId).toBeDefined();
 
       const detail = generateDemoFunnels(SITE_ID, { id: firstId! });
       expect(detail.ok).toBe(true);
-      expect("funnel" in detail).toBe(true);
-      expect("analysis" in detail).toBe(true);
-      if ("analysis" in detail) {
-        expect(detail.analysis.steps.length).toBeGreaterThan(0);
-        expect(detail.analysis.summary.totalSessions).toBeGreaterThan(0);
-        expect(
-          detail.analysis.summary.convertedSessions,
-        ).toBeGreaterThanOrEqual(0);
-        expect(
-          detail.analysis.summary.overallConversionRate,
-        ).toBeGreaterThanOrEqual(0);
-        expect(
-          detail.analysis.summary.overallConversionRate,
-        ).toBeLessThanOrEqual(1);
-      }
+      const data = detailOf(detail);
+      expect(data.analysis.steps.length).toBeGreaterThan(0);
+      expect(data.analysis.summary.totalSessions).toBeGreaterThan(0);
+      expect(data.analysis.summary.convertedSessions).toBeGreaterThanOrEqual(0);
+      expect(
+        data.analysis.summary.overallConversionRate,
+      ).toBeGreaterThanOrEqual(0);
+      expect(data.analysis.summary.overallConversionRate).toBeLessThanOrEqual(
+        1,
+      );
     });
 
-    it("falls back to the first funnel when the id does not match", () => {
+    it("returns a standard not-found error when the id does not match", () => {
       const detail = generateDemoFunnels(SITE_ID, { id: "nonexistent-id" });
-      expect(detail.ok).toBe(true);
-      expect("funnel" in detail).toBe(true);
-      if ("funnel" in detail) {
-        expect(detail.funnel.id).toBeDefined();
-      }
+      expect(detail.ok).toBe(false);
+      const error = errorOf(detail);
+      expect(error.error.code).toBe("not_found");
     });
 
     it("includes template funnels for non-demo-site-001 sites", () => {
       const result = generateDemoFunnels("other-site", {});
       expect(result.ok).toBe(true);
-      if ("funnels" in result) {
-        expect(result.funnels.length).toBeGreaterThanOrEqual(2);
-        for (const funnel of result.funnels) {
-          expect(funnel.siteId).toBe("other-site");
-        }
+      for (const funnel of listOf(result)) {
+        expect(funnel.siteId).toBe("other-site");
       }
     });
 
     it("returns analysis steps with correct conversion math", () => {
-      const detail = generateDemoFunnels(SITE_ID, { id: "demo-funnel-signup" });
-      if (!("analysis" in detail)) throw new Error("expected analysis");
-
-      const { steps, summary } = detail.analysis;
+      const detail = generateDemoFunnels(SITE_ID, {
+        id: "demo-funnel-signup",
+      });
+      const { steps, summary } = detailOf(detail).analysis;
       expect(steps[0].dropOffSessions).toBe(0);
       expect(steps[0].conversionRate).toBe(1);
       for (let i = 1; i < steps.length; i++) {
@@ -86,16 +110,17 @@ describe("mock/funnels", () => {
       const detail = generateDemoFunnels(SITE_ID, {
         id: "demo-funnel-checkout",
       });
-      if (!("analysis" in detail)) throw new Error("expected analysis");
-      expect(detail.analysis.summary.largestDropOffStepIndex).not.toBeNull();
-      expect(
-        detail.analysis.summary.largestDropOffStepIndex!,
-      ).toBeGreaterThanOrEqual(1);
+      const analysis = detailOf(detail).analysis;
+      expect(analysis.summary.largestDropOffStepIndex).not.toBeNull();
+      expect(analysis.summary.largestDropOffStepIndex!).toBeGreaterThanOrEqual(
+        1,
+      );
     });
 
     it("handles empty id string (whitespace) as list request", () => {
       const result = generateDemoFunnels(SITE_ID, { id: "   " });
-      expect("funnels" in result).toBe(true);
+      expect(result.ok).toBe(true);
+      expect(listOf(result).length).toBeGreaterThan(0);
     });
   });
 
@@ -109,42 +134,48 @@ describe("mock/funnels", () => {
         ],
       });
       expect(result.ok).toBe(true);
-      expect(result.funnel.name).toBe("Custom funnel");
-      expect(result.funnel.steps).toHaveLength(2);
-      expect(result.funnel.steps[0]).toEqual({
+      const funnel = createdOf(result).funnel;
+      expect(funnel.name).toBe("Custom funnel");
+      expect(funnel.steps).toHaveLength(2);
+      expect(funnel.steps[0]).toEqual({
         type: "pageview",
         value: "/home",
       });
-      expect(result.funnel.steps[1]).toEqual({
+      expect(funnel.steps[1]).toEqual({
         type: "event",
         value: "signup",
       });
-      expect(result.funnel.id).toMatch(/^demo-funnel-custom-/);
+      expect(funnel.id).toMatch(/^demo-funnel-custom-/);
     });
 
-    it("defaults name to 'Untitled funnel' when missing", () => {
+    it("returns a standard error when name is missing", () => {
       const result = createDemoFunnel(SITE_ID, {
         steps: [
           { type: "pageview", value: "/a" },
           { type: "event", value: "b" },
         ],
       });
-      expect(result.funnel.name).toBe("Untitled funnel");
+      expect(result.ok).toBe(false);
+      expect(errorOf(result).error.message).toBe("Name is required");
     });
 
-    it("falls back to default steps when fewer than 2 valid steps provided", () => {
+    it("returns a standard error when fewer than 2 steps are provided", () => {
       const result = createDemoFunnel(SITE_ID, {
         name: "Sparse",
         steps: [{ type: "pageview", value: "/only-one" }],
       });
-      expect(result.funnel.steps).toHaveLength(2);
-      expect(result.funnel.steps[0].value).toBe("/");
-      expect(result.funnel.steps[1].value).toBe("conversion");
+      expect(result.ok).toBe(false);
+      expect(errorOf(result).error.message).toBe(
+        "At least 2 steps are required",
+      );
     });
 
-    it("falls back to default steps when steps is not an array", () => {
+    it("returns a standard error when steps is not an array", () => {
       const result = createDemoFunnel(SITE_ID, { name: "Bad", steps: "nope" });
-      expect(result.funnel.steps).toHaveLength(2);
+      expect(result.ok).toBe(false);
+      expect(errorOf(result).error.message).toBe(
+        "At least 2 steps are required",
+      );
     });
 
     it("filters out invalid step entries", () => {
@@ -158,9 +189,11 @@ describe("mock/funnels", () => {
           { type: "event", value: "end" },
         ],
       });
-      expect(result.funnel.steps).toHaveLength(2);
-      expect(result.funnel.steps[0].value).toBe("/start");
-      expect(result.funnel.steps[1].value).toBe("end");
+      expect(result.ok).toBe(true);
+      const funnel = createdOf(result).funnel;
+      expect(funnel.steps).toHaveLength(2);
+      expect(funnel.steps[0].value).toBe("/start");
+      expect(funnel.steps[1].value).toBe("end");
     });
 
     it("truncates steps to a maximum of 12", () => {
@@ -169,7 +202,8 @@ describe("mock/funnels", () => {
         value: `/step-${i}`,
       }));
       const result = createDemoFunnel(SITE_ID, { name: "Long", steps });
-      expect(result.funnel.steps.length).toBeLessThanOrEqual(12);
+      expect(result.ok).toBe(true);
+      expect(createdOf(result).funnel.steps.length).toBeLessThanOrEqual(12);
     });
 
     it("assigns a unique incremental id", () => {
@@ -187,13 +221,13 @@ describe("mock/funnels", () => {
           { type: "event", value: "d" },
         ],
       });
-      expect(a.funnel.id).not.toBe(b.funnel.id);
+      expect(createdOf(a).funnel.id).not.toBe(createdOf(b).funnel.id);
     });
 
-    it("handles null/undefined body gracefully", () => {
+    it("returns a standard error for null/undefined body", () => {
       const result = createDemoFunnel(SITE_ID, null);
-      expect(result.ok).toBe(true);
-      expect(result.funnel.name).toBe("Untitled funnel");
+      expect(result.ok).toBe(false);
+      expect(errorOf(result).error.message).toBe("Name is required");
     });
 
     it("sets createdAt and updatedAt to current time", () => {
@@ -206,9 +240,10 @@ describe("mock/funnels", () => {
         ],
       });
       const after = Math.floor(Date.now() / 1000) + 1;
-      expect(result.funnel.createdAt).toBeGreaterThanOrEqual(before);
-      expect(result.funnel.createdAt).toBeLessThanOrEqual(after);
-      expect(result.funnel.updatedAt).toBe(result.funnel.createdAt);
+      const funnel = createdOf(result).funnel;
+      expect(funnel.createdAt).toBeGreaterThanOrEqual(before);
+      expect(funnel.createdAt).toBeLessThanOrEqual(after);
+      expect(funnel.updatedAt).toBe(funnel.createdAt);
     });
   });
 
@@ -221,7 +256,9 @@ describe("mock/funnels", () => {
           { type: "event", value: "gone" },
         ],
       });
-      const result = deleteDemoFunnel(SITE_ID, { id: created.funnel.id });
+      const result = deleteDemoFunnel(SITE_ID, {
+        id: createdOf(created).funnel.id,
+      });
       expect(result.ok).toBe(true);
     });
 
@@ -237,9 +274,10 @@ describe("mock/funnels", () => {
       expect(result.ok).toBe(true);
     });
 
-    it("handles missing id param", () => {
+    it("returns a standard error when id is missing", () => {
       const result = deleteDemoFunnel(SITE_ID, {});
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(errorOf(result).error.message).toBe("Funnel id is required");
     });
   });
 });

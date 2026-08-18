@@ -95,6 +95,7 @@ import type {
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
+import { extractErrorMessage } from "@/lib/response-envelope";
 import Link from "@/lib/router";
 import { useRouter } from "@/lib/router";
 
@@ -374,8 +375,8 @@ async function fetchTeamDashboard(
   signal?: AbortSignal,
 ): Promise<TeamDashboardData> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: "/api/private/team-dashboard",
       params: {
         teamId,
@@ -430,8 +431,8 @@ async function fetchTeamMembers(
   signal?: AbortSignal,
 ): Promise<MemberData[]> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: "/api/private/admin/members",
       params: { teamId },
     }) as { ok: boolean; data?: MemberData[] };
@@ -457,8 +458,8 @@ async function fetchTeamSites(
   signal?: AbortSignal,
 ): Promise<SiteData[]> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: "/api/private/admin/sites",
       params: { teamId },
     }) as { ok: boolean; data?: SiteData[] };
@@ -484,8 +485,8 @@ async function fetchTeamInvites(
   signal?: AbortSignal,
 ): Promise<TeamInviteData[]> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: "/api/private/admin/team-invites",
       params: { teamId },
     }) as { ok: boolean; data?: TeamInviteData[] };
@@ -519,8 +520,8 @@ async function postJson<T>(
   method: "POST" | "PATCH" = "POST",
 ): Promise<T> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: url,
       method,
       body,
@@ -537,7 +538,7 @@ async function postJson<T>(
   });
   const payload = (await response.json()) as ActionResponse<T>;
   if (!response.ok || !payload.ok || payload.data === undefined) {
-    throw new Error(payload.message || payload.error || "request_failed");
+    throw new Error(extractErrorMessage(payload));
   }
   return payload.data;
 }

@@ -30,6 +30,7 @@ import type { TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
+import { extractErrorMessage } from "@/lib/response-envelope";
 import { useRouter } from "@/lib/router";
 
 interface TeamSelectOption {
@@ -155,9 +156,7 @@ export function TeamSelect({
       });
       const payload = (await response.json()) as CreateTeamResponse;
       if (!response.ok || !payload.ok || !payload.data) {
-        throw new Error(
-          payload.message || payload.error || "create_team_failed",
-        );
+        throw new Error(extractErrorMessage(payload, "create_team_failed"));
       }
       setOpenCreateDialog(false);
       setTeamName("");

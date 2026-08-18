@@ -59,6 +59,7 @@ import {
 import type { ApiKeyData, ApiKeyScope } from "@/lib/edge-client-types";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { extractErrorMessage } from "@/lib/response-envelope";
 
 interface ApiKeysClientProps {
   locale: Locale;
@@ -140,7 +141,7 @@ async function readPayload<T>(response: Response): Promise<T> {
     error?: string;
   };
   if (!response.ok || !payload.ok || payload.data === undefined) {
-    throw new Error(payload.error || "request_failed");
+    throw new Error(extractErrorMessage(payload));
   }
   return payload.data;
 }
@@ -167,6 +168,11 @@ function createDemoApiKey(input: {
   status?: ApiKeyData["status"];
   lastUsedOffsetSeconds?: number | null;
 }): ApiKeyData {
+  const name = input.name.trim();
+  if (name.length < 2) throw new Error("Name is required");
+  if (input.scopes.length === 0) {
+    throw new Error("At least one scope is required");
+  }
   const now = Math.floor(Date.now() / 1000);
   const index = input.index ?? 0;
   const expiresAt =
@@ -176,7 +182,7 @@ function createDemoApiKey(input: {
   return {
     id: `demo-api-key-${index}-${now}`,
     teamId: input.teamId,
-    name: input.name,
+    name,
     prefix: demoKeyPrefix(index),
     scopes: input.scopes,
     siteIds: input.siteIds,

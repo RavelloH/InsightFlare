@@ -378,7 +378,7 @@ async function handleFunnelList(
 ): Promise<Response> {
   return jsonResponseWith(ctx!, {
     ok: true,
-    funnels: await queryFunnelDefinitions(env, siteId),
+    data: { funnels: await queryFunnelDefinitions(env, siteId) },
   });
 }
 
@@ -408,7 +408,7 @@ async function handleFunnelDetail(
     funnel.steps,
   );
 
-  return jsonResponseWith(ctx!, { ok: true, funnel, analysis });
+  return jsonResponseWith(ctx!, { ok: true, data: { funnel, analysis } });
 }
 
 async function handleFunnelCreate(
@@ -450,7 +450,9 @@ async function handleFunnelCreate(
     ctx!,
     {
       ok: true,
-      funnel: { id, siteId, name, steps, createdAt: now, updatedAt: now },
+      data: {
+        funnel: { id, siteId, name, steps, createdAt: now, updatedAt: now },
+      },
     },
     201,
   );

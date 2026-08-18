@@ -48,6 +48,7 @@ import { shortDateTime } from "@/lib/dashboard/format";
 import type { AccountUserData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { extractErrorMessage } from "@/lib/response-envelope";
 
 interface AdminUsersManagementClientProps {
   locale: Locale;
@@ -73,8 +74,8 @@ function epochSecondsToMs(value: number): number {
 
 async function getUsers(signal?: AbortSignal): Promise<AccountUserData[]> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: "/api/private/admin/users",
     }) as ApiResponse<AccountUserData[]>;
     return Array.isArray(result.data) ? result.data : [];
@@ -87,7 +88,7 @@ async function getUsers(signal?: AbortSignal): Promise<AccountUserData[]> {
   });
   const payload = (await response.json()) as ApiResponse<AccountUserData[]>;
   if (!response.ok || !payload.ok || !Array.isArray(payload.data)) {
-    throw new Error(payload.message || payload.error || "load_users_failed");
+    throw new Error(extractErrorMessage(payload, "load_users_failed"));
   }
   return payload.data;
 }
@@ -199,7 +200,7 @@ export function AdminUsersManagementClient({
       });
       const payload = (await response.json()) as ApiResponse<AccountUserData>;
       if (!response.ok || !payload.ok) {
-        throw new Error(payload.message || payload.error || t.createFailed);
+        throw new Error(extractErrorMessage(payload, t.createFailed));
       }
       setUsername("");
       setEmail("");
@@ -238,7 +239,7 @@ export function AdminUsersManagementClient({
         removed: boolean;
       }>;
       if (!response.ok || !payload.ok) {
-        throw new Error(payload.message || payload.error || t.deleteFailed);
+        throw new Error(extractErrorMessage(payload, t.deleteFailed));
       }
       await refreshUsers();
       toast.success(t.deleteSuccess);
@@ -269,9 +270,7 @@ export function AdminUsersManagementClient({
       const payload =
         (await response.json()) as ApiResponse<CreatedAccountLink>;
       if (!response.ok || !payload.ok || !payload.data) {
-        throw new Error(
-          payload.message || payload.error || t.resetLinkCreateFailed,
-        );
+        throw new Error(extractErrorMessage(payload, t.resetLinkCreateFailed));
       }
       setResetLinkUrl(payload.data.url);
       setResetLinkExpiresAt(payload.data.expiresAt);

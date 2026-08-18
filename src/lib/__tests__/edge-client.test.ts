@@ -48,7 +48,7 @@ import {
   updateNotificationRule,
   upsertAdminSiteConfig,
 } from "@/lib/edge-client";
-import { handleDemoRequest } from "@/lib/realtime/mock";
+import { demoRequest } from "@/lib/realtime/mock";
 import { requestHeader } from "@/lib/request-headers";
 
 vi.mock("@/lib/auth", () => ({
@@ -56,13 +56,13 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/realtime/mock", () => ({
-  handleDemoRequest: vi.fn(),
+  demoRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/request-headers", () => ({ requestHeader: vi.fn() }));
 
 const getSessionTokenMock = vi.mocked(getSessionToken);
-const handleDemoRequestMock = vi.mocked(handleDemoRequest);
+const demoRequestMock = vi.mocked(demoRequest);
 const requestHeaderMock = vi.mocked(requestHeader);
 
 function fetchMock() {
@@ -82,7 +82,7 @@ describe("edge client request wrappers", () => {
     vi.stubEnv("VITE_DEMO_MODE", "");
     getSessionTokenMock.mockReset();
     getSessionTokenMock.mockResolvedValue("session-token");
-    handleDemoRequestMock.mockReset();
+    demoRequestMock.mockReset();
     requestHeaderMock.mockReset();
     requestHeaderMock.mockResolvedValue(null);
     vi.stubGlobal(
@@ -758,7 +758,7 @@ describe("edge client request wrappers", () => {
 
   it("delegates to the realtime demo handler in demo mode", async () => {
     vi.stubEnv("VITE_DEMO_MODE", "1");
-    handleDemoRequestMock.mockReturnValue({
+    demoRequestMock.mockReturnValue({
       ok: true,
       data: [{ bucket: 1 }],
     });
@@ -766,7 +766,7 @@ describe("edge client request wrappers", () => {
     const result = await fetchPublicTrend("demo-site", { from: 1, to: 2 });
 
     expect(result).toEqual({ ok: true, data: [{ bucket: 1 }] });
-    expect(handleDemoRequestMock).toHaveBeenCalledWith({
+    expect(demoRequestMock).toHaveBeenCalledWith({
       path: "/api/public/share/demo-site/trend",
       method: undefined,
       params: { from: 1, to: 2, interval: "day" },
@@ -777,7 +777,7 @@ describe("edge client request wrappers", () => {
 
   it("delegates private POST wrappers to the demo handler with method and body", async () => {
     vi.stubEnv("VITE_DEMO_MODE", "1");
-    handleDemoRequestMock.mockReturnValue({
+    demoRequestMock.mockReturnValue({
       ok: true,
       data: { id: "team-1", name: "Team" },
     });
@@ -785,7 +785,7 @@ describe("edge client request wrappers", () => {
     const result = await createAdminTeam({ name: "Team", slug: "team" });
 
     expect(result).toEqual({ id: "team-1", name: "Team" });
-    expect(handleDemoRequestMock).toHaveBeenCalledWith({
+    expect(demoRequestMock).toHaveBeenCalledWith({
       path: "/api/private/admin/teams",
       method: "POST",
       params: undefined,
@@ -821,7 +821,7 @@ describe("edge client request wrappers", () => {
     expect((init.headers as Headers).get("authorization")).toBe(
       "Bearer session-token",
     );
-    expect(handleDemoRequestMock).not.toHaveBeenCalled();
+    expect(demoRequestMock).not.toHaveBeenCalled();
   });
 
   it("wires the edge-client filter helper into at least one exported request wrapper", () => {

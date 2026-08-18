@@ -12,6 +12,7 @@ import { shortDateTime } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
+import { extractErrorMessage } from "@/lib/response-envelope";
 import Link from "@/lib/router";
 import { useRouter } from "@/lib/router";
 
@@ -50,7 +51,7 @@ function tokenFromHash(): string {
 }
 
 function apiMessage(payload: ApiResponse<unknown>, fallback: string): string {
-  return payload.message || payload.error || fallback;
+  return extractErrorMessage(payload, fallback);
 }
 
 function epochSecondsToMs(value: number): number {

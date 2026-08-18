@@ -5,10 +5,10 @@ import {
   fetchPrivateJsonMutate,
   publicDashboardSiteId,
 } from "@/lib/dashboard/client-request";
-import { handleDemoRequest } from "@/lib/realtime/mock";
+import { demoRequest } from "@/lib/realtime/mock";
 
 vi.mock("@/lib/realtime/mock", () => ({
-  handleDemoRequest: vi.fn(),
+  demoRequest: vi.fn(),
 }));
 
 describe("dashboard client request helpers", () => {
@@ -23,7 +23,7 @@ describe("dashboard client request helpers", () => {
       process.env.VITE_DEMO_MODE = realDemoMode;
     }
     vi.restoreAllMocks();
-    vi.mocked(handleDemoRequest).mockReset();
+    vi.mocked(demoRequest).mockReset();
   });
 
   function jsonResponse(body: unknown, status = 200): Response {
@@ -243,14 +243,14 @@ describe("dashboard client request helpers", () => {
     process.env.VITE_DEMO_MODE = "1";
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock;
-    vi.mocked(handleDemoRequest).mockReturnValue({ ok: true });
+    vi.mocked(demoRequest).mockReturnValue({ ok: true } as never);
 
     await expect(
       fetchPrivateJsonMutate("/api/public/session", "POST", undefined, {
         username: "demo",
       }),
     ).resolves.toMatchObject({ ok: true });
-    expect(handleDemoRequest).toHaveBeenCalledWith({
+    expect(demoRequest).toHaveBeenCalledWith({
       path: "/api/public/session",
       method: "POST",
       params: undefined,

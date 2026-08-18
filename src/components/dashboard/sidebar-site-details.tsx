@@ -142,8 +142,8 @@ async function fetchTeamDashboard(
   signal?: AbortSignal,
 ): Promise<TeamDashboardData> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: "/api/private/team-dashboard",
       params: {
         teamId,

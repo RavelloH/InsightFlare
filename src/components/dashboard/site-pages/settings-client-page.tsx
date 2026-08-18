@@ -62,6 +62,7 @@ import type { SiteData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
+import { extractErrorMessage } from "@/lib/response-envelope";
 import { useRouter } from "@/lib/router";
 import {
   DEFAULT_SITE_SCRIPT_SETTINGS,
@@ -149,15 +150,15 @@ async function postJson<T>(
   method: "POST" | "PATCH" = "POST",
 ): Promise<T> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: url.split("?")[0],
       method,
       params: Object.fromEntries(new URLSearchParams(url.split("?")[1] || "")),
       body,
     }) as ActionResponse<T>;
     if (!result.ok || result.data === undefined) {
-      throw new Error(result.message || result.error || "request_failed");
+      throw new Error(extractErrorMessage(result));
     }
     return result.data;
   }
@@ -171,7 +172,7 @@ async function postJson<T>(
   });
   const payload = (await response.json()) as ActionResponse<T>;
   if (!response.ok || !payload.ok || payload.data === undefined) {
-    throw new Error(payload.message || payload.error || "request_failed");
+    throw new Error(extractErrorMessage(payload));
   }
   return payload.data;
 }
@@ -315,8 +316,8 @@ export function SettingsClientPage({
     queryKey: ["dashboard", "site-config", site.id],
     queryFn: async ({ signal }) => {
       if (import.meta.env.VITE_DEMO_MODE === "1") {
-        const { handleDemoRequest } = await import("@/lib/realtime/mock");
-        const result = handleDemoRequest({
+        const { demoRequest } = await import("@/lib/realtime/mock");
+        const result = demoRequest({
           path: "/api/private/admin/site-config",
           params: { siteId: site.id },
         }) as SiteConfigPayload;
@@ -344,8 +345,8 @@ export function SettingsClientPage({
     queryKey: ["dashboard", "site-script-snippet", site.id],
     queryFn: async ({ signal }) => {
       if (import.meta.env.VITE_DEMO_MODE === "1") {
-        const { handleDemoRequest } = await import("@/lib/realtime/mock");
-        const result = handleDemoRequest({
+        const { demoRequest } = await import("@/lib/realtime/mock");
+        const result = demoRequest({
           path: "/api/private/admin/script-snippet",
           params: { siteId: site.id },
         }) as ScriptSnippetPayload;

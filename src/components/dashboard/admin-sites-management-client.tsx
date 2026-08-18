@@ -24,6 +24,7 @@ import type { SiteData, TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
+import { extractErrorMessage } from "@/lib/response-envelope";
 import { useRouter } from "@/lib/router";
 
 interface AdminSitesManagementClientProps {
@@ -59,8 +60,8 @@ async function fetchSites(
   signal?: AbortSignal,
 ): Promise<SiteData[]> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: "/api/private/admin/sites",
       params: { teamId },
     }) as ApiResponse<SiteData[]>;
@@ -77,7 +78,7 @@ async function fetchSites(
   );
   const payload = (await response.json()) as ApiResponse<SiteData[]>;
   if (!response.ok || !payload.ok || !Array.isArray(payload.data)) {
-    throw new Error(payload.message || payload.error || "load_sites_failed");
+    throw new Error(extractErrorMessage(payload, "load_sites_failed"));
   }
   return payload.data;
 }
@@ -141,7 +142,7 @@ export function AdminSitesManagementClient({
       });
       const payload = (await response.json()) as ApiResponse<SiteData>;
       if (!response.ok || !payload.ok || !payload.data) {
-        throw new Error(payload.message || payload.error || t.createFailed);
+        throw new Error(extractErrorMessage(payload, t.createFailed));
       }
       setName("");
       setDomain("");

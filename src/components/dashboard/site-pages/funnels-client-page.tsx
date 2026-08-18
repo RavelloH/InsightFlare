@@ -645,7 +645,7 @@ function FunnelDetailContent({
   payload: FunnelDetailData;
   onDelete: (funnel: FunnelDefinition) => void;
 }) {
-  const { funnel, analysis } = payload;
+  const { funnel, analysis } = payload.data;
   const largestDropOffStep =
     analysis.summary.largestDropOffStepIndex === null
       ? null
@@ -839,7 +839,7 @@ export function FunnelsClientPage({
     queryFn: ({ signal }) => fetchFunnels(siteId, { signal }),
     enabled: typeof window !== "undefined",
   });
-  const funnels = funnelsData?.funnels ?? [];
+  const funnels = funnelsData?.data?.funnels ?? [];
 
   useEffect(() => {
     if (!detailFunnelId) openedDetailFromListRef.current = false;
@@ -906,12 +906,14 @@ export function FunnelsClientPage({
           funnelsQueryKey,
           (current) => ({
             ok: true,
-            funnels: [payload.funnel, ...(current?.funnels ?? [])],
+            data: {
+              funnels: [payload.data.funnel, ...(current?.data?.funnels ?? [])],
+            },
           }),
         );
         setCreateOpen(false);
         toast.success(labels.created);
-        openFunnelDetail(payload.funnel.id);
+        openFunnelDetail(payload.data.funnel.id);
       } catch (error) {
         const message =
           error instanceof Error && error.message
@@ -942,9 +944,11 @@ export function FunnelsClientPage({
         current
           ? {
               ...current,
-              funnels: current.funnels.filter(
-                (funnel) => funnel.id !== target.id,
-              ),
+              data: {
+                funnels: current.data.funnels.filter(
+                  (funnel) => funnel.id !== target.id,
+                ),
+              },
             }
           : current,
       );

@@ -56,6 +56,7 @@ import {
 } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { extractErrorMessage } from "@/lib/response-envelope";
 import { useRouter } from "@/lib/router";
 
 interface AccountSettingsClientProps {
@@ -318,9 +319,7 @@ export function AccountSettingsClient({
         .json()
         .catch(() => ({}))) as ProfileResponse;
       if (!response.ok || payload.ok === false || !payload.data) {
-        throw new Error(
-          payload.message || payload.error || copy.profileSaveFailed,
-        );
+        throw new Error(extractErrorMessage(payload, copy.profileSaveFailed));
       }
       applySavedUser(payload.data);
       toast.success(copy.profileSaved);
@@ -367,9 +366,7 @@ export function AccountSettingsClient({
         .json()
         .catch(() => ({}))) as ProfileResponse;
       if (!response.ok || payload.ok === false || !payload.data) {
-        throw new Error(
-          payload.message || payload.error || copy.passwordSaveFailed,
-        );
+        throw new Error(extractErrorMessage(payload, copy.passwordSaveFailed));
       }
       applySavedUser(payload.data);
       setCurrentPassword("");
@@ -438,7 +435,7 @@ export function AccountSettingsClient({
         .catch(() => ({}))) as ProfileResponse;
       if (!response.ok || payload.ok === false || !payload.data) {
         throw new Error(
-          payload.message || payload.error || copy.preferredLanguageSaveFailed,
+          extractErrorMessage(payload, copy.preferredLanguageSaveFailed),
         );
       }
       applySavedUser(payload.data);
@@ -477,7 +474,7 @@ export function AccountSettingsClient({
         .json()
         .catch(() => ({}))) as ProfileResponse;
       if (!response.ok || payload.ok === false) {
-        throw new Error(payload.message || payload.error || copy.saveFailed);
+        throw new Error(extractErrorMessage(payload, copy.saveFailed));
       }
       const savedTimeZone = normalizeTimeZone(payload.data?.timeZone) || "";
       setTimeZonePreference(savedTimeZone);

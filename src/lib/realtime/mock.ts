@@ -1,4 +1,5 @@
 import { normalizeTimeZone } from "@/lib/dashboard/time-zone";
+import type { NotificationPreferencesData } from "@/lib/edge-client";
 import type {
   NotificationMessageData,
   NotificationRuleData,
@@ -57,6 +58,13 @@ import {
   generateDemoReferrerRadar,
 } from "@/lib/realtime/mock/browser-client";
 import {
+  demoBadRequest,
+  demoNotFound,
+  demoOk,
+  extractErrorMessage,
+  isErrorEnvelope,
+} from "@/lib/realtime/mock/envelope";
+import {
   generateDemoEventFields,
   generateDemoEventRecordDetail,
   generateDemoEventsRecords,
@@ -101,7 +109,18 @@ import {
 export type { RealtimeSocketLike } from "@/lib/realtime/mock/socket";
 export { createMockRealtimeSocket } from "@/lib/realtime/mock/socket";
 
-const DEMO_NOT_FOUND_RESPONSE = { ok: false, data: { error: "Not Found" } };
+const demoNotFoundResponse = () => demoNotFound();
+
+const demoNotificationPreferences: NotificationPreferencesData = {
+  inApp: true,
+  email: true,
+  webPush: false,
+  attention: {
+    reportsCreateUnread: false,
+    milestonesCreateUnread: false,
+    alertsCreateUnread: true,
+  },
+};
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -457,7 +476,7 @@ function generateDemoNotificationRuleRun(
 //  Route dispatcher — the single entry point for demo mode
 // ---------------------------------------------------------------------------
 
-export function handleDemoRequest(options: {
+function handleDemoRequestInner(options: {
   path: string;
   method?: string;
   params?: Record<string, string | number>;
@@ -581,13 +600,36 @@ export function handleDemoRequest(options: {
       const now = nowSeconds();
       const team = String(keyBody.teamId || teamId || getDemoTeams()[0].id);
       const keys = generateDemoApiKeys(team);
+      if (!keyBody.keyId) {
+        const createdName = String(keyBody.name ?? "").trim();
+        if (createdName.length < 2) return demoBadRequest("name is required");
+        if (!Array.isArray(keyBody.scopes) || keyBody.scopes.length === 0) {
+          return demoBadRequest("at least one scope is required");
+        }
+      }
       if (keyBody.keyId) {
-        const key = keys.find((item) => item.id === keyBody.keyId) ?? keys[0];
-        if (method === "PATCH" && key) {
+        const key = keys.find((item) => item.id === keyBody.keyId);
+        if (method === "PATCH") {
           return {
             ok: true,
             data: {
-              ...key,
+              ...(key ?? {
+                id: String(keyBody.keyId),
+                teamId: team,
+                name: "API key",
+                prefix: "",
+                scopes: [],
+                siteIds: [],
+                createdByUserId: "",
+                expiresAt: 0,
+                revokedAt: null,
+                revokedByUserId: "",
+                rotatedFromKeyId: "",
+                lastUsedAt: null,
+                createdAt: now,
+                updatedAt: now,
+                status: "active",
+              }),
               status: "revoked",
               revokedAt: now,
               revokedByUserId: getDemoUser().id,
@@ -621,7 +663,13 @@ export function handleDemoRequest(options: {
       const inviteTeamId = String(
         bodyRecord.teamId || teamId || getDemoTeams()[0].id,
       );
-      const role = bodyRecord.role === "admin" ? "admin" : "member";
+      const rawRole = String(bodyRecord.role || "").toLowerCase();
+      if (rawRole && rawRole !== "member" && rawRole !== "admin") {
+        return demoBadRequest("Invite role must be member or admin");
+      }
+      const role = rawRole === "admin" ? "admin" : "member";
+      const email = String(bodyRecord.email || "").trim();
+      if (!email) return demoBadRequest("A valid email is required");
       const siteIds =
         role === "member" && Array.isArray(bodyRecord.siteIds)
           ? bodyRecord.siteIds
@@ -635,7 +683,7 @@ export function handleDemoRequest(options: {
             type: "team_invite",
             teamId: inviteTeamId,
             userId: "",
-            email: String(bodyRecord.email || ""),
+            email,
             payload: { teamRole: role, siteIds },
             code: token,
             url: `https://demo.insightflare.app/invite#token=${token}`,
@@ -659,6 +707,9 @@ export function handleDemoRequest(options: {
     }
     if (path === "/api/private/notifications") {
       return { ok: true, data: { updated: 1 } };
+    }
+    if (path === "/api/private/notifications/preferences") {
+      return { ok: true, data: demoNotificationPreferences };
     }
     const notificationReadMatch = path.match(
       /^\/api\/private\/notifications\/([^/]+)$/,
@@ -775,6 +826,48 @@ export function handleDemoRequest(options: {
         },
       };
     }
+    if (path.includes("/admin/teams")) {
+      const teamId = String(params.teamId || bodyRecord.teamId || "").trim();
+      if (!teamId) return demoBadRequest("teamId is required");
+      const existing =
+        getDemoTeams().find((team) => team.id === teamId) ?? getDemoTeams()[0];
+      const intent = String(bodyRecord.intent ?? "").toLowerCase();
+      if (intent === "remove" || intent === "delete") {
+        return {
+          ok: true,
+          data: {
+            teams: getDemoTeams().filter((team) => team.id !== teamId),
+          },
+        };
+      }
+      const name = String(bodyRecord.name ?? "").trim();
+      if (name.length < 2) return demoBadRequest("Team name is required");
+      return { ok: true, data: { ...existing, name } };
+    }
+    if (path.includes("/admin/members")) {
+      const teamId = String(params.teamId || bodyRecord.teamId || "").trim();
+      const userId = String(
+        params.userId || bodyRecord.userId || bodyRecord.user || "",
+      ).trim();
+      if (!teamId) return demoBadRequest("teamId is required");
+      if (!userId)
+        return demoBadRequest("teamId and user identifier are required");
+      return { ok: true, data: { teamId, members: getDemoMembers(teamId) } };
+    }
+    if (path.includes("/admin/users")) {
+      const userId = String(
+        params.userId || bodyRecord.userId || bodyRecord.id || "",
+      ).trim();
+      const teamId = String(params.teamId || bodyRecord.teamId || "").trim();
+      const user = getDemoUsers()[0];
+      return {
+        ok: true,
+        data: {
+          user: { ...user, id: userId || user.id },
+          ...(teamId ? { teamId } : {}),
+        },
+      };
+    }
     // Generic write → return empty success
     return { ok: true, data: {} };
   }
@@ -832,6 +925,9 @@ export function handleDemoRequest(options: {
       },
     };
   }
+  if (path === "/api/private/notifications/preferences") {
+    return { ok: true, data: demoNotificationPreferences };
+  }
   if (path.includes("/admin/notification-email")) {
     return {
       ok: true,
@@ -867,7 +963,7 @@ export function handleDemoRequest(options: {
   if (publicSiteMatch) {
     const slug = decodeURIComponent(publicSiteMatch[1] || "demo-site");
     const profile = publicSiteProfile ?? findSiteProfileByPublicSlug(slug);
-    if (!profile) return DEMO_NOT_FOUND_RESPONSE;
+    if (!profile) return demoNotFoundResponse();
     return {
       ok: true,
       data: {
@@ -1080,7 +1176,7 @@ export function handleDemoRequest(options: {
   // Public routes — delegate to same generators
   const publicMatch = path.match(/\/api\/public\/share\/[^/]+\/(.*)/);
   if (publicMatch) {
-    if (!publicSiteProfile) return DEMO_NOT_FOUND_RESPONSE;
+    if (!publicSiteProfile) return demoNotFoundResponse();
     const subPath = publicMatch[1];
     if (subPath === "overview") return generateDemoOverview(siteId, params);
     if (subPath === "trend") return generateDemoTrend(siteId, params);
@@ -1142,9 +1238,46 @@ export function handleDemoRequest(options: {
       return generateDemoClientDimensionTrend(siteId, params);
     if (subPath === "client-cross-breakdown")
       return generateDemoClientCrossBreakdown(siteId, params);
-    return DEMO_NOT_FOUND_RESPONSE;
+    return demoNotFoundResponse();
   }
 
   // Fallback
-  return DEMO_NOT_FOUND_RESPONSE;
+  return demoNotFoundResponse();
+}
+
+/**
+ * Standalone entry point. Runs the dispatcher, then normalizes any success
+ * envelope to the standard `{ ok:true, requestId, timestamp, ... }` shape so
+ * demo responses are compatible with the real private/public API. Failures are
+ * already emitted in the standard `{ ok:false, error:{ code, message } }` shape
+ * by the dispatcher and pass through untouched.
+ */
+export function handleDemoRequest(
+  options: Parameters<typeof handleDemoRequestInner>[0],
+): unknown {
+  const result: unknown = handleDemoRequestInner(options);
+  if (
+    result &&
+    typeof result === "object" &&
+    (result as { ok?: unknown }).ok === true &&
+    typeof (result as { requestId?: unknown }).requestId !== "string"
+  ) {
+    return demoOk({ ...(result as Record<string, unknown>) });
+  }
+  return result;
+}
+
+/**
+ * Demo request entry point with failure detection. Mirrors the real fetch
+ * branches: a standard failure envelope throws an Error whose message is the
+ * server-style error message, so demo consumers land in the same catch path.
+ */
+export function demoRequest(
+  options: Parameters<typeof handleDemoRequest>[0],
+): unknown {
+  const result = handleDemoRequest(options);
+  if (isErrorEnvelope(result)) {
+    throw new Error(extractErrorMessage(result));
+  }
+  return result;
 }

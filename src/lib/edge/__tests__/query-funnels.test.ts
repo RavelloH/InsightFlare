@@ -98,24 +98,26 @@ describe("funnel query handler", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      funnels: [
-        {
-          id: "funnel-1",
-          siteId: "site-1",
-          name: "Signup",
-          steps,
-          createdAt: 10,
-          updatedAt: 20,
-        },
-        {
-          id: "funnel-legacy",
-          siteId: "site-1",
-          name: "Docs",
-          steps: legacySteps,
-          createdAt: 30,
-          updatedAt: 40,
-        },
-      ],
+      data: {
+        funnels: [
+          {
+            id: "funnel-1",
+            siteId: "site-1",
+            name: "Signup",
+            steps,
+            createdAt: 10,
+            updatedAt: 20,
+          },
+          {
+            id: "funnel-legacy",
+            siteId: "site-1",
+            name: "Docs",
+            steps: legacySteps,
+            createdAt: 30,
+            updatedAt: 40,
+          },
+        ],
+      },
     });
     expect(calls[0]?.sql).toContain("FROM analysis_definitions");
     expect(calls[0]?.sql).not.toContain("widgets");
@@ -149,13 +151,15 @@ describe("funnel query handler", () => {
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      funnel: {
-        id: "00000000-0000-4000-8000-000000000001",
-        siteId: "site-1",
-        name: "Signup",
-        steps: normalizedSteps,
-        createdAt: now,
-        updatedAt: now,
+      data: {
+        funnel: {
+          id: "00000000-0000-4000-8000-000000000001",
+          siteId: "site-1",
+          name: "Signup",
+          steps: normalizedSteps,
+          createdAt: now,
+          updatedAt: now,
+        },
       },
     });
     expect(calls[0]?.sql).toContain("INSERT INTO analysis_definitions");
@@ -247,46 +251,48 @@ describe("funnel query handler", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
-      funnel: {
-        id: "funnel-1",
-        siteId: "site-1",
-        name: "Signup",
-        steps,
-        createdAt: 10,
-        updatedAt: 20,
-      },
-      analysis: {
-        steps: [
-          {
-            index: 0,
-            label: "/pricing",
-            type: "pageview",
-            sessions: 1,
-            visitors: 1,
-            conversionRate: 1,
-            stepConversionRate: 1,
-            dropOffSessions: 0,
-            dropOffRate: 0,
+      data: {
+        funnel: {
+          id: "funnel-1",
+          siteId: "site-1",
+          name: "Signup",
+          steps,
+          createdAt: 10,
+          updatedAt: 20,
+        },
+        analysis: {
+          steps: [
+            {
+              index: 0,
+              label: "/pricing",
+              type: "pageview",
+              sessions: 1,
+              visitors: 1,
+              conversionRate: 1,
+              stepConversionRate: 1,
+              dropOffSessions: 0,
+              dropOffRate: 0,
+            },
+            {
+              index: 1,
+              label: "signup_started",
+              type: "event",
+              sessions: 1,
+              visitors: 1,
+              conversionRate: 1,
+              stepConversionRate: 1,
+              dropOffSessions: 0,
+              dropOffRate: 0,
+            },
+          ],
+          summary: {
+            totalSessions: 1,
+            convertedSessions: 1,
+            totalVisitors: 1,
+            convertedVisitors: 1,
+            overallConversionRate: 1,
+            largestDropOffStepIndex: null,
           },
-          {
-            index: 1,
-            label: "signup_started",
-            type: "event",
-            sessions: 1,
-            visitors: 1,
-            conversionRate: 1,
-            stepConversionRate: 1,
-            dropOffSessions: 0,
-            dropOffRate: 0,
-          },
-        ],
-        summary: {
-          totalSessions: 1,
-          convertedSessions: 1,
-          totalVisitors: 1,
-          convertedVisitors: 1,
-          overallConversionRate: 1,
-          largestDropOffStepIndex: null,
         },
       },
     });

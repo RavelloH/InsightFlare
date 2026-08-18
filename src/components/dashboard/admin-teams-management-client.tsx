@@ -30,6 +30,7 @@ import type { TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
+import { extractErrorMessage } from "@/lib/response-envelope";
 import { useRouter } from "@/lib/router";
 
 interface AdminTeamsManagementClientProps {
@@ -46,8 +47,8 @@ interface ApiResponse<T> {
 
 async function fetchTeams(signal?: AbortSignal): Promise<TeamData[]> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: "/api/private/admin/teams",
     }) as ApiResponse<TeamData[]>;
     return Array.isArray(result.data) ? result.data : [];
@@ -60,7 +61,7 @@ async function fetchTeams(signal?: AbortSignal): Promise<TeamData[]> {
   });
   const payload = (await response.json()) as ApiResponse<TeamData[]>;
   if (!response.ok || !payload.ok || !Array.isArray(payload.data)) {
-    throw new Error(payload.message || payload.error || "load_teams_failed");
+    throw new Error(extractErrorMessage(payload, "load_teams_failed"));
   }
   return payload.data;
 }
@@ -122,7 +123,7 @@ export function AdminTeamsManagementClient({
       });
       const payload = (await response.json()) as ApiResponse<TeamData>;
       if (!response.ok || !payload.ok) {
-        throw new Error(payload.message || payload.error || t.createFailed);
+        throw new Error(extractErrorMessage(payload, t.createFailed));
       }
       setName("");
       setSlug("");

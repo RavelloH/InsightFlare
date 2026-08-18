@@ -131,8 +131,8 @@ async function fetchConfig(
   signal?: AbortSignal,
 ): Promise<PublicLoginTurnstileAdminConfig> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: API_PATH,
     }) as ApiResponse<PublicLoginTurnstileAdminConfig>;
     return result.data ?? defaultConfig();
@@ -156,8 +156,8 @@ async function saveConfig(
   body: Record<string, unknown>,
 ): Promise<PublicLoginTurnstileAdminConfig> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: API_PATH,
       method: "PATCH",
       body,
@@ -184,8 +184,8 @@ async function saveConfig(
 
 async function deleteConfig(): Promise<PublicLoginTurnstileAdminConfig> {
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path: API_PATH,
       method: "DELETE",
     }) as ApiResponse<PublicLoginTurnstileAdminConfig>;
@@ -215,8 +215,8 @@ async function testConfig(body: {
   const path = `${API_PATH}/test`;
 
   if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
-    const result = handleDemoRequest({
+    const { demoRequest } = await import("@/lib/realtime/mock");
+    const result = demoRequest({
       path,
       method: "POST",
       body,

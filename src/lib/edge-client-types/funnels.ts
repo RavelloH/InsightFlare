@@ -38,20 +38,26 @@ export interface FunnelAnalysis {
 
 export interface FunnelListData {
   ok: boolean;
-  funnels: FunnelDefinition[];
+  data: {
+    funnels: FunnelDefinition[];
+  };
 }
 
 export interface FunnelDetailData {
   ok: boolean;
-  funnel: FunnelDefinition;
-  analysis: FunnelAnalysis;
+  data: {
+    funnel: FunnelDefinition;
+    analysis: FunnelAnalysis;
+  };
 }
 
 export type FunnelAnalysisData = FunnelDetailData;
 
 export interface FunnelMutationData {
   ok: boolean;
-  funnel: FunnelDefinition;
+  data: {
+    funnel: FunnelDefinition;
+  };
 }
 
 export interface FunnelDeleteData {

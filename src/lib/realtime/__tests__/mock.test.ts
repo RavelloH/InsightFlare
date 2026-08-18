@@ -1014,7 +1014,7 @@ describe("mock — handleDemoRequest", () => {
           params: ANALYTICS_PARAMS,
         }),
       );
-      expect(res).toEqual({ ok: true, eventName: "", fields: [] });
+      expect(res).toMatchObject({ ok: true, eventName: "", fields: [] });
     });
 
     it("limits public filter values to public canonical fields", () => {
@@ -1137,7 +1137,7 @@ describe("mock — handleDemoRequest", () => {
           },
         }),
       );
-      expect(sameDimension).toEqual({
+      expect(sameDimension).toMatchObject({
         ok: true,
         data: {
           columns: [],
@@ -1181,7 +1181,7 @@ describe("mock — handleDemoRequest", () => {
           params: { ...invertedParams, dimension: "browser" },
         }),
       );
-      expect(clientTrend).toEqual({
+      expect(clientTrend).toMatchObject({
         ok: true,
         interval: "hour",
         series: [],
@@ -1194,7 +1194,7 @@ describe("mock — handleDemoRequest", () => {
           params: { ...invertedParams, dimension: "source" },
         }),
       );
-      expect(utmTrend).toEqual({
+      expect(utmTrend).toMatchObject({
         ok: true,
         interval: "hour",
         series: [],
@@ -1207,7 +1207,7 @@ describe("mock — handleDemoRequest", () => {
           params: invertedParams,
         }),
       );
-      expect(browserRadar).toEqual({ ok: true, data: [] });
+      expect(browserRadar).toMatchObject({ ok: true, data: [] });
 
       const referrerRadar = asRecord(
         handleDemoRequest({
@@ -1215,7 +1215,7 @@ describe("mock — handleDemoRequest", () => {
           params: invertedParams,
         }),
       );
-      expect(referrerRadar).toEqual({ ok: true, data: [] });
+      expect(referrerRadar).toMatchObject({ ok: true, data: [] });
 
       const browserCross = asRecord(
         handleDemoRequest({
@@ -1239,7 +1239,7 @@ describe("mock — handleDemoRequest", () => {
           },
         }),
       );
-      expect(clientCross).toEqual({
+      expect(clientCross).toMatchObject({
         ok: true,
         data: {
           columns: [],
@@ -1475,7 +1475,10 @@ describe("mock — handleDemoRequest", () => {
             params,
           }),
         ),
-      ).toEqual({ ok: false, data: { error: "Not Found" } });
+      ).toMatchObject({
+        ok: false,
+        error: { code: "not_found", message: "Not Found" },
+      });
 
       expect(
         ok(
@@ -1484,7 +1487,10 @@ describe("mock — handleDemoRequest", () => {
             params,
           }),
         ),
-      ).toEqual({ ok: false, data: { error: "Not Found" } });
+      ).toMatchObject({
+        ok: false,
+        error: { code: "not_found", message: "Not Found" },
+      });
     });
 
     it("dispatches trend to the same generator", () => {
@@ -1519,7 +1525,9 @@ describe("mock — handleDemoRequest", () => {
         }),
       );
       expect(res.ok).toBe(false);
-      expect(res.data).toEqual({ error: "Not Found" });
+      expect(res).toMatchObject({
+        error: { code: "not_found", message: "Not Found" },
+      });
     });
 
     it.each([
@@ -1613,7 +1621,9 @@ describe("mock — handleDemoRequest", () => {
         handleDemoRequest({ path: "/api/private/totally-unknown" }),
       );
       expect(res.ok).toBe(false);
-      expect(res.data).toEqual({ error: "Not Found" });
+      expect(res).toMatchObject({
+        error: { code: "not_found", message: "Not Found" },
+      });
     });
   });
 });

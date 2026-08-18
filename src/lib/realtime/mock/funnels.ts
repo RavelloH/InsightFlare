@@ -6,6 +6,8 @@ import type {
   FunnelMutationData,
   FunnelStep,
 } from "@/lib/edge-client";
+import { demoBadRequest, demoNotFound } from "@/lib/realtime/mock/envelope";
+import type { ErrorEnvelope } from "@/lib/response-envelope";
 
 const CREATED_AT = 1_767_225_600;
 let customFunnelCounter = 0;
@@ -132,52 +134,52 @@ function analysisFor(funnel: FunnelDefinition): FunnelAnalysis {
 export function generateDemoFunnels(
   siteId: string,
   params: Record<string, string | number>,
-): FunnelListData | FunnelDetailData {
+): FunnelListData | FunnelDetailData | ErrorEnvelope {
   const id = String(params.id ?? "").trim();
   const funnels = siteFunnels(siteId);
-  if (!id) return { ok: true, funnels };
+  if (!id) return { ok: true, data: { funnels } };
 
-  const funnel = funnels.find((item) => item.id === id) ?? funnels[0];
+  const funnel = funnels.find((item) => item.id === id);
+  if (!funnel) return demoNotFound();
+  if (funnel.steps.length < 2) {
+    return demoBadRequest("Funnel has fewer than 2 steps");
+  }
   return {
     ok: true,
-    funnel,
-    analysis: analysisFor(funnel),
+    data: { funnel, analysis: analysisFor(funnel) },
   };
 }
 
 export function createDemoFunnel(
   siteId: string,
   body: unknown,
-): FunnelMutationData {
+): FunnelMutationData | ErrorEnvelope {
   const payload = body && typeof body === "object" ? body : {};
   const record = payload as Record<string, unknown>;
-  const name = String(record.name ?? "").trim() || "Untitled funnel";
+  const name = String(record.name ?? "").trim();
+  if (!name) return demoBadRequest("Name is required");
   const steps = normalizeDemoSteps(record.steps);
+  if (steps.length < 2) return demoBadRequest("At least 2 steps are required");
   customFunnelCounter += 1;
   const now = Math.floor(Date.now() / 1000);
   const funnel: FunnelDefinition = {
     id: `demo-funnel-custom-${customFunnelCounter}`,
     siteId,
     name,
-    steps:
-      steps.length >= 2
-        ? steps
-        : [
-            { type: "pageview", value: "/" },
-            { type: "event", value: "conversion" },
-          ],
+    steps,
     createdAt: now,
     updatedAt: now,
   };
   demoFunnels.unshift(funnel);
-  return { ok: true, funnel };
+  return { ok: true, data: { funnel } };
 }
 
 export function deleteDemoFunnel(
   siteId: string,
   params: Record<string, string | number>,
-): { ok: boolean } {
+): { ok: boolean } | ErrorEnvelope {
   const id = String(params.id ?? "").trim();
+  if (!id) return demoBadRequest("Funnel id is required");
   const index = demoFunnels.findIndex(
     (funnel) => funnel.siteId === siteId && funnel.id === id,
   );
