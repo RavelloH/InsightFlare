@@ -182,6 +182,17 @@ export function parseFilterOptionKey(url: URL): FilterOptionKey | null {
     "geo.country",
     "client.deviceType",
     "client.browser",
+    "client.browserVersion",
+    "client.browserEngine",
+    "client.os",
+    "client.osVersion",
+    "client.language",
+    "client.screenSize",
+    "utm.source",
+    "utm.medium",
+    "utm.campaign",
+    "utm.term",
+    "utm.content",
     "page.path",
     "page.title",
     "page.hostname",
@@ -197,6 +208,7 @@ export function parseFilterOptionKey(url: URL): FilterOptionKey | null {
     "geo.continent",
     "geo.timeZone",
     "geo.organization",
+    "event.name",
   ];
   return keys.includes(raw as FilterOptionKey)
     ? (raw as FilterOptionKey)

@@ -77,10 +77,23 @@ export async function queryEventFieldValuesFromD1(
   fieldPath: string,
   fieldValueType: string,
   limit: number,
+  search?: string,
 ): Promise<EventFieldValueRow[]> {
   const filter = buildEventFilterSql(filters, "es");
   const valueTypeCode = customEventJsonTypeCode(fieldValueType);
   if (valueTypeCode === null) return [];
+  const normalizedSearch = search?.trim().toLowerCase();
+  const searchExpression =
+    valueTypeCode === 1
+      ? "v.string_value"
+      : valueTypeCode === 2
+        ? "CAST(v.number_value AS TEXT)"
+        : valueTypeCode === 3
+          ? "CASE v.boolean_value WHEN 1 THEN 'true' ELSE 'false' END"
+          : "''";
+  const searchPattern = normalizedSearch
+    ? `%${normalizedSearch.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`
+    : null;
   const sql = `
 WITH
 ${buildEventAnalyticsSourceCte({ eventName })},
@@ -103,6 +116,7 @@ field_rows AS (
   INNER JOIN filtered_events fe
     ON fe.event_pk = v.event_pk
   WHERE p.path = ? AND v.value_type = ?
+  ${searchPattern ? `AND LOWER(TRIM(COALESCE(${searchExpression}, ''))) LIKE ? ESCAPE '\\'` : ""}
 )
 SELECT
   valueType,
@@ -123,6 +137,7 @@ LIMIT ?
     ...filter.bindings,
     fieldPath,
     valueTypeCode,
+    ...(searchPattern ? [searchPattern] : []),
     limit,
   ]);
 }

@@ -12,6 +12,7 @@ export interface DimensionData {
 export interface DashboardFilterOption {
   value: string;
   label: string;
+  occurrences?: number;
   group?: "country" | "region" | "city";
 }
 

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   dashboardFilterDocumentFromPresentation,
   dashboardFilterPresentation,
+  serializeDashboardSearchParams,
   withDashboardFilterSearchParams,
 } from "@/lib/dashboard/filter-state";
 import type { RangePreset } from "@/lib/dashboard/query-state";
@@ -342,6 +343,20 @@ describe("dashboard query-state helpers", () => {
       expect(next.get("geoCountry")).toBeNull();
       expect(next.get("filter[geo.country]")).toBeNull();
       expect(next.get("filter[referrer.domain]")).toBe("google.com");
+    });
+  });
+
+  describe("serializeDashboardSearchParams", () => {
+    it("keeps filter syntax readable while encoding unsafe values", () => {
+      const params = new URLSearchParams([
+        ["filter[page.path]", "/politics"],
+        ["filter[referrer.domain]", "google.com"],
+        ["filter[page.title]", "News & Politics"],
+      ]);
+
+      expect(serializeDashboardSearchParams(params)).toBe(
+        "filter[page.path]=/politics&filter[referrer.domain]=google.com&filter[page.title]=News%20%26%20Politics",
+      );
     });
   });
 

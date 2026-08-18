@@ -307,6 +307,7 @@ export function ShareHeader({
             siteId={publicSiteId}
             showControls
             showFilterSheet
+            filterAudience="public-share"
             showRealtimeBadge={false}
           />
         </div>

@@ -23,6 +23,7 @@ async function queryCustomEventNamesFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
+  search?: string,
 ): Promise<DimensionRow[]> {
   const filter = buildVisitFilterSql(filters, "vc");
   const sql = `
@@ -73,6 +74,7 @@ event_rollup AS (
 SELECT value, views, sessions, visitors
 FROM event_rollup
 WHERE TRIM(value) != ''
+${search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
 ORDER BY views DESC, sessions DESC, value ASC
 LIMIT ?
 `;
@@ -81,6 +83,16 @@ LIMIT ?
       ...visitSourceBindings(siteId, window),
       ...eventSourceBindings(siteId, window),
       ...filter.bindings,
+      ...(search
+        ? [
+            `%${search
+              .trim()
+              .toLowerCase()
+              .replaceAll("\\", "\\\\")
+              .replaceAll("%", "\\%")
+              .replaceAll("_", "\\_")}%`,
+          ]
+        : []),
       limit,
     ])
   ).map((row) => ({
@@ -97,8 +109,16 @@ export async function queryEventTypeAggregate(
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
+  search?: string,
 ): Promise<DimensionRow[]> {
-  return queryCustomEventNamesFromD1(env, siteId, window, filters, limit);
+  return queryCustomEventNamesFromD1(
+    env,
+    siteId,
+    window,
+    filters,
+    limit,
+    search,
+  );
 }
 
 export async function queryEventSummaryMetricsFromD1(

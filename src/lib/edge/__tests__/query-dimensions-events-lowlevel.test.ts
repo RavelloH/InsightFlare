@@ -679,6 +679,7 @@ describe("edge query event fields and records low-level coverage", () => {
         "/amount",
         "number",
         7,
+        "4",
       ),
     ).resolves.toEqual([
       {
@@ -694,6 +695,7 @@ describe("edge query event fields and records low-level coverage", () => {
     ]);
 
     expect(calls[0].sql).toContain("WHERE p.path = ? AND v.value_type = ?");
+    expect(calls[0].sql).toContain("LIKE ? ESCAPE '\\'");
     expect(calls[0].bindings).toEqual([
       siteId,
       "Purchase",
@@ -701,6 +703,7 @@ describe("edge query event fields and records low-level coverage", () => {
       "mobile",
       "/amount",
       2,
+      "%4%",
       7,
     ]);
   });

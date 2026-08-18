@@ -28,6 +28,7 @@ import {
   fetchEventsSummary,
   fetchEventsTrend,
 } from "@/lib/dashboard/client-data";
+import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
 import type { EventsSummaryData, EventsTrendData } from "@/lib/edge-client";
@@ -214,7 +215,7 @@ function detailQueryTarget(
   const params = new URLSearchParams(searchParams.toString());
   params.set(DETAIL_QUERY_PARAM, normalized);
   params.delete("eventName");
-  const query = params.toString();
+  const query = serializeDashboardSearchParams(params);
   return query ? `${pathname}?${query}` : pathname;
 }
 
@@ -295,7 +296,7 @@ export function EventsClientPage({
 
     params.delete(DETAIL_QUERY_PARAM);
     params.delete("eventName");
-    const query = params.toString();
+    const query = serializeDashboardSearchParams(params);
     replaceUrlWithoutNavigation(query ? `${pathname}?${query}` : pathname);
   }, [pathname]);
   const siteBasePath = useMemo(

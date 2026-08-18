@@ -146,6 +146,42 @@ export interface AppMessages {
     all: string;
     clear: string;
   };
+  filterBuilder: {
+    fieldGroups: {
+      page: string;
+      session: string;
+      referrer: string;
+      campaign: string;
+      client: string;
+      geography: string;
+      event: string;
+    };
+    fieldLabels: Record<string, string>;
+    operatorLabels: Record<string, string>;
+    valueType: string;
+    valueKinds: {
+      string: string;
+      number: string;
+      boolean: string;
+    };
+    booleanTrue: string;
+    booleanFalse: string;
+    valueSearchPlaceholder: string;
+    valueListPlaceholder: string;
+    rangeStartPlaceholder: string;
+    rangeEndPlaceholder: string;
+    jsonPointer: string;
+    match: string;
+    apply: string;
+    allConditions: string;
+    anyCondition: string;
+    condition: string;
+    group: string;
+    invertCondition: string;
+    exclude: string;
+    addGroup: string;
+    invalid: string;
+  };
   realtime: {
     title: string;
     subtitle: string;
@@ -2197,7 +2233,7 @@ const enMessages = {
       "Week interval is only available within the last 12 months.",
     filterTitle: "Filters",
     filterSubtitle:
-      "Filters are applied to current overview data queries in real time.",
+      "Create or save filters, or use filters saved for you or your team.",
     previousPeriod: "Previous period",
     nextPeriod: "Next period",
     customSelectionSummary: "Selected range: {from} to {to} ({days} days)",
@@ -2208,6 +2244,92 @@ const enMessages = {
     browser: "Browser",
     all: "All",
     clear: "Clear",
+  },
+  filterBuilder: {
+    fieldGroups: {
+      page: "Page",
+      session: "Session",
+      referrer: "Referrer",
+      campaign: "Campaign",
+      client: "Client",
+      geography: "Geography",
+      event: "Event",
+    },
+    fieldLabels: {
+      "page.path": "Page path",
+      "page.title": "Page title",
+      "page.hostname": "Page hostname",
+      "page.query": "Query string",
+      "page.hash": "Hash fragment",
+      "session.entryPath": "Entry page",
+      "session.exitPath": "Exit page",
+      "referrer.domain": "Referrer domain",
+      "referrer.url": "Referrer URL",
+      "utm.source": "Campaign source",
+      "utm.medium": "Campaign medium",
+      "utm.campaign": "Campaign name",
+      "utm.term": "Campaign term",
+      "utm.content": "Campaign content",
+      "client.browser": "Browser",
+      "client.browserVersion": "Browser version",
+      "client.browserEngine": "Browser engine",
+      "client.os": "Operating system",
+      "client.osVersion": "Operating system version",
+      "client.deviceType": "Device type",
+      "client.language": "Language",
+      "client.screenSize": "Screen size",
+      "geo.country": "Country",
+      "geo.region": "Region",
+      "geo.city": "City",
+      "geo.continent": "Continent",
+      "geo.timeZone": "Time zone",
+      "geo.organization": "Organization",
+      "event.name": "Event name",
+      "event.payload": "Event payload",
+    },
+    operatorLabels: {
+      eq: "Equals",
+      neq: "Does not equal",
+      in: "Is one of",
+      notIn: "Is not one of",
+      contains: "Contains",
+      startsWith: "Starts with",
+      endsWith: "Ends with",
+      gt: "Greater than",
+      gte: "Greater than or equal to",
+      lt: "Less than",
+      lte: "Less than or equal to",
+      between: "Between",
+      exists: "Exists",
+      notExists: "Does not exist",
+      isNull: "Is null",
+      notNull: "Is not null",
+      isEmpty: "Is empty",
+      notEmpty: "Is not empty",
+    },
+    valueType: "Value type",
+    valueKinds: {
+      string: "Text",
+      number: "Number",
+      boolean: "Boolean",
+    },
+    booleanTrue: "True",
+    booleanFalse: "False",
+    valueSearchPlaceholder: "Search or enter a value",
+    valueListPlaceholder: "Enter values separated by commas",
+    rangeStartPlaceholder: "Lower bound",
+    rangeEndPlaceholder: "Upper bound",
+    jsonPointer: "JSON Pointer",
+    match: "Match",
+    apply: "Apply Filters",
+    allConditions: "All conditions",
+    anyCondition: "Any condition",
+    condition: "Condition {index}",
+    group: "Group {index}",
+    invertCondition: "Invert this condition",
+    exclude: "Exclude",
+    addGroup: "Add group",
+    invalid: "Complete each filter condition before applying.",
   },
   realtime: {
     title: "Real-time",
@@ -4429,7 +4551,7 @@ const zhMessages = {
     intervalDisabledDay: "仅在最近 90 天内可选日间隔。",
     intervalDisabledWeek: "仅在最近 12 个月内可选周间隔。",
     filterTitle: "筛选条件",
-    filterSubtitle: "筛选条件会实时参与当前总览数据查询。",
+    filterSubtitle: "新建、保存筛选条件，或者使用个人/团队保存的筛选条件。",
     previousPeriod: "上个周期",
     nextPeriod: "下个周期",
     customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）",
@@ -4440,6 +4562,92 @@ const zhMessages = {
     browser: "浏览器",
     all: "全部",
     clear: "清除",
+  },
+  filterBuilder: {
+    fieldGroups: {
+      page: "页面",
+      session: "会话",
+      referrer: "来源",
+      campaign: "营销活动",
+      client: "客户端",
+      geography: "地理位置",
+      event: "事件",
+    },
+    fieldLabels: {
+      "page.path": "页面路径",
+      "page.title": "页面标题",
+      "page.hostname": "页面主机名",
+      "page.query": "查询字符串",
+      "page.hash": "Hash 片段",
+      "session.entryPath": "入口页面",
+      "session.exitPath": "出口页面",
+      "referrer.domain": "来源域名",
+      "referrer.url": "来源 URL",
+      "utm.source": "活动来源",
+      "utm.medium": "活动媒介",
+      "utm.campaign": "活动名称",
+      "utm.term": "活动关键词",
+      "utm.content": "活动内容",
+      "client.browser": "浏览器",
+      "client.browserVersion": "浏览器版本",
+      "client.browserEngine": "浏览器引擎",
+      "client.os": "操作系统",
+      "client.osVersion": "操作系统版本",
+      "client.deviceType": "设备类型",
+      "client.language": "语言",
+      "client.screenSize": "屏幕尺寸",
+      "geo.country": "国家/地区",
+      "geo.region": "地区",
+      "geo.city": "城市",
+      "geo.continent": "大洲",
+      "geo.timeZone": "时区",
+      "geo.organization": "组织",
+      "event.name": "事件名称",
+      "event.payload": "事件载荷",
+    },
+    operatorLabels: {
+      eq: "等于",
+      neq: "不等于",
+      in: "属于任一值",
+      notIn: "不属于任一值",
+      contains: "包含",
+      startsWith: "以此开头",
+      endsWith: "以此结尾",
+      gt: "大于",
+      gte: "大于或等于",
+      lt: "小于",
+      lte: "小于或等于",
+      between: "介于两者之间",
+      exists: "存在",
+      notExists: "不存在",
+      isNull: "为 NULL",
+      notNull: "不为 NULL",
+      isEmpty: "为空字符串",
+      notEmpty: "不为空字符串",
+    },
+    valueType: "值类型",
+    valueKinds: {
+      string: "文本",
+      number: "数字",
+      boolean: "布尔值",
+    },
+    booleanTrue: "是",
+    booleanFalse: "否",
+    valueSearchPlaceholder: "搜索或输入值",
+    valueListPlaceholder: "输入多个值，以逗号分隔",
+    rangeStartPlaceholder: "下限",
+    rangeEndPlaceholder: "上限",
+    jsonPointer: "JSON 指针",
+    match: "匹配方式",
+    apply: "应用筛选",
+    allConditions: "全部条件均满足",
+    anyCondition: "满足任一条件",
+    condition: "条件 {index}",
+    group: "组 {index}",
+    invertCondition: "反转此条件",
+    exclude: "排除",
+    addGroup: "添加分组",
+    invalid: "请先完成每一条筛选条件。",
   },
   realtime: {
     title: "实时",
@@ -6585,7 +6793,7 @@ const jaMessages = {
     intervalDisabledWeek: "週単位の間隔は過去 12 か月以内でのみ利用できます。",
     filterTitle: "フィルター",
     filterSubtitle:
-      "フィルターは現在の概要データクエリにリアルタイムで適用されます。",
+      "フィルターを新規作成・保存するか、自分またはチームが保存したフィルターを使用します。",
     previousPeriod: "前の期間",
     nextPeriod: "次の期間",
     customSelectionSummary: "選択範囲：{from} から {to}（{days} 日）",
@@ -6596,6 +6804,92 @@ const jaMessages = {
     browser: "ブラウザー",
     all: "すべて",
     clear: "クリア",
+  },
+  filterBuilder: {
+    fieldGroups: {
+      page: "ページ",
+      session: "セッション",
+      referrer: "リファラー",
+      campaign: "キャンペーン",
+      client: "クライアント",
+      geography: "地域",
+      event: "イベント",
+    },
+    fieldLabels: {
+      "page.path": "ページパス",
+      "page.title": "ページタイトル",
+      "page.hostname": "ページホスト名",
+      "page.query": "クエリ文字列",
+      "page.hash": "ハッシュフラグメント",
+      "session.entryPath": "入口ページ",
+      "session.exitPath": "出口ページ",
+      "referrer.domain": "リファラードメイン",
+      "referrer.url": "リファラー URL",
+      "utm.source": "キャンペーンソース",
+      "utm.medium": "キャンペーンメディア",
+      "utm.campaign": "キャンペーン名",
+      "utm.term": "キャンペーン用語",
+      "utm.content": "キャンペーンコンテンツ",
+      "client.browser": "ブラウザー",
+      "client.browserVersion": "ブラウザーのバージョン",
+      "client.browserEngine": "ブラウザーエンジン",
+      "client.os": "オペレーティングシステム",
+      "client.osVersion": "オペレーティングシステムのバージョン",
+      "client.deviceType": "デバイス種別",
+      "client.language": "言語",
+      "client.screenSize": "画面サイズ",
+      "geo.country": "国・地域",
+      "geo.region": "地域",
+      "geo.city": "市区町村",
+      "geo.continent": "大陸",
+      "geo.timeZone": "タイムゾーン",
+      "geo.organization": "組織",
+      "event.name": "イベント名",
+      "event.payload": "イベントペイロード",
+    },
+    operatorLabels: {
+      eq: "等しい",
+      neq: "等しくない",
+      in: "いずれかに一致",
+      notIn: "いずれにも一致しない",
+      contains: "含む",
+      startsWith: "で始まる",
+      endsWith: "で終わる",
+      gt: "より大きい",
+      gte: "以上",
+      lt: "より小さい",
+      lte: "以下",
+      between: "範囲内",
+      exists: "存在する",
+      notExists: "存在しない",
+      isNull: "NULL である",
+      notNull: "NULL ではない",
+      isEmpty: "空文字列である",
+      notEmpty: "空文字列ではない",
+    },
+    valueType: "値の種類",
+    valueKinds: {
+      string: "テキスト",
+      number: "数値",
+      boolean: "真偽値",
+    },
+    booleanTrue: "真",
+    booleanFalse: "偽",
+    valueSearchPlaceholder: "値を検索または入力",
+    valueListPlaceholder: "値をカンマで区切って入力",
+    rangeStartPlaceholder: "下限",
+    rangeEndPlaceholder: "上限",
+    jsonPointer: "JSON ポインター",
+    match: "一致条件",
+    apply: "フィルターを適用",
+    allConditions: "すべての条件",
+    anyCondition: "いずれかの条件",
+    condition: "条件 {index}",
+    group: "グループ {index}",
+    invertCondition: "この条件を反転",
+    exclude: "除外",
+    addGroup: "グループを追加",
+    invalid: "適用する前に、すべての条件を入力してください。",
   },
   realtime: {
     title: "リアルタイム",

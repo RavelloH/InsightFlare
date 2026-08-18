@@ -18,6 +18,8 @@ import {
   serializeFilterParams,
 } from "@/lib/filter-contract";
 
+import { serializeDashboardSearchParams } from "./filter-state";
+
 export type RangePreset =
   | "30m"
   | "1h"
@@ -290,7 +292,7 @@ export function withRangeAndFilters(
     analyticsFilterRegistry,
   );
   params.set("range", range);
-  return `${pathname}?${params.toString()}`;
+  return `${pathname}?${serializeDashboardSearchParams(params)}`;
 }
 
 export function normalizeCustomDateRange(

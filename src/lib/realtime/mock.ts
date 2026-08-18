@@ -875,7 +875,7 @@ export function handleDemoRequest(options: {
   }
 
   // Analytics query routes
-  if (path.includes("/filter-options")) {
+  if (path.includes("/filter-values")) {
     return generateDemoFilterOptions(siteId, params);
   }
   if (path.includes("/overview-page-path")) {
@@ -1067,7 +1067,7 @@ export function handleDemoRequest(options: {
       return generateDemoPerformance(siteId, params);
     if (subPath === "countries")
       return generateDemoDimension(siteId, "countries", params);
-    if (subPath === "filter-options")
+    if (subPath === "filter-values")
       return generateDemoFilterOptions(siteId, params);
     if (subPath === "overview-geo-points")
       return generateDemoGeoPoints(siteId, params);

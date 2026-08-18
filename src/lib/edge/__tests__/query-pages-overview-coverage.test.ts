@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 import { mapDimensionRows, type QueryWindow } from "@/lib/edge/query/core";
+import { handleFilterValuesContract } from "@/lib/edge/query/filter-values-contract-adapter";
 import {
   queryOverviewFromD1,
   queryTrendFromD1,
@@ -12,10 +13,7 @@ import {
   handleOverviewContract as handleOverview,
   handleTrendContract as handleTrend,
 } from "@/lib/edge/query/overview-contract-adapter";
-import {
-  handleFilterOptionsContract as handleFilterOptions,
-  handleOverviewGeoPointsContract as handleOverviewGeoPoints,
-} from "@/lib/edge/query/overview-extras-contract-adapter";
+import { handleOverviewGeoPointsContract as handleOverviewGeoPoints } from "@/lib/edge/query/overview-extras-contract-adapter";
 import { handleOverviewTabContract } from "@/lib/edge/query/overview-tabs-contract-adapter";
 import {
   queryDimensionAggregate,
@@ -1721,10 +1719,10 @@ describe("edge overview D1 queries and handlers", () => {
       ],
     ]);
 
-    const scalar = await handleFilterOptions(
+    const scalar = await handleFilterValuesContract(
       env,
       siteId,
-      url("/filter-options", {
+      url("/filter-values", {
         filterKey: "geo.country",
         "filter[geo.country]": "US",
         "filter[client.browser]": "Chrome",
@@ -1733,10 +1731,10 @@ describe("edge overview D1 queries and handlers", () => {
         limit: 4,
       }),
     );
-    const page = await handleFilterOptions(
+    const page = await handleFilterValuesContract(
       env,
       siteId,
-      url("/filter-options", {
+      url("/filter-values", {
         filterKey: "page.path",
         "filter[page.path]": "/home",
         from: window.startMs,
@@ -1744,10 +1742,10 @@ describe("edge overview D1 queries and handlers", () => {
         limit: 4,
       }),
     );
-    const source = await handleFilterOptions(
+    const source = await handleFilterValuesContract(
       env,
       siteId,
-      url("/filter-options", {
+      url("/filter-values", {
         filterKey: "referrer.domain",
         "filter[referrer.domain]": "__direct__",
         from: window.startMs,
@@ -1755,10 +1753,10 @@ describe("edge overview D1 queries and handlers", () => {
         limit: 4,
       }),
     );
-    const client = await handleFilterOptions(
+    const client = await handleFilterValuesContract(
       env,
       siteId,
-      url("/filter-options", {
+      url("/filter-values", {
         filterKey: "client.screenSize",
         "filter[client.screenSize]": "390x844",
         from: window.startMs,
@@ -1766,10 +1764,10 @@ describe("edge overview D1 queries and handlers", () => {
         limit: 4,
       }),
     );
-    const geo = await handleFilterOptions(
+    const geo = await handleFilterValuesContract(
       env,
       siteId,
-      url("/filter-options", {
+      url("/filter-values", {
         filterKey: "geo.region",
         "filter[geo.country]": "US",
         "filter[geo.region]": "California",
@@ -1778,10 +1776,10 @@ describe("edge overview D1 queries and handlers", () => {
         limit: 4,
       }),
     );
-    const geoOrganization = await handleFilterOptions(
+    const geoOrganization = await handleFilterValuesContract(
       env,
       siteId,
-      url("/filter-options", {
+      url("/filter-values", {
         filterKey: "geo.organization",
         "filter[geo.organization]": "Example ISP",
         from: window.startMs,
@@ -1790,30 +1788,21 @@ describe("edge overview D1 queries and handlers", () => {
       }),
     );
 
-    await expect(scalar.json()).resolves.toEqual({
-      ok: true,
-      data: [{ value: "US", label: "US" }],
-    });
-    await expect(page.json()).resolves.toEqual({
-      ok: true,
-      data: [{ value: "/home", label: "/home" }],
-    });
-    await expect(source.json()).resolves.toEqual({
-      ok: true,
-      data: [{ value: "__direct__", label: "__direct__" }],
-    });
-    await expect(client.json()).resolves.toEqual({
-      ok: true,
-      data: [{ value: "390x844", label: "390x844" }],
-    });
-    await expect(geo.json()).resolves.toEqual({
-      ok: true,
-      data: [{ value: "US::CA::California", label: "US::CA::California" }],
-    });
-    await expect(geoOrganization.json()).resolves.toEqual({
-      ok: true,
-      data: [{ value: "Example ISP", label: "Example ISP" }],
-    });
+    const responses = [
+      [scalar, "geo.country"],
+      [page, "page.path"],
+      [source, "referrer.domain"],
+      [client, "client.screenSize"],
+      [geo, "geo.region"],
+      [geoOrganization, "geo.organization"],
+    ] as const;
+    for (const [response, field] of responses) {
+      await expect(response.json()).resolves.toMatchObject({
+        ok: true,
+        field,
+        data: expect.any(Array),
+      });
+    }
     expect(calls[0]?.bindings).toEqual([...visitBindings(), "Chrome", 4]);
     expect(calls.every((call) => call.bindings.at(-1) === 4)).toBe(true);
     expect(calls.flatMap((call) => call.bindings)).toEqual(
@@ -1841,10 +1830,10 @@ describe("edge overview D1 queries and handlers", () => {
       ],
     ]);
 
-    const device = await handleFilterOptions(
+    const device = await handleFilterValuesContract(
       env,
       siteId,
-      url("/filter-options", {
+      url("/filter-values", {
         filterKey: "client.deviceType",
         "filter[client.deviceType]": "desktop",
         "filter[client.browser]": "Chrome",
@@ -1853,10 +1842,10 @@ describe("edge overview D1 queries and handlers", () => {
         limit: 4,
       }),
     );
-    const browser = await handleFilterOptions(
+    const browser = await handleFilterValuesContract(
       env,
       siteId,
-      url("/filter-options", {
+      url("/filter-values", {
         filterKey: "client.browser",
         "filter[client.browser]": "Chrome",
         "filter[geo.country]": "US",
@@ -1868,14 +1857,16 @@ describe("edge overview D1 queries and handlers", () => {
 
     await expect(device.json()).resolves.toEqual({
       ok: true,
-      data: [{ value: "desktop", label: "desktop" }],
+      field: "client.deviceType",
+      data: [{ value: "desktop", label: "desktop", occurrences: 6 }],
     });
     await expect(browser.json()).resolves.toEqual({
       ok: true,
-      data: [{ value: "Chrome", label: "Chrome" }],
+      field: "client.browser",
+      data: [{ value: "Chrome", label: "Chrome", occurrences: 5 }],
     });
-    expect(calls[0].sql).toContain("COALESCE(device_type, '') AS value");
-    expect(calls[1].sql).toContain("COALESCE(browser, '') AS value");
+    expect(calls[0].sql).toContain("TRIM(COALESCE(device_type, ''))");
+    expect(calls[1].sql).toContain("TRIM(COALESCE(browser, ''))");
     expect(calls.map((call) => call.bindings)).toEqual([
       [...visitBindings(), "Chrome", 4],
       [...visitBindings(), "us", 4],

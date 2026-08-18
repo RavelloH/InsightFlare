@@ -149,6 +149,87 @@ filters:
   browser: 浏览器
   all: 全部
   clear: 清除
+filterBuilder:
+  fieldGroups:
+    page: 页面
+    session: 会话
+    referrer: 来源
+    campaign: 营销活动
+    client: 客户端
+    geography: 地理位置
+    event: 事件
+  fieldLabels:
+    page.path: 页面路径
+    page.title: 页面标题
+    page.hostname: 页面主机名
+    page.query: 查询字符串
+    page.hash: Hash 片段
+    session.entryPath: 入口页面
+    session.exitPath: 出口页面
+    referrer.domain: 来源域名
+    referrer.url: 来源 URL
+    utm.source: 活动来源
+    utm.medium: 活动媒介
+    utm.campaign: 活动名称
+    utm.term: 活动关键词
+    utm.content: 活动内容
+    client.browser: 浏览器
+    client.browserVersion: 浏览器版本
+    client.browserEngine: 浏览器引擎
+    client.os: 操作系统
+    client.osVersion: 操作系统版本
+    client.deviceType: 设备类型
+    client.language: 语言
+    client.screenSize: 屏幕尺寸
+    geo.country: 国家/地区
+    geo.region: 地区
+    geo.city: 城市
+    geo.continent: 大洲
+    geo.timeZone: 时区
+    geo.organization: 组织
+    event.name: 事件名称
+    event.payload: 事件载荷
+  operatorLabels:
+    eq: 等于
+    neq: 不等于
+    in: 属于任一值
+    notIn: 不属于任一值
+    contains: 包含
+    startsWith: 以此开头
+    endsWith: 以此结尾
+    gt: 大于
+    gte: 大于或等于
+    lt: 小于
+    lte: 小于或等于
+    between: 介于两者之间
+    exists: 存在
+    notExists: 不存在
+    isNull: 为 NULL
+    notNull: 不为 NULL
+    isEmpty: 为空字符串
+    notEmpty: 不为空字符串
+  valueType: 值类型
+  valueKinds:
+    string: 文本
+    number: 数字
+    boolean: 布尔值
+  booleanTrue: "是"
+  booleanFalse: "否"
+  valueSearchPlaceholder: 搜索或输入值
+  valueListPlaceholder: 输入多个值，以逗号分隔
+  rangeStartPlaceholder: 下限
+  rangeEndPlaceholder: 上限
+  jsonPointer: JSON 指针
+  match: 匹配方式
+  apply: 应用筛选
+  allConditions: 全部条件均满足
+  anyCondition: 满足任一条件
+  condition: 条件 {index}
+  group: 组 {index}
+  invertCondition: 反转此条件
+  exclude: 排除
+  addGroup: 添加分组
+  invalid: 请先完成每一条筛选条件。
 realtime:
   title: 实时
   subtitle: 查看最近 30 分钟的访问情况

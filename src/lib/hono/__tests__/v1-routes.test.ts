@@ -183,6 +183,7 @@ describe("Hono API v1 routes", () => {
     ["/api/v1/sites/site-1/events", handleEvents, "events"],
     ["/api/v1/sites/site-1/events/event-1", handleEvents, "events"],
     ["/api/v1/sites/site-1/event-fields", handleEvents, "events"],
+    ["/api/v1/sites/site-1/event-fields/values", handleEvents, "events"],
     ["/api/v1/sites/site-1/visitors", handleJourneys, "journeys"],
     ["/api/v1/sites/site-1/visitors/visitor-1", handleJourneys, "journeys"],
     ["/api/v1/sites/site-1/sessions", handleJourneys, "journeys"],

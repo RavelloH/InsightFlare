@@ -32,6 +32,7 @@ import {
   prepareNativeScrollbarHost,
   useNativeScrollbars,
 } from "@/components/ui/overlay-scrollbar";
+import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import Link from "@/lib/router";
 import { usePathname, useSearchParams } from "@/lib/router";
 import { cn } from "@/lib/utils";
@@ -127,6 +128,23 @@ function isTabActive(
   return normalizedPathname.startsWith(itemPath);
 }
 
+function globalNavigationSearchParams(
+  searchParams: URLSearchParams,
+): URLSearchParams {
+  const next = new URLSearchParams();
+  for (const [key, value] of searchParams) {
+    if (
+      key.startsWith("filter[") ||
+      key === "range" ||
+      key === "interval" ||
+      key === "timeZone"
+    ) {
+      next.append(key, value);
+    }
+  }
+  return next;
+}
+
 export function AnalyticsTabs({ items }: AnalyticsTabsProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -159,15 +177,18 @@ export function AnalyticsTabs({ items }: AnalyticsTabsProps) {
   const resolvedActiveKey = pathActiveKey;
   const hrefForItem = useCallback(
     (item: AnalyticsTabItem) => {
-      if (!item.queryKey) return item.href;
       const itemPath = normalizePathname(item.href.split("?")[0] || item.href);
-      const nextParams = new URLSearchParams(searchParams.toString());
-      if (item.queryDefault) {
-        nextParams.delete(item.queryKey);
-      } else if (item.queryValue) {
-        nextParams.set(item.queryKey, item.queryValue);
+      const nextParams = item.queryKey
+        ? new URLSearchParams(searchParams.toString())
+        : globalNavigationSearchParams(searchParams);
+      if (item.queryKey) {
+        if (item.queryDefault) {
+          nextParams.delete(item.queryKey);
+        } else if (item.queryValue) {
+          nextParams.set(item.queryKey, item.queryValue);
+        }
       }
-      const nextQuery = nextParams.toString();
+      const nextQuery = serializeDashboardSearchParams(nextParams);
       return nextQuery ? `${itemPath}?${nextQuery}` : itemPath;
     },
     [searchParams],

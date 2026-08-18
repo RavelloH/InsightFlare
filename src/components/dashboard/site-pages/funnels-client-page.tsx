@@ -77,6 +77,7 @@ import {
   fetchFunnels,
   fetchOverviewPageCardTab,
 } from "@/lib/dashboard/client-data";
+import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import {
   intlLocale,
   numberFormat,
@@ -131,7 +132,7 @@ function detailQueryTarget(
   const params = new URLSearchParams(searchParams.toString());
   params.set(DETAIL_QUERY_PARAM, funnelId);
   params.delete("funnelId");
-  const query = params.toString();
+  const query = serializeDashboardSearchParams(params);
   return query ? `${pathname}?${query}` : pathname;
 }
 
@@ -892,7 +893,7 @@ export function FunnelsClientPage({
     }
 
     params.delete(DETAIL_QUERY_PARAM);
-    const query = params.toString();
+    const query = serializeDashboardSearchParams(params);
     replaceUrlWithoutNavigation(query ? `${pathname}?${query}` : pathname);
   }, [pathname]);
 

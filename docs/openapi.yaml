@@ -1209,6 +1209,70 @@ paths:
           $ref: "#/components/responses/NotFound"
       x-required-scopes:
         - analytics:read
+  /api/v1/sites/{siteId}/analytics/filter-values:
+    parameters:
+      - *a3
+    get:
+      operationId: getAnalyticsFilterValues
+      summary: Search canonical filter values
+      description:
+        Returns candidate values for one canonical analytics filter field.
+        The current field's own condition is excluded before candidate values
+        are calculated.
+      tags:
+        - Analytics
+      parameters:
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - name: field
+          in: query
+          schema:
+            type: string
+            maxLength: 128
+          description: Canonical filter field ID.
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 160
+          description: Case-insensitive candidate value search text.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 50
+          description: Maximum candidate values.
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FilterValuesResponse"
+              examples:
+                default:
+                  summary: getAnalyticsFilterValues
+                  value:
+                    data:
+                      message: Successful response
+                    meta:
+                      requestId: req_abc123
+                      generatedAt: 2026-06-26T12:00:00Z
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
   /api/v1/sites/{siteId}/analytics/breakdowns/{dimension}:
     parameters:
       - *a3
@@ -1974,6 +2038,63 @@ paths:
                       requestId: req_abc123
                       generatedAt: 2026-06-26T12:00:00Z
                       timeRange: *a1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-required-scopes:
+        - analytics:read
+  /api/v1/sites/{siteId}/event-fields:
+    parameters:
+      - *a3
+    get:
+      operationId: getEventFields
+      summary: Discover dynamic event JSON fields
+      description:
+        Returns observed JSON pointer paths and scalar types for one custom
+        event name.
+      tags:
+        - Events
+      parameters:
+        - $ref: "#/components/parameters/FromQueryParam"
+        - $ref: "#/components/parameters/ToQueryParam"
+        - $ref: "#/components/parameters/PresetQueryParam"
+        - $ref: "#/components/parameters/TimeZoneQueryParam"
+        - $ref: "#/components/parameters/FilterQueryParam"
+        - name: eventName
+          in: query
+          schema:
+            type: string
+            maxLength: 120
+          description: Event name.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+          description: Maximum discovered fields.
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventFieldsResponse"
+              examples:
+                default:
+                  summary: getEventFields
+                  value:
+                    data:
+                      message: Successful response
+                    meta:
+                      requestId: req_abc123
+                      generatedAt: 2026-06-26T12:00:00Z
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -3874,6 +3995,44 @@ components:
                     latestAvailableAt: *a16
                 links:
                   $ref: "#/components/schemas/LinkMap"
+    FilterValueOption:
+      type: object
+      required:
+        - value
+        - label
+        - occurrences
+      properties:
+        value:
+          type:
+            - string
+            - number
+            - boolean
+            - "null"
+        label:
+          type: string
+        occurrences:
+          type: integer
+          minimum: 0
+    FilterValuesResponse:
+      description: Response envelope.
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          description: Response envelope.
+          properties:
+            data:
+              type: object
+              required:
+                - field
+                - data
+              properties:
+                field:
+                  type: string
+                  maxLength: 128
+                data:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/FilterValueOption"
     OverviewMetrics:
       type: object
       description: Aggregate analytics metrics for a time range.
@@ -4241,6 +4400,67 @@ components:
           type: array
           description: Example observed values.
           items: {}
+    EventFieldDiscoveryItem:
+      type: object
+      required:
+        - path
+        - valueType
+        - events
+        - occurrences
+        - firstSeenAt
+        - lastSeenAt
+        - exampleValue
+      properties:
+        path:
+          type: string
+          maxLength: 240
+        valueType:
+          type: string
+          enum:
+            - string
+            - number
+            - boolean
+            - "null"
+            - object
+            - array
+        events:
+          type: integer
+          minimum: 0
+        occurrences:
+          type: integer
+          minimum: 0
+        firstSeenAt:
+          type: integer
+          minimum: 0
+        lastSeenAt:
+          type: integer
+          minimum: 0
+        exampleValue:
+          type:
+            - string
+            - number
+            - boolean
+            - "null"
+    EventFieldsResponse:
+      description: Response envelope.
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          description: Response envelope.
+          properties:
+            data:
+              type: object
+              required:
+                - eventName
+                - fields
+              properties:
+                eventName:
+                  type: string
+                  maxLength: 120
+                fields:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/EventFieldDiscoveryItem"
     EventType:
       type: object
       description: Details and aggregate metrics for one custom event type.

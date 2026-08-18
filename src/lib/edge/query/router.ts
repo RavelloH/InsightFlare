@@ -10,7 +10,7 @@ export const PUBLIC_QUERY_PATHS = [
   "retention",
   "performance",
   "countries",
-  "filter-options",
+  "filter-values",
   "event-types",
   "overview-page-path",
   "overview-page-title",
@@ -122,7 +122,7 @@ export function operationForQueryRoute(pathname: string): QueryOperation {
   if (pathname === "pages") return "pages";
   if (pathname === "pages-dashboard") return "pages-dashboard";
   if (pathname === "referrers") return "referrers";
-  if (pathname === "filter-options") return "filter-options";
+  if (pathname === "filter-values") return "filter-values";
   if (pathname === "overview-geo-points") return "geo-points";
   if (pathname === "retention") return "retention";
   if (pathname === "performance") return "performance";
@@ -132,12 +132,8 @@ export function operationForQueryRoute(pathname: string): QueryOperation {
   if (pathname === "events-trend") return "event-trend";
   if (pathname === "event-types") return "event-types";
   if (pathname === "event-type-detail") return "event-type-detail";
-  if (
-    pathname === "event-type-fields" ||
-    pathname === "event-type-field-values"
-  ) {
-    return "event-fields";
-  }
+  if (pathname === "event-type-fields") return "event-fields";
+  if (pathname === "event-type-field-values") return "event-field-values";
   if (pathname === "event-type-context") return "event-context";
   if (pathname === "events-records") return "event-records";
   if (pathname === "event-record-detail") return "event-record-detail";

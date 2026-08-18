@@ -14,7 +14,7 @@ import {
 describe("query route policy", () => {
   it("exposes only the intended public paths", () => {
     expect(PUBLIC_QUERY_PATHS).toContain("overview");
-    expect(PUBLIC_QUERY_PATHS).toContain("filter-options");
+    expect(PUBLIC_QUERY_PATHS).toContain("filter-values");
     expect(PUBLIC_QUERY_PATHS).not.toContain("page-query");
     expect(PUBLIC_QUERY_PATHS).not.toContain("page-hash");
     expect(PUBLIC_QUERY_PATHS).not.toContain("overview-source-link");
@@ -25,6 +25,9 @@ describe("query route policy", () => {
   it("maps protocol paths to typed operation capabilities", () => {
     expect(operationForQueryRoute("overview")).toBe("overview");
     expect(operationForQueryRoute("event-type-fields")).toBe("event-fields");
+    expect(operationForQueryRoute("event-type-field-values")).toBe(
+      "event-field-values",
+    );
     expect(operationForQueryRoute("session-detail")).toBe("session-detail");
     expect(operationForQueryRoute("browser-radar")).toBe("radar");
     expect(operationForQueryRoute("client-cross-breakdown")).toBe(
@@ -65,6 +68,13 @@ describe("query route policy", () => {
     ).toMatchObject({
       kind: "capability-denied",
     });
+    expect(assertOperationAllowed(publicContext, "event-fields")).toMatchObject(
+      { kind: "capability-denied" },
+    );
+    expect(
+      assertOperationAllowed(publicContext, "event-field-values"),
+    ).toMatchObject({ kind: "capability-denied" });
+    expect(assertOperationAllowed(publicContext, "filter-values")).toBeNull();
     expect(assertOperationAllowed(publicContext, "overview")).toBeNull();
   });
 });

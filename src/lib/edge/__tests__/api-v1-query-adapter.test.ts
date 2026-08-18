@@ -5,6 +5,7 @@ import {
   apiV1OverviewMetrics,
   queryApiV1Breakdown,
   queryApiV1CrossBreakdown,
+  queryApiV1EventFields,
   queryApiV1EventFieldValues,
   queryApiV1EventRecordDetail,
   queryApiV1EventRecords,
@@ -13,6 +14,7 @@ import {
   queryApiV1EventTypeDetail,
   queryApiV1EventTypes,
   queryApiV1Explore,
+  queryApiV1FilterValues,
   queryApiV1FunnelAnalysis,
   queryApiV1JourneyEvents,
   queryApiV1JourneySessions,
@@ -90,6 +92,13 @@ describe("API v1 typed query adapter", () => {
       queryApiV1EventRecords(env, "site-1", url, timeRange, pagination),
       queryApiV1EventTypes(env, "site-1", url, timeRange),
       queryApiV1EventFieldValues(env, "site-1", url, timeRange),
+      queryApiV1EventFields(env, "site-1", url, timeRange),
+      queryApiV1FilterValues(
+        env,
+        "site-1",
+        new URL(`${url}&filterKey=page.path`),
+        timeRange,
+      ),
       queryApiV1EventsSummary(env, "site-1", url, timeRange),
       queryApiV1EventsTrend(env, "site-1", url, timeRange),
       queryApiV1Retention(env, "site-1", url, timeRange),
@@ -118,8 +127,36 @@ describe("API v1 typed query adapter", () => {
       }),
     ]);
 
-    expect(results).toHaveLength(24);
+    expect(results).toHaveLength(26);
     expect(results.every((result) => "ok" in result)).toBe(true);
+  });
+
+  it("rejects incomplete API v1 field-value and canonical-value requests", async () => {
+    const env = emptyEnv();
+    const [eventFieldValues, eventFields, filterValues] = await Promise.all([
+      queryApiV1EventFieldValues(
+        env,
+        "site-1",
+        new URL("https://edge.test/api/v1?eventName=signup"),
+        timeRange,
+      ),
+      queryApiV1EventFields(
+        env,
+        "site-1",
+        new URL("https://edge.test/api/v1"),
+        timeRange,
+      ),
+      queryApiV1FilterValues(
+        env,
+        "site-1",
+        new URL("https://edge.test/api/v1"),
+        timeRange,
+      ),
+    ]);
+
+    expect(eventFieldValues.ok).toBe(false);
+    expect(eventFields.ok).toBe(false);
+    expect(filterValues.ok).toBe(false);
   });
 
   it("selects private and public contract readers without a dispatcher", async () => {
@@ -145,7 +182,7 @@ describe("API v1 typed query adapter", () => {
       "sessions",
       "visitor-detail",
       "session-detail",
-      "filter-options",
+      "filter-values",
       "overview-geo-points",
       "funnels",
       "countries",
@@ -194,7 +231,7 @@ describe("API v1 typed query adapter", () => {
       "retention",
       "performance",
       "event-types",
-      "filter-options",
+      "filter-values",
       "overview-geo-points",
       "countries",
       "utm-source",

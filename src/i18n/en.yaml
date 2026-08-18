@@ -149,6 +149,87 @@ filters:
   browser: Browser
   all: All
   clear: Clear
+filterBuilder:
+  fieldGroups:
+    page: Page
+    session: Session
+    referrer: Referrer
+    campaign: Campaign
+    client: Client
+    geography: Geography
+    event: Event
+  fieldLabels:
+    page.path: Page path
+    page.title: Page title
+    page.hostname: Page hostname
+    page.query: Query string
+    page.hash: Hash fragment
+    session.entryPath: Entry page
+    session.exitPath: Exit page
+    referrer.domain: Referrer domain
+    referrer.url: Referrer URL
+    utm.source: Campaign source
+    utm.medium: Campaign medium
+    utm.campaign: Campaign name
+    utm.term: Campaign term
+    utm.content: Campaign content
+    client.browser: Browser
+    client.browserVersion: Browser version
+    client.browserEngine: Browser engine
+    client.os: Operating system
+    client.osVersion: Operating system version
+    client.deviceType: Device type
+    client.language: Language
+    client.screenSize: Screen size
+    geo.country: Country
+    geo.region: Region
+    geo.city: City
+    geo.continent: Continent
+    geo.timeZone: Time zone
+    geo.organization: Organization
+    event.name: Event name
+    event.payload: Event payload
+  operatorLabels:
+    eq: Equals
+    neq: Does not equal
+    in: Is one of
+    notIn: Is not one of
+    contains: Contains
+    startsWith: Starts with
+    endsWith: Ends with
+    gt: Greater than
+    gte: Greater than or equal to
+    lt: Less than
+    lte: Less than or equal to
+    between: Between
+    exists: Exists
+    notExists: Does not exist
+    isNull: Is null
+    notNull: Is not null
+    isEmpty: Is empty
+    notEmpty: Is not empty
+  valueType: Value type
+  valueKinds:
+    string: Text
+    number: Number
+    boolean: Boolean
+  booleanTrue: "True"
+  booleanFalse: "False"
+  valueSearchPlaceholder: Search or enter a value
+  valueListPlaceholder: Enter values separated by commas
+  rangeStartPlaceholder: Lower bound
+  rangeEndPlaceholder: Upper bound
+  jsonPointer: JSON Pointer
+  match: Match
+  apply: Apply Filters
+  allConditions: All conditions
+  anyCondition: Any condition
+  condition: Condition {index}
+  group: Group {index}
+  invertCondition: Invert this condition
+  exclude: Exclude
+  addGroup: Add group
+  invalid: Complete each filter condition before applying.
 realtime:
   title: Real-time
   subtitle: View traffic from the last 30 minutes.

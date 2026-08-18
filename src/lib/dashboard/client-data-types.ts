@@ -68,26 +68,9 @@ export type OverviewGeoDimensionTab =
   | "timezone"
   | "organization";
 
-export type DashboardFilterOptionKey = Extract<
+export type DashboardFilterOptionKey = Exclude<
   AnalyticsFilterFieldId,
-  | "geo.country"
-  | "client.deviceType"
-  | "client.browser"
-  | "page.path"
-  | "page.title"
-  | "page.hostname"
-  | "session.entryPath"
-  | "session.exitPath"
-  | "referrer.domain"
-  | "referrer.url"
-  | "client.osVersion"
-  | "client.language"
-  | "client.screenSize"
-  | "geo.region"
-  | "geo.city"
-  | "geo.continent"
-  | "geo.timeZone"
-  | "geo.organization"
+  "event.payload"
 >;
 
 export type UtmDimensionTab =

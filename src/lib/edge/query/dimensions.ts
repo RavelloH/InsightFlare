@@ -27,7 +27,7 @@ export async function queryDimensionFromD1(
   filters: FilterDocument,
   limit: number,
   selectExpr: string,
-  options?: { excludeEmpty?: boolean },
+  options?: { excludeEmpty?: boolean; search?: string },
   diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
   const filter = buildVisitFilterSql(filters);
@@ -51,6 +51,7 @@ dimension_rollup AS (
 SELECT value, views, sessions, visitors
 FROM dimension_rollup
 ${options?.excludeEmpty ? "WHERE TRIM(value) != ''" : ""}
+${options?.search ? `${options?.excludeEmpty ? "AND" : "WHERE"} LOWER(value) LIKE ? ESCAPE '\\'` : ""}
 ORDER BY views DESC, sessions DESC, value ASC
 LIMIT ?
 `;
@@ -58,7 +59,21 @@ LIMIT ?
     await queryD1All<Record<string, unknown>>(
       env,
       sql,
-      [...visitSourceBindings(siteId, window), ...filter.bindings, limit],
+      [
+        ...visitSourceBindings(siteId, window),
+        ...filter.bindings,
+        ...(options?.search
+          ? [
+              `%${options.search
+                .trim()
+                .toLowerCase()
+                .replaceAll("\\", "\\\\")
+                .replaceAll("%", "\\%")
+                .replaceAll("_", "\\_")}%`,
+            ]
+          : []),
+        limit,
+      ],
       diagnostics,
     )
   ).map((row) => ({
@@ -77,6 +92,7 @@ export async function querySessionPathDimensionFromD1(
   limit: number,
   kind: "entry" | "exit",
   diagnostics?: D1ReadDiagnostics,
+  search?: string,
 ): Promise<DimensionRow[]> {
   const filter = buildVisitFilterSql(filters);
   const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
@@ -124,6 +140,7 @@ SELECT
   count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
 FROM session_edges
 WHERE TRIM(value) != ''
+${search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
 GROUP BY value
 ORDER BY views DESC, value ASC
 LIMIT ?
@@ -132,7 +149,21 @@ LIMIT ?
     await queryD1All<Record<string, unknown>>(
       env,
       sql,
-      [...visitSourceBindings(siteId, window), ...filter.bindings, limit],
+      [
+        ...visitSourceBindings(siteId, window),
+        ...filter.bindings,
+        ...(search
+          ? [
+              `%${search
+                .trim()
+                .toLowerCase()
+                .replaceAll("\\", "\\\\")
+                .replaceAll("%", "\\%")
+                .replaceAll("_", "\\_")}%`,
+            ]
+          : []),
+        limit,
+      ],
       diagnostics,
     )
   ).map((row) => ({
@@ -173,6 +204,7 @@ export async function querySessionBoundaryDimensionFromD1(
   limit: number,
   kind: "entry" | "exit",
   diagnostics?: D1ReadDiagnostics,
+  search?: string,
 ): Promise<DimensionRow[]> {
   return querySessionPathDimensionFromD1(
     env,
@@ -182,6 +214,7 @@ export async function querySessionBoundaryDimensionFromD1(
     limit,
     kind,
     diagnostics,
+    search,
   );
 }
 
@@ -342,6 +375,7 @@ export async function queryReferrersFromD1(
   limit: number,
   includeFullUrl: boolean,
   diagnostics?: D1ReadDiagnostics,
+  search?: string,
 ): Promise<ReferrerRow[]> {
   const filter = buildVisitFilterSql(filters);
   const keyExpr = includeFullUrl ? "referrer_url" : "referrer_host";
@@ -360,6 +394,7 @@ SELECT
   count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
 FROM filtered_visits
 GROUP BY referrer
+${search ? "HAVING LOWER(referrer) LIKE ? ESCAPE '\\'" : ""}
 ORDER BY views DESC, sessions DESC, referrer ASC
 LIMIT ?
 `;
@@ -367,7 +402,21 @@ LIMIT ?
     await queryD1All<Record<string, unknown>>(
       env,
       sql,
-      [...visitSourceBindings(siteId, window), ...filter.bindings, limit],
+      [
+        ...visitSourceBindings(siteId, window),
+        ...filter.bindings,
+        ...(search
+          ? [
+              `%${search
+                .trim()
+                .toLowerCase()
+                .replaceAll("\\", "\\\\")
+                .replaceAll("%", "\\%")
+                .replaceAll("_", "\\_")}%`,
+            ]
+          : []),
+        limit,
+      ],
       diagnostics,
     )
   ).map((row) => ({

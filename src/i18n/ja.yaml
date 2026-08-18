@@ -149,6 +149,87 @@ filters:
   browser: ブラウザー
   all: すべて
   clear: クリア
+filterBuilder:
+  fieldGroups:
+    page: ページ
+    session: セッション
+    referrer: リファラー
+    campaign: キャンペーン
+    client: クライアント
+    geography: 地域
+    event: イベント
+  fieldLabels:
+    page.path: ページパス
+    page.title: ページタイトル
+    page.hostname: ページホスト名
+    page.query: クエリ文字列
+    page.hash: ハッシュフラグメント
+    session.entryPath: 入口ページ
+    session.exitPath: 出口ページ
+    referrer.domain: リファラードメイン
+    referrer.url: リファラー URL
+    utm.source: キャンペーンソース
+    utm.medium: キャンペーンメディア
+    utm.campaign: キャンペーン名
+    utm.term: キャンペーン用語
+    utm.content: キャンペーンコンテンツ
+    client.browser: ブラウザー
+    client.browserVersion: ブラウザーのバージョン
+    client.browserEngine: ブラウザーエンジン
+    client.os: オペレーティングシステム
+    client.osVersion: オペレーティングシステムのバージョン
+    client.deviceType: デバイス種別
+    client.language: 言語
+    client.screenSize: 画面サイズ
+    geo.country: 国・地域
+    geo.region: 地域
+    geo.city: 市区町村
+    geo.continent: 大陸
+    geo.timeZone: タイムゾーン
+    geo.organization: 組織
+    event.name: イベント名
+    event.payload: イベントペイロード
+  operatorLabels:
+    eq: 等しい
+    neq: 等しくない
+    in: いずれかに一致
+    notIn: いずれにも一致しない
+    contains: 含む
+    startsWith: で始まる
+    endsWith: で終わる
+    gt: より大きい
+    gte: 以上
+    lt: より小さい
+    lte: 以下
+    between: 範囲内
+    exists: 存在する
+    notExists: 存在しない
+    isNull: NULL である
+    notNull: NULL ではない
+    isEmpty: 空文字列である
+    notEmpty: 空文字列ではない
+  valueType: 値の種類
+  valueKinds:
+    string: テキスト
+    number: 数値
+    boolean: 真偽値
+  booleanTrue: "真"
+  booleanFalse: "偽"
+  valueSearchPlaceholder: 値を検索または入力
+  valueListPlaceholder: 値をカンマで区切って入力
+  rangeStartPlaceholder: 下限
+  rangeEndPlaceholder: 上限
+  jsonPointer: JSON ポインター
+  match: 一致条件
+  apply: フィルターを適用
+  allConditions: すべての条件
+  anyCondition: いずれかの条件
+  condition: 条件 {index}
+  group: グループ {index}
+  invertCondition: この条件を反転
+  exclude: 除外
+  addGroup: グループを追加
+  invalid: 適用する前に、すべての条件を入力してください。
 realtime:
   title: リアルタイム
   subtitle: 直近 30 分間のトラフィックを確認します。

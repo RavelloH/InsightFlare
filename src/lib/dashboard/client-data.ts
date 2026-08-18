@@ -76,8 +76,8 @@ export {
   fetchUtmTrend,
 } from "./client-referrer-data";
 export {
-  fetchDashboardFilterOptions,
   fetchEventTypesTab,
+  fetchFilterValues,
   fetchOverviewClientDimensionTab,
   fetchOverviewPageCardTab,
   fetchOverviewSourceCardTab,

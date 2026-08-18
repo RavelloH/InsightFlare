@@ -59,7 +59,7 @@ export type QueryOperation =
   | "pages"
   | "pages-dashboard"
   | "referrers"
-  | "filter-options"
+  | "filter-values"
   | "geo-points"
   | "retention"
   | "performance"
@@ -68,6 +68,7 @@ export type QueryOperation =
   | "event-types"
   | "event-type-detail"
   | "event-fields"
+  | "event-field-values"
   | "event-context"
   | "event-records"
   | "event-record-detail"
@@ -227,6 +228,18 @@ export type CrossBreakdownQuery = DimensionQuery;
 export type ShareTrendQuery = TrendQuery;
 export type RadarQuery = DimensionQuery;
 export type FilterOptionsQuery = DimensionQuery;
+export interface FilterValuesQuery extends BaseQuery {
+  readonly field: string;
+  readonly search?: string;
+  readonly limit: number;
+}
+export interface EventFieldValuesQuery extends BaseQuery {
+  readonly eventName: string;
+  readonly fieldPath: string;
+  readonly fieldValueType: string;
+  readonly search?: string;
+  readonly limit: number;
+}
 export type GeoPointsQuery = BaseQuery;
 export type TopPagesQuery = PagesQuery;
 export type PagesDashboardQuery = PageQuery;
@@ -294,6 +307,15 @@ export type CrossBreakdownResult = CanonicalObject;
 export type ShareTrendResult = CanonicalObject;
 export type RadarResult = CanonicalObject;
 export type FilterOptionsResult = CanonicalObject;
+export interface FilterValueOption {
+  readonly value: string | number | boolean | null;
+  readonly label: string;
+  readonly occurrences: number;
+}
+export interface FilterValuesResult {
+  readonly field: string;
+  readonly data: readonly FilterValueOption[];
+}
 export type GeoPointsResult = CanonicalObject;
 export type TopPagesResult = PagesResult;
 export type DashboardPage = CanonicalObject;

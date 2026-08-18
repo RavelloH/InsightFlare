@@ -550,6 +550,7 @@ export async function fetchEventTypeFieldValues(
   filters?: FilterDocument,
   options?: {
     limit?: number;
+    search?: string;
     signal?: AbortSignal;
   },
 ): Promise<EventFieldValuesData> {
@@ -570,6 +571,7 @@ export async function fetchEventTypeFieldValues(
         fieldPath: normalizedFieldPath,
         fieldValueType,
         limit: options?.limit ?? 25,
+        ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
       },
       filters,
     ),

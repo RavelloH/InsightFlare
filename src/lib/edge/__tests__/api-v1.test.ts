@@ -2316,6 +2316,19 @@ describe("api v1 gateway", () => {
     expect(response.status).toBe(200);
   });
 
+  it("returns dynamic event fields", async () => {
+    routeQueryMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, fields: [] }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const { response } = await authed(
+      "/api/v1/sites/site-1/event-fields?eventName=signup&from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z",
+      [siteMatch("site-1", "Blog")],
+    );
+    expect(response.status).toBe(200);
+  });
+
   it("returns events summary", async () => {
     routeQueryMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: true, data: { total: 5 } }), {

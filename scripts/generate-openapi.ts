@@ -1010,6 +1010,23 @@ function buildSchemas(): Record<string, unknown> {
         links: ref("LinkMap"),
       },
     }),
+    FilterValueOption: {
+      type: "object",
+      required: ["value", "label", "occurrences"],
+      properties: {
+        value: { type: ["string", "number", "boolean", "null"] },
+        label: { type: "string" },
+        occurrences: { type: "integer", minimum: 0 },
+      },
+    },
+    FilterValuesResponse: envelope({
+      type: "object",
+      required: ["field", "data"],
+      properties: {
+        field: { type: "string", maxLength: 128 },
+        data: { type: "array", items: ref("FilterValueOption") },
+      },
+    }),
     OverviewMetrics: {
       type: "object",
       description: "Aggregate analytics metrics for a time range.",
@@ -1286,6 +1303,38 @@ function buildSchemas(): Record<string, unknown> {
         },
       },
     },
+    EventFieldDiscoveryItem: {
+      type: "object",
+      required: [
+        "path",
+        "valueType",
+        "events",
+        "occurrences",
+        "firstSeenAt",
+        "lastSeenAt",
+        "exampleValue",
+      ],
+      properties: {
+        path: { type: "string", maxLength: 240 },
+        valueType: {
+          type: "string",
+          enum: ["string", "number", "boolean", "null", "object", "array"],
+        },
+        events: { type: "integer", minimum: 0 },
+        occurrences: { type: "integer", minimum: 0 },
+        firstSeenAt: { type: "integer", minimum: 0 },
+        lastSeenAt: { type: "integer", minimum: 0 },
+        exampleValue: { type: ["string", "number", "boolean", "null"] },
+      },
+    },
+    EventFieldsResponse: envelope({
+      type: "object",
+      required: ["eventName", "fields"],
+      properties: {
+        eventName: { type: "string", maxLength: 120 },
+        fields: { type: "array", items: ref("EventFieldDiscoveryItem") },
+      },
+    }),
     EventType: {
       type: "object",
       description: "Details and aggregate metrics for one custom event type.",
@@ -2076,6 +2125,39 @@ function buildPaths(): OpenAPISpec["paths"] {
         },
       }),
     },
+    "/api/v1/sites/{siteId}/analytics/filter-values": {
+      parameters: [siteParam],
+      get: op({
+        operationId: "getAnalyticsFilterValues",
+        summary: "Search canonical filter values",
+        description:
+          "Returns candidate values for one canonical analytics filter field. The current field's own condition is excluded before candidate values are calculated.",
+        tags: ["Analytics"],
+        parameters: [
+          ...timeParams(),
+          filterParam(),
+          queryParam(
+            "field",
+            { type: "string", maxLength: 128 },
+            "Canonical filter field ID.",
+          ),
+          queryParam(
+            "search",
+            { type: "string", maxLength: 160 },
+            "Case-insensitive candidate value search text.",
+          ),
+          queryParam(
+            "limit",
+            { type: "integer", minimum: 1, maximum: 500, default: 50 },
+            "Maximum candidate values.",
+          ),
+        ],
+        responses: {
+          "200": ok("FilterValuesResponse"),
+          ...errorResponses("400", "401", "403", "404"),
+        },
+      }),
+    },
     "/api/v1/sites/{siteId}/analytics/breakdowns/{dimension}": {
       parameters: [siteParam, dimensionParam],
       get: op({
@@ -2340,6 +2422,34 @@ function buildPaths(): OpenAPISpec["paths"] {
         ],
         responses: {
           "200": ok("AnalyticsBreakdownResponse"),
+          ...errorResponses("400", "401", "403", "404"),
+        },
+      }),
+    },
+    "/api/v1/sites/{siteId}/event-fields": {
+      parameters: [siteParam],
+      get: op({
+        operationId: "getEventFields",
+        summary: "Discover dynamic event JSON fields",
+        description:
+          "Returns observed JSON pointer paths and scalar types for one custom event name.",
+        tags: ["Events"],
+        parameters: [
+          ...timeParams(),
+          filterParam(),
+          queryParam(
+            "eventName",
+            { type: "string", maxLength: 120 },
+            "Event name.",
+          ),
+          queryParam(
+            "limit",
+            { type: "integer", minimum: 1, maximum: 200, default: 100 },
+            "Maximum discovered fields.",
+          ),
+        ],
+        responses: {
+          "200": ok("EventFieldsResponse"),
           ...errorResponses("400", "401", "403", "404"),
         },
       }),

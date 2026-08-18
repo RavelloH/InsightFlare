@@ -231,7 +231,7 @@ export async function handleEventFieldValuesContract(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await executeQueryOperation(
-    "event-fields",
+    "event-field-values",
     {
       context: queryContext,
       time: toQueryTime(window),
@@ -251,6 +251,7 @@ export async function handleEventFieldValuesContract(
             fieldPath,
             fieldValueType,
             parseLimit(url, 25, 100),
+            parseListSearch(url),
           )
         ).map(mapEventFieldValue),
       },

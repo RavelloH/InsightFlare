@@ -185,26 +185,28 @@ export function executePublicQuery(
         ),
     );
   }
-  if (
-    input.pathname === "filter-options" ||
-    input.pathname === "overview-geo-points"
-  ) {
-    return import("../query/overview-extras-contract-adapter").then((module) =>
-      input.pathname === "filter-options"
-        ? module.handleFilterOptionsContract(
-            input.env,
-            input.siteId,
-            url,
-            ctx,
-            queryContext,
-          )
-        : module.handleOverviewGeoPointsContract(
-            input.env,
-            input.siteId,
-            url,
-            ctx,
-            queryContext,
-          ),
+  if (input.pathname === "filter-values") {
+    return import("../query/filter-values-contract-adapter").then(
+      ({ handleFilterValuesContract }) =>
+        handleFilterValuesContract(
+          input.env,
+          input.siteId,
+          url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "overview-geo-points") {
+    return import("../query/overview-extras-contract-adapter").then(
+      ({ handleOverviewGeoPointsContract }) =>
+        handleOverviewGeoPointsContract(
+          input.env,
+          input.siteId,
+          url,
+          ctx,
+          queryContext,
+        ),
     );
   }
   const dimension = SIMPLE_DIMENSIONS[input.pathname];

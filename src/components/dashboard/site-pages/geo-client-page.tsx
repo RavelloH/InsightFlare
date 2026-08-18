@@ -14,6 +14,7 @@ import {
   fetchOverviewGeoPoints,
   type OverviewGeoTabRows,
 } from "@/lib/dashboard/client-data";
+import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import {
   buildLocalityLocationValue,
@@ -1438,7 +1439,7 @@ export function GeoClientPage({
     } else {
       nextParams.delete("location");
     }
-    const query = nextParams.toString();
+    const query = serializeDashboardSearchParams(nextParams);
     const nextTarget = `${globalThis.window.location.pathname}${query ? `?${query}` : ""}${globalThis.window.location.hash}`;
     pushUrlWithoutNavigation(nextTarget);
   }

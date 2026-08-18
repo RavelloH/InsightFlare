@@ -15,6 +15,7 @@ import {
   parseEventFieldValueType,
   parseEventName,
   parseEventRecordSort,
+  parseFilterOptionKey,
   parseInterval,
   parseLimit,
   parseListSearch,
@@ -43,6 +44,7 @@ import {
 } from "./query/events-summary";
 import { queryEventsTrendFromD1 } from "./query/events-trend";
 import { queryEventTypeTrendFromD1 } from "./query/events-trend";
+import { queryFilterValuesFromD1 } from "./query/filter-values";
 import {
   type FunnelAnalysis,
   type FunnelStepConfig,
@@ -83,6 +85,7 @@ import {
   executeOverview,
   executeQueryOperation,
   executeTrend,
+  type FilterValueOption,
   type OverviewResult,
   parseApiV1FilterUrl,
   siteQueryContext,
@@ -438,7 +441,7 @@ export async function queryApiV1EventFieldValues(
     };
   }
   return executeQueryOperation(
-    "event-fields",
+    "event-field-values",
     {
       ...apiV1QueryBase(url, timeRange),
       context: siteQueryContext(siteId, "api-v1"),
@@ -459,8 +462,107 @@ export async function queryApiV1EventFieldValues(
           fieldPath,
           fieldValueType,
           parseLimit(url, 25, 100),
+          parseListSearch(url),
         )
       ).map(mapEventFieldValue),
+    }),
+  );
+}
+
+export async function queryApiV1EventFields(
+  env: Env,
+  siteId: string,
+  url: URL,
+  timeRange: ParsedTimeRange,
+): Promise<AnalyticsResult<Record<string, unknown>>> {
+  const eventName = parseEventName(url);
+  if (!eventName) {
+    return {
+      ok: false,
+      error: {
+        kind: "invalid-input",
+        issues: [{ path: "eventName", code: "missing_required_value" }],
+      },
+    };
+  }
+  return executeQueryOperation(
+    "event-fields",
+    {
+      ...apiV1QueryBase(url, timeRange),
+      context: siteQueryContext(siteId, "api-v1"),
+    },
+    async () => ({
+      value: {
+        eventName,
+        fields: (
+          await queryEventFieldsFromD1(
+            env,
+            siteId,
+            {
+              startMs: timeRange.startMs,
+              endExclusiveMs: timeRange.endExclusiveMs,
+              nowMs: Date.now(),
+              timeZone: timeRange.timeZone,
+            },
+            apiV1FilterSet(url),
+            eventName,
+            parseLimit(url, 100, 200),
+          )
+        ).map(mapEventField),
+      },
+    }),
+  );
+}
+
+export async function queryApiV1FilterValues(
+  env: Env,
+  siteId: string,
+  url: URL,
+  timeRange: ParsedTimeRange,
+): Promise<
+  AnalyticsResult<{ field: string; data: readonly FilterValueOption[] }>
+> {
+  const field = parseFilterOptionKey(url);
+  if (!field) {
+    return {
+      ok: false,
+      error: {
+        kind: "invalid-input",
+        issues: [{ path: "field", code: "unsupported_filter_field" }],
+      },
+    };
+  }
+  return executeQueryOperation(
+    "filter-values",
+    {
+      ...apiV1QueryBase(url, timeRange),
+      context: siteQueryContext(siteId, "api-v1"),
+      filters: apiV1FilterSet(url),
+    },
+    async () => ({
+      value: {
+        field,
+        data: (
+          await queryFilterValuesFromD1(
+            env,
+            siteId,
+            {
+              startMs: timeRange.startMs,
+              endExclusiveMs: timeRange.endExclusiveMs,
+              nowMs: Date.now(),
+              timeZone: timeRange.timeZone,
+            },
+            apiV1FilterSet(url),
+            field,
+            parseLimit(url, 50, 500),
+            parseListSearch(url),
+          )
+        ).map((row) => ({
+          value: row.value,
+          label: row.value,
+          occurrences: row.occurrences,
+        })),
+      },
     }),
   );
 }

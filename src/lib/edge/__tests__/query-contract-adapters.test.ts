@@ -11,6 +11,7 @@ import {
   handleEventTypeFieldsContract,
   handleEventTypesContract,
 } from "@/lib/edge/query/events-contract-adapter";
+import { handleFilterValuesContract } from "@/lib/edge/query/filter-values-contract-adapter";
 import { handleFunnelAnalysisContract } from "@/lib/edge/query/funnels-contract-adapter";
 import {
   handleSessionDetailContract,
@@ -18,10 +19,7 @@ import {
   handleVisitorDetailContract,
   handleVisitorsContract,
 } from "@/lib/edge/query/journeys-contract-adapter";
-import {
-  handleFilterOptionsContract,
-  handleOverviewGeoPointsContract,
-} from "@/lib/edge/query/overview-extras-contract-adapter";
+import { handleOverviewGeoPointsContract } from "@/lib/edge/query/overview-extras-contract-adapter";
 import {
   handlePagesContract,
   handlePagesDashboardContract,
@@ -33,6 +31,10 @@ import {
   handleCrossBreakdownContract,
   handleUtmDimensionTrendContract,
 } from "@/lib/edge/query/technology-contract-adapter";
+import {
+  type QueryOperation,
+  siteQueryContext,
+} from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
 function emptyEnv(): Env {
@@ -136,16 +138,16 @@ describe("typed query adapter validation branches", () => {
     const base =
       "https://edge.test/query?from=1767225600000&to=1767312000000&dimension=browser&primaryDimension=browser&secondaryDimension=os";
     const filterKeys = [
-      "country",
-      "path",
-      "sourceLink",
-      "clientBrowser",
-      "geo",
-      "geoContinent",
+      "geo.country",
+      "page.path",
+      "referrer.url",
+      "client.browser",
+      "geo.region",
+      "geo.continent",
     ];
     const responses = await Promise.all([
       ...filterKeys.map((filterKey) =>
-        handleFilterOptionsContract(
+        handleFilterValuesContract(
           env,
           siteId,
           new URL(`${base}&filterKey=${filterKey}`),
@@ -202,5 +204,61 @@ describe("typed query adapter validation branches", () => {
       true,
     );
     expect(responses.some((response) => response.status === 400)).toBe(true);
+  });
+
+  it("does not expose private canonical fields from public filter-values", async () => {
+    const response = await handleFilterValuesContract(
+      env,
+      siteId,
+      new URL(
+        "https://edge.test/query?from=1767225600000&to=1767312000000&filterKey=page.query",
+      ),
+      undefined,
+      siteQueryContext(siteId, "public-share"),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("validates canonical filter-value requests before returning candidates", async () => {
+    const base = "https://edge.test/query?from=1767225600000&to=1767312000000";
+    const deniedContext = {
+      ...siteQueryContext(siteId, "private-dashboard"),
+      policy: {
+        ...siteQueryContext(siteId, "private-dashboard").policy,
+        allowedOperations: new Set<QueryOperation>(),
+      },
+    };
+    const [missingField, unknownField, invalidWindow, valid, denied] =
+      await Promise.all([
+        handleFilterValuesContract(env, siteId, new URL(base)),
+        handleFilterValuesContract(
+          env,
+          siteId,
+          new URL(`${base}&filterKey=missing.field`),
+        ),
+        handleFilterValuesContract(
+          env,
+          siteId,
+          new URL("https://edge.test/query?filterKey=page.path&from=20&to=10"),
+        ),
+        handleFilterValuesContract(
+          env,
+          siteId,
+          new URL(`${base}&filterKey=page.path&search=docs`),
+        ),
+        handleFilterValuesContract(
+          env,
+          siteId,
+          new URL(`${base}&filterKey=page.path`),
+          undefined,
+          deniedContext,
+        ),
+      ]);
+
+    expect(missingField.status).toBe(400);
+    expect(unknownField.status).toBe(400);
+    expect(invalidWindow.status).toBe(400);
+    expect(valid.status).toBe(200);
+    expect(denied.status).toBe(400);
   });
 });

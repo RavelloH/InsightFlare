@@ -308,6 +308,23 @@ export function withDashboardFilterSearchParams(
   return next;
 }
 
+/** Formats dashboard navigation query strings without escaping filter syntax. */
+export function serializeDashboardSearchParams(
+  searchParams: URLSearchParams,
+): string {
+  return [...searchParams]
+    .map(([key, value]) => {
+      const readableKey = encodeURIComponent(key)
+        .replaceAll("%5B", "[")
+        .replaceAll("%5D", "]");
+      const readableValue = encodeURIComponent(value)
+        .replaceAll("%2F", "/")
+        .replaceAll("%3A", ":");
+      return `${readableKey}=${readableValue}`;
+    })
+    .join("&");
+}
+
 export function appendEventPayloadFilter(
   document: FilterDocument,
   path: string,

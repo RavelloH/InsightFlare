@@ -191,17 +191,19 @@ export async function fetchOverviewClientDimensionTab(
   return normalizeOverviewRows(payload.data);
 }
 
-export async function fetchDashboardFilterOptions(
+export async function fetchFilterValues(
   siteId: string,
   window: TimeWindow,
   filterKey: DashboardFilterOptionKey,
   filters?: FilterDocument,
   options?: {
     limit?: number;
+    search?: string;
+    signal?: AbortSignal;
   },
 ): Promise<DashboardFilterOptionData[]> {
   const payload = await fetchPrivateJson<DashboardFilterOptionsData>(
-    "/api/private/filter-options",
+    "/api/private/filter-values",
     withFilters(
       {
         siteId,
@@ -210,9 +212,11 @@ export async function fetchDashboardFilterOptions(
         timeZone: window.timeZone,
         filterKey,
         limit: options?.limit ?? 200,
+        ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
       },
       filters,
     ),
+    { signal: options?.signal },
   ).catch(() => emptyDashboardFilterOptions());
   return Array.isArray(payload.data) ? payload.data : [];
 }

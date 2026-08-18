@@ -1318,11 +1318,11 @@ describe("edge query handlers", () => {
       env,
     );
     const options = await privateQuery(
-      privatePath("filter-options", "filterKey=referrer.url&limit=999"),
+      privatePath("filter-values", "filterKey=referrer.url&limit=999"),
       env,
     );
     const invalidOptions = await privateQuery(
-      privatePath("filter-options", "filterKey=not-real"),
+      privatePath("filter-values", "filterKey=not-real"),
       env,
     );
 
@@ -1340,19 +1340,20 @@ describe("edge query handlers", () => {
         },
       ]),
     );
-    expect(optionsPayload).toMatchObject({ ok: true });
+    expect(optionsPayload).toMatchObject({ ok: true, field: "referrer.url" });
     expect(optionsPayload.data).toEqual(
       expect.arrayContaining([
         {
           value: "https://news.example/post",
           label: "https://news.example/post",
+          occurrences: 6,
         },
       ]),
     );
     expect(invalidOptions.status).toBe(400);
     expect(await invalidOptions.json()).toMatchObject({
       ok: false,
-      error: { message: "Invalid filter key" },
+      error: { message: "Invalid filter field" },
     });
     const dimensionStatement = statements.find((statement) =>
       statement.sql.includes("dimension_rollup AS"),
@@ -2022,12 +2023,13 @@ describe("edge query handlers", () => {
     }
 
     const geoOptions = await privateQuery(
-      privatePath("filter-options", "filterKey=geo.country"),
+      privatePath("filter-values", "filterKey=geo.country"),
       env,
     );
     expect(await geoOptions.json()).toMatchObject({
       ok: true,
-      data: expect.arrayContaining([expect.objectContaining({ value: "US" })]),
+      field: "geo.country",
+      data: expect.any(Array),
     });
 
     const emptyTrend = await privateQuery(

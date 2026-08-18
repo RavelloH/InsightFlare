@@ -190,6 +190,18 @@ v1Routes.all("/sites/:siteId/event-fields", (c) =>
     ),
   ),
 );
+v1Routes.all("/sites/:siteId/event-fields/*", (c) =>
+  withSiteId(c, (siteId, routePath) =>
+    handleEvents(
+      c.req.raw,
+      c.env,
+      requestUrl(c),
+      principal(c),
+      siteId,
+      routePath,
+    ),
+  ),
+);
 v1Routes.all("/sites/:siteId/visitors", (c) =>
   withSiteId(c, (siteId, routePath) =>
     handleJourneys(

@@ -1,11 +1,4 @@
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type DateRange } from "react-day-picker";
 import {
   RiArrowDownSLine,
@@ -15,14 +8,11 @@ import {
   RiCheckLine,
   RiCloseLine,
   RiFilter3Line,
-  RiFilterOffLine,
   RiTimeLine,
 } from "@remixicon/react";
-import type { PartialOptions } from "overlayscrollbars";
-import { OverlayScrollbars } from "overlayscrollbars";
 
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
-import { resolveDeviceTypeMeta } from "@/components/dashboard/journey-display";
+import { FilterPanel } from "@/components/dashboard/filter-panel";
 import {
   RealtimeStatusDot,
   realtimeStatusText,
@@ -33,7 +23,6 @@ import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Calendar } from "@/components/ui/calendar";
-import { Clickable } from "@/components/ui/clickable";
 import {
   Dialog,
   DialogContent,
@@ -62,12 +51,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  prepareNativeScrollbarHost,
-  useNativeScrollbars,
-} from "@/components/ui/overlay-scrollbar";
 import {
   Sheet,
   SheetContent,
@@ -76,7 +60,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { Spinner } from "@/components/ui/spinner";
 import {
   Tooltip,
   TooltipContent,
@@ -88,42 +71,23 @@ import {
   useLiveSearchParams,
 } from "@/lib/client-history";
 import {
-  type DashboardFilterOptionData,
-  type DashboardFilterOptionKey,
-  fetchDashboardFilterOptions,
-} from "@/lib/dashboard/client-data";
-import {
-  DASHBOARD_FILTER_CONTROL_KEYS,
-  type DashboardFilterControlKey,
-  dashboardFilterFieldId,
-  dashboardFilterFingerprint,
-  type DashboardFilterPresentation,
-  dashboardFilterPresentation,
-  setDashboardFilterValue,
-  withoutDashboardFilter,
+  serializeDashboardSearchParams,
+  withDashboardFilterSearchParams,
 } from "@/lib/dashboard/filter-state";
 import { intlLocale } from "@/lib/dashboard/format";
-import { parseGeoLocationValue } from "@/lib/dashboard/geo-location";
 import {
   type CustomTimeRange,
   type DashboardInterval,
   normalizeCustomDateRange,
   parseFilterDocumentFromSearchParams,
   type RangePreset,
-  type TimeWindow,
 } from "@/lib/dashboard/query-state";
 import { zonedParts } from "@/lib/dashboard/time-zone";
-import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 import {
   analyticsFilterRegistry,
   type FilterDocument,
   serializeFilterParams,
 } from "@/lib/filter-contract";
-import {
-  resolveContinentLabel,
-  resolveCountryLabel,
-  resolveLanguageLabel,
-} from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
@@ -138,53 +102,8 @@ interface DashboardHeaderControlsProps {
   siteId?: string;
   showControls: boolean;
   showFilterSheet: boolean;
+  filterAudience?: "private-dashboard" | "public-share";
   showRealtimeBadge?: boolean;
-}
-
-const FILTER_QUERY_KEYS = DASHBOARD_FILTER_CONTROL_KEYS;
-type FilterQueryKey = DashboardFilterControlKey;
-
-function normalizeFilterInputValue(
-  raw: string | null | undefined,
-): string | undefined {
-  if (typeof raw !== "string") return undefined;
-  const normalized = raw.trim().slice(0, 160);
-  if (!normalized) return undefined;
-  const lowered = normalized.toLowerCase();
-  if (lowered === "all" || lowered === "null" || lowered === "undefined") {
-    return undefined;
-  }
-  return normalized;
-}
-
-function presentationFromSearchParams(searchParams: URLSearchParams): {
-  document: FilterDocument;
-  presentation: DashboardFilterPresentation;
-} {
-  const document = parseFilterDocumentFromSearchParams(searchParams);
-  return { document, presentation: dashboardFilterPresentation(document) };
-}
-
-function filterFieldLabel(messages: AppMessages, key: FilterQueryKey): string {
-  if (key === "country") return messages.filters.country;
-  if (key === "device") return messages.filters.device;
-  if (key === "browser") return messages.filters.browser;
-  if (key === "path") return messages.common.path;
-  if (key === "title") return messages.common.title;
-  if (key === "hostname") return messages.common.hostname;
-  if (key === "entry") return messages.common.entryPage;
-  if (key === "exit") return messages.common.exitPage;
-  if (key === "sourceDomain") return messages.overview.sourceDomainColumn;
-  if (key === "sourceLink") return messages.overview.sourceLinkColumn;
-  if (key === "clientBrowser") return messages.common.browser;
-  if (key === "clientOsVersion") return messages.common.operatingSystem;
-  if (key === "clientDeviceType") return messages.common.deviceType;
-  if (key === "clientLanguage") return messages.common.language;
-  if (key === "clientScreenSize") return messages.common.screenSize;
-  if (key === "geo") return messages.common.location;
-  if (key === "geoContinent") return messages.common.continent;
-  if (key === "geoTimezone") return messages.common.timezone;
-  return messages.common.organization;
 }
 
 const INTERVAL_ORDER: readonly DashboardInterval[] = [
@@ -205,19 +124,6 @@ const ROLLING_RANGE_PRESETS = new Set<RangePreset>([
   "12m",
 ]);
 const USE_REALTIME_MOCK = isRealtimeMockEnabled();
-const PANEL_SCROLLBAR_OPTIONS = {
-  overflow: {
-    x: "hidden",
-    y: "scroll",
-  },
-  scrollbars: {
-    theme: "os-theme-insightflare",
-    autoHide: "move",
-    autoHideDelay: 420,
-    autoHideSuspend: false,
-  },
-} satisfies PartialOptions;
-
 function rangeLabel(messages: AppMessages, range: RangePreset): string {
   if (range === "30m") return messages.ranges.last30m;
   if (range === "1h") return messages.ranges.last1h;
@@ -460,570 +366,13 @@ function FilterActiveCountBadge({ count }: { count: number }) {
   );
 }
 
-const DIRECT_REFERRER_FILTER_VALUE = "__direct__";
-
-function omitFilterKey(
-  filters: FilterDocument,
-  key: FilterQueryKey,
-): FilterDocument {
-  return withoutDashboardFilter(filters, key);
-}
-
-function inferGeoOptionGroup(
-  value: string,
-): DashboardFilterOptionData["group"] | undefined {
-  const parsed = parseGeoLocationValue(value);
-  if (!parsed) return undefined;
-  if (parsed.level === "country") return "country";
-  if (parsed.level === "region") return "region";
-  if (parsed.level === "locality") return "city";
-  return undefined;
-}
-
-function formatGeoOptionLabel(
-  value: string,
-  locale: Locale,
-  messages: AppMessages,
-  group?: DashboardFilterOptionData["group"],
-): string {
-  const parsed = parseGeoLocationValue(value);
-  if (!parsed) return messages.common.unknown;
-
-  const countryCode = parsed.countryCode;
-  const countryLabel = resolveCountryLabel(
-    countryCode,
-    locale,
-    messages.common.unknown,
-  ).label;
-
-  const effectiveGroup = group ?? inferGeoOptionGroup(value);
-  if (effectiveGroup === "country" || parsed.level === "country") {
-    return countryLabel;
-  }
-
-  const regionLabel =
-    parsed.regionName || parsed.regionCode || messages.common.unknown;
-  if (effectiveGroup === "region" || parsed.level === "region") {
-    return `${countryLabel} / ${regionLabel}`;
-  }
-
-  const cityLabel = parsed.localityName || messages.common.unknown;
-  if (!parsed.regionCode && !parsed.regionName) {
-    return `${countryLabel} / ${cityLabel}`;
-  }
-  return `${countryLabel} / ${regionLabel} / ${cityLabel}`;
-}
-
-function formatFilterOptionLabel(
-  key: FilterQueryKey,
-  option: DashboardFilterOptionData,
-  locale: Locale,
-  messages: AppMessages,
-): string {
-  const value = String(option.value ?? "").trim();
-  const label = String(option.label ?? value).trim() || value;
-
-  if (key === "country") {
-    return resolveCountryLabel(value || label, locale, messages.common.unknown)
-      .label;
-  }
-  if (key === "clientLanguage") {
-    return resolveLanguageLabel(label, locale, messages.common.unknown).label;
-  }
-  if (key === "device" || key === "clientDeviceType") {
-    return resolveDeviceTypeMeta(
-      value || label,
-      messages.common.deviceLabels,
-      messages.common.unknown,
-    ).label;
-  }
-  if (key === "geoContinent") {
-    return resolveContinentLabel(
-      label,
-      messages.common.unknown,
-      messages.common.continentLabels,
-    );
-  }
-  if (key === "sourceDomain" || key === "sourceLink") {
-    if (value === DIRECT_REFERRER_FILTER_VALUE) {
-      return messages.overview.direct;
-    }
-  }
-  if (
-    key === "path" ||
-    key === "entry" ||
-    key === "exit" ||
-    key === "sourceLink"
-  ) {
-    return decodeUrlDisplayValue(label || value || messages.common.unknown);
-  }
-  if (key === "geo") {
-    return formatGeoOptionLabel(value || label, locale, messages, option.group);
-  }
-  return label || messages.common.unknown;
-}
-
-function filterOptionGroupLabel(
-  messages: AppMessages,
-  group: DashboardFilterOptionData["group"],
-): string {
-  if (group === "country") return messages.common.country;
-  if (group === "region") return messages.common.region;
-  if (group === "city") return messages.common.city;
-  return "";
-}
-
-function buildSyntheticFilterOption(
-  key: FilterQueryKey,
-  value: string,
-): DashboardFilterOptionData {
-  return {
-    value,
-    label: value,
-    ...(key === "geo" ? { group: inferGeoOptionGroup(value) } : {}),
-  };
-}
-
-function PanelScrollbar({
-  className,
-  children,
-  syncKey,
-}: {
-  className?: string;
-  children: ReactNode;
-  syncKey?: string | number | boolean | null;
-}) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
-    null,
-  );
-  const nativeScrollbars = useNativeScrollbars();
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    if (prepareNativeScrollbarHost(host)) return;
-
-    const existing = OverlayScrollbars(host);
-    const instance =
-      existing ?? OverlayScrollbars(host, PANEL_SCROLLBAR_OPTIONS);
-    if (existing) {
-      existing.options(PANEL_SCROLLBAR_OPTIONS);
-    }
-    scrollbarRef.current = instance;
-    instance.update();
-
-    return () => {
-      if (!existing) {
-        instance.destroy();
-      }
-      if (scrollbarRef.current === instance) {
-        scrollbarRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    scrollbarRef.current?.update();
-  }, [syncKey]);
-
-  return (
-    <div
-      ref={hostRef}
-      className={cn(
-        nativeScrollbars ? "overflow-y-auto" : "overflow-hidden",
-        className,
-      )}
-      data-overlayscrollbars-initialize={nativeScrollbars ? undefined : ""}
-    >
-      {children}
-    </div>
-  );
-}
-
-interface DashboardFilterSelectFieldProps {
-  locale: Locale;
-  messages: AppMessages;
-  siteId?: string;
-  triggerId?: string;
-  filterKey: FilterQueryKey;
-  currentValue?: string;
-  currentFilters: FilterDocument;
-  window: TimeWindow;
-  onValueChange: (value: string) => void;
-}
-
-function DashboardFilterSelectField({
-  locale,
-  messages,
-  siteId,
-  triggerId,
-  filterKey,
-  currentValue,
-  currentFilters,
-  window,
-  onValueChange,
-}: DashboardFilterSelectFieldProps) {
-  const [open, setOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const [optionState, setOptionState] = useState<{
-    signature: string;
-    loading: boolean;
-    options: DashboardFilterOptionData[] | null;
-  }>({
-    signature: "",
-    loading: false,
-    options: null,
-  });
-
-  const requestFilters = useMemo(
-    () => omitFilterKey(currentFilters, filterKey),
-    [currentFilters, filterKey],
-  );
-  const requestSignature = useMemo(
-    () =>
-      JSON.stringify({
-        siteId: siteId ?? "",
-        filterKey,
-        from: window.from,
-        to: window.to,
-        interval: window.interval,
-        filters: dashboardFilterFingerprint(requestFilters),
-      }),
-    [
-      filterKey,
-      requestFilters,
-      siteId,
-      window.from,
-      window.interval,
-      window.to,
-    ],
-  );
-
-  useEffect(() => {
-    if (!open) {
-      setSearchTerm("");
-      return;
-    }
-    if (!siteId) return;
-
-    let active = true;
-    setOptionState({
-      signature: requestSignature,
-      loading: true,
-      options: null,
-    });
-
-    fetchDashboardFilterOptions(
-      siteId,
-      window,
-      (filterKey === "geo"
-        ? "geo.country"
-        : dashboardFilterFieldId(filterKey)) as DashboardFilterOptionKey,
-      requestFilters,
-      {
-        limit: 200,
-      },
-    )
-      .then((options) => {
-        if (!active) return;
-        setOptionState({
-          signature: requestSignature,
-          loading: false,
-          options,
-        });
-      })
-      .catch(() => {
-        if (!active) return;
-        setOptionState({
-          signature: requestSignature,
-          loading: false,
-          options: [],
-        });
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [filterKey, open, requestFilters, requestSignature, siteId, window]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (rootRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open]);
-
-  const resolvedOptions = useMemo(() => {
-    const base =
-      optionState.signature === requestSignature
-        ? (optionState.options ?? [])
-        : [];
-    if (!currentValue) return base;
-    return base.some((option) => option.value === currentValue)
-      ? base
-      : [buildSyntheticFilterOption(filterKey, currentValue), ...base];
-  }, [
-    currentValue,
-    filterKey,
-    optionState.options,
-    optionState.signature,
-    requestSignature,
-  ]);
-
-  const normalizedSearchTerm = searchTerm.trim().toLocaleLowerCase();
-  const visibleOptions = useMemo(() => {
-    if (!normalizedSearchTerm) return resolvedOptions;
-    return resolvedOptions.filter((option) => {
-      const displayLabel = formatFilterOptionLabel(
-        filterKey,
-        option,
-        locale,
-        messages,
-      ).toLocaleLowerCase();
-      const rawValue = option.value.toLocaleLowerCase();
-      return (
-        displayLabel.includes(normalizedSearchTerm) ||
-        rawValue.includes(normalizedSearchTerm)
-      );
-    });
-  }, [filterKey, locale, messages, normalizedSearchTerm, resolvedOptions]);
-
-  const groupedOptions = useMemo(() => {
-    const groups = new Map<string, DashboardFilterOptionData[]>();
-    for (const option of visibleOptions) {
-      const groupKey = option.group ?? "default";
-      const existing = groups.get(groupKey) ?? [];
-      existing.push(option);
-      groups.set(groupKey, existing);
-    }
-    return Array.from(groups.entries());
-  }, [visibleOptions]);
-
-  const selectedOption = useMemo(
-    () =>
-      currentValue
-        ? (resolvedOptions.find((option) => option.value === currentValue) ??
-          buildSyntheticFilterOption(filterKey, currentValue))
-        : null,
-    [currentValue, filterKey, resolvedOptions],
-  );
-  const selectedLabel = selectedOption
-    ? formatFilterOptionLabel(filterKey, selectedOption, locale, messages)
-    : messages.filters.all;
-  const listSyncKey = `${requestSignature}:${optionState.loading ? "1" : "0"}:${visibleOptions.length}:${normalizedSearchTerm}`;
-
-  return (
-    <div ref={rootRef} className="relative w-full">
-      <button
-        type="button"
-        id={triggerId}
-        role="combobox"
-        aria-expanded={open}
-        aria-label={filterFieldLabel(messages, filterKey)}
-        disabled={!siteId}
-        onClick={() => {
-          setOpen((previous) => !previous);
-        }}
-        className={cn(
-          "flex h-8 w-full items-center gap-1.5 rounded-none border border-input bg-transparent py-2 pl-2.5 text-xs whitespace-nowrap transition-colors outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50",
-          currentValue ? "pr-14" : "pr-8",
-          !currentValue && "text-muted-foreground",
-        )}
-      >
-        <span className="truncate">{selectedLabel}</span>
-      </button>
-      {currentValue ? (
-        <Clickable
-          aria-label={messages.filters.clear}
-          onClick={(event) => {
-            event.stopPropagation();
-            onValueChange("");
-            setOpen(false);
-          }}
-          className="absolute top-1/2 right-7 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded-none text-muted-foreground transition-colors hover:text-foreground"
-          enableHoverScale={false}
-          tapScale={0.96}
-        >
-          <RiCloseLine className="size-3.5" />
-        </Clickable>
-      ) : null}
-      <span
-        aria-hidden
-        className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2"
-      >
-        <RiArrowDownSLine
-          className={cn(
-            "size-4 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-180",
-          )}
-        />
-      </span>
-
-      {open ? (
-        <div className="absolute top-[calc(100%+0.25rem)] left-0 z-[70] w-full overflow-hidden rounded-none border bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10">
-          <div className="sticky top-0 z-10 border-b bg-popover p-2">
-            <Input
-              value={searchTerm}
-              onChange={(event) => {
-                setSearchTerm(event.target.value);
-              }}
-              placeholder={messages.common.search}
-              className="h-8 w-full text-xs"
-              autoFocus
-            />
-          </div>
-
-          <PanelScrollbar className="max-h-80" syncKey={listSyncKey}>
-            <div
-              className="py-1"
-              role="listbox"
-              aria-label={filterFieldLabel(messages, filterKey)}
-            >
-              {optionState.loading &&
-              optionState.signature === requestSignature ? (
-                <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
-                  <Spinner className="size-3.5" />
-                  <span>{messages.common.loading}</span>
-                </div>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={!currentValue}
-                    onClick={() => {
-                      onValueChange("");
-                      setOpen(false);
-                    }}
-                    className={cn(
-                      "flex w-full items-center px-2 py-2 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground",
-                      !currentValue && "bg-accent text-accent-foreground",
-                    )}
-                  >
-                    {messages.filters.all}
-                  </button>
-
-                  {groupedOptions.length > 0 ? (
-                    groupedOptions.map(([groupKey, options]) => (
-                      <div key={`${filterKey}-${groupKey}`}>
-                        {groupKey !== "default" ? (
-                          <p className="px-2 py-1 text-xs text-muted-foreground">
-                            {filterOptionGroupLabel(
-                              messages,
-                              groupKey as DashboardFilterOptionData["group"],
-                            )}
-                          </p>
-                        ) : null}
-                        {options.map((option) => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            role="option"
-                            aria-selected={option.value === currentValue}
-                            onClick={() => {
-                              onValueChange(option.value);
-                              setOpen(false);
-                            }}
-                            className={cn(
-                              "flex w-full items-center px-2 py-2 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground",
-                              option.value === currentValue &&
-                                "bg-accent text-accent-foreground",
-                            )}
-                          >
-                            {formatFilterOptionLabel(
-                              filterKey,
-                              option,
-                              locale,
-                              messages,
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="px-2 py-3 text-xs text-muted-foreground">
-                      {messages.common.noData}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </PanelScrollbar>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function DashboardFilterFields({
-  locale,
-  messages,
-  siteId,
-  queryFilters,
-  queryDocument,
-  window,
-  onValueChange,
-}: {
-  locale: Locale;
-  messages: AppMessages;
-  siteId?: string;
-  queryFilters: DashboardFilterPresentation;
-  queryDocument: FilterDocument;
-  window: TimeWindow;
-  onValueChange: (key: FilterQueryKey, value: string) => void;
-}) {
-  return (
-    <>
-      {FILTER_QUERY_KEYS.map((key) => {
-        const inputId = `dashboard-filter-${key}`;
-        return (
-          <div key={inputId} className="space-y-2">
-            <Label htmlFor={inputId}>{filterFieldLabel(messages, key)}</Label>
-            <DashboardFilterSelectField
-              locale={locale}
-              messages={messages}
-              siteId={siteId}
-              triggerId={inputId}
-              filterKey={key}
-              currentValue={queryFilters[key]}
-              currentFilters={queryDocument}
-              window={window}
-              onValueChange={(value) => {
-                onValueChange(key, value);
-              }}
-            />
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
 export function DashboardHeaderControls({
   locale,
   messages,
   siteId,
   showControls,
   showFilterSheet,
+  filterAudience = "private-dashboard",
   showRealtimeBadge: shouldShowRealtimeBadge = true,
 }: DashboardHeaderControlsProps) {
   const searchParams = useLiveSearchParams();
@@ -1041,17 +390,14 @@ export function DashboardHeaderControls({
     maxRangeDays,
   } = useDashboardQueryControls();
   const searchParamsKey = searchParams.toString();
-  const { document: queryDocument, presentation: queryFilters } = useMemo(
-    () => presentationFromSearchParams(new URLSearchParams(searchParamsKey)),
+  const queryDocument = useMemo(
+    () =>
+      parseFilterDocumentFromSearchParams(new URLSearchParams(searchParamsKey)),
     [searchParamsKey],
   );
   const activeFilterCount = useMemo(
-    () =>
-      FILTER_QUERY_KEYS.reduce(
-        (count, key) => (queryFilters[key] ? count + 1 : count),
-        0,
-      ),
-    [queryFilters],
+    () => serializeFilterParams(queryDocument, analyticsFilterRegistry).size,
+    [queryDocument],
   );
   const hasActiveFilters = activeFilterCount > 0;
   const filterTriggerClassName = cn(
@@ -1073,6 +419,7 @@ export function DashboardHeaderControls({
   );
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const [mobileFilterDrawerOpen, setMobileFilterDrawerOpen] = useState(false);
+  const [desktopFilterSheetOpen, setDesktopFilterSheetOpen] = useState(false);
   const [mobileTimeDrawerOpen, setMobileTimeDrawerOpen] = useState(false);
   const [periodForwardStack, setPeriodForwardStack] = useState<
     CustomTimeRange[]
@@ -1194,52 +541,23 @@ export function DashboardHeaderControls({
     setPeriodForwardStack([]);
   }, [siteId]);
 
-  const setFilterQueryValue = useCallback(
-    (key: FilterQueryKey, rawValue: string) => {
-      const normalized = normalizeFilterInputValue(rawValue);
-      const nextDocument = setDashboardFilterValue(
-        queryDocument,
-        key,
-        normalized,
-      );
-      const params = new URLSearchParams(searchParams.toString());
-      for (const existingKey of [...params.keys()]) {
-        if (existingKey.startsWith("filter[")) params.delete(existingKey);
-      }
-      for (const [filterKey, value] of serializeFilterParams(
+  const applyFilterDocument = useCallback(
+    (nextDocument: FilterDocument) => {
+      const params = withDashboardFilterSearchParams(
+        searchParams,
         nextDocument,
-        analyticsFilterRegistry,
-      )) {
-        params.append(filterKey, value);
-      }
-
-      const updated = params.toString();
-      const current = searchParams.toString();
+      );
+      const updated = serializeDashboardSearchParams(params);
+      const current = serializeDashboardSearchParams(searchParams);
       if (updated !== current) {
         const target = updated ? `${livePathname}?${updated}` : livePathname;
         replaceUrlWithoutNavigation(target);
       }
+      setMobileFilterDrawerOpen(false);
+      setDesktopFilterSheetOpen(false);
     },
-    [livePathname, queryDocument, searchParams],
+    [livePathname, searchParams],
   );
-
-  const clearAllFilterQueryValues = useCallback(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    for (const key of [...params.keys()]) {
-      if (key.startsWith("filter[")) params.delete(key);
-    }
-    for (const key of FILTER_QUERY_KEYS) params.delete(key);
-    params.delete("geoCountry");
-    params.delete("geoRegion");
-    params.delete("geoCity");
-
-    const updated = params.toString();
-    const current = searchParams.toString();
-    if (updated !== current) {
-      const target = updated ? `${livePathname}?${updated}` : livePathname;
-      replaceUrlWithoutNavigation(target);
-    }
-  }, [livePathname, searchParams]);
 
   const queueOpenCustomDialog = () => {
     if (openCustomDialogTimeoutRef.current !== null) {
@@ -1334,36 +652,17 @@ export function DashboardHeaderControls({
                     {messages.dashboardHeader.filterSubtitle}
                   </DrawerDescription>
                 </DrawerHeader>
-
-                <PanelScrollbar
-                  className="min-h-0 flex-1"
-                  syncKey={searchParamsKey}
-                >
-                  <div className="space-y-4 px-4 pb-2">
-                    <DashboardFilterFields
-                      locale={locale}
-                      messages={messages}
-                      siteId={siteId}
-                      queryFilters={queryFilters}
-                      queryDocument={queryDocument}
-                      window={window}
-                      onValueChange={setFilterQueryValue}
-                    />
-                  </div>
-                </PanelScrollbar>
-
-                <DrawerFooter>
-                  <Button variant="outline" onClick={clearAllFilterQueryValues}>
-                    <RiFilterOffLine className="size-4" />
-                    <span>{messages.filters.clear}</span>
-                  </Button>
-                  <DrawerClose asChild>
-                    <Button>
-                      <RiCloseLine className="size-4" />
-                      <span>{closeLabel}</span>
-                    </Button>
-                  </DrawerClose>
-                </DrawerFooter>
+                <div className="min-h-0 flex-1 px-4">
+                  <FilterPanel
+                    audience={filterAudience}
+                    document={queryDocument}
+                    messages={messages}
+                    open={mobileFilterDrawerOpen}
+                    siteId={siteId}
+                    window={window}
+                    onApply={applyFilterDocument}
+                  />
+                </div>
               </DrawerContent>
             </Drawer>
           ) : null}
@@ -1497,7 +796,11 @@ export function DashboardHeaderControls({
             />
           ) : null}
           {showFilterSheet ? (
-            <Sheet modal={false}>
+            <Sheet
+              modal={false}
+              open={desktopFilterSheetOpen}
+              onOpenChange={setDesktopFilterSheetOpen}
+            >
               <SheetTrigger asChild>
                 <Button
                   variant="outline"
@@ -1522,30 +825,17 @@ export function DashboardHeaderControls({
                   </SheetDescription>
                 </SheetHeader>
 
-                <PanelScrollbar
-                  className="min-h-0 flex-1"
-                  syncKey={searchParamsKey}
-                >
-                  <div className="space-y-4 px-4 pb-4">
-                    <DashboardFilterFields
-                      locale={locale}
-                      messages={messages}
-                      siteId={siteId}
-                      queryFilters={queryFilters}
-                      queryDocument={queryDocument}
-                      window={window}
-                      onValueChange={setFilterQueryValue}
-                    />
-
-                    <Button
-                      variant="outline"
-                      onClick={clearAllFilterQueryValues}
-                    >
-                      <RiFilterOffLine className="size-4" />
-                      <span>{messages.filters.clear}</span>
-                    </Button>
-                  </div>
-                </PanelScrollbar>
+                <div className="min-h-0 flex-1 px-4">
+                  <FilterPanel
+                    audience={filterAudience}
+                    document={queryDocument}
+                    messages={messages}
+                    open={desktopFilterSheetOpen}
+                    siteId={siteId}
+                    window={window}
+                    onApply={applyFilterDocument}
+                  />
+                </div>
               </SheetContent>
             </Sheet>
           ) : null}

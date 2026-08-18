@@ -24,6 +24,7 @@ import {
 } from "@/lib/client-history";
 import {
   dashboardFilterValue,
+  serializeDashboardSearchParams,
   setDashboardFilterValue,
   withDashboardFilterSearchParams,
 } from "@/lib/dashboard/filter-state";
@@ -132,8 +133,8 @@ export function ReferrerBreakdownCard({
       nextFilters,
     );
 
-    const updated = updatedParams.toString();
-    const current = searchParams.toString();
+    const updated = serializeDashboardSearchParams(updatedParams);
+    const current = serializeDashboardSearchParams(searchParams);
     if (updated === current) return;
     const target = updated ? `${livePathname}?${updated}` : livePathname;
     replaceUrlWithoutNavigation(target);

@@ -51,7 +51,7 @@ export const QueryNameSchema = z
     "utm-term",
     "utm-content",
     "countries",
-    "filter-options",
+    "filter-values",
     "overview-page-path",
     "overview-page-title",
     "overview-page-hostname",
@@ -558,7 +558,7 @@ export const GeoTabRowSchema = z.object({
   visitors: z.number().int(),
 });
 
-// filter-options
+// filter-values
 export const FilterOptionSchema = z.object({
   value: z.string(),
   label: z.string(),

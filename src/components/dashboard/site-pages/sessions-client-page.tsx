@@ -21,6 +21,7 @@ import {
   useLiveSearchParams,
 } from "@/lib/client-history";
 import { fetchSessions } from "@/lib/dashboard/client-data";
+import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
 import type { JourneySession } from "@/lib/edge-client";
@@ -94,7 +95,7 @@ function detailQueryTarget(
   params.set(DETAIL_QUERY_PARAM, detailId);
   params.delete("visitorId");
   params.delete("sessionId");
-  const query = params.toString();
+  const query = serializeDashboardSearchParams(params);
   return query ? `${pathname}?${query}` : pathname;
 }
 
@@ -226,7 +227,7 @@ export function SessionsClientPage({
     }
 
     params.delete(DETAIL_QUERY_PARAM);
-    const query = params.toString();
+    const query = serializeDashboardSearchParams(params);
     replaceUrlWithoutNavigation(query ? `${pathname}?${query}` : pathname);
   }, [pathname]);
   const visitorsPathname = useMemo(

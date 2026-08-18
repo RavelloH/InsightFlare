@@ -563,7 +563,7 @@ describe("mock — handleDemoRequest", () => {
     };
 
     const routes = [
-      "/api/private/filter-options",
+      "/api/private/filter-values",
       "/api/private/overview",
       "/api/private/overview-page-path",
       "/api/private/overview-page-title",
@@ -916,7 +916,7 @@ describe("mock — handleDemoRequest", () => {
     ])("returns deduped filter options for %s", (filterKey) => {
       const res = ok(
         handleDemoRequest({
-          path: "/api/private/filter-options",
+          path: "/api/private/filter-values",
           params: { ...ANALYTICS_PARAMS, filterKey, limit: 8 },
         }),
       );
@@ -1427,7 +1427,7 @@ describe("mock — handleDemoRequest", () => {
     it.each([
       "performance",
       "countries",
-      "filter-options",
+      "filter-values",
       "overview-geo-points",
       "overview-client-browser",
       "overview-client-os-version",

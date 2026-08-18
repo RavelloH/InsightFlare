@@ -13,7 +13,6 @@ import {
   fetchBrowserVersionBreakdown,
   fetchClientCrossBreakdown,
   fetchClientDimensionTrend,
-  fetchDashboardFilterOptions,
   fetchEventRecordDetail,
   fetchEventsRecords,
   fetchEventsSummary,
@@ -21,6 +20,7 @@ import {
   fetchEventTypeDetail,
   fetchEventTypeFieldValues,
   fetchEventTypesTab,
+  fetchFilterValues,
   fetchFunnelDetail,
   fetchFunnels,
   fetchOverview,
@@ -347,7 +347,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
           "country",
         );
         expect(geoDimensionTab).toBeDefined();
-        const filterOptions = await fetchDashboardFilterOptions(
+        const filterOptions = await fetchFilterValues(
           "demo-site-001",
           mockWindow,
           "geo.country",
@@ -1723,11 +1723,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         fetchOverviewGeoDimensionTab("fallback-geo-tab", mockWindow, "country"),
       ).resolves.toEqual([]);
       await expect(
-        fetchDashboardFilterOptions(
-          "fallback-filter-options",
-          mockWindow,
-          "geo.country",
-        ),
+        fetchFilterValues("fallback-filter-options", mockWindow, "geo.country"),
       ).resolves.toEqual([]);
     });
 

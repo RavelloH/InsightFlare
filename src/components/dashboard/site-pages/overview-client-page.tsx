@@ -56,6 +56,7 @@ import {
 import {
   type DashboardFilterControlKey,
   dashboardFilterValue,
+  serializeDashboardSearchParams,
   setDashboardFilterValue,
   withDashboardFilterSearchParams,
 } from "@/lib/dashboard/filter-state";
@@ -2740,8 +2741,8 @@ export function OverviewPagesSection({
       next?.value,
     );
     const params = withDashboardFilterSearchParams(searchParams, nextFilters);
-    const current = searchParams.toString();
-    const updated = params.toString();
+    const current = serializeDashboardSearchParams(searchParams);
+    const updated = serializeDashboardSearchParams(params);
     if (updated === current) return;
     const target = updated ? `${livePathname}?${updated}` : livePathname;
     replaceUrlWithoutNavigation(target);
@@ -2756,8 +2757,8 @@ export function OverviewPagesSection({
       next?.value,
     );
     const params = withDashboardFilterSearchParams(searchParams, nextFilters);
-    const current = searchParams.toString();
-    const updated = params.toString();
+    const current = serializeDashboardSearchParams(searchParams);
+    const updated = serializeDashboardSearchParams(params);
     if (updated === current) return;
     const target = updated ? `${livePathname}?${updated}` : livePathname;
     replaceUrlWithoutNavigation(target);
@@ -2772,8 +2773,8 @@ export function OverviewPagesSection({
       next?.value,
     );
     const params = withDashboardFilterSearchParams(searchParams, nextFilters);
-    const current = searchParams.toString();
-    const updated = params.toString();
+    const current = serializeDashboardSearchParams(searchParams);
+    const updated = serializeDashboardSearchParams(params);
     if (updated === current) return;
     const target = updated ? `${livePathname}?${updated}` : livePathname;
     replaceUrlWithoutNavigation(target);
@@ -2795,8 +2796,8 @@ export function OverviewPagesSection({
       filterValue,
     );
     const params = withDashboardFilterSearchParams(searchParams, nextFilters);
-    const current = searchParams.toString();
-    const updated = params.toString();
+    const current = serializeDashboardSearchParams(searchParams);
+    const updated = serializeDashboardSearchParams(params);
     if (updated === current) return;
     const target = updated ? `${livePathname}?${updated}` : livePathname;
     replaceUrlWithoutNavigation(target);
@@ -4045,9 +4046,9 @@ export function OverviewClientPage({
         searchParams,
         nextDocument,
       );
-      const nextQuery = params.toString();
+      const nextQuery = serializeDashboardSearchParams(params);
       const target = nextQuery ? `${livePathname}?${nextQuery}` : livePathname;
-      const current = searchParams.toString();
+      const current = serializeDashboardSearchParams(searchParams);
       if (nextQuery !== current) {
         replaceUrlWithoutNavigation(target);
       }

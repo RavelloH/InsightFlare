@@ -68,6 +68,7 @@ import {
   apiV1OverviewMetrics,
   queryApiV1Breakdown,
   queryApiV1CrossBreakdown,
+  queryApiV1EventFields,
   queryApiV1EventFieldValues,
   queryApiV1EventRecordDetail,
   queryApiV1EventRecords,
@@ -76,6 +77,7 @@ import {
   queryApiV1EventTypeDetail,
   queryApiV1EventTypes,
   queryApiV1Explore,
+  queryApiV1FilterValues,
   queryApiV1FunnelAnalysis,
   queryApiV1JourneyEvents,
   queryApiV1JourneySessions,
@@ -1845,6 +1847,29 @@ export async function handleAnalytics(
       { request, meta: { timeRange, interval } },
     );
   }
+  if (resource === "filter-values") {
+    if (request.method !== "GET") return methodNotAllowed(request);
+    const field = url.searchParams.get("field")?.trim();
+    if (!field) {
+      return jsonError(
+        "validation_failed",
+        "Missing filter field",
+        400,
+        undefined,
+        request,
+      );
+    }
+    const internalUrl = buildInternalUrl(url, timeRange);
+    internalUrl.searchParams.set("filterKey", field);
+    const result = await queryApiV1FilterValues(
+      env,
+      siteId,
+      internalUrl,
+      timeRange,
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonSuccess(result.data, { request, meta: { timeRange, field } });
+  }
   if (resource === "breakdowns" && path[4]) {
     if (request.method !== "GET") return methodNotAllowed(request);
     const dimension = validateDimension(path[4]);
@@ -2030,6 +2055,17 @@ export async function handleEvents(
     );
     if (!result.ok) return apiV1QueryFailure(result.error, request);
     return jsonSuccess({}, { request, meta: { timeRange, ...result.data } });
+  }
+  if (path[2] === "event-fields" && !path[3]) {
+    if (request.method !== "GET") return methodNotAllowed(request);
+    const result = await queryApiV1EventFields(
+      env,
+      siteId,
+      buildInternalUrl(url, timeRange),
+      timeRange,
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonSuccess(result.data, { request, meta: { timeRange } });
   }
   if (path[2] === "event-fields" && path[3] === "values") {
     if (request.method !== "GET") return methodNotAllowed(request);

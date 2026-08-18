@@ -408,6 +408,7 @@ export function parseFilterParams(
 function conditionValue(
   value: FilterValue | readonly FilterValue[] | undefined,
   operator: FilterOperator,
+  isTypeless: boolean,
 ): string {
   if (VALUELESS.has(operator))
     return operator === "exists"
@@ -422,13 +423,26 @@ function conditionValue(
               ? "null"
               : "nnull";
   const values = Array.isArray(value) ? value : [value];
-  const encoded = values.map((item) =>
-    escapeListValue(
-      item === null || typeof item === "number" || typeof item === "boolean"
-        ? `json:${JSON.stringify(item)}`
-        : String(item),
-    ),
-  );
+  const needsListEscaping = LIST.has(operator) || operator === "between";
+  const encodeItem = (item: FilterValue): string => {
+    let wire: string;
+    if (isTypeless) {
+      // json-scalar fields have no declared value kind, so values carry an
+      // explicit json: marker. Strings are quoted (JSON string literal) so a
+      // literal string value that itself begins with "json:" is never
+      // mistaken for a marker on reparse.
+      wire =
+        typeof item === "string" && !item.startsWith("json:")
+          ? item
+          : `json:${JSON.stringify(item)}`;
+    } else {
+      // Typed fields know their value kind, so values are plain text and the
+      // parser converts them via the field definition on reparse.
+      wire = item === null ? "" : String(item);
+    }
+    return needsListEscaping ? escapeListValue(wire) : wire;
+  };
+  const encoded = values.map(encodeItem);
   const alias =
     Object.entries(OPERATOR_ALIASES).find(
       ([, candidate]) => candidate === operator,
@@ -448,6 +462,7 @@ function serializeExpression(
   expression: FilterExpression,
   path: string[],
   pairs: Array<[string, string]>,
+  registry: FilterFieldRegistry,
 ): void {
   const children =
     expression.kind === "and" ? expression.children : [expression];
@@ -459,14 +474,15 @@ function serializeExpression(
         child.target.kind === "field" ? child.target.field : "event.payload";
       const targetPath =
         child.target.kind === "event-payload" ? `[${child.target.path}]` : "";
+      const isTypeless = registry.get(field)?.valueKind === "json-scalar";
       pairs.push([
         `filter[${field}]${targetPath}${path.length ? `[${path.join(".")}]` : ""}`,
-        conditionValue(child.value, child.operator),
+        conditionValue(child.value, child.operator, isTypeless),
       ]);
     } else if (child.kind === "not") {
       const index = notGroups.indexOf(child);
       const token = notGroups.length === 1 ? "not" : `not:${index}`;
-      serializeExpression(child.child, [...path, token], pairs);
+      serializeExpression(child.child, [...path, token], pairs, registry);
     } else {
       const index = orGroups.indexOf(child);
       const token = orGroups.length === 1 ? "or" : `or:${index}`;
@@ -475,6 +491,7 @@ function serializeExpression(
           branch,
           [...path, token, String(branchIndex)],
           pairs,
+          registry,
         ),
       );
     }
@@ -487,7 +504,8 @@ export function serializeFilterParams(
 ): URLSearchParams {
   const normalized = normalizeFilterDocument(document, registry);
   const pairs: Array<[string, string]> = [];
-  if (normalized.root) serializeExpression(normalized.root, [], pairs);
+  if (normalized.root)
+    serializeExpression(normalized.root, [], pairs, registry);
   pairs.sort(([a, av], [b, bv]) => a.localeCompare(b) || av.localeCompare(bv));
   const params = new URLSearchParams();
   for (const [key, value] of pairs) params.append(key, value);

@@ -383,6 +383,28 @@ describe("fetchEventTypeContextCards", () => {
 });
 
 describe("fetchEventTypeFieldValues", () => {
+  it("forwards a trimmed search term", async () => {
+    fetchPrivateJsonMock.mockResolvedValueOnce(
+      emptyEventFieldValues("path", "string"),
+    );
+
+    await fetchEventTypeFieldValues(
+      "site-1",
+      window,
+      "click",
+      "path",
+      "string",
+      undefined,
+      { search: "  pro  " },
+    );
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/event-type-field-values",
+      expect.objectContaining({ search: "pro" }),
+      { signal: undefined },
+    );
+  });
+
   it("returns emptyEventFieldValues for empty eventName", async () => {
     const result = await fetchEventTypeFieldValues(
       "site-1",

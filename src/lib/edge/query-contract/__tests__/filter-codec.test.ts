@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   analyticsFilterRegistry,
   type FilterDocument,
+  type FilterFieldDefinition,
+  type FilterFieldRegistry,
+  normalizeFilterDocument,
   parseFilterParams,
   serializeFilterParams,
 } from "@/lib/edge/query-contract";
@@ -211,5 +214,162 @@ describe("filter URL codec", () => {
     expect(() =>
       parseFilterParams("filter[page.path]x=/docs", analyticsFilterRegistry),
     ).toThrow(/Malformed filter key/);
+  });
+});
+
+describe("type-aware value encoding", () => {
+  const all = new Set(["private-dashboard", "api-v1"] as const);
+  const definition = (
+    id: string,
+    valueKind: FilterFieldDefinition["valueKind"],
+  ): FilterFieldDefinition => ({
+    id,
+    valueKind,
+    operators: new Set(["eq", "in", "between"]),
+    audiences: all,
+  });
+  const custom: FilterFieldRegistry = new Map([
+    ["metric.number", definition("metric.number", "number")],
+    ["metric.boolean", definition("metric.boolean", "boolean")],
+  ]);
+  const typed = (root: unknown) =>
+    normalizeFilterDocument({ version: 1, root }, custom);
+  const payload = (root: unknown) =>
+    normalizeFilterDocument({ version: 1, root }, analyticsFilterRegistry);
+
+  it("round-trips typed number/boolean fields without a json: marker", () => {
+    const numberParams = serializeFilterParams(
+      typed({
+        kind: "condition",
+        target: { kind: "field", field: "metric.number" },
+        operator: "between",
+        value: [2, 50],
+      }),
+      custom,
+    );
+    expect(numberParams.get("filter[metric.number]")).toBe("bt:2,50");
+    expect(
+      serializeFilterParams(parseFilterParams(numberParams, custom), custom),
+    ).toEqual(numberParams);
+
+    const booleanParams = serializeFilterParams(
+      typed({
+        kind: "condition",
+        target: { kind: "field", field: "metric.boolean" },
+        operator: "eq",
+        value: true,
+      }),
+      custom,
+    );
+    expect(booleanParams.get("filter[metric.boolean]")).toBe("true");
+    expect(
+      serializeFilterParams(parseFilterParams(booleanParams, custom), custom),
+    ).toEqual(booleanParams);
+  });
+
+  it("parses typed number/boolean plain-text wire values", () => {
+    expect(
+      parseFilterParams("filter[metric.number]=between:2,50", custom).root,
+    ).toMatchObject({
+      kind: "condition",
+      operator: "between",
+      value: [2, 50],
+    });
+    expect(
+      parseFilterParams("filter[metric.boolean]=eq:true", custom).root,
+    ).toMatchObject({
+      kind: "condition",
+      operator: "eq",
+      value: true,
+    });
+  });
+
+  it("quotes payload strings so a leading json: is preserved on round-trip", () => {
+    const source = {
+      kind: "condition" as const,
+      target: {
+        kind: "event-payload" as const,
+        path: "/metadata/note" as never,
+      },
+      operator: "eq" as const,
+      value: "json:true",
+    };
+    const params = serializeFilterParams(
+      payload(source),
+      analyticsFilterRegistry,
+    );
+    expect(params.get("filter[event.payload][/metadata/note]")).toBe(
+      'json:"json:true"',
+    );
+    expect(parseFilterParams(params, analyticsFilterRegistry).root).toEqual(
+      source,
+    );
+  });
+
+  it("round-trips payload strings with json: prefix and embedded commas in lists", () => {
+    const source = {
+      kind: "condition" as const,
+      target: {
+        kind: "event-payload" as const,
+        path: "/metadata/tags" as never,
+      },
+      operator: "in" as const,
+      value: ["c:d", "json:a,b", "plain"],
+    };
+    const params = serializeFilterParams(
+      payload(source),
+      analyticsFilterRegistry,
+    );
+    expect(params.get("filter[event.payload][/metadata/tags]")).toBe(
+      'in:c:d,json:"json:a\\,b",plain',
+    );
+    expect(parseFilterParams(params, analyticsFilterRegistry).root).toEqual(
+      source,
+    );
+  });
+
+  it("preserves commas and backslashes in scalar payload and page strings", () => {
+    const cases: Array<
+      [
+        string,
+        { kind: "field" | "event-payload"; field?: string; path?: string },
+      ]
+    > = [
+      ["filter[event.payload][/x]", { kind: "event-payload", path: "/x" }],
+      ["filter[page.path]", { kind: "field", field: "page.path" }],
+    ];
+    for (const [key, target] of cases) {
+      const source = {
+        kind: "condition" as const,
+        target: target as never,
+        operator: "eq" as const,
+        value: "a,b\\c",
+      };
+      const params = serializeFilterParams(
+        payload(source),
+        analyticsFilterRegistry,
+      );
+      expect(params.get(key)).toBe("a,b\\c");
+      expect(parseFilterParams(params, analyticsFilterRegistry).root).toEqual(
+        source,
+      );
+    }
+  });
+
+  it("still guards payload strings that collide with operator aliases", () => {
+    const source = {
+      kind: "condition" as const,
+      target: { kind: "event-payload" as const, path: "/x" as never },
+      operator: "eq" as const,
+      value: "in:internal",
+    };
+    const params = serializeFilterParams(
+      payload(source),
+      analyticsFilterRegistry,
+    );
+    expect(params.get("filter[event.payload][/x]")).toBe("eq:in:internal");
+    expect(parseFilterParams(params, analyticsFilterRegistry).root).toEqual(
+      source,
+    );
   });
 });

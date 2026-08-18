@@ -473,6 +473,7 @@ export async function queryReferrerAggregate(
   limit: number,
   includeFullUrl: boolean,
   diagnostics?: D1ReadDiagnostics,
+  search?: string,
 ): Promise<ReferrerRow[]> {
   return queryReferrersFromD1(
     env,
@@ -482,6 +483,7 @@ export async function queryReferrerAggregate(
     limit,
     includeFullUrl,
     diagnostics,
+    search,
   );
 }
 
