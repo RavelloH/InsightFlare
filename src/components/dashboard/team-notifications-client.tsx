@@ -83,6 +83,10 @@ import {
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
+import {
+  describeNotificationFormConditions,
+  describeNotificationRuleCondition,
+} from "@/lib/notifications/condition-description";
 import Link from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -358,67 +362,15 @@ function scheduleLabel(
 
 function conditionLabel(
   copy: AppMessages["teamManagement"]["notifications"],
+  terms: AppMessages["conditionDescription"],
   rule: NotificationRuleData,
 ): string {
-  const primaryCondition = firstCondition(rule.condition);
-  if (rule.type === "report") {
-    const reportType = isReportType(rule.condition.reportType)
-      ? rule.condition.reportType
-      : "daily";
-    return formatI18nTemplate(copy.conditionReport, {
-      period: copy.reportPeriods[reportType],
-    });
-  }
-  if (rule.type === "milestone") {
-    const metric =
-      primaryCondition.metric === "views" ||
-      primaryCondition.metric === "sessions"
-        ? primaryCondition.metric
-        : "visitors";
-    const step = String(
-      rule.condition.step ??
-        rule.condition.every ??
-        rule.condition.value ??
-        "-",
-    );
-    return formatI18nTemplate(copy.conditionMilestone, {
-      metric: copy.metrics[metric],
-      step,
-    });
-  }
-  if (rule.type === "threshold" || rule.type === "change") {
-    const metric =
-      primaryCondition.metric === "views" ||
-      primaryCondition.metric === "sessions"
-        ? primaryCondition.metric
-        : "visitors";
-    const window =
-      primaryCondition.window === "last_24h" ||
-      primaryCondition.window === "yesterday"
-        ? primaryCondition.window
-        : "last_1h";
-    const value = String(primaryCondition.value ?? "-");
-    const operator =
-      primaryCondition.operator === ">" ||
-      primaryCondition.operator === "<" ||
-      primaryCondition.operator === "<="
-        ? primaryCondition.operator
-        : ">=";
-    const template =
-      rule.type === "change" ? copy.conditionChange : copy.conditionThreshold;
-    return formatI18nTemplate(template, {
-      metric: copy.metrics[metric],
-      window: copy.windows[window],
-      operator,
-      value,
-    });
-  }
-  if (rule.type === "health") {
-    return formatI18nTemplate(copy.conditionHealth, {
-      hours: String(rule.condition.hours ?? "-"),
-    });
-  }
-  return copy.scheduleCustom;
+  return describeNotificationRuleCondition(
+    copy,
+    terms,
+    rule.type,
+    rule.condition,
+  );
 }
 
 function ruleTypeLabel(
@@ -728,57 +680,26 @@ function buildRulePayload(
   };
 }
 
-function metricConditionText(
-  copy: AppMessages["teamManagement"]["notifications"],
-  condition: MetricConditionForm,
-  type: RuleFormType,
-): string {
-  const metric = copy.metrics[condition.metric];
-  const window = copy.windows[condition.window];
-  const value = condition.value || "0";
-  if (type === "change") {
-    return formatI18nTemplate(copy.summaryConditionChange, {
-      window,
-      metric,
-      operator: condition.operator,
-      value,
-      mode:
-        condition.changeMode === "percent"
-          ? copy.changeModePercent
-          : copy.changeModeAbsolute,
-    });
-  }
-  return formatI18nTemplate(copy.summaryConditionThreshold, {
-    window,
-    metric,
-    operator: condition.operator,
-    value,
-  });
-}
-
 function ruleSummaryLines(
   copy: AppMessages["teamManagement"]["notifications"],
+  terms: AppMessages["conditionDescription"],
   form: RuleFormState,
 ): string[] {
-  if (form.type === "threshold" || form.type === "change") {
-    return form.conditions.map((condition) =>
-      metricConditionText(copy, condition, form.type),
-    );
-  }
-  if (form.type === "report") {
-    return [];
-  }
-  if (form.type === "milestone") {
-    return [
-      formatI18nTemplate(copy.summaryMilestoneCondition, {
-        metric: copy.metrics[form.metric],
-        step: form.milestoneStep || "0",
-      }),
-    ];
-  }
   return [
-    formatI18nTemplate(copy.summaryHealthCondition, {
-      hours: form.hours || "0",
+    describeNotificationFormConditions(copy, terms, {
+      type: form.type,
+      combinator: form.combinator,
+      conditions: form.conditions.map((condition) => ({
+        metric: condition.metric,
+        window: condition.window,
+        operator: condition.operator,
+        value: condition.value || "0",
+        changeMode: condition.changeMode,
+      })),
+      reportType: form.reportType,
+      metric: form.metric,
+      milestoneStep: form.milestoneStep,
+      hours: form.hours,
     }),
   ];
 }
@@ -825,6 +746,7 @@ function RuleFormSection({
 
 function RuleFormFields({
   copy,
+  terms,
   locale,
   form,
   sites,
@@ -833,6 +755,7 @@ function RuleFormFields({
   onChange,
 }: {
   copy: AppMessages["teamManagement"]["notifications"];
+  terms: AppMessages["conditionDescription"];
   locale: Locale;
   form: RuleFormState;
   sites: SiteData[];
@@ -902,7 +825,7 @@ function RuleFormFields({
     });
   }
 
-  const summaryLines = ruleSummaryLines(copy, form);
+  const summaryLines = ruleSummaryLines(copy, terms, form);
 
   return (
     <div className="space-y-5">
@@ -2314,7 +2237,13 @@ export function TeamNotificationsClient({
                   <p className="text-xs text-muted-foreground">
                     {copy.columns.condition}
                   </p>
-                  <p className="mt-1">{conditionLabel(copy, previewRule)}</p>
+                  <p className="mt-1">
+                    {conditionLabel(
+                      copy,
+                      messages.conditionDescription,
+                      previewRule,
+                    )}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">
@@ -2487,6 +2416,7 @@ export function TeamNotificationsClient({
           <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
             <RuleFormFields
               copy={copy}
+              terms={messages.conditionDescription}
               locale={locale}
               form={form}
               sites={sites}

@@ -146,6 +146,20 @@ export interface AppMessages {
     all: string;
     clear: string;
   };
+  conditionDescription: {
+    and: string;
+    or: string;
+    not: string;
+    emptyConditions: string;
+    emptyFilter: string;
+    filterEquals: string;
+    filterNotEquals: string;
+    filterAnyOf: string;
+    filterNoneOf: string;
+    filterBetween: string;
+    filterStartsWith: string;
+    filterEndsWith: string;
+  };
   filterBuilder: {
     fieldGroups: {
       page: string;
@@ -180,6 +194,7 @@ export interface AppMessages {
     match: string;
     expression: string;
     expressionPlaceholder: string;
+    naturalLanguageDescription: string;
     expressionInvalid: string;
     expressionHelpTitle: string;
     expressionHelpDescription: string;
@@ -2265,6 +2280,20 @@ const enMessages = {
     all: "All",
     clear: "Clear",
   },
+  conditionDescription: {
+    and: "and",
+    or: "or",
+    not: "not ({description})",
+    emptyConditions: "No conditions",
+    emptyFilter: "No filter conditions",
+    filterEquals: "{field} equals {value}",
+    filterNotEquals: "{field} does not equal {value}",
+    filterAnyOf: "{field} is one of {values}",
+    filterNoneOf: "{field} is none of {values}",
+    filterBetween: "{field} is between {from} and {to}",
+    filterStartsWith: "{field} starts with {value}",
+    filterEndsWith: "{field} ends with {value}",
+  },
   filterBuilder: {
     fieldGroups: {
       page: "Page",
@@ -2349,6 +2378,7 @@ const enMessages = {
     match: "Match",
     expression: "Filter expression",
     expressionPlaceholder: "Filter expression...",
+    naturalLanguageDescription: "Natural-language description",
     expressionInvalid: "Invalid expression. Click to view syntax help.",
     expressionHelpTitle: "Filter expression syntax",
     expressionHelpDescription:
@@ -4602,6 +4632,20 @@ const zhMessages = {
     all: "全部",
     clear: "清除",
   },
+  conditionDescription: {
+    and: "且",
+    or: "或",
+    not: "不满足（{description}）",
+    emptyConditions: "尚未设置条件",
+    emptyFilter: "尚未设置筛选条件",
+    filterEquals: "{field} 为 {value}",
+    filterNotEquals: "{field} 不为 {value}",
+    filterAnyOf: "{field} 属于 {values} 中的任一值",
+    filterNoneOf: "{field} 不属于 {values} 中的任何值",
+    filterBetween: "{field} 介于 {from} 与 {to} 之间",
+    filterStartsWith: "{field} 以 {value} 开头",
+    filterEndsWith: "{field} 以 {value} 结尾",
+  },
   filterBuilder: {
     fieldGroups: {
       page: "页面",
@@ -4686,6 +4730,7 @@ const zhMessages = {
     match: "匹配方式",
     expression: "筛选表达式",
     expressionPlaceholder: "筛选表达式...",
+    naturalLanguageDescription: "自然语言描述",
     expressionInvalid: "表达式无效，点击查看语法帮助",
     expressionHelpTitle: "筛选表达式语法",
     expressionHelpDescription: "可用字段和操作符由当前筛选契约动态生成。",
@@ -6864,6 +6909,20 @@ const jaMessages = {
     all: "すべて",
     clear: "クリア",
   },
+  conditionDescription: {
+    and: "かつ",
+    or: "または",
+    not: "（{description}）を満たさない",
+    emptyConditions: "条件がありません",
+    emptyFilter: "フィルター条件がありません",
+    filterEquals: "{field} は {value} と等しい",
+    filterNotEquals: "{field} は {value} と等しくない",
+    filterAnyOf: "{field} は {values} のいずれかに一致",
+    filterNoneOf: "{field} は {values} のいずれにも一致しない",
+    filterBetween: "{field} は {from} から {to} の間",
+    filterStartsWith: "{field} は {value} で始まる",
+    filterEndsWith: "{field} は {value} で終わる",
+  },
   filterBuilder: {
     fieldGroups: {
       page: "ページ",
@@ -6948,6 +7007,7 @@ const jaMessages = {
     match: "一致条件",
     expression: "フィルター式",
     expressionPlaceholder: "フィルター式...",
+    naturalLanguageDescription: "自然言語の説明",
     expressionInvalid:
       "式が無効です。クリックして構文ヘルプを確認してください。",
     expressionHelpTitle: "フィルター式の構文",

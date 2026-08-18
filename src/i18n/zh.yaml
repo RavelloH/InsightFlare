@@ -149,6 +149,19 @@ filters:
   browser: 浏览器
   all: 全部
   clear: 清除
+conditionDescription:
+  and: 且
+  or: 或
+  not: "不满足（{description}）"
+  emptyConditions: 尚未设置条件
+  emptyFilter: 尚未设置筛选条件
+  filterEquals: "{field} 为 {value}"
+  filterNotEquals: "{field} 不为 {value}"
+  filterAnyOf: "{field} 属于 {values} 中的任一值"
+  filterNoneOf: "{field} 不属于 {values} 中的任何值"
+  filterBetween: "{field} 介于 {from} 与 {to} 之间"
+  filterStartsWith: "{field} 以 {value} 开头"
+  filterEndsWith: "{field} 以 {value} 结尾"
 filterBuilder:
   fieldGroups:
     page: 页面
@@ -229,6 +242,7 @@ filterBuilder:
   match: 匹配方式
   expression: 筛选表达式
   expressionPlaceholder: 筛选表达式...
+  naturalLanguageDescription: 自然语言描述
   expressionInvalid: 表达式无效，点击查看语法帮助
   expressionHelpTitle: 筛选表达式语法
   expressionHelpDescription: 可用字段和操作符由当前筛选契约动态生成。

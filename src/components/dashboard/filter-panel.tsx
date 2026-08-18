@@ -9,6 +9,7 @@ import {
 import {
   RiAddLine,
   RiArrowDownSLine,
+  RiChatQuoteLine,
   RiCheckLine,
   RiDeleteBinLine,
   RiErrorWarningLine,
@@ -46,11 +47,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import type { DashboardFilterOptionKey } from "@/lib/dashboard/client-data";
 import {
   fetchEventTypeFieldValues,
   fetchFilterValues,
 } from "@/lib/dashboard/client-data";
+import { describeFilterExpression } from "@/lib/dashboard/filter-description";
 import {
   formatFilterPanelExpression,
   parseFilterPanelExpression,
@@ -1422,7 +1425,7 @@ function GroupEditor({
         </div>
       </div>
 
-      <AutoResizer initial duration={0.18}>
+      <AutoResizer initial={false} duration={0.18}>
         <div className="space-y-3">
           <AnimatePresence initial={false} mode="popLayout">
             {group.children.map((child, index) => (
@@ -1527,6 +1530,15 @@ export function FilterPanel({
   const expressionRegistry = useMemo(
     () => new Map(allowedFields(audience).map((field) => [field.id, field])),
     [audience],
+  );
+  const naturalLanguageDescription = useMemo(
+    () =>
+      describeFilterExpression(
+        displayRootExpression(root),
+        expressionRegistry,
+        messages,
+      ),
+    [expressionRegistry, messages, root],
   );
   const eventName = directEventName(root);
 
@@ -1663,7 +1675,10 @@ export function FilterPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+      <VerticalScrollMask
+        className="min-h-0 flex-1"
+        contentClassName="h-full min-h-0 pb-4"
+      >
         <GroupEditor
           audience={audience}
           document={document}
@@ -1685,9 +1700,40 @@ export function FilterPanel({
             {validationError}
           </p>
         ) : null}
-      </div>
+      </VerticalScrollMask>
 
       <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background">
+        <div className="border-b border-border bg-muted/20">
+          <AutoResizer initial={false} duration={0.18}>
+            <AutoTransition
+              transitionKey={naturalLanguageDescription}
+              type="fade"
+              duration={0.18}
+              initial={false}
+            >
+              <VerticalScrollMask
+                syncKey={naturalLanguageDescription}
+                className="max-h-28"
+                contentClassName="max-h-28"
+                maskClassName="from-muted/20 via-muted/10 to-transparent"
+              >
+                <div
+                  aria-label={messages.filterBuilder.naturalLanguageDescription}
+                  className="min-h-8 px-4 py-2 text-xs leading-4 text-muted-foreground"
+                  title={messages.filterBuilder.naturalLanguageDescription}
+                >
+                  <RiChatQuoteLine
+                    className="mr-2 inline-block size-4 align-text-bottom"
+                    aria-hidden
+                  />
+                  <span className="break-words">
+                    {naturalLanguageDescription}
+                  </span>
+                </div>
+              </VerticalScrollMask>
+            </AutoTransition>
+          </AutoResizer>
+        </div>
         <div className="border-b border-border">
           <OverlayScrollbar
             axis="horizontal"
@@ -1715,7 +1761,7 @@ export function FilterPanel({
             />
           </OverlayScrollbar>
         </div>
-        <AutoResizer initial duration={0.18}>
+        <AutoResizer initial={false} duration={0.18}>
           <AutoTransition
             transitionKey={expressionError ? "invalid" : "valid"}
             type="slideDown"

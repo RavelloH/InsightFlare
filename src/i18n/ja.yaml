@@ -149,6 +149,19 @@ filters:
   browser: ブラウザー
   all: すべて
   clear: クリア
+conditionDescription:
+  and: かつ
+  or: または
+  not: "（{description}）を満たさない"
+  emptyConditions: 条件がありません
+  emptyFilter: フィルター条件がありません
+  filterEquals: "{field} は {value} と等しい"
+  filterNotEquals: "{field} は {value} と等しくない"
+  filterAnyOf: "{field} は {values} のいずれかに一致"
+  filterNoneOf: "{field} は {values} のいずれにも一致しない"
+  filterBetween: "{field} は {from} から {to} の間"
+  filterStartsWith: "{field} は {value} で始まる"
+  filterEndsWith: "{field} は {value} で終わる"
 filterBuilder:
   fieldGroups:
     page: ページ
@@ -229,6 +242,7 @@ filterBuilder:
   match: 一致条件
   expression: フィルター式
   expressionPlaceholder: フィルター式...
+  naturalLanguageDescription: 自然言語の説明
   expressionInvalid: 式が無効です。クリックして構文ヘルプを確認してください。
   expressionHelpTitle: フィルター式の構文
   expressionHelpDescription: 利用可能なフィールドと演算子は、現在のフィルター契約から動的に生成されます。
