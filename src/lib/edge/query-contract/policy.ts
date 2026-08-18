@@ -17,7 +17,7 @@ import type {
 const DEFAULT_LIMITS: QueryLimits = {
   maxBuckets: 2_000,
   maxCursorBytes: 12_288,
-  maxFilterClauses: 12,
+  maxFilterClauses: 96,
   maxLimit: 500,
   maxOffset: 20_000,
 };

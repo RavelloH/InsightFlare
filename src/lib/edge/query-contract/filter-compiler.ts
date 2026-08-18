@@ -36,6 +36,7 @@ type Compiler = {
   readonly eventAlias: string;
   readonly bindings: FilterSqlBinding[];
   payloadIndex: number;
+  orLikeIndex: number;
 };
 
 const FILTER_SQL_CACHE = new WeakMap<FilterDocument, Map<string, FilterSql>>();
@@ -151,6 +152,132 @@ function escapedLike(value: string): string {
     .replaceAll("\\", "\\\\")
     .replaceAll("%", "\\%")
     .replaceAll("_", "\\_");
+}
+
+type OrVectorOperator = "eq" | "contains" | "startsWith" | "endsWith";
+
+type OrVectorCondition = {
+  readonly field: RegisteredFilterField;
+  readonly source: string;
+  readonly operator: OrVectorOperator;
+  readonly value: string | number;
+};
+
+function storedComparisonValue(
+  field: RegisteredFilterField,
+  value: string | number,
+): string | number {
+  return field.profile === "direct-referrer" && value === "__direct__"
+    ? ""
+    : value;
+}
+
+function orVectorCondition(
+  compiler: Compiler,
+  item: FilterExpression,
+): OrVectorCondition | undefined {
+  if (item.kind !== "condition" || item.target.kind !== "field") {
+    return undefined;
+  }
+  const field = analyticsFilterDefinition(item.target.field);
+  if (
+    !field ||
+    field.profile === "session-boundary" ||
+    (item.operator !== "eq" &&
+      item.operator !== "contains" &&
+      item.operator !== "startsWith" &&
+      item.operator !== "endsWith") ||
+    Array.isArray(item.value) ||
+    (typeof item.value !== "string" && typeof item.value !== "number")
+  ) {
+    return undefined;
+  }
+  if (item.operator !== "eq" && typeof item.value !== "string") {
+    return undefined;
+  }
+  return {
+    field,
+    source: directColumn(compiler, field.id),
+    operator: item.operator,
+    value: storedComparisonValue(field, item.value),
+  };
+}
+
+function vectorKey(item: OrVectorCondition): string {
+  return `${item.field.id}\u0000${item.operator}`;
+}
+
+function jsonOrLikeComparison(
+  compiler: Compiler,
+  item: OrVectorCondition,
+  values: readonly string[],
+): string {
+  const normalized = normalizedColumn(item.field, item.source);
+  const alias = `filter_or_like_${compiler.orLikeIndex}`;
+  compiler.orLikeIndex += 1;
+  // This mirrors escapedLike() for values read from json_each at SQL runtime.
+  const escaped = `REPLACE(REPLACE(REPLACE(${alias}.value, '\\', '\\\\'), '%', '\\%'), '_', '\\_')`;
+  const pattern =
+    item.operator === "contains"
+      ? `'%' || ${escaped} || '%'`
+      : item.operator === "startsWith"
+        ? `${escaped} || '%'`
+        : `'%' || ${escaped}`;
+  return `EXISTS (
+    SELECT 1
+    FROM json_each(${push(compiler, JSON.stringify(values))}) AS ${alias}
+    WHERE ${normalized} LIKE ${pattern} ESCAPE '\\'
+  )`;
+}
+
+function vectorOrComparison(
+  compiler: Compiler,
+  item: OrVectorCondition,
+  values: readonly (string | number)[],
+): string {
+  const normalized = normalizedColumn(item.field, item.source);
+  if (item.operator === "eq") {
+    return `${normalized} IN (SELECT value FROM json_each(${push(compiler, jsonSet(values))}))`;
+  }
+  return jsonOrLikeComparison(compiler, item, values as readonly string[]);
+}
+
+function orExpression(
+  compiler: Compiler,
+  children: readonly FilterExpression[],
+): string {
+  const vectors = children.map((child) => orVectorCondition(compiler, child));
+  const groups = new Map<string, number[]>();
+  for (const [index, vector] of vectors.entries()) {
+    if (!vector) continue;
+    const key = vectorKey(vector);
+    const entries = groups.get(key) ?? [];
+    entries.push(index);
+    groups.set(key, entries);
+  }
+  const groupedIndexes = new Set(
+    [...groups.values()].flatMap((indexes) =>
+      indexes.length > 1 ? indexes.slice(1) : [],
+    ),
+  );
+  const clauses: string[] = [];
+  for (const [index, child] of children.entries()) {
+    if (groupedIndexes.has(index)) continue;
+    const vector = vectors[index];
+    const indexes = vector ? groups.get(vectorKey(vector)) : undefined;
+    if (vector && indexes && indexes.length > 1) {
+      clauses.push(
+        vectorOrComparison(
+          compiler,
+          vector,
+          indexes.map((itemIndex) => vectors[itemIndex]!.value),
+        ),
+      );
+    } else {
+      clauses.push(expression(compiler, child));
+    }
+  }
+  return `(${clauses.join(" OR ")})`;
 }
 
 function comparison(
@@ -370,6 +497,7 @@ function condition(compiler: Compiler, item: FilterCondition): string {
 function expression(compiler: Compiler, item: FilterExpression): string {
   if (item.kind === "condition") return condition(compiler, item);
   if (item.kind === "not") return `(NOT (${expression(compiler, item.child)}))`;
+  if (item.kind === "or") return orExpression(compiler, item.children);
   const operator = item.kind === "and" ? " AND " : " OR ";
   return `(${item.children.map((child) => expression(compiler, child)).join(operator)})`;
 }
@@ -407,6 +535,7 @@ export function compileFilterDocument(
     ),
     bindings: [],
     payloadIndex: 0,
+    orLikeIndex: 0,
   };
   const result = {
     clause: `WHERE ${expression(compiler, normalized.root)}`,

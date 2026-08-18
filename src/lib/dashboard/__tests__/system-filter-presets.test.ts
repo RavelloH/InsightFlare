@@ -6,9 +6,11 @@ import {
   systemFilterPresetFromOptionValue,
   systemFilterPresetOptionValue,
 } from "@/lib/dashboard/system-filter-presets";
+import { queryPolicyForAudience } from "@/lib/edge/query-contract/policy";
 import {
   analyticsFilterRegistry,
   assertFilterAudience,
+  filterConditionCount,
 } from "@/lib/filter-contract";
 
 describe("system filter presets", () => {
@@ -26,6 +28,9 @@ describe("system filter presets", () => {
       expect(() =>
         assertFilterAudience(document, analyticsFilterRegistry, "public-share"),
       ).not.toThrow();
+      expect(filterConditionCount(document)).toBeLessThanOrEqual(
+        queryPolicyForAudience("public-share").limits.maxFilterClauses!,
+      );
     }
   });
 
@@ -34,6 +39,44 @@ describe("system filter presets", () => {
       expect(preset.filterDsl).not.toContain('in ["__direct__"');
       expect(preset.filterDsl).not.toContain('notIn ["__direct__"');
     }
+  });
+
+  it("matches registered discovery domains and their subdomains safely", () => {
+    const searchDiscovery = SYSTEM_FILTER_PRESETS.find(
+      (preset) => preset.id === "organicSearchDiscovery",
+    )!;
+    const socialDiscovery = SYSTEM_FILTER_PRESETS.find(
+      (preset) => preset.id === "organicSocialDiscovery",
+    )!;
+    const mobileDiscovery = SYSTEM_FILTER_PRESETS.find(
+      (preset) => preset.id === "mobileOrganicDiscovery",
+    )!;
+
+    expect(searchDiscovery.filterDsl).toContain(
+      'referrer.domain eq "google.com"',
+    );
+    expect(searchDiscovery.filterDsl).toContain(
+      'referrer.domain endsWith ".google.com"',
+    );
+    expect(searchDiscovery.filterDsl).toContain(
+      'referrer.domain endsWith ".google.com.hk"',
+    );
+    expect(searchDiscovery.filterDsl).toContain(
+      'referrer.domain endsWith ".google.co.uk"',
+    );
+    expect(socialDiscovery.filterDsl).toContain(
+      'referrer.domain eq "linkedin.com"',
+    );
+    expect(socialDiscovery.filterDsl).toContain(
+      'referrer.domain endsWith ".linkedin.com"',
+    );
+    expect(mobileDiscovery.filterDsl).toContain(
+      'referrer.domain endsWith ".google.com"',
+    );
+    expect(mobileDiscovery.filterDsl).toContain(
+      'referrer.domain endsWith ".linkedin.com"',
+    );
+    expect(mobileDiscovery.filterDsl).not.toMatch(/referrer\.domain in \[/);
   });
 
   it("round-trips selector option values", () => {

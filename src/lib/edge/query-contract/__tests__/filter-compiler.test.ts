@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +13,232 @@ function document(root: unknown) {
 }
 
 describe("filter SQL compiler", () => {
+  it("matches strict root-or-subdomain predicates with generic JSON-bound OR sets", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec(`
+        CREATE TABLE visits (id TEXT PRIMARY KEY, referrer_host TEXT);
+      `);
+      const insert = database.prepare(
+        "INSERT INTO visits (id, referrer_host) VALUES (?, ?)",
+      );
+      for (const [id, referrerHost] of [
+        ["root", "google.com"],
+        ["subdomain", "www.google.com"],
+        ["regional-subdomain", "www.google.com.hk"],
+        ["other-root", "bing.com"],
+        ["other-subdomain", "cn.bing.com"],
+        ["case-and-space", "  WWW.Google.Com  "],
+        ["false-prefix", "evilgoogle.com"],
+        ["false-suffix", "evil.google.com.evil"],
+        ["literal-percent", "sub.literal%domain.test"],
+        ["literal-underscore", "sub.literal_domain.test"],
+        ["literal-backslash", "sub.literal\\domain.test"],
+        ["direct", "__direct__"],
+        ["empty", ""],
+        ["null", null],
+      ] as const) {
+        insert.run(id, referrerHost);
+      }
+
+      const roots = [
+        "google.com",
+        "google.com.hk",
+        "bing.com",
+        "literal%domain.test",
+        "literal_domain.test",
+        "literal\\domain.test",
+      ];
+      const normalized = "LOWER(TRIM(COALESCE(referrer_host, '')))";
+      const baselineClause = roots
+        .map(() => `(${normalized} = ? OR ${normalized} LIKE ? ESCAPE '\\')`)
+        .join(" OR ");
+      const baselineBindings = roots.flatMap((root) => [
+        root,
+        `%.${root.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}`,
+      ]);
+      const escapedRoot = `REPLACE(REPLACE(REPLACE(roots.value, '\\', '\\\\'), '%', '\\%'), '_', '\\_')`;
+      const optimizedClause = `(
+        ${normalized} IN (SELECT value FROM json_each(?))
+        OR EXISTS (
+          SELECT 1
+          FROM json_each(?) AS roots
+          WHERE ${normalized} LIKE '%' || ${escapedRoot} ESCAPE '\\'
+        )
+      )`;
+
+      const queryIds = (clause: string, bindings: readonly string[]) =>
+        database
+          .prepare(`SELECT id FROM visits WHERE ${clause} ORDER BY id`)
+          .all(...bindings)
+          .map((row) => (row as { id: string }).id);
+      const baseline = queryIds(baselineClause, baselineBindings);
+      const optimized = queryIds(optimizedClause, [
+        JSON.stringify(roots),
+        JSON.stringify(roots.map((root) => `.${root}`)),
+      ]);
+      const compiled = compileFilterDocument(
+        document({
+          kind: "or",
+          children: roots.flatMap((root) => [
+            {
+              kind: "condition",
+              target: { kind: "field", field: "referrer.domain" },
+              operator: "eq",
+              value: root,
+            },
+            {
+              kind: "condition",
+              target: { kind: "field", field: "referrer.domain" },
+              operator: "endsWith",
+              value: `.${root}`,
+            },
+          ]),
+        }),
+      );
+      const compiledIds = database
+        .prepare(
+          `SELECT id FROM visits AS visit_source ${compiled.clause} ORDER BY id`,
+        )
+        .all(...compiled.bindings)
+        .map((row) => (row as { id: string }).id);
+
+      expect(optimized).toEqual(baseline);
+      expect(compiledIds).toEqual(baseline);
+      expect(compiled.clause).toContain("json_each(?)");
+      expect(compiled.bindings).toHaveLength(2);
+      expect(
+        new Set(
+          compiled.bindings.flatMap((binding) => JSON.parse(binding as string)),
+        ),
+      ).toEqual(new Set([...roots, ...roots.map((root) => `.${root}`)]));
+      expect(optimized).toEqual([
+        "case-and-space",
+        "literal-backslash",
+        "literal-percent",
+        "literal-underscore",
+        "other-root",
+        "other-subdomain",
+        "regional-subdomain",
+        "root",
+        "subdomain",
+      ]);
+      expect(
+        database
+          .prepare(
+            `EXPLAIN QUERY PLAN SELECT id FROM visits WHERE ${optimizedClause}`,
+          )
+          .all(JSON.stringify(roots), JSON.stringify(roots))
+          .map((row) => (row as { detail: string }).detail)
+          .join("\n"),
+      ).toContain("SCAN roots VIRTUAL TABLE");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("lowers compatible OR leaves by typed AST shape rather than field identity", () => {
+    const result = compileFilterDocument(
+      document({
+        kind: "or",
+        children: [
+          {
+            kind: "condition",
+            target: { kind: "field", field: "page.path" },
+            operator: "eq",
+            value: "/docs",
+          },
+          {
+            kind: "condition",
+            target: { kind: "field", field: "page.path" },
+            operator: "eq",
+            value: "/pricing",
+          },
+          {
+            kind: "condition",
+            target: { kind: "field", field: "page.title" },
+            operator: "contains",
+            value: "Pricing",
+          },
+          {
+            kind: "condition",
+            target: { kind: "field", field: "page.title" },
+            operator: "contains",
+            value: "Compare",
+          },
+        ],
+      }),
+      { alias: "vs" },
+    );
+
+    expect(result.clause).toContain(
+      "TRIM(COALESCE(vs.pathname, '')) IN (SELECT value FROM json_each(?))",
+    );
+    expect(result.clause).toContain("FROM json_each(?) AS filter_or_like_0");
+    expect(result.bindings).toHaveLength(2);
+  });
+
+  it("lowers startsWith OR leaves with the same escaped JSON set", () => {
+    const result = compileFilterDocument(
+      document({
+        kind: "or",
+        children: [
+          {
+            kind: "condition",
+            target: { kind: "field", field: "page.path" },
+            operator: "startsWith",
+            value: "/docs",
+          },
+          {
+            kind: "condition",
+            target: { kind: "field", field: "page.path" },
+            operator: "startsWith",
+            value: "/guide",
+          },
+        ],
+      }),
+    );
+
+    expect(result.clause).toContain("LIKE");
+    expect(result.clause).toContain(" || '%'");
+    expect(result.bindings).toHaveLength(1);
+  });
+
+  it("falls back per leaf when an OR group contains non-vector conditions", () => {
+    const result = compileFilterDocument(
+      document({
+        kind: "or",
+        children: [
+          {
+            kind: "not",
+            child: {
+              kind: "condition",
+              target: { kind: "field", field: "page.path" },
+              operator: "eq",
+              value: "/private",
+            },
+          },
+          {
+            kind: "condition",
+            target: { kind: "field", field: "session.entryPath" },
+            operator: "eq",
+            value: "/landing",
+          },
+          {
+            kind: "condition",
+            target: { kind: "field", field: "session.entryPath" },
+            operator: "eq",
+            value: "/home",
+          },
+        ],
+      }),
+    );
+
+    expect(result.clause).toContain("NOT (");
+    expect(result.clause).toContain("ROW_NUMBER() OVER");
+    expect(result.clause).not.toContain("json_each(?)");
+  });
+
   it("compiles nested visit predicates with bound values and escaped LIKE", () => {
     const result = compileFilterDocument(
       document({
@@ -78,6 +306,96 @@ describe("filter SQL compiler", () => {
 
     expect(result.clause).toContain("json_each(?)");
     expect(result.bindings).toEqual(["/plan", JSON.stringify(values), 1]);
+  });
+
+  it("keeps small direct sets scalar-bound", () => {
+    const result = compileFilterDocument(
+      document({
+        kind: "condition",
+        target: { kind: "field", field: "page.path" },
+        operator: "in",
+        value: ["/docs", "/pricing"],
+      }),
+    );
+
+    expect(result.clause).toContain(" IN (?, ?)");
+    expect(result.clause).not.toContain("json_each(?)");
+    expect(result.bindings).toEqual(["/docs", "/pricing"]);
+  });
+
+  it("keeps small payload NOT IN sets typed and rejects mixed payload sets", () => {
+    const result = compileFilterDocument(
+      document({
+        kind: "condition",
+        target: { kind: "event-payload", path: "/plan" },
+        operator: "notIn",
+        value: ["free", "trial"],
+      }),
+      { alias: "es", eventAlias: "es" },
+    );
+    expect(result.clause).toContain("NOT IN (?, ?)");
+    expect(result.bindings).toEqual(["/plan", "free", "trial", 1]);
+
+    expect(() =>
+      compileFilterDocument(
+        document({
+          kind: "condition",
+          target: { kind: "event-payload", path: "/score" },
+          operator: "in",
+          value: ["free", 1],
+        }),
+      ),
+    ).toThrow("one JSON type");
+
+    expect(() =>
+      compileFilterDocument(
+        document({
+          kind: "condition",
+          target: { kind: "event-payload", path: "/score" },
+          operator: "contains",
+          value: 42,
+        }),
+      ),
+    ).toThrow("requires a string");
+  });
+
+  it("binds true JSON payload values as booleans", () => {
+    const result = compileFilterDocument(
+      document({
+        kind: "condition",
+        target: { kind: "event-payload", path: "/enabled" },
+        operator: "eq",
+        value: true,
+      }),
+      { alias: "es", eventAlias: "es" },
+    );
+    expect(result.bindings).toEqual(["/enabled", 3, 1]);
+  });
+
+  it("compiles null payload sets and typed payload ranges", () => {
+    expect(() =>
+      compileFilterDocument(
+        document({
+          kind: "condition",
+          target: { kind: "event-payload", path: "/nullable" },
+          operator: "in",
+          value: [null],
+        }),
+        { alias: "es", eventAlias: "es" },
+      ),
+    ).toThrow("non-null scalar");
+
+    const range = compileFilterDocument(
+      document({
+        kind: "condition",
+        target: { kind: "event-payload", path: "/score" },
+        operator: "between",
+        value: [10, 20],
+      }),
+      { alias: "es", eventAlias: "es" },
+    );
+    expect(range.clause).toContain("BETWEEN");
+    expect(range.bindings).toEqual(["/score", 2, 10, 20]);
   });
 
   it("keeps payload missing, JSON null, empty, false, and zero distinct", () => {
@@ -179,5 +497,33 @@ describe("filter SQL compiler", () => {
       "LOWER(TRIM(COALESCE(vs.referrer_host, ''))) = ''",
     );
     expect(result.bindings).toEqual([]);
+  });
+
+  it("keeps the direct referrer sentinel in generic OR lowering", () => {
+    const result = compileFilterDocument(
+      document({
+        kind: "or",
+        children: [
+          {
+            kind: "condition",
+            target: { kind: "field", field: "referrer.domain" },
+            operator: "eq",
+            value: "__direct__",
+          },
+          {
+            kind: "condition",
+            target: { kind: "field", field: "referrer.domain" },
+            operator: "eq",
+            value: "google.com",
+          },
+        ],
+      }),
+    );
+
+    expect(result.clause).toContain("IN (SELECT value FROM json_each(?))");
+    expect(JSON.parse(result.bindings[0] as string)).toEqual([
+      "",
+      "google.com",
+    ]);
   });
 });
