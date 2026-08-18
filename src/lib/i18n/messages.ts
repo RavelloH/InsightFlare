@@ -208,6 +208,99 @@ export interface AppMessages {
     expressionHelpFieldType: string;
     expressionHelpFieldOperators: string;
     expressionHelpOtherFields: string;
+    savedFiltersLoading: string;
+    noSavedFilter: string;
+    systemPresets: string;
+    systemPresetItems: {
+      directTraffic: {
+        name: string;
+        description: string;
+      };
+      externalReferrals: {
+        name: string;
+        description: string;
+      };
+      organicSearchDiscovery: {
+        name: string;
+        description: string;
+      };
+      organicSocialDiscovery: {
+        name: string;
+        description: string;
+      };
+      campaignTaggedTraffic: {
+        name: string;
+        description: string;
+      };
+      mobileTraffic: {
+        name: string;
+        description: string;
+      };
+      desktopTraffic: {
+        name: string;
+        description: string;
+      };
+      campaignTaggedExternalAcquisition: {
+        name: string;
+        description: string;
+      };
+      campaignTaggedDirectEntry: {
+        name: string;
+        description: string;
+      };
+      untaggedExternalReferrals: {
+        name: string;
+        description: string;
+      };
+      mobileAcquiredTraffic: {
+        name: string;
+        description: string;
+      };
+      mobileOrganicDiscovery: {
+        name: string;
+        description: string;
+      };
+      desktopDirectAudience: {
+        name: string;
+        description: string;
+      };
+      geographicAttributionGap: {
+        name: string;
+        description: string;
+      };
+      tabletTraffic: {
+        name: string;
+        description: string;
+      };
+    };
+    savedFiltersPersonal: string;
+    savedFiltersTeam: string;
+    savedFiltersAuthor: string;
+    savedFiltersPrivate: string;
+    savedFiltersTeamShared: string;
+    saveThisFilter: string;
+    saveAsThisFilter: string;
+    manageThisFilter: string;
+    finishEditingFilter: string;
+    createSavedFilter: string;
+    manageSavedFilter: string;
+    savedFilterName: string;
+    savedFilterDescription: string;
+    savedFilterVisibility: string;
+    savedFilterVisibilityPrivate: string;
+    savedFilterVisibilityTeam: string;
+    savedFilterCreateDescription: string;
+    savedFilterManageDescription: string;
+    editSavedFilter: string;
+    deleteSavedFilter: string;
+    deleteSavedFilterTitle: string;
+    deleteSavedFilterDescription: string;
+    savedFilterCancel: string;
+    savedFilterSave: string;
+    savedFilterSaving: string;
+    savedFilterDelete: string;
+    savedFilterDeleting: string;
+    savedFilterOperationFailed: string;
     apply: string;
     allConditions: string;
     anyCondition: string;
@@ -2268,7 +2361,7 @@ const enMessages = {
       "Week interval is only available within the last 12 months.",
     filterTitle: "Filters",
     filterSubtitle:
-      "Filters are applied to current overview data queries in real time.",
+      "Create and save filters, or use your personal and team saved filters.",
     previousPeriod: "Previous period",
     nextPeriod: "Next period",
     customSelectionSummary: "Selected range: {from} to {to} ({days} days)",
@@ -2395,6 +2488,104 @@ const enMessages = {
     expressionHelpFieldType: "Type",
     expressionHelpFieldOperators: "Operators",
     expressionHelpOtherFields: "Other",
+    savedFiltersLoading: "Loading saved filters...",
+    noSavedFilter: "Do not use a saved filter",
+    systemPresets: "System presets",
+    systemPresetItems: {
+      directTraffic: {
+        name: "Direct traffic",
+        description: "Visits with no external referrer.",
+      },
+      externalReferrals: {
+        name: "External referrals",
+        description: "Visits that arrived from an external referrer.",
+      },
+      organicSearchDiscovery: {
+        name: "Organic search discovery",
+        description: "Search-engine referrals without campaign tags.",
+      },
+      organicSocialDiscovery: {
+        name: "Organic social discovery",
+        description: "Social-network referrals without campaign tags.",
+      },
+      campaignTaggedTraffic: {
+        name: "Campaign-tagged traffic",
+        description: "Visits carrying a campaign source, medium, or name.",
+      },
+      mobileTraffic: {
+        name: "Mobile traffic",
+        description: "Visits from mobile devices.",
+      },
+      desktopTraffic: {
+        name: "Desktop traffic",
+        description: "Visits from desktop devices.",
+      },
+      campaignTaggedExternalAcquisition: {
+        name: "Tagged external acquisition",
+        description: "Externally referred visits carrying campaign tags.",
+      },
+      campaignTaggedDirectEntry: {
+        name: "Tagged direct entry",
+        description: "Direct visits carrying campaign tags.",
+      },
+      untaggedExternalReferrals: {
+        name: "Untagged external referrals",
+        description: "Externally referred visits without campaign tags.",
+      },
+      mobileAcquiredTraffic: {
+        name: "Mobile campaign acquisition",
+        description:
+          "Mobile visits from external, campaign-tagged acquisition.",
+      },
+      mobileOrganicDiscovery: {
+        name: "Mobile organic discovery",
+        description:
+          "Untagged mobile visits discovered through search or social.",
+      },
+      desktopDirectAudience: {
+        name: "Desktop direct audience",
+        description: "Untagged direct visits from desktop devices.",
+      },
+      geographicAttributionGap: {
+        name: "Geographic attribution gap",
+        description: "Externally referred visits without a recorded country.",
+      },
+      tabletTraffic: {
+        name: "Tablet traffic",
+        description: "Visits from tablet devices.",
+      },
+    },
+    savedFiltersPersonal: "Personal filters",
+    savedFiltersTeam: "Team filters",
+    savedFiltersAuthor: "Author: {name}",
+    savedFiltersPrivate: "Personal",
+    savedFiltersTeamShared: "Shared with team",
+    saveThisFilter: "Save this filter",
+    saveAsThisFilter: "Save as this filter",
+    manageThisFilter: "Manage this filter",
+    finishEditingFilter: "Finish editing",
+    createSavedFilter: "Save filter",
+    manageSavedFilter: "Manage filter",
+    savedFilterName: "Name",
+    savedFilterDescription: "Notes",
+    savedFilterVisibility: "Visibility",
+    savedFilterVisibilityPrivate: "Only me",
+    savedFilterVisibilityTeam: "Share with team",
+    savedFilterCreateDescription:
+      "Save the current filter expression to apply it again later.",
+    savedFilterManageDescription:
+      "Update this filter's details or start editing its conditions.",
+    editSavedFilter: "Edit this filter",
+    deleteSavedFilter: "Delete this filter",
+    deleteSavedFilterTitle: "Delete this filter?",
+    deleteSavedFilterDescription:
+      "This cannot be undone, and team members will no longer be able to use it.",
+    savedFilterCancel: "Cancel",
+    savedFilterSave: "Save",
+    savedFilterSaving: "Saving...",
+    savedFilterDelete: "Delete",
+    savedFilterDeleting: "Deleting...",
+    savedFilterOperationFailed: "The operation failed. Please try again.",
     apply: "Apply Filters",
     allConditions: "All conditions",
     anyCondition: "Any condition",
@@ -4620,7 +4811,7 @@ const zhMessages = {
     intervalDisabledDay: "仅在最近 90 天内可选日间隔。",
     intervalDisabledWeek: "仅在最近 12 个月内可选周间隔。",
     filterTitle: "筛选条件",
-    filterSubtitle: "筛选条件会实时参与当前总览数据查询。",
+    filterSubtitle: "新建、保存筛选条件，或者使用个人/团队保存的筛选条件。",
     previousPeriod: "上个周期",
     nextPeriod: "下个周期",
     customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）",
@@ -4746,6 +4937,99 @@ const zhMessages = {
     expressionHelpFieldType: "类型",
     expressionHelpFieldOperators: "操作符",
     expressionHelpOtherFields: "其他",
+    savedFiltersLoading: "正在获取已保存的筛选...",
+    noSavedFilter: "不使用已保存的筛选",
+    systemPresets: "系统预设",
+    systemPresetItems: {
+      directTraffic: {
+        name: "直接访问",
+        description: "没有外部来源的访问。",
+      },
+      externalReferrals: {
+        name: "外部来源访问",
+        description: "通过外部来源进入的访问。",
+      },
+      organicSearchDiscovery: {
+        name: "自然搜索发现",
+        description: "没有营销活动标记的搜索引擎来源访问。",
+      },
+      organicSocialDiscovery: {
+        name: "自然社交发现",
+        description: "没有营销活动标记的社交网络来源访问。",
+      },
+      campaignTaggedTraffic: {
+        name: "带活动标记的流量",
+        description: "带有活动来源、媒介或名称的访问。",
+      },
+      mobileTraffic: {
+        name: "移动端流量",
+        description: "来自移动设备的访问。",
+      },
+      desktopTraffic: {
+        name: "桌面端流量",
+        description: "来自桌面设备的访问。",
+      },
+      campaignTaggedExternalAcquisition: {
+        name: "带标记的外部获客",
+        description: "带有营销活动标记的外部来源访问。",
+      },
+      campaignTaggedDirectEntry: {
+        name: "带标记的直接访问",
+        description: "带有营销活动标记的直接访问。",
+      },
+      untaggedExternalReferrals: {
+        name: "未标记的外部来源",
+        description: "没有营销活动标记的外部来源访问。",
+      },
+      mobileAcquiredTraffic: {
+        name: "移动端活动获客",
+        description: "来自外部且带有营销活动标记的移动端访问。",
+      },
+      mobileOrganicDiscovery: {
+        name: "移动端自然发现",
+        description: "通过搜索或社交发现、且没有活动标记的移动端访问。",
+      },
+      desktopDirectAudience: {
+        name: "桌面端直接受众",
+        description: "来自桌面设备、且没有活动标记的直接访问。",
+      },
+      geographicAttributionGap: {
+        name: "地理归因缺口",
+        description: "有外部来源但未记录国家的访问。",
+      },
+      tabletTraffic: {
+        name: "平板端流量",
+        description: "来自平板设备的访问。",
+      },
+    },
+    savedFiltersPersonal: "个人筛选",
+    savedFiltersTeam: "团队筛选",
+    savedFiltersAuthor: "作者：{name}",
+    savedFiltersPrivate: "个人",
+    savedFiltersTeamShared: "已共享给团队",
+    saveThisFilter: "保存此筛选",
+    saveAsThisFilter: "另存此筛选",
+    manageThisFilter: "管理此筛选",
+    finishEditingFilter: "完成编辑",
+    createSavedFilter: "保存筛选",
+    manageSavedFilter: "管理筛选",
+    savedFilterName: "名称",
+    savedFilterDescription: "备注",
+    savedFilterVisibility: "可见性",
+    savedFilterVisibilityPrivate: "仅自己可见",
+    savedFilterVisibilityTeam: "与团队共享",
+    savedFilterCreateDescription: "保存当前的筛选表达式，以便之后再次套用。",
+    savedFilterManageDescription: "更新此筛选的基本信息，或开始编辑筛选条件。",
+    editSavedFilter: "修改此筛选",
+    deleteSavedFilter: "删除此筛选",
+    deleteSavedFilterTitle: "删除此筛选？",
+    deleteSavedFilterDescription: "删除后无法恢复，团队成员也将无法再使用它。",
+    savedFilterCancel: "取消",
+    savedFilterSave: "保存",
+    savedFilterSaving: "正在保存...",
+    savedFilterDelete: "删除",
+    savedFilterDeleting: "正在删除...",
+    savedFilterOperationFailed: "操作失败，请稍后重试。",
     apply: "应用筛选",
     allConditions: "全部条件均满足",
     anyCondition: "满足任一条件",
@@ -6897,7 +7181,7 @@ const jaMessages = {
     intervalDisabledWeek: "週単位の間隔は過去 12 か月以内でのみ利用できます。",
     filterTitle: "フィルター",
     filterSubtitle:
-      "フィルターは現在の概要データクエリにリアルタイムで適用されます。",
+      "フィルターを新規作成・保存するか、個人またはチームで保存したフィルターを使用します。",
     previousPeriod: "前の期間",
     nextPeriod: "次の期間",
     customSelectionSummary: "選択範囲：{from} から {to}（{days} 日）",
@@ -7025,6 +7309,106 @@ const jaMessages = {
     expressionHelpFieldType: "型",
     expressionHelpFieldOperators: "演算子",
     expressionHelpOtherFields: "その他",
+    savedFiltersLoading: "保存済みフィルターを取得中...",
+    noSavedFilter: "保存済みフィルターを使用しない",
+    systemPresets: "システムプリセット",
+    systemPresetItems: {
+      directTraffic: {
+        name: "直接トラフィック",
+        description: "外部リファラーのない訪問です。",
+      },
+      externalReferrals: {
+        name: "外部リファラー",
+        description: "外部リファラーから到達した訪問です。",
+      },
+      organicSearchDiscovery: {
+        name: "自然検索による流入",
+        description: "キャンペーンタグのない検索エンジン経由の訪問です。",
+      },
+      organicSocialDiscovery: {
+        name: "自然ソーシャルによる流入",
+        description:
+          "キャンペーンタグのないソーシャルネットワーク経由の訪問です。",
+      },
+      campaignTaggedTraffic: {
+        name: "キャンペーンタグ付きトラフィック",
+        description: "キャンペーンソース、メディア、または名前を持つ訪問です。",
+      },
+      mobileTraffic: {
+        name: "モバイルトラフィック",
+        description: "モバイル端末からの訪問です。",
+      },
+      desktopTraffic: {
+        name: "デスクトップトラフィック",
+        description: "デスクトップ端末からの訪問です。",
+      },
+      campaignTaggedExternalAcquisition: {
+        name: "タグ付き外部獲得",
+        description: "キャンペーンタグを持つ外部リファラー経由の訪問です。",
+      },
+      campaignTaggedDirectEntry: {
+        name: "タグ付き直接流入",
+        description: "キャンペーンタグを持つ直接訪問です。",
+      },
+      untaggedExternalReferrals: {
+        name: "タグなし外部リファラー",
+        description: "キャンペーンタグのない外部リファラー経由の訪問です。",
+      },
+      mobileAcquiredTraffic: {
+        name: "モバイルキャンペーン獲得",
+        description:
+          "外部から獲得した、キャンペーンタグ付きのモバイル訪問です。",
+      },
+      mobileOrganicDiscovery: {
+        name: "モバイル自然発見",
+        description:
+          "検索またはソーシャルから発見された、タグなしのモバイル訪問です。",
+      },
+      desktopDirectAudience: {
+        name: "デスクトップ直接訪問者",
+        description:
+          "キャンペーンタグのないデスクトップ端末からの直接訪問です。",
+      },
+      geographicAttributionGap: {
+        name: "地域帰属の欠落",
+        description: "国が記録されていない外部リファラー経由の訪問です。",
+      },
+      tabletTraffic: {
+        name: "タブレットトラフィック",
+        description: "タブレット端末からの訪問です。",
+      },
+    },
+    savedFiltersPersonal: "個人用フィルター",
+    savedFiltersTeam: "チームのフィルター",
+    savedFiltersAuthor: "作成者: {name}",
+    savedFiltersPrivate: "個人用",
+    savedFiltersTeamShared: "チームと共有済み",
+    saveThisFilter: "このフィルターを保存",
+    saveAsThisFilter: "このフィルターを別名で保存",
+    manageThisFilter: "このフィルターを管理",
+    finishEditingFilter: "編集を完了",
+    createSavedFilter: "フィルターを保存",
+    manageSavedFilter: "フィルターを管理",
+    savedFilterName: "名前",
+    savedFilterDescription: "メモ",
+    savedFilterVisibility: "公開範囲",
+    savedFilterVisibilityPrivate: "自分のみ",
+    savedFilterVisibilityTeam: "チームと共有",
+    savedFilterCreateDescription:
+      "現在のフィルター式を保存して、あとで再び適用できます。",
+    savedFilterManageDescription:
+      "このフィルターの基本情報を更新するか、条件の編集を開始します。",
+    editSavedFilter: "このフィルターを編集",
+    deleteSavedFilter: "このフィルターを削除",
+    deleteSavedFilterTitle: "このフィルターを削除しますか？",
+    deleteSavedFilterDescription:
+      "この操作は取り消せません。チームメンバーも使用できなくなります。",
+    savedFilterCancel: "キャンセル",
+    savedFilterSave: "保存",
+    savedFilterSaving: "保存中...",
+    savedFilterDelete: "削除",
+    savedFilterDeleting: "削除中...",
+    savedFilterOperationFailed: "操作に失敗しました。もう一度お試しください。",
     apply: "フィルターを適用",
     allConditions: "すべての条件",
     anyCondition: "いずれかの条件",

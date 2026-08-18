@@ -209,4 +209,18 @@ describe("Hono public query routes", () => {
     expect(response.status).toBe(404);
     expect(dispatchQueryRoute).not.toHaveBeenCalled();
   });
+
+  it("derives the query path without the share segment for catch-all routes", async () => {
+    const app = new Hono<AppEnv>();
+    app.route("/", publicQueryRoutes);
+
+    const response = await app.fetch(
+      request("/demo/some-catch-all-path"),
+      env as never,
+      ctx,
+    );
+
+    expect(response.status).toBe(404);
+    expect(fetchPublicSite).toHaveBeenCalled();
+  });
 });

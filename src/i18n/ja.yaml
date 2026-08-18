@@ -139,7 +139,7 @@ dashboardHeader:
   intervalDisabledDay: 日単位の間隔は過去 90 日以内でのみ利用できます。
   intervalDisabledWeek: 週単位の間隔は過去 12 か月以内でのみ利用できます。
   filterTitle: フィルター
-  filterSubtitle: フィルターは現在の概要データクエリにリアルタイムで適用されます。
+  filterSubtitle: フィルターを新規作成・保存するか、個人またはチームで保存したフィルターを使用します。
   previousPeriod: 前の期間
   nextPeriod: 次の期間
   customSelectionSummary: "選択範囲：{from} から {to}（{days} 日）"
@@ -256,6 +256,83 @@ filterBuilder:
   expressionHelpFieldType: 型
   expressionHelpFieldOperators: 演算子
   expressionHelpOtherFields: その他
+  savedFiltersLoading: 保存済みフィルターを取得中...
+  noSavedFilter: 保存済みフィルターを使用しない
+  systemPresets: システムプリセット
+  systemPresetItems:
+    directTraffic:
+      name: 直接トラフィック
+      description: 外部リファラーのない訪問です。
+    externalReferrals:
+      name: 外部リファラー
+      description: 外部リファラーから到達した訪問です。
+    organicSearchDiscovery:
+      name: 自然検索による流入
+      description: キャンペーンタグのない検索エンジン経由の訪問です。
+    organicSocialDiscovery:
+      name: 自然ソーシャルによる流入
+      description: キャンペーンタグのないソーシャルネットワーク経由の訪問です。
+    campaignTaggedTraffic:
+      name: キャンペーンタグ付きトラフィック
+      description: キャンペーンソース、メディア、または名前を持つ訪問です。
+    mobileTraffic:
+      name: モバイルトラフィック
+      description: モバイル端末からの訪問です。
+    desktopTraffic:
+      name: デスクトップトラフィック
+      description: デスクトップ端末からの訪問です。
+    campaignTaggedExternalAcquisition:
+      name: タグ付き外部獲得
+      description: キャンペーンタグを持つ外部リファラー経由の訪問です。
+    campaignTaggedDirectEntry:
+      name: タグ付き直接流入
+      description: キャンペーンタグを持つ直接訪問です。
+    untaggedExternalReferrals:
+      name: タグなし外部リファラー
+      description: キャンペーンタグのない外部リファラー経由の訪問です。
+    mobileAcquiredTraffic:
+      name: モバイルキャンペーン獲得
+      description: 外部から獲得した、キャンペーンタグ付きのモバイル訪問です。
+    mobileOrganicDiscovery:
+      name: モバイル自然発見
+      description: 検索またはソーシャルから発見された、タグなしのモバイル訪問です。
+    desktopDirectAudience:
+      name: デスクトップ直接訪問者
+      description: キャンペーンタグのないデスクトップ端末からの直接訪問です。
+    geographicAttributionGap:
+      name: 地域帰属の欠落
+      description: 国が記録されていない外部リファラー経由の訪問です。
+    tabletTraffic:
+      name: タブレットトラフィック
+      description: タブレット端末からの訪問です。
+  savedFiltersPersonal: 個人用フィルター
+  savedFiltersTeam: チームのフィルター
+  savedFiltersAuthor: "作成者: {name}"
+  savedFiltersPrivate: 個人用
+  savedFiltersTeamShared: チームと共有済み
+  saveThisFilter: このフィルターを保存
+  saveAsThisFilter: このフィルターを別名で保存
+  manageThisFilter: このフィルターを管理
+  finishEditingFilter: 編集を完了
+  createSavedFilter: フィルターを保存
+  manageSavedFilter: フィルターを管理
+  savedFilterName: 名前
+  savedFilterDescription: メモ
+  savedFilterVisibility: 公開範囲
+  savedFilterVisibilityPrivate: 自分のみ
+  savedFilterVisibilityTeam: チームと共有
+  savedFilterCreateDescription: 現在のフィルター式を保存して、あとで再び適用できます。
+  savedFilterManageDescription: このフィルターの基本情報を更新するか、条件の編集を開始します。
+  editSavedFilter: このフィルターを編集
+  deleteSavedFilter: このフィルターを削除
+  deleteSavedFilterTitle: このフィルターを削除しますか？
+  deleteSavedFilterDescription: この操作は取り消せません。チームメンバーも使用できなくなります。
+  savedFilterCancel: キャンセル
+  savedFilterSave: 保存
+  savedFilterSaving: 保存中...
+  savedFilterDelete: 削除
+  savedFilterDeleting: 削除中...
+  savedFilterOperationFailed: 操作に失敗しました。もう一度お試しください。
   apply: フィルターを適用
   allConditions: すべての条件
   anyCondition: いずれかの条件

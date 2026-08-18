@@ -139,7 +139,7 @@ dashboardHeader:
   intervalDisabledDay: 仅在最近 90 天内可选日间隔。
   intervalDisabledWeek: 仅在最近 12 个月内可选周间隔。
   filterTitle: 筛选条件
-  filterSubtitle: 筛选条件会实时参与当前总览数据查询。
+  filterSubtitle: 新建、保存筛选条件，或者使用个人/团队保存的筛选条件。
   previousPeriod: 上个周期
   nextPeriod: 下个周期
   customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）"
@@ -256,6 +256,83 @@ filterBuilder:
   expressionHelpFieldType: 类型
   expressionHelpFieldOperators: 操作符
   expressionHelpOtherFields: 其他
+  savedFiltersLoading: 正在获取已保存的筛选...
+  noSavedFilter: 不使用已保存的筛选
+  systemPresets: 系统预设
+  systemPresetItems:
+    directTraffic:
+      name: 直接访问
+      description: 没有外部来源的访问。
+    externalReferrals:
+      name: 外部来源访问
+      description: 通过外部来源进入的访问。
+    organicSearchDiscovery:
+      name: 自然搜索发现
+      description: 没有营销活动标记的搜索引擎来源访问。
+    organicSocialDiscovery:
+      name: 自然社交发现
+      description: 没有营销活动标记的社交网络来源访问。
+    campaignTaggedTraffic:
+      name: 带活动标记的流量
+      description: 带有活动来源、媒介或名称的访问。
+    mobileTraffic:
+      name: 移动端流量
+      description: 来自移动设备的访问。
+    desktopTraffic:
+      name: 桌面端流量
+      description: 来自桌面设备的访问。
+    campaignTaggedExternalAcquisition:
+      name: 带标记的外部获客
+      description: 带有营销活动标记的外部来源访问。
+    campaignTaggedDirectEntry:
+      name: 带标记的直接访问
+      description: 带有营销活动标记的直接访问。
+    untaggedExternalReferrals:
+      name: 未标记的外部来源
+      description: 没有营销活动标记的外部来源访问。
+    mobileAcquiredTraffic:
+      name: 移动端活动获客
+      description: 来自外部且带有营销活动标记的移动端访问。
+    mobileOrganicDiscovery:
+      name: 移动端自然发现
+      description: 通过搜索或社交发现、且没有活动标记的移动端访问。
+    desktopDirectAudience:
+      name: 桌面端直接受众
+      description: 来自桌面设备、且没有活动标记的直接访问。
+    geographicAttributionGap:
+      name: 地理归因缺口
+      description: 有外部来源但未记录国家的访问。
+    tabletTraffic:
+      name: 平板端流量
+      description: 来自平板设备的访问。
+  savedFiltersPersonal: 个人筛选
+  savedFiltersTeam: 团队筛选
+  savedFiltersAuthor: "作者：{name}"
+  savedFiltersPrivate: 个人
+  savedFiltersTeamShared: 已共享给团队
+  saveThisFilter: 保存此筛选
+  saveAsThisFilter: 另存此筛选
+  manageThisFilter: 管理此筛选
+  finishEditingFilter: 完成编辑
+  createSavedFilter: 保存筛选
+  manageSavedFilter: 管理筛选
+  savedFilterName: 名称
+  savedFilterDescription: 备注
+  savedFilterVisibility: 可见性
+  savedFilterVisibilityPrivate: 仅自己可见
+  savedFilterVisibilityTeam: 与团队共享
+  savedFilterCreateDescription: 保存当前的筛选表达式，以便之后再次套用。
+  savedFilterManageDescription: 更新此筛选的基本信息，或开始编辑筛选条件。
+  editSavedFilter: 修改此筛选
+  deleteSavedFilter: 删除此筛选
+  deleteSavedFilterTitle: 删除此筛选？
+  deleteSavedFilterDescription: 删除后无法恢复，团队成员也将无法再使用它。
+  savedFilterCancel: 取消
+  savedFilterSave: 保存
+  savedFilterSaving: 正在保存...
+  savedFilterDelete: 删除
+  savedFilterDeleting: 正在删除...
+  savedFilterOperationFailed: 操作失败，请稍后重试。
   apply: 应用筛选
   allConditions: 全部条件均满足
   anyCondition: 满足任一条件

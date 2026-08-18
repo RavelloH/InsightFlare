@@ -47,7 +47,7 @@ const DEMO_USERS = [
   {
     id: "demo-user-001",
     username: "demo",
-    email: "demo@insightflare.app",
+    email: "demo@insightflare.net",
     name: "Demo User",
     systemRole: "admin" as const,
     timeZone: "",
@@ -182,7 +182,7 @@ export function generateDemoTeamInvites(teamId: string) {
       email: "product@example.test",
       payload: { teamRole: "admin", siteIds: [] },
       code: "demo_product_admin_token",
-      url: "https://demo.insightflare.app/invite#token=demo_product_admin_token",
+      url: "https://demo.insightflare.net/invite#token=demo_product_admin_token",
       createdByUserId: getDemoUser().id,
       createdAt: now - 2 * 24 * 60 * 60,
       expiresAt: now + 5 * 24 * 60 * 60,
@@ -199,7 +199,7 @@ export function generateDemoTeamInvites(teamId: string) {
       email: "",
       payload: { teamRole: "member", siteIds: [] },
       code: "demo_open_member_token",
-      url: "https://demo.insightflare.app/invite#token=demo_open_member_token",
+      url: "https://demo.insightflare.net/invite#token=demo_open_member_token",
       createdByUserId: getDemoUser().id,
       createdAt: now - 6 * 60 * 60,
       expiresAt: now + 72 * 60 * 60,
@@ -221,7 +221,7 @@ export function generateDemoTeamInvites(teamId: string) {
           .map((site) => site.id),
       },
       code: "demo_used_member_token",
-      url: "https://demo.insightflare.app/invite#token=demo_used_member_token",
+      url: "https://demo.insightflare.net/invite#token=demo_used_member_token",
       createdByUserId: getDemoUser().id,
       createdAt: now - 21 * 24 * 60 * 60,
       expiresAt: now + 9 * 24 * 60 * 60,
@@ -624,9 +624,9 @@ export function generateDemoNotificationMessages(
   const primarySite = sites[0] ?? null;
   const docsSite = sites[1] ?? primarySite;
   const apiSite = sites[2] ?? primarySite;
-  const primaryDomain = primarySite?.domain ?? "demo.insightflare.app";
-  const docsDomain = docsSite?.domain ?? "docs.insightflare.app";
-  const apiDomain = apiSite?.domain ?? "api.insightflare.app";
+  const primaryDomain = primarySite?.domain ?? "demo.insightflare.net";
+  const docsDomain = docsSite?.domain ?? "docs.insightflare.net";
+  const apiDomain = apiSite?.domain ?? "api.insightflare.net";
   return [
     demoTypedNotificationMessage({
       id: "demo-notification-message-attention",

@@ -1,0 +1,40 @@
+export const SAVED_FILTER_DSL_VERSION = 1 as const;
+
+export const SAVED_FILTER_VISIBILITIES = ["private", "team"] as const;
+export type SavedFilterVisibility = (typeof SAVED_FILTER_VISIBILITIES)[number];
+
+export interface SavedFilter {
+  readonly id: string;
+  readonly siteId: string;
+  readonly ownerUserId: string;
+  readonly authorName: string;
+  readonly isOwner: boolean;
+  readonly visibility: SavedFilterVisibility;
+  readonly name: string;
+  readonly description: string;
+  /** Exact user-authored DSL. Never treat this as a canonical query string. */
+  readonly filterDsl: string;
+  readonly filterDslVersion: number;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+export interface SavedFilterListResponse {
+  readonly filters: readonly SavedFilter[];
+}
+
+export interface SavedFilterInput {
+  readonly name: string;
+  readonly description: string;
+  readonly visibility: SavedFilterVisibility;
+  /** Exact user-authored DSL, intentionally never normalized by the client. */
+  readonly filterDsl: string;
+}
+
+export interface SavedFilterResponse {
+  readonly filter: SavedFilter;
+}
+
+export interface SavedFilterDeleteResponse {
+  readonly deletedId: string;
+}

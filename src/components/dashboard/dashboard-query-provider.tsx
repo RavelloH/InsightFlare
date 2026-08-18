@@ -37,6 +37,7 @@ interface PersistedDashboardQueryState {
   interval?: DashboardInterval;
   customRange?: CustomTimeRange | null;
   uiFilters?: FilterDocument;
+  uiFilterDsl?: string;
 }
 
 interface DashboardQueryContextValue {
@@ -44,11 +45,12 @@ interface DashboardQueryContextValue {
   window: TimeWindow;
   filters: FilterDocument;
   uiFilters: FilterDocument;
+  uiFilterDsl?: string;
   customRange: CustomTimeRange | null;
   setRange: (range: RangePreset) => void;
   setCustomRange: (range: CustomTimeRange | null) => void;
   setInterval: (interval: DashboardInterval) => void;
-  setUiFilters: (filters: FilterDocument) => void;
+  setUiFilters: (filters: FilterDocument, rawDsl?: string) => void;
   clearUiFilters: () => void;
   allowedIntervals: DashboardInterval[];
   timeZone: string;
@@ -82,6 +84,16 @@ function normalizeFilters(
   } catch {
     return EMPTY_FILTERS;
   }
+}
+
+function filterDocumentKey(filters: FilterDocument): string {
+  return JSON.stringify(normalizeFilters(filters));
+}
+
+function persistedRawDsl(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value
+    : undefined;
 }
 
 function normalizeCustomRange(
@@ -119,6 +131,7 @@ function buildInitialState(initialTimeZonePreference: string) {
       interval: initialWindow.interval as DashboardInterval,
       customRange: null as CustomTimeRange | null,
       uiFilters: EMPTY_FILTERS,
+      uiFilterDsl: undefined,
       timeZonePreference: initialTimeZonePreference,
     };
   }
@@ -135,6 +148,7 @@ function buildInitialState(initialTimeZonePreference: string) {
       interval: initialWindow.interval as DashboardInterval,
       customRange: null as CustomTimeRange | null,
       uiFilters: EMPTY_FILTERS,
+      uiFilterDsl: undefined,
       timeZonePreference: initialTimeZonePreference,
     };
   }
@@ -152,6 +166,7 @@ function buildInitialState(initialTimeZonePreference: string) {
     interval: persistedWindow.interval,
     customRange: persistedCustomRange,
     uiFilters: normalizeFilters(persisted.uiFilters),
+    uiFilterDsl: persistedRawDsl(persisted.uiFilterDsl),
     timeZonePreference: initialTimeZonePreference,
   };
 }
@@ -206,6 +221,12 @@ export function DashboardQueryProvider({
   const [uiFilters, setUiFiltersState] = useState<FilterDocument>(
     initial.uiFilters,
   );
+  const [uiFilterDsl, setUiFilterDslState] = useState<string | undefined>(
+    initial.uiFilterDsl,
+  );
+  const [uiFilterDslDocumentKey, setUiFilterDslDocumentKey] = useState(() =>
+    initial.uiFilterDsl ? filterDocumentKey(initial.uiFilters) : undefined,
+  );
   const [timeZonePreference, setTimeZonePreferenceState] = useState(
     initial.timeZonePreference,
   );
@@ -253,15 +274,27 @@ export function DashboardQueryProvider({
       interval: windowState.interval,
       customRange,
       uiFilters: normalizeFilters(uiFilters),
+      ...(uiFilterDsl && uiFilterDslDocumentKey === filterDocumentKey(uiFilters)
+        ? { uiFilterDsl }
+        : {}),
     };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [range, windowState.interval, customRange, uiFilters]);
+  }, [
+    range,
+    windowState.interval,
+    customRange,
+    uiFilters,
+    uiFilterDsl,
+    uiFilterDslDocumentKey,
+  ]);
 
   useEffect(() => {
     if (previousScopeKeyRef.current === scopeKey) return;
     previousScopeKeyRef.current = scopeKey;
     // Site-scoped data filters are easy to carry across sites and cause empty states.
     setUiFiltersState(EMPTY_FILTERS);
+    setUiFilterDslState(undefined);
+    setUiFilterDslDocumentKey(undefined);
   }, [scopeKey]);
 
   const setRange = useCallback(
@@ -307,12 +340,29 @@ export function DashboardQueryProvider({
     setTimeZonePreferenceState(next);
   }, []);
 
-  const setUiFilters = useCallback((next: FilterDocument) => {
-    setUiFiltersState(normalizeFilters(next));
-  }, []);
+  const setUiFilters = useCallback(
+    (next: FilterDocument, rawDsl?: string) => {
+      const normalized = normalizeFilters(next);
+      const nextKey = filterDocumentKey(normalized);
+      setUiFiltersState(normalized);
+      if (rawDsl !== undefined) {
+        const persisted = persistedRawDsl(rawDsl);
+        setUiFilterDslState(persisted);
+        setUiFilterDslDocumentKey(persisted ? nextKey : undefined);
+        return;
+      }
+      if (uiFilterDslDocumentKey !== nextKey) {
+        setUiFilterDslState(undefined);
+        setUiFilterDslDocumentKey(undefined);
+      }
+    },
+    [uiFilterDslDocumentKey],
+  );
 
   const clearUiFilters = useCallback(() => {
     setUiFiltersState(EMPTY_FILTERS);
+    setUiFilterDslState(undefined);
+    setUiFilterDslDocumentKey(undefined);
   }, []);
 
   const allowedIntervals = useMemo(
@@ -326,6 +376,7 @@ export function DashboardQueryProvider({
       window: windowState,
       filters: normalizeFilters(uiFilters),
       uiFilters,
+      uiFilterDsl,
       customRange,
       setRange,
       setCustomRange,
@@ -343,6 +394,7 @@ export function DashboardQueryProvider({
       range,
       windowState,
       uiFilters,
+      uiFilterDsl,
       customRange,
       setRange,
       setCustomRange,
@@ -374,6 +426,7 @@ function useDashboardQueryContext(): DashboardQueryContextValue {
       window: fallbackWindow,
       filters: EMPTY_FILTERS,
       uiFilters: EMPTY_FILTERS,
+      uiFilterDsl: undefined,
       customRange: null,
       setRange: () => {},
       setCustomRange: () => {},

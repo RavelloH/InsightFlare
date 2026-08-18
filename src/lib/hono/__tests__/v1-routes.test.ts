@@ -145,6 +145,20 @@ describe("Hono API v1 routes", () => {
     expect(handleApiV1).not.toHaveBeenCalled();
   });
 
+  it("throws when the api principal context is missing", async () => {
+    vi.mocked(authenticateApiKey).mockResolvedValueOnce(undefined as never);
+    const app = createApp();
+
+    const response = await app.fetch(
+      request("/api/v1/capabilities"),
+      env as never,
+      ctx,
+    );
+
+    expect(response.status).toBe(500);
+    expect(handleCapabilities).not.toHaveBeenCalled();
+  });
+
   it("routes site analytics resources with the decoded API v1 path", async () => {
     const response = await createApp().fetch(
       request("/api/v1/sites/site-1/analytics/overview"),

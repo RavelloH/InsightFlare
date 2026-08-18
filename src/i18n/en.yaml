@@ -139,7 +139,7 @@ dashboardHeader:
   intervalDisabledDay: Day interval is only available within the last 90 days.
   intervalDisabledWeek: Week interval is only available within the last 12 months.
   filterTitle: Filters
-  filterSubtitle: Filters are applied to current overview data queries in real time.
+  filterSubtitle: Create and save filters, or use your personal and team saved filters.
   previousPeriod: Previous period
   nextPeriod: Next period
   customSelectionSummary: "Selected range: {from} to {to} ({days} days)"
@@ -256,6 +256,83 @@ filterBuilder:
   expressionHelpFieldType: Type
   expressionHelpFieldOperators: Operators
   expressionHelpOtherFields: Other
+  savedFiltersLoading: Loading saved filters...
+  noSavedFilter: Do not use a saved filter
+  systemPresets: System presets
+  systemPresetItems:
+    directTraffic:
+      name: Direct traffic
+      description: Visits with no external referrer.
+    externalReferrals:
+      name: External referrals
+      description: Visits that arrived from an external referrer.
+    organicSearchDiscovery:
+      name: Organic search discovery
+      description: Search-engine referrals without campaign tags.
+    organicSocialDiscovery:
+      name: Organic social discovery
+      description: Social-network referrals without campaign tags.
+    campaignTaggedTraffic:
+      name: Campaign-tagged traffic
+      description: Visits carrying a campaign source, medium, or name.
+    mobileTraffic:
+      name: Mobile traffic
+      description: Visits from mobile devices.
+    desktopTraffic:
+      name: Desktop traffic
+      description: Visits from desktop devices.
+    campaignTaggedExternalAcquisition:
+      name: Tagged external acquisition
+      description: Externally referred visits carrying campaign tags.
+    campaignTaggedDirectEntry:
+      name: Tagged direct entry
+      description: Direct visits carrying campaign tags.
+    untaggedExternalReferrals:
+      name: Untagged external referrals
+      description: Externally referred visits without campaign tags.
+    mobileAcquiredTraffic:
+      name: Mobile campaign acquisition
+      description: Mobile visits from external, campaign-tagged acquisition.
+    mobileOrganicDiscovery:
+      name: Mobile organic discovery
+      description: Untagged mobile visits discovered through search or social.
+    desktopDirectAudience:
+      name: Desktop direct audience
+      description: Untagged direct visits from desktop devices.
+    geographicAttributionGap:
+      name: Geographic attribution gap
+      description: Externally referred visits without a recorded country.
+    tabletTraffic:
+      name: Tablet traffic
+      description: Visits from tablet devices.
+  savedFiltersPersonal: Personal filters
+  savedFiltersTeam: Team filters
+  savedFiltersAuthor: "Author: {name}"
+  savedFiltersPrivate: Personal
+  savedFiltersTeamShared: Shared with team
+  saveThisFilter: Save this filter
+  saveAsThisFilter: Save as this filter
+  manageThisFilter: Manage this filter
+  finishEditingFilter: Finish editing
+  createSavedFilter: Save filter
+  manageSavedFilter: Manage filter
+  savedFilterName: Name
+  savedFilterDescription: Notes
+  savedFilterVisibility: Visibility
+  savedFilterVisibilityPrivate: Only me
+  savedFilterVisibilityTeam: Share with team
+  savedFilterCreateDescription: Save the current filter expression to apply it again later.
+  savedFilterManageDescription: Update this filter's details or start editing its conditions.
+  editSavedFilter: Edit this filter
+  deleteSavedFilter: Delete this filter
+  deleteSavedFilterTitle: Delete this filter?
+  deleteSavedFilterDescription: This cannot be undone, and team members will no longer be able to use it.
+  savedFilterCancel: Cancel
+  savedFilterSave: Save
+  savedFilterSaving: Saving...
+  savedFilterDelete: Delete
+  savedFilterDeleting: Deleting...
+  savedFilterOperationFailed: The operation failed. Please try again.
   apply: Apply Filters
   allConditions: All conditions
   anyCondition: Any condition

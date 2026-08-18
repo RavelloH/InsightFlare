@@ -91,6 +91,12 @@ export {
   toQueryString,
   withFilters,
 } from "./client-utils";
+export {
+  createSavedFilter,
+  deleteSavedFilter,
+  fetchSavedFilters,
+  updateSavedFilter,
+} from "./saved-filter-data";
 
 export const emptyOverviewClientDimensionTabsData =
   emptyOverviewClientDimensionTabs;

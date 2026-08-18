@@ -84,6 +84,7 @@ import {
   generateDemoVisitorDetail,
   generateDemoVisitors,
 } from "@/lib/realtime/mock/journeys";
+import { handleDemoSavedFilters } from "@/lib/realtime/mock/saved-filters";
 import {
   generateDemoBrowserEngineTrend,
   generateDemoBrowserTrend,
@@ -148,12 +149,12 @@ function demoLocale(value: unknown): Locale {
 }
 
 function demoSiteDomain(siteId: string | null | undefined): string {
-  if (!siteId) return "demo.insightflare.app";
+  if (!siteId) return "demo.insightflare.net";
   for (const team of getDemoTeams()) {
     const site = getDemoSites(team.id).find((item) => item.id === siteId);
     if (site) return site.domain;
   }
-  return "demo.insightflare.app";
+  return "demo.insightflare.net";
 }
 
 function demoLoginTurnstileConfig(body?: Record<string, unknown>) {
@@ -501,6 +502,10 @@ function handleDemoRequestInner(options: {
       : {};
   const locale = demoLocale(params.locale ?? bodyRecord.locale);
 
+  if (path.startsWith("/api/private/saved-filters")) {
+    return handleDemoSavedFilters({ path, method, siteId, body: options.body });
+  }
+
   // Write operations → read-only stub
   if (
     method === "POST" ||
@@ -686,7 +691,7 @@ function handleDemoRequestInner(options: {
             email,
             payload: { teamRole: role, siteIds },
             code: token,
-            url: `https://demo.insightflare.app/invite#token=${token}`,
+            url: `https://demo.insightflare.net/invite#token=${token}`,
             createdByUserId: getDemoUser().id,
             createdAt: now,
             expiresAt: now + Number(bodyRecord.expiresInHours || 72) * 60 * 60,
@@ -695,7 +700,7 @@ function handleDemoRequestInner(options: {
             revokedAt: null,
             status: "active",
           },
-          url: `https://demo.insightflare.app/invite#token=${token}`,
+          url: `https://demo.insightflare.net/invite#token=${token}`,
         },
       };
     }

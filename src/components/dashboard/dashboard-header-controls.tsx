@@ -385,6 +385,7 @@ export function DashboardHeaderControls({
     setCustomRange,
     setInterval: setDashboardInterval,
     setUiFilters,
+    uiFilterDsl,
     allowedIntervals,
     timeZone,
     maxRangeDays,
@@ -542,7 +543,12 @@ export function DashboardHeaderControls({
   }, [siteId]);
 
   const applyFilterDocument = useCallback(
-    (nextDocument: FilterDocument) => {
+    (
+      nextDocument: FilterDocument,
+      rawDsl?: string,
+      options?: { readonly closePanel?: boolean },
+    ) => {
+      setUiFilters(nextDocument, rawDsl);
       const params = withDashboardFilterSearchParams(
         searchParams,
         nextDocument,
@@ -553,10 +559,12 @@ export function DashboardHeaderControls({
         const target = updated ? `${livePathname}?${updated}` : livePathname;
         replaceUrlWithoutNavigation(target);
       }
-      setMobileFilterDrawerOpen(false);
-      setDesktopFilterSheetOpen(false);
+      if (options?.closePanel !== false) {
+        setMobileFilterDrawerOpen(false);
+        setDesktopFilterSheetOpen(false);
+      }
     },
-    [livePathname, searchParams],
+    [livePathname, searchParams, setUiFilters],
   );
 
   const queueOpenCustomDialog = () => {
@@ -661,6 +669,7 @@ export function DashboardHeaderControls({
                   <FilterPanel
                     audience={filterAudience}
                     document={queryDocument}
+                    expressionText={uiFilterDsl}
                     messages={messages}
                     open={mobileFilterDrawerOpen}
                     siteId={siteId}
@@ -839,6 +848,7 @@ export function DashboardHeaderControls({
                   <FilterPanel
                     audience={filterAudience}
                     document={queryDocument}
+                    expressionText={uiFilterDsl}
                     messages={messages}
                     open={desktopFilterSheetOpen}
                     siteId={siteId}

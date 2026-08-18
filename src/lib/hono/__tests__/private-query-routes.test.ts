@@ -193,6 +193,52 @@ describe("Hono private query routes", () => {
     expect(withDashboardCache).not.toHaveBeenCalled();
   });
 
+  it("throws when the private session context is missing", async () => {
+    const app = new Hono<AppEnv>();
+    app.route("/api/private", privateQueryRoutes);
+
+    const response = await app.fetch(
+      request("/api/private/team-dashboard?teamId=team-1"),
+      env as never,
+      ctx,
+    );
+
+    expect(response.status).toBe(500);
+    expect(resolvePrivateTeamForSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-GET team dashboard queries before team resolution", async () => {
+    const app = createApp();
+
+    const response = await app.fetch(
+      request("/api/private/team-dashboard?teamId=team-1", { method: "POST" }),
+      env as never,
+      ctx,
+    );
+
+    expect(response.status).toBe(405);
+    expect(resolvePrivateTeamForSession).not.toHaveBeenCalled();
+    expect(executePrivateTeamDashboard).not.toHaveBeenCalled();
+  });
+
+  it("returns the team access response directly when team resolution fails", async () => {
+    vi.mocked(resolvePrivateTeamForSession).mockResolvedValueOnce(
+      new Response("denied", { status: 403 }),
+    );
+    const app = createApp();
+
+    const response = await app.fetch(
+      request("/api/private/team-dashboard?teamId=team-1"),
+      env as never,
+      ctx,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.text()).resolves.toBe("denied");
+    expect(withDashboardCache).not.toHaveBeenCalled();
+    expect(executePrivateTeamDashboard).not.toHaveBeenCalled();
+  });
+
   it("caches the team dashboard after team access resolves", async () => {
     const app = createApp();
 

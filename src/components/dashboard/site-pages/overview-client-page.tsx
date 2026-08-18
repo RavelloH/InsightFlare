@@ -556,18 +556,6 @@ function createOverviewCardTabCache<T extends string>(
   }, {} as OverviewCardTabCache<T>);
 }
 
-function createOverviewCardTabFlightState<T extends string>(
-  tabs: readonly T[],
-): Record<T, boolean> {
-  return tabs.reduce(
-    (acc, tab) => {
-      acc[tab] = false;
-      return acc;
-    },
-    {} as Record<T, boolean>,
-  );
-}
-
 function sanitizeHostname(value: string): string {
   return value
     .trim()
@@ -1841,24 +1829,12 @@ export function OverviewPagesSection({
     return Math.floor(from + (to - from) / 2);
   }, [window.from, window.to]);
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
-  const pageCardInFlightRef = useRef<Record<PageCardTab, boolean>>(
-    createOverviewCardTabFlightState(ALL_PAGE_CARD_TABS),
-  );
   const pageCardFetchersRef = useRef(pageCardFetchers);
   pageCardFetchersRef.current = pageCardFetchers;
-  const sourceCardInFlightRef = useRef<Record<SourceCardTab, boolean>>(
-    createOverviewCardTabFlightState(SOURCE_CARD_TABS),
-  );
   const sourceCardFetchersRef = useRef(sourceCardFetchers);
   sourceCardFetchersRef.current = sourceCardFetchers;
-  const clientDimensionCardInFlightRef = useRef<
-    Record<ClientDimensionCardTab, boolean>
-  >(createOverviewCardTabFlightState(CLIENT_DIMENSION_CARD_TABS));
   const clientCardFetchersRef = useRef(clientCardFetchers);
   clientCardFetchersRef.current = clientCardFetchers;
-  const geoDimensionCardInFlightRef = useRef<
-    Record<GeoDimensionCardTab, boolean>
-  >(createOverviewCardTabFlightState(GEO_DIMENSION_CARD_TABS));
   const geoCardFetchersRef = useRef(geoCardFetchers);
   geoCardFetchersRef.current = geoCardFetchers;
   const [pageCardTabData, setPageCardTabData] = useState<
@@ -1927,16 +1903,6 @@ export function OverviewPagesSection({
 
   useEffect(() => {
     if (hasCardDataOverride) return;
-    pageCardInFlightRef.current =
-      createOverviewCardTabFlightState(ALL_PAGE_CARD_TABS);
-    sourceCardInFlightRef.current =
-      createOverviewCardTabFlightState(SOURCE_CARD_TABS);
-    clientDimensionCardInFlightRef.current = createOverviewCardTabFlightState(
-      CLIENT_DIMENSION_CARD_TABS,
-    );
-    geoDimensionCardInFlightRef.current = createOverviewCardTabFlightState(
-      GEO_DIMENSION_CARD_TABS,
-    );
     setPageCardTabData(createOverviewCardTabCache(ALL_PAGE_CARD_TABS));
     setSourceCardTabData(createOverviewCardTabCache(SOURCE_CARD_TABS));
     setClientDimensionCardTabData(
@@ -1958,9 +1924,7 @@ export function OverviewPagesSection({
   useEffect(() => {
     if (hasCardDataOverride) return;
     if (activePageCardTabData !== null) return;
-    if (pageCardInFlightRef.current[pageCardTab]) return;
     let active = true;
-    pageCardInFlightRef.current[pageCardTab] = true;
 
     const loadPageCardTab =
       pageCardFetchersRef.current?.[pageCardTab] ??
@@ -1993,9 +1957,6 @@ export function OverviewPagesSection({
           ...prev,
           [pageCardTab]: [],
         }));
-      })
-      .finally(() => {
-        pageCardInFlightRef.current[pageCardTab] = false;
       });
 
     return () => {
@@ -2016,9 +1977,7 @@ export function OverviewPagesSection({
   useEffect(() => {
     if (hasCardDataOverride) return;
     if (activeSourceCardTabData !== null) return;
-    if (sourceCardInFlightRef.current[sourceCardTab]) return;
     let active = true;
-    sourceCardInFlightRef.current[sourceCardTab] = true;
 
     const loadSourceCardTab =
       sourceCardFetchersRef.current?.[sourceCardTab] ??
@@ -2049,9 +2008,6 @@ export function OverviewPagesSection({
           ...prev,
           [sourceCardTab]: [],
         }));
-      })
-      .finally(() => {
-        sourceCardInFlightRef.current[sourceCardTab] = false;
       });
 
     return () => {
@@ -2072,9 +2028,7 @@ export function OverviewPagesSection({
   useEffect(() => {
     if (hasCardDataOverride) return;
     if (activeClientDimensionCardTabData !== null) return;
-    if (clientDimensionCardInFlightRef.current[clientDimensionCardTab]) return;
     let active = true;
-    clientDimensionCardInFlightRef.current[clientDimensionCardTab] = true;
 
     const loadClientCardTab =
       clientCardFetchersRef.current?.[clientDimensionCardTab] ??
@@ -2105,9 +2059,6 @@ export function OverviewPagesSection({
           ...prev,
           [clientDimensionCardTab]: [],
         }));
-      })
-      .finally(() => {
-        clientDimensionCardInFlightRef.current[clientDimensionCardTab] = false;
       });
 
     return () => {
@@ -2128,9 +2079,7 @@ export function OverviewPagesSection({
   useEffect(() => {
     if (hasCardDataOverride) return;
     if (activeGeoDimensionCardTabData !== null) return;
-    if (geoDimensionCardInFlightRef.current[geoDimensionCardTab]) return;
     let active = true;
-    geoDimensionCardInFlightRef.current[geoDimensionCardTab] = true;
 
     const loadGeoCardTab =
       geoCardFetchersRef.current?.[geoDimensionCardTab] ??
@@ -2161,9 +2110,6 @@ export function OverviewPagesSection({
           ...prev,
           [geoDimensionCardTab]: [],
         }));
-      })
-      .finally(() => {
-        geoDimensionCardInFlightRef.current[geoDimensionCardTab] = false;
       });
 
     return () => {
