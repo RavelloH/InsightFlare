@@ -32,6 +32,7 @@ import {
   emptyVisitorDetail,
   emptyVisitors,
 } from "@/lib/dashboard/client-empty-data";
+import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 
 vi.mock("@/lib/dashboard/client-request", () => ({
   fetchPrivateJson: vi.fn(),
@@ -312,9 +313,12 @@ describe("fetchEventTypeFields", () => {
   });
 
   it("uses the private fields endpoint and keeps filters", async () => {
-    await fetchEventTypeFields("site-1", window, "click", {
-      country: "CN",
-    });
+    await fetchEventTypeFields(
+      "site-1",
+      window,
+      "click",
+      dashboardFilterDocumentFromPresentation({ country: "CN" }),
+    );
 
     expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
       "/api/private/event-type-fields",
@@ -355,9 +359,13 @@ describe("fetchEventTypeContextCards", () => {
     fetchPrivateJsonMock.mockResolvedValueOnce({ cards } as any);
 
     await expect(
-      fetchEventTypeContextCards("site-1", window, " click ", " path ", {
-        country: "CN",
-      }),
+      fetchEventTypeContextCards(
+        "site-1",
+        window,
+        " click ",
+        " path ",
+        dashboardFilterDocumentFromPresentation({ country: "CN" }),
+      ),
     ).resolves.toEqual(cards);
     expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
       "/api/private/event-type-context",

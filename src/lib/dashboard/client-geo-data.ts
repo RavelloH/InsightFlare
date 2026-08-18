@@ -6,11 +6,12 @@ import {
   emptyOverviewGeoPoints,
   emptyOverviewGeoTab,
 } from "@/lib/dashboard/client-empty-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   OverviewGeoPointsData,
   OverviewGeoTabData,
 } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 
 import { fetchPrivateJson } from "./client-request";
 import { withFilters } from "./client-utils";
@@ -45,7 +46,7 @@ function normalizeGeoDimensionLabel(
 export async function fetchOverviewGeoPoints(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     applyGeoFilter?: boolean;
@@ -122,7 +123,7 @@ export async function fetchOverviewGeoDimensionTab(
   siteId: string,
   window: TimeWindow,
   tab: OverviewGeoDimensionTab,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;

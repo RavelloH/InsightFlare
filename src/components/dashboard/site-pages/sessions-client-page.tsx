@@ -21,9 +21,10 @@ import {
   useLiveSearchParams,
 } from "@/lib/client-history";
 import { fetchSessions } from "@/lib/dashboard/client-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
 import type { JourneySession } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -105,7 +106,7 @@ export function SessionsClientPage({
 }: SessionsClientPageProps) {
   const labels = messages.sessions;
   const { filters, window: timeWindow } = useDashboardQuery() as {
-    filters: DashboardFilters;
+    filters: FilterDocument;
     window: TimeWindow;
   };
   const [query, setQuery] = useState("");

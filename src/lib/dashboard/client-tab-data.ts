@@ -1,6 +1,6 @@
 import type {
-  DashboardFilterKey,
   DashboardFilterOptionData,
+  DashboardFilterOptionKey,
   OverviewClientDimensionTab,
   OverviewPageCardTab,
   OverviewSourceCardTab,
@@ -10,11 +10,12 @@ import {
   emptyDashboardFilterOptions,
   emptyOverviewTab,
 } from "@/lib/dashboard/client-empty-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   DashboardFilterOptionsData,
   OverviewTabData,
 } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 
 import { fetchPrivateJson } from "./client-request";
 import {
@@ -41,7 +42,7 @@ export async function fetchOverviewPageCardTab(
   siteId: string,
   window: TimeWindow,
   tab: OverviewPageCardTab,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -77,7 +78,7 @@ export async function fetchOverviewPageCardTab(
 export async function fetchPageHashTab(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
   },
@@ -104,7 +105,7 @@ export async function fetchPageHashTab(
 export async function fetchPageQueryTab(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
   },
@@ -116,7 +117,7 @@ export async function fetchOverviewSourceCardTab(
   siteId: string,
   window: TimeWindow,
   tab: OverviewSourceCardTab,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -142,7 +143,7 @@ export async function fetchOverviewSourceCardTab(
 export async function fetchEventTypesTab(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -169,7 +170,7 @@ export async function fetchOverviewClientDimensionTab(
   siteId: string,
   window: TimeWindow,
   tab: OverviewClientDimensionTab,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
   },
@@ -193,8 +194,8 @@ export async function fetchOverviewClientDimensionTab(
 export async function fetchDashboardFilterOptions(
   siteId: string,
   window: TimeWindow,
-  filterKey: DashboardFilterKey,
-  filters?: DashboardFilters,
+  filterKey: DashboardFilterOptionKey,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
   },

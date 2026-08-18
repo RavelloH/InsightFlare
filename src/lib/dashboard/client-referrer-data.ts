@@ -1,11 +1,12 @@
 import type { UtmDimensionTab } from "@/lib/dashboard/client-data-types";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   BrowserTrendData,
   DimensionData,
   ReferrerRadarData,
   ReferrersData,
 } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 
 import { fetchPrivateJson } from "./client-request";
 import { withFilters } from "./client-utils";
@@ -21,7 +22,7 @@ const utmPathMap: Record<UtmDimensionTab, string> = {
 export async function fetchReferrers(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     fullUrl?: boolean;
     limit?: number;
@@ -47,7 +48,7 @@ export async function fetchUtmDimension(
   siteId: string,
   window: TimeWindow,
   tab: UtmDimensionTab,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: { signal?: AbortSignal },
 ): Promise<DimensionData> {
   const requestParams = withFilters(
@@ -78,7 +79,7 @@ export async function fetchUtmTrend(
   siteId: string,
   window: TimeWindow,
   tab: UtmDimensionTab,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -105,7 +106,7 @@ export async function fetchUtmTrend(
 export async function fetchReferrerTrend(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -131,7 +132,7 @@ export async function fetchReferrerTrend(
 export async function fetchReferrerRadar(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;

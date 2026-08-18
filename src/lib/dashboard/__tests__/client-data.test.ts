@@ -51,6 +51,7 @@ import {
   toQueryString,
   withFilters,
 } from "@/lib/dashboard/client-data";
+import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 
 describe("Dashboard Client Data Processing Utilities", () => {
   describe("normalizeOverviewRows", () => {
@@ -153,24 +154,17 @@ describe("Dashboard Client Data Processing Utilities", () => {
 
     it("should correctly map filters into request parameters object", () => {
       const baseParams = { siteId: "123" };
-      const filters = {
+      const filters = dashboardFilterDocumentFromPresentation({
         country: "US",
         browser: "Chrome",
         path: "/docs",
-        eventPayloadFilters: [
-          { path: "user.role", operator: "eq", value: "admin" },
-        ],
-      };
+      });
 
-      const withResult = withFilters(baseParams, filters as any);
+      const withResult = withFilters(baseParams, filters);
       expect(withResult.siteId).toBe("123");
-      expect(withResult.country).toBe("US");
-      expect(withResult.browser).toBe("Chrome");
-      expect(withResult.path).toBe("/docs");
-      expect(withResult.eventPayloadFilters).toBeTypeOf("string");
-      expect(JSON.parse(withResult.eventPayloadFilters as string)).toEqual(
-        filters.eventPayloadFilters,
-      );
+      expect(withResult["filter[geo.country]"]).toBe("us");
+      expect(withResult["filter[client.browser]"]).toBe("Chrome");
+      expect(withResult["filter[page.path]"]).toBe("/docs");
     });
 
     it("should skip mapping filters if filters object is empty or undefined", () => {
@@ -356,7 +350,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         const filterOptions = await fetchDashboardFilterOptions(
           "demo-site-001",
           mockWindow,
-          "country",
+          "geo.country",
         );
         expect(filterOptions).toBeDefined();
 
@@ -444,7 +438,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
   describe("withFilters — comprehensive filter mapping", () => {
     it("should pass through every supported filter dimension into the request params", () => {
       const baseParams = { siteId: "abc" };
-      const filters = {
+      const filters = dashboardFilterDocumentFromPresentation({
         country: "JP",
         device: "mobile",
         browser: "Chrome",
@@ -461,40 +455,30 @@ describe("Dashboard Client Data Processing Utilities", () => {
         clientDeviceType: "tablet",
         clientLanguage: "en-US",
         clientScreenSize: "1920x1080",
-        geo: "JP-13",
+        geo: "JP::13::Tokyo",
         geoContinent: "AS",
         geoTimezone: "Asia/Tokyo",
         geoOrganization: "AS12345",
-      } as any;
+      });
       const out = withFilters(baseParams, filters);
       expect(out.siteId).toBe("abc");
-      expect(out.country).toBe("JP");
-      expect(out.device).toBe("mobile");
-      expect(out.browser).toBe("Chrome");
-      expect(out.path).toBe("/docs");
-      expect(out.query).toBe("?ref=x");
-      expect(out.title).toBe("Docs Home");
-      expect(out.hostname).toBe("docs.test");
-      expect(out.entry).toBe("/landing");
-      expect(out.exit).toBe("/checkout");
-      expect(out.sourceDomain).toBe("google.com");
-      expect(out.sourceLink).toBe("https://google.com/search");
-      expect(out.clientBrowser).toBe("Firefox");
-      expect(out.clientOsVersion).toBe("14");
-      expect(out.clientDeviceType).toBe("tablet");
-      expect(out.clientLanguage).toBe("en-US");
-      expect(out.clientScreenSize).toBe("1920x1080");
-      expect(out.geo).toBe("JP-13");
-      expect(out.geoContinent).toBe("AS");
-      expect(out.geoTimezone).toBe("Asia/Tokyo");
-      expect(out.geoOrganization).toBe("AS12345");
+      expect(out["filter[geo.country]"]).toBe("jp");
+      expect(out["filter[client.deviceType]"]).toBe("tablet");
+      expect(out["filter[client.browser]"]).toBe("Firefox");
+      expect(out["filter[page.path]"]).toBe("/docs");
+      expect(out["filter[page.query]"]).toBe("?ref=x");
+      expect(out["filter[referrer.domain]"]).toBe("google.com");
+      expect(out["filter[geo.continent]"]).toBe("as");
+      expect(out["filter[geo.timeZone]"]).toBe("Asia/Tokyo");
+      expect(out["filter[geo.organization]"]).toBe("AS12345");
     });
 
     it("should skip empty eventPayloadFilters and not serialize them", () => {
-      const out = withFilters({ siteId: "x" }, {
-        eventPayloadFilters: [],
-      } as any);
-      expect(out.eventPayloadFilters).toBeUndefined();
+      const out = withFilters(
+        { siteId: "x" },
+        dashboardFilterDocumentFromPresentation({}),
+      );
+      expect(Object.keys(out)).toEqual(["siteId"]);
     });
   });
 
@@ -702,13 +686,17 @@ describe("Dashboard Client Data Processing Utilities", () => {
         );
       globalThis.fetch = fetchMock as any;
 
-      await fetchPages("filter-site-unique", mockWindow, {
-        country: "DE",
-        browser: "Safari",
-      } as any);
+      await fetchPages(
+        "filter-site-unique",
+        mockWindow,
+        dashboardFilterDocumentFromPresentation({
+          country: "DE",
+          browser: "Safari",
+        }),
+      );
       const [calledUrl] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(calledUrl).toContain("country=DE");
-      expect(calledUrl).toContain("browser=Safari");
+      expect(calledUrl).toContain("filter%5Bgeo.country%5D=de");
+      expect(calledUrl).toContain("filter%5Bclient.browser%5D=Safari");
     });
 
     it("should serialize optional request params for overview, lists, events, and details", async () => {
@@ -1738,7 +1726,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         fetchDashboardFilterOptions(
           "fallback-filter-options",
           mockWindow,
-          "country",
+          "geo.country",
         ),
       ).resolves.toEqual([]);
     });

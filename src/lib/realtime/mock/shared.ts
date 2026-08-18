@@ -142,7 +142,6 @@ import {
 } from "@/lib/realtime/mock/site-curves";
 import type {
   DemoDimensionRow,
-  DemoEventPayloadFilterRule,
   DemoFactDataset,
   DemoFilteredFacts,
   DemoQueryFilters,

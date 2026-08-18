@@ -1,8 +1,9 @@
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journey-display";
 import { ShareTrendCard } from "@/components/dashboard/share-trend-card";
 import { fetchClientDimensionTrend } from "@/lib/dashboard/client-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { ClientDimensionKey } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -11,7 +12,7 @@ interface DeviceDimensionTrendCardProps {
   messages: AppMessages;
   siteId: string;
   window: TimeWindow;
-  filters: DashboardFilters;
+  filters: FilterDocument;
   dimension: Extract<ClientDimensionKey, "deviceType" | "operatingSystem">;
   title: string;
 }
@@ -19,7 +20,7 @@ interface DeviceDimensionTrendCardProps {
 async function fetchDeviceTypeTrend(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: { limit?: number; signal?: AbortSignal },
 ) {
   return fetchClientDimensionTrend(
@@ -34,7 +35,7 @@ async function fetchDeviceTypeTrend(
 async function fetchOperatingSystemTrend(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: { limit?: number; signal?: AbortSignal },
 ) {
   return fetchClientDimensionTrend(

@@ -37,9 +37,9 @@ import {
   pickLocaleGeoLabel,
   resolveGeoStateTranslation,
 } from "@/lib/dashboard/geo-translation";
-import type { DashboardFilters } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
 import type { OverviewGeoPointsData } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import { resolveCountryLabel } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -353,7 +353,7 @@ function normalizeCountryCode(value: string | null | undefined): string | null {
   return normalized;
 }
 
-function dashboardFilterSignature(filters: DashboardFilters): string {
+function dashboardFilterSignature(filters: FilterDocument): string {
   const entries = Object.entries(filters)
     .map(([key, value]) => [key, String(value ?? "").trim()] as const)
     .filter(([, value]) => value.length > 0)
@@ -1164,7 +1164,7 @@ export function GeoClientPage({
     () => parseGeoLocationValue(searchParams.get("location")),
     [searchParams],
   );
-  const requestFilters = useMemo<DashboardFilters>(
+  const requestFilters = useMemo<FilterDocument>(
     () => ({
       ...filters,
       ...(requestedLocation?.canonical

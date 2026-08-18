@@ -1,6 +1,7 @@
 import { ShareTrendCard } from "@/components/dashboard/share-trend-card";
 import { fetchBrowserTrend } from "@/lib/dashboard/client-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -9,7 +10,7 @@ interface BrowserShareTrendCardProps {
   messages: AppMessages;
   siteId: string;
   window: TimeWindow;
-  filters: DashboardFilters;
+  filters: FilterDocument;
 }
 
 export function BrowserShareTrendCard({

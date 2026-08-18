@@ -89,20 +89,36 @@ import {
 } from "@/lib/client-history";
 import {
   type DashboardFilterOptionData,
+  type DashboardFilterOptionKey,
   fetchDashboardFilterOptions,
 } from "@/lib/dashboard/client-data";
+import {
+  DASHBOARD_FILTER_CONTROL_KEYS,
+  type DashboardFilterControlKey,
+  dashboardFilterFieldId,
+  dashboardFilterFingerprint,
+  type DashboardFilterPresentation,
+  dashboardFilterPresentation,
+  setDashboardFilterValue,
+  withoutDashboardFilter,
+} from "@/lib/dashboard/filter-state";
 import { intlLocale } from "@/lib/dashboard/format";
 import { parseGeoLocationValue } from "@/lib/dashboard/geo-location";
 import {
   type CustomTimeRange,
-  type DashboardFilters,
   type DashboardInterval,
   normalizeCustomDateRange,
+  parseFilterDocumentFromSearchParams,
   type RangePreset,
   type TimeWindow,
 } from "@/lib/dashboard/query-state";
 import { zonedParts } from "@/lib/dashboard/time-zone";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
+import {
+  analyticsFilterRegistry,
+  type FilterDocument,
+  serializeFilterParams,
+} from "@/lib/filter-contract";
 import {
   resolveContinentLabel,
   resolveCountryLabel,
@@ -125,29 +141,8 @@ interface DashboardHeaderControlsProps {
   showRealtimeBadge?: boolean;
 }
 
-const FILTER_QUERY_KEYS = [
-  "country",
-  "device",
-  "browser",
-  "path",
-  "title",
-  "hostname",
-  "entry",
-  "exit",
-  "sourceDomain",
-  "sourceLink",
-  "clientBrowser",
-  "clientOsVersion",
-  "clientDeviceType",
-  "clientLanguage",
-  "clientScreenSize",
-  "geo",
-  "geoContinent",
-  "geoTimezone",
-  "geoOrganization",
-] as const;
-
-type FilterQueryKey = (typeof FILTER_QUERY_KEYS)[number];
+const FILTER_QUERY_KEYS = DASHBOARD_FILTER_CONTROL_KEYS;
+type FilterQueryKey = DashboardFilterControlKey;
 
 function normalizeFilterInputValue(
   raw: string | null | undefined,
@@ -162,17 +157,12 @@ function normalizeFilterInputValue(
   return normalized;
 }
 
-function parseFiltersFromSearchParams(
-  searchParams: URLSearchParams,
-): DashboardFilters {
-  const next: DashboardFilters = {};
-  for (const key of FILTER_QUERY_KEYS) {
-    const normalized = normalizeFilterInputValue(searchParams.get(key));
-    if (normalized) {
-      next[key] = normalized;
-    }
-  }
-  return next;
+function presentationFromSearchParams(searchParams: URLSearchParams): {
+  document: FilterDocument;
+  presentation: DashboardFilterPresentation;
+} {
+  const document = parseFilterDocumentFromSearchParams(searchParams);
+  return { document, presentation: dashboardFilterPresentation(document) };
 }
 
 function filterFieldLabel(messages: AppMessages, key: FilterQueryKey): string {
@@ -473,11 +463,10 @@ function FilterActiveCountBadge({ count }: { count: number }) {
 const DIRECT_REFERRER_FILTER_VALUE = "__direct__";
 
 function omitFilterKey(
-  filters: DashboardFilters,
+  filters: FilterDocument,
   key: FilterQueryKey,
-): DashboardFilters {
-  const { [key]: _, ...next } = filters;
-  return next;
+): FilterDocument {
+  return withoutDashboardFilter(filters, key);
 }
 
 function inferGeoOptionGroup(
@@ -659,7 +648,7 @@ interface DashboardFilterSelectFieldProps {
   triggerId?: string;
   filterKey: FilterQueryKey;
   currentValue?: string;
-  currentFilters: DashboardFilters;
+  currentFilters: FilterDocument;
   window: TimeWindow;
   onValueChange: (value: string) => void;
 }
@@ -700,7 +689,7 @@ function DashboardFilterSelectField({
         from: window.from,
         to: window.to,
         interval: window.interval,
-        filters: requestFilters,
+        filters: dashboardFilterFingerprint(requestFilters),
       }),
     [
       filterKey,
@@ -726,9 +715,17 @@ function DashboardFilterSelectField({
       options: null,
     });
 
-    fetchDashboardFilterOptions(siteId, window, filterKey, requestFilters, {
-      limit: 200,
-    })
+    fetchDashboardFilterOptions(
+      siteId,
+      window,
+      (filterKey === "geo"
+        ? "geo.country"
+        : dashboardFilterFieldId(filterKey)) as DashboardFilterOptionKey,
+      requestFilters,
+      {
+        limit: 200,
+      },
+    )
       .then((options) => {
         if (!active) return;
         setOptionState({
@@ -982,13 +979,15 @@ function DashboardFilterFields({
   messages,
   siteId,
   queryFilters,
+  queryDocument,
   window,
   onValueChange,
 }: {
   locale: Locale;
   messages: AppMessages;
   siteId?: string;
-  queryFilters: DashboardFilters;
+  queryFilters: DashboardFilterPresentation;
+  queryDocument: FilterDocument;
   window: TimeWindow;
   onValueChange: (key: FilterQueryKey, value: string) => void;
 }) {
@@ -1006,7 +1005,7 @@ function DashboardFilterFields({
               triggerId={inputId}
               filterKey={key}
               currentValue={queryFilters[key]}
-              currentFilters={queryFilters}
+              currentFilters={queryDocument}
               window={window}
               onValueChange={(value) => {
                 onValueChange(key, value);
@@ -1042,8 +1041,8 @@ export function DashboardHeaderControls({
     maxRangeDays,
   } = useDashboardQueryControls();
   const searchParamsKey = searchParams.toString();
-  const queryFilters = useMemo(
-    () => parseFiltersFromSearchParams(new URLSearchParams(searchParamsKey)),
+  const { document: queryDocument, presentation: queryFilters } = useMemo(
+    () => presentationFromSearchParams(new URLSearchParams(searchParamsKey)),
     [searchParamsKey],
   );
   const activeFilterCount = useMemo(
@@ -1188,8 +1187,8 @@ export function DashboardHeaderControls({
   }, []);
 
   useEffect(() => {
-    setUiFilters(queryFilters);
-  }, [queryFilters, setUiFilters]);
+    setUiFilters(queryDocument);
+  }, [queryDocument, setUiFilters]);
 
   useEffect(() => {
     setPeriodForwardStack([]);
@@ -1197,10 +1196,22 @@ export function DashboardHeaderControls({
 
   const setFilterQueryValue = useCallback(
     (key: FilterQueryKey, rawValue: string) => {
-      const params = new URLSearchParams(searchParams.toString());
       const normalized = normalizeFilterInputValue(rawValue);
-      if (normalized) params.set(key, normalized);
-      else params.delete(key);
+      const nextDocument = setDashboardFilterValue(
+        queryDocument,
+        key,
+        normalized,
+      );
+      const params = new URLSearchParams(searchParams.toString());
+      for (const existingKey of [...params.keys()]) {
+        if (existingKey.startsWith("filter[")) params.delete(existingKey);
+      }
+      for (const [filterKey, value] of serializeFilterParams(
+        nextDocument,
+        analyticsFilterRegistry,
+      )) {
+        params.append(filterKey, value);
+      }
 
       const updated = params.toString();
       const current = searchParams.toString();
@@ -1209,14 +1220,15 @@ export function DashboardHeaderControls({
         replaceUrlWithoutNavigation(target);
       }
     },
-    [livePathname, searchParams],
+    [livePathname, queryDocument, searchParams],
   );
 
   const clearAllFilterQueryValues = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
-    for (const key of FILTER_QUERY_KEYS) {
-      params.delete(key);
+    for (const key of [...params.keys()]) {
+      if (key.startsWith("filter[")) params.delete(key);
     }
+    for (const key of FILTER_QUERY_KEYS) params.delete(key);
     params.delete("geoCountry");
     params.delete("geoRegion");
     params.delete("geoCity");
@@ -1333,6 +1345,7 @@ export function DashboardHeaderControls({
                       messages={messages}
                       siteId={siteId}
                       queryFilters={queryFilters}
+                      queryDocument={queryDocument}
                       window={window}
                       onValueChange={setFilterQueryValue}
                     />
@@ -1519,6 +1532,7 @@ export function DashboardHeaderControls({
                       messages={messages}
                       siteId={siteId}
                       queryFilters={queryFilters}
+                      queryDocument={queryDocument}
                       window={window}
                       onValueChange={setFilterQueryValue}
                     />

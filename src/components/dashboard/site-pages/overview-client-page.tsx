@@ -54,6 +54,10 @@ import {
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
 import {
+  dashboardFilterValue,
+  setDashboardFilterValue,
+} from "@/lib/dashboard/filter-state";
+import {
   durationFormat,
   intlLocale,
   numberFormat,
@@ -73,13 +77,19 @@ import {
   buildPageDetailHref,
   normalizePagePath,
 } from "@/lib/dashboard/page-detail";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   addZonedInterval,
   startOfZonedInterval,
 } from "@/lib/dashboard/time-zone";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 import type { OverviewData, TrendData } from "@/lib/edge-client";
+import {
+  analyticsFilterRegistry,
+  type FilterDocument,
+  parseFilterParams,
+  serializeFilterParams,
+} from "@/lib/filter-contract";
 import {
   resolveContinentLabel,
   resolveCountryFlagCode,
@@ -389,7 +399,7 @@ interface PageCardTabMeta {
 type PageCardTabFetcher = (
   siteId: string,
   window: TimeWindow,
-  filters: DashboardFilters,
+  filters: FilterDocument,
 ) => Promise<OverviewTabRows>;
 
 type PageCardTargetUrlResolver = (params: {
@@ -649,64 +659,11 @@ function extractGeoCountryCodeFromFilterValue(
 
 export function parseOverviewCardFilters(
   searchParams: SearchParamsLike,
-): DashboardFilters {
-  return {
-    country: normalizeOverviewFilterValue(searchParams.get("country")),
-    device: normalizeOverviewFilterValue(searchParams.get("device")),
-    browser: normalizeOverviewFilterValue(searchParams.get("browser")),
-    path: normalizeOverviewFilterValue(
-      searchParams.get(PAGE_CARD_QUERY_PARAM_BY_TAB.path),
-    ),
-    query: normalizeOverviewFilterValue(
-      searchParams.get(PAGE_CARD_QUERY_PARAM_BY_TAB.query),
-    ),
-    title: normalizeOverviewFilterValue(
-      searchParams.get(PAGE_CARD_QUERY_PARAM_BY_TAB.title),
-    ),
-    hostname: normalizeOverviewFilterValue(
-      searchParams.get(PAGE_CARD_QUERY_PARAM_BY_TAB.hostname),
-    ),
-    entry: normalizeOverviewFilterValue(
-      searchParams.get(PAGE_CARD_QUERY_PARAM_BY_TAB.entry),
-    ),
-    exit: normalizeOverviewFilterValue(
-      searchParams.get(PAGE_CARD_QUERY_PARAM_BY_TAB.exit),
-    ),
-    sourceDomain: normalizeOverviewFilterValue(
-      searchParams.get(SOURCE_CARD_QUERY_PARAM_BY_TAB.domain),
-    ),
-    sourceLink: normalizeOverviewFilterValue(
-      searchParams.get(SOURCE_CARD_QUERY_PARAM_BY_TAB.link),
-    ),
-    clientBrowser: normalizeOverviewFilterValue(
-      searchParams.get(CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB.browser),
-    ),
-    clientOsVersion: normalizeOverviewFilterValue(
-      searchParams.get(CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB.osVersion),
-    ),
-    clientDeviceType: normalizeOverviewFilterValue(
-      searchParams.get(CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB.deviceType),
-    ),
-    clientLanguage: normalizeOverviewFilterValue(
-      searchParams.get(CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB.language),
-    ),
-    clientScreenSize: normalizeOverviewFilterValue(
-      searchParams.get(CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB.screenSize),
-    ),
-    geoContinent: normalizeOverviewFilterValue(
-      searchParams.get(GEO_AUX_QUERY_PARAM_BY_TAB.continent),
-    ),
-    geoTimezone: normalizeOverviewFilterValue(
-      searchParams.get(GEO_AUX_QUERY_PARAM_BY_TAB.timezone),
-    ),
-    geoOrganization: normalizeOverviewFilterValue(
-      searchParams.get(GEO_AUX_QUERY_PARAM_BY_TAB.organization),
-    ),
-    geo:
-      canonicalizeGeoFilterValue(
-        resolveGeoQueryValueFromSearchParams(searchParams),
-      ) ?? undefined,
-  };
+): FilterDocument {
+  if (searchParams instanceof URLSearchParams) {
+    return parseFilterParams(searchParams, analyticsFilterRegistry);
+  }
+  return parseFilterParams(new URLSearchParams(), analyticsFilterRegistry);
 }
 
 function isGeoLocationTab(tab: GeoDimensionCardTab): tab is GeoLocationTab {
@@ -1831,7 +1788,7 @@ function MetricAreaMap({
 }
 
 interface OverviewPagesSectionProps extends OverviewClientPageProps {
-  filters: DashboardFilters;
+  filters: FilterDocument;
   loading?: boolean;
   cardDataOverride?: OverviewPagesSectionCardData | null;
   visibleCards?: readonly OverviewPagesSectionCardKind[];
@@ -2034,7 +1991,7 @@ export function OverviewPagesSection({
       ((
         requestedSiteId: string,
         requestedWindow: TimeWindow,
-        requestedFilters: DashboardFilters,
+        requestedFilters: FilterDocument,
       ) =>
         fetchOverviewPageCardTab(
           requestedSiteId,
@@ -2092,7 +2049,7 @@ export function OverviewPagesSection({
       ((
         requestedSiteId: string,
         requestedWindow: TimeWindow,
-        requestedFilters: DashboardFilters,
+        requestedFilters: FilterDocument,
       ) =>
         fetchOverviewSourceCardTab(
           requestedSiteId,
@@ -2148,7 +2105,7 @@ export function OverviewPagesSection({
       ((
         requestedSiteId: string,
         requestedWindow: TimeWindow,
-        requestedFilters: DashboardFilters,
+        requestedFilters: FilterDocument,
       ) =>
         fetchOverviewClientDimensionTab(
           requestedSiteId,
@@ -2204,7 +2161,7 @@ export function OverviewPagesSection({
       ((
         requestedSiteId: string,
         requestedWindow: TimeWindow,
-        requestedFilters: DashboardFilters,
+        requestedFilters: FilterDocument,
       ) =>
         fetchOverviewGeoDimensionTab(
           requestedSiteId,
@@ -2434,7 +2391,9 @@ export function OverviewPagesSection({
     return normalized.length > 0 ? normalized : null;
   }, [pageCardQueryParamByTab, pageCardTab, searchParams]);
   const pageCardDefaultHostname = useMemo(() => {
-    const filteredHostname = sanitizeHostname(filters.hostname ?? "");
+    const filteredHostname = sanitizeHostname(
+      dashboardFilterValue(filters, "hostname") ?? "",
+    );
     if (filteredHostname.length > 0) return filteredHostname;
 
     const configuredHostname = sanitizeHostname(siteDomain);
@@ -2445,7 +2404,7 @@ export function OverviewPagesSection({
       if (hostname.length > 0) return hostname;
     }
     return "";
-  }, [filters.hostname, hostnameRows, siteDomain]);
+  }, [filters, hostnameRows, siteDomain]);
   const pageDetailBasePath = useMemo(
     () => buildPagesPagePath(pathname),
     [pathname],
@@ -3716,7 +3675,7 @@ interface OverviewDataSectionProps {
   messages: AppMessages;
   siteId: string;
   window: TimeWindow;
-  filters: DashboardFilters;
+  filters: FilterDocument;
 }
 
 function useOverviewSummaryQuery({
@@ -4094,7 +4053,7 @@ export function OverviewClientPage({
     () => parseOverviewCardFilters(new URLSearchParams(searchParamsKey)),
     [searchParamsKey],
   );
-  const selectedGeoValue = requestFilters.geo ?? null;
+  const selectedGeoValue = dashboardFilterValue(requestFilters, "geo") ?? null;
   const selectedGeoCountry = useMemo(() => {
     return extractGeoCountryCodeFromFilterValue(selectedGeoValue);
   }, [selectedGeoValue]);
@@ -4110,11 +4069,20 @@ export function OverviewClientPage({
         normalizedNext.length > 0 && normalizedNext !== normalizedCurrent
           ? normalizedNext
           : undefined;
+      const nextDocument = setDashboardFilterValue(
+        requestFilters,
+        "geo",
+        nextCountry,
+      );
       const params = new URLSearchParams(searchParams.toString());
-      params.delete(GEO_QUERY_PARAM);
-      clearLegacyGeoQueryParams(params);
-      if (nextCountry) {
-        params.set(GEO_QUERY_PARAM, nextCountry);
+      for (const key of [...params.keys()]) {
+        if (key.startsWith("filter[")) params.delete(key);
+      }
+      for (const [key, value] of serializeFilterParams(
+        nextDocument,
+        analyticsFilterRegistry,
+      )) {
+        params.append(key, value);
       }
       const nextQuery = params.toString();
       const target = nextQuery ? `${livePathname}?${nextQuery}` : livePathname;
@@ -4123,7 +4091,7 @@ export function OverviewClientPage({
         replaceUrlWithoutNavigation(target);
       }
     },
-    [livePathname, searchParams, selectedGeoCountry],
+    [livePathname, requestFilters, searchParams, selectedGeoCountry],
   );
 
   return (

@@ -74,6 +74,7 @@ import {
   fetchVisitorDetail,
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
+import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import {
   durationFormat,
   intlLocale,
@@ -116,7 +117,7 @@ type Labels = AppMessages["visitorDetail"];
 type VisitorPerformancePanelKey = PerformanceMetricKey | "score";
 type VisitorPerformanceStatus = "great" | "needs-improvement" | "poor" | "none";
 
-const VISITOR_DETAIL_OVERVIEW_FILTERS = {};
+const VISITOR_DETAIL_OVERVIEW_FILTERS = EMPTY_DASHBOARD_FILTER_DOCUMENT;
 const VISITOR_OVERVIEW_PAGE_CARD_TABS = ["path", "title"] as const;
 const VISITOR_ACTIVITY_DAYS = 365;
 const VISITOR_SESSION_SORT: SessionSortState = {

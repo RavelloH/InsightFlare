@@ -75,7 +75,7 @@ describe("mock/analytics-overview coverage", () => {
       includeDetail: "1",
       interval: "hour",
       timeZone: "UTC",
-      country: "US",
+      "filter[geo.country]": "US",
     });
 
     expect(mockBuildDemoFactDataset).toHaveBeenNthCalledWith(
@@ -95,7 +95,7 @@ describe("mock/analytics-overview coverage", () => {
       1000,
       2000,
       "hour",
-      expect.objectContaining({ country: "US" }),
+      expect.objectContaining({ country: "us" }),
       "UTC",
     );
     expect(result).toMatchObject({
@@ -120,7 +120,7 @@ describe("mock/analytics-overview coverage", () => {
       to: 2000,
       interval: "minute",
       tz: "UTC",
-      browser: "Chrome",
+      "filter[client.browser]": "Chrome",
     });
 
     expect(mockBuildDemoTrendBuckets).toHaveBeenCalledWith(

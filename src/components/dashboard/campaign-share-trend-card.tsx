@@ -6,7 +6,8 @@ import {
   type ShareTrendFetcher,
 } from "@/components/dashboard/share-trend-card";
 import { fetchUtmTrend } from "@/lib/dashboard/client-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -15,7 +16,7 @@ interface CampaignShareTrendCardProps {
   messages: AppMessages;
   siteId: string;
   window: TimeWindow;
-  filters: DashboardFilters;
+  filters: FilterDocument;
 }
 
 interface CampaignTrendPanelProps extends CampaignShareTrendCardProps {

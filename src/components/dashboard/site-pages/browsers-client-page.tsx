@@ -7,7 +7,8 @@ import { BrowserVersionBreakdownGrid } from "@/components/dashboard/browser-vers
 import { CanIUseCompatCard } from "@/components/dashboard/caniuse-compat-card";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -24,7 +25,7 @@ export function BrowsersClientPage({
   siteId,
 }: BrowsersClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
-    filters: DashboardFilters;
+    filters: FilterDocument;
     window: TimeWindow;
   };
 

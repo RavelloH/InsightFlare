@@ -42,7 +42,7 @@ import {
   fetchEventsSummary,
   fetchEventsTrend,
 } from "@/lib/dashboard/client-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
 import type { EventsSummaryData, EventsTrendData } from "@/lib/edge-client";
 import {
@@ -51,6 +51,7 @@ import {
   type LandingEmbedView,
   normalizeLandingEmbedView,
 } from "@/lib/embeds/landing";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
@@ -134,7 +135,7 @@ function LandingEmbedLoading() {
   );
 }
 
-function useOverviewEmbedFilters(): DashboardFilters {
+function useOverviewEmbedFilters(): FilterDocument {
   const searchParams = useLiveSearchParams();
   const searchParamsKey = searchParams.toString();
   return useMemo(
@@ -143,7 +144,7 @@ function useOverviewEmbedFilters(): DashboardFilters {
   );
 }
 
-function useRealtimeEmbedFilters(): DashboardFilters {
+function useRealtimeEmbedFilters(): FilterDocument {
   const searchParams = useLiveSearchParams();
   const searchParamsKey = searchParams.toString();
   return useMemo(

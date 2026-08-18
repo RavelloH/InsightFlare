@@ -18,8 +18,10 @@ import {
   fetchPageQueryTab,
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import { setDashboardFilterValue } from "@/lib/dashboard/filter-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -33,13 +35,10 @@ interface PageDetailClientPageProps {
 }
 
 function buildPageDetailFilters(
-  filters: DashboardFilters,
+  filters: FilterDocument,
   pagePath: string,
-): DashboardFilters {
-  return {
-    ...filters,
-    path: pagePath,
-  };
+): FilterDocument {
+  return setDashboardFilterValue(filters, "path", pagePath);
 }
 
 function normalizeLabel(value: string, fallback: string): string {
@@ -76,7 +75,7 @@ export function PageDetailClientPage({
   pagePath,
 }: PageDetailClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
-    filters: DashboardFilters;
+    filters: FilterDocument;
     window: TimeWindow;
   };
   const detailFilters = useMemo(
@@ -100,7 +99,7 @@ export function PageDetailClientPage({
       path: (
         requestedSiteId: string,
         requestedWindow: TimeWindow,
-        requestedFilters: DashboardFilters,
+        requestedFilters: FilterDocument,
       ) =>
         fetchPageHashTab(requestedSiteId, requestedWindow, requestedFilters, {
           limit: 100,
@@ -108,7 +107,7 @@ export function PageDetailClientPage({
       query: (
         requestedSiteId: string,
         requestedWindow: TimeWindow,
-        requestedFilters: DashboardFilters,
+        requestedFilters: FilterDocument,
       ) =>
         fetchPageQueryTab(requestedSiteId, requestedWindow, requestedFilters, {
           limit: 100,

@@ -12,7 +12,8 @@ import {
   emptyOverviewGeoPointsData,
   fetchOverviewGeoPoints,
 } from "@/lib/dashboard/client-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -21,12 +22,12 @@ interface OverviewGeoPointsMapCardProps {
   messages: AppMessages;
   siteId: string;
   window: TimeWindow;
-  filters: DashboardFilters;
+  filters: FilterDocument;
   selectedCountryCode?: string | null;
   onCountrySelect?: (countryCode: string | null) => void;
 }
 
-function dashboardFilterSignature(filters: DashboardFilters): string {
+function dashboardFilterSignature(filters: FilterDocument): string {
   const entries = Object.entries(filters)
     .map(([key, value]) => [key, String(value ?? "").trim()] as const)
     .filter(([, value]) => value.length > 0)
@@ -44,7 +45,7 @@ export function OverviewGeoPointsMapCard({
   onCountrySelect,
 }: OverviewGeoPointsMapCardProps) {
   const emptyGeoPointsData = useMemo(() => emptyOverviewGeoPointsData(), []);
-  const requestFilters = useMemo<DashboardFilters>(
+  const requestFilters = useMemo<FilterDocument>(
     () => ({
       ...filters,
       country: undefined,

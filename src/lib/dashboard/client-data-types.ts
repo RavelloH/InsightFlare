@@ -1,4 +1,4 @@
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   DashboardFilterOption,
   OverviewClientDimensionTabsData as OverviewClientDimensionTabsResponse,
@@ -7,6 +7,7 @@ import type {
   PagesDashboardData,
   PagesData,
 } from "@/lib/edge-client";
+import type { AnalyticsFilterFieldId } from "@/lib/filter-contract";
 
 export type DashboardFilterOptionData = DashboardFilterOption;
 
@@ -67,7 +68,27 @@ export type OverviewGeoDimensionTab =
   | "timezone"
   | "organization";
 
-export type DashboardFilterKey = keyof DashboardFilters;
+export type DashboardFilterOptionKey = Extract<
+  AnalyticsFilterFieldId,
+  | "geo.country"
+  | "client.deviceType"
+  | "client.browser"
+  | "page.path"
+  | "page.title"
+  | "page.hostname"
+  | "session.entryPath"
+  | "session.exitPath"
+  | "referrer.domain"
+  | "referrer.url"
+  | "client.osVersion"
+  | "client.language"
+  | "client.screenSize"
+  | "geo.region"
+  | "geo.city"
+  | "geo.continent"
+  | "geo.timeZone"
+  | "geo.organization"
+>;
 
 export type UtmDimensionTab =
   | "source"

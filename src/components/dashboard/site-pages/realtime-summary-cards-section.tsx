@@ -5,12 +5,14 @@ import {
   type OverviewPagesSectionCardData,
 } from "@/components/dashboard/site-pages/overview-client-page";
 import type { OverviewTabRows } from "@/lib/dashboard/client-data";
+import { dashboardFilterPresentation } from "@/lib/dashboard/filter-state";
 import {
   buildLocalityLocationValue,
   buildRegionLocationValue,
   parseGeoLocationValue,
 } from "@/lib/dashboard/geo-location";
-import type { DashboardFilters } from "@/lib/dashboard/query-state";
+import { parseFilterDocumentFromSearchParams } from "@/lib/dashboard/query-state";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type { RealtimeVisit } from "@/lib/realtime/types";
@@ -23,21 +25,13 @@ interface RealtimeSummaryCardsSectionProps {
   siteId: string;
   siteDomain: string;
   visits: RealtimeVisit[];
-  filters: DashboardFilters;
+  filters: FilterDocument;
 }
 
 interface SessionBoundary {
   entryPath: string;
   exitPath: string;
   visitorId: string;
-}
-
-function normalizeRealtimeFilterValue(
-  value: string | null | undefined,
-): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim().slice(0, 160);
-  return normalized.length > 0 ? normalized : undefined;
 }
 
 function equalsTrimmed(left: string, right: string): boolean {
@@ -211,9 +205,10 @@ function matchesGeoFilter(visit: RealtimeVisit, filterValue: string): boolean {
 
 function filterRealtimeVisits(
   visits: RealtimeVisit[],
-  filters: DashboardFilters,
+  document: FilterDocument,
   sessionBoundaries: Map<string, SessionBoundary>,
 ): RealtimeVisit[] {
+  const filters = dashboardFilterPresentation(document);
   return visits.filter((visit) => {
     const sessionBoundary = sessionBoundaries.get(sessionKeyOf(visit));
 
@@ -572,43 +567,6 @@ export function RealtimeSummaryCardsSection({
 
 export function parseRealtimeCardFilters(
   searchParams: URLSearchParams,
-): DashboardFilters {
-  return {
-    country: normalizeRealtimeFilterValue(searchParams.get("country")),
-    device: normalizeRealtimeFilterValue(searchParams.get("device")),
-    browser: normalizeRealtimeFilterValue(searchParams.get("browser")),
-    path: normalizeRealtimeFilterValue(searchParams.get("path")),
-    query: normalizeRealtimeFilterValue(searchParams.get("query")),
-    title: normalizeRealtimeFilterValue(searchParams.get("title")),
-    hostname: normalizeRealtimeFilterValue(searchParams.get("hostname")),
-    entry: normalizeRealtimeFilterValue(searchParams.get("entry")),
-    exit: normalizeRealtimeFilterValue(searchParams.get("exit")),
-    sourceDomain: normalizeRealtimeFilterValue(
-      searchParams.get("sourceDomain"),
-    ),
-    sourceLink: normalizeRealtimeFilterValue(searchParams.get("sourceLink")),
-    clientBrowser: normalizeRealtimeFilterValue(
-      searchParams.get("clientBrowser"),
-    ),
-    clientOsVersion: normalizeRealtimeFilterValue(
-      searchParams.get("clientOsVersion"),
-    ),
-    clientDeviceType: normalizeRealtimeFilterValue(
-      searchParams.get("clientDeviceType"),
-    ),
-    clientLanguage: normalizeRealtimeFilterValue(
-      searchParams.get("clientLanguage"),
-    ),
-    clientScreenSize: normalizeRealtimeFilterValue(
-      searchParams.get("clientScreenSize"),
-    ),
-    geo: normalizeRealtimeFilterValue(searchParams.get("geo")),
-    geoContinent: normalizeRealtimeFilterValue(
-      searchParams.get("geoContinent"),
-    ),
-    geoTimezone: normalizeRealtimeFilterValue(searchParams.get("geoTimezone")),
-    geoOrganization: normalizeRealtimeFilterValue(
-      searchParams.get("geoOrganization"),
-    ),
-  };
+): FilterDocument {
+  return parseFilterDocumentFromSearchParams(searchParams);
 }

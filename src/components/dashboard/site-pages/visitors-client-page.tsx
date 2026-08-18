@@ -41,9 +41,10 @@ import {
 } from "@/lib/client-history";
 import { fetchVisitors } from "@/lib/dashboard/client-data";
 import { numberFormat } from "@/lib/dashboard/format";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
 import type { VisitorsData } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
@@ -266,7 +267,7 @@ export function VisitorsClientPage({
 }: VisitorsClientPageProps) {
   const labels = messages.visitors;
   const { filters, window: timeWindow } = useDashboardQuery() as {
-    filters: DashboardFilters;
+    filters: FilterDocument;
     window: TimeWindow;
   };
   const [query, setQuery] = useState("");

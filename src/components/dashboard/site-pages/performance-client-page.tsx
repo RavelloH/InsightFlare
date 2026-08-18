@@ -53,7 +53,7 @@ import { Clickable } from "@/components/ui/clickable";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchPerformance } from "@/lib/dashboard/client-data";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   addZonedInterval,
   startOfZonedInterval,
@@ -68,6 +68,7 @@ import type {
   PerformanceSummary,
   PerformanceTrendPoint,
 } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import {
   resolveCountryFlagCode,
   resolveCountryLabel,
@@ -2509,7 +2510,7 @@ export function PerformanceClientPage({
   siteId,
 }: PerformanceClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
-    filters: DashboardFilters;
+    filters: FilterDocument;
     window: TimeWindow;
   };
   const [activePanel, setActivePanel] = useState<PerformancePanelKey>("score");

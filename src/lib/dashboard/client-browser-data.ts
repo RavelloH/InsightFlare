@@ -1,4 +1,4 @@
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { ClientDimensionKey } from "@/lib/edge-client";
 import type {
   BrowserCrossBreakdownData,
@@ -8,6 +8,7 @@ import type {
   BrowserVersionBreakdownData,
   ClientCrossBreakdownData,
 } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 
 import { fetchPrivateJson } from "./client-request";
 import { withFilters } from "./client-utils";
@@ -16,7 +17,7 @@ export async function fetchClientDimensionTrend(
   siteId: string,
   window: TimeWindow,
   dimension: ClientDimensionKey,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -45,7 +46,7 @@ export async function fetchClientCrossBreakdown(
   window: TimeWindow,
   primaryDimension: ClientDimensionKey,
   secondaryDimension: ClientDimensionKey,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     primaryLimit?: number;
     secondaryLimit?: number;
@@ -75,7 +76,7 @@ export async function fetchClientCrossBreakdown(
 export async function fetchBrowserTrend(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -101,7 +102,7 @@ export async function fetchBrowserTrend(
 export async function fetchBrowserEngineTrend(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -127,7 +128,7 @@ export async function fetchBrowserEngineTrend(
 export async function fetchBrowserVersionBreakdown(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     browserLimit?: number;
     versionLimit?: number;
@@ -160,7 +161,7 @@ export async function fetchBrowserVersionBreakdown(
 export async function fetchBrowserCrossBreakdown(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     browserLimit?: number;
     osLimit?: number;
@@ -195,7 +196,7 @@ export async function fetchBrowserCrossBreakdown(
 export async function fetchBrowserRadar(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: { signal?: AbortSignal },
 ): Promise<BrowserRadarData> {
   const requestParams = withFilters(

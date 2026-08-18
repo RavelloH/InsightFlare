@@ -38,12 +38,14 @@ import {
   numberFormat,
   percentFormat,
 } from "@/lib/dashboard/format";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   addZonedInterval,
   startOfZonedInterval,
 } from "@/lib/dashboard/time-zone";
 import type { RetentionData } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
+import { filterConditionCount } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
@@ -194,21 +196,14 @@ function retentionBucketCount(
   return Math.max(1, count);
 }
 
-function retentionActiveFilterCount(filters: DashboardFilters): number {
-  return Object.entries(filters).reduce((count, [key, value]) => {
-    if (key === "eventPayloadFilters") {
-      return (
-        count + (Array.isArray(value) && value.length > 0 ? value.length : 0)
-      );
-    }
-    return count + (typeof value === "string" && value.trim() ? 1 : 0);
-  }, 0);
+function retentionActiveFilterCount(filters: FilterDocument): number {
+  return filterConditionCount(filters);
 }
 
 function retentionLoadingShape(
   window: TimeWindow,
   granularity: RetentionGranularity,
-  filters: DashboardFilters,
+  filters: FilterDocument,
 ): RetentionLoadingShape {
   const bucketCount = retentionBucketCount(window, granularity);
   const activeFilterCount = retentionActiveFilterCount(filters);
@@ -951,7 +946,7 @@ export function RetentionClientPage({
 }: RetentionClientPageProps) {
   const labels = messages.retention;
   const { filters, window: timeWindow } = useDashboardQuery() as {
-    filters: DashboardFilters;
+    filters: FilterDocument;
     window: TimeWindow;
   };
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);

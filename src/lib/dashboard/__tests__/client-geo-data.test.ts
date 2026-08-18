@@ -4,6 +4,7 @@ import {
   fetchOverviewGeoDimensionTab,
   fetchOverviewGeoPoints,
 } from "@/lib/dashboard/client-geo-data";
+import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 
 describe("dashboard client geo data helpers", () => {
@@ -64,7 +65,7 @@ describe("dashboard client geo data helpers", () => {
     const out = await fetchOverviewGeoPoints(
       "geo-site",
       window,
-      { country: "FR", geo: "EU::FR" },
+      dashboardFilterDocumentFromPresentation({ geo: "FR" }),
       { limit: 25, applyGeoFilter: true },
     );
 
@@ -76,8 +77,7 @@ describe("dashboard client geo data helpers", () => {
         timeZone: "UTC",
         limit: "25",
         applyGeoFilter: "1",
-        country: "FR",
-        geo: "EU::FR",
+        "filter[geo.country]": "fr",
       }),
     );
     expect(out).toEqual({

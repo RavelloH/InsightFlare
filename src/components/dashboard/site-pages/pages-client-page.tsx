@@ -28,8 +28,9 @@ import {
   percentFormat,
 } from "@/lib/dashboard/format";
 import { buildPageDetailHref } from "@/lib/dashboard/page-detail";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import Link from "@/lib/router";
@@ -245,7 +246,7 @@ export function PagesClientPage({
   pathname,
 }: PagesClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
-    filters: DashboardFilters;
+    filters: FilterDocument;
     window: TimeWindow;
   };
   const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null);

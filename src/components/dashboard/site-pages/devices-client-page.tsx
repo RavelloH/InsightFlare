@@ -4,7 +4,8 @@ import { DeviceScreenBreakdownCard } from "@/components/dashboard/device-screen-
 import { DeviceShareOverview } from "@/components/dashboard/device-share-overview";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -23,7 +24,7 @@ export function DevicesClientPage({
   siteDomain,
 }: DevicesClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
-    filters: DashboardFilters;
+    filters: FilterDocument;
     window: TimeWindow;
   };
 

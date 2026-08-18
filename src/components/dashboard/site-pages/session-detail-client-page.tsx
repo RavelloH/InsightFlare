@@ -62,6 +62,7 @@ import {
   fetchSessionDetail,
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
+import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import { buildPageDetailHref } from "@/lib/dashboard/page-detail";
 import dynamic from "@/lib/dynamic";
@@ -1180,7 +1181,7 @@ function VisitDetailsTab({
   );
 }
 
-const SESSION_DETAIL_OVERVIEW_FILTERS = {};
+const SESSION_DETAIL_OVERVIEW_FILTERS = EMPTY_DASHBOARD_FILTER_DOCUMENT;
 const SESSION_OVERVIEW_PAGE_CARD_TABS = ["path", "title"] as const;
 
 interface SessionOverviewRowInput {

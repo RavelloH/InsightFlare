@@ -37,8 +37,8 @@ export {
   fetchVisitors,
 } from "./client-core-data";
 export type {
-  DashboardFilterKey,
   DashboardFilterOptionData,
+  DashboardFilterOptionKey,
   EventRecordSortKey,
   FetchPrivateJsonOptions,
   OverviewClientDimensionTab,

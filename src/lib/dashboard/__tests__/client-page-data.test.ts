@@ -5,6 +5,7 @@ import {
   fetchPagesDashboard,
   fetchPagesShareTrend,
 } from "@/lib/dashboard/client-page-data";
+import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 
 describe("dashboard client page data helpers", () => {
@@ -48,10 +49,14 @@ describe("dashboard client page data helpers", () => {
       );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    await fetchPagesDashboard("pages-site", window, {
-      path: "/docs",
-      sourceDomain: "example.com",
-    });
+    await fetchPagesDashboard(
+      "pages-site",
+      window,
+      dashboardFilterDocumentFromPresentation({
+        path: "/docs",
+        sourceDomain: "example.com",
+      }),
+    );
     await fetchPagesDashboard("pages-site", window, undefined, {
       page: 3,
       pageSize: 40,
@@ -66,8 +71,8 @@ describe("dashboard client page data helpers", () => {
         interval: "day",
         page: "1",
         pageSize: "12",
-        path: "/docs",
-        sourceDomain: "example.com",
+        "filter[page.path]": "/docs",
+        "filter[referrer.domain]": "example.com",
       }),
     );
     expect(paramsFromCall(fetchMock, 1).get("page")).toBe("3");
@@ -269,9 +274,11 @@ describe("dashboard client page data helpers", () => {
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const trend = await fetchPagesShareTrend("share-duplicates", window, {
-      path: "/docs",
-    });
+    const trend = await fetchPagesShareTrend(
+      "share-duplicates",
+      window,
+      dashboardFilterDocumentFromPresentation({ path: "/docs" }),
+    );
 
     expect(trend.ok).toBe(false);
     expect(trend.series).toEqual([
@@ -345,12 +352,14 @@ describe("dashboard client page data helpers", () => {
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const trend = await fetchPagesShareTrend("share-total-only", window, {
-      path: "/docs",
-    });
+    const trend = await fetchPagesShareTrend(
+      "share-total-only",
+      window,
+      dashboardFilterDocumentFromPresentation({ path: "/docs" }),
+    );
 
     expect(paramsFromCall(fetchMock, 0).get("pageSize")).toBe("5");
-    expect(paramsFromCall(fetchMock, 1).get("path")).toBe("/docs");
+    expect(paramsFromCall(fetchMock, 1).get("filter[page.path]")).toBe("/docs");
     expect(trend.series).toEqual([
       {
         key: "other",
@@ -465,7 +474,11 @@ describe("dashboard client page data helpers", () => {
     globalThis.fetch = fetchMock;
 
     await expect(
-      fetchPageCardTabs("tabs-site", window, { path: "/docs" }),
+      fetchPageCardTabs(
+        "tabs-site",
+        window,
+        dashboardFilterDocumentFromPresentation({ path: "/docs" }),
+      ),
     ).resolves.toEqual(tabs);
     await expect(fetchPageCardTabs("tabs-empty", window)).resolves.toEqual({
       path: [],
@@ -475,6 +488,6 @@ describe("dashboard client page data helpers", () => {
       exit: [],
     });
     expect(paramsFromCall(fetchMock, 0).get("limit")).toBe("100");
-    expect(paramsFromCall(fetchMock, 0).get("path")).toBe("/docs");
+    expect(paramsFromCall(fetchMock, 0).get("filter[page.path]")).toBe("/docs");
   });
 });

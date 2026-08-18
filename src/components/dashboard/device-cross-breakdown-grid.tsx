@@ -15,11 +15,12 @@ import {
 } from "@/components/ui/chart";
 import { fetchClientCrossBreakdown } from "@/lib/dashboard/client-data";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   BrowserCrossBreakdownDimensionData,
   BrowserCrossBreakdownItem,
 } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -37,7 +38,7 @@ interface DeviceCrossBreakdownGridProps {
   messages: AppMessages;
   siteId: string;
   window: TimeWindow;
-  filters: DashboardFilters;
+  filters: FilterDocument;
 }
 
 interface CrossDisplayItem extends BrowserCrossBreakdownItem {

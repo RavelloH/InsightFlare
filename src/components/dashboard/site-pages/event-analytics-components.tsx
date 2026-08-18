@@ -95,17 +95,13 @@ import {
   fetchEventTypeFields,
   fetchEventTypeFieldValues,
 } from "@/lib/dashboard/client-data";
+import { appendEventPayloadFilter } from "@/lib/dashboard/filter-state";
 import {
   intlLocale,
   numberFormat,
   percentFormat,
 } from "@/lib/dashboard/format";
-import type {
-  DashboardFilters,
-  EventPayloadFilterRule,
-  EventPayloadFilterValue,
-  TimeWindow,
-} from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
 import type {
   EventField,
@@ -115,6 +111,7 @@ import type {
   EventsTrendData,
   EventTrendSeries,
 } from "@/lib/edge-client";
+import type { FilterDocument, FilterValue } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
@@ -122,6 +119,12 @@ import { useRouter } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const EVENT_PAGE_SIZE = 50;
+type EventPayloadFilterValue = FilterValue;
+interface EventPayloadFilterRule {
+  path: string;
+  operator: "eq" | "neq";
+  value: EventPayloadFilterValue;
+}
 const EVENT_SKELETON_ROWS = 8;
 const OTHER_SERIES_KEY = "other";
 const FIELD_TREE_CHILD_TRANSITION = {
@@ -251,7 +254,7 @@ function formatPayloadFilterRules(rules: EventPayloadFilterRule[]): string {
     .map(
       (rule) =>
         `${formatPayloadFilterPathForInput(rule.path)} ${
-          rule.operator === "ne" ? "!=" : "=="
+          rule.operator === "neq" ? "!=" : "=="
         } ${formatPayloadFilterValueForInput(rule.value)}`,
     )
     .join("\n");
@@ -299,7 +302,7 @@ function parsePayloadFilterInput(
       const value = parsePayloadFilterValue(match[3] ?? "");
       rules.push({
         path,
-        operator: match[2] === "!=" ? "ne" : "eq",
+        operator: match[2] === "!=" ? "neq" : "eq",
         value,
       });
     }
@@ -1654,7 +1657,7 @@ export function EventRecordsSection({
   siteId: string;
   pathname: string;
   window: TimeWindow;
-  filters: DashboardFilters;
+  filters: FilterDocument;
   eventName?: string;
 }) {
   const [query, setQuery] = useState("");
@@ -1835,7 +1838,7 @@ export function EventFieldsCard({
   labels: EventPageCopy;
   siteId: string;
   window: TimeWindow;
-  filters: DashboardFilters;
+  filters: FilterDocument;
   eventName: string;
   loading: boolean;
   fields: EventField[];
@@ -1854,12 +1857,18 @@ export function EventFieldsCard({
     [payloadFilters],
   );
   const activePayloadFilterCount = payloadFilters.length;
-  const effectiveFilters = useMemo<DashboardFilters>(() => {
+  const effectiveFilters = useMemo<FilterDocument>(() => {
     if (payloadFilters.length === 0) return filters;
-    return {
-      ...filters,
-      eventPayloadFilters: payloadFilters,
-    };
+    return payloadFilters.reduce(
+      (document, rule) =>
+        appendEventPayloadFilter(
+          document,
+          rule.path,
+          rule.operator,
+          rule.value,
+        ),
+      filters,
+    );
   }, [filters, payloadFilters, payloadFiltersKey]);
   const effectiveFiltersKey = useMemo(
     () => JSON.stringify(effectiveFilters ?? {}),

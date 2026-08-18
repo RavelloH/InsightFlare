@@ -9,11 +9,11 @@ import {
   useState,
 } from "react";
 
+import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import {
   allowedIntervalsForRange,
   clampIntervalForRange,
   type CustomTimeRange,
-  type DashboardFilters,
   type DashboardInterval,
   DEFAULT_RANGE_PRESET,
   finestIntervalForRange,
@@ -26,24 +26,29 @@ import {
   browserTimeZone,
   resolveReportingTimeZone,
 } from "@/lib/dashboard/time-zone";
+import {
+  analyticsFilterRegistry,
+  type FilterDocument,
+  normalizeFilterDocument,
+} from "@/lib/filter-contract";
 
 interface PersistedDashboardQueryState {
   range?: string;
   interval?: DashboardInterval;
   customRange?: CustomTimeRange | null;
-  uiFilters?: DashboardFilters;
+  uiFilters?: FilterDocument;
 }
 
 interface DashboardQueryContextValue {
   range: RangePreset;
   window: TimeWindow;
-  filters: DashboardFilters;
-  uiFilters: DashboardFilters;
+  filters: FilterDocument;
+  uiFilters: FilterDocument;
   customRange: CustomTimeRange | null;
   setRange: (range: RangePreset) => void;
   setCustomRange: (range: CustomTimeRange | null) => void;
   setInterval: (interval: DashboardInterval) => void;
-  setUiFilters: (filters: DashboardFilters) => void;
+  setUiFilters: (filters: FilterDocument) => void;
   clearUiFilters: () => void;
   allowedIntervals: DashboardInterval[];
   timeZone: string;
@@ -60,50 +65,23 @@ interface DashboardQueryProviderProps {
   maxRangeDays?: number;
 }
 
-const STORAGE_KEY = "insightflare.dashboard.query.v2";
-const EMPTY_FILTERS: DashboardFilters = {};
+const STORAGE_KEY = "insightflare.dashboard.query.v3";
+const EMPTY_FILTERS = EMPTY_DASHBOARD_FILTER_DOCUMENT;
 const DEFAULT_RANGE: RangePreset = DEFAULT_RANGE_PRESET;
 
 const DashboardQueryContext = createContext<DashboardQueryContextValue | null>(
   null,
 );
 
-function clampFilter(value: string | undefined): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim().slice(0, 120);
-  if (normalized.length === 0) return undefined;
-  const lowered = normalized.toLowerCase();
-  if (lowered === "all" || lowered === "null" || lowered === "undefined") {
-    return undefined;
-  }
-  return normalized;
-}
-
 function normalizeFilters(
-  filters: DashboardFilters | undefined | null,
-): DashboardFilters {
-  return {
-    country: clampFilter(filters?.country),
-    device: clampFilter(filters?.device),
-    browser: clampFilter(filters?.browser),
-    path: clampFilter(filters?.path),
-    query: clampFilter(filters?.query),
-    title: clampFilter(filters?.title),
-    hostname: clampFilter(filters?.hostname),
-    entry: clampFilter(filters?.entry),
-    exit: clampFilter(filters?.exit),
-    sourceDomain: clampFilter(filters?.sourceDomain),
-    sourceLink: clampFilter(filters?.sourceLink),
-    clientBrowser: clampFilter(filters?.clientBrowser),
-    clientOsVersion: clampFilter(filters?.clientOsVersion),
-    clientDeviceType: clampFilter(filters?.clientDeviceType),
-    clientLanguage: clampFilter(filters?.clientLanguage),
-    clientScreenSize: clampFilter(filters?.clientScreenSize),
-    geo: clampFilter(filters?.geo),
-    geoContinent: clampFilter(filters?.geoContinent),
-    geoTimezone: clampFilter(filters?.geoTimezone),
-    geoOrganization: clampFilter(filters?.geoOrganization),
-  };
+  filters: FilterDocument | undefined | null,
+): FilterDocument {
+  if (!filters) return EMPTY_FILTERS;
+  try {
+    return normalizeFilterDocument(filters, analyticsFilterRegistry);
+  } catch {
+    return EMPTY_FILTERS;
+  }
 }
 
 function normalizeCustomRange(
@@ -140,7 +118,7 @@ function buildInitialState(initialTimeZonePreference: string) {
       range: DEFAULT_RANGE as RangePreset,
       interval: initialWindow.interval as DashboardInterval,
       customRange: null as CustomTimeRange | null,
-      uiFilters: EMPTY_FILTERS as DashboardFilters,
+      uiFilters: EMPTY_FILTERS,
       timeZonePreference: initialTimeZonePreference,
     };
   }
@@ -156,7 +134,7 @@ function buildInitialState(initialTimeZonePreference: string) {
       range: DEFAULT_RANGE as RangePreset,
       interval: initialWindow.interval as DashboardInterval,
       customRange: null as CustomTimeRange | null,
-      uiFilters: EMPTY_FILTERS as DashboardFilters,
+      uiFilters: EMPTY_FILTERS,
       timeZonePreference: initialTimeZonePreference,
     };
   }
@@ -225,7 +203,7 @@ export function DashboardQueryProvider({
   const [customRange, setCustomRangeState] = useState<CustomTimeRange | null>(
     clampCustomRangeToMaxDays(initial.customRange, maxRangeDays),
   );
-  const [uiFilters, setUiFiltersState] = useState<DashboardFilters>(
+  const [uiFilters, setUiFiltersState] = useState<FilterDocument>(
     initial.uiFilters,
   );
   const [timeZonePreference, setTimeZonePreferenceState] = useState(
@@ -329,7 +307,7 @@ export function DashboardQueryProvider({
     setTimeZonePreferenceState(next);
   }, []);
 
-  const setUiFilters = useCallback((next: DashboardFilters) => {
+  const setUiFilters = useCallback((next: FilterDocument) => {
     setUiFiltersState(normalizeFilters(next));
   }, []);
 

@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appendEventPayloadFilter,
+  dashboardFilterFieldId,
+  dashboardFilterFieldsForControl,
+  dashboardFilterFingerprint,
+  dashboardFilterPresentation,
+  setDashboardFilterValue,
+  withoutDashboardFilter,
+} from "@/lib/dashboard/filter-state";
+import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
+import type { FilterDocument, FilterFieldId } from "@/lib/filter-contract";
+import {
   DEMO_DIRECT_REFERRER_FILTER_VALUE,
   DEMO_INTERVALS,
   demoValuesIncludeSearch,
@@ -16,6 +27,85 @@ import {
 } from "@/lib/realtime/mock/filters";
 
 describe("mock/filters", () => {
+  it("exposes canonical dashboard filter helpers", () => {
+    const document = dashboardFilterDocumentFromPresentation({
+      country: "US",
+      browser: "Chrome",
+    });
+    expect(dashboardFilterFieldId("country")).toBe("geo.country");
+    expect(dashboardFilterFieldsForControl("geo")).toEqual([
+      "geo.country",
+      "geo.region",
+      "geo.city",
+    ]);
+    expect(dashboardFilterFingerprint(document)).toContain("filter-v1:");
+    const withPayload = appendEventPayloadFilter(document, "plan", "eq", "pro");
+    expect(withPayload.root).toBeTruthy();
+  });
+
+  it("normalizes dashboard filter edits across invalid, nested, and geo values", () => {
+    const empty = dashboardFilterDocumentFromPresentation({});
+    expect(setDashboardFilterValue(empty, "country", "   ").root).toBeNull();
+    expect(setDashboardFilterValue(empty, "country", null).root).toBeNull();
+    expect(setDashboardFilterValue(empty, "geo", "invalid").root).toBeNull();
+    const region = setDashboardFilterValue(empty, "geo", "US::CA");
+    expect(region.root).toBeTruthy();
+    expect(parseDemoFilters({}).filterDocument).toBeDefined();
+    expect(
+      dashboardFilterDocumentFromPresentation({ geo: "US::CA" }).root,
+    ).toBeTruthy();
+    expect(dashboardFilterPresentation(region).geo).toBe("us::us::ca");
+    const locality = setDashboardFilterValue(
+      empty,
+      "geo",
+      "US::CA::California::Berkeley",
+    );
+    expect(locality.root).toBeTruthy();
+    expect(dashboardFilterPresentation(locality).geo).toContain("berkeley");
+
+    const combined = dashboardFilterDocumentFromPresentation({
+      country: "US",
+      browser: "Chrome",
+    });
+    expect(withoutDashboardFilter(combined, "country").root).toBeTruthy();
+    expect(withoutDashboardFilter(combined, "browser").root).toBeTruthy();
+    expect(withoutDashboardFilter(combined, "geo").root).toBeTruthy();
+    const notDocument = {
+      version: 1,
+      root: {
+        kind: "not",
+        child: {
+          kind: "condition",
+          target: { kind: "field", field: "geo.country" },
+          operator: "eq",
+          value: "us",
+        },
+      },
+    } as FilterDocument;
+    expect(withoutDashboardFilter(notDocument, "country").root).toBeNull();
+    const preservedNotDocument: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "not",
+        child: {
+          kind: "condition",
+          target: {
+            kind: "field",
+            field: "client.browser" as FilterFieldId,
+          },
+          operator: "eq",
+          value: "Chrome",
+        },
+      },
+    };
+    expect(
+      withoutDashboardFilter(preservedNotDocument, "country").root,
+    ).toBeTruthy();
+    expect(
+      appendEventPayloadFilter(empty, "/plan", "eq", "pro").root,
+    ).toBeTruthy();
+  });
+
   describe("constants", () => {
     it("exposes the direct referrer sentinel", () => {
       expect(DEMO_DIRECT_REFERRER_FILTER_VALUE).toBe("__direct__");
@@ -58,159 +148,58 @@ describe("mock/filters", () => {
       const filters = parseDemoFilters({});
       expect(filters.country).toBeUndefined();
       expect(filters.geo).toBeUndefined();
-      expect(filters.eventPayloadFilters).toBeUndefined();
+      expect(filters.filterDocument?.root).toBeNull();
     });
 
     it("captures every supported dimension key", () => {
       const filters = parseDemoFilters({
-        country: "US",
-        device: "Mobile",
-        browser: "Chrome",
-        path: "/pricing",
-        query: "?utm_source=newsletter",
-        title: "Home",
-        hostname: "example.com",
-        entry: "/",
-        exit: "/checkout",
-        sourceDomain: "google.com",
-        sourceLink: "https://google.com/search",
-        clientBrowser: "Safari",
-        clientOsVersion: "iOS 18",
-        clientDeviceType: "Mobile",
-        clientLanguage: "en-US",
-        clientScreenSize: "390x844",
-        geoContinent: "North America",
-        geoTimezone: "America/New_York",
-        geoOrganization: "Cloudflare Inc.",
+        "filter[geo.country]": "US",
+        "filter[client.deviceType]": "Mobile",
+        "filter[client.browser]": "Chrome",
+        "filter[page.path]": "/pricing",
+        "filter[page.query]": "?utm_source=newsletter",
+        "filter[page.title]": "Home",
+        "filter[page.hostname]": "example.com",
+        "filter[session.entryPath]": "/",
+        "filter[session.exitPath]": "/checkout",
+        "filter[referrer.domain]": "google.com",
+        "filter[referrer.url]": "https://google.com/search",
+        "filter[client.osVersion]": "iOS 18",
+        "filter[client.language]": "en-US",
+        "filter[client.screenSize]": "390x844",
+        "filter[geo.continent]": "North America",
+        "filter[geo.timeZone]": "America/New_York",
+        "filter[geo.organization]": "Cloudflare Inc.",
       });
-      expect(filters.country).toBe("US");
-      expect(filters.device).toBe("Mobile");
+      expect(filters.country).toBe("us");
+      expect(filters.device).toBe("mobile");
       expect(filters.browser).toBe("Chrome");
       expect(filters.path).toBe("/pricing");
       expect(filters.title).toBe("Home");
       expect(filters.entry).toBe("/");
       expect(filters.exit).toBe("/checkout");
       expect(filters.sourceDomain).toBe("google.com");
-      expect(filters.clientBrowser).toBe("Safari");
       expect(filters.clientScreenSize).toBe("390x844");
-      expect(filters.geoContinent).toBe("North America");
+      expect(filters.geoContinent).toBe("north america");
       expect(filters.geoOrganization).toBe("Cloudflare Inc.");
     });
 
-    it("prefers `geo` over `geoCountry`/`geoRegion`/`geoCity`", () => {
-      expect(parseDemoFilters({ geo: "US::CA::California" }).geo).toBe(
-        "US::CA::California",
-      );
-      expect(parseDemoFilters({ geoCity: "US::NY::New York::NYC" }).geo).toBe(
-        "US::NY::New York::NYC",
-      );
+    it("maps canonical geo paths to the existing geo presentation", () => {
       expect(
-        parseDemoFilters({ geoCountry: "US", geoRegion: "US::CA" }).geo,
-      ).toBe("US");
+        parseDemoFilters({
+          "filter[geo.country]": "US",
+          "filter[geo.region]": "CA",
+          "filter[geo.city]": "Los Angeles",
+        }).geo,
+      ).toBe("us::ca::los angeles");
     });
 
-    it("parses event payload filters JSON", () => {
+    it("parses event payload conditions into the shared AST", () => {
       const filters = parseDemoFilters({
-        eventPayloadFilters: JSON.stringify([
-          { path: "/foo", operator: "eq", value: "bar" },
-          { path: "$.amount[*]", operator: "ne", value: 100 },
-        ]),
+        "filter[event.payload][/foo]": "bar",
+        "filter[event.payload][/amount/*]": "neq:json:100",
       });
-      expect(filters.eventPayloadFilters).toEqual([
-        { path: "/foo", operator: "eq", value: "bar" },
-        { path: "/amount/*", operator: "ne", value: 100 },
-      ]);
-    });
-
-    it("ignores invalid event payload filters JSON", () => {
-      const filters = parseDemoFilters({
-        eventPayloadFilters: "not json",
-      });
-      expect(filters.eventPayloadFilters).toBeUndefined();
-    });
-
-    it("returns undefined when event payload filters is not an array", () => {
-      expect(
-        parseDemoFilters({ eventPayloadFilters: JSON.stringify({ foo: 1 }) })
-          .eventPayloadFilters,
-      ).toBeUndefined();
-    });
-
-    it("drops invalid event payload entries (missing path or value)", () => {
-      const filters = parseDemoFilters({
-        eventPayloadFilters: JSON.stringify([
-          { path: "/", operator: "eq", value: "ignored" },
-          { path: "", operator: "eq", value: "ignored" },
-          { path: "/ok", operator: "eq", value: "ok" },
-          { path: "/no-value", operator: "eq" },
-          { path: "/null-value", operator: "ne", value: null },
-          { path: "/bool", operator: "eq", value: true },
-          null,
-          "not-an-object",
-          { operator: "eq", value: "ignored" },
-        ]),
-      });
-      expect(filters.eventPayloadFilters).toEqual([
-        { path: "/ok", operator: "eq", value: "ok" },
-        { path: "/null-value", operator: "ne", value: null },
-        { path: "/bool", operator: "eq", value: true },
-      ]);
-    });
-
-    it("returns undefined when no event payload rules survive", () => {
-      const filters = parseDemoFilters({
-        eventPayloadFilters: JSON.stringify([
-          { path: "", operator: "eq", value: "ignored" },
-        ]),
-      });
-      expect(filters.eventPayloadFilters).toBeUndefined();
-    });
-
-    it("normalizes dot-path expressions and trims to 240 chars", () => {
-      const longValue = "x".repeat(500);
-      const filters = parseDemoFilters({
-        eventPayloadFilters: JSON.stringify([
-          { path: "$.items[0].name", operator: "ne", value: longValue },
-        ]),
-      });
-      expect(filters.eventPayloadFilters?.[0]?.path).toBe("/items/*/name");
-      expect(
-        String(filters.eventPayloadFilters?.[0]?.value ?? "").length,
-      ).toBeLessThanOrEqual(240);
-    });
-
-    it("ignores entries whose value is an object/array (unsupported types)", () => {
-      const filters = parseDemoFilters({
-        eventPayloadFilters: JSON.stringify([
-          { path: "/n", operator: "eq", value: { nested: true } },
-          { path: "/arr", operator: "eq", value: [1, 2] },
-          { path: "/ok", operator: "eq", value: 7 },
-        ]),
-      });
-      expect(filters.eventPayloadFilters).toEqual([
-        { path: "/ok", operator: "eq", value: 7 },
-      ]);
-    });
-
-    it("caps event payload rules at 12 entries", () => {
-      const raw = Array.from({ length: 20 }, (_, i) => ({
-        path: `/p${i}`,
-        operator: "eq",
-        value: i,
-      }));
-      const filters = parseDemoFilters({
-        eventPayloadFilters: JSON.stringify(raw),
-      });
-      expect(filters.eventPayloadFilters?.length).toBe(12);
-    });
-
-    it("maps `!=` operator to `ne`", () => {
-      const filters = parseDemoFilters({
-        eventPayloadFilters: JSON.stringify([
-          { path: "/x", operator: "!=", value: 1 },
-        ]),
-      });
-      expect(filters.eventPayloadFilters?.[0]?.operator).toBe("ne");
+      expect(filters.filterDocument?.root).toBeTruthy();
     });
   });
 
@@ -236,12 +225,13 @@ describe("mock/filters", () => {
   describe("withoutDemoGeoFilter", () => {
     it("clears the `geo` field but preserves other filters", () => {
       const filters = parseDemoFilters({
-        country: "US",
-        geo: "US::CA::California",
+        "filter[geo.country]": "US",
+        "filter[geo.region]": "CA",
+        "filter[geo.city]": "California",
       });
       const stripped = withoutDemoGeoFilter(filters);
       expect(stripped.geo).toBeUndefined();
-      expect(stripped.country).toBe("US");
+      expect(stripped.country).toBeUndefined();
     });
   });
 

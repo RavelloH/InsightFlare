@@ -17,6 +17,10 @@ import type {
   TeamData,
   TrendData,
 } from "@/lib/edge-client-types";
+import {
+  analyticsFilterRegistry,
+  serializeFilterParams,
+} from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { PublicNotificationEmailConfig } from "@/lib/notifications/email-config";
 import type { SiteScriptSettings } from "@/lib/site-settings";
@@ -87,30 +91,11 @@ function withFilters(
 ): Record<string, string | number> {
   const next = { ...params };
   if (!filters) return next;
-  if (filters.country) next.country = filters.country;
-  if (filters.device) next.device = filters.device;
-  if (filters.browser) next.browser = filters.browser;
-  if (filters.path) next.path = filters.path;
-  if (filters.query) next.query = filters.query;
-  if (filters.title) next.title = filters.title;
-  if (filters.hostname) next.hostname = filters.hostname;
-  if (filters.entry) next.entry = filters.entry;
-  if (filters.exit) next.exit = filters.exit;
-  if (filters.sourceDomain) next.sourceDomain = filters.sourceDomain;
-  if (filters.sourceLink) next.sourceLink = filters.sourceLink;
-  if (filters.clientBrowser) next.clientBrowser = filters.clientBrowser;
-  if (filters.clientOsVersion) next.clientOsVersion = filters.clientOsVersion;
-  if (filters.clientDeviceType)
-    next.clientDeviceType = filters.clientDeviceType;
-  if (filters.clientLanguage) next.clientLanguage = filters.clientLanguage;
-  if (filters.clientScreenSize)
-    next.clientScreenSize = filters.clientScreenSize;
-  if (filters.geo) next.geo = filters.geo;
-  if (filters.geoContinent) next.geoContinent = filters.geoContinent;
-  if (filters.geoTimezone) next.geoTimezone = filters.geoTimezone;
-  if (filters.geoOrganization) next.geoOrganization = filters.geoOrganization;
-  if (filters.eventPayloadFilters?.length) {
-    next.eventPayloadFilters = JSON.stringify(filters.eventPayloadFilters);
+  for (const [key, value] of serializeFilterParams(
+    filters,
+    analyticsFilterRegistry,
+  )) {
+    next[key] = value;
   }
   return next;
 }

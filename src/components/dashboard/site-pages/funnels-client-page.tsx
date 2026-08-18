@@ -82,7 +82,7 @@ import {
   numberFormat,
   percentFormat,
 } from "@/lib/dashboard/format";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   FunnelAnalysisStep,
   FunnelDefinition,
@@ -90,6 +90,7 @@ import type {
   FunnelListData,
   FunnelStep,
 } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
@@ -756,7 +757,7 @@ function FunnelDetailDrawer({
 }) {
   const labels = messages.funnels;
   const { filters, window: timeWindow } = useDashboardQuery() as {
-    filters: DashboardFilters;
+    filters: FilterDocument;
     window: TimeWindow;
   };
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
@@ -810,7 +811,7 @@ export function FunnelsClientPage({
 }: FunnelsClientPageProps) {
   const labels = messages.funnels;
   const { filters, window: timeWindow } = useDashboardQuery() as {
-    filters: DashboardFilters;
+    filters: FilterDocument;
     window: TimeWindow;
   };
   const searchParams = useLiveSearchParams();

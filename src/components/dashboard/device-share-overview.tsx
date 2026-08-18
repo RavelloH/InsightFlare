@@ -6,8 +6,9 @@ import { ShareRadialCard } from "@/components/dashboard/share-radial-card";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Spinner } from "@/components/ui/spinner";
 import { fetchClientDimensionTrend } from "@/lib/dashboard/client-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserTrendData } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -33,7 +34,7 @@ interface DeviceShareOverviewProps {
   messages: AppMessages;
   siteId: string;
   window: TimeWindow;
-  filters: DashboardFilters;
+  filters: FilterDocument;
 }
 
 export function DeviceShareOverview({

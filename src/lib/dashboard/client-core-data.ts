@@ -18,7 +18,7 @@ import {
   emptyVisitorDetail,
   emptyVisitors,
 } from "@/lib/dashboard/client-empty-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   EventField,
   EventFieldValuesData,
@@ -42,6 +42,7 @@ import type {
   VisitorDetailData,
   VisitorsData,
 } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 
 import { fetchPrivateJson, fetchPrivateJsonMutate } from "./client-request";
 import { withFilters } from "./client-utils";
@@ -64,7 +65,7 @@ function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
 export async function fetchOverview(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     includeChange?: boolean;
     includeDetail?: boolean;
@@ -93,7 +94,7 @@ export async function fetchOverview(
 export async function fetchTrend(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: { signal?: AbortSignal },
 ): Promise<TrendData> {
   return fetchPrivateJson<TrendData>(
@@ -115,7 +116,7 @@ export async function fetchTrend(
 export async function fetchPages(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
 ): Promise<PagesData> {
   return fetchPrivateJson<PagesData>(
     "/api/private/pages",
@@ -136,7 +137,7 @@ export async function fetchPages(
 export async function fetchVisitors(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     cursor?: string | null;
@@ -202,7 +203,7 @@ export async function fetchVisitorDetail(
 export async function fetchSessions(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     cursor?: string | null;
@@ -284,7 +285,7 @@ export async function fetchFunnelDetail(
   siteId: string,
   funnelId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: { signal?: AbortSignal },
 ): Promise<FunnelDetailData> {
   const normalizedFunnelId = funnelId.trim();
@@ -334,7 +335,7 @@ export async function deleteFunnel(
 export async function fetchEventsSummary(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: { signal?: AbortSignal },
 ): Promise<EventsSummaryData> {
   const requestParams = withFilters(
@@ -364,7 +365,7 @@ export async function fetchEventsSummary(
 export async function fetchEventsTrend(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     eventName?: string;
@@ -400,7 +401,7 @@ export async function fetchEventsTrend(
 export async function fetchEventsRecords(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     cursor?: string | null;
     pageSize?: number;
@@ -446,7 +447,7 @@ export async function fetchEventTypeDetail(
   siteId: string,
   window: TimeWindow,
   eventName: string,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: { signal?: AbortSignal },
 ): Promise<EventTypeDetailData> {
   const normalizedEventName = eventName.trim();
@@ -488,7 +489,7 @@ export async function fetchEventTypeFields(
   siteId: string,
   window: TimeWindow,
   eventName: string,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: { signal?: AbortSignal },
 ): Promise<Pick<EventTypeDetailData, "fields">> {
   const normalizedEventName = eventName.trim();
@@ -514,7 +515,7 @@ export async function fetchEventTypeContextCards(
   window: TimeWindow,
   eventName: string,
   cards: string,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
 ): Promise<EventTypeDetailData["cards"]> {
   const normalizedEventName = eventName.trim();
   const normalizedCards = cards.trim();
@@ -546,7 +547,7 @@ export async function fetchEventTypeFieldValues(
   eventName: string,
   fieldPath: string,
   fieldValueType: EventField["valueType"],
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -602,7 +603,7 @@ export async function fetchEventRecordDetail(
 export async function fetchPerformance(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: { signal?: AbortSignal },
 ): Promise<PerformanceData> {
   const requestParams = withFilters(
@@ -633,7 +634,7 @@ export async function fetchPerformance(
 export async function fetchRetention(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     granularity?: RetentionGranularity;
     signal?: AbortSignal;

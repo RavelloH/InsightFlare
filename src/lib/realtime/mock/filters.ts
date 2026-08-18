@@ -7,9 +7,16 @@
 //  parseDemoBoolean / parseDemoInterval for primitive params.
 // ---------------------------------------------------------------------------
 
+import {
+  dashboardFilterPresentation,
+  withoutDashboardFilter,
+} from "@/lib/dashboard/filter-state";
+import {
+  analyticsFilterRegistry,
+  parseFilterParams,
+} from "@/lib/filter-contract";
 import { DEMO_GEO_SEGMENT_SEPARATOR } from "@/lib/realtime/mock/dimension-pools";
 import type {
-  DemoEventPayloadFilterRule,
   DemoQueryFilters,
   ParsedDemoGeoFilter,
 } from "@/lib/realtime/mock/types";
@@ -36,100 +43,18 @@ export function normalizeDemoFilterValue(
   return normalized;
 }
 
-function normalizeDemoEventPayloadFilterPath(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().slice(0, 240);
-  if (!normalized || normalized === "/") return null;
-  if (normalized.startsWith("/")) {
-    const segments = normalized
-      .split("/")
-      .map((segment) => segment.trim())
-      .filter(Boolean);
-    return segments.length > 0 ? `/${segments.join("/")}` : null;
-  }
-
-  const dotPath = normalized
-    .replace(/^\$\.?/, "")
-    .replace(/\[(?:\d+|\*)\]/g, ".*")
-    .split(".")
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-  return dotPath.length > 0 ? `/${dotPath.join("/")}` : null;
-}
-
-function normalizeDemoEventPayloadFilterValue(
-  value: unknown,
-): DemoEventPayloadFilterRule["value"] | undefined {
-  if (value === null) return null;
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") return value.slice(0, 240);
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  return undefined;
-}
-
-function parseDemoEventPayloadFilters(
-  value: string | number | undefined,
-): DemoEventPayloadFilterRule[] | undefined {
-  if (value === undefined || value === null) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(String(value));
-  } catch {
-    return undefined;
-  }
-  if (!Array.isArray(parsed)) return undefined;
-
-  const rules: DemoEventPayloadFilterRule[] = [];
-  for (const item of parsed.slice(0, 12)) {
-    if (!item || typeof item !== "object") continue;
-    const candidate = item as {
-      path?: unknown;
-      operator?: unknown;
-      value?: unknown;
-    };
-    const path = normalizeDemoEventPayloadFilterPath(candidate.path);
-    const operator =
-      candidate.operator === "ne" || candidate.operator === "!=" ? "ne" : "eq";
-    const filterValue = normalizeDemoEventPayloadFilterValue(candidate.value);
-    if (!path || filterValue === undefined) continue;
-    rules.push({ path, operator, value: filterValue });
-  }
-
-  return rules.length > 0 ? rules : undefined;
-}
-
 export function parseDemoFilters(
   params: Record<string, string | number>,
 ): DemoQueryFilters {
-  const geo =
-    normalizeDemoFilterValue(params.geo) ||
-    normalizeDemoFilterValue(params.geoCountry) ||
-    normalizeDemoFilterValue(params.geoRegion) ||
-    normalizeDemoFilterValue(params.geoCity);
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (key.startsWith("filter[")) search.append(key, String(value));
+  }
+  const document = parseFilterParams(search, analyticsFilterRegistry);
+  const presentation = dashboardFilterPresentation(document);
   return {
-    country: normalizeDemoFilterValue(params.country),
-    device: normalizeDemoFilterValue(params.device),
-    browser: normalizeDemoFilterValue(params.browser),
-    path: normalizeDemoFilterValue(params.path),
-    query: normalizeDemoFilterValue(params.query),
-    title: normalizeDemoFilterValue(params.title),
-    hostname: normalizeDemoFilterValue(params.hostname),
-    entry: normalizeDemoFilterValue(params.entry),
-    exit: normalizeDemoFilterValue(params.exit),
-    sourceDomain: normalizeDemoFilterValue(params.sourceDomain),
-    sourceLink: normalizeDemoFilterValue(params.sourceLink),
-    clientBrowser: normalizeDemoFilterValue(params.clientBrowser),
-    clientOsVersion: normalizeDemoFilterValue(params.clientOsVersion),
-    clientDeviceType: normalizeDemoFilterValue(params.clientDeviceType),
-    clientLanguage: normalizeDemoFilterValue(params.clientLanguage),
-    clientScreenSize: normalizeDemoFilterValue(params.clientScreenSize),
-    geo,
-    geoContinent: normalizeDemoFilterValue(params.geoContinent),
-    geoTimezone: normalizeDemoFilterValue(params.geoTimezone),
-    geoOrganization: normalizeDemoFilterValue(params.geoOrganization),
-    eventPayloadFilters: parseDemoEventPayloadFilters(
-      params.eventPayloadFilters,
-    ),
+    filterDocument: document,
+    ...presentation,
   };
 }
 
@@ -157,7 +82,12 @@ export function demoValuesIncludeSearch(
 export function withoutDemoGeoFilter(
   filters: DemoQueryFilters,
 ): DemoQueryFilters {
-  return { ...filters, geo: undefined };
+  if (!filters.filterDocument) return { ...filters, geo: undefined };
+  const filterDocument = withoutDashboardFilter(filters.filterDocument, "geo");
+  return {
+    filterDocument,
+    ...dashboardFilterPresentation(filterDocument),
+  };
 }
 
 export function parseDemoGeoFilterValue(

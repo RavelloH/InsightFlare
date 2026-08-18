@@ -822,9 +822,7 @@ describe("mock — handleDemoRequest", () => {
           path: "/api/private/events-records",
           params: {
             ...ANALYTICS_PARAMS,
-            eventPayloadFilters: JSON.stringify([
-              { path: "/plan", operator: "eq", value: "not-a-demo-plan" },
-            ]),
+            "filter[event.payload][/plan]": "not-a-demo-plan",
           },
         }),
       );
@@ -836,9 +834,7 @@ describe("mock — handleDemoRequest", () => {
           params: {
             ...ANALYTICS_PARAMS,
             pageSize: 3,
-            eventPayloadFilters: JSON.stringify([
-              { path: "/plan", operator: "ne", value: "not-a-demo-plan" },
-            ]),
+            "filter[event.payload][/plan]": "neq:not-a-demo-plan",
           },
         }),
       );
@@ -850,9 +846,7 @@ describe("mock — handleDemoRequest", () => {
           params: {
             ...ANALYTICS_PARAMS,
             pageSize: 3,
-            eventPayloadFilters: JSON.stringify([
-              { path: "/items/*", operator: "eq", value: null },
-            ]),
+            "filter[event.payload][/items/*]": "isNull",
           },
         }),
       );
@@ -863,9 +857,7 @@ describe("mock — handleDemoRequest", () => {
           path: "/api/private/events-records",
           params: {
             ...ANALYTICS_PARAMS,
-            eventPayloadFilters: JSON.stringify([
-              { path: "/value", operator: "eq", value: 999_999 },
-            ]),
+            "filter[event.payload][/value]": "eq:json:999999",
           },
         }),
       );

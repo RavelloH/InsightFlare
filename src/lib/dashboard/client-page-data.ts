@@ -6,12 +6,13 @@ import {
   emptyPageCardTabs,
   emptyTrend,
 } from "@/lib/dashboard/client-empty-data";
-import type { DashboardFilters, TimeWindow } from "@/lib/dashboard/query-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   BrowserTrendData,
   PagesDashboardData,
   PagesData,
 } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 
 import { fetchTrend } from "./client-core-data";
 import { fetchPrivateJson } from "./client-request";
@@ -25,7 +26,7 @@ function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
 export async function fetchPagesDashboard(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     page?: number;
     pageSize?: number;
@@ -53,7 +54,7 @@ export async function fetchPagesDashboard(
 export async function fetchPagesShareTrend(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -184,7 +185,7 @@ export async function fetchPagesShareTrend(
 export async function fetchPageCardTabs(
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
 ): Promise<PageCardTabsData> {
   const payload = await fetchPrivateJson<PagesData>(
     "/api/private/pages",

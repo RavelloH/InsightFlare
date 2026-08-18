@@ -22,11 +22,11 @@ import {
   percentFormat,
 } from "@/lib/dashboard/format";
 import type {
-  DashboardFilters,
   DashboardInterval,
   TimeWindow,
 } from "@/lib/dashboard/query-state";
 import type { BrowserTrendData, BrowserTrendSeries } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -42,7 +42,7 @@ const CHART_COLORS = [
 export type ShareTrendFetcher = (
   siteId: string,
   window: TimeWindow,
-  filters?: DashboardFilters,
+  filters?: FilterDocument,
   options?: {
     limit?: number;
     signal?: AbortSignal;
@@ -54,7 +54,7 @@ interface ShareTrendCardProps {
   messages: AppMessages;
   siteId: string;
   window: TimeWindow;
-  filters: DashboardFilters;
+  filters: FilterDocument;
   queryKey: readonly unknown[];
   title: string;
   fetchTrend: ShareTrendFetcher;
