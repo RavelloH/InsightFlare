@@ -211,8 +211,12 @@ filterBuilder:
   valueType: 值类型
   valueKinds:
     string: 文本
+    enum: 枚举
     number: 数字
     boolean: 布尔值
+    date: 日期
+    datetime: 日期和时间
+    json-scalar: JSON 标量
   booleanTrue: "是"
   booleanFalse: "否"
   valueUnset: (未设置)
@@ -223,6 +227,21 @@ filterBuilder:
   rangeEndPlaceholder: 上限
   jsonPointer: JSON 指针
   match: 匹配方式
+  expression: 筛选表达式
+  expressionPlaceholder: 筛选表达式...
+  expressionInvalid: 表达式无效，点击查看语法帮助
+  expressionHelpTitle: 筛选表达式语法
+  expressionHelpDescription: 可用字段和操作符由当前筛选契约动态生成。
+  expressionHelpSyntax: 语法
+  expressionHelpLogicDescription: AND 的优先级高于 OR。使用括号表达嵌套；AND(...) 和 OR(...) 可保留显式的单条件分组。
+  expressionHelpValues: 值
+  expressionHelpValuesDescription: 字符串使用 JSON 双引号；数字和布尔值不加引号。集合使用 [值, 值]，between 必须使用两个有序的值。
+  expressionHelpOperators: 可用操作符
+  expressionHelpUnaryOperators: 无需值的操作符
+  expressionHelpFields: 可用字段
+  expressionHelpFieldType: 类型
+  expressionHelpFieldOperators: 操作符
+  expressionHelpOtherFields: 其他
   apply: 应用筛选
   allConditions: 全部条件均满足
   anyCondition: 满足任一条件
@@ -1983,9 +2002,9 @@ systemPerformance:
   delayed: 延迟
   future: 未来时钟
   latencyPercentileTrend: 延迟分位趋势
-  latencyPercentileTrendDescription: 按服务端写入时间分桶，展示可信样本的 P50、P75、P95 估算延迟。
+  latencyPercentileTrendDescription: 查看接收事件的 P50、P75、P95 估算延迟。
   throughputTrend: 已接收事件吞吐
-  throughputTrendDescription: 按服务端写入时间分桶，柱条合并访问和自定义事件。
+  throughputTrendDescription: 查看接收事件的吞吐情况。
   visits: 访问
   customEvents: 自定义事件
   anomalyBucket: 异常分桶
@@ -1996,12 +2015,11 @@ systemPerformance:
   timedOut: 已超时
   oldestOpen: 最早未关闭
   latestActivity: 最近活动
-  estimationNote: 估算延迟等于服务端写入时间减客户端事件时间，因此会包含浏览器排队和错误客户端时钟。
   latencySampleHealth: 延迟样本健康度
-  latencySampleHealthDescription: 只统计非负且未超过可信上限的延迟样本。
+  latencySampleHealthDescription: 查看可信事件的延迟情况。
   trustedSamples: 可信样本
   topSitesTitle: 系统负载最高的站点
-  topSitesDescription: 当前窗口内产生最多已接收行的站点。
+  topSitesDescription: 当前接收事件数量最多的站点。
   events: 事件
   avgLatency: 平均延迟
   slowestEventsTitle: 估算最慢事件
@@ -2010,9 +2028,7 @@ systemPerformance:
   serverTime: 服务端写入时间
   estimatedDelay: 估算延迟
   doDiagnosticTitle: DO 内部缓冲诊断
-  doDiagnosticDescription:
-    直接询问每个站点的 Durable Object，统计 buffered_visits /
-    buffered_custom_events 是否存在停滞、未来时间戳或永久未刷新（脏）行。
+  doDiagnosticDescription: 诊断每个站点的专用 Durable Object 中的数据停滞情况。
   doDiagnosticLoadFailed: 加载 DO 诊断数据失败。
   doDiagnosticLoading: 正在拉取每个 DO 的状态…
   doDiagnosticRun: 运行 DO 诊断

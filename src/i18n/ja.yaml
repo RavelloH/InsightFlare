@@ -211,8 +211,12 @@ filterBuilder:
   valueType: 値の種類
   valueKinds:
     string: テキスト
+    enum: 選択肢
     number: 数値
     boolean: 真偽値
+    date: 日付
+    datetime: 日時
+    json-scalar: JSON スカラー
   booleanTrue: "真"
   booleanFalse: "偽"
   valueUnset: （未設定）
@@ -223,6 +227,21 @@ filterBuilder:
   rangeEndPlaceholder: 上限
   jsonPointer: JSON ポインター
   match: 一致条件
+  expression: フィルター式
+  expressionPlaceholder: フィルター式...
+  expressionInvalid: 式が無効です。クリックして構文ヘルプを確認してください。
+  expressionHelpTitle: フィルター式の構文
+  expressionHelpDescription: 利用可能なフィールドと演算子は、現在のフィルター契約から動的に生成されます。
+  expressionHelpSyntax: 構文
+  expressionHelpLogicDescription: AND は OR より優先されます。ネストには括弧を使用し、AND(...) と OR(...) は明示的な単一条件グループを保持します。
+  expressionHelpValues: 値
+  expressionHelpValuesDescription: 文字列は JSON の二重引用符を使います。数値と真偽値は引用しません。集合には [値, 値] を使い、between には順序付きの値を 2 つ指定します。
+  expressionHelpOperators: 利用可能な演算子
+  expressionHelpUnaryOperators: 値を取らない演算子
+  expressionHelpFields: 利用可能なフィールド
+  expressionHelpFieldType: 型
+  expressionHelpFieldOperators: 演算子
+  expressionHelpOtherFields: その他
   apply: フィルターを適用
   allConditions: すべての条件
   anyCondition: いずれかの条件
@@ -1997,9 +2016,9 @@ systemPerformance:
   delayed: 遅延
   future: 未来時刻
   latencyPercentileTrend: 遅延パーセンタイル推移
-  latencyPercentileTrendDescription: サーバー書き込み時刻でグループ化した信頼サンプルの P50、P75、P95 推定遅延です。
+  latencyPercentileTrendDescription: 受信イベントの P50、P75、P95 推定遅延を表示します。
   throughputTrend: 受理イベントスループット
-  throughputTrendDescription: サーバー書き込み時刻でグループ化した行です。バーは訪問とカスタムイベントを合算します。
+  throughputTrendDescription: 受信イベントのスループットを表示します。
   visits: 訪問
   customEvents: カスタムイベント
   anomalyBucket: 異常分類
@@ -2010,12 +2029,11 @@ systemPerformance:
   timedOut: タイムアウト
   oldestOpen: 最古の未終了
   latestActivity: 最新アクティビティ
-  estimationNote: 推定遅延はサーバー書き込み時刻からクライアントイベント時刻を引いた値のため、ブラウザーのキューイングや誤ったクライアント時刻も含まれます。
   latencySampleHealth: 遅延サンプルの健全性
-  latencySampleHealthDescription: 信頼上限未満の非負遅延サンプルのみを数えます。
+  latencySampleHealthDescription: 信頼イベントの遅延を表示します。
   trustedSamples: 信頼サンプル
   topSitesTitle: システム負荷上位サイト
-  topSitesDescription: 選択期間で最も多くの受理行を生成したサイトです。
+  topSitesDescription: 現在受信イベント数が最も多いサイトです。
   events: イベント
   avgLatency: 平均遅延
   slowestEventsTitle: 推定最遅イベント
@@ -2024,9 +2042,7 @@ systemPerformance:
   serverTime: サーバー書き込み時刻
   estimatedDelay: 推定遅延
   doDiagnosticTitle: DO バッファ診断
-  doDiagnosticDescription:
-    各サイトの Durable Object に直接問い合わせ、buffered_visits /
-    buffered_custom_events の状態から、停滞行、未来時刻の行、未フラッシュの滞留行を検出します。
+  doDiagnosticDescription: 各サイトの専用 Durable Object のデータ停滞状況を診断します。
   doDiagnosticLoadFailed: DO 診断データを読み込めません。
   doDiagnosticLoading: サイトごとに DO 状態を取得中…
   doDiagnosticRun: DO 診断を実行

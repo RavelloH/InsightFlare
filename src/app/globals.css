@@ -140,6 +140,11 @@
     @apply bg-background text-foreground;
     font-family: var(--font-mono);
   }
+
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 28%, transparent);
+    color: var(--foreground);
+  }
 }
 
 @supports (-webkit-touch-callout: none) {

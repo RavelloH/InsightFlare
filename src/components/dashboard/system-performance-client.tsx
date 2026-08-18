@@ -1314,7 +1314,6 @@ export function SystemPerformanceClient({
                 </span>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">{t.estimationNote}</p>
           </CardContent>
         </Card>
 
@@ -1394,7 +1393,6 @@ export function SystemPerformanceClient({
                 </span>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">{t.estimationNote}</p>
           </CardContent>
         </Card>
       </div>

@@ -211,8 +211,12 @@ filterBuilder:
   valueType: Value type
   valueKinds:
     string: Text
+    enum: Option
     number: Number
     boolean: Boolean
+    date: Date
+    datetime: Date and time
+    json-scalar: JSON scalar
   booleanTrue: "True"
   booleanFalse: "False"
   valueUnset: (Not set)
@@ -223,6 +227,21 @@ filterBuilder:
   rangeEndPlaceholder: Upper bound
   jsonPointer: JSON Pointer
   match: Match
+  expression: Filter expression
+  expressionPlaceholder: Filter expression...
+  expressionInvalid: Invalid expression. Click to view syntax help.
+  expressionHelpTitle: Filter expression syntax
+  expressionHelpDescription: Available fields and operators are generated from the active filter contract.
+  expressionHelpSyntax: Syntax
+  expressionHelpLogicDescription: AND binds more tightly than OR. Use parentheses for nesting; AND(...) and OR(...) preserve an explicit one-condition group.
+  expressionHelpValues: Values
+  expressionHelpValuesDescription: Strings use JSON double quotes. Numbers and booleans are unquoted. Use [value, value] for sets and exactly two ordered values with between.
+  expressionHelpOperators: Available operators
+  expressionHelpUnaryOperators: Operators without a value
+  expressionHelpFields: Available fields
+  expressionHelpFieldType: Type
+  expressionHelpFieldOperators: Operators
+  expressionHelpOtherFields: Other
   apply: Apply Filters
   allConditions: All conditions
   anyCondition: Any condition
@@ -2076,11 +2095,9 @@ systemPerformance:
   delayed: Delayed
   future: Future clock
   latencyPercentileTrend: Latency Percentile Trend
-  latencyPercentileTrendDescription:
-    P50, P75, and P95 estimated delay for trusted
-    samples grouped by server write time.
+  latencyPercentileTrendDescription: View estimated P50, P75, and P95 delay for received events.
   throughputTrend: Accepted Event Throughput
-  throughputTrendDescription: Rows grouped by server write time. Bars combine visits and custom events.
+  throughputTrendDescription: View the throughput of received events.
   visits: Visits
   customEvents: Custom Events
   anomalyBucket: Anomaly bucket
@@ -2093,13 +2110,11 @@ systemPerformance:
   timedOut: Timed out
   oldestOpen: Oldest open
   latestActivity: Latest activity
-  estimationNote: Estimated delay equals server write time minus client event
-    time, so it can include browser queueing and inaccurate client clocks.
   latencySampleHealth: Latency Sample Health
-  latencySampleHealthDescription: Counts only non-negative delay samples below the trusted upper bound.
+  latencySampleHealthDescription: View the delay of trusted events.
   trustedSamples: Trusted samples
   topSitesTitle: Top Sites by System Load
-  topSitesDescription: Sites producing the most accepted rows in the selected window.
+  topSitesDescription: Sites receiving the most events in the current view.
   events: Events
   avgLatency: Avg delay
   slowestEventsTitle: Slowest Estimated Events
@@ -2108,10 +2123,7 @@ systemPerformance:
   serverTime: Server write time
   estimatedDelay: Estimated delay
   doDiagnosticTitle: DO Buffer Diagnostic
-  doDiagnosticDescription:
-    Asks each site's Durable Object directly for the state
-    of buffered_visits / buffered_custom_events to surface stale rows,
-    future-skewed timestamps, or stuck dirty rows.
+  doDiagnosticDescription: Diagnoses data stagnation in each site's dedicated Durable Object.
   doDiagnosticLoadFailed: Failed to load DO diagnostic data.
   doDiagnosticLoading: Fetching DO state per site…
   doDiagnosticRun: Run DO diagnostic

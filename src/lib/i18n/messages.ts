@@ -161,8 +161,12 @@ export interface AppMessages {
     valueType: string;
     valueKinds: {
       string: string;
+      enum: string;
       number: string;
       boolean: string;
+      date: string;
+      datetime: string;
+      "json-scalar": string;
     };
     booleanTrue: string;
     booleanFalse: string;
@@ -174,6 +178,21 @@ export interface AppMessages {
     rangeEndPlaceholder: string;
     jsonPointer: string;
     match: string;
+    expression: string;
+    expressionPlaceholder: string;
+    expressionInvalid: string;
+    expressionHelpTitle: string;
+    expressionHelpDescription: string;
+    expressionHelpSyntax: string;
+    expressionHelpLogicDescription: string;
+    expressionHelpValues: string;
+    expressionHelpValuesDescription: string;
+    expressionHelpOperators: string;
+    expressionHelpUnaryOperators: string;
+    expressionHelpFields: string;
+    expressionHelpFieldType: string;
+    expressionHelpFieldOperators: string;
+    expressionHelpOtherFields: string;
     apply: string;
     allConditions: string;
     anyCondition: string;
@@ -2009,7 +2028,6 @@ export interface AppMessages {
     timedOut: string;
     oldestOpen: string;
     latestActivity: string;
-    estimationNote: string;
     latencySampleHealth: string;
     latencySampleHealthDescription: string;
     trustedSamples: string;
@@ -2312,8 +2330,12 @@ const enMessages = {
     valueType: "Value type",
     valueKinds: {
       string: "Text",
+      enum: "Option",
       number: "Number",
       boolean: "Boolean",
+      date: "Date",
+      datetime: "Date and time",
+      "json-scalar": "JSON scalar",
     },
     booleanTrue: "True",
     booleanFalse: "False",
@@ -2325,6 +2347,24 @@ const enMessages = {
     rangeEndPlaceholder: "Upper bound",
     jsonPointer: "JSON Pointer",
     match: "Match",
+    expression: "Filter expression",
+    expressionPlaceholder: "Filter expression...",
+    expressionInvalid: "Invalid expression. Click to view syntax help.",
+    expressionHelpTitle: "Filter expression syntax",
+    expressionHelpDescription:
+      "Available fields and operators are generated from the active filter contract.",
+    expressionHelpSyntax: "Syntax",
+    expressionHelpLogicDescription:
+      "AND binds more tightly than OR. Use parentheses for nesting; AND(...) and OR(...) preserve an explicit one-condition group.",
+    expressionHelpValues: "Values",
+    expressionHelpValuesDescription:
+      "Strings use JSON double quotes. Numbers and booleans are unquoted. Use [value, value] for sets and exactly two ordered values with between.",
+    expressionHelpOperators: "Available operators",
+    expressionHelpUnaryOperators: "Operators without a value",
+    expressionHelpFields: "Available fields",
+    expressionHelpFieldType: "Type",
+    expressionHelpFieldOperators: "Operators",
+    expressionHelpOtherFields: "Other",
     apply: "Apply Filters",
     allConditions: "All conditions",
     anyCondition: "Any condition",
@@ -4310,10 +4350,9 @@ const enMessages = {
     future: "Future clock",
     latencyPercentileTrend: "Latency Percentile Trend",
     latencyPercentileTrendDescription:
-      "P50, P75, and P95 estimated delay for trusted samples grouped by server write time.",
+      "View estimated P50, P75, and P95 delay for received events.",
     throughputTrend: "Accepted Event Throughput",
-    throughputTrendDescription:
-      "Rows grouped by server write time. Bars combine visits and custom events.",
+    throughputTrendDescription: "View the throughput of received events.",
     visits: "Visits",
     customEvents: "Custom Events",
     anomalyBucket: "Anomaly bucket",
@@ -4325,15 +4364,11 @@ const enMessages = {
     timedOut: "Timed out",
     oldestOpen: "Oldest open",
     latestActivity: "Latest activity",
-    estimationNote:
-      "Estimated delay equals server write time minus client event time, so it can include browser queueing and inaccurate client clocks.",
     latencySampleHealth: "Latency Sample Health",
-    latencySampleHealthDescription:
-      "Counts only non-negative delay samples below the trusted upper bound.",
+    latencySampleHealthDescription: "View the delay of trusted events.",
     trustedSamples: "Trusted samples",
     topSitesTitle: "Top Sites by System Load",
-    topSitesDescription:
-      "Sites producing the most accepted rows in the selected window.",
+    topSitesDescription: "Sites receiving the most events in the current view.",
     events: "Events",
     avgLatency: "Avg delay",
     slowestEventsTitle: "Slowest Estimated Events",
@@ -4344,7 +4379,7 @@ const enMessages = {
     estimatedDelay: "Estimated delay",
     doDiagnosticTitle: "DO Buffer Diagnostic",
     doDiagnosticDescription:
-      "Asks each site's Durable Object directly for the state of buffered_visits / buffered_custom_events to surface stale rows, future-skewed timestamps, or stuck dirty rows.",
+      "Diagnoses data stagnation in each site's dedicated Durable Object.",
     doDiagnosticLoadFailed: "Failed to load DO diagnostic data.",
     doDiagnosticLoading: "Fetching DO state per site…",
     doDiagnosticRun: "Run DO diagnostic",
@@ -4632,8 +4667,12 @@ const zhMessages = {
     valueType: "值类型",
     valueKinds: {
       string: "文本",
+      enum: "枚举",
       number: "数字",
       boolean: "布尔值",
+      date: "日期",
+      datetime: "日期和时间",
+      "json-scalar": "JSON 标量",
     },
     booleanTrue: "是",
     booleanFalse: "否",
@@ -4645,6 +4684,23 @@ const zhMessages = {
     rangeEndPlaceholder: "上限",
     jsonPointer: "JSON 指针",
     match: "匹配方式",
+    expression: "筛选表达式",
+    expressionPlaceholder: "筛选表达式...",
+    expressionInvalid: "表达式无效，点击查看语法帮助",
+    expressionHelpTitle: "筛选表达式语法",
+    expressionHelpDescription: "可用字段和操作符由当前筛选契约动态生成。",
+    expressionHelpSyntax: "语法",
+    expressionHelpLogicDescription:
+      "AND 的优先级高于 OR。使用括号表达嵌套；AND(...) 和 OR(...) 可保留显式的单条件分组。",
+    expressionHelpValues: "值",
+    expressionHelpValuesDescription:
+      "字符串使用 JSON 双引号；数字和布尔值不加引号。集合使用 [值, 值]，between 必须使用两个有序的值。",
+    expressionHelpOperators: "可用操作符",
+    expressionHelpUnaryOperators: "无需值的操作符",
+    expressionHelpFields: "可用字段",
+    expressionHelpFieldType: "类型",
+    expressionHelpFieldOperators: "操作符",
+    expressionHelpOtherFields: "其他",
     apply: "应用筛选",
     allConditions: "全部条件均满足",
     anyCondition: "满足任一条件",
@@ -6555,10 +6611,9 @@ const zhMessages = {
     future: "未来时钟",
     latencyPercentileTrend: "延迟分位趋势",
     latencyPercentileTrendDescription:
-      "按服务端写入时间分桶，展示可信样本的 P50、P75、P95 估算延迟。",
+      "查看接收事件的 P50、P75、P95 估算延迟。",
     throughputTrend: "已接收事件吞吐",
-    throughputTrendDescription:
-      "按服务端写入时间分桶，柱条合并访问和自定义事件。",
+    throughputTrendDescription: "查看接收事件的吞吐情况。",
     visits: "访问",
     customEvents: "自定义事件",
     anomalyBucket: "异常分桶",
@@ -6570,13 +6625,11 @@ const zhMessages = {
     timedOut: "已超时",
     oldestOpen: "最早未关闭",
     latestActivity: "最近活动",
-    estimationNote:
-      "估算延迟等于服务端写入时间减客户端事件时间，因此会包含浏览器排队和错误客户端时钟。",
     latencySampleHealth: "延迟样本健康度",
-    latencySampleHealthDescription: "只统计非负且未超过可信上限的延迟样本。",
+    latencySampleHealthDescription: "查看可信事件的延迟情况。",
     trustedSamples: "可信样本",
     topSitesTitle: "系统负载最高的站点",
-    topSitesDescription: "当前窗口内产生最多已接收行的站点。",
+    topSitesDescription: "当前接收事件数量最多的站点。",
     events: "事件",
     avgLatency: "平均延迟",
     slowestEventsTitle: "估算最慢事件",
@@ -6587,7 +6640,7 @@ const zhMessages = {
     estimatedDelay: "估算延迟",
     doDiagnosticTitle: "DO 内部缓冲诊断",
     doDiagnosticDescription:
-      "直接询问每个站点的 Durable Object，统计 buffered_visits / buffered_custom_events 是否存在停滞、未来时间戳或永久未刷新（脏）行。",
+      "诊断每个站点的专用 Durable Object 中的数据停滞情况。",
     doDiagnosticLoadFailed: "加载 DO 诊断数据失败。",
     doDiagnosticLoading: "正在拉取每个 DO 的状态…",
     doDiagnosticRun: "运行 DO 诊断",
@@ -6876,8 +6929,12 @@ const jaMessages = {
     valueType: "値の種類",
     valueKinds: {
       string: "テキスト",
+      enum: "選択肢",
       number: "数値",
       boolean: "真偽値",
+      date: "日付",
+      datetime: "日時",
+      "json-scalar": "JSON スカラー",
     },
     booleanTrue: "真",
     booleanFalse: "偽",
@@ -6889,6 +6946,25 @@ const jaMessages = {
     rangeEndPlaceholder: "上限",
     jsonPointer: "JSON ポインター",
     match: "一致条件",
+    expression: "フィルター式",
+    expressionPlaceholder: "フィルター式...",
+    expressionInvalid:
+      "式が無効です。クリックして構文ヘルプを確認してください。",
+    expressionHelpTitle: "フィルター式の構文",
+    expressionHelpDescription:
+      "利用可能なフィールドと演算子は、現在のフィルター契約から動的に生成されます。",
+    expressionHelpSyntax: "構文",
+    expressionHelpLogicDescription:
+      "AND は OR より優先されます。ネストには括弧を使用し、AND(...) と OR(...) は明示的な単一条件グループを保持します。",
+    expressionHelpValues: "値",
+    expressionHelpValuesDescription:
+      "文字列は JSON の二重引用符を使います。数値と真偽値は引用しません。集合には [値, 値] を使い、between には順序付きの値を 2 つ指定します。",
+    expressionHelpOperators: "利用可能な演算子",
+    expressionHelpUnaryOperators: "値を取らない演算子",
+    expressionHelpFields: "利用可能なフィールド",
+    expressionHelpFieldType: "型",
+    expressionHelpFieldOperators: "演算子",
+    expressionHelpOtherFields: "その他",
     apply: "フィルターを適用",
     allConditions: "すべての条件",
     anyCondition: "いずれかの条件",
@@ -8871,10 +8947,9 @@ const jaMessages = {
     future: "未来時刻",
     latencyPercentileTrend: "遅延パーセンタイル推移",
     latencyPercentileTrendDescription:
-      "サーバー書き込み時刻でグループ化した信頼サンプルの P50、P75、P95 推定遅延です。",
+      "受信イベントの P50、P75、P95 推定遅延を表示します。",
     throughputTrend: "受理イベントスループット",
-    throughputTrendDescription:
-      "サーバー書き込み時刻でグループ化した行です。バーは訪問とカスタムイベントを合算します。",
+    throughputTrendDescription: "受信イベントのスループットを表示します。",
     visits: "訪問",
     customEvents: "カスタムイベント",
     anomalyBucket: "異常分類",
@@ -8886,14 +8961,11 @@ const jaMessages = {
     timedOut: "タイムアウト",
     oldestOpen: "最古の未終了",
     latestActivity: "最新アクティビティ",
-    estimationNote:
-      "推定遅延はサーバー書き込み時刻からクライアントイベント時刻を引いた値のため、ブラウザーのキューイングや誤ったクライアント時刻も含まれます。",
     latencySampleHealth: "遅延サンプルの健全性",
-    latencySampleHealthDescription:
-      "信頼上限未満の非負遅延サンプルのみを数えます。",
+    latencySampleHealthDescription: "信頼イベントの遅延を表示します。",
     trustedSamples: "信頼サンプル",
     topSitesTitle: "システム負荷上位サイト",
-    topSitesDescription: "選択期間で最も多くの受理行を生成したサイトです。",
+    topSitesDescription: "現在受信イベント数が最も多いサイトです。",
     events: "イベント",
     avgLatency: "平均遅延",
     slowestEventsTitle: "推定最遅イベント",
@@ -8904,7 +8976,7 @@ const jaMessages = {
     estimatedDelay: "推定遅延",
     doDiagnosticTitle: "DO バッファ診断",
     doDiagnosticDescription:
-      "各サイトの Durable Object に直接問い合わせ、buffered_visits / buffered_custom_events の状態から、停滞行、未来時刻の行、未フラッシュの滞留行を検出します。",
+      "各サイトの専用 Durable Object のデータ停滞状況を診断します。",
     doDiagnosticLoadFailed: "DO 診断データを読み込めません。",
     doDiagnosticLoading: "サイトごとに DO 状態を取得中…",
     doDiagnosticRun: "DO 診断を実行",

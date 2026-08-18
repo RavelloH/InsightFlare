@@ -11,7 +11,9 @@ import {
   RiArrowDownSLine,
   RiCheckLine,
   RiDeleteBinLine,
+  RiErrorWarningLine,
   RiFilterOffLine,
+  RiInformationLine,
   RiSearchLine,
 } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
@@ -22,6 +24,14 @@ import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Clickable } from "@/components/ui/clickable";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { OverlayScrollbar } from "@/components/ui/overlay-scrollbar";
@@ -41,6 +51,10 @@ import {
   fetchEventTypeFieldValues,
   fetchFilterValues,
 } from "@/lib/dashboard/client-data";
+import {
+  formatFilterPanelExpression,
+  parseFilterPanelExpression,
+} from "@/lib/dashboard/filter-panel-expression";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   analyticsFilterRegistry,
@@ -73,10 +87,12 @@ interface EditorCondition {
   readonly id: string;
   readonly kind: "condition";
   readonly negated: boolean;
+  readonly notCount: number;
   readonly field: string;
   readonly payloadPath: string;
   readonly operator: FilterOperator;
   readonly value: FilterValue | readonly FilterValue[] | undefined;
+  readonly listValues: readonly FilterValue[] | undefined;
   readonly valueText: string;
   readonly scalarKind: ScalarKind;
   readonly valueDirty: boolean;
@@ -86,6 +102,7 @@ interface EditorGroup {
   readonly id: string;
   readonly kind: "group";
   readonly negated: boolean;
+  readonly notCount: number;
   readonly combinator: "and" | "or";
   readonly children: readonly EditorNode[];
 }
@@ -139,15 +156,25 @@ function valueTextFor(
   return values.map((item) => String(item ?? "")).join(", ");
 }
 
+function filterValueText(value: FilterValue): string {
+  return value === null ? "null" : String(value);
+}
+
+function filterValueKey(value: FilterValue): string {
+  return JSON.stringify(value);
+}
+
 function defaultCondition(createId: () => string): EditorCondition {
   return {
     id: createId(),
     kind: "condition",
     negated: false,
+    notCount: 0,
     field: "page.path",
     payloadPath: "",
     operator: "eq",
     value: undefined,
+    listValues: undefined,
     valueText: "",
     scalarKind: "string",
     valueDirty: true,
@@ -159,6 +186,7 @@ function defaultGroup(createId: () => string): EditorGroup {
     id: createId(),
     kind: "group",
     negated: false,
+    notCount: 0,
     combinator: "and",
     children: [defaultCondition(createId)],
   };
@@ -169,6 +197,7 @@ function emptyEditorGroup(createId: () => string): EditorGroup {
     id: createId(),
     kind: "group",
     negated: false,
+    notCount: 0,
     combinator: "and",
     children: [],
   };
@@ -177,10 +206,10 @@ function emptyEditorGroup(createId: () => string): EditorGroup {
 function editorNodeFromExpression(
   expression: FilterExpression,
   createId: () => string,
-  negated = false,
+  notCount = 0,
 ): EditorNode {
   if (expression.kind === "not") {
-    return editorNodeFromExpression(expression.child, createId, !negated);
+    return editorNodeFromExpression(expression.child, createId, notCount + 1);
   }
   if (expression.kind === "condition") {
     const field =
@@ -190,7 +219,8 @@ function editorNodeFromExpression(
     return {
       id: createId(),
       kind: "condition",
-      negated,
+      negated: notCount % 2 === 1,
+      notCount,
       field,
       payloadPath:
         expression.target.kind === "event-payload"
@@ -198,6 +228,9 @@ function editorNodeFromExpression(
           : "",
       operator: expression.operator,
       value: expression.value,
+      listValues: Array.isArray(expression.value)
+        ? expression.value
+        : undefined,
       valueText: valueTextFor(expression.value),
       scalarKind: scalarKindFor(expression.value),
       valueDirty: false,
@@ -206,7 +239,8 @@ function editorNodeFromExpression(
   return {
     id: createId(),
     kind: "group",
-    negated,
+    negated: notCount % 2 === 1,
+    notCount,
     combinator: expression.kind,
     children: expression.children.map((child) =>
       editorNodeFromExpression(child, createId),
@@ -225,6 +259,7 @@ function editorRootFromDocument(
     id: createId(),
     kind: "group",
     negated: false,
+    notCount: 0,
     combinator: "and",
     children: [editor],
   };
@@ -269,12 +304,15 @@ function conditionFromEditor(node: EditorCondition): FilterCondition {
   requireValue(node);
   const value = node.valueDirty
     ? LIST_OPERATORS.has(node.operator) || node.operator === "between"
-      ? node.valueText
-          .split(",")
-          .map((item) => item.trim())
-          .map((item) =>
-            valueForKind(item, definition.valueKind, node.scalarKind),
-          )
+      ? (LIST_OPERATORS.has(node.operator)
+          ? (node.listValues ??
+            node.valueText.split(",").map((item) => item.trim()))
+          : node.valueText.split(",").map((item) => item.trim())
+        ).map((item) =>
+          item === null
+            ? null
+            : valueForKind(String(item), definition.valueKind, node.scalarKind),
+        )
       : valueForKind(
           node.valueText.trim(),
           definition.valueKind,
@@ -297,7 +335,133 @@ function expressionFromEditor(node: EditorNode): FilterExpression {
           kind: node.combinator,
           children: node.children.map(expressionFromEditor),
         };
-  return node.negated ? { kind: "not", child: expression } : expression;
+  return Array.from({ length: node.notCount }).reduce<FilterExpression>(
+    (child) => ({ kind: "not", child }),
+    expression,
+  );
+}
+
+function displayExpressionFromEditor(
+  node: EditorNode,
+): FilterExpression | null {
+  if (node.kind === "condition") {
+    try {
+      return expressionFromEditor(node);
+    } catch {
+      return null;
+    }
+  }
+  const children = node.children
+    .map(displayExpressionFromEditor)
+    .filter((child): child is FilterExpression => child !== null);
+  if (children.length === 0) return null;
+  const expression: FilterExpression = { kind: node.combinator, children };
+  return Array.from({ length: node.notCount }).reduce<FilterExpression>(
+    (child) => ({ kind: "not", child }),
+    expression,
+  );
+}
+
+function displayRootExpression(root: EditorGroup): FilterExpression | null {
+  const children = root.children
+    .map(displayExpressionFromEditor)
+    .filter((child): child is FilterExpression => child !== null);
+  if (children.length === 0) return null;
+  return children.length === 1
+    ? children[0]!
+    : { kind: root.combinator, children };
+}
+
+function documentFromEditor(root: EditorGroup): FilterDocument {
+  return normalizeFilterDocument(
+    {
+      version: FILTER_DOCUMENT_VERSION,
+      root: root.children.length > 0 ? expressionFromEditor(root) : null,
+    },
+    analyticsFilterRegistry,
+  );
+}
+
+function expressionTextFromEditor(root: EditorGroup): string {
+  try {
+    // Do not normalize before formatting. Normalization is required when a
+    // filter is applied, but it sorts and deduplicates equivalent branches.
+    // The expression field should instead mirror the editor's current tree.
+    return formatFilterPanelExpression({
+      version: FILTER_DOCUMENT_VERSION,
+      root: displayRootExpression(root),
+    });
+  } catch {
+    return "";
+  }
+}
+
+function editorNodeFingerprint(node: EditorNode): string | null {
+  try {
+    return JSON.stringify(expressionFromEditor(node));
+  } catch {
+    return null;
+  }
+}
+
+function reconcileEditorNode(
+  current: EditorNode,
+  incoming: EditorNode,
+): EditorNode {
+  const currentFingerprint = editorNodeFingerprint(current);
+  const incomingFingerprint = editorNodeFingerprint(incoming);
+  if (
+    currentFingerprint !== null &&
+    currentFingerprint === incomingFingerprint
+  ) {
+    return current;
+  }
+  if (current.kind !== incoming.kind) return incoming;
+  if (current.kind === "condition" && incoming.kind === "condition") {
+    return { ...incoming, id: current.id };
+  }
+  if (current.kind === "condition" || incoming.kind === "condition") {
+    return incoming;
+  }
+
+  const consumed = new Set<number>();
+  const children = incoming.children.map((nextChild, index) => {
+    const nextFingerprint = editorNodeFingerprint(nextChild);
+    const exactIndex = current.children.findIndex(
+      (currentChild, childIndex) =>
+        !consumed.has(childIndex) &&
+        nextFingerprint !== null &&
+        editorNodeFingerprint(currentChild) === nextFingerprint,
+    );
+    if (exactIndex >= 0) {
+      consumed.add(exactIndex);
+      return current.children[exactIndex]!;
+    }
+
+    const indexedChild = current.children[index];
+    if (
+      indexedChild &&
+      !consumed.has(index) &&
+      indexedChild.kind === nextChild.kind
+    ) {
+      consumed.add(index);
+      return reconcileEditorNode(indexedChild, nextChild);
+    }
+    return nextChild;
+  });
+  const unchanged =
+    current.combinator === incoming.combinator &&
+    current.notCount === incoming.notCount &&
+    current.children.length === children.length &&
+    children.every((child, index) => child === current.children[index]);
+  return unchanged ? current : { ...incoming, id: current.id, children };
+}
+
+function reconcileEditorRoot(
+  current: EditorGroup,
+  incoming: EditorGroup,
+): EditorGroup {
+  return reconcileEditorNode(current, incoming) as EditorGroup;
 }
 
 function updateEditorNode(
@@ -410,21 +574,197 @@ const FILTER_FIELD_GROUPS: readonly {
       "geo.organization",
     ],
   },
-  {
-    key: "event",
-    fieldIds: ["event.name", "event.payload"],
-  },
 ];
+
+const GENERIC_FILTER_HIDDEN_FIELDS = new Set(["event.name", "event.payload"]);
 
 function fieldLabel(field: string, messages: AppMessages): string {
   return messages.filterBuilder.fieldLabels[field] ?? field;
+}
+
+function FilterExpressionHelpDialog({
+  audience,
+  messages,
+  open,
+  onOpenChange,
+}: {
+  audience: FilterPanelAudience;
+  messages: AppMessages;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const fields = useMemo(() => allowedFields(audience), [audience]);
+  const fieldGroups = useMemo(() => {
+    const grouped = FILTER_FIELD_GROUPS.map((group) => ({
+      key: group.key,
+      label: messages.filterBuilder.fieldGroups[group.key],
+      fields: group.fieldIds
+        .map((fieldId) => fields.find((field) => field.id === fieldId))
+        .filter((field): field is FilterFieldDefinition => field !== undefined),
+    })).filter((group) => group.fields.length > 0);
+    const knownFieldIds = new Set(grouped.flatMap((group) => group.fields));
+    const otherFields = fields.filter((field) => !knownFieldIds.has(field));
+    return otherFields.length > 0
+      ? [
+          ...grouped,
+          {
+            key: "other",
+            label: messages.filterBuilder.expressionHelpOtherFields,
+            fields: otherFields,
+          },
+        ]
+      : grouped;
+  }, [fields, messages]);
+  const operators = useMemo(() => {
+    const available = new Set<FilterOperator>();
+    fields.forEach((field) =>
+      field.operators.forEach((operator) => available.add(operator)),
+    );
+    return [...available];
+  }, [fields]);
+  const unaryOperators = operators.filter((operator) =>
+    VALUELESS_OPERATORS.has(operator),
+  );
+  const valueKindLabel = (valueKind: FilterValueKind) =>
+    messages.filterBuilder.valueKinds[valueKind];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl gap-0 p-0">
+        <DialogHeader className="border-b px-4 py-4 sm:px-5">
+          <DialogTitle icon={RiInformationLine}>
+            {messages.filterBuilder.expressionHelpTitle}
+          </DialogTitle>
+          <DialogDescription>
+            {messages.filterBuilder.expressionHelpDescription}
+          </DialogDescription>
+        </DialogHeader>
+        <OverlayScrollbar
+          axis="vertical"
+          syncKey={`${audience}:${fields.length}:${operators.length}`}
+          className="max-h-[min(72vh,46rem)]"
+        >
+          <div className="space-y-6 p-4 sm:p-5">
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.filterBuilder.expressionHelpSyntax}
+              </h3>
+              <div className="space-y-2 border-y border-border py-3 font-mono text-xs">
+                <p>&lt;field&gt; &lt;operator&gt; &lt;value&gt;</p>
+                <p>&lt;expression&gt; AND | OR &lt;expression&gt;</p>
+                <p>NOT &lt;expression&gt; · (&lt;expression&gt;)</p>
+                <p>AND(&lt;expression&gt;) · OR(&lt;expression&gt;)</p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {messages.filterBuilder.expressionHelpLogicDescription}
+              </p>
+            </section>
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.filterBuilder.expressionHelpValues}
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                {messages.filterBuilder.expressionHelpValuesDescription}
+              </p>
+              <div className="flex flex-wrap gap-2 font-mono text-xs">
+                {['"text"', "42", "true", '["a", "b"]', "between [10, 20]"].map(
+                  (example) => (
+                    <code key={example} className="bg-muted px-2 py-1">
+                      {example}
+                    </code>
+                  ),
+                )}
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.filterBuilder.expressionHelpOperators}
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {operators.map((operator) => (
+                  <span
+                    key={operator}
+                    className="inline-flex items-center gap-1 bg-muted px-2 py-1 text-xs"
+                  >
+                    <code className="font-mono">{operator}</code>
+                    <span className="text-muted-foreground">
+                      {messages.filterBuilder.operatorLabels[operator] ??
+                        operator}
+                    </span>
+                  </span>
+                ))}
+              </div>
+              {unaryOperators.length > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {messages.filterBuilder.expressionHelpUnaryOperators}:{" "}
+                  <span className="font-mono">{unaryOperators.join(", ")}</span>
+                </p>
+              ) : null}
+            </section>
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.filterBuilder.expressionHelpFields}
+              </h3>
+              <div className="divide-y divide-border border-y border-border">
+                {fieldGroups.map((group) => (
+                  <div key={group.key}>
+                    <h4 className="bg-muted px-3 py-2 text-xs font-medium">
+                      {group.label}
+                    </h4>
+                    {group.fields.map((field) => (
+                      <div
+                        key={field.id}
+                        className="grid gap-2 px-3 py-2 sm:grid-cols-[minmax(13rem,0.75fr)_minmax(0,1fr)]"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-medium">
+                            {fieldLabel(field.id, messages)}
+                          </div>
+                          <code className="block truncate font-mono text-xs text-muted-foreground">
+                            {field.id}
+                          </code>
+                        </div>
+                        <div className="min-w-0 space-y-1">
+                          <div className="text-xs text-muted-foreground">
+                            {messages.filterBuilder.expressionHelpFieldType}:{" "}
+                            {valueKindLabel(field.valueKind)}
+                          </div>
+                          <div className="break-words text-xs text-muted-foreground">
+                            {
+                              messages.filterBuilder
+                                .expressionHelpFieldOperators
+                            }
+                            :{" "}
+                            <span className="font-mono">
+                              {[...field.operators].join(", ")}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </OverlayScrollbar>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function allowedFields(
   audience: FilterPanelAudience,
 ): readonly FilterFieldDefinition[] {
   return [...analyticsFilterRegistry.values()]
-    .filter((field) => field.audiences.has(audience))
+    .filter(
+      (field) =>
+        field.audiences.has(audience) &&
+        !GENERIC_FILTER_HIDDEN_FIELDS.has(field.id),
+    )
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
@@ -446,6 +786,7 @@ function SearchableValueInput({
   eventName,
   messages,
   onChange,
+  onListChange,
   siteId,
   valueKind,
   window,
@@ -455,6 +796,7 @@ function SearchableValueInput({
   eventName: string | undefined;
   messages: AppMessages;
   onChange: (valueText: string) => void;
+  onListChange: (values: readonly FilterValue[]) => void;
   siteId: string | undefined;
   valueKind: FilterValueKind;
   window: TimeWindow | undefined;
@@ -465,10 +807,8 @@ function SearchableValueInput({
   const isPayload = condition.field === "event.payload";
   const isList = LIST_OPERATORS.has(condition.operator);
   const selectedValues = isList
-    ? condition.valueText
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean)
+    ? (condition.listValues ??
+      (Array.isArray(condition.value) ? condition.value : []))
     : [];
   const canSearch = Boolean(
     siteId &&
@@ -536,13 +876,14 @@ function SearchableValueInput({
     if (open) setSearchToken("");
   }, [condition.id, condition.field, condition.operator, open]);
 
-  const addListValue = (value: string) => {
-    const normalized = value.trim();
-    if (!normalized) return;
-    const nextValues = selectedValues.includes(normalized)
+  const addListValue = (value: FilterValue) => {
+    if (typeof value === "string" && !value.trim()) return;
+    const nextValues = selectedValues.some(
+      (selected) => filterValueKey(selected) === filterValueKey(value),
+    )
       ? selectedValues
-      : [...selectedValues, normalized];
-    onChange(nextValues.join(", "));
+      : [...selectedValues, value];
+    onListChange(nextValues);
     setSearchToken("");
   };
 
@@ -555,7 +896,10 @@ function SearchableValueInput({
           className="h-8 w-full justify-between text-xs font-normal"
         >
           <span className="min-w-0 truncate text-left">
-            {condition.valueText || messages.filterBuilder.valueUnset}
+            {isList
+              ? selectedValues.map(filterValueText).join(", ") ||
+                messages.filterBuilder.valueUnset
+              : condition.valueText || messages.filterBuilder.valueUnset}
           </span>
           <RiArrowDownSLine className="size-4 shrink-0 text-muted-foreground" />
         </Button>
@@ -570,18 +914,19 @@ function SearchableValueInput({
             <div className="flex flex-wrap gap-1 border-b border-border px-2 py-1.5">
               {selectedValues.map((value) => (
                 <button
-                  key={value}
+                  key={filterValueKey(value)}
                   type="button"
                   className="max-w-full truncate bg-muted px-1.5 py-0.5 text-xs hover:bg-accent"
                   onClick={() =>
-                    onChange(
-                      selectedValues
-                        .filter((selected) => selected !== value)
-                        .join(", "),
+                    onListChange(
+                      selectedValues.filter(
+                        (selected) =>
+                          filterValueKey(selected) !== filterValueKey(value),
+                      ),
                     )
                   }
                 >
-                  {value}
+                  {filterValueText(value)}
                 </button>
               ))}
             </div>
@@ -628,24 +973,27 @@ function SearchableValueInput({
                   className="max-h-56 border-t border-border pt-1"
                 >
                   {suggestions.map((item) => {
-                    const value = String(item.value ?? "");
+                    const value = item.value;
                     const label = "label" in item ? item.label : value;
                     return (
                       <button
-                        key={`${typeof item.value}:${value}`}
+                        key={`${typeof value}:${filterValueKey(value)}`}
                         type="button"
                         className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
                         onClick={() => {
                           if (isList) {
                             addListValue(value);
                           } else {
-                            onChange(value);
-                            setSearchToken(value);
+                            const valueText = filterValueText(value);
+                            onChange(valueText);
+                            setSearchToken(valueText);
                             setOpen(false);
                           }
                         }}
                       >
-                        <span className="min-w-0 truncate">{label}</span>
+                        <span className="min-w-0 truncate">
+                          {label ?? filterValueText(value)}
+                        </span>
                         <span className="shrink-0 text-xs text-muted-foreground">
                           {item.occurrences ?? 0}
                         </span>
@@ -753,6 +1101,7 @@ function ConditionEditor({
       payloadPath: field === "event.payload" ? "/value" : "",
       operator: firstOperator(nextDefinition),
       value: undefined,
+      listValues: undefined,
       valueText: "",
       scalarKind: "string",
       valueDirty: true,
@@ -846,6 +1195,9 @@ function ConditionEditor({
               onChange((current) => ({
                 ...current,
                 scalarKind: value,
+                value: undefined,
+                listValues: undefined,
+                valueText: "",
                 valueDirty: true,
               }));
             }}
@@ -922,6 +1274,14 @@ function ConditionEditor({
                   valueDirty: true,
                 }));
               }}
+              onListChange={(listValues) => {
+                onChange((current) => ({
+                  ...current,
+                  listValues,
+                  valueText: listValues.map(filterValueText).join(", "),
+                  valueDirty: true,
+                }));
+              }}
             />
           )}
         </div>
@@ -935,6 +1295,7 @@ function ConditionEditor({
               onChange((current) => ({
                 ...current,
                 negated: checked === true,
+                notCount: checked === true ? 1 : 0,
               }));
             }}
           />
@@ -1032,7 +1393,11 @@ function GroupEditor({
                 onCheckedChange={(checked) => {
                   onChange(group.id, (node) =>
                     node.kind === "group"
-                      ? { ...node, negated: checked === true }
+                      ? {
+                          ...node,
+                          negated: checked === true,
+                          notCount: checked === true ? 1 : 0,
+                        }
                       : node,
                   );
                 }}
@@ -1153,6 +1518,16 @@ export function FilterPanel({
     editorRootFromDocument(document, createId),
   );
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [expressionText, setExpressionText] = useState(() =>
+    expressionTextFromEditor(root),
+  );
+  const [expressionError, setExpressionError] = useState<string | null>(null);
+  const [expressionHelpOpen, setExpressionHelpOpen] = useState(false);
+  const expressionUpdateRef = useRef(false);
+  const expressionRegistry = useMemo(
+    () => new Map(allowedFields(audience).map((field) => [field.id, field])),
+    [audience],
+  );
   const eventName = directEventName(root);
 
   useEffect(() => {
@@ -1161,12 +1536,68 @@ export function FilterPanel({
     setValidationError(null);
   }, [createId, documentKey, open]);
 
+  useEffect(() => {
+    if (expressionUpdateRef.current) {
+      expressionUpdateRef.current = false;
+      return;
+    }
+    setExpressionText(expressionTextFromEditor(root));
+    setExpressionError(null);
+  }, [root]);
+
+  const rootFromExpressionText = useCallback(
+    (source: string): EditorGroup | null => {
+      try {
+        return source.trim()
+          ? editorRootFromDocument(
+              parseFilterPanelExpression(source, expressionRegistry),
+              createId,
+            )
+          : emptyEditorGroup(createId);
+      } catch {
+        setExpressionError(messages.filterBuilder.expressionInvalid);
+        return null;
+      }
+    },
+    [createId, expressionRegistry, messages.filterBuilder.expressionInvalid],
+  );
+
+  const setExpressionRoot = useCallback((nextRoot: EditorGroup) => {
+    setRoot((current) => {
+      const reconciled = reconcileEditorRoot(current, nextRoot);
+      if (reconciled !== current) expressionUpdateRef.current = true;
+      return reconciled;
+    });
+  }, []);
+
+  const updateFromExpressionText = useCallback(
+    (source: string): EditorGroup | null => {
+      const nextRoot = rootFromExpressionText(source);
+      if (!nextRoot) return null;
+      setExpressionRoot(nextRoot);
+      setExpressionError(null);
+      setValidationError(null);
+      return nextRoot;
+    },
+    [rootFromExpressionText, setExpressionRoot],
+  );
+
+  const commitExpressionText = useCallback(() => {
+    const nextRoot = rootFromExpressionText(expressionText);
+    if (!nextRoot) return null;
+    setExpressionError(null);
+    setExpressionText(expressionTextFromEditor(nextRoot));
+    setExpressionRoot(nextRoot);
+    return nextRoot;
+  }, [expressionText, rootFromExpressionText, setExpressionRoot]);
+
   const updateNode = useCallback(
     (id: string, update: (node: EditorNode) => EditorNode) => {
       setRoot(
         (current) => updateEditorNode(current, id, update) as EditorGroup,
       );
       setValidationError(null);
+      setExpressionError(null);
     },
     [],
   );
@@ -1181,6 +1612,7 @@ export function FilterPanel({
         ) as EditorGroup;
       });
       setValidationError(null);
+      setExpressionError(null);
     },
     [createId],
   );
@@ -1195,6 +1627,7 @@ export function FilterPanel({
         ) as EditorGroup;
       });
       setValidationError(null);
+      setExpressionError(null);
     },
     [createId],
   );
@@ -1207,20 +1640,16 @@ export function FilterPanel({
           emptyEditorGroup(createId),
       );
       setValidationError(null);
+      setExpressionError(null);
     },
     [createId],
   );
 
   const apply = useCallback(() => {
+    const nextRoot = commitExpressionText();
+    if (!nextRoot) return;
     try {
-      const next = normalizeFilterDocument(
-        {
-          version: FILTER_DOCUMENT_VERSION,
-          root: root.children.length > 0 ? expressionFromEditor(root) : null,
-        },
-        analyticsFilterRegistry,
-      );
-      onApply(next);
+      onApply(documentFromEditor(nextRoot));
     } catch (error) {
       setValidationError(
         error instanceof FilterValidationError || error instanceof Error
@@ -1230,7 +1659,7 @@ export function FilterPanel({
           : messages.filterBuilder.invalid,
       );
     }
-  }, [messages.filterBuilder.invalid, onApply, root]);
+  }, [commitExpressionText, messages.filterBuilder.invalid, onApply]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1258,23 +1687,80 @@ export function FilterPanel({
         ) : null}
       </div>
 
-      <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap justify-between gap-2 border-t bg-background px-4 py-3">
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => {
-            setRoot(emptyEditorGroup(createId));
-            setValidationError(null);
-          }}
-        >
-          <RiFilterOffLine />
-          <span>{messages.filters.clear}</span>
-        </Button>
-        <Button type="button" onClick={apply}>
-          <RiCheckLine />
-          <span>{messages.filterBuilder.apply}</span>
-        </Button>
+      <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background">
+        <div className="border-b border-border">
+          <OverlayScrollbar
+            axis="horizontal"
+            syncKey={expressionText}
+            className="w-full"
+          >
+            <Input
+              id="filter-panel-expression"
+              aria-label={messages.filterBuilder.expression}
+              aria-invalid={expressionError ? true : undefined}
+              className="h-8 min-w-full border-0 bg-transparent px-4 font-mono text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
+              placeholder={messages.filterBuilder.expressionPlaceholder}
+              style={{ width: `${Math.max(32, expressionText.length + 3)}ch` }}
+              value={expressionText}
+              onChange={(event) => {
+                const source = event.target.value;
+                setExpressionText(source);
+                updateFromExpressionText(source);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                commitExpressionText();
+              }}
+            />
+          </OverlayScrollbar>
+        </div>
+        <AutoResizer initial duration={0.18}>
+          <AutoTransition
+            transitionKey={expressionError ? "invalid" : "valid"}
+            type="slideDown"
+            duration={0.18}
+            initial={false}
+          >
+            {expressionError ? (
+              <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-destructive">
+                <RiErrorWarningLine className="size-4 shrink-0" aria-hidden />
+                <Clickable
+                  className="justify-start text-left text-destructive"
+                  hoverScale={1.05}
+                  onClick={() => setExpressionHelpOpen(true)}
+                >
+                  {expressionError}
+                </Clickable>
+              </div>
+            ) : null}
+          </AutoTransition>
+        </AutoResizer>
+        <div className="flex flex-wrap justify-between gap-2 px-4 py-3">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setRoot(emptyEditorGroup(createId));
+              setValidationError(null);
+              setExpressionError(null);
+            }}
+          >
+            <RiFilterOffLine />
+            <span>{messages.filters.clear}</span>
+          </Button>
+          <Button type="button" onClick={apply}>
+            <RiCheckLine />
+            <span>{messages.filterBuilder.apply}</span>
+          </Button>
+        </div>
       </div>
+      <FilterExpressionHelpDialog
+        audience={audience}
+        messages={messages}
+        open={expressionHelpOpen}
+        onOpenChange={setExpressionHelpOpen}
+      />
     </div>
   );
 }

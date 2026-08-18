@@ -1157,7 +1157,6 @@ export interface AppManagementMessages {
     timedOut: string;
     oldestOpen: string;
     latestActivity: string;
-    estimationNote: string;
     latencySampleHealth: string;
     latencySampleHealthDescription: string;
     trustedSamples: string;
