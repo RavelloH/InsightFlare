@@ -2253,7 +2253,7 @@ const enMessages = {
       "Week interval is only available within the last 12 months.",
     filterTitle: "Filters",
     filterSubtitle:
-      "Create or save filters, or use filters saved for you or your team.",
+      "Filters are applied to current overview data queries in real time.",
     previousPeriod: "Previous period",
     nextPeriod: "Next period",
     customSelectionSummary: "Selected range: {from} to {to} ({days} days)",
@@ -4590,7 +4590,7 @@ const zhMessages = {
     intervalDisabledDay: "仅在最近 90 天内可选日间隔。",
     intervalDisabledWeek: "仅在最近 12 个月内可选周间隔。",
     filterTitle: "筛选条件",
-    filterSubtitle: "新建、保存筛选条件，或者使用个人/团队保存的筛选条件。",
+    filterSubtitle: "筛选条件会实时参与当前总览数据查询。",
     previousPeriod: "上个周期",
     nextPeriod: "下个周期",
     customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）",
@@ -6852,7 +6852,7 @@ const jaMessages = {
     intervalDisabledWeek: "週単位の間隔は過去 12 か月以内でのみ利用できます。",
     filterTitle: "フィルター",
     filterSubtitle:
-      "フィルターを新規作成・保存するか、自分またはチームが保存したフィルターを使用します。",
+      "フィルターは現在の概要データクエリにリアルタイムで適用されます。",
     previousPeriod: "前の期間",
     nextPeriod: "次の期間",
     customSelectionSummary: "選択範囲：{from} から {to}（{days} 日）",

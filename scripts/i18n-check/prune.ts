@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs/promises";
 
 import YAML from "yaml";
@@ -5,6 +6,10 @@ import YAML from "yaml";
 import { rlog } from "./logger";
 import { APP_MESSAGES_PATH, LOCALE_PATHS, LOCALES } from "./paths";
 import type { JsonLike } from "./types";
+
+function tsKey(key: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
+}
 
 function toTsInterface(
   obj: JsonLike,
@@ -14,7 +19,9 @@ function toTsInterface(
   const currentPath = path.join(".");
   if (
     currentPath === "common.continentLabels" ||
-    currentPath === "geo.investigation.typeLabels"
+    currentPath === "geo.investigation.typeLabels" ||
+    currentPath === "filterBuilder.fieldLabels" ||
+    currentPath === "filterBuilder.operatorLabels"
   ) {
     return "Record<string, string>";
   }
@@ -34,7 +41,7 @@ function toTsInterface(
     const lines = ["{"];
     for (const [key, value] of entries) {
       const propType = toTsInterface(value, indent + 2, [...path, key]);
-      lines.push(`${childSpaces}${key}: ${propType};`);
+      lines.push(`${childSpaces}${tsKey(key)}: ${propType};`);
     }
     lines.push(`${spaces}}`);
     return lines.join("\n");
@@ -55,7 +62,7 @@ function buildMessagesOutput(
     parsedYamlByLocale.en as Record<string, unknown>,
   )) {
     const propType = toTsInterface(value as JsonLike, 2, [key]);
-    interfaceBody.push(`  ${key}: ${propType};`);
+    interfaceBody.push(`  ${tsKey(key)}: ${propType};`);
   }
 
   return `import type { Locale } from "./config";
@@ -76,6 +83,12 @@ export function getMessages(locale: Locale): AppMessages {
 `;
 }
 
+function formatMessagesFile(): void {
+  execSync(`npx prettier --write ${JSON.stringify(APP_MESSAGES_PATH)}`, {
+    stdio: "pipe",
+  });
+}
+
 export async function regenerateAppMessages(): Promise<void> {
   const parsedYamlByLocale = Object.fromEntries(
     await Promise.all(
@@ -91,6 +104,7 @@ export async function regenerateAppMessages(): Promise<void> {
     buildMessagesOutput(parsedYamlByLocale),
     "utf8",
   );
+  formatMessagesFile();
   rlog.success("Successfully regenerated messages.ts schema!");
 }
 
@@ -146,5 +160,6 @@ export async function pruneUnusedKeys(
     buildMessagesOutput(parsedYamlByLocale),
     "utf8",
   );
+  formatMessagesFile();
   rlog.success("Successfully regenerated messages.ts schema!");
 }
