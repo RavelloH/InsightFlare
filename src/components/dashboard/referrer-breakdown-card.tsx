@@ -7,7 +7,7 @@ import {
 
 import {
   LabelWithOptionalIcon,
-  REFERRER_QUERY_PARAM_BY_TAB,
+  REFERRER_FILTER_CONTROL_BY_TAB,
   type ReferrerBreakdownRow,
   type ReferrerRowsByTab,
   type ReferrerTab,
@@ -22,7 +22,13 @@ import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/client-history";
+import {
+  dashboardFilterValue,
+  setDashboardFilterValue,
+  withDashboardFilterSearchParams,
+} from "@/lib/dashboard/filter-state";
 import { numberFormat } from "@/lib/dashboard/format";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
@@ -35,6 +41,7 @@ interface ReferrerBreakdownCardProps {
   locale: Locale;
   messages: AppMessages;
   pathname: string;
+  filters: FilterDocument;
   rowsByTab: ReferrerRowsByTab;
   loading: boolean;
 }
@@ -45,6 +52,7 @@ export function ReferrerBreakdownCard({
   locale,
   messages,
   pathname,
+  filters,
   rowsByTab,
   loading,
 }: ReferrerBreakdownCardProps) {
@@ -100,32 +108,31 @@ export function ReferrerBreakdownCard({
     }),
     [loading],
   );
-  const activeQueryValueByTab = useMemo(
+  const activeFilterValueByTab = useMemo(
     () => ({
-      domain: normalizeQueryValue(
-        searchParams.get(REFERRER_QUERY_PARAM_BY_TAB.domain),
-      ),
-      link: normalizeQueryValue(
-        searchParams.get(REFERRER_QUERY_PARAM_BY_TAB.link),
-      ),
+      domain:
+        dashboardFilterValue(filters, REFERRER_FILTER_CONTROL_BY_TAB.domain) ??
+        null,
+      link:
+        dashboardFilterValue(filters, REFERRER_FILTER_CONTROL_BY_TAB.link) ??
+        null,
     }),
-    [searchParams],
+    [filters],
   );
 
-  function setQueryFilter(next: { tab: ReferrerTab; value: string } | null) {
-    const params = new URLSearchParams(searchParams.toString());
+  function setFilter(next: { tab: ReferrerTab; value: string } | null) {
     const activeTab = next?.tab ?? "domain";
-    const queryKey = REFERRER_QUERY_PARAM_BY_TAB[activeTab];
-    params.delete(queryKey);
+    const nextFilters = setDashboardFilterValue(
+      filters,
+      REFERRER_FILTER_CONTROL_BY_TAB[activeTab],
+      next?.value,
+    );
+    const updatedParams = withDashboardFilterSearchParams(
+      searchParams,
+      nextFilters,
+    );
 
-    if (next) {
-      const normalized = next.value.trim();
-      if (normalized) {
-        params.set(queryKey, normalized);
-      }
-    }
-
-    const updated = params.toString();
+    const updated = updatedParams.toString();
     const current = searchParams.toString();
     if (updated === current) return;
     const target = updated ? `${livePathname}?${updated}` : livePathname;
@@ -134,8 +141,8 @@ export function ReferrerBreakdownCard({
 
   function toggleRowFilter(tab: ReferrerTab, value: string) {
     const normalized = value.trim();
-    const isActive = activeQueryValueByTab[tab] === normalized;
-    setQueryFilter(isActive ? null : { tab, value: normalized });
+    const isActive = activeFilterValueByTab[tab] === normalized;
+    setFilter(isActive ? null : { tab, value: normalized });
   }
 
   function openTarget(url: string, event: MouseEvent<HTMLDivElement>) {
@@ -200,13 +207,13 @@ export function ReferrerBreakdownCard({
                 getSearchText: (row) => row.label,
                 getExportLabel: (row) => row.label,
                 getActive: (row, activeTab) =>
-                  activeQueryValueByTab[activeTab] === row.filterValue,
+                  activeFilterValueByTab[activeTab] === row.filterValue,
                 getInteractive: () => true,
                 onClick: (row, { tab: activeTab }) =>
                   toggleRowFilter(activeTab, row.filterValue),
               }}
               filterRows={(rows, activeTab) => {
-                const activeValue = activeQueryValueByTab[activeTab];
+                const activeValue = activeFilterValueByTab[activeTab];
                 return activeValue
                   ? rows.filter((row) => row.filterValue === activeValue)
                   : [...rows];
@@ -243,9 +250,4 @@ export function ReferrerBreakdownCard({
       </div>
     </section>
   );
-}
-
-function normalizeQueryValue(value: string | null): string | null {
-  const normalized = String(value ?? "").trim();
-  return normalized || null;
 }

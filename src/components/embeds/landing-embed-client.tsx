@@ -501,7 +501,7 @@ function EventsEmbedBlock({
             showIcon: false,
           },
         }}
-        pageCardQueryParamOverride={{ path: null }}
+        pageCardFilterEnabledOverride={{ path: false }}
         pageCardNavigableTabs={[]}
         pageCardDetailTabs={[]}
         pageCardShowVisitors

@@ -24,7 +24,10 @@ export interface ReferrerRowsByTab {
 
 export const DIRECT_REFERRER_FILTER_VALUE = "__direct__";
 
-export const REFERRER_QUERY_PARAM_BY_TAB: Record<ReferrerTab, string> = {
+export const REFERRER_FILTER_CONTROL_BY_TAB: Record<
+  ReferrerTab,
+  "sourceDomain" | "sourceLink"
+> = {
   domain: "sourceDomain",
   link: "sourceLink",
 };

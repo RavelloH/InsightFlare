@@ -54,8 +54,10 @@ import {
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
 import {
+  type DashboardFilterControlKey,
   dashboardFilterValue,
   setDashboardFilterValue,
+  withDashboardFilterSearchParams,
 } from "@/lib/dashboard/filter-state";
 import {
   durationFormat,
@@ -88,7 +90,6 @@ import {
   analyticsFilterRegistry,
   type FilterDocument,
   parseFilterParams,
-  serializeFilterParams,
 } from "@/lib/filter-contract";
 import {
   resolveContinentLabel,
@@ -491,7 +492,10 @@ const PAGE_CARD_DETAIL_TAB_LIST: PageCardDetailTab[] = [
   "exit",
 ];
 const ABSOLUTE_URL_PATTERN = /^[a-z][a-z\d+\-.]*:\/\//i;
-const PAGE_CARD_QUERY_PARAM_BY_TAB: Record<PageCardTab, string> = {
+const PAGE_CARD_FILTER_CONTROL_BY_TAB: Record<
+  PageCardTab,
+  DashboardFilterControlKey
+> = {
   path: "path",
   query: "query",
   title: "title",
@@ -499,7 +503,10 @@ const PAGE_CARD_QUERY_PARAM_BY_TAB: Record<PageCardTab, string> = {
   entry: "entry",
   exit: "exit",
 };
-const SOURCE_CARD_QUERY_PARAM_BY_TAB: Record<SourceCardTab, string> = {
+const SOURCE_CARD_FILTER_CONTROL_BY_TAB: Record<
+  SourceCardTab,
+  DashboardFilterControlKey
+> = {
   domain: "sourceDomain",
   link: "sourceLink",
 };
@@ -518,9 +525,9 @@ const GEO_DIMENSION_CARD_TABS: GeoDimensionCardTab[] = [
   "timezone",
   "organization",
 ];
-const CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB: Record<
+const CLIENT_DIMENSION_CARD_FILTER_CONTROL_BY_TAB: Record<
   ClientDimensionCardTab,
-  string
+  DashboardFilterControlKey
 > = {
   browser: "clientBrowser",
   osVersion: "clientOsVersion",
@@ -528,11 +535,9 @@ const CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB: Record<
   language: "clientLanguage",
   screenSize: "clientScreenSize",
 };
-const GEO_QUERY_PARAM = "geo";
-const LEGACY_GEO_QUERY_PARAMS = ["geoCountry", "geoRegion", "geoCity"] as const;
-const GEO_AUX_QUERY_PARAM_BY_TAB: Record<
+const GEO_AUX_FILTER_CONTROL_BY_TAB: Record<
   Exclude<GeoDimensionCardTab, GeoLocationTab>,
-  string
+  DashboardFilterControlKey
 > = {
   continent: "geoContinent",
   timezone: "geoTimezone",
@@ -612,38 +617,6 @@ function leadingLabelLetter(value: string): string {
   return normalized.slice(0, 1).toUpperCase();
 }
 
-interface SearchParamsLike {
-  get: (name: string) => string | null;
-}
-
-function normalizeOverviewFilterValue(
-  value: string | null | undefined,
-): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim().slice(0, 160);
-  return normalized.length > 0 ? normalized : undefined;
-}
-
-function resolveGeoQueryValueFromSearchParams(
-  searchParams: SearchParamsLike,
-): string | undefined {
-  const primary = normalizeOverviewFilterValue(
-    searchParams.get(GEO_QUERY_PARAM),
-  );
-  if (primary) return primary;
-  for (const key of LEGACY_GEO_QUERY_PARAMS) {
-    const fallback = normalizeOverviewFilterValue(searchParams.get(key));
-    if (fallback) return fallback;
-  }
-  return undefined;
-}
-
-function clearLegacyGeoQueryParams(params: URLSearchParams): void {
-  for (const key of LEGACY_GEO_QUERY_PARAMS) {
-    params.delete(key);
-  }
-}
-
 function extractGeoCountryCodeFromFilterValue(
   value: string | null | undefined,
 ): string | null {
@@ -658,12 +631,9 @@ function extractGeoCountryCodeFromFilterValue(
 }
 
 export function parseOverviewCardFilters(
-  searchParams: SearchParamsLike,
+  searchParams: URLSearchParams,
 ): FilterDocument {
-  if (searchParams instanceof URLSearchParams) {
-    return parseFilterParams(searchParams, analyticsFilterRegistry);
-  }
-  return parseFilterParams(new URLSearchParams(), analyticsFilterRegistry);
+  return parseFilterParams(searchParams, analyticsFilterRegistry);
 }
 
 function isGeoLocationTab(tab: GeoDimensionCardTab): tab is GeoLocationTab {
@@ -1796,7 +1766,7 @@ interface OverviewPagesSectionProps extends OverviewClientPageProps {
   pageCardTabMetaOverride?: Partial<
     Record<PageCardTab, Partial<PageCardTabMeta>>
   >;
-  pageCardQueryParamOverride?: Partial<Record<PageCardTab, string | null>>;
+  pageCardFilterEnabledOverride?: Partial<Record<PageCardTab, boolean>>;
   pageCardNavigableTabs?: readonly PageCardNavigableTab[];
   pageCardDetailTabs?: readonly PageCardDetailTab[];
   pageCardFetchers?: Partial<Record<PageCardTab, PageCardTabFetcher>>;
@@ -1832,7 +1802,7 @@ export function OverviewPagesSection({
   visibleCards,
   pageCardTabs,
   pageCardTabMetaOverride,
-  pageCardQueryParamOverride,
+  pageCardFilterEnabledOverride,
   pageCardNavigableTabs,
   pageCardDetailTabs,
   pageCardFetchers,
@@ -1936,12 +1906,17 @@ export function OverviewPagesSection({
       ),
     [pageCardDetailTabs],
   );
-  const pageCardQueryParamByTab = useMemo<Record<PageCardTab, string | null>>(
+  const pageCardFilterEnabledByTab = useMemo<Record<PageCardTab, boolean>>(
     () => ({
-      ...PAGE_CARD_QUERY_PARAM_BY_TAB,
-      ...(pageCardQueryParamOverride ?? {}),
+      path: true,
+      query: true,
+      title: true,
+      hostname: true,
+      entry: true,
+      exit: true,
+      ...(pageCardFilterEnabledOverride ?? {}),
     }),
-    [pageCardQueryParamOverride],
+    [pageCardFilterEnabledOverride],
   );
 
   useEffect(() => {
@@ -2382,14 +2357,14 @@ export function OverviewPagesSection({
     }),
     [pathRows, queryRows, titleRows, hostnameRows, entryRows, exitRows],
   );
-  const activePageCardQueryValue = useMemo(() => {
-    const queryParamKey = pageCardQueryParamByTab[pageCardTab];
-    if (!queryParamKey) return null;
-    const raw = searchParams.get(queryParamKey);
-    if (!raw) return null;
-    const normalized = raw.trim();
-    return normalized.length > 0 ? normalized : null;
-  }, [pageCardQueryParamByTab, pageCardTab, searchParams]);
+  const activePageCardFilterValue = useMemo(
+    () =>
+      dashboardFilterValue(
+        filters,
+        PAGE_CARD_FILTER_CONTROL_BY_TAB[pageCardTab],
+      ) ?? null,
+    [filters, pageCardTab],
+  );
   const pageCardDefaultHostname = useMemo(() => {
     const filteredHostname = sanitizeHostname(
       dashboardFilterValue(filters, "hostname") ?? "",
@@ -2469,13 +2444,14 @@ export function OverviewPagesSection({
     }),
     [sourceDomainRows, sourceLinkRows],
   );
-  const activeSourceCardQueryValue = useMemo(() => {
-    const queryParamKey = SOURCE_CARD_QUERY_PARAM_BY_TAB[sourceCardTab];
-    const raw = searchParams.get(queryParamKey);
-    if (!raw) return null;
-    const normalized = raw.trim();
-    return normalized.length > 0 ? normalized : null;
-  }, [searchParams, sourceCardTab]);
+  const activeSourceCardFilterValue = useMemo(
+    () =>
+      dashboardFilterValue(
+        filters,
+        SOURCE_CARD_FILTER_CONTROL_BY_TAB[sourceCardTab],
+      ) ?? null,
+    [filters, sourceCardTab],
+  );
   const clientDimensionCardTabMeta: Record<
     ClientDimensionCardTab,
     { label: string; columnLabel: string; mono: boolean }
@@ -2731,103 +2707,94 @@ export function OverviewPagesSection({
   ]);
   const resolvedPrimaryMetricLabel =
     primaryMetricLabel ?? messages.common.views;
-  const activeClientDimensionCardQueryValue = useMemo(() => {
-    const queryParamKey =
-      CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB[clientDimensionCardTab];
-    const raw = searchParams.get(queryParamKey);
-    if (!raw) return null;
-    const normalized = raw.trim();
-    return normalized.length > 0 ? normalized : null;
-  }, [clientDimensionCardTab, searchParams]);
-  const activeGeoDimensionCardQueryValue = useMemo(() => {
+  const activeClientDimensionCardFilterValue = useMemo(() => {
+    return (
+      dashboardFilterValue(
+        filters,
+        CLIENT_DIMENSION_CARD_FILTER_CONTROL_BY_TAB[clientDimensionCardTab],
+      ) ?? null
+    );
+  }, [clientDimensionCardTab, filters]);
+  const activeGeoDimensionCardFilterValue = useMemo(() => {
     if (isGeoLocationTab(geoDimensionCardTab)) {
       return (
-        canonicalizeGeoFilterValue(
-          resolveGeoQueryValueFromSearchParams(searchParams),
-        ) ?? null
+        canonicalizeGeoFilterValue(dashboardFilterValue(filters, "geo")) ?? null
       );
     }
-    const queryKey = GEO_AUX_QUERY_PARAM_BY_TAB[geoDimensionCardTab];
-    const raw = searchParams.get(queryKey);
-    if (!raw) return null;
-    const normalized = raw.trim();
-    return normalized.length > 0 ? normalized : null;
-  }, [geoDimensionCardTab, searchParams]);
+    return (
+      dashboardFilterValue(
+        filters,
+        GEO_AUX_FILTER_CONTROL_BY_TAB[geoDimensionCardTab],
+      ) ?? null
+    );
+  }, [filters, geoDimensionCardTab]);
 
-  const setPageCardQueryFilter = (
+  const setPageCardFilter = (
     next: { tab: PageCardTab; value: string } | null,
   ) => {
-    const params = new URLSearchParams(searchParams.toString());
     const activeTab = next?.tab ?? pageCardTab;
-    const queryKey = pageCardQueryParamByTab[activeTab];
-    if (!queryKey) return;
-    params.delete(queryKey);
-    if (next) {
-      const normalized = next.value.trim();
-      if (normalized.length > 0) params.set(queryKey, normalized);
-    }
+    if (!pageCardFilterEnabledByTab[activeTab]) return;
+    const nextFilters = setDashboardFilterValue(
+      filters,
+      PAGE_CARD_FILTER_CONTROL_BY_TAB[activeTab],
+      next?.value,
+    );
+    const params = withDashboardFilterSearchParams(searchParams, nextFilters);
     const current = searchParams.toString();
     const updated = params.toString();
     if (updated === current) return;
     const target = updated ? `${livePathname}?${updated}` : livePathname;
     replaceUrlWithoutNavigation(target);
   };
-  const setSourceCardQueryFilter = (
+  const setSourceCardFilter = (
     next: { tab: SourceCardTab; value: string } | null,
   ) => {
-    const params = new URLSearchParams(searchParams.toString());
     const activeTab = next?.tab ?? sourceCardTab;
-    const queryKey = SOURCE_CARD_QUERY_PARAM_BY_TAB[activeTab];
-    params.delete(queryKey);
-    if (next) {
-      const normalized = next.value.trim();
-      if (normalized.length > 0) params.set(queryKey, normalized);
-    }
+    const nextFilters = setDashboardFilterValue(
+      filters,
+      SOURCE_CARD_FILTER_CONTROL_BY_TAB[activeTab],
+      next?.value,
+    );
+    const params = withDashboardFilterSearchParams(searchParams, nextFilters);
     const current = searchParams.toString();
     const updated = params.toString();
     if (updated === current) return;
     const target = updated ? `${livePathname}?${updated}` : livePathname;
     replaceUrlWithoutNavigation(target);
   };
-  const setClientDimensionCardQueryFilter = (
+  const setClientDimensionCardFilter = (
     next: { tab: ClientDimensionCardTab; value: string } | null,
   ) => {
-    const params = new URLSearchParams(searchParams.toString());
     const activeTab = next?.tab ?? clientDimensionCardTab;
-    const queryKey = CLIENT_DIMENSION_CARD_QUERY_PARAM_BY_TAB[activeTab];
-    params.delete(queryKey);
-    if (next) {
-      const normalized = next.value.trim();
-      if (normalized.length > 0) params.set(queryKey, normalized);
-    }
+    const nextFilters = setDashboardFilterValue(
+      filters,
+      CLIENT_DIMENSION_CARD_FILTER_CONTROL_BY_TAB[activeTab],
+      next?.value,
+    );
+    const params = withDashboardFilterSearchParams(searchParams, nextFilters);
     const current = searchParams.toString();
     const updated = params.toString();
     if (updated === current) return;
     const target = updated ? `${livePathname}?${updated}` : livePathname;
     replaceUrlWithoutNavigation(target);
   };
-  const setGeoDimensionCardQueryFilter = (
+  const setGeoDimensionCardFilter = (
     next: { tab: GeoDimensionCardTab; value: string } | null,
   ) => {
-    const params = new URLSearchParams(searchParams.toString());
     const activeTab = next?.tab ?? geoDimensionCardTab;
-    if (isGeoLocationTab(activeTab)) {
-      params.delete(GEO_QUERY_PARAM);
-      clearLegacyGeoQueryParams(params);
-    } else {
-      params.delete(GEO_AUX_QUERY_PARAM_BY_TAB[activeTab]);
-    }
-    if (next) {
-      const normalized = next.value.trim();
-      if (normalized.length > 0) {
-        if (isGeoLocationTab(next.tab)) {
-          const geoValue = canonicalizeGeoFilterValue(normalized);
-          if (geoValue) params.set(GEO_QUERY_PARAM, geoValue);
-        } else {
-          params.set(GEO_AUX_QUERY_PARAM_BY_TAB[next.tab], normalized);
-        }
-      }
-    }
+    const filterControl = isGeoLocationTab(activeTab)
+      ? "geo"
+      : GEO_AUX_FILTER_CONTROL_BY_TAB[activeTab];
+    const filterValue =
+      next && isGeoLocationTab(next.tab)
+        ? canonicalizeGeoFilterValue(next.value)
+        : next?.value;
+    const nextFilters = setDashboardFilterValue(
+      filters,
+      filterControl,
+      filterValue,
+    );
+    const params = withDashboardFilterSearchParams(searchParams, nextFilters);
     const current = searchParams.toString();
     const updated = params.toString();
     if (updated === current) return;
@@ -3289,9 +3256,9 @@ export function OverviewPagesSection({
                 getSearchText: (row) => row.label,
                 getExportLabel: (row) => row.label,
                 getActive: (row) =>
-                  activePageCardQueryValue === (row.filterValue ?? row.label),
+                  activePageCardFilterValue === (row.filterValue ?? row.label),
                 getInteractive: (row, tab) =>
-                  Boolean(pageCardQueryParamByTab[tab]) ||
+                  pageCardFilterEnabledByTab[tab] ||
                   Boolean(
                     resolvedPageCardNavigableTabs.has(
                       tab as PageCardNavigableTab,
@@ -3311,10 +3278,10 @@ export function OverviewPagesSection({
                     resolvedPageCardDetailTabs.has(tab)),
                 onClick: (row, { tab }) => {
                   const rowFilterValue = row.filterValue ?? row.label;
-                  if (pageCardQueryParamByTab[tab]) {
+                  if (pageCardFilterEnabledByTab[tab]) {
                     const normalized = rowFilterValue.trim();
-                    setPageCardQueryFilter(
-                      activePageCardQueryValue === normalized
+                    setPageCardFilter(
+                      activePageCardFilterValue === normalized
                         ? null
                         : { tab, value: normalized },
                     );
@@ -3375,11 +3342,11 @@ export function OverviewPagesSection({
                 },
               }}
               filterRows={(rows) =>
-                activePageCardQueryValue
+                activePageCardFilterValue
                   ? rows.filter(
                       (row) =>
                         (row.filterValue ?? row.label) ===
-                        activePageCardQueryValue,
+                        activePageCardFilterValue,
                     )
                   : [...rows]
               }
@@ -3440,21 +3407,21 @@ export function OverviewPagesSection({
                 getSearchText: (row) => row.label,
                 getExportLabel: (row) => row.label,
                 getActive: (row) =>
-                  activeSourceCardQueryValue === row.filterValue,
+                  activeSourceCardFilterValue === row.filterValue,
                 getInteractive: () => true,
                 onClick: (row, { tab }) => {
                   const normalized = row.filterValue.trim();
-                  setSourceCardQueryFilter(
-                    activeSourceCardQueryValue === normalized
+                  setSourceCardFilter(
+                    activeSourceCardFilterValue === normalized
                       ? null
                       : { tab, value: normalized },
                   );
                 },
               }}
               filterRows={(rows) =>
-                activeSourceCardQueryValue
+                activeSourceCardFilterValue
                   ? rows.filter(
-                      (row) => row.filterValue === activeSourceCardQueryValue,
+                      (row) => row.filterValue === activeSourceCardFilterValue,
                     )
                   : [...rows]
               }
@@ -3506,24 +3473,24 @@ export function OverviewPagesSection({
                 getSearchText: (row) => row.rawLabel?.trim() || row.label,
                 getExportLabel: (row) => row.rawLabel?.trim() || row.label,
                 getActive: (row) =>
-                  activeClientDimensionCardQueryValue ===
+                  activeClientDimensionCardFilterValue ===
                   (row.filterValue ?? row.label),
                 getInteractive: () => true,
                 onClick: (row, { tab }) => {
                   const normalized = (row.filterValue ?? row.label).trim();
-                  setClientDimensionCardQueryFilter(
-                    activeClientDimensionCardQueryValue === normalized
+                  setClientDimensionCardFilter(
+                    activeClientDimensionCardFilterValue === normalized
                       ? null
                       : { tab, value: normalized },
                   );
                 },
               }}
               filterRows={(rows) =>
-                activeClientDimensionCardQueryValue
+                activeClientDimensionCardFilterValue
                   ? rows.filter(
                       (row) =>
                         (row.filterValue ?? row.label) ===
-                        activeClientDimensionCardQueryValue,
+                        activeClientDimensionCardFilterValue,
                     )
                   : [...rows]
               }
@@ -3623,9 +3590,9 @@ export function OverviewPagesSection({
                   const activeGeoHighlightValue = isGeoLocationTab(tab)
                     ? resolveGeoLocationHighlightValue(
                         tab,
-                        activeGeoDimensionCardQueryValue,
+                        activeGeoDimensionCardFilterValue,
                       )
-                    : activeGeoDimensionCardQueryValue;
+                    : activeGeoDimensionCardFilterValue;
                   return (
                     activeGeoHighlightValue === (row.filterValue ?? row.label)
                   );
@@ -3633,25 +3600,25 @@ export function OverviewPagesSection({
                 getInteractive: () => true,
                 onClick: (row, { tab }) => {
                   const normalized = (row.filterValue ?? row.label).trim();
-                  setGeoDimensionCardQueryFilter(
-                    activeGeoDimensionCardQueryValue === normalized
+                  setGeoDimensionCardFilter(
+                    activeGeoDimensionCardFilterValue === normalized
                       ? null
                       : { tab, value: normalized },
                   );
                 },
               }}
               filterRows={(rows, tab) => {
-                if (!activeGeoDimensionCardQueryValue) return [...rows];
-                const activeGeoQueryValue = isGeoLocationTab(tab)
+                if (!activeGeoDimensionCardFilterValue) return [...rows];
+                const activeGeoFilterValue = isGeoLocationTab(tab)
                   ? resolveGeoLocationHighlightValue(
                       tab,
-                      activeGeoDimensionCardQueryValue,
+                      activeGeoDimensionCardFilterValue,
                     )
-                  : activeGeoDimensionCardQueryValue;
-                if (!activeGeoQueryValue) return [...rows];
+                  : activeGeoDimensionCardFilterValue;
+                if (!activeGeoFilterValue) return [...rows];
                 return rows.filter(
                   (row) =>
-                    (row.filterValue ?? row.label) === activeGeoQueryValue,
+                    (row.filterValue ?? row.label) === activeGeoFilterValue,
                 );
               }}
               compareRows={comparePageRows}
@@ -4074,16 +4041,10 @@ export function OverviewClientPage({
         "geo",
         nextCountry,
       );
-      const params = new URLSearchParams(searchParams.toString());
-      for (const key of [...params.keys()]) {
-        if (key.startsWith("filter[")) params.delete(key);
-      }
-      for (const [key, value] of serializeFilterParams(
+      const params = withDashboardFilterSearchParams(
+        searchParams,
         nextDocument,
-        analyticsFilterRegistry,
-      )) {
-        params.append(key, value);
-      }
+      );
       const nextQuery = params.toString();
       const target = nextQuery ? `${livePathname}?${nextQuery}` : livePathname;
       const current = searchParams.toString();

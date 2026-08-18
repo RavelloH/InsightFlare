@@ -9,6 +9,7 @@ import {
   filterFingerprint,
   type FilterValue,
   normalizeFilterDocument,
+  serializeFilterParams,
 } from "@/lib/filter-contract";
 
 import {
@@ -277,6 +278,34 @@ export function setDashboardFilterValue(
 
 export function dashboardFilterFingerprint(document: FilterDocument): string {
   return filterFingerprint(document, analyticsFilterRegistry);
+}
+
+/** Replaces only typed filter parameters and preserves unrelated URL state. */
+export function withDashboardFilterSearchParams(
+  searchParams: URLSearchParams,
+  document: FilterDocument,
+): URLSearchParams {
+  const next = new URLSearchParams(searchParams.toString());
+  for (const key of [...next.keys()]) {
+    if (
+      key.startsWith("filter[") ||
+      DASHBOARD_FILTER_CONTROL_KEYS.includes(
+        key as DashboardFilterControlKey,
+      ) ||
+      key === "geoCountry" ||
+      key === "geoRegion" ||
+      key === "geoCity"
+    ) {
+      next.delete(key);
+    }
+  }
+  for (const [key, value] of serializeFilterParams(
+    document,
+    analyticsFilterRegistry,
+  )) {
+    next.append(key, value);
+  }
+  return next;
 }
 
 export function appendEventPayloadFilter(

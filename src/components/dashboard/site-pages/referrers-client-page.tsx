@@ -127,6 +127,7 @@ export function ReferrersClientPage({
         locale={locale}
         messages={messages}
         pathname={pathname}
+        filters={requestFilters}
         rowsByTab={normalizedRowsByTab}
         loading={loading}
       />

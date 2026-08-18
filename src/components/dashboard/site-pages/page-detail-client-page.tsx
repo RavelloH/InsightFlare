@@ -317,7 +317,7 @@ export function PageDetailClientPage({
         pageCardNavigableTabs={pageCardNavigableTabs}
         pageCardDetailTabs={pageCardDetailTabs}
         pageCardTargetUrlResolvers={pageCardTargetUrlResolvers}
-        pageCardQueryParamOverride={{ path: null, query: null }}
+        pageCardFilterEnabledOverride={{ path: false, query: false }}
         pageCardTabMetaOverride={{
           path: {
             label: messages.pages.hashTab,

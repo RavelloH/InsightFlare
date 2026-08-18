@@ -357,7 +357,7 @@ export function EventsClientPage({
               showIcon: false,
             },
           }}
-          pageCardQueryParamOverride={{ path: null }}
+          pageCardFilterEnabledOverride={{ path: false }}
           pageCardNavigableTabs={[]}
           pageCardDetailTabs={["path"]}
           pageCardDetailClickResolvers={{

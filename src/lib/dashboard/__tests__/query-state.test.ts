@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   dashboardFilterDocumentFromPresentation,
   dashboardFilterPresentation,
+  withDashboardFilterSearchParams,
 } from "@/lib/dashboard/filter-state";
 import type { RangePreset } from "@/lib/dashboard/query-state";
 import {
@@ -320,6 +321,27 @@ describe("dashboard query-state helpers", () => {
       expect(url.searchParams.get("range")).toBe("30d");
       expect(url.searchParams.get("filter[geo.country]")).toBeNull();
       expect(url.searchParams.get("filter[client.browser]")).toBe("Chrome");
+    });
+  });
+
+  describe("withDashboardFilterSearchParams", () => {
+    it("replaces typed and legacy filter parameters while preserving route state", () => {
+      const params = new URLSearchParams({
+        range: "7d",
+        sourceDomain: "old.example",
+        geoCountry: "US",
+        "filter[geo.country]": "us",
+      });
+      const next = withDashboardFilterSearchParams(
+        params,
+        dashboardFilterDocumentFromPresentation({ sourceDomain: "google.com" }),
+      );
+
+      expect(next.get("range")).toBe("7d");
+      expect(next.get("sourceDomain")).toBeNull();
+      expect(next.get("geoCountry")).toBeNull();
+      expect(next.get("filter[geo.country]")).toBeNull();
+      expect(next.get("filter[referrer.domain]")).toBe("google.com");
     });
   });
 
