@@ -7,7 +7,7 @@ import {
   GeoPointsMapIsland,
   type GeoPointsMapPoint,
 } from "@/components/dashboard/geo-points-map-island";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardTitle } from "@/components/ui/card";
 import {
   emptyOverviewGeoPointsData,
   fetchOverviewGeoPoints,
@@ -107,23 +107,8 @@ export function OverviewGeoPointsMapCard({
   );
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <CardTitle className="inline-flex items-center gap-2">
-            <RiMapPin2Line className="size-4" />
-            {messages.geo.mapTitle}
-          </CardTitle>
-        </div>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <RiCopyrightLine aria-hidden="true" size="1em" />
-          <span>OpenStreetMap contributors</span>
-          <span aria-hidden="true">·</span>
-          <RiCopyrightLine aria-hidden="true" size="1em" />
-          <span>CARTO</span>
-        </div>
-      </CardHeader>
-      <CardContent className="pt-0">
+    <div className="relative h-[460px] overflow-hidden bg-card ring-1 ring-foreground/10">
+      <div className="absolute inset-0">
         <GeoPointsMapIsland
           locale={locale}
           messages={messages}
@@ -132,8 +117,24 @@ export function OverviewGeoPointsMapCard({
           countryCounts={countryCounts}
           selectedCountryCode={selectedCountryCode}
           onCountrySelect={onCountrySelect}
+          heightClassName="h-full"
+          bordered={false}
         />
-      </CardContent>
-    </Card>
+      </div>
+
+      <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-between gap-2 md:inset-x-6 md:top-6">
+        <CardTitle className="inline-flex items-center gap-2 text-foreground">
+          <RiMapPin2Line className="size-4" />
+          {messages.geo.mapTitle}
+        </CardTitle>
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <RiCopyrightLine aria-hidden="true" size="1em" />
+          <span>OpenStreetMap contributors</span>
+          <span aria-hidden="true">·</span>
+          <RiCopyrightLine aria-hidden="true" size="1em" />
+          <span>CARTO</span>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -1,4 +1,5 @@
 import { browserEngineLabel } from "@/lib/browser-engine";
+import { dashboardFilterPresentation } from "@/lib/dashboard/filter-state";
 import {
   addZonedInterval,
   normalizeTimeZone,
@@ -6,6 +7,11 @@ import {
   startOfZonedInterval,
   zonedParts,
 } from "@/lib/dashboard/time-zone";
+import {
+  analyticsFilterDefinition,
+  type FilterDocument,
+  type FilterExpression,
+} from "@/lib/filter-contract";
 import {
   DEMO_SITE_PROFILES,
   type DemoSiteProfile,
@@ -95,6 +101,7 @@ import {
   GLOBAL_COUNTRY_LONG_TAIL,
   GLOBAL_REFERRER_LONG_TAIL,
 } from "@/lib/realtime/mock/dimension-pools";
+import { createDemoCustomEventFacts } from "@/lib/realtime/mock/events-helpers";
 import {
   aggregateDimensionRowsFromVisits,
   aggregateOverviewMetrics,
@@ -222,6 +229,224 @@ function withoutDemoFilterKey(
 ): DemoQueryFilters {
   const { [key]: _, ...next } = filters;
   return next;
+}
+
+interface DemoFilterValueOption {
+  readonly value: string;
+  readonly label: string;
+  readonly occurrences: number;
+}
+
+function filterValuesFromCandidates(
+  candidates: Iterable<{
+    readonly value: string;
+    readonly label?: string;
+    readonly occurrences?: number;
+  }>,
+  search: string,
+  limit: number,
+): DemoFilterValueOption[] {
+  const rows = new Map<string, DemoFilterValueOption>();
+  for (const candidate of candidates) {
+    const value = String(candidate.value ?? "").trim();
+    if (!value) continue;
+    const label = String(candidate.label ?? value).trim() || value;
+    if (!demoValuesIncludeSearch(search, [value, label])) continue;
+    const current = rows.get(value);
+    rows.set(value, {
+      value,
+      label,
+      occurrences:
+        (current?.occurrences ?? 0) + Math.max(0, candidate.occurrences ?? 1),
+    });
+  }
+  return [...rows.values()]
+    .sort(
+      (left, right) =>
+        right.occurrences - left.occurrences ||
+        left.label.localeCompare(right.label),
+    )
+    .slice(0, limit);
+}
+
+function withoutCanonicalField(
+  expression: FilterExpression | null,
+  field: string,
+): FilterExpression | null {
+  if (!expression) return null;
+  if (expression.kind === "condition") {
+    return expression.target.kind === "field" &&
+      expression.target.field === field
+      ? null
+      : expression;
+  }
+  if (expression.kind === "not") {
+    const child = withoutCanonicalField(expression.child, field);
+    return child ? { ...expression, child } : null;
+  }
+  const children = expression.children
+    .map((child) => withoutCanonicalField(child, field))
+    .filter((child): child is FilterExpression => child !== null);
+  if (children.length === 0) return null;
+  return children.length === 1 ? children[0]! : { ...expression, children };
+}
+
+function withoutDemoCanonicalField(
+  document: FilterDocument,
+  field: string,
+): FilterDocument {
+  return { ...document, root: withoutCanonicalField(document.root, field) };
+}
+
+function filterValueForVisit(field: string, visit: DemoVisitFact): string {
+  switch (field) {
+    case "page.path":
+      return visit.pathname;
+    case "page.title":
+      return visit.title;
+    case "page.hostname":
+      return visit.hostname;
+    case "page.query":
+      return demoQueryStringForVisit(visit);
+    case "page.hash":
+      return demoHashFragmentForVisit(visit);
+    case "referrer.domain":
+      return visit.referrerHost || DEMO_DIRECT_REFERRER_FILTER_VALUE;
+    case "referrer.url":
+      return visit.referrerUrl || DEMO_DIRECT_REFERRER_FILTER_VALUE;
+    case "client.browser":
+      return visit.browser;
+    case "client.browserVersion":
+      return visit.browserVersion;
+    case "client.browserEngine":
+      return browserEngineLabel(visit.browser, visit.osVersion);
+    case "client.os":
+      return demoOperatingSystemLabel(visit.osVersion);
+    case "client.osVersion":
+      return visit.osVersion;
+    case "client.deviceType":
+      return visit.deviceType;
+    case "client.language":
+      return visit.language;
+    case "client.screenSize":
+      return visit.screenSize;
+    case "geo.country":
+      return visit.country;
+    case "geo.region":
+      return visit.region;
+    case "geo.city":
+      return visit.city;
+    case "geo.continent":
+      return visit.continent;
+    case "geo.timeZone":
+      return visit.timezone;
+    case "geo.organization":
+      return visit.organization;
+    default:
+      return "";
+  }
+}
+
+const DEMO_UTM_FILTER_VALUES: Readonly<Record<string, readonly string[]>> = {
+  "utm.source": ["google", "newsletter", "partner", "github"],
+  "utm.medium": ["organic", "email", "referral", "social"],
+  "utm.campaign": ["launch", "docs", "pricing", "retention"],
+  "utm.term": ["analytics", "observability", "product-led"],
+  "utm.content": ["hero", "navigation", "cta", "release-note"],
+};
+
+/** Canonical candidate-value mock used by private, public, and API v1 routes. */
+export function generateDemoFilterValues(
+  siteId: string,
+  params: Record<string, string | number>,
+  audience:
+    | "private-dashboard"
+    | "public-share"
+    | "api-v1" = "private-dashboard",
+): Record<string, unknown> {
+  const field = normalizeDemoFilterValue(params.filterKey);
+  const definition = field ? analyticsFilterDefinition(field) : undefined;
+  if (
+    !field ||
+    !definition ||
+    definition.source === "payload" ||
+    !definition.audiences.has(audience)
+  ) {
+    return { ok: false, data: [] };
+  }
+
+  const limit = parseDemoLimit(params.limit, 50, 1, 500);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const parsedFilters = parseDemoFilters(params);
+  const filterDocument = parsedFilters.filterDocument
+    ? withoutDemoCanonicalField(parsedFilters.filterDocument, field)
+    : undefined;
+  const filters = filterDocument
+    ? { filterDocument, ...dashboardFilterPresentation(filterDocument) }
+    : parsedFilters;
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const search = normalizeDemoSearch(params);
+
+  if (field === "event.name") {
+    return {
+      ok: true,
+      field,
+      data: filterValuesFromCandidates(
+        createDemoCustomEventFacts(filtered.visits).map((event) => ({
+          value: event.eventName,
+        })),
+        search,
+        limit,
+      ),
+    };
+  }
+  if (field === "session.entryPath" || field === "session.exitPath") {
+    const key = field === "session.entryPath" ? "entryPath" : "exitPath";
+    return {
+      ok: true,
+      field,
+      data: filterValuesFromCandidates(
+        [...filtered.sessions].flatMap((sessionId) => {
+          const session = dataset.sessions.get(sessionId);
+          return session ? [{ value: session[key] }] : [];
+        }),
+        search,
+        limit,
+      ),
+    };
+  }
+  const utmValues = DEMO_UTM_FILTER_VALUES[field];
+  if (utmValues) {
+    return {
+      ok: true,
+      field,
+      data: filterValuesFromCandidates(
+        utmValues.map((value) => ({ value })),
+        search,
+        limit,
+      ),
+    };
+  }
+
+  return {
+    ok: true,
+    field,
+    data: filterValuesFromCandidates(
+      filtered.visits.map((visit) => {
+        const value = filterValueForVisit(field, visit);
+        return {
+          value,
+          ...(value === DEMO_DIRECT_REFERRER_FILTER_VALUE
+            ? { label: "Direct" }
+            : {}),
+        };
+      }),
+      search,
+      limit,
+    ),
+  };
 }
 
 function parseDemoFilterKey(

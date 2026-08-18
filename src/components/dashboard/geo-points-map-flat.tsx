@@ -42,6 +42,7 @@ interface GeoPointsMapProps {
   heightClassName?: string;
   countryHoverEnabled?: boolean;
   pointColor?: [number, number, number];
+  bordered?: boolean;
   selectedCountryCode?: string | null;
   onCountrySelect?: (countryCode: string | null) => void;
 }
@@ -379,6 +380,7 @@ export function FlatGeoPointsMap({
   heightClassName = DEFAULT_MAP_HEIGHT_CLASS,
   countryHoverEnabled = true,
   pointColor = MAP_ACCENT_RGB,
+  bordered = true,
   selectedCountryCode,
   onCountrySelect,
 }: GeoPointsMapProps) {
@@ -729,7 +731,9 @@ export function FlatGeoPointsMap({
   return (
     <div
       data-geo-map-mode="flat"
-      className={`relative ${heightClassName} w-full overflow-hidden rounded-md border border-border/70`}
+      className={`relative ${heightClassName} w-full overflow-hidden${
+        bordered ? " border border-border/70" : ""
+      }`}
       style={MAP_VIEWPORT_RENDER_ISOLATION_STYLE}
     >
       <Map
@@ -760,7 +764,7 @@ export function FlatGeoPointsMap({
             exit={{ opacity: 0, y: 12 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
-            <div className="inline-flex items-center gap-4 rounded-md border border-border/70 bg-background/92 px-3 py-2 text-xs shadow-lg backdrop-blur-sm">
+            <div className="inline-flex items-center gap-4 border border-border/70 bg-background/92 px-3 py-2 text-xs shadow-lg backdrop-blur-sm">
               <AutoResizer
                 initial
                 animateWidth

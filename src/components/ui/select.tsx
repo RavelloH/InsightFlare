@@ -1,7 +1,13 @@
 import * as React from "react";
 import { RiArrowDownSLine, RiCheckLine } from "@remixicon/react";
+import { OverlayScrollbars } from "overlayscrollbars";
 import { Popover as PopoverPrimitive } from "radix-ui";
 
+import {
+  prepareNativeScrollbarHost,
+  useNativeScrollbars,
+  VERTICAL_SCROLLBAR_OPTIONS,
+} from "@/components/ui/overlay-scrollbar";
 import { cn } from "@/lib/utils";
 
 type ItemMeta = {
@@ -302,6 +308,39 @@ function SelectContent({
   ...props
 }: SelectContentProps) {
   const ctx = useSelectContext("SelectContent");
+  const scrollHostRef = React.useRef<HTMLDivElement | null>(null);
+  const [scrollHost, setScrollHost] = React.useState<HTMLDivElement | null>(
+    null,
+  );
+  const scrollbarRef = React.useRef<ReturnType<
+    typeof OverlayScrollbars
+  > | null>(null);
+  const nativeScrollbars = useNativeScrollbars();
+  const setScrollHostRef = React.useCallback((node: HTMLDivElement | null) => {
+    scrollHostRef.current = node;
+    setScrollHost(node);
+  }, []);
+
+  React.useEffect(() => {
+    if (!scrollHost) return;
+    const host = scrollHost;
+    if (prepareNativeScrollbarHost(host)) return;
+
+    const existing = OverlayScrollbars(host);
+    const instance =
+      existing ?? OverlayScrollbars(host, VERTICAL_SCROLLBAR_OPTIONS);
+    if (existing) existing.options(VERTICAL_SCROLLBAR_OPTIONS);
+    scrollbarRef.current = instance;
+
+    return () => {
+      if (!existing) instance.destroy();
+      if (scrollbarRef.current === instance) scrollbarRef.current = null;
+    };
+  }, [nativeScrollbars, scrollHost]);
+
+  const scrollViewport = () =>
+    (scrollbarRef.current?.elements().viewport as HTMLDivElement | undefined) ??
+    scrollHostRef.current;
 
   const focusValue = React.useCallback(
     (val: string) => {
@@ -382,7 +421,8 @@ function SelectContent({
     if (event.defaultPrevented) return;
     event.preventDefault();
     event.stopPropagation();
-    const target = event.currentTarget;
+    const target = scrollViewport();
+    if (!target) return;
     target.scrollTop += event.deltaY;
     target.scrollLeft += event.deltaX;
   };
@@ -413,12 +453,21 @@ function SelectContent({
         onOpenAutoFocus={handleOpenAutoFocus}
         data-slot="select-content"
         className={cn(
-          "relative z-50 max-h-(--radix-popover-content-available-height) min-w-(--radix-popover-trigger-width) origin-(--radix-popover-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-none bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
-          className,
+          "relative z-50 min-w-(--radix-popover-trigger-width) origin-(--radix-popover-content-transform-origin) overflow-hidden rounded-none bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
         )}
         {...props}
       >
-        {children}
+        <div
+          ref={setScrollHostRef}
+          className={cn(
+            "max-h-(--radix-popover-content-available-height) overflow-x-hidden",
+            nativeScrollbars ? "overflow-y-auto" : "overflow-hidden",
+            className,
+          )}
+          data-overlayscrollbars-initialize={nativeScrollbars ? undefined : ""}
+        >
+          {children}
+        </div>
       </PopoverPrimitive.Content>
     </PopoverPrimitive.Portal>
   );

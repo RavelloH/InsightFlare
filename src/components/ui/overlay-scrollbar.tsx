@@ -22,6 +22,19 @@ export const HORIZONTAL_SCROLLBAR_OPTIONS = {
   },
 } satisfies PartialOptions;
 
+export const VERTICAL_SCROLLBAR_OPTIONS = {
+  overflow: {
+    x: "hidden",
+    y: "scroll",
+  },
+  scrollbars: {
+    theme: "os-theme-insightflare",
+    autoHide: "move",
+    autoHideDelay: 420,
+    autoHideSuspend: false,
+  },
+} satisfies PartialOptions;
+
 export function shouldUseNativeScrollbars(): boolean {
   if (typeof navigator === "undefined") return false;
   const uaData = (
@@ -58,14 +71,16 @@ export function useNativeScrollbars() {
 }
 
 interface OverlayScrollbarProps extends ComponentPropsWithoutRef<"div"> {
+  axis?: "horizontal" | "vertical";
   options?: PartialOptions;
   syncKey?: string | number | boolean | null;
 }
 
 export function OverlayScrollbar({
+  axis = "horizontal",
   children,
   className,
-  options = HORIZONTAL_SCROLLBAR_OPTIONS,
+  options,
   syncKey,
   ...props
 }: OverlayScrollbarProps) {
@@ -75,11 +90,39 @@ export function OverlayScrollbar({
     null,
   );
   const nativeScrollbars = useNativeScrollbars();
+  const resolvedOptions =
+    options ??
+    (axis === "vertical"
+      ? VERTICAL_SCROLLBAR_OPTIONS
+      : HORIZONTAL_SCROLLBAR_OPTIONS);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     if (prepareNativeScrollbarHost(host)) return;
+
+    if (axis === "vertical") {
+      const existing = OverlayScrollbars(host);
+      const instance = existing ?? OverlayScrollbars(host, resolvedOptions);
+      if (existing) {
+        existing.options(resolvedOptions);
+      }
+      scrollbarRef.current = instance;
+
+      const resizeObserver = new ResizeObserver(() => instance.update());
+      resizeObserver.observe(host);
+      instance.update();
+
+      return () => {
+        resizeObserver.disconnect();
+        if (!existing) {
+          instance.destroy();
+        }
+        if (scrollbarRef.current === instance) {
+          scrollbarRef.current = null;
+        }
+      };
+    }
 
     const slot = document.createElement("div");
     slot.style.position = "fixed";
@@ -92,7 +135,7 @@ export function OverlayScrollbar({
     document.body.appendChild(slot);
 
     const existing = OverlayScrollbars(host);
-    const instance =
+    const horizontalInstance =
       existing ??
       OverlayScrollbars(
         {
@@ -101,12 +144,12 @@ export function OverlayScrollbar({
             slot,
           },
         },
-        options,
+        resolvedOptions,
       );
     if (existing) {
-      existing.options(options);
+      existing.options(resolvedOptions);
     }
-    scrollbarRef.current = instance;
+    scrollbarRef.current = horizontalInstance;
 
     const syncSlotBounds = () => {
       const rect = host.getBoundingClientRect();
@@ -114,7 +157,7 @@ export function OverlayScrollbar({
       const right = Math.min(window.innerWidth, rect.right);
       const width = Math.max(0, right - left);
       const isVisible = rect.bottom > 0 && rect.top < window.innerHeight;
-      const hasHorizontalOverflow = instance.state().hasOverflow.x;
+      const hasHorizontalOverflow = horizontalInstance.state().hasOverflow.x;
       const slotHeight = slot.offsetHeight || 12;
       const isAtHostBottom = rect.bottom <= window.innerHeight;
 
@@ -133,7 +176,7 @@ export function OverlayScrollbar({
       }
     };
     const updateAndSyncSlotBounds = () => {
-      instance.update();
+      horizontalInstance.update();
       syncSlotBounds();
     };
 
@@ -143,7 +186,7 @@ export function OverlayScrollbar({
     resizeObserver.observe(host);
     window.addEventListener("resize", updateAndSyncSlotBounds);
     window.addEventListener("scroll", syncSlotBounds, true);
-    instance.update();
+    horizontalInstance.update();
     syncSlotBounds();
 
     return () => {
@@ -151,9 +194,9 @@ export function OverlayScrollbar({
       window.removeEventListener("resize", updateAndSyncSlotBounds);
       window.removeEventListener("scroll", syncSlotBounds, true);
       if (!existing) {
-        instance.destroy();
+        horizontalInstance.destroy();
       }
-      if (scrollbarRef.current === instance) {
+      if (scrollbarRef.current === horizontalInstance) {
         scrollbarRef.current = null;
       }
       if (syncSlotBoundsRef.current === syncSlotBounds) {
@@ -161,7 +204,7 @@ export function OverlayScrollbar({
       }
       slot.remove();
     };
-  }, [options]);
+  }, [axis, resolvedOptions]);
 
   useEffect(() => {
     syncSlotBoundsRef.current?.();
@@ -177,7 +220,11 @@ export function OverlayScrollbar({
       {...props}
       ref={hostRef}
       className={cn(
-        nativeScrollbars ? "overflow-x-auto" : "overflow-hidden",
+        nativeScrollbars
+          ? axis === "vertical"
+            ? "overflow-y-auto"
+            : "overflow-x-auto"
+          : "overflow-hidden",
         className,
       )}
       data-overlayscrollbars-initialize={nativeScrollbars ? undefined : ""}

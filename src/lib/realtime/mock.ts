@@ -57,6 +57,7 @@ import {
   generateDemoReferrerRadar,
 } from "@/lib/realtime/mock/browser-client";
 import {
+  generateDemoEventFields,
   generateDemoEventRecordDetail,
   generateDemoEventsRecords,
   generateDemoEventsSummary,
@@ -83,7 +84,7 @@ import {
 } from "@/lib/realtime/mock/share-trends";
 import { generateDemoTeamDashboard } from "@/lib/realtime/mock/team-dashboard";
 import {
-  generateDemoFilterOptions,
+  generateDemoFilterValues,
   generateDemoGeoPoints,
   generateDemoOverviewClientTab,
   generateDemoOverviewGeoTab,
@@ -467,8 +468,12 @@ export function handleDemoRequest(options: {
   const publicSiteProfile = publicRouteMatch
     ? findSiteProfileByPublicSlug(publicRouteMatch[1] || "")
     : null;
+  const apiV1SiteMatch = path.match(/\/api\/v1\/sites\/([^/]+)/);
   const siteId = String(
-    params.siteId || publicSiteProfile?.id || "demo-site-001",
+    params.siteId ||
+      apiV1SiteMatch?.[1] ||
+      publicSiteProfile?.id ||
+      "demo-site-001",
   );
   const teamId = String(params.teamId || "");
   const bodyRecord =
@@ -876,7 +881,15 @@ export function handleDemoRequest(options: {
 
   // Analytics query routes
   if (path.includes("/filter-values")) {
-    return generateDemoFilterOptions(siteId, params);
+    return generateDemoFilterValues(
+      siteId,
+      params,
+      path.includes("/api/public/")
+        ? "public-share"
+        : path.includes("/api/v1/")
+          ? "api-v1"
+          : "private-dashboard",
+    );
   }
   if (path.includes("/overview-page-path")) {
     return generateDemoOverviewPageTab(siteId, params, "path");
@@ -938,8 +951,18 @@ export function handleDemoRequest(options: {
   if (path.includes("/event-record-detail")) {
     return generateDemoEventRecordDetail(siteId, params);
   }
-  if (path.includes("/event-type-field-values")) {
+  if (
+    (path.includes("/api/private/") || path.includes("/api/v1/")) &&
+    (path.includes("/event-type-field-values") ||
+      path.includes("/event-fields/values"))
+  ) {
     return generateDemoEventTypeFieldValues(siteId, params);
+  }
+  if (
+    (path.includes("/api/private/") || path.includes("/api/v1/")) &&
+    (path.includes("/event-type-fields") || path.endsWith("/event-fields"))
+  ) {
+    return generateDemoEventFields(siteId, params);
   }
   if (path.includes("/event-type-detail")) {
     return generateDemoEventTypeDetail(siteId, params);
@@ -1068,7 +1091,7 @@ export function handleDemoRequest(options: {
     if (subPath === "countries")
       return generateDemoDimension(siteId, "countries", params);
     if (subPath === "filter-values")
-      return generateDemoFilterOptions(siteId, params);
+      return generateDemoFilterValues(siteId, params, "public-share");
     if (subPath === "overview-geo-points")
       return generateDemoGeoPoints(siteId, params);
     if (subPath.startsWith("overview-client-")) {

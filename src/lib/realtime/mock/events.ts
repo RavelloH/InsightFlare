@@ -483,6 +483,33 @@ export function generateDemoEventTypeDetail(
   };
 }
 
+export function generateDemoEventFields(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const eventName = normalizeDemoFilterValue(params.eventName) ?? "";
+  if (!eventName) return { ok: true, eventName, fields: [] };
+
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const events = filterDemoCustomEventsByPayload(
+    createDemoCustomEventFacts(filtered.visits),
+    filters,
+  ).filter((event) => event.eventName === eventName);
+
+  return {
+    ok: true,
+    eventName,
+    fields: collectDemoEventFields(
+      events,
+      parseDemoLimit(params.limit, 100, 1, 200),
+    ),
+  };
+}
+
 export function generateDemoEventTypeFieldValues(
   siteId: string,
   params: Record<string, string | number>,
@@ -494,6 +521,7 @@ export function generateDemoEventTypeFieldValues(
   const to = parseDemoNumber(params.to, Date.now());
   const filters = parseDemoFilters(params);
   const limit = parseDemoLimit(params.limit, 25, 1, 100);
+  const search = normalizeDemoSearch(params);
   if (!eventName || !fieldPath || !fieldValueType) {
     return {
       ok: true,
@@ -513,7 +541,9 @@ export function generateDemoEventTypeFieldValues(
     ok: true,
     fieldPath,
     fieldValueType,
-    data: collectDemoEventFieldValues(events, fieldPath, fieldValueType, limit),
+    data: collectDemoEventFieldValues(events, fieldPath, fieldValueType, limit)
+      .filter((row) => demoValuesIncludeSearch(search, [row.value]))
+      .slice(0, limit),
   };
 }
 

@@ -215,8 +215,10 @@ filterBuilder:
     boolean: 布尔值
   booleanTrue: "是"
   booleanFalse: "否"
+  valueUnset: (未设置)
+  valueLoading: 正在加载值
   valueSearchPlaceholder: 搜索或输入值
-  valueListPlaceholder: 输入多个值，以逗号分隔
+  valueListPlaceholder: 搜索或输入值后按 Enter 添加
   rangeStartPlaceholder: 下限
   rangeEndPlaceholder: 上限
   jsonPointer: JSON 指针

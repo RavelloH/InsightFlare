@@ -20,6 +20,7 @@ interface GeoPointsMapIslandProps {
   heightClassName?: string;
   countryHoverEnabled?: boolean;
   pointColor?: [number, number, number];
+  bordered?: boolean;
   projectionMode?: "mercator" | "globe";
   autoRotate?: boolean;
   selectedCountryCode?: string | null;
@@ -32,7 +33,7 @@ const DEFAULT_MAP_HEIGHT_CLASS = "h-[460px]";
 
 function GeoPointsMapFallback() {
   return (
-    <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-md border border-border/70 bg-muted/20">
+    <div className="flex h-full w-full items-center justify-center overflow-hidden border border-border/70 bg-muted/20">
       <Spinner className="size-6" />
     </div>
   );

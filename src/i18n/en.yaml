@@ -215,8 +215,10 @@ filterBuilder:
     boolean: Boolean
   booleanTrue: "True"
   booleanFalse: "False"
+  valueUnset: (Not set)
+  valueLoading: Loading values
   valueSearchPlaceholder: Search or enter a value
-  valueListPlaceholder: Enter values separated by commas
+  valueListPlaceholder: Search or enter a value, then press Enter
   rangeStartPlaceholder: Lower bound
   rangeEndPlaceholder: Upper bound
   jsonPointer: JSON Pointer

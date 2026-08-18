@@ -814,6 +814,37 @@ describe("mock — handleDemoRequest", () => {
           occurrences: expect.any(Number),
         }),
       );
+
+      const fields = asRecord(
+        handleDemoRequest({
+          path: "/api/private/event-type-fields",
+          params: { ...ANALYTICS_PARAMS, eventName },
+        }),
+      );
+      expect(fields).toMatchObject({ ok: true, eventName });
+      expect(fields.fields).toEqual(expect.any(Array));
+
+      const apiV1Fields = asRecord(
+        handleDemoRequest({
+          path: `/api/v1/sites/${SITE_ID}/event-fields`,
+          params: { ...ANALYTICS_PARAMS, eventName },
+        }),
+      );
+      expect(apiV1Fields).toMatchObject({ ok: true, eventName });
+
+      const apiV1FieldValues = asRecord(
+        handleDemoRequest({
+          path: `/api/v1/sites/${SITE_ID}/event-fields/values`,
+          params: {
+            ...ANALYTICS_PARAMS,
+            eventName,
+            fieldPath: "/plan",
+            fieldValueType: "string",
+            search: "pro",
+          },
+        }),
+      );
+      expect(apiV1FieldValues.data).toEqual(expect.any(Array));
     });
 
     it("supports event payload filters for scalar and array values", () => {
@@ -898,22 +929,36 @@ describe("mock — handleDemoRequest", () => {
     });
 
     it.each([
-      "country",
-      "device",
-      "browser",
-      "path",
-      "sourceDomain",
-      "sourceLink",
-      "clientBrowser",
-      "clientOsVersion",
-      "clientDeviceType",
-      "clientLanguage",
-      "clientScreenSize",
-      "geo",
-      "geoContinent",
-      "geoTimezone",
-      "geoOrganization",
-    ])("returns deduped filter options for %s", (filterKey) => {
+      "page.path",
+      "page.title",
+      "page.hostname",
+      "page.query",
+      "page.hash",
+      "session.entryPath",
+      "session.exitPath",
+      "referrer.domain",
+      "referrer.url",
+      "client.browser",
+      "client.browserVersion",
+      "client.browserEngine",
+      "client.os",
+      "client.osVersion",
+      "client.deviceType",
+      "client.language",
+      "client.screenSize",
+      "geo.country",
+      "geo.region",
+      "geo.city",
+      "geo.continent",
+      "geo.timeZone",
+      "geo.organization",
+      "event.name",
+      "utm.source",
+      "utm.medium",
+      "utm.campaign",
+      "utm.term",
+      "utm.content",
+    ])("returns canonical filter values for %s", (filterKey) => {
       const res = ok(
         handleDemoRequest({
           path: "/api/private/filter-values",
@@ -922,11 +967,64 @@ describe("mock — handleDemoRequest", () => {
       );
 
       expect(res.ok).toBe(true);
+      expect(asRecord(res).field).toBe(filterKey);
       expect(Array.isArray(res.data)).toBe(true);
       const values = (res.data as Array<{ value: string }>).map(
         (item) => item.value,
       );
       expect(new Set(values).size).toBe(values.length);
+    });
+
+    it("excludes the current canonical condition before finding filter values", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/filter-values",
+          params: {
+            ...ANALYTICS_PARAMS,
+            filterKey: "page.path",
+            "filter[page.path]": "/not-present-in-demo",
+          },
+        }),
+      );
+      expect(res).toMatchObject({ ok: true, field: "page.path" });
+      expect(res.data).toEqual(expect.any(Array));
+    });
+
+    it("removes nested NOT and OR branches for the active canonical field", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/filter-values",
+          params: {
+            ...ANALYTICS_PARAMS,
+            filterKey: "page.path",
+            "filter[page.path][not]": "/private",
+            "filter[page.title][not]": "Internal",
+            "filter[page.path][or:0.0]": "/",
+            "filter[page.title][or:0.1]": "Home",
+          },
+        }),
+      );
+      expect(res).toMatchObject({ ok: true, field: "page.path" });
+    });
+
+    it("returns an empty event-fields response when eventName is absent", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/event-type-fields",
+          params: ANALYTICS_PARAMS,
+        }),
+      );
+      expect(res).toEqual({ ok: true, eventName: "", fields: [] });
+    });
+
+    it("limits public filter values to public canonical fields", () => {
+      const denied = asRecord(
+        handleDemoRequest({
+          path: "/api/public/share/some-token/filter-values",
+          params: { ...ANALYTICS_PARAMS, filterKey: "page.query" },
+        }),
+      );
+      expect(denied).toMatchObject({ ok: false, data: [] });
     });
 
     it("returns hierarchical geo point counts with and without region filters", () => {
@@ -1455,7 +1553,7 @@ describe("mock — handleDemoRequest", () => {
         params: {
           ...params,
           dimension: "browser",
-          filterKey: "browser",
+          filterKey: "client.browser",
           primaryDimension: "browser",
           secondaryDimension: "language",
         },

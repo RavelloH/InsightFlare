@@ -44,6 +44,7 @@ interface GeoPointsMap3DProps {
   countryHoverEnabled?: boolean;
   pointColor?: [number, number, number];
   autoRotate?: boolean;
+  bordered?: boolean;
   selectedCountryCode?: string | null;
   onCountrySelect?: (countryCode: string | null) => void;
   collapseOverlappingPointColors?: boolean;
@@ -509,6 +510,7 @@ export function GeoPointsMap3D({
   countryHoverEnabled = true,
   pointColor = MAP_ACCENT_RGB,
   autoRotate = false,
+  bordered = true,
   selectedCountryCode,
   onCountrySelect,
   collapseOverlappingPointColors = false,
@@ -1061,7 +1063,7 @@ export function GeoPointsMap3D({
     <div
       data-geo-map-mode="3d"
       className={`relative ${heightClassName} w-full overflow-hidden ${
-        isGlobe ? "bg-background" : "rounded-md border border-border/70"
+        isGlobe ? "bg-background" : bordered ? "border border-border/70" : ""
       }`}
       style={MAP_VIEWPORT_RENDER_ISOLATION_STYLE}
     >
@@ -1134,7 +1136,7 @@ export function GeoPointsMap3D({
             exit={{ opacity: 0, y: 12 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
-            <div className="inline-flex items-center gap-4 rounded-md border border-border/70 bg-background/92 px-3 py-2 text-xs shadow-lg backdrop-blur-sm">
+            <div className="inline-flex items-center gap-4 border border-border/70 bg-background/92 px-3 py-2 text-xs shadow-lg backdrop-blur-sm">
               <AutoResizer
                 initial
                 animateWidth

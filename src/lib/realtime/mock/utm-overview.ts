@@ -510,4 +510,7 @@ export function generateDemoOverviewGeoTab(
   };
 }
 
-export { generateDemoFilterOptions } from "@/lib/realtime/mock/filter-options";
+export {
+  generateDemoFilterOptions,
+  generateDemoFilterValues,
+} from "@/lib/realtime/mock/filter-options";

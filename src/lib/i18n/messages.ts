@@ -166,6 +166,8 @@ export interface AppMessages {
     };
     booleanTrue: string;
     booleanFalse: string;
+    valueUnset: string;
+    valueLoading: string;
     valueSearchPlaceholder: string;
     valueListPlaceholder: string;
     rangeStartPlaceholder: string;
@@ -2315,8 +2317,10 @@ const enMessages = {
     },
     booleanTrue: "True",
     booleanFalse: "False",
+    valueUnset: "(Not set)",
+    valueLoading: "Loading values",
     valueSearchPlaceholder: "Search or enter a value",
-    valueListPlaceholder: "Enter values separated by commas",
+    valueListPlaceholder: "Search or enter a value, then press Enter",
     rangeStartPlaceholder: "Lower bound",
     rangeEndPlaceholder: "Upper bound",
     jsonPointer: "JSON Pointer",
@@ -4633,8 +4637,10 @@ const zhMessages = {
     },
     booleanTrue: "是",
     booleanFalse: "否",
+    valueUnset: "(未设置)",
+    valueLoading: "正在加载值",
     valueSearchPlaceholder: "搜索或输入值",
-    valueListPlaceholder: "输入多个值，以逗号分隔",
+    valueListPlaceholder: "搜索或输入值后按 Enter 添加",
     rangeStartPlaceholder: "下限",
     rangeEndPlaceholder: "上限",
     jsonPointer: "JSON 指针",
@@ -6875,8 +6881,10 @@ const jaMessages = {
     },
     booleanTrue: "真",
     booleanFalse: "偽",
+    valueUnset: "（未設定）",
+    valueLoading: "値を読み込み中",
     valueSearchPlaceholder: "値を検索または入力",
-    valueListPlaceholder: "値をカンマで区切って入力",
+    valueListPlaceholder: "値を検索または入力して Enter で追加",
     rangeStartPlaceholder: "下限",
     rangeEndPlaceholder: "上限",
     jsonPointer: "JSON ポインター",

@@ -638,7 +638,12 @@ export function DashboardHeaderControls({
                   className={filterTriggerClassName}
                   style={filterTriggerStyle}
                 >
-                  <RiFilter3Line className="size-4 text-muted-foreground" />
+                  <RiFilter3Line
+                    className={cn(
+                      "size-4",
+                      !hasActiveFilters && "text-muted-foreground",
+                    )}
+                  />
                   {messages.dashboardHeader.filters}
                   <FilterActiveCountBadge count={activeFilterCount} />
                 </Button>
@@ -807,7 +812,12 @@ export function DashboardHeaderControls({
                   className={filterTriggerClassName}
                   style={filterTriggerStyle}
                 >
-                  <RiFilter3Line className="size-4 text-muted-foreground" />
+                  <RiFilter3Line
+                    className={cn(
+                      "size-4",
+                      !hasActiveFilters && "text-muted-foreground",
+                    )}
+                  />
                   {messages.dashboardHeader.filters}
                   <FilterActiveCountBadge count={activeFilterCount} />
                 </Button>
