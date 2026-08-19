@@ -1,9 +1,8 @@
-import { RiLoginBoxLine, RiTranslate2 } from "@remixicon/react";
+import { RiLoginBoxLine } from "@remixicon/react";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { AuthPageActions } from "@/components/auth/auth-page-actions";
 import { LoginForm } from "@/components/auth/login-form";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -63,32 +62,11 @@ function Page() {
               <RiLoginBoxLine className="size-5" />
               {t.login.title}
             </CardTitle>
-            <div className="flex items-center gap-1">
-              <ThemeToggle
-                lightLabel={t.actions.switchToLight}
-                darkLabel={t.actions.switchToDark}
-                className="w-fit self-end"
-              />
-              {(["en", "zh", "ja"] as const).map((item) => (
-                <Button
-                  key={item}
-                  variant={locale === item ? "default" : "outline"}
-                  size="xs"
-                  asChild
-                >
-                  <Link href={withNext(`/${item}/login`, nextPath)}>
-                    <RiTranslate2 className="size-3" />
-                    <span>
-                      {item === "en"
-                        ? t.actions.switchToEnglish
-                        : item === "zh"
-                          ? t.actions.switchToChinese
-                          : t.actions.switchToJapanese}
-                    </span>
-                  </Link>
-                </Button>
-              ))}
-            </div>
+            <AuthPageActions
+              locale={locale}
+              messages={t}
+              buildHref={(item) => withNext(`/${item}/login`, nextPath)}
+            />
           </div>
           <CardDescription>{t.login.subtitle}</CardDescription>
         </CardHeader>

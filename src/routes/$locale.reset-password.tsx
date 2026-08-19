@@ -1,7 +1,8 @@
+import { useEffect, useState } from "react";
 import { RiLockPasswordLine } from "@remixicon/react";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { AccountLinkPageActions } from "@/components/auth/account-link-page-actions";
+import { AuthPageActions } from "@/components/auth/auth-page-actions";
 import { ResetPasswordLinkForm } from "@/components/auth/reset-password-link-form";
 import {
   Card,
@@ -10,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import type { Locale } from "@/lib/i18n/config";
 import { dashboardPageTitle } from "@/lib/page-title";
 import Link from "@/lib/router";
 export const Route = createFileRoute("/$locale/reset-password")({
@@ -27,6 +29,11 @@ export const Route = createFileRoute("/$locale/reset-password")({
 });
 function Page() {
   const { locale, messages: t } = Route.useRouteContext();
+  const [hash, setHash] = useState("");
+  useEffect(() => {
+    setHash(window.location.hash);
+  }, []);
+  const buildHref = (item: Locale) => `/${item}/reset-password${hash}`;
   return (
     <main className="grid min-h-svh place-items-center p-4">
       <Card className="w-full max-w-md">
@@ -44,14 +51,10 @@ function Page() {
               <RiLockPasswordLine className="size-5" />
               {t.accountLinks.resetPassword.title}
             </CardTitle>
-            <AccountLinkPageActions
+            <AuthPageActions
               locale={locale}
-              path="/reset-password"
-              lightLabel={t.actions.switchToLight}
-              darkLabel={t.actions.switchToDark}
-              englishLabel={t.actions.switchToEnglish}
-              chineseLabel={t.actions.switchToChinese}
-              japaneseLabel={t.actions.switchToJapanese}
+              messages={t}
+              buildHref={buildHref}
             />
           </div>
           <CardDescription>

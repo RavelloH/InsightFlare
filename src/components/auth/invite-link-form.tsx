@@ -189,7 +189,7 @@ export function InviteLinkForm({ locale, copy }: InviteLinkFormProps) {
       : "register";
 
   return (
-    <AutoResizer initial>
+    <AutoResizer initial={false}>
       <AutoTransition initial duration={0.22} transitionKey={contentKey}>
         {loading ? (
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -211,7 +211,6 @@ export function InviteLinkForm({ locale, copy }: InviteLinkFormProps) {
           </div>
         ) : (
           <form
-            className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
               void completeInvite();
@@ -252,12 +251,12 @@ export function InviteLinkForm({ locale, copy }: InviteLinkFormProps) {
               </div>
             </div>
 
-            <AutoResizer initial>
-              <AutoTransition
-                initial={false}
-                duration={0.2}
-                transitionKey={accountActionKey}
-              >
+            <AutoTransition
+              initial={false}
+              duration={0.2}
+              transitionKey={accountActionKey}
+            >
+              <div className="pt-4">
                 {signedIn ? (
                   <div className="flex items-start gap-2 border border-primary/20 bg-primary/5 p-3 text-primary">
                     <RiCheckLine className="mt-0.5 size-4 shrink-0" />
@@ -323,41 +322,31 @@ export function InviteLinkForm({ locale, copy }: InviteLinkFormProps) {
                     </div>
                   </div>
                 )}
-              </AutoTransition>
-            </AutoResizer>
+              </div>
+            </AutoTransition>
 
-            <AutoResizer initial>
-              <AutoTransition
-                initial={false}
-                duration={0.2}
-                transitionKey={requiresLogin ? "empty" : "submit"}
-              >
-                {!requiresLogin ? (
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={submitting}
+            {!requiresLogin ? (
+              <div className="pt-4">
+                <Button type="submit" className="w-full" disabled={submitting}>
+                  <AutoTransition
+                    className="inline-flex items-center gap-2"
+                    transitionKey={submitting ? "submitting" : "idle"}
                   >
-                    <AutoTransition
-                      className="inline-flex items-center gap-2"
-                      transitionKey={submitting ? "submitting" : "idle"}
-                    >
-                      {submitting ? (
-                        <span className="inline-flex items-center gap-2">
-                          <Spinner className="size-4" />
-                          {copy.accepting}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-2">
-                          <RiCheckLine className="size-4" />
-                          {copy.accept}
-                        </span>
-                      )}
-                    </AutoTransition>
-                  </Button>
-                ) : null}
-              </AutoTransition>
-            </AutoResizer>
+                    {submitting ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Spinner className="size-4" />
+                        {copy.accepting}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-2">
+                        <RiCheckLine className="size-4" />
+                        {copy.accept}
+                      </span>
+                    )}
+                  </AutoTransition>
+                </Button>
+              </div>
+            ) : null}
           </form>
         )}
       </AutoTransition>
