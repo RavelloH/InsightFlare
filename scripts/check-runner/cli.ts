@@ -90,6 +90,10 @@ const tasks: CheckTask[] = [
         name: "Skills spec",
         args: ["run", "check:skills"],
       },
+      {
+        name: "Schema spec",
+        args: ["run", "check:schema"],
+      },
     ],
   },
   {
