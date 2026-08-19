@@ -703,6 +703,7 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
         </BarChart>
       </ChartContainer>
       <AutoTransition
+        initial={false}
         aria-hidden={!loading && hasChartSize}
         className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-muted-foreground"
         transitionKey={loading || !hasChartSize ? "loading" : "ready"}

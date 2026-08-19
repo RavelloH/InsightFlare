@@ -57,9 +57,10 @@ export function fillMissingTrafficData(
   );
   const fallbackFrom = sortedStarts[0] ?? 0;
   const fallbackTo = sortedStarts[sortedStarts.length - 1] ?? fallbackFrom;
-  const rangeFrom = Number.isFinite(range?.from)
-    ? startOfZonedInterval(Number(range?.from ?? 0), interval, timeZone)
-    : fallbackFrom;
+  const rangeFrom =
+    Number.isFinite(range?.from) && Number(range?.from) > 0
+      ? startOfZonedInterval(Number(range?.from ?? 0), interval, timeZone)
+      : fallbackFrom;
   const rangeTo = Number.isFinite(range?.to)
     ? startOfZonedInterval(Number(range?.to ?? 0), interval, timeZone)
     : fallbackTo;

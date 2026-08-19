@@ -1230,6 +1230,25 @@ empty:
   noTeams: 利用可能なチームはまだありません。
   noSites: このチームには利用可能なサイトがありません。
   siteNotFound: チームまたはサイトが見つかりません。
+errorPage:
+  notFoundEyebrow: ページが見つかりません
+  notFoundTitle: お探しのページが見つかりません
+  notFoundDescription: アドレスが正しくないか、ページが移動した可能性があります。
+  errorEyebrow: アプリケーションエラー
+  errorTitle: 問題が発生しました
+  errorDescription: InsightFlare はリクエストを完了できませんでした。以下の診断情報が調査に役立ちます。
+  statusLabel: ステータス
+  reasonLabel: 原因
+  requestLabel: リクエストパス
+  timestampLabel: タイムスタンプ
+  diagnosticIdLabel: 診断 ID
+  errorTypeLabel: エラー種別
+  errorMessageLabel: エラーメッセージ
+  notFoundReason: route_not_found
+  unexpectedReason: unexpected_application_error
+  homeAction: ホームに戻る
+  reportAction: GitHub で報告
+  reportHint: 内容を確認できるよう、入力済みの GitHub Issue が開きます。
 actions:
   logout: ログアウト
   switchToEnglish: English

@@ -1275,6 +1275,25 @@ empty:
   noTeams: No team available yet.
   noSites: No site is available under this team.
   siteNotFound: Team or site not found.
+errorPage:
+  notFoundEyebrow: Page not found
+  notFoundTitle: We couldn't find that page
+  notFoundDescription: The address may be incorrect, or the page may have moved.
+  errorEyebrow: Application error
+  errorTitle: Something went wrong
+  errorDescription: InsightFlare couldn't complete this request. The diagnostic details below can help us investigate.
+  statusLabel: Status
+  reasonLabel: Reason
+  requestLabel: Request path
+  timestampLabel: Timestamp
+  diagnosticIdLabel: Diagnostic ID
+  errorTypeLabel: Error type
+  errorMessageLabel: Error message
+  notFoundReason: route_not_found
+  unexpectedReason: unexpected_application_error
+  homeAction: Return home
+  reportAction: Report on GitHub
+  reportHint: The report opens a pre-filled GitHub issue. Review it before submitting.
 actions:
   logout: Logout
   switchToEnglish: English

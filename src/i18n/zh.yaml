@@ -1224,6 +1224,25 @@ empty:
   noTeams: 当前账号还没有可访问的团队。
   noSites: 该团队下暂无可访问站点。
   siteNotFound: 未找到对应团队或站点。
+errorPage:
+  notFoundEyebrow: 页面未找到
+  notFoundTitle: 找不到这个页面
+  notFoundDescription: 地址可能不正确，或者页面已经被移动。
+  errorEyebrow: 应用错误
+  errorTitle: 页面出现了问题
+  errorDescription: InsightFlare 无法完成这次请求。下面的诊断信息可以帮助我们定位问题。
+  statusLabel: 状态
+  reasonLabel: 原因
+  requestLabel: 请求路径
+  timestampLabel: 时间
+  diagnosticIdLabel: 诊断 ID
+  errorTypeLabel: 错误类型
+  errorMessageLabel: 错误信息
+  notFoundReason: route_not_found
+  unexpectedReason: unexpected_application_error
+  homeAction: 返回首页
+  reportAction: 在 GitHub 反馈
+  reportHint: 将打开一个已预填内容的 GitHub Issue，提交前请先检查信息。
 actions:
   logout: 退出登录
   switchToEnglish: English

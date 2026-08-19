@@ -30,6 +30,26 @@ describe("traffic chart data", () => {
     ]);
   });
 
+  it("starts an all-time chart at its first valid data point", () => {
+    const first = Date.UTC(2026, 7, 1);
+    expect(
+      fillMissingTrafficData(
+        [
+          { timestampMs: first, views: 10, visitors: 5 },
+          { timestampMs: first + 2 * 86_400_000, views: 6, visitors: 3 },
+        ],
+        "day",
+        "UTC",
+        { from: 0, to: Date.UTC(2026, 7, 4) },
+      ),
+    ).toEqual([
+      { timestampMs: first, views: 10, visitors: 5 },
+      { timestampMs: first + 86_400_000, views: 0, visitors: 0 },
+      { timestampMs: first + 2 * 86_400_000, views: 6, visitors: 3 },
+      { timestampMs: first + 3 * 86_400_000, views: 0, visitors: 0 },
+    ]);
+  });
+
   it("downsamples counts without exceeding the view total", () => {
     expect(
       downsampleTrafficData(

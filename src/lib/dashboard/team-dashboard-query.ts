@@ -79,11 +79,14 @@ function safeCount(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
-function bucketStarts(window: TeamDashboardWindow): number[] {
+function bucketStarts(
+  window: TeamDashboardWindow,
+  firstDataTimestamp?: number,
+): number[] {
   const starts: number[] = [];
   const end = startOfZonedInterval(window.to, window.interval, window.timeZone);
   let current = startOfZonedInterval(
-    window.from,
+    window.from > 0 ? window.from : (firstDataTimestamp ?? window.from),
     window.interval,
     window.timeZone,
   );
@@ -188,6 +191,13 @@ export function buildTeamAggregateTrend(
   trend: readonly TeamDashboardTrendBucket[],
   window: TeamDashboardWindow,
 ): TeamAggregateTrendPoint[] {
+  const firstDataTimestamp = trend.reduce<number | undefined>(
+    (earliest, point) =>
+      earliest === undefined
+        ? point.timestampMs
+        : Math.min(earliest, point.timestampMs),
+    undefined,
+  );
   const timeline = new Map<
     number,
     {
@@ -195,7 +205,7 @@ export function buildTeamAggregateTrend(
       sites: Map<string, { views: number; visitors: number }>;
     }
   >(
-    bucketStarts(window).map((timestampMs) => [
+    bucketStarts(window, firstDataTimestamp).map((timestampMs) => [
       timestampMs,
       { timestampMs, sites: new Map() },
     ]),
@@ -237,7 +247,14 @@ export function buildTeamSiteTrends(
   trend: readonly TeamDashboardTrendBucket[],
   window: TeamDashboardWindow,
 ): Record<string, TeamTrafficPoint[]> {
-  const starts = bucketStarts(window);
+  const firstDataTimestamp = trend.reduce<number | undefined>(
+    (earliest, point) =>
+      earliest === undefined
+        ? point.timestampMs
+        : Math.min(earliest, point.timestampMs),
+    undefined,
+  );
+  const starts = bucketStarts(window, firstDataTimestamp);
   const bySite = new Map<string, Map<number, TeamTrafficPoint>>();
   for (const siteId of siteIds) {
     bySite.set(

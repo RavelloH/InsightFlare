@@ -1222,6 +1222,26 @@ export interface AppMessages {
     noSites: string;
     siteNotFound: string;
   };
+  errorPage: {
+    notFoundEyebrow: string;
+    notFoundTitle: string;
+    notFoundDescription: string;
+    errorEyebrow: string;
+    errorTitle: string;
+    errorDescription: string;
+    statusLabel: string;
+    reasonLabel: string;
+    requestLabel: string;
+    timestampLabel: string;
+    diagnosticIdLabel: string;
+    errorTypeLabel: string;
+    errorMessageLabel: string;
+    notFoundReason: string;
+    unexpectedReason: string;
+    homeAction: string;
+    reportAction: string;
+    reportHint: string;
+  };
   actions: {
     logout: string;
     switchToEnglish: string;
@@ -3593,6 +3613,29 @@ const enMessages = {
     noSites: "No site is available under this team.",
     siteNotFound: "Team or site not found.",
   },
+  errorPage: {
+    notFoundEyebrow: "Page not found",
+    notFoundTitle: "We couldn't find that page",
+    notFoundDescription:
+      "The address may be incorrect, or the page may have moved.",
+    errorEyebrow: "Application error",
+    errorTitle: "Something went wrong",
+    errorDescription:
+      "InsightFlare couldn't complete this request. The diagnostic details below can help us investigate.",
+    statusLabel: "Status",
+    reasonLabel: "Reason",
+    requestLabel: "Request path",
+    timestampLabel: "Timestamp",
+    diagnosticIdLabel: "Diagnostic ID",
+    errorTypeLabel: "Error type",
+    errorMessageLabel: "Error message",
+    notFoundReason: "route_not_found",
+    unexpectedReason: "unexpected_application_error",
+    homeAction: "Return home",
+    reportAction: "Report on GitHub",
+    reportHint:
+      "The report opens a pre-filled GitHub issue. Review it before submitting.",
+  },
   actions: {
     logout: "Logout",
     switchToEnglish: "English",
@@ -4246,7 +4289,7 @@ const enMessages = {
     subtitle: "Manage sites under the current team.",
     team: "Team",
     createTitle: "Create Site",
-    createSubtitle: "Create a site for analytics.",
+    createSubtitle: "The new site can be opened immediately.",
     name: "Site Name",
     domain: "Domain",
     publicSlug: "Public Slug (optional)",
@@ -5993,6 +6036,27 @@ const zhMessages = {
     noSites: "该团队下暂无可访问站点。",
     siteNotFound: "未找到对应团队或站点。",
   },
+  errorPage: {
+    notFoundEyebrow: "页面未找到",
+    notFoundTitle: "找不到这个页面",
+    notFoundDescription: "地址可能不正确，或者页面已经被移动。",
+    errorEyebrow: "应用错误",
+    errorTitle: "页面出现了问题",
+    errorDescription:
+      "InsightFlare 无法完成这次请求。下面的诊断信息可以帮助我们定位问题。",
+    statusLabel: "状态",
+    reasonLabel: "原因",
+    requestLabel: "请求路径",
+    timestampLabel: "时间",
+    diagnosticIdLabel: "诊断 ID",
+    errorTypeLabel: "错误类型",
+    errorMessageLabel: "错误信息",
+    notFoundReason: "route_not_found",
+    unexpectedReason: "unexpected_application_error",
+    homeAction: "返回首页",
+    reportAction: "在 GitHub 反馈",
+    reportHint: "将打开一个已预填内容的 GitHub Issue，提交前请先检查信息。",
+  },
   actions: {
     logout: "退出登录",
     switchToEnglish: "English",
@@ -6628,7 +6692,7 @@ const zhMessages = {
     subtitle: "管理当前团队下的站点。",
     team: "团队",
     createTitle: "新建站点",
-    createSubtitle: "新建一个用于分析的站点。",
+    createSubtitle: "新建后可直接进入分析页面。",
     name: "站点名称",
     domain: "域名",
     publicSlug: "公开 Slug（可选）",
@@ -8414,6 +8478,28 @@ const jaMessages = {
     noSites: "このチームには利用可能なサイトがありません。",
     siteNotFound: "チームまたはサイトが見つかりません。",
   },
+  errorPage: {
+    notFoundEyebrow: "ページが見つかりません",
+    notFoundTitle: "お探しのページが見つかりません",
+    notFoundDescription:
+      "アドレスが正しくないか、ページが移動した可能性があります。",
+    errorEyebrow: "アプリケーションエラー",
+    errorTitle: "問題が発生しました",
+    errorDescription:
+      "InsightFlare はリクエストを完了できませんでした。以下の診断情報が調査に役立ちます。",
+    statusLabel: "ステータス",
+    reasonLabel: "原因",
+    requestLabel: "リクエストパス",
+    timestampLabel: "タイムスタンプ",
+    diagnosticIdLabel: "診断 ID",
+    errorTypeLabel: "エラー種別",
+    errorMessageLabel: "エラーメッセージ",
+    notFoundReason: "route_not_found",
+    unexpectedReason: "unexpected_application_error",
+    homeAction: "ホームに戻る",
+    reportAction: "GitHub で報告",
+    reportHint: "内容を確認できるよう、入力済みの GitHub Issue が開きます。",
+  },
   actions: {
     logout: "ログアウト",
     switchToEnglish: "English",
@@ -9069,7 +9155,7 @@ const jaMessages = {
     subtitle: "現在のチーム配下のサイトを管理します。",
     team: "チーム",
     createTitle: "サイトを作成",
-    createSubtitle: "分析用のサイトを新規作成します。",
+    createSubtitle: "新しいサイトはすぐに開けます。",
     name: "サイト名",
     domain: "ドメイン",
     publicSlug: "公開スラッグ（任意）",
