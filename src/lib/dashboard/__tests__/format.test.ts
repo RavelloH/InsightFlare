@@ -68,6 +68,13 @@ describe("Dashboard Format Utilities", () => {
       expect(shortDateTime("en", "0")).toBe("--");
     });
 
+    it("should return fallback for positive numbers that exceed the valid date range", () => {
+      // Finite and > 0, but `new Date(value)` produces an Invalid Date.
+      expect(shortDateTime("en", 8.64e15 + 1000 as any)).toBe("--");
+      // Numeric-string path reaching the same invalid-Date branch.
+      expect(shortDateTime("en", "1e20" as any)).toBe("--");
+    });
+
     it("should correctly parse and format valid Date objects", () => {
       const date = new Date(Date.UTC(2026, 4, 25, 3, 43, 43)); // May 25, 2026 03:43:43 UTC
       const resultDate = shortDate("en", date, "UTC");

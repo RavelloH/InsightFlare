@@ -169,6 +169,39 @@ describe("mock/analytics-retention coverage", () => {
       cohorts: [],
     });
   });
+
+  it("skips visits whose start time falls outside the generated buckets", () => {
+    const visits = [
+      makeVisit({ visitId: "in-range", visitorId: "u1", startedAt: 1_000 }),
+      makeVisit({
+        visitId: "after-window",
+        visitorId: "u2",
+        sessionId: "s-late",
+        startedAt: 60 * 60 * 1000, // beyond `to`
+      }),
+    ];
+    const dataset = makeDataset(visits);
+    mockBuildDemoFactDataset.mockReturnValue(dataset);
+    mockApplyDemoFilters.mockReturnValue(makeFiltered(visits));
+
+    expect(
+      generateDemoRetention("site", {
+        from: 0,
+        to: 1_000,
+        granularity: "hour",
+        timeZone: "UTC",
+      }),
+    ).toMatchObject({
+      ok: true,
+      cohorts: [
+        expect.objectContaining({
+          bucket: 0,
+          size: 1,
+          periods: [expect.objectContaining({ index: 0, visitors: 1 })],
+        }),
+      ],
+    });
+  });
 });
 
 function makeDataset(visits: DemoVisitFact[]): DemoFactDataset {

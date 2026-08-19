@@ -89,6 +89,21 @@ describe("edge proxy helpers", () => {
     expect(headers.get("content-type")).toBeNull();
   });
 
+  it("falls back to the default edge base URL when none is provided", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchEdgeForServer({
+      pathname: "/api/relay",
+      params: { siteId: "site-1" },
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Headers;
+    expect(url).toBe("http://127.0.0.1:8787/api/relay?siteId=site-1");
+    expect(headers.get("authorization")).toBe("Bearer session-token");
+  });
+
   it("handles unavailable sessions and HEAD requests without auth or body", async () => {
     getSessionTokenMock.mockRejectedValue(new Error("outside request scope"));
     const fetchMock = vi.fn().mockResolvedValue(new Response(null));

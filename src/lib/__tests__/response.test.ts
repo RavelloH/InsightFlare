@@ -167,5 +167,9 @@ describe("response helpers", () => {
       "request failed {bad json",
     );
     expect(normalizeErrorMessage(42)).toBe("42");
+    expect(normalizeErrorMessage('{"error": ""}')).toBe('{"error": ""}');
+    expect(normalizeErrorMessage('{"message": 42, "error": ""}')).toBe(
+      '{"message": 42, "error": ""}',
+    );
   });
 });

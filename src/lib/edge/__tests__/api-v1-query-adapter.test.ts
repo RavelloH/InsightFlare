@@ -30,7 +30,9 @@ import {
   queryApiV1VisitorDetail,
   queryApiV1Visitors,
 } from "@/lib/edge/api-v1-query-adapter";
+import * as dimensions from "@/lib/edge/query/dimensions";
 import * as eventSummary from "@/lib/edge/query/events-summary";
+import * as filterValues from "@/lib/edge/query/filter-values";
 import { executePrivateQuery } from "@/lib/edge/query-adapters/private";
 import { executePublicQuery } from "@/lib/edge/query-adapters/public";
 import type { Env } from "@/lib/edge/types";
@@ -389,5 +391,55 @@ describe("API v1 typed query adapter", () => {
     summarySpy.mockRestore();
     expect(result).toMatchObject({ ok: true });
     expect(trend).toMatchObject({ ok: true });
+  });
+
+  it("maps returned rows for API v1 filter values", async () => {
+    const filterSpy = vi
+      .spyOn(filterValues, "queryFilterValuesFromD1")
+      .mockResolvedValue([
+        { value: "/pricing", occurrences: 42 },
+        { value: "/about", occurrences: 7 },
+      ] as never);
+    const result = await queryApiV1FilterValues(
+      emptyEnv(),
+      "site-1",
+      new URL(`${url}&filterKey=page.path`),
+      timeRange,
+    );
+    filterSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.field).toBe("page.path");
+      expect(result.data.data).toEqual([
+        { value: "/pricing", label: "/pricing", occurrences: 42 },
+        { value: "/about", label: "/about", occurrences: 7 },
+      ]);
+    }
+  });
+
+  it("maps returned rows for API v1 breakdown", async () => {
+    const dimensionSpy = vi
+      .spyOn(dimensions, "queryDimensionFromD1")
+      .mockResolvedValue([
+        { value: "/", views: 10, sessions: 5, visitors: 3 },
+        { value: "/login", views: 4, sessions: 2, visitors: 2 },
+      ] as never);
+    const result = await queryApiV1Breakdown(
+      emptyEnv(),
+      "site-1",
+      new URL(`${url}`),
+      timeRange,
+      "page.path",
+    );
+    dimensionSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data).toEqual([
+        { value: "/", label: "/", views: 10, sessions: 5, visitors: 3 },
+        { value: "/login", label: "/login", views: 4, sessions: 2, visitors: 2 },
+      ]);
+    }
   });
 });

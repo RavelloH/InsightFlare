@@ -95,6 +95,49 @@ describe("resolveTeamDashboardRequest", () => {
     );
   });
 
+  it("defaults to UTC when no cookie header is present", async () => {
+    requireSessionMock.mockResolvedValue(session);
+    resolvePrivateTeamForSessionMock.mockResolvedValue({
+      id: "team-resolved",
+    } as Awaited<ReturnType<typeof resolvePrivateTeamForSession>>);
+    const request = new Request("https://app.test/team/dashboard?tab=traffic");
+
+    const result = await resolveTeamDashboardRequest({
+      request,
+      env,
+      teamId: "team-requested",
+    });
+
+    expect(result).not.toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      throw new Error("Expected request context");
+    }
+    expect(result.timeZone).toBe("UTC");
+  });
+
+  it("skips cookie entries without an '=' separator and keeps the timezone", async () => {
+    requireSessionMock.mockResolvedValue(session);
+    resolvePrivateTeamForSessionMock.mockResolvedValue({
+      id: "team-resolved",
+    } as Awaited<ReturnType<typeof resolvePrivateTeamForSession>>);
+    const request = requestWithCookies(
+      "https://app.test/team/dashboard?tab=traffic",
+      "no-separator-value; insightflare-reporting-time-zone=Europe%2FParis",
+    );
+
+    const result = await resolveTeamDashboardRequest({
+      request,
+      env,
+      teamId: "team-requested",
+    });
+
+    expect(result).not.toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      throw new Error("Expected request context");
+    }
+    expect(result.timeZone).toBe("Europe/Paris");
+  });
+
   it("returns ACL failures and uses UTC for missing or malformed cookies", async () => {
     requireSessionMock.mockResolvedValue(session);
     const denied = new Response("Forbidden", { status: 403 });

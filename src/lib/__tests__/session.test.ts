@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveSecret, SECRET_PURPOSES } from "@/lib/secrets";
-import { createSessionToken, verifySessionToken } from "@/lib/session";
+import {
+  createSessionToken,
+  hasConfiguredSessionSecret,
+  hasConfiguredSessionSecretSource,
+  verifySessionToken,
+} from "@/lib/session";
 
 function bytes(input: string): Uint8Array {
   return new TextEncoder().encode(input);
@@ -34,6 +39,46 @@ describe("Session Authentication (Web Crypto HMAC)", () => {
   afterEach(() => {
     delete process.env.MAIN_SECRET;
     delete process.env.DAILY_SALT_SECRET;
+  });
+
+  describe("configured session secret helpers", () => {
+    it("returns true when MAIN_SECRET is configured", () => {
+      process.env.MAIN_SECRET = "configured";
+      delete process.env.DAILY_SALT_SECRET;
+      expect(
+        hasConfiguredSessionSecretSource({
+          MAIN_SECRET: "configured",
+          DAILY_SALT_SECRET: undefined,
+        }),
+      ).toBe(true);
+    });
+
+    it("returns true when DAILY_SALT_SECRET is configured", () => {
+      expect(
+        hasConfiguredSessionSecretSource({
+          MAIN_SECRET: undefined,
+          DAILY_SALT_SECRET: "salt",
+        }),
+      ).toBe(true);
+    });
+
+    it("returns false when no secret is configured", () => {
+      expect(
+        hasConfiguredSessionSecretSource({
+          MAIN_SECRET: undefined,
+          DAILY_SALT_SECRET: undefined,
+        }),
+      ).toBe(false);
+    });
+
+    it("hasConfiguredSessionSecret reflects process env", () => {
+      delete process.env.MAIN_SECRET;
+      delete process.env.DAILY_SALT_SECRET;
+      expect(hasConfiguredSessionSecret()).toBe(false);
+
+      process.env.DAILY_SALT_SECRET = "a-daily-salt";
+      expect(hasConfiguredSessionSecret()).toBe(true);
+    });
   });
 
   it("should successfully create and verify a valid session token", async () => {

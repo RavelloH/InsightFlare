@@ -490,6 +490,128 @@ describe("custom event read helpers", () => {
     });
   });
 
+  it("applies zero ordering when all object and array children lack ordering", async () => {
+    const objectEvent = statement({
+      first: {
+        eventPk: 42,
+        eventId: "event-1",
+        siteId: "site-1",
+        visitId: "visit-1",
+        eventName: "checkout",
+        occurredAt: 100,
+        receivedAt: 120,
+        sequence: 3,
+        nodeCount: 3,
+        valueCount: 2,
+      },
+    });
+    const objectNodes = statement({
+      all: [
+        {
+          nodeId: 1,
+          parentNodeId: null,
+          key: null,
+          valueType: CUSTOM_EVENT_JSON_TYPE.object,
+          memberOrder: null,
+          arrayIndex: null,
+          stringValue: null,
+          numberValue: null,
+          booleanValue: null,
+        },
+        {
+          nodeId: 2,
+          parentNodeId: 1,
+          key: "a",
+          valueType: CUSTOM_EVENT_JSON_TYPE.string,
+          memberOrder: null,
+          arrayIndex: null,
+          stringValue: "first",
+          numberValue: null,
+          booleanValue: null,
+        },
+        {
+          nodeId: 3,
+          parentNodeId: 1,
+          key: "b",
+          valueType: CUSTOM_EVENT_JSON_TYPE.string,
+          memberOrder: null,
+          arrayIndex: null,
+          stringValue: "second",
+          numberValue: null,
+          booleanValue: null,
+        },
+      ],
+    });
+    const arrayEvent = statement({
+      first: {
+        eventPk: 42,
+        eventId: "event-1",
+        siteId: "site-1",
+        visitId: "visit-1",
+        eventName: "checkout",
+        occurredAt: 100,
+        receivedAt: 120,
+        sequence: 3,
+        nodeCount: 3,
+        valueCount: 2,
+      },
+    });
+    const arrayNodes = statement({
+      all: [
+        {
+          nodeId: 1,
+          parentNodeId: null,
+          key: null,
+          valueType: CUSTOM_EVENT_JSON_TYPE.array,
+          memberOrder: null,
+          arrayIndex: null,
+          stringValue: null,
+          numberValue: null,
+          booleanValue: null,
+        },
+        {
+          nodeId: 2,
+          parentNodeId: 1,
+          key: null,
+          valueType: CUSTOM_EVENT_JSON_TYPE.string,
+          memberOrder: null,
+          arrayIndex: null,
+          stringValue: "first",
+          numberValue: null,
+          booleanValue: null,
+        },
+        {
+          nodeId: 3,
+          parentNodeId: 1,
+          key: null,
+          valueType: CUSTOM_EVENT_JSON_TYPE.string,
+          memberOrder: null,
+          arrayIndex: null,
+          stringValue: "second",
+          numberValue: null,
+          booleanValue: null,
+        },
+      ],
+    });
+    const { env } = envWithStatements([
+      objectEvent,
+      objectNodes,
+      arrayEvent,
+      arrayNodes,
+    ]);
+
+    await expect(
+      readCustomEventDetail(env, "site-1", "event-1"),
+    ).resolves.toMatchObject({
+      eventData: { a: "first", b: "second" },
+    });
+    await expect(
+      readCustomEventDetail(env, "site-1", "event-1"),
+    ).resolves.toMatchObject({
+      eventData: ["first", "second"],
+    });
+  });
+
   it("materializes object and array roots without children", async () => {
     const baseEvent = {
       eventPk: 42,

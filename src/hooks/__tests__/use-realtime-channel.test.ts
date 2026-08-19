@@ -163,6 +163,29 @@ describe("useRealtimeChannel", () => {
     expect(container.textContent).toBe("disconnected:5");
   });
 
+  it("ignores broadcasts when no site or channel is active", async () => {
+    renderProbe(root, { enabled: true });
+
+    await act(async () => {
+      await broadcastRealtimeMessage({
+        siteId: "site-a",
+        state: channelState("failed", 99),
+      });
+    });
+
+    expect(container.textContent).toBe("disconnected:0");
+
+    renderProbe(root, { enabled: false, siteId: "site-a" });
+    await act(async () => {
+      await broadcastRealtimeMessage({
+        siteId: "site-a",
+        state: channelState("connected", 1),
+      });
+    });
+
+    expect(container.textContent).toBe("disconnected:0");
+  });
+
   it("resets to idle and releases when the channel is disabled", () => {
     const release = vi.fn();
     acquireRealtimeChannelMock.mockReturnValue(release);

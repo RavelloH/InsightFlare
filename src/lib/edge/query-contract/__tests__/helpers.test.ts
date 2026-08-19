@@ -28,6 +28,9 @@ describe("query contract time helpers", () => {
     expect(inclusiveRangeToExclusive(100, 199)).toEqual(range);
     expect(() => createTimeRange(100, 100)).toThrow();
     expect(() => createTimeRange(200, 100)).toThrow();
+    expect(() => createTimeRange(100, 1.5)).toThrow(
+      "Time range boundaries must be safe integer",
+    );
   });
 
   it("builds a comparable range immediately before the current range", () => {

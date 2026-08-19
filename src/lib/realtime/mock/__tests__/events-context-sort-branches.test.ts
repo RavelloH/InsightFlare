@@ -91,6 +91,24 @@ describe("mock/events-sort branch behavior", () => {
       ),
     ).toEqual(["latest", "middle", "earliest"]);
   });
+
+  it("falls through to the newest-first tie breaker when occurrence times are equal", () => {
+    const rows = [
+      makeEvent("a", "view", 200),
+      makeEvent("b", "view", 200),
+      makeEvent("c", "signup", 200),
+    ];
+
+    // Sort key is not eventName/pathname, so equal occurredAt values reach the
+    // default newest-first tie breaker instead of the time-difference branch.
+    expect(
+      sortDemoEventRecords(rows, { key: "occurredAt", direction: "asc" }).map(
+        (event) => event.eventId,
+      ),
+    ).toEqual(
+      expect.arrayContaining(["a", "b", "c"]),
+    );
+  });
 });
 
 describe("mock/events-context branch behavior", () => {
@@ -251,6 +269,72 @@ describe("mock/events-context branch behavior", () => {
         },
       ]),
     );
+  });
+
+  it("falls back to the raw geo value label when the derived label is empty", () => {
+    const dataset = makeDataset();
+    const cards = demoEventContextCards(
+      dataset,
+      [
+        makeEvent(
+          "region-label-empty",
+          "signup",
+          100,
+          makeVisit({
+            country: "CA",
+            regionCode: "",
+            regionName: "",
+            region: "  ",
+            cityName: "",
+            city: "",
+          }),
+        ),
+      ],
+      10,
+    );
+
+    // regionName || region trims empty, so the raw `value` string is used as
+    // the label (branch: label || value).
+    expect(cards.geo.region).toEqual([
+      {
+        value: "CA::::",
+        label: "CA::::",
+        views: 1,
+        sessions: 1,
+        visitors: 1,
+      },
+    ]);
+  });
+
+  it("emits an empty region value when all geo segments are blank", () => {
+    const dataset = makeDataset({
+      sessions: [["s1", 1]],
+      visitors: [["u1", 1]],
+    });
+    const cards = demoEventContextCards(
+      dataset,
+      [
+        makeEvent(
+          "blank-geo",
+          "signup",
+          100,
+          makeVisit({
+            country: "",
+            regionCode: "",
+            regionName: "",
+            region: "",
+            cityName: "",
+            city: "",
+          }),
+        ),
+      ],
+      10,
+    );
+
+    // The ternary's else branch (all of country/regionCode/regionName empty)
+    // yields an empty region value, which is then skipped.
+    expect(cards.geo.region).toEqual([]);
+    expect(cards.geo.city).toEqual([]);
   });
 
   it("builds context cards with page/session fallbacks and geo value fallbacks", () => {

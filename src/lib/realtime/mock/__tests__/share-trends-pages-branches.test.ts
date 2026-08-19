@@ -416,6 +416,49 @@ describe("mock/analytics-pages branch coverage", () => {
     });
   });
 
+  it("returns zero pages per session when a page has views but no weighted sessions", () => {
+    const currentVisits = [
+      makeVisit({ visitId: "zero-session", pathname: "/zero", title: "Zero" }),
+    ];
+    const currentDataset = makeDataset(currentVisits);
+    // Give the only session a zero weight so weightedSessionCount returns 0
+    // while views remain > 0 — this exercises the else branch of
+    // pagesPerSession (`sessions > 0 ? views / sessions : 0`).
+    currentDataset.sessions.get("s1")!.weight = 0;
+    mockBuildDemoFactDataset.mockReturnValue(currentDataset);
+    mockApplyDemoFilters.mockImplementation(
+      (dataset: DemoFactDataset, filters: { path?: string }) => {
+        const visits = filters.path
+          ? dataset.visits.filter((visit) => visit.pathname === filters.path)
+          : dataset.visits;
+        return makeFiltered(visits);
+      },
+    );
+
+    expect(
+      generateDemoPagesDashboard(SITE_ID, {
+        from: BASE_TIME,
+        to: BASE_TIME,
+        interval: "hour",
+        page: 1,
+        pageSize: 12,
+        timeZone: "UTC",
+      }),
+    ).toMatchObject({
+      ok: true,
+      data: [
+        expect.objectContaining({
+          pathname: "/zero",
+          metrics: expect.objectContaining({
+            views: 1,
+            sessions: 0,
+            pagesPerSession: 0,
+          }),
+        }),
+      ],
+    });
+  });
+
   it("returns null dashboard change rates when the previous window has no rows", () => {
     const currentVisits = [
       makeVisit({ visitId: "only", pathname: "/only", title: "Only" }),

@@ -59,4 +59,14 @@ describe("E2E clock", () => {
     });
     expect(e2eClockNow()).toBeNull();
   });
+
+  it("ignores a configured clock whose start timestamp is invalid", () => {
+    vi.spyOn(Date, "now").mockReturnValue(900);
+    initializeE2eClock({
+      INSIGHTFLARE_E2E: "1",
+      INSIGHTFLARE_E2E_NOW: "not-a-number",
+    });
+    expect(e2eClockNow()).toBeNull();
+    expect(appNow()).toBe(900);
+  });
 });

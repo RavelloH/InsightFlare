@@ -136,6 +136,19 @@ describe("validateSearchParams", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("formats root-level search param issues without a path prefix", async () => {
+    const schema = z.string(); // search params object is not a string -> root issue
+    const url = new URL("https://test.example/api?page=1");
+    const result = validateSearchParams(url, schema);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const body = (await result.response.json()) as {
+        error: { message: string };
+      };
+      expect(body.error.message).not.toMatch(/^[a-zA-Z_.]+:/);
+    }
+  });
+
   it("handles multiple search params", () => {
     const schema = z.object({
       from: z.coerce.number(),

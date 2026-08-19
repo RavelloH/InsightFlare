@@ -313,4 +313,36 @@ describe("dashboard server helpers", () => {
     await expect(getDefaultTeamSite()).resolves.toBeNull();
     await expect(getTeamDefaultSite("team-a")).resolves.toBeNull();
   });
+
+  it("falls back to zero when root context notifications fail and returns null when teams are unresolvable", async () => {
+    fetchAdminMeMock.mockResolvedValue({
+      user: {
+        id: "user-1",
+        username: "admin",
+        email: "admin@example.test",
+        name: "Admin User",
+        systemRole: "user",
+      },
+      teams: [team("team-1", "team-a")],
+    } as any);
+    fetchAdminSitesMock.mockResolvedValue([site({ publicSlug: "Docs" })]);
+    fetchNotificationMessagesMock.mockRejectedValue(
+      new Error("notifications unavailable"),
+    );
+    const { getDashboardRootContext, getTeamSiteContext } =
+      await loadServerModule();
+
+    await expect(getDashboardRootContext()).resolves.toMatchObject({
+      unreadAttentionCount: 0,
+    });
+    await expect(
+      getTeamSiteContext("no-such-team", "docs-example-test"),
+    ).resolves.toBeNull();
+  });
+
+  it("returns null from getTeamDefaultSite when the profile is missing", async () => {
+    fetchAdminMeMock.mockResolvedValueOnce(null as any);
+    const { getTeamDefaultSite } = await loadServerModule();
+    await expect(getTeamDefaultSite("team-a")).resolves.toBeNull();
+  });
 });

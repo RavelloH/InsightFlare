@@ -29,6 +29,7 @@ describe("query route policy", () => {
       "event-field-values",
     );
     expect(operationForQueryRoute("session-detail")).toBe("session-detail");
+    expect(operationForQueryRoute("funnels")).toBe("funnel-analysis");
     expect(operationForQueryRoute("browser-radar")).toBe("radar");
     expect(operationForQueryRoute("client-cross-breakdown")).toBe(
       "cross-dimension",

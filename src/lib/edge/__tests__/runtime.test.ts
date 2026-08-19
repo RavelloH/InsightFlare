@@ -32,4 +32,10 @@ describe("edge runtime resolver", () => {
     );
     expect((runtime.request as Request & { cf?: unknown }).cf).toBeNull();
   });
+
+  it("falls back to the worker env binding when no env is provided", async () => {
+    const runtime = await resolveEdgeRuntime(new Request("https://edge.test/"));
+    expect(runtime.url.toString()).toBe("https://edge.test/");
+    expect(runtime.ctx.waitUntil).toBeTypeOf("function");
+  });
 });

@@ -52,6 +52,12 @@ describe("auth helpers", () => {
     await expect(getSessionToken()).resolves.toBe("");
   });
 
+  it("returns an empty token when browser cookies are present but empty", async () => {
+    vi.stubGlobal("document", { cookie: "" });
+
+    await expect(getSessionToken()).resolves.toBe("");
+  });
+
   it("returns an empty token when browser and server cookie headers are empty", async () => {
     document.cookie = "if_session=; Max-Age=0; path=/";
     await expect(getSessionToken()).resolves.toBe("");

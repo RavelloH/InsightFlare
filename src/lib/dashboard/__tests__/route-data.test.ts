@@ -44,6 +44,22 @@ vi.mock("@/lib/dashboard/server", () => ({
   getTeamSiteContext: vi.fn(),
 }));
 
+vi.mock("@/lib/dashboard/query-preferences", () => ({
+  resolveDashboardInitialWindow: vi.fn(),
+}));
+
+vi.mock("@/lib/dashboard/server-query", () => ({
+  resolveTeamDashboardRequest: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/query/team", () => ({
+  queryTeamDashboardForTeam: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/runtime", () => ({
+  resolveEdgeRuntime: vi.fn(),
+}));
+
 vi.mock("@/lib/edge-client", () => ({
   fetchPublicSite: vi.fn(),
 }));
@@ -58,14 +74,20 @@ vi.mock("@/lib/dashboard/client-request", () => ({
 
 import { getRequest } from "@tanstack/react-start/server";
 
+import { resolveDashboardInitialWindow } from "@/lib/dashboard/query-preferences";
 import {
+  loadDashboardInitialWindow,
   loadDashboardRoot,
   loadDashboardSite,
   loadDashboardTeam,
   loadRequestOrigin,
   loadShareSite,
+  loadTeamDashboardSnapshot,
   loadVersionReleases,
 } from "@/lib/dashboard/route-data";
+import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
+import { queryTeamDashboardForTeam } from "@/lib/edge/query/team";
+import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 import { fetchPublicSite } from "@/lib/edge-client";
 import { fetchGithubReleases } from "@/lib/github-releases";
 
@@ -91,6 +113,25 @@ describe("Dashboard route data loaders", () => {
     vi.mocked(fetchGithubReleases).mockResolvedValue([
       { tag_name: "v1.0.0", name: "v1.0.0", url: "", html_url: "" },
     ] as never);
+    vi.mocked(resolveEdgeRuntime).mockResolvedValue({
+      env: { DB: {} },
+    } as never);
+    vi.mocked(resolveTeamDashboardRequest).mockResolvedValue({
+      env: { DB: {} },
+      teamId: "team-1",
+      allowedSiteIds: ["site-1"],
+    } as never);
+    vi.mocked(resolveDashboardInitialWindow).mockReturnValue({
+      preset: "7d",
+      from: 100,
+      to: 200,
+      interval: "day",
+      timeZone: "Asia/Tokyo",
+    });
+    vi.mocked(queryTeamDashboardForTeam).mockResolvedValue({
+      data: { sites: [], trend: [] },
+      source: "raw",
+    } as never);
   });
 
   describe("loadRequestOrigin", () => {
@@ -138,6 +179,16 @@ describe("Dashboard route data loaders", () => {
     });
   });
 
+  it("derives the initial dashboard window from the request cookie", () => {
+    const window = loadDashboardInitialWindow();
+    expect(resolveDashboardInitialWindow).toHaveBeenCalledWith(null);
+    expect(window).toMatchObject({
+      preset: "7d",
+      interval: "day",
+      timeZone: "Asia/Tokyo",
+    });
+  });
+
   describe("loadVersionReleases", () => {
     it("returns releases on success", async () => {
       await expect(loadVersionReleases()).resolves.toEqual({
@@ -180,6 +231,41 @@ describe("Dashboard route data loaders", () => {
   });
 
   describe("dashboard context loaders", () => {
+    it("loads a typed SSR snapshot with the resolved request scope", async () => {
+      const result = await loadTeamDashboardSnapshot({
+        data: { teamId: "team-requested" },
+      } as never);
+
+      expect(result).toEqual({
+        data: { sites: [], trend: [] },
+        window: {
+          from: 100,
+          to: 200,
+          interval: "day",
+          timeZone: "Asia/Tokyo",
+        },
+        range: "7d",
+        fetchedAt: expect.any(Number),
+      });
+      expect(resolveTeamDashboardRequest).toHaveBeenCalledWith({
+        request: expect.anything(),
+        env: { DB: {} },
+        teamId: "team-requested",
+      });
+      expect(queryTeamDashboardForTeam).toHaveBeenCalledWith(
+        { DB: {} },
+        "team-1",
+        {
+          startMs: 100,
+          endExclusiveMs: 200,
+          nowMs: 200,
+          timeZone: "Asia/Tokyo",
+        },
+        "day",
+        ["site-1"],
+      );
+    });
+
     it("loads the dashboard root context", async () => {
       const server =
         (await import("@/lib/dashboard/server")) as typeof DashboardServerModule;

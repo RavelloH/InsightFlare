@@ -3492,17 +3492,32 @@ describe("api v1 gateway", () => {
   });
 
   it("covers performance timeseries and invalid breakdown branches", async () => {
+    // Return performance trend points spread across two hourly buckets (bucket 1
+    // deliberately supplied ahead of bucket 0) so the sort comparator and map
+    // callback inside queryPerformanceTimeseriesData both execute.
     const timeseries = await authed(
       "/api/v1/sites/site-1/performance/timeseries?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z&interval=hour",
       [
         siteMatch("site-1", "Blog"),
         {
-          includes: ["bucket_index"],
-          all: [{ bucket: 0, timestampMs: Date.UTC(2026, 5, 1), p75: 123 }],
+          includes: ["PARTITION BY metric, bucket"],
+          all: [
+            { metric: "lcp", bucket: 1, avgValue: 200, p50: 200, p95: 200, samples: 2 },
+            { metric: "lcp", bucket: 0, avgValue: 100, p50: 100, p95: 100, samples: 2 },
+          ],
         },
       ],
     );
     expect(timeseries.response.status).toBe(200);
+    const timeseriesBody = await timeseries.response.json();
+    expect(timeseriesBody).toMatchObject({
+      data: [
+        { start: "2026-06-01T00:00:00.000Z", lcp: 100 },
+        { start: "2026-06-01T01:00:00.000Z", lcp: 200 },
+      ],
+      meta: { interval: "hour" },
+    });
+    expect(timeseriesBody.data.length).toBe(2);
 
     const badMetric = await authed(
       "/api/v1/sites/site-1/performance/breakdowns/page.path?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z&metric=bad",

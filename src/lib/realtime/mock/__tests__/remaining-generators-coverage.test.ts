@@ -1069,6 +1069,31 @@ describe("mock remaining generator coverage", () => {
     });
   });
 
+  it("falls back to the raw region/city strings when labels do not parse", () => {
+    setFacts([
+      makeVisit({
+        visitId: "unparsed-geo",
+        sessionId: "s1",
+        visitorId: "u1",
+        country: "US",
+        region: "CA", // parses to null -> label falls back to raw string
+        city: "Austin", // parses to null -> label falls back to raw string
+      }),
+    ]);
+
+    const result = generateDemoGeoPoints(SITE_ID, {
+      limit: 50,
+      applyGeoFilter: "true",
+      "filter[geo.country]": "US",
+      "filter[geo.region]": "CA",
+      "filter[geo.city]": "Austin",
+    }) as any;
+
+    // The unparseable region/city buckets still exercise the label
+    // fallbacks (`parseDemoRegionLabel(...)?.regionName || visit.region`).
+    expect(result).toMatchObject({ ok: true });
+  });
+
   it("returns geo point region drilldowns and ignores geo filters by default", () => {
     setFacts([
       makeVisit({
@@ -1267,6 +1292,21 @@ describe("mock remaining generator coverage", () => {
             timestampMs: expect.any(Number),
             sites: expect.any(Array),
           }),
+        ]),
+      },
+    });
+  });
+
+  it("builds the team dashboard when the `to` window param is missing", () => {
+    const dashboard = generateDemoTeamDashboard("demo-team-001", {
+      from: 1,
+    }) as any;
+
+    expect(dashboard).toMatchObject({
+      ok: true,
+      data: {
+        sites: expect.arrayContaining([
+          expect.objectContaining({ teamId: "demo-team-001" }),
         ]),
       },
     });

@@ -875,6 +875,9 @@ describe("edge query core SQL helpers", () => {
         "started_at < ?",
       ]),
     ).toBe("WHERE status = 'active' AND started_at >= ? AND started_at < ?");
+    expect(appendSqlConditions("SELECT * FROM t", ["  ", "\t"])).toBe(
+      "SELECT * FROM t",
+    );
   });
 
   it("builds visit filters for direct traffic, client dimensions, and geo values", () => {

@@ -82,6 +82,10 @@ describe("mock/visit-helpers", () => {
     it("returns empty for nullish input", () => {
       expect(demoOperatingSystemLabel("")).toBe("");
     });
+
+    it("returns empty for undefined/absent OS version", () => {
+      expect(demoOperatingSystemLabel(undefined as unknown as string)).toBe("");
+    });
   });
 
   describe("demoQueryStringForVisit", () => {
