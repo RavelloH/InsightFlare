@@ -44,23 +44,16 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
+import { requestAdminService } from "@/lib/admin-service-client";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { AccountUserData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
-import { extractErrorMessage } from "@/lib/response-envelope";
 
 interface AdminUsersManagementClientProps {
   locale: Locale;
   messages: AppMessages;
   currentUserId?: string;
-}
-
-interface ApiResponse<T> {
-  ok: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
 }
 
 interface CreatedAccountLink {
@@ -73,24 +66,7 @@ function epochSecondsToMs(value: number): number {
 }
 
 async function getUsers(signal?: AbortSignal): Promise<AccountUserData[]> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: "/api/private/admin/users",
-    }) as ApiResponse<AccountUserData[]>;
-    return Array.isArray(result.data) ? result.data : [];
-  }
-  const response = await fetch("/api/private/admin/users", {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-    signal,
-  });
-  const payload = (await response.json()) as ApiResponse<AccountUserData[]>;
-  if (!response.ok || !payload.ok || !Array.isArray(payload.data)) {
-    throw new Error(extractErrorMessage(payload, "load_users_failed"));
-  }
-  return payload.data;
+  return requestAdminService<AccountUserData[]>("users", { signal });
 }
 
 function formatDefaultTeamName(template: string, name: string) {
@@ -182,13 +158,9 @@ export function AdminUsersManagementClient({
 
     setSubmitting(true);
     try {
-      const response = await fetch("/api/private/admin/users", {
+      await requestAdminService<AccountUserData>("users", {
         method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           username: normalizedUsername,
           email: normalizedEmail,
           name: name.trim() || undefined,
@@ -196,12 +168,8 @@ export function AdminUsersManagementClient({
           systemRole,
           teamName: normalizedTeamName,
           teamSlug: teamSlug.trim() || undefined,
-        }),
+        },
       });
-      const payload = (await response.json()) as ApiResponse<AccountUserData>;
-      if (!response.ok || !payload.ok) {
-        throw new Error(extractErrorMessage(payload, t.createFailed));
-      }
       setUsername("");
       setEmail("");
       setName("");
@@ -223,24 +191,16 @@ export function AdminUsersManagementClient({
   async function handleDeleteUser(userId: string) {
     setDeletingUserId(userId);
     try {
-      const response = await fetch("/api/private/admin/users", {
-        method: "PATCH",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          intent: "remove",
-          userId,
-        }),
-      });
-      const payload = (await response.json()) as ApiResponse<{
+      await requestAdminService<{
         userId: string;
         removed: boolean;
-      }>;
-      if (!response.ok || !payload.ok) {
-        throw new Error(extractErrorMessage(payload, t.deleteFailed));
-      }
+      }>("users", {
+        method: "PATCH",
+        body: {
+          intent: "remove",
+          userId,
+        },
+      });
       await refreshUsers();
       toast.success(t.deleteSuccess);
       setDeleteUserDialogOpen(false);
@@ -256,24 +216,18 @@ export function AdminUsersManagementClient({
   async function handleGenerateResetLink(userId: string) {
     setGeneratingResetUserId(userId);
     try {
-      const response = await fetch("/api/private/admin/account-links", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
+      const data = await requestAdminService<CreatedAccountLink>(
+        "account-links",
+        {
+          method: "POST",
+          body: {
+            type: "password_reset",
+            userId,
+          },
         },
-        body: JSON.stringify({
-          type: "password_reset",
-          userId,
-        }),
-      });
-      const payload =
-        (await response.json()) as ApiResponse<CreatedAccountLink>;
-      if (!response.ok || !payload.ok || !payload.data) {
-        throw new Error(extractErrorMessage(payload, t.resetLinkCreateFailed));
-      }
-      setResetLinkUrl(payload.data.url);
-      setResetLinkExpiresAt(payload.data.expiresAt);
+      );
+      setResetLinkUrl(data.url);
+      setResetLinkExpiresAt(data.expiresAt);
       toast.success(t.resetLinkCreated);
     } catch (error) {
       const message =

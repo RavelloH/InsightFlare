@@ -775,24 +775,27 @@ describe("edge client request wrappers", () => {
     expect(fetchMock()).not.toHaveBeenCalled();
   });
 
-  it("delegates private POST wrappers to the demo handler with method and body", async () => {
+  it("keeps admin mutations on the server service in demo mode", async () => {
     vi.stubEnv("VITE_DEMO_MODE", "1");
-    demoRequestMock.mockReturnValue({
-      ok: true,
-      data: { id: "team-1", name: "Team" },
-    });
+    fetchMock().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        data: { id: "team-1", name: "Team" },
+      }),
+    );
 
     const result = await createAdminTeam({ name: "Team", slug: "team" });
 
     expect(result).toEqual({ id: "team-1", name: "Team" });
-    expect(demoRequestMock).toHaveBeenCalledWith({
-      path: "/api/private/admin/teams",
-      method: "POST",
-      params: undefined,
-      body: { name: "Team", slug: "team" },
-    });
-    expect(fetchMock()).not.toHaveBeenCalled();
-    expect(getSessionTokenMock).not.toHaveBeenCalled();
+    expect(demoRequestMock).not.toHaveBeenCalled();
+    expect(lastFetchCall()).toMatchObject([
+      "http://127.0.0.1:8787/api/private/admin/teams",
+      {
+        method: "POST",
+        body: JSON.stringify({ name: "Team", slug: "team" }),
+      },
+    ]);
+    expect(getSessionTokenMock).toHaveBeenCalled();
   });
 
   it("fetches notification email previews through the API in demo mode", async () => {

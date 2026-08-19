@@ -62,11 +62,11 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { requestAdminService } from "@/lib/admin-service-client";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { buildTeamSections } from "@/lib/dashboard/team-sections";
 import {
-  fetchAdminSites,
   type SessionTeamGroups,
   type SiteData,
   type TeamData,
@@ -707,7 +707,9 @@ export function DashboardShell({
     }
 
     let active = true;
-    fetchAdminSites(activeTeamId)
+    requestAdminService<SiteData[]>("sites", {
+      params: { teamId: activeTeamId },
+    })
       .then((nextSites) => {
         if (!active) return;
         setClientSitesByTeam((current) => ({

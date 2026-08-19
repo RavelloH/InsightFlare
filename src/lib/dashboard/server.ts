@@ -1,16 +1,19 @@
 import "@tanstack/react-start/server-only";
 
 import { cache } from "react";
+import { getRequest } from "@tanstack/react-start/server";
 
 import {
+  type AdminServiceReadMap,
+  readAdminService,
+} from "@/lib/edge/admin-service";
+import { resolveEdgeRuntime } from "@/lib/edge/runtime";
+import {
   type AccountUserData,
-  fetchAdminMe,
-  fetchAdminSites,
-  fetchNotificationMessages,
   type SessionTeamGroups,
   type SiteData,
   type TeamData,
-} from "@/lib/edge-client";
+} from "@/lib/edge-client-types";
 export { buildSitePath } from "@/lib/dashboard/paths";
 
 export interface SiteWithSlug extends SiteData {
@@ -76,13 +79,47 @@ function findSiteBySlug(
 
 const getMe = cache(async () => {
   try {
-    return await fetchAdminMe();
+    return await readAdmin("session");
   } catch {
     return null;
   }
 });
 
-function teamGroupsForProfile(me: Awaited<ReturnType<typeof fetchAdminMe>>) {
+const getAdminRuntime = cache(async () => {
+  const runtime = await resolveEdgeRuntime(getRequest());
+  return {
+    request: runtime.request,
+    env: runtime.env,
+    url: runtime.url,
+  };
+});
+
+async function readAdmin<K extends keyof AdminServiceReadMap>(
+  route: K,
+  params?: Record<string, string | number>,
+): Promise<AdminServiceReadMap[K] | null> {
+  try {
+    const runtime = await getAdminRuntime();
+    const url = new URL(runtime.url);
+    for (const [key, value] of Object.entries(params ?? {})) {
+      url.searchParams.set(key, String(value));
+    }
+    const result = await readAdminService({
+      route,
+      request: runtime.request,
+      env: runtime.env,
+      url,
+    });
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+function teamGroupsForProfile(
+  me: Awaited<ReturnType<typeof readAdmin<"session">>>,
+) {
+  if (!me) return null;
   return (
     me.teamGroups ?? {
       created: [],
@@ -102,16 +139,13 @@ export const getDashboardRootContext = cache(
     const me = await getMe();
     if (!me) return null;
 
-    const unreadAttentionCount = await fetchNotificationMessages({
-      limit: 1,
-    })
-      .then((data) => data.unreadAttentionCount)
-      .catch(() => 0);
+    const notifications = await readAdmin("notifications", { limit: 1 });
+    const unreadAttentionCount = notifications?.unreadAttentionCount ?? 0;
 
     return {
       user: me.user,
       teams: me.teams,
-      teamGroups: teamGroupsForProfile(me),
+      teamGroups: teamGroupsForProfile(me)!,
       unreadAttentionCount,
     };
   },
@@ -120,7 +154,8 @@ export const getDashboardRootContext = cache(
 const getSitesForTeam = cache(
   async (teamId: string): Promise<SiteWithSlug[]> => {
     try {
-      const sites = await fetchAdminSites(teamId);
+      const sites = await readAdmin("sites", { teamId });
+      if (!sites) return [];
       return sites.map(withSiteSlug);
     } catch {
       return [];
@@ -137,16 +172,13 @@ export const getDashboardTeamContext = cache(
     if (!activeTeam) return null;
 
     const sites = await getSitesForTeam(activeTeam.id);
-    const unreadAttentionCount = await fetchNotificationMessages({
-      limit: 1,
-    })
-      .then((data) => data.unreadAttentionCount)
-      .catch(() => 0);
+    const notifications = await readAdmin("notifications", { limit: 1 });
+    const unreadAttentionCount = notifications?.unreadAttentionCount ?? 0;
 
     return {
       user: me.user,
       teams: me.teams,
-      teamGroups: teamGroupsForProfile(me),
+      teamGroups: teamGroupsForProfile(me)!,
       activeTeam,
       sites,
       unreadAttentionCount,

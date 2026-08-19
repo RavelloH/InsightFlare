@@ -33,6 +33,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { requestAdminService } from "@/lib/admin-service-client";
 import type { PublicBotAnalyticsConfig } from "@/lib/bot-analytics-config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
@@ -43,22 +44,7 @@ interface BotAnalyticsSettingsClientProps {
   messages: AppMessages;
 }
 
-interface ApiResponse<T> {
-  ok?: boolean;
-  data?: T;
-  error?: string | { message?: string };
-  message?: string;
-}
-
 type FormState = Pick<PublicBotAnalyticsConfig, "accountId">;
-
-const API_PATH = "/api/private/admin/bot-analytics-config";
-const ANALYTICS_ENGINE_ENABLE_URL =
-  "https://dash.cloudflare.com/?to=/:account/workers/analytics-engine";
-
-function demoAnalyticsEngineDisabled(): boolean {
-  return import.meta.env.VITE_INSIGHTFLARE_ANALYTICS_ENGINE_DISABLED === "1";
-}
 
 function defaultConfig(): PublicBotAnalyticsConfig {
   return {
@@ -79,92 +65,27 @@ function toFormState(config: PublicBotAnalyticsConfig): FormState {
   };
 }
 
-function apiMessage(payload: ApiResponse<unknown>, fallback: string): string {
-  if (typeof payload.message === "string" && payload.message) {
-    return payload.message;
-  }
-  if (typeof payload.error === "string" && payload.error) {
-    return payload.error;
-  }
-  if (
-    payload.error &&
-    typeof payload.error === "object" &&
-    typeof payload.error.message === "string"
-  ) {
-    return payload.error.message;
-  }
-  return fallback;
-}
-
 async function fetchConfig(
   signal?: AbortSignal,
 ): Promise<PublicBotAnalyticsConfig> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    return {
-      ...defaultConfig(),
-      analyticsEngineDisabled: demoAnalyticsEngineDisabled(),
-      analyticsEngineEnableUrl: ANALYTICS_ENGINE_ENABLE_URL,
-    };
-  }
-
-  const response = await fetch(API_PATH, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
+  return requestAdminService<PublicBotAnalyticsConfig>("bot-analytics-config", {
     signal,
   });
-  const payload =
-    (await response.json()) as ApiResponse<PublicBotAnalyticsConfig>;
-  if (!response.ok || payload.ok !== true || !payload.data) {
-    throw new Error(apiMessage(payload, "load_bot_analytics_config_failed"));
-  }
-  return payload.data;
 }
 
 async function saveConfig(
   body: Record<string, unknown>,
 ): Promise<PublicBotAnalyticsConfig> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    return {
-      ...defaultConfig(),
-      accountId: String(body.accountId || ""),
-      apiTokenConfigured: Boolean(body.apiToken),
-      apiTokenHint: body.apiToken ? "••••demo" : "",
-      analyticsEngineDisabled: false,
-      analyticsEngineEnableUrl: "",
-      updatedAt: Date.now(),
-    };
-  }
-
-  const response = await fetch(API_PATH, {
+  return requestAdminService<PublicBotAnalyticsConfig>("bot-analytics-config", {
     method: "PATCH",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   });
-  const payload =
-    (await response.json()) as ApiResponse<PublicBotAnalyticsConfig>;
-  if (!response.ok || payload.ok !== true || !payload.data) {
-    throw new Error(apiMessage(payload, "save_bot_analytics_config_failed"));
-  }
-  return payload.data;
 }
 
 async function deleteConfig(): Promise<PublicBotAnalyticsConfig> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    return defaultConfig();
-  }
-
-  const response = await fetch(API_PATH, {
+  return requestAdminService<PublicBotAnalyticsConfig>("bot-analytics-config", {
     method: "DELETE",
-    credentials: "include",
   });
-  const payload =
-    (await response.json()) as ApiResponse<PublicBotAnalyticsConfig>;
-  if (!response.ok || payload.ok !== true || !payload.data) {
-    throw new Error(apiMessage(payload, "delete_bot_analytics_config_failed"));
-  }
-  return payload.data;
 }
 
 export function BotAnalyticsSettingsClient({

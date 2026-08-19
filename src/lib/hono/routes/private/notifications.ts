@@ -1,30 +1,50 @@
 import { Hono } from "hono";
 
-import {
-  handleNotificationPreferences,
-  handleNotificationRead,
-  handleNotifications,
-  handleNotificationsReadAll,
-} from "@/lib/edge/admin-notifications";
 import { nf } from "@/lib/edge/admin-response";
+import { executeAdminService } from "@/lib/edge/admin-service";
 import type { AppEnv } from "@/lib/hono/types";
 import { requestUrl } from "@/lib/hono/utils/context";
 
 export const privateNotificationRoutes = new Hono<AppEnv>();
 
 privateNotificationRoutes.get("/", (c) =>
-  handleNotifications(c.req.raw, c.env, requestUrl(c)),
+  executeAdminService({
+    route: "notifications",
+    request: c.req.raw,
+    env: c.env,
+    url: requestUrl(c),
+  }),
 );
 privateNotificationRoutes.get("/preferences", (c) =>
-  handleNotificationPreferences(c.req.raw, c.env),
+  executeAdminService({
+    route: "notifications/preferences",
+    request: c.req.raw,
+    env: c.env,
+    url: requestUrl(c),
+  }),
 );
 privateNotificationRoutes.patch("/preferences", (c) =>
-  handleNotificationPreferences(c.req.raw, c.env),
+  executeAdminService({
+    route: "notifications/preferences",
+    request: c.req.raw,
+    env: c.env,
+    url: requestUrl(c),
+  }),
 );
 privateNotificationRoutes.patch("/:messageId", (c) =>
-  handleNotificationRead(c.req.raw, c.env, c.req.param("messageId").trim()),
+  executeAdminService({
+    route: `notifications/${c.req.param("messageId").trim()}`,
+    request: c.req.raw,
+    env: c.env,
+    url: requestUrl(c),
+  }),
 );
 privateNotificationRoutes.patch("/", (c) =>
-  handleNotificationsReadAll(c.req.raw, c.env),
+  executeAdminService({
+    route: "notifications/read-all",
+    request: c.req.raw,
+    env: c.env,
+    url: requestUrl(c),
+  }),
 );
 privateNotificationRoutes.all("/*", () => nf());

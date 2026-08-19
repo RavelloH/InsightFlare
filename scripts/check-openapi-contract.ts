@@ -362,7 +362,11 @@ if (
 ) {
   issues.push("FilterDocument must expose the recursive version 1 AST schema");
 }
-for (const legacyFilterSchema of ["ComplexFilter", "EventPayloadFilter", "FilterObject"]) {
+for (const legacyFilterSchema of [
+  "ComplexFilter",
+  "EventPayloadFilter",
+  "FilterObject",
+]) {
   if (openapi.components?.schemas?.[legacyFilterSchema]) {
     issues.push(`${legacyFilterSchema} must not be exposed in API v1`);
   }
@@ -378,11 +382,15 @@ for (const requestName of ["AnalyticsExploreRequest", "EventSearchRequest"]) {
 const eventSearchProperties =
   openapi.components?.schemas?.EventSearchRequest?.properties ?? {};
 if (eventSearchProperties.eventName || eventSearchProperties.payloadFilters) {
-  issues.push("EventSearchRequest must use FilterDocument instead of legacy event filters");
+  issues.push(
+    "EventSearchRequest must use FilterDocument instead of legacy event filters",
+  );
 }
 const filterQuery = openapi.components?.parameters?.FilterQueryParam;
 if (
-  !String(filterQuery?.description ?? "").includes("filter[geo.country]=in:US,JP") ||
+  !String(filterQuery?.description ?? "").includes(
+    "filter[geo.country]=in:US,JP",
+  ) ||
   !String(filterQuery?.description ?? "").includes("event.payload")
 ) {
   issues.push("FilterQueryParam must document the canonical URL filter DSL");
@@ -390,12 +398,17 @@ if (
 
 for (const schemaName of ["Funnel", "FunnelCreateInput", "FunnelUpdateInput"]) {
   if (openapi.components?.schemas?.[schemaName]?.properties?.description) {
-    issues.push(`${schemaName} must not expose the removed funnel description field`);
+    issues.push(
+      `${schemaName} must not expose the removed funnel description field`,
+    );
   }
 }
 
 const methodNotAllowed = openapi.components?.responses?.MethodNotAllowed;
-if (refName(methodNotAllowed?.content?.["application/json"]?.schema) !== "ErrorResponse") {
+if (
+  refName(methodNotAllowed?.content?.["application/json"]?.schema) !==
+  "ErrorResponse"
+) {
   issues.push("MethodNotAllowed must use the standard ErrorResponse envelope");
 }
 

@@ -426,7 +426,10 @@ describe("api v1 public docs", () => {
       if (!path.startsWith("/api/v1")) continue;
       for (const operation of Object.values(item)) {
         if (!operation?.operationId) continue;
-        expect(operation.responses?.["405"], `${operation.operationId} 405`).toBeDefined();
+        expect(
+          operation.responses?.["405"],
+          `${operation.operationId} 405`,
+        ).toBeDefined();
       }
     }
   });

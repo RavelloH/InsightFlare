@@ -39,6 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { requestAdminService } from "@/lib/admin-service-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type {
@@ -55,13 +56,6 @@ interface NotificationEmailSettingsClientProps {
   showHeading?: boolean;
 }
 
-interface ApiResponse<T> {
-  ok?: boolean;
-  data?: T;
-  error?: string | { message?: string };
-  message?: string;
-}
-
 interface TestEmailResponse {
   provider: "resend";
   messageId: string;
@@ -72,8 +66,6 @@ type FormState = Pick<
   PublicNotificationEmailConfig,
   "enabled" | "provider" | "fromName" | "fromEmail" | "replyTo"
 >;
-
-const API_PATH = "/api/private/admin/notification-email";
 
 function defaultConfig(): PublicNotificationEmailConfig {
   return {
@@ -100,131 +92,37 @@ function toFormState(config: PublicNotificationEmailConfig): FormState {
   };
 }
 
-function apiMessage(payload: ApiResponse<unknown>, fallback: string): string {
-  if (typeof payload.message === "string" && payload.message) {
-    return payload.message;
-  }
-  if (typeof payload.error === "string" && payload.error) {
-    return payload.error;
-  }
-  if (
-    payload.error &&
-    typeof payload.error === "object" &&
-    typeof payload.error.message === "string"
-  ) {
-    return payload.error.message;
-  }
-  return fallback;
-}
-
 async function fetchEmailConfig(
   signal?: AbortSignal,
 ): Promise<PublicNotificationEmailConfig> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: API_PATH,
-    }) as ApiResponse<PublicNotificationEmailConfig>;
-    return result.data ?? defaultConfig();
-  }
-
-  const response = await fetch(API_PATH, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-    signal,
-  });
-  const payload =
-    (await response.json()) as ApiResponse<PublicNotificationEmailConfig>;
-  if (!response.ok || payload.ok !== true || !payload.data) {
-    throw new Error(apiMessage(payload, "load_notification_email_failed"));
-  }
-  return payload.data;
+  return requestAdminService<PublicNotificationEmailConfig>(
+    "notification-email",
+    { signal },
+  );
 }
 
 async function saveEmailConfig(
   body: Record<string, unknown>,
 ): Promise<PublicNotificationEmailConfig> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: API_PATH,
-      method: "PATCH",
-      body,
-    }) as ApiResponse<PublicNotificationEmailConfig>;
-    if (!result.ok || !result.data) {
-      throw new Error(apiMessage(result, "save_notification_email_failed"));
-    }
-    return result.data;
-  }
-
-  const response = await fetch(API_PATH, {
-    method: "PATCH",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload =
-    (await response.json()) as ApiResponse<PublicNotificationEmailConfig>;
-  if (!response.ok || payload.ok !== true || !payload.data) {
-    throw new Error(apiMessage(payload, "save_notification_email_failed"));
-  }
-  return payload.data;
+  return requestAdminService<PublicNotificationEmailConfig>(
+    "notification-email",
+    { method: "PATCH", body },
+  );
 }
 
 async function deleteEmailConfig(): Promise<PublicNotificationEmailConfig> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: API_PATH,
-      method: "DELETE",
-    }) as ApiResponse<PublicNotificationEmailConfig>;
-    if (!result.ok || !result.data) {
-      throw new Error(apiMessage(result, "delete_notification_email_failed"));
-    }
-    return result.data;
-  }
-
-  const response = await fetch(API_PATH, {
-    method: "DELETE",
-    credentials: "include",
-  });
-  const payload =
-    (await response.json()) as ApiResponse<PublicNotificationEmailConfig>;
-  if (!response.ok || payload.ok !== true || !payload.data) {
-    throw new Error(apiMessage(payload, "delete_notification_email_failed"));
-  }
-  return payload.data;
+  return requestAdminService<PublicNotificationEmailConfig>(
+    "notification-email",
+    { method: "DELETE" },
+  );
 }
 
 async function sendTestEmail(to: string): Promise<TestEmailResponse> {
-  const path = `${API_PATH}/test`;
   const body = { to };
-
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path,
-      method: "POST",
-      body,
-    }) as ApiResponse<TestEmailResponse>;
-    if (!result.ok || !result.data) {
-      throw new Error(apiMessage(result, "test_notification_email_failed"));
-    }
-    return result.data;
-  }
-
-  const response = await fetch(path, {
+  return requestAdminService<TestEmailResponse>("notification-email/test", {
     method: "POST",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   });
-  const payload = (await response.json()) as ApiResponse<TestEmailResponse>;
-  if (!response.ok || payload.ok !== true || !payload.data) {
-    throw new Error(apiMessage(payload, "test_notification_email_failed"));
-  }
-  return payload.data;
 }
 
 export function NotificationEmailSettingsClient({

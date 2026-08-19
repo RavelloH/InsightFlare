@@ -125,13 +125,6 @@ interface TeamRow {
   createdAt: number;
 }
 
-interface BatchRequestInput {
-  id: string;
-  method: string;
-  path: string;
-  query?: Record<string, string | number | boolean | null>;
-}
-
 interface FunnelRow {
   id: string;
   site_id: string;
@@ -243,7 +236,10 @@ const BatchRequestSchema = z
             method: z.literal("GET"),
             path: z.string().min(1).max(2048),
             query: z
-              .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+              .record(
+                z.string(),
+                z.union([z.string(), z.number(), z.boolean(), z.null()]),
+              )
               .optional(),
           })
           .strict(),
@@ -380,7 +376,10 @@ function relativeChanges(
     Object.keys(current).flatMap((key) => {
       const currentValue = current[key];
       const previousValue = previous[key];
-      if (typeof currentValue !== "number" || typeof previousValue !== "number") {
+      if (
+        typeof currentValue !== "number" ||
+        typeof previousValue !== "number"
+      ) {
         return [];
       }
       const change =
@@ -2109,14 +2108,17 @@ export async function handleAnalytics(
     const previous = result.data.previous
       ? apiV1OverviewMetrics({ current: result.data.previous })
       : current;
-    return jsonSuccess({
-      current,
-      previous,
-      change: relativeChanges(current, previous),
-    }, {
-      request,
-      meta: { timeRange, compare },
-    });
+    return jsonSuccess(
+      {
+        current,
+        previous,
+        change: relativeChanges(current, previous),
+      },
+      {
+        request,
+        meta: { timeRange, compare },
+      },
+    );
   }
   if (resource === "explore") {
     if (request.method !== "POST") return methodNotAllowed(request);
@@ -2210,7 +2212,10 @@ export async function handleEvents(
   if (site instanceof Response) return site;
   if (path[2] === "events" && path[3] === "search") {
     if (request.method !== "POST") return methodNotAllowed(request);
-    const body = await parseAndValidateApiV1Body(request, EventSearchInputSchema);
+    const body = await parseAndValidateApiV1Body(
+      request,
+      EventSearchInputSchema,
+    );
     if (!body.ok) return body.response;
     const bodyUrl = urlForBodyQuery(url, body.data);
     const timeRange = parseTimeRange(bodyUrl);
@@ -2579,10 +2584,9 @@ async function handleFunnelResource(
     );
     if (!parsed.ok) return parsed.response;
     const name = parsed.data.name ?? existing.name;
-    const steps =
-      parsed.data.steps
-        ? normalizeFunnelSteps(parsed.data.steps)
-        : parseFunnelSteps(existing.config_json);
+    const steps = parsed.data.steps
+      ? normalizeFunnelSteps(parsed.data.steps)
+      : parseFunnelSteps(existing.config_json);
     if (steps.length < 2) {
       return jsonError(
         "validation_failed",

@@ -71,6 +71,11 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import {
+  type AdminServiceHttpMethod,
+  requestAdminService,
+} from "@/lib/admin-service-client";
+import type { AdminServiceRoute } from "@/lib/admin-service-contract";
+import {
   durationFormat,
   intlLocale,
   numberFormat,
@@ -88,7 +93,6 @@ import type { MemberData, SiteData, TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
-import { extractErrorMessage } from "@/lib/response-envelope";
 import Link from "@/lib/router";
 import { useRouter } from "@/lib/router";
 
@@ -338,117 +342,38 @@ async function fetchTeamMembers(
   teamId: string,
   signal?: AbortSignal,
 ): Promise<MemberData[]> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: "/api/private/admin/members",
-      params: { teamId },
-    }) as { ok: boolean; data?: MemberData[] };
-    return Array.isArray(result.data) ? result.data : [];
-  }
-  const url = `/api/private/admin/members?teamId=${encodeURIComponent(teamId)}`;
-  const response = await fetch(url, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
+  return requestAdminService<MemberData[]>("members", {
+    params: { teamId },
     signal,
   });
-  if (!response.ok) throw new Error("fetch_team_members_failed");
-  const payload = (await response.json()) as {
-    ok: boolean;
-    data?: MemberData[];
-  };
-  return Array.isArray(payload.data) ? payload.data : [];
 }
 
 async function fetchTeamSites(
   teamId: string,
   signal?: AbortSignal,
 ): Promise<SiteData[]> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: "/api/private/admin/sites",
-      params: { teamId },
-    }) as { ok: boolean; data?: SiteData[] };
-    return Array.isArray(result.data) ? result.data : [];
-  }
-  const url = `/api/private/admin/sites?teamId=${encodeURIComponent(teamId)}`;
-  const response = await fetch(url, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
+  return requestAdminService<SiteData[]>("sites", {
+    params: { teamId },
     signal,
   });
-  if (!response.ok) throw new Error("fetch_team_sites_failed");
-  const payload = (await response.json()) as {
-    ok: boolean;
-    data?: SiteData[];
-  };
-  return Array.isArray(payload.data) ? payload.data : [];
 }
 
 async function fetchTeamInvites(
   teamId: string,
   signal?: AbortSignal,
 ): Promise<TeamInviteData[]> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: "/api/private/admin/team-invites",
-      params: { teamId },
-    }) as { ok: boolean; data?: TeamInviteData[] };
-    return Array.isArray(result.data) ? result.data : [];
-  }
-  const url = `/api/private/admin/team-invites?teamId=${encodeURIComponent(teamId)}`;
-  const response = await fetch(url, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
+  return requestAdminService<TeamInviteData[]>("team-invites", {
+    params: { teamId },
     signal,
   });
-  if (!response.ok) throw new Error("fetch_team_invites_failed");
-  const payload = (await response.json()) as {
-    ok: boolean;
-    data?: TeamInviteData[];
-  };
-  return Array.isArray(payload.data) ? payload.data : [];
-}
-
-interface ActionResponse<T> {
-  ok: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
 }
 
 async function postJson<T>(
-  url: string,
+  route: AdminServiceRoute,
   body: Record<string, unknown>,
-  method: "POST" | "PATCH" = "POST",
+  method: AdminServiceHttpMethod = "POST",
 ): Promise<T> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: url,
-      method,
-      body,
-    }) as ActionResponse<T>;
-    return (result.data ?? {}) as T;
-  }
-  const response = await fetch(url, {
-    method,
-    credentials: "include",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  const payload = (await response.json()) as ActionResponse<T>;
-  if (!response.ok || !payload.ok || payload.data === undefined) {
-    throw new Error(extractErrorMessage(payload));
-  }
-  return payload.data;
+  return requestAdminService<T>(route, { method, body });
 }
 
 export function TeamManagementClient({
@@ -640,7 +565,7 @@ export function TeamManagementClient({
     setCreatingSite(true);
     setCreateSiteError("");
     try {
-      const created = await postJson<SiteData>("/api/private/admin/sites", {
+      const created = await postJson<SiteData>("sites", {
         teamId: team.id,
         name,
         domain,
@@ -677,7 +602,7 @@ export function TeamManagementClient({
     setSavingTeam(true);
     try {
       const updated = await postJson<TeamData>(
-        "/api/private/admin/teams",
+        "teams",
         {
           teamId: activeTeam.id,
           name,
@@ -718,16 +643,13 @@ export function TeamManagementClient({
 
     setCreatingInvite(true);
     try {
-      const created = await postJson<CreatedTeamInviteData>(
-        "/api/private/admin/team-invites",
-        {
-          teamId: activeTeam.id,
-          email: email || undefined,
-          role: inviteRole,
-          siteIds: inviteRole === "member" ? inviteSiteIds : [],
-          expiresInHours,
-        },
-      );
+      const created = await postJson<CreatedTeamInviteData>("team-invites", {
+        teamId: activeTeam.id,
+        email: email || undefined,
+        role: inviteRole,
+        siteIds: inviteRole === "member" ? inviteSiteIds : [],
+        expiresInHours,
+      });
       setInviteEmail("");
       setInviteRole("member");
       setInviteSiteIds([]);
@@ -749,7 +671,7 @@ export function TeamManagementClient({
     setRevokingInviteId(inviteId);
     try {
       await postJson<TeamInviteData>(
-        "/api/private/admin/team-invites",
+        "team-invites",
         {
           intent: "revoke",
           inviteId,
@@ -792,7 +714,7 @@ export function TeamManagementClient({
     setDeletingTeam(true);
     try {
       await postJson(
-        "/api/private/admin/teams",
+        "teams",
         {
           intent: "remove",
           teamId: activeTeam.id,
@@ -820,7 +742,7 @@ export function TeamManagementClient({
     setTransferring(true);
     try {
       await postJson<TeamData>(
-        "/api/private/admin/teams",
+        "teams",
         {
           intent: "transfer_owner",
           teamId: activeTeam.id,
@@ -851,7 +773,7 @@ export function TeamManagementClient({
     setChangingRoleId(userId);
     try {
       await postJson(
-        "/api/private/admin/members",
+        "members",
         {
           intent: "update_role",
           teamId: activeTeam.id,
@@ -877,7 +799,7 @@ export function TeamManagementClient({
     setSavingSiteAccessId(userId);
     try {
       await postJson(
-        "/api/private/admin/members",
+        "members",
         {
           intent: "update_site_access",
           teamId: activeTeam.id,
@@ -905,7 +827,7 @@ export function TeamManagementClient({
     setRemovingMemberId(userId);
     try {
       await postJson(
-        "/api/private/admin/members",
+        "members",
         {
           intent: "remove",
           teamId: activeTeam.id,

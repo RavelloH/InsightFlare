@@ -1,3 +1,7 @@
+import {
+  defaultBotAnalyticsConfig,
+  redactBotAnalyticsConfig,
+} from "@/lib/bot-analytics-config";
 import { normalizeTimeZone } from "@/lib/dashboard/time-zone";
 import type { NotificationPreferencesData } from "@/lib/edge-client";
 import type {
@@ -84,6 +88,7 @@ import {
   generateDemoVisitorDetail,
   generateDemoVisitors,
 } from "@/lib/realtime/mock/journeys";
+import { generateDemoRequestObservationData } from "@/lib/realtime/mock/request-observation";
 import { handleDemoSavedFilters } from "@/lib/realtime/mock/saved-filters";
 import {
   generateDemoBrowserEngineTrend,
@@ -513,6 +518,21 @@ function handleDemoRequestInner(options: {
     method === "PUT" ||
     method === "DELETE"
   ) {
+    if (path.includes("/admin/bot-analytics-config")) {
+      const body = bodyRecord as {
+        accountId?: unknown;
+        apiToken?: unknown;
+        clearApiToken?: unknown;
+      };
+      const config = defaultBotAnalyticsConfig();
+      config.accountId = String(body.accountId ?? "").trim();
+      config.configured =
+        body.clearApiToken !== true &&
+        String(body.apiToken ?? "").trim() !== "";
+      config.apiTokenHint = config.configured ? "••••demo" : "";
+      config.updatedAt = Date.now();
+      return { ok: true, data: redactBotAnalyticsConfig(config) };
+    }
     if (path.includes("/funnels")) {
       if (method === "DELETE") return deleteDemoFunnel(siteId, params);
       return createDemoFunnel(siteId, options.body);
@@ -909,6 +929,13 @@ function handleDemoRequestInner(options: {
     const tid = teamId || getDemoTeams()[0].id;
     return { ok: true, data: generateDemoApiKeys(tid) };
   }
+  if (path.includes("/admin/bot-analytics-config")) {
+    const config = defaultBotAnalyticsConfig();
+    return { ok: true, data: redactBotAnalyticsConfig(config) };
+  }
+  if (path.includes("/admin/bot-analytics")) {
+    return demoBotAnalyticsResponse(params);
+  }
   if (path.includes("/admin/notification-rules")) {
     return {
       ok: true,
@@ -1248,6 +1275,87 @@ function handleDemoRequestInner(options: {
 
   // Fallback
   return demoNotFoundResponse();
+}
+
+function demoBotAnalyticsResponse(
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const from = Number(params.from);
+  const to = Number(params.to);
+  const requestedMinutes =
+    Number.isFinite(from) && Number.isFinite(to) && to > from
+      ? Math.ceil((to - from) / 60_000)
+      : 60;
+  const minutes =
+    requestedMinutes <= 60
+      ? 60
+      : requestedMinutes <= 1440
+        ? 1440
+        : requestedMinutes <= 10080
+          ? 10080
+          : 43200;
+  const data = generateDemoRequestObservationData(minutes) as unknown as {
+    ok: true;
+    configured: boolean;
+    generatedAt: number;
+    events: Array<Record<string, unknown>>;
+    normal?: { events?: Array<Record<string, unknown>> };
+  } & Record<string, unknown>;
+
+  if (params.detail === "1") {
+    const traceId = String(params.traceId || "");
+    const rayId = String(params.rayId || "");
+    const detail = data.events.find(
+      (event) => event.traceId === traceId || event.rayId === rayId,
+    );
+    return {
+      ok: true,
+      configured: data.configured,
+      generatedAt: data.generatedAt,
+      detail: detail ?? null,
+    };
+  }
+
+  const source = params.page === "normal" ? "normal" : "abnormal";
+  const events =
+    source === "normal" ? (data.normal?.events ?? []) : data.events;
+  if (params.page === "normal" || params.page === "abnormal") {
+    const limit = Math.max(1, Math.min(100, Number(params.limit) || 50));
+    return {
+      ok: true,
+      configured: data.configured,
+      generatedAt: data.generatedAt,
+      page: {
+        source,
+        events: events.slice(0, limit),
+        hasMore: events.length > limit,
+        nextCursor: null,
+      },
+    };
+  }
+
+  if (params.dimensionTab) {
+    const key = String(params.dimensionTab);
+    const counts = new Map<string, { count: number; highConfidence: number }>();
+    for (const event of events) {
+      const value = String(event[key] ?? "Unknown");
+      const current = counts.get(value) ?? { count: 0, highConfidence: 0 };
+      current.count += 1;
+      if (event.confidence === "high") current.highConfidence += 1;
+      counts.set(value, current);
+    }
+    return {
+      ok: true,
+      dimension: {
+        rows: [...counts.entries()]
+          .map(([key, value]) => ({ key, label: key, ...value }))
+          .sort((left, right) => right.count - left.count)
+          .slice(0, 30),
+      },
+    };
+  }
+
+  return data;
 }
 
 /**

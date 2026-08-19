@@ -28,13 +28,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { requestAdminService } from "@/lib/admin-service-client";
 import { shortDateTime } from "@/lib/dashboard/format";
-import {
-  fetchNotificationMessages,
-  markAllNotificationMessagesRead,
-  markNotificationMessageRead,
-  type NotificationMessageData,
-} from "@/lib/edge-client";
+import { type NotificationMessageData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
@@ -408,11 +404,16 @@ export function NotificationCenterClient({
   const messagesQuery = useQuery({
     queryKey: messagesQueryKey,
     queryFn: ({ signal }) =>
-      fetchNotificationMessages({
-        teamId,
-        ruleId: ruleIdFilter || undefined,
-        locale,
-        limit: 80,
+      requestAdminService<{
+        messages: NotificationMessageData[];
+        unreadAttentionCount: number;
+      }>("notifications", {
+        params: {
+          teamId,
+          ruleId: ruleIdFilter || undefined,
+          locale,
+          limit: 80,
+        },
         signal,
       }),
     enabled: typeof window !== "undefined",
@@ -470,7 +471,13 @@ export function NotificationCenterClient({
     const target = messagesList.find((item) => item.id === messageId);
     setUpdatingId(messageId);
     try {
-      const updated = await markNotificationMessageRead({ messageId, locale });
+      const updated = await requestAdminService<NotificationMessageData | null>(
+        `notifications/${encodeURIComponent(messageId)}`,
+        {
+          method: "PATCH",
+          body: { read: true, locale },
+        },
+      );
       queryClient.setQueryData(
         messagesQueryKey,
         (current: typeof messagesQuery.data) => {
@@ -498,7 +505,10 @@ export function NotificationCenterClient({
     if (markingAll) return;
     setMarkingAll(true);
     try {
-      await markAllNotificationMessagesRead({ teamId });
+      await requestAdminService<{ updated: number }>("notifications/read-all", {
+        method: "PATCH",
+        body: { teamId, read: true },
+      });
       await queryClient.invalidateQueries({ queryKey: messagesQueryKey });
       toast.success(copy.markAllReadSuccess);
     } catch {

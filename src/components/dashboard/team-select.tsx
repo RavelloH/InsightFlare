@@ -26,11 +26,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { requestAdminService } from "@/lib/admin-service-client";
 import type { TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
-import { extractErrorMessage } from "@/lib/response-envelope";
 import { useRouter } from "@/lib/router";
 
 interface TeamSelectOption {
@@ -50,13 +50,6 @@ interface TeamSelectProps {
     system: TeamSelectOption[];
   };
   activeTeamSlug: string;
-}
-
-interface CreateTeamResponse {
-  ok: boolean;
-  data?: TeamData;
-  error?: string;
-  message?: string;
 }
 
 const CREATE_TEAM_VALUE = "__create_team__";
@@ -143,26 +136,18 @@ export function TeamSelect({
     setSubmitting(true);
     setSubmitError("");
     try {
-      const response = await fetch("/api/private/admin/teams", {
+      const data = await requestAdminService<TeamData>("teams", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({
+        body: {
           name: normalizedName,
           slug: normalizedSlug || undefined,
-        }),
+        },
       });
-      const payload = (await response.json()) as CreateTeamResponse;
-      if (!response.ok || !payload.ok || !payload.data) {
-        throw new Error(extractErrorMessage(payload, "create_team_failed"));
-      }
       setOpenCreateDialog(false);
       setTeamName("");
       setTeamSlug("");
       toast.success(copy.createSuccess);
-      navigateWithTransition(router, `/${locale}/app/${payload.data.slug}`);
+      navigateWithTransition(router, `/${locale}/app/${data.slug}`);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : copy.createFailed;

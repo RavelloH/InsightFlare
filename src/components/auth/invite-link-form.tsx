@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { requestAdminService } from "@/lib/admin-service-client";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -102,12 +103,12 @@ export function InviteLinkForm({ locale, copy }: InviteLinkFormProps) {
       setLoading(true);
       setError("");
       try {
-        const sessionResponse = await fetch("/api/private/session", {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
-        setSignedIn(sessionResponse.ok);
+        try {
+          await requestAdminService("session");
+          setSignedIn(true);
+        } catch {
+          setSignedIn(false);
+        }
 
         const response = await fetch("/api/public/account-links/inspect", {
           method: "POST",

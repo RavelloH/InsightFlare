@@ -81,6 +81,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { requestAdminService } from "@/lib/admin-service-client";
 import {
   durationFormat,
   intlLocale,
@@ -1977,37 +1978,19 @@ async function fetchRequestObservation(
   timeWindow: TimeWindow,
   signal?: AbortSignal,
 ): Promise<RequestObservationData> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    return generateDemoRequestObservation(demoMinutesForWindow(timeWindow));
-  }
-
-  const params = new URLSearchParams({
-    from: String(Math.floor(timeWindow.from)),
-    to: String(Math.floor(timeWindow.to)),
-    interval: timeWindow.interval,
-    timeZone: timeWindow.timeZone,
-    limit: String(BOT_EVENT_FETCH_LIMIT),
-  });
-  const response = await fetch(`/api/private/admin/bot-analytics?${params}`, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-    signal,
-  });
-  const payload = (await response.json()) as
-    | RequestObservationData
-    | {
-        ok?: false;
-        error?: string;
-        message?: string;
-      };
-  if (!response.ok || payload.ok !== true) {
-    throw new Error(
-      ("message" in payload && payload.message) ||
-        ("error" in payload && payload.error) ||
-        "load_bot_protection_failed",
-    );
-  }
+  const payload = await requestAdminService<RequestObservationData>(
+    "bot-analytics",
+    {
+      params: {
+        from: String(Math.floor(timeWindow.from)),
+        to: String(Math.floor(timeWindow.to)),
+        interval: timeWindow.interval,
+        timeZone: timeWindow.timeZone,
+        limit: String(BOT_EVENT_FETCH_LIMIT),
+      },
+      signal,
+    },
+  );
   return withDemoOverlayData(timeWindow, payload);
 }
 
@@ -2016,25 +1999,17 @@ async function fetchRequestObservationPage(
   source: "abnormal" | "normal",
   cursor: RequestDetailCursor,
 ): Promise<RequestObservationPageData> {
-  const params = new URLSearchParams({
-    from: String(Math.floor(timeWindow.from)),
-    to: String(Math.floor(timeWindow.to)),
-    interval: timeWindow.interval,
-    timeZone: timeWindow.timeZone,
-    page: source,
-    limit: String(BOT_EVENT_FETCH_LIMIT),
-    cursor: JSON.stringify(cursor),
+  return requestAdminService<RequestObservationPageData>("bot-analytics", {
+    params: {
+      from: String(Math.floor(timeWindow.from)),
+      to: String(Math.floor(timeWindow.to)),
+      interval: timeWindow.interval,
+      timeZone: timeWindow.timeZone,
+      page: source,
+      limit: String(BOT_EVENT_FETCH_LIMIT),
+      cursor: JSON.stringify(cursor),
+    },
   });
-  const response = await fetch(`/api/private/admin/bot-analytics?${params}`, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-  });
-  const payload = (await response.json()) as RequestObservationPageData;
-  if (!response.ok || payload.ok !== true) {
-    throw new Error("load_bot_protection_failed");
-  }
-  return payload;
 }
 
 async function fetchRequestObservationDimension(
@@ -2043,22 +2018,23 @@ async function fetchRequestObservationDimension(
   group: "detection" | "target" | "network" | "client",
   tab: string,
 ): Promise<RequestNetworkDimensionRow[]> {
-  const params = new URLSearchParams({
-    from: String(Math.floor(timeWindow.from)),
-    to: String(Math.floor(timeWindow.to)),
-    interval: timeWindow.interval,
-    timeZone: timeWindow.timeZone,
-    dimensionSource: source,
-    dimensionGroup: group,
-    dimensionTab: tab,
-  });
-  const response = await fetch(`/api/private/admin/bot-analytics?${params}`, {
-    credentials: "include",
-    cache: "no-store",
-  });
-  const payload = (await response.json()) as RequestObservationDimensionData;
-  if (!response.ok || payload.ok !== true)
+  const payload = await requestAdminService<RequestObservationDimensionData>(
+    "bot-analytics",
+    {
+      params: {
+        from: String(Math.floor(timeWindow.from)),
+        to: String(Math.floor(timeWindow.to)),
+        interval: timeWindow.interval,
+        timeZone: timeWindow.timeZone,
+        dimensionSource: source,
+        dimensionGroup: group,
+        dimensionTab: tab,
+      },
+    },
+  );
+  if (!payload.dimension) {
     throw new Error("load_bot_protection_failed");
+  }
   return payload.dimension.rows;
 }
 
@@ -2067,38 +2043,21 @@ async function fetchRequestObservationDetail(
   event: BotEvent,
   signal?: AbortSignal,
 ): Promise<BotEvent | null> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") return event;
-
-  const params = new URLSearchParams({
-    from: String(Math.floor(timeWindow.from)),
-    to: String(Math.floor(timeWindow.to)),
-    interval: timeWindow.interval,
-    timeZone: timeWindow.timeZone,
-    detail: "1",
-  });
-  if (event.traceId) params.set("traceId", event.traceId);
-  if (event.rayId) params.set("rayId", event.rayId);
-
-  const response = await fetch(`/api/private/admin/bot-analytics?${params}`, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-    signal,
-  });
-  const payload = (await response.json()) as
-    | RequestObservationDetailData
-    | {
-        ok?: false;
-        error?: string;
-        message?: string;
-      };
-  if (!response.ok || payload.ok !== true) {
-    throw new Error(
-      ("message" in payload && payload.message) ||
-        ("error" in payload && payload.error) ||
-        "load_bot_protection_detail_failed",
-    );
-  }
+  const payload = await requestAdminService<RequestObservationDetailData>(
+    "bot-analytics",
+    {
+      params: {
+        from: String(Math.floor(timeWindow.from)),
+        to: String(Math.floor(timeWindow.to)),
+        interval: timeWindow.interval,
+        timeZone: timeWindow.timeZone,
+        detail: "1",
+        ...(event.traceId ? { traceId: event.traceId } : {}),
+        ...(event.rayId ? { rayId: event.rayId } : {}),
+      },
+      signal,
+    },
+  );
   return payload.detail;
 }
 

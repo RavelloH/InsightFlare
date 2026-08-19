@@ -1,118 +1,86 @@
+import type { Context } from "hono";
 import { Hono } from "hono";
 
-import { handleAccountLinksAdmin } from "@/lib/edge/admin-account-links";
-import { handleApiKeysAdmin } from "@/lib/edge/admin-api-keys";
-import { requireActor } from "@/lib/edge/admin-auth";
-import {
-  handleBotAnalyticsAdmin,
-  handleBotAnalyticsConfigAdmin,
-} from "@/lib/edge/admin-bot-analytics";
-import {
-  handleLoginTurnstileConfigAdmin,
-  handleLoginTurnstileTestAdmin,
-} from "@/lib/edge/admin-login-turnstile";
-import {
-  handleNotificationEmailConfigAdmin,
-  handleNotificationEmailTestAdmin,
-} from "@/lib/edge/admin-notification-email";
-import {
-  handleNotificationEmailPreviewAdmin,
-  handleNotificationRulePreviewAdmin,
-  handleNotificationRuleRunAdmin,
-  handleNotificationRulesAdmin,
-  handleNotificationTestAdmin,
-} from "@/lib/edge/admin-notifications";
 import { nf } from "@/lib/edge/admin-response";
-import { handleScheduledTasksAdmin } from "@/lib/edge/admin-scheduled-tasks";
 import {
-  handleScriptSnippetAdmin,
-  handleSiteConfigAdmin,
-  handleSitesAdmin,
-} from "@/lib/edge/admin-sites";
-import {
-  handleDoDiagnosticAdmin,
-  handleE2eFlushAdmin,
-  handleSystemPerformanceAdmin,
-} from "@/lib/edge/admin-system";
-import { handleTeamInvitesAdmin } from "@/lib/edge/admin-team-invites";
-import { handleMembersAdmin, handleTeamsAdmin } from "@/lib/edge/admin-teams";
-import { handleProfileAdmin, handleUsersAdmin } from "@/lib/edge/admin-users";
+  type AdminServiceRoute,
+  executeAdminService,
+} from "@/lib/edge/admin-service";
 import type { AppEnv } from "@/lib/hono/types";
 import { requestUrl } from "@/lib/hono/utils/context";
 
 export const privateAdminRoutes = new Hono<AppEnv>();
 
-privateAdminRoutes.all("/account-links", (c) =>
-  handleAccountLinksAdmin(c.req.raw, c.env),
+function adminServiceRoute(route: AdminServiceRoute) {
+  return (c: Context<AppEnv>) =>
+    executeAdminService({
+      route,
+      request: c.req.raw,
+      env: c.env,
+      url: requestUrl(c),
+    });
+}
+
+privateAdminRoutes.all("/account-links", adminServiceRoute("account-links"));
+privateAdminRoutes.all("/users", adminServiceRoute("users"));
+privateAdminRoutes.all("/profile", adminServiceRoute("profile"));
+privateAdminRoutes.all("/teams", adminServiceRoute("teams"));
+privateAdminRoutes.all("/team-invites", adminServiceRoute("team-invites"));
+privateAdminRoutes.all("/sites", adminServiceRoute("sites"));
+privateAdminRoutes.all("/members", adminServiceRoute("members"));
+privateAdminRoutes.all("/site-config", adminServiceRoute("site-config"));
+privateAdminRoutes.all("/script-snippet", adminServiceRoute("script-snippet"));
+privateAdminRoutes.all("/api-keys", adminServiceRoute("api-keys"));
+privateAdminRoutes.all(
+  "/notification-email",
+  adminServiceRoute("notification-email"),
 );
-privateAdminRoutes.all("/users", (c) => handleUsersAdmin(c.req.raw, c.env));
-privateAdminRoutes.all("/profile", (c) => handleProfileAdmin(c.req.raw, c.env));
-privateAdminRoutes.all("/teams", (c) => handleTeamsAdmin(c.req.raw, c.env));
-privateAdminRoutes.all("/team-invites", (c) =>
-  handleTeamInvitesAdmin(c.req.raw, c.env, requestUrl(c)),
+privateAdminRoutes.all(
+  "/notification-email/test",
+  adminServiceRoute("notification-email/test"),
 );
-privateAdminRoutes.all("/sites", (c) =>
-  handleSitesAdmin(c.req.raw, c.env, requestUrl(c)),
+privateAdminRoutes.all(
+  "/login-turnstile",
+  adminServiceRoute("login-turnstile"),
 );
-privateAdminRoutes.all("/members", (c) =>
-  handleMembersAdmin(c.req.raw, c.env, requestUrl(c)),
+privateAdminRoutes.all(
+  "/login-turnstile/test",
+  adminServiceRoute("login-turnstile/test"),
 );
-privateAdminRoutes.all("/site-config", (c) =>
-  handleSiteConfigAdmin(c.req.raw, c.env, requestUrl(c)),
+privateAdminRoutes.all(
+  "/bot-analytics-config",
+  adminServiceRoute("bot-analytics-config"),
 );
-privateAdminRoutes.all("/script-snippet", (c) =>
-  handleScriptSnippetAdmin(c.req.raw, c.env, requestUrl(c)),
+privateAdminRoutes.all("/bot-analytics", adminServiceRoute("bot-analytics"));
+privateAdminRoutes.all(
+  "/notification-email-preview",
+  adminServiceRoute("notification-email-preview"),
 );
-privateAdminRoutes.all("/api-keys", (c) =>
-  handleApiKeysAdmin(c.req.raw, c.env, requestUrl(c)),
+privateAdminRoutes.all(
+  "/notification-rules",
+  adminServiceRoute("notification-rules"),
 );
-privateAdminRoutes.all("/notification-email", (c) =>
-  handleNotificationEmailConfigAdmin(c.req.raw, c.env),
+privateAdminRoutes.all(
+  "/notification-rules/preview",
+  adminServiceRoute("notification-rules/preview"),
 );
-privateAdminRoutes.all("/notification-email/test", (c) =>
-  handleNotificationEmailTestAdmin(c.req.raw, c.env),
+privateAdminRoutes.all(
+  "/notification-rules/run",
+  adminServiceRoute("notification-rules/run"),
 );
-privateAdminRoutes.all("/login-turnstile", (c) =>
-  handleLoginTurnstileConfigAdmin(c.req.raw, c.env),
+privateAdminRoutes.all(
+  "/notification-test",
+  adminServiceRoute("notification-test"),
 );
-privateAdminRoutes.all("/login-turnstile/test", (c) =>
-  handleLoginTurnstileTestAdmin(c.req.raw, c.env),
+privateAdminRoutes.all(
+  "/system-performance",
+  adminServiceRoute("system-performance"),
 );
-privateAdminRoutes.all("/bot-analytics-config", (c) =>
-  handleBotAnalyticsConfigAdmin(c.req.raw, c.env),
+privateAdminRoutes.all(
+  "/scheduled-tasks",
+  adminServiceRoute("scheduled-tasks"),
 );
-privateAdminRoutes.all("/bot-analytics", (c) =>
-  handleBotAnalyticsAdmin(c.req.raw, c.env, requestUrl(c)),
-);
-privateAdminRoutes.all("/notification-email-preview", (c) =>
-  handleNotificationEmailPreviewAdmin(c.req.raw, c.env, requestUrl(c)),
-);
-privateAdminRoutes.all("/notification-rules", (c) =>
-  handleNotificationRulesAdmin(c.req.raw, c.env, requestUrl(c)),
-);
-// TODO(private-api): Consider migrating notification rule mutations to
-// /notification-rules/:ruleId, /:ruleId/preview, and /:ruleId/run once the
-// notification UI stabilizes. Keep the current body/query based shape for now
-// to avoid unnecessary churn during the initial notification-system rollout.
-privateAdminRoutes.all("/notification-rules/preview", (c) =>
-  handleNotificationRulePreviewAdmin(c.req.raw, c.env),
-);
-privateAdminRoutes.all("/notification-rules/run", (c) =>
-  handleNotificationRuleRunAdmin(c.req.raw, c.env),
-);
-privateAdminRoutes.all("/notification-test", (c) =>
-  handleNotificationTestAdmin(c.req.raw, c.env),
-);
-privateAdminRoutes.all("/system-performance", (c) =>
-  handleSystemPerformanceAdmin(c.req.raw, c.env, requestUrl(c), requireActor),
-);
-privateAdminRoutes.all("/scheduled-tasks", (c) =>
-  handleScheduledTasksAdmin(c.req.raw, c.env, requestUrl(c), requireActor),
-);
-privateAdminRoutes.all("/do-diagnostic", (c) =>
-  handleDoDiagnosticAdmin(c.req.raw, c.env, requestUrl(c), requireActor),
-);
-privateAdminRoutes.all("/e2e/flush", (c) =>
-  handleE2eFlushAdmin(c.req.raw, c.env, requestUrl(c), requireActor),
-);
+privateAdminRoutes.all("/do-diagnostic", adminServiceRoute("do-diagnostic"));
+privateAdminRoutes.all("/e2e/flush", adminServiceRoute("e2e/flush"));
+
 privateAdminRoutes.all("/*", () => nf());

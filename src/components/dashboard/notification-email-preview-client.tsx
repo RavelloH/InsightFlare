@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { fetchNotificationEmailPreview } from "@/lib/edge-client";
+import { requestAdminService } from "@/lib/admin-service-client";
 import {
   isValidLocale,
   type Locale,
@@ -33,6 +33,11 @@ type PreviewType =
   | "change"
   | "health";
 type PreviewFormat = "html" | "text" | "json";
+type NotificationEmailPreview = {
+  subject: string;
+  html: string;
+  text: string;
+};
 
 const PREVIEW_TYPES: PreviewType[] = [
   "test",
@@ -71,24 +76,28 @@ export function NotificationEmailPreviewClient({
       format,
     ],
     queryFn: () =>
-      fetchNotificationEmailPreview({
-        type,
-        locale: previewLocale,
-        format,
-      }),
+      requestAdminService<NotificationEmailPreview>(
+        "notification-email-preview",
+        {
+          params: {
+            type,
+            locale: previewLocale,
+            format: "json",
+          },
+        },
+      ),
     enabled: typeof window !== "undefined",
   });
   const loading = previewQuery.isFetching;
-  const subject =
-    typeof previewQuery.data === "string"
-      ? ""
-      : previewQuery.data?.subject || "";
+  const subject = previewQuery.data?.subject || "";
   const payload =
-    typeof previewQuery.data === "string"
-      ? previewQuery.data
-      : previewQuery.data
-        ? JSON.stringify(previewQuery.data, null, 2)
-        : "";
+    format === "html"
+      ? previewQuery.data?.html || ""
+      : format === "text"
+        ? previewQuery.data?.text || ""
+        : previewQuery.data
+          ? JSON.stringify(previewQuery.data, null, 2)
+          : "";
 
   useEffect(() => {
     if (previewQuery.isError) toast.error(page.loadFailed);

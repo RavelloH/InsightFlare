@@ -25,12 +25,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
+import { requestAdminService } from "@/lib/admin-service-client";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
-import { extractErrorMessage } from "@/lib/response-envelope";
 import { useRouter } from "@/lib/router";
 
 interface AdminTeamsManagementClientProps {
@@ -38,32 +38,8 @@ interface AdminTeamsManagementClientProps {
   messages: AppMessages;
 }
 
-interface ApiResponse<T> {
-  ok: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
-}
-
 async function fetchTeams(signal?: AbortSignal): Promise<TeamData[]> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: "/api/private/admin/teams",
-    }) as ApiResponse<TeamData[]>;
-    return Array.isArray(result.data) ? result.data : [];
-  }
-  const response = await fetch("/api/private/admin/teams", {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-    signal,
-  });
-  const payload = (await response.json()) as ApiResponse<TeamData[]>;
-  if (!response.ok || !payload.ok || !Array.isArray(payload.data)) {
-    throw new Error(extractErrorMessage(payload, "load_teams_failed"));
-  }
-  return payload.data;
+  return requestAdminService<TeamData[]>("teams", { signal });
 }
 
 export function AdminTeamsManagementClient({
@@ -110,21 +86,13 @@ export function AdminTeamsManagementClient({
 
     setSubmitting(true);
     try {
-      const response = await fetch("/api/private/admin/teams", {
+      await requestAdminService<TeamData>("teams", {
         method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           name: name.trim(),
           slug: slug.trim() || undefined,
-        }),
+        },
       });
-      const payload = (await response.json()) as ApiResponse<TeamData>;
-      if (!response.ok || !payload.ok) {
-        throw new Error(extractErrorMessage(payload, t.createFailed));
-      }
       setName("");
       setSlug("");
       await refreshTeams();

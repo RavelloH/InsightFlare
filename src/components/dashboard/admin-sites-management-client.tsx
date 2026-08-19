@@ -19,25 +19,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
+import { requestAdminService } from "@/lib/admin-service-client";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { SiteData, TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
-import { extractErrorMessage } from "@/lib/response-envelope";
 import { useRouter } from "@/lib/router";
 
 interface AdminSitesManagementClientProps {
   locale: Locale;
   messages: AppMessages;
   activeTeam: TeamData;
-}
-
-interface ApiResponse<T> {
-  ok: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
 }
 
 function safeSlug(value: string): string {
@@ -59,28 +52,10 @@ async function fetchSites(
   teamId: string,
   signal?: AbortSignal,
 ): Promise<SiteData[]> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: "/api/private/admin/sites",
-      params: { teamId },
-    }) as ApiResponse<SiteData[]>;
-    return Array.isArray(result.data) ? result.data : [];
-  }
-  const response = await fetch(
-    `/api/private/admin/sites?teamId=${encodeURIComponent(teamId)}`,
-    {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-      signal,
-    },
-  );
-  const payload = (await response.json()) as ApiResponse<SiteData[]>;
-  if (!response.ok || !payload.ok || !Array.isArray(payload.data)) {
-    throw new Error(extractErrorMessage(payload, "load_sites_failed"));
-  }
-  return payload.data;
+  return requestAdminService<SiteData[]>("sites", {
+    params: { teamId },
+    signal,
+  });
 }
 
 export function AdminSitesManagementClient({
@@ -127,30 +102,22 @@ export function AdminSitesManagementClient({
 
     setSubmitting(true);
     try {
-      const response = await fetch("/api/private/admin/sites", {
+      const data = await requestAdminService<SiteData>("sites", {
         method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           teamId: team.id,
           name: name.trim(),
           domain: domain.trim(),
           publicSlug: publicSlug.trim() || undefined,
-        }),
+        },
       });
-      const payload = (await response.json()) as ApiResponse<SiteData>;
-      if (!response.ok || !payload.ok || !payload.data) {
-        throw new Error(extractErrorMessage(payload, t.createFailed));
-      }
       setName("");
       setDomain("");
       setPublicSlug("");
       toast.success(t.createSuccess);
       navigateWithTransition(
         router,
-        `/${locale}/app/${team.slug}/${siteSlug(payload.data)}/settings`,
+        `/${locale}/app/${team.slug}/${siteSlug(data)}/settings`,
       );
       router.refresh();
     } catch (error) {

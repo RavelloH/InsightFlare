@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
+import { requestAdminService } from "@/lib/admin-service-client";
 import {
   intlLocale,
   numberFormat,
@@ -65,12 +66,6 @@ interface SystemPerformanceClientProps {
   messages: AppMessages;
 }
 
-interface ApiErrorResponse {
-  ok?: false;
-  error?: string;
-  message?: string;
-}
-
 const WINDOW_OPTIONS: readonly SystemPerformanceWindowMinutes[] = [
   15, 60, 360, 1440,
 ] as const;
@@ -84,64 +79,18 @@ async function fetchSystemPerformance(
   minutes: SystemPerformanceWindowMinutes,
   signal?: AbortSignal,
 ): Promise<SystemPerformanceData> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    return demoRequest({
-      path: "/api/private/admin/system-performance",
-      params: { minutes },
-    }) as SystemPerformanceData;
-  }
-
-  const response = await fetch(
-    `/api/private/admin/system-performance?minutes=${minutes}`,
-    {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-      signal,
-    },
-  );
-  const payload = (await response.json()) as
-    | SystemPerformanceData
-    | ApiErrorResponse;
-  if (!response.ok || payload.ok !== true) {
-    throw new Error(
-      ("message" in payload && payload.message) ||
-        ("error" in payload && payload.error) ||
-        "load_system_performance_failed",
-    );
-  }
-  return payload;
+  return requestAdminService<SystemPerformanceData>("system-performance", {
+    params: { minutes },
+    signal,
+  });
 }
 
 async function fetchDoDiagnostic(
   signal?: AbortSignal,
 ): Promise<DoDiagnosticAggregate> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    return demoRequest({
-      path: "/api/private/admin/do-diagnostic",
-      params: {},
-    }) as DoDiagnosticAggregate;
-  }
-
-  const response = await fetch(`/api/private/admin/do-diagnostic`, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
+  return requestAdminService<DoDiagnosticAggregate>("do-diagnostic", {
     signal,
   });
-  const payload = (await response.json()) as
-    | DoDiagnosticAggregate
-    | ApiErrorResponse;
-  if (!response.ok || payload.ok !== true) {
-    throw new Error(
-      ("message" in payload && payload.message) ||
-        ("error" in payload && payload.error) ||
-        "load_do_diagnostic_failed",
-    );
-  }
-  return payload;
 }
 
 function formatMetricNumber(locale: Locale, value: number): string {

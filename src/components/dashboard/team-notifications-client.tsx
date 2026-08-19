@@ -56,6 +56,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { requestAdminService } from "@/lib/admin-service-client";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
 import {
   browserTimeZone,
@@ -65,20 +66,11 @@ import {
   timeZoneOffsetMinutes,
 } from "@/lib/dashboard/time-zone";
 import {
-  createNotificationRule,
-  deleteNotificationRule,
-  fetchAdminMembers,
-  fetchAdminSites,
-  fetchNotificationEmailConfig,
-  fetchNotificationRules,
   type MemberData,
   type NotificationRuleData,
   type NotificationRuleEvaluationData,
-  previewNotificationRule,
-  runNotificationRuleNow,
-  sendNotificationTest,
+  type NotificationRuleRunData,
   type SiteData,
-  updateNotificationRule,
 } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -87,6 +79,7 @@ import {
   describeNotificationFormConditions,
   describeNotificationRuleCondition,
 } from "@/lib/notifications/condition-description";
+import type { PublicNotificationEmailConfig } from "@/lib/notifications/email-config";
 import Link from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -1768,10 +1761,22 @@ export function TeamNotificationsClient({
     queryKey: rulesQueryKey,
     queryFn: async ({ signal }) => {
       const [rules, sites, members, emailConfig] = await Promise.all([
-        fetchNotificationRules({ teamId, signal }),
-        fetchAdminSites(teamId, { signal }),
-        fetchAdminMembers(teamId, { signal }),
-        fetchNotificationEmailConfig({ signal }),
+        requestAdminService<NotificationRuleData[]>("notification-rules", {
+          params: { teamId },
+          signal,
+        }),
+        requestAdminService<SiteData[]>("sites", {
+          params: { teamId },
+          signal,
+        }),
+        requestAdminService<MemberData[]>("members", {
+          params: { teamId },
+          signal,
+        }),
+        requestAdminService<PublicNotificationEmailConfig>(
+          "notification-email",
+          { signal },
+        ),
       ]);
       return {
         rules,
@@ -1843,9 +1848,12 @@ export function TeamNotificationsClient({
     setSaving(true);
     try {
       const payload = buildRulePayload(copy, form, sites);
-      await (form.id
-        ? updateNotificationRule({ ruleId: form.id, teamId, ...payload })
-        : createNotificationRule({ teamId, ...payload }));
+      await requestAdminService<NotificationRuleData>("notification-rules", {
+        method: form.id ? "PATCH" : "POST",
+        body: form.id
+          ? { ruleId: form.id, teamId, ...payload }
+          : { teamId, ...payload },
+      });
       await queryClient.invalidateQueries({ queryKey: rulesQueryKey });
       setDialogOpen(false);
       toast.success(form.id ? copy.ruleUpdated : copy.ruleCreated);
@@ -1858,9 +1866,12 @@ export function TeamNotificationsClient({
 
   async function toggleRule(rule: NotificationRuleData) {
     try {
-      await updateNotificationRule({
-        ruleId: rule.id,
-        enabled: !rule.enabled,
+      await requestAdminService<NotificationRuleData>("notification-rules", {
+        method: "PATCH",
+        body: {
+          ruleId: rule.id,
+          enabled: !rule.enabled,
+        },
       });
       await queryClient.invalidateQueries({ queryKey: rulesQueryKey });
     } catch {
@@ -1876,7 +1887,13 @@ export function TeamNotificationsClient({
     )
       return;
     try {
-      await deleteNotificationRule({ ruleId: rule.id });
+      await requestAdminService<{ id: string; removed: boolean }>(
+        "notification-rules",
+        {
+          method: "DELETE",
+          params: { id: rule.id },
+        },
+      );
       await queryClient.invalidateQueries({ queryKey: rulesQueryKey });
       toast.success(copy.ruleDeleted);
     } catch {
@@ -1888,7 +1905,10 @@ export function TeamNotificationsClient({
     if (testing) return;
     setTesting(true);
     try {
-      await sendNotificationTest({ teamId, userId: currentUserId });
+      await requestAdminService("notification-test", {
+        method: "POST",
+        body: { teamId, userId: currentUserId },
+      });
       toast.success(copy.testNotificationSent);
       setTestDialogOpen(false);
     } catch {
@@ -1905,7 +1925,13 @@ export function TeamNotificationsClient({
     setPreviewDialogOpen(true);
     setPreviewingId(rule.id);
     try {
-      const result = await previewNotificationRule({ ruleId: rule.id });
+      const result = await requestAdminService<NotificationRuleEvaluationData>(
+        "notification-rules/preview",
+        {
+          method: "POST",
+          body: { ruleId: rule.id },
+        },
+      );
       setPreviewResult(result);
     } catch {
       toast.error(copy.previewFailed);
@@ -1918,7 +1944,13 @@ export function TeamNotificationsClient({
     if (runningId) return;
     setRunningId(rule.id);
     try {
-      const result = await runNotificationRuleNow({ ruleId: rule.id });
+      const result = await requestAdminService<NotificationRuleRunData>(
+        "notification-rules/run",
+        {
+          method: "POST",
+          body: { ruleId: rule.id },
+        },
+      );
       toast.success(
         formatI18nTemplate(copy.runResultToast, {
           messages: result.messageCount,

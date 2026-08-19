@@ -39,6 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { requestAdminService } from "@/lib/admin-service-client";
 import { intlLocale } from "@/lib/dashboard/format";
 import {
   buildTimeZoneOptions,
@@ -49,14 +50,11 @@ import {
 } from "@/lib/dashboard/time-zone";
 import {
   type AccountUserData,
-  fetchNotificationPreferences,
   normalizeNotificationPreferencesData,
   type NotificationPreferencesData,
-  updateNotificationPreferences,
 } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
-import { extractErrorMessage } from "@/lib/response-envelope";
 import { useRouter } from "@/lib/router";
 
 interface AccountSettingsClientProps {
@@ -67,13 +65,6 @@ interface AccountSettingsClientProps {
 
 type TimeZoneMode = "browser" | "custom";
 type PreferredLocale = "" | "en" | "zh" | "ja";
-
-interface ProfileResponse {
-  ok?: boolean;
-  data?: AccountUserData;
-  error?: string;
-  message?: string;
-}
 
 function sameNotificationPreferences(
   left: NotificationPreferencesData | null,
@@ -131,7 +122,11 @@ export function AccountSettingsClient({
   const appliedNotificationPreferencesUserIdRef = useRef<string | null>(null);
   const notificationPreferencesQuery = useQuery({
     queryKey: ["dashboard", "notification-preferences", user.id],
-    queryFn: ({ signal }) => fetchNotificationPreferences({ signal }),
+    queryFn: ({ signal }) =>
+      requestAdminService<NotificationPreferencesData>(
+        "notifications/preferences",
+        { signal },
+      ).then(normalizeNotificationPreferencesData),
     enabled: typeof window !== "undefined",
   });
   const notificationPreferencesLoading = notificationPreferencesQuery.isPending;
@@ -303,25 +298,15 @@ export function AccountSettingsClient({
 
     setProfileSaving(true);
     try {
-      const response = await fetch("/api/private/admin/profile", {
+      const data = await requestAdminService<AccountUserData>("profile", {
         method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           username: normalizedProfileUsername,
           email: normalizedProfileEmail,
           name: normalizedProfileName,
-        }),
+        },
       });
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as ProfileResponse;
-      if (!response.ok || payload.ok === false || !payload.data) {
-        throw new Error(extractErrorMessage(payload, copy.profileSaveFailed));
-      }
-      applySavedUser(payload.data);
+      applySavedUser(data);
       toast.success(copy.profileSaved);
       router.refresh();
     } catch (error) {
@@ -351,24 +336,14 @@ export function AccountSettingsClient({
 
     setPasswordSaving(true);
     try {
-      const response = await fetch("/api/private/admin/profile", {
+      const data = await requestAdminService<AccountUserData>("profile", {
         method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           currentPassword,
           password: nextPassword,
-        }),
+        },
       });
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as ProfileResponse;
-      if (!response.ok || payload.ok === false || !payload.data) {
-        throw new Error(extractErrorMessage(payload, copy.passwordSaveFailed));
-      }
-      applySavedUser(payload.data);
+      applySavedUser(data);
       setCurrentPassword("");
       setNextPassword("");
       setConfirmPassword("");
@@ -391,8 +366,12 @@ export function AccountSettingsClient({
 
     setNotificationPreferencesSaving(true);
     try {
-      const saved = await updateNotificationPreferences(
-        draftNotificationPreferences,
+      const saved = await requestAdminService<NotificationPreferencesData>(
+        "notifications/preferences",
+        {
+          method: "PATCH",
+          body: draftNotificationPreferences,
+        },
       );
       const normalized = normalizeNotificationPreferencesData(saved);
       setNotificationPreferences(normalized);
@@ -422,23 +401,11 @@ export function AccountSettingsClient({
 
     setPreferredLocaleSaving(true);
     try {
-      const response = await fetch("/api/private/admin/profile", {
+      const data = await requestAdminService<AccountUserData>("profile", {
         method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ preferredLocale }),
+        body: { preferredLocale },
       });
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as ProfileResponse;
-      if (!response.ok || payload.ok === false || !payload.data) {
-        throw new Error(
-          extractErrorMessage(payload, copy.preferredLanguageSaveFailed),
-        );
-      }
-      applySavedUser(payload.data);
+      applySavedUser(data);
       toast.success(copy.preferredLanguageSaved);
       router.refresh();
     } catch (error) {
@@ -462,21 +429,11 @@ export function AccountSettingsClient({
 
     setSaving(true);
     try {
-      const response = await fetch("/api/private/admin/profile", {
+      const data = await requestAdminService<AccountUserData>("profile", {
         method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ timeZone: nextPreference }),
+        body: { timeZone: nextPreference },
       });
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as ProfileResponse;
-      if (!response.ok || payload.ok === false) {
-        throw new Error(extractErrorMessage(payload, copy.saveFailed));
-      }
-      const savedTimeZone = normalizeTimeZone(payload.data?.timeZone) || "";
+      const savedTimeZone = normalizeTimeZone(data.timeZone) || "";
       setTimeZonePreference(savedTimeZone);
       setMode(savedTimeZone ? "custom" : "browser");
       if (savedTimeZone) {

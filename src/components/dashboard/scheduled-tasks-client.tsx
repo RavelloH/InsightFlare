@@ -60,7 +60,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fetchPrivateJson } from "@/lib/dashboard/client-request";
+import { requestAdminService } from "@/lib/admin-service-client";
 import {
   durationFormat,
   numberFormat,
@@ -120,11 +120,10 @@ async function fetchScheduledTasks(params: {
   if (params.runId) {
     query.runId = params.runId;
   }
-  return fetchPrivateJson<ScheduledTasksData>(
-    "/api/private/admin/scheduled-tasks",
-    query,
-    { dedupe: false, signal: params.signal },
-  );
+  return requestAdminService<ScheduledTasksData>("scheduled-tasks", {
+    params: query,
+    signal: params.signal,
+  });
 }
 
 function formatDuration(locale: Locale, value: number | null): string {

@@ -350,12 +350,13 @@ describe("dashboard query-state helpers", () => {
     it("keeps filter syntax readable while encoding unsafe values", () => {
       const params = new URLSearchParams([
         ["filter[page.path]", "/politics"],
+        ["filter[page.path][or:0.0]", "/world"],
         ["filter[referrer.domain]", "google.com"],
         ["filter[page.title]", "News & Politics"],
       ]);
 
       expect(serializeDashboardSearchParams(params)).toBe(
-        "filter[page.path]=/politics&filter[referrer.domain]=google.com&filter[page.title]=News%20%26%20Politics",
+        "filter[page.path]=/politics&filter[page.path][or:0.0]=/world&filter[referrer.domain]=google.com&filter[page.title]=News%20%26%20Politics",
       );
     });
   });

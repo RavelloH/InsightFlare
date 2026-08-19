@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { requestAdminService } from "@/lib/admin-service-client";
 import type { AppMessages } from "@/lib/i18n/messages";
 
 import { SystemSettingsGuideDialog } from "./system-settings-guide-dialog";
@@ -55,13 +56,6 @@ interface PublicLoginTurnstileAdminConfig {
   secretKeyConfigured: boolean;
   secretKeyHint: string;
   updatedAt: number;
-}
-
-interface ApiResponse<T> {
-  ok?: boolean;
-  data?: T;
-  error?: string | { message?: string };
-  message?: string;
 }
 
 type FormState = Pick<PublicLoginTurnstileAdminConfig, "enabled" | "siteKey">;
@@ -88,7 +82,6 @@ declare global {
   }
 }
 
-const API_PATH = "/api/private/admin/login-turnstile";
 const TURNSTILE_SCRIPT_ID = "cloudflare-turnstile-script";
 let turnstileScriptPromise: Promise<void> | null = null;
 
@@ -110,101 +103,29 @@ function toFormState(config: PublicLoginTurnstileAdminConfig): FormState {
   };
 }
 
-function apiMessage(payload: ApiResponse<unknown>, fallback: string): string {
-  if (typeof payload.message === "string" && payload.message) {
-    return payload.message;
-  }
-  if (typeof payload.error === "string" && payload.error) {
-    return payload.error;
-  }
-  if (
-    payload.error &&
-    typeof payload.error === "object" &&
-    typeof payload.error.message === "string"
-  ) {
-    return payload.error.message;
-  }
-  return fallback;
-}
-
 async function fetchConfig(
   signal?: AbortSignal,
 ): Promise<PublicLoginTurnstileAdminConfig> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: API_PATH,
-    }) as ApiResponse<PublicLoginTurnstileAdminConfig>;
-    return result.data ?? defaultConfig();
-  }
-
-  const response = await fetch(API_PATH, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-    signal,
-  });
-  const payload =
-    (await response.json()) as ApiResponse<PublicLoginTurnstileAdminConfig>;
-  if (!response.ok || payload.ok !== true || !payload.data) {
-    throw new Error(apiMessage(payload, "load_login_turnstile_failed"));
-  }
-  return payload.data;
+  return requestAdminService<PublicLoginTurnstileAdminConfig>(
+    "login-turnstile",
+    { signal },
+  );
 }
 
 async function saveConfig(
   body: Record<string, unknown>,
 ): Promise<PublicLoginTurnstileAdminConfig> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: API_PATH,
-      method: "PATCH",
-      body,
-    }) as ApiResponse<PublicLoginTurnstileAdminConfig>;
-    if (!result.ok || !result.data) {
-      throw new Error(apiMessage(result, "save_login_turnstile_failed"));
-    }
-    return result.data;
-  }
-
-  const response = await fetch(API_PATH, {
-    method: "PATCH",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload =
-    (await response.json()) as ApiResponse<PublicLoginTurnstileAdminConfig>;
-  if (!response.ok || payload.ok !== true || !payload.data) {
-    throw new Error(apiMessage(payload, "save_login_turnstile_failed"));
-  }
-  return payload.data;
+  return requestAdminService<PublicLoginTurnstileAdminConfig>(
+    "login-turnstile",
+    { method: "PATCH", body },
+  );
 }
 
 async function deleteConfig(): Promise<PublicLoginTurnstileAdminConfig> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: API_PATH,
-      method: "DELETE",
-    }) as ApiResponse<PublicLoginTurnstileAdminConfig>;
-    if (!result.ok || !result.data) {
-      throw new Error(apiMessage(result, "delete_login_turnstile_failed"));
-    }
-    return result.data;
-  }
-
-  const response = await fetch(API_PATH, {
-    method: "DELETE",
-    credentials: "include",
-  });
-  const payload =
-    (await response.json()) as ApiResponse<PublicLoginTurnstileAdminConfig>;
-  if (!response.ok || payload.ok !== true || !payload.data) {
-    throw new Error(apiMessage(payload, "delete_login_turnstile_failed"));
-  }
-  return payload.data;
+  return requestAdminService<PublicLoginTurnstileAdminConfig>(
+    "login-turnstile",
+    { method: "DELETE" },
+  );
 }
 
 async function testConfig(body: {
@@ -212,31 +133,10 @@ async function testConfig(body: {
   secretKey: string;
   turnstileToken: string;
 }): Promise<void> {
-  const path = `${API_PATH}/test`;
-
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path,
-      method: "POST",
-      body,
-    }) as ApiResponse<{ verified: boolean }>;
-    if (!result.ok) {
-      throw new Error(apiMessage(result, "test_login_turnstile_failed"));
-    }
-    return;
-  }
-
-  const response = await fetch(path, {
+  await requestAdminService<{ verified: boolean }>("login-turnstile/test", {
     method: "POST",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body,
   });
-  const payload = (await response.json()) as ApiResponse<{ verified: boolean }>;
-  if (!response.ok || payload.ok !== true) {
-    throw new Error(apiMessage(payload, "test_login_turnstile_failed"));
-  }
 }
 
 function loadTurnstileScript(): Promise<void> {

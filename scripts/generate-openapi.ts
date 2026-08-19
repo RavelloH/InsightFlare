@@ -180,13 +180,13 @@ function errorResponses(...codes: string[]) {
             ? "Forbidden"
             : code === "404"
               ? "NotFound"
-            : code === "409"
-              ? "Conflict"
-              : code === "413"
-                ? "PayloadTooLarge"
-                : code === "405"
-                  ? "MethodNotAllowed"
-                : "InternalError";
+              : code === "409"
+                ? "Conflict"
+                : code === "413"
+                  ? "PayloadTooLarge"
+                  : code === "405"
+                    ? "MethodNotAllowed"
+                    : "InternalError";
     map[code] = { $ref: `#/components/responses/${name}` };
   }
   return map;
@@ -601,7 +601,10 @@ function buildSchemas(): Record<string, unknown> {
     FilterFieldTarget: {
       type: "object",
       required: ["kind", "field"],
-      properties: { kind: { const: "field" }, field: { type: "string", maxLength: 128 } },
+      properties: {
+        kind: { const: "field" },
+        field: { type: "string", maxLength: 128 },
+      },
       additionalProperties: false,
     },
     FilterEventPayloadTarget: {
@@ -609,19 +612,57 @@ function buildSchemas(): Record<string, unknown> {
       required: ["kind", "path"],
       properties: {
         kind: { const: "event-payload" },
-        path: { type: "string", pattern: "^/(?:[^/]|~[01])+(?:/(?:[^/]|~[01])+)*$", maxLength: 240 },
+        path: {
+          type: "string",
+          pattern: "^/(?:[^/]|~[01])+(?:/(?:[^/]|~[01])+)*$",
+          maxLength: 240,
+        },
       },
       additionalProperties: false,
     },
-    FilterTarget: { oneOf: [ref("FilterFieldTarget"), ref("FilterEventPayloadTarget")] },
+    FilterTarget: {
+      oneOf: [ref("FilterFieldTarget"), ref("FilterEventPayloadTarget")],
+    },
     FilterCondition: {
       type: "object",
       required: ["kind", "target", "operator"],
       properties: {
         kind: { const: "condition" },
         target: ref("FilterTarget"),
-        operator: { type: "string", enum: ["eq", "neq", "in", "notIn", "contains", "startsWith", "endsWith", "gt", "gte", "lt", "lte", "between", "exists", "notExists", "isNull", "notNull", "isEmpty", "notEmpty"] },
-        value: { oneOf: [ref("FilterScalar"), { type: "array", minItems: 1, maxItems: 128, items: ref("FilterScalar") }] },
+        operator: {
+          type: "string",
+          enum: [
+            "eq",
+            "neq",
+            "in",
+            "notIn",
+            "contains",
+            "startsWith",
+            "endsWith",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "exists",
+            "notExists",
+            "isNull",
+            "notNull",
+            "isEmpty",
+            "notEmpty",
+          ],
+        },
+        value: {
+          oneOf: [
+            ref("FilterScalar"),
+            {
+              type: "array",
+              minItems: 1,
+              maxItems: 128,
+              items: ref("FilterScalar"),
+            },
+          ],
+        },
       },
       additionalProperties: false,
     },
@@ -630,7 +671,12 @@ function buildSchemas(): Record<string, unknown> {
       required: ["kind", "children"],
       properties: {
         kind: { type: "string", enum: ["and", "or"] },
-        children: { type: "array", minItems: 1, maxItems: 128, items: ref("FilterExpression") },
+        children: {
+          type: "array",
+          minItems: 1,
+          maxItems: 128,
+          items: ref("FilterExpression"),
+        },
       },
       additionalProperties: false,
     },
@@ -640,12 +686,18 @@ function buildSchemas(): Record<string, unknown> {
       properties: { kind: { const: "not" }, child: ref("FilterExpression") },
       additionalProperties: false,
     },
-    FilterExpression: { oneOf: [ref("FilterCondition"), ref("FilterGroup"), ref("FilterNot")] },
+    FilterExpression: {
+      oneOf: [ref("FilterCondition"), ref("FilterGroup"), ref("FilterNot")],
+    },
     FilterDocument: {
       type: "object",
-      description: "Canonical filter AST. Conditions use registered fields or event-payload JSON Pointer targets; group expressions compose AND/OR/NOT.",
+      description:
+        "Canonical filter AST. Conditions use registered fields or event-payload JSON Pointer targets; group expressions compose AND/OR/NOT.",
       required: ["version", "root"],
-      properties: { version: { const: 1 }, root: { oneOf: [ref("FilterExpression"), { type: "null" }] } },
+      properties: {
+        version: { const: 1 },
+        root: { oneOf: [ref("FilterExpression"), { type: "null" }] },
+      },
       additionalProperties: false,
     },
     MetricDefinition: {

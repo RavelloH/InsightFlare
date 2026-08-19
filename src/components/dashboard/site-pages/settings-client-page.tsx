@@ -58,11 +58,15 @@ import {
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  type AdminServiceHttpMethod,
+  requestAdminService,
+} from "@/lib/admin-service-client";
+import type { AdminServiceRoute } from "@/lib/admin-service-contract";
 import type { SiteData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
-import { extractErrorMessage } from "@/lib/response-envelope";
 import { useRouter } from "@/lib/router";
 import {
   DEFAULT_SITE_SCRIPT_SETTINGS,
@@ -89,27 +93,6 @@ interface SiteSettingsClientPageProps {
     SiteData,
     "id" | "name" | "domain" | "publicEnabled" | "publicSlug"
   >;
-}
-
-interface ActionResponse<T> {
-  ok: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
-}
-
-interface ScriptSnippetPayload {
-  ok: boolean;
-  data?: {
-    siteId: string;
-    src: string;
-    snippet: string;
-  };
-}
-
-interface SiteConfigPayload {
-  ok: boolean;
-  data?: Record<string, unknown>;
 }
 
 function safeSlug(value: string): string {
@@ -145,36 +128,11 @@ function formatSampleRateValue(value: number): string {
 }
 
 async function postJson<T>(
-  url: string,
+  route: AdminServiceRoute,
   body: Record<string, unknown>,
-  method: "POST" | "PATCH" = "POST",
+  method: AdminServiceHttpMethod = "POST",
 ): Promise<T> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: url.split("?")[0],
-      method,
-      params: Object.fromEntries(new URLSearchParams(url.split("?")[1] || "")),
-      body,
-    }) as ActionResponse<T>;
-    if (!result.ok || result.data === undefined) {
-      throw new Error(extractErrorMessage(result));
-    }
-    return result.data;
-  }
-  const response = await fetch(url, {
-    method,
-    credentials: "include",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  const payload = (await response.json()) as ActionResponse<T>;
-  if (!response.ok || !payload.ok || payload.data === undefined) {
-    throw new Error(extractErrorMessage(payload));
-  }
-  return payload.data;
+  return requestAdminService<T>(route, { method, body });
 }
 
 export function SettingsClientPage({
@@ -314,59 +272,25 @@ export function SettingsClientPage({
 
   const siteConfigQuery = useQuery({
     queryKey: ["dashboard", "site-config", site.id],
-    queryFn: async ({ signal }) => {
-      if (import.meta.env.VITE_DEMO_MODE === "1") {
-        const { demoRequest } = await import("@/lib/realtime/mock");
-        const result = demoRequest({
-          path: "/api/private/admin/site-config",
-          params: { siteId: site.id },
-        }) as SiteConfigPayload;
-        return result.data ?? DEFAULT_SITE_SCRIPT_SETTINGS;
-      }
-
-      const response = await fetch(
-        `/api/private/admin/site-config?siteId=${encodeURIComponent(site.id)}`,
-        {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          signal,
-        },
-      );
-      const payload = (await response.json()) as SiteConfigPayload;
-      if (!response.ok || !payload.ok) {
-        throw new Error("load_site_config_failed");
-      }
-      return payload.data ?? DEFAULT_SITE_SCRIPT_SETTINGS;
-    },
+    queryFn: ({ signal }) =>
+      requestAdminService<Record<string, unknown>>("site-config", {
+        params: { siteId: site.id },
+        signal,
+      }),
     enabled: typeof window !== "undefined",
   });
   const scriptSnippetQuery = useQuery({
     queryKey: ["dashboard", "site-script-snippet", site.id],
     queryFn: async ({ signal }) => {
-      if (import.meta.env.VITE_DEMO_MODE === "1") {
-        const { demoRequest } = await import("@/lib/realtime/mock");
-        const result = demoRequest({
-          path: "/api/private/admin/script-snippet",
-          params: { siteId: site.id },
-        }) as ScriptSnippetPayload;
-        return result.data?.snippet || "";
-      }
-
-      const response = await fetch(
-        `/api/private/admin/script-snippet?siteId=${encodeURIComponent(site.id)}`,
-        {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          signal,
-        },
-      );
-      const payload = (await response.json()) as ScriptSnippetPayload;
-      if (!response.ok || !payload.ok || !payload.data?.snippet) {
-        throw new Error("load_script_snippet_failed");
-      }
-      return payload.data.snippet;
+      const data = await requestAdminService<{
+        siteId: string;
+        src: string;
+        snippet: string;
+      }>("script-snippet", {
+        params: { siteId: site.id },
+        signal,
+      });
+      return data.snippet;
     },
     enabled: typeof window !== "undefined",
   });
@@ -424,7 +348,7 @@ export function SettingsClientPage({
     setSaving(true);
     try {
       const updated = await postJson<SiteData>(
-        "/api/private/admin/sites",
+        "sites",
         {
           intent: "update",
           siteId: site.id,
@@ -468,7 +392,7 @@ export function SettingsClientPage({
         ? publicSlug.trim() || randomPublicSlug()
         : publicSlug.trim();
       const updated = await postJson<SiteData>(
-        "/api/private/admin/sites",
+        "sites",
         {
           intent: "update",
           siteId: site.id,
@@ -511,7 +435,7 @@ export function SettingsClientPage({
       ...input,
     });
     const savedSettings = await postJson<Record<string, unknown>>(
-      "/api/private/admin/site-config",
+      "site-config",
       {
         siteId: site.id,
         config: normalizedSettings,
@@ -625,7 +549,7 @@ export function SettingsClientPage({
     setDeleting(true);
     try {
       await postJson<{ siteId: string; teamId: string; removed: boolean }>(
-        "/api/private/admin/sites",
+        "sites",
         {
           intent: "remove",
           siteId: site.id,
@@ -657,7 +581,7 @@ export function SettingsClientPage({
     setTransferring(true);
     try {
       const updated = await postJson<SiteData>(
-        "/api/private/admin/sites",
+        "sites",
         {
           intent: "update",
           siteId: site.id,
