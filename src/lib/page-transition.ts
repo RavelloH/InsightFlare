@@ -12,6 +12,7 @@ export type NavigateRequest = {
 type TransitionHandler = (request: NavigateRequest) => void;
 
 interface RouterLike {
+  preload?: (href: string) => Promise<void>;
   push: (href: string, options?: { scroll?: boolean }) => void;
   replace: (href: string, options?: { scroll?: boolean }) => void;
 }

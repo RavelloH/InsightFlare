@@ -132,18 +132,6 @@ export async function fetchTeamDashboard(
   window: TeamDashboardWindow,
   signal?: AbortSignal,
 ): Promise<TeamDashboardData> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: "/api/private/team-dashboard",
-      params: { teamId, ...window },
-    }) as { ok: boolean; data?: Partial<TeamDashboardData> };
-    return {
-      sites: Array.isArray(result.data?.sites) ? result.data.sites : [],
-      trend: Array.isArray(result.data?.trend) ? result.data.trend : [],
-    };
-  }
-
   const params = new URLSearchParams({
     teamId,
     from: String(window.from),

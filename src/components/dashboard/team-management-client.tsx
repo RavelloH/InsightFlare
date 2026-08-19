@@ -20,7 +20,6 @@ import {
   RiSettings3Line,
 } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
-import { motion } from "motion/react";
 import { toast } from "sonner";
 
 import { SiteTrafficStackChart } from "@/components/dashboard/charts/site-traffic-stack-chart";
@@ -133,10 +132,6 @@ function formatChangeRate(value: number | null): string | null {
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-function epochSecondsToMs(value: number): number {
-  return value > 0 && value < 100_000_000_000 ? value * 1000 : value;
-}
-
 function changeRateClass(value: number | null, lowerIsBetter = false): string {
   if (value === null) return "text-muted-foreground";
   const isImprovement = lowerIsBetter ? value <= 0 : value >= 0;
@@ -160,6 +155,10 @@ function ChangeRateInline({
       {formatChangeRate(value)}
     </span>
   );
+}
+
+function epochSecondsToMs(value: number): number {
+  return value > 0 && value < 100_000_000_000 ? value * 1000 : value;
 }
 
 interface TeamManagementClientProps {
@@ -480,7 +479,6 @@ export function TeamManagementClient({
   const copy = messages.teamManagement;
   const siteCreateCopy = messages.adminSites;
   const [sites, setSites] = useState<Array<SiteData & { slug: string }>>([]);
-  const [siteOrder, setSiteOrder] = useState<string[]>([]);
   const [members, setMembers] = useState<MemberData[]>([]);
   const [loading, setLoading] = useState(true);
   const [createSiteDialogOpen, setCreateSiteDialogOpen] = useState(false);
@@ -552,28 +550,14 @@ export function TeamManagementClient({
   const dashboardData = dashboardSnapshot?.data;
   const dashboardWindow = dashboardSnapshot?.window ?? window;
   const dashboardSites = useMemo(
-    () => (dashboardData?.sites ?? []).map(withSiteSlug),
+    () =>
+      sortSitesForInitialOrder((dashboardData?.sites ?? []).map(withSiteSlug)),
     [dashboardData?.sites],
   );
   const transferableMembers = useMemo(
     () => members.filter((m) => m.userId !== activeTeam.ownerUserId),
     [members, activeTeam.ownerUserId],
   );
-
-  useEffect(() => {
-    if (activeTab !== "sites" || !dashboardData) return;
-    setSiteOrder((currentOrder) => {
-      const nextIds = sortSitesForInitialOrder([...dashboardData.sites]).map(
-        (site) => site.id,
-      );
-      if (currentOrder.length === 0) return nextIds;
-      const knownIds = new Set(currentOrder);
-      const appended = nextIds.filter((id) => !knownIds.has(id));
-      return appended.length > 0
-        ? [...currentOrder, ...appended]
-        : currentOrder;
-    });
-  }, [activeTab, dashboardData]);
 
   useEffect(() => {
     if (activeTab !== "settings" && activeTab !== "members") return;
@@ -601,7 +585,6 @@ export function TeamManagementClient({
     setInviteExpiresInHours("72");
     setLatestInviteUrl("");
     setSites([]);
-    setSiteOrder([]);
     setMembers([]);
     setInvites([]);
     setTransferTargetId("");
@@ -942,56 +925,43 @@ export function TeamManagementClient({
   }
 
   const aggregateChartRenderData = useMemo(() => {
-    return buildTeamAggregateTrend(dashboardData?.trend ?? [], dashboardWindow);
-  }, [dashboardData?.trend, dashboardWindow]);
+    if (!dashboardData) return undefined;
+    return buildTeamAggregateTrend(dashboardData.trend, dashboardWindow);
+  }, [dashboardData, dashboardWindow]);
 
-  const siteTrendById = useMemo(() => {
-    return buildTeamSiteTrends(
-      dashboardSites.map((site) => site.id),
-      dashboardData?.trend ?? [],
-      dashboardWindow,
-    );
-  }, [dashboardData?.trend, dashboardSites, dashboardWindow]);
+  const siteTrendById = useMemo(
+    () =>
+      buildTeamSiteTrends(
+        dashboardSites.map((site) => site.id),
+        dashboardData?.trend ?? [],
+        dashboardWindow,
+      ),
+    [dashboardData?.trend, dashboardSites, dashboardWindow],
+  );
 
-  const siteDashboardCards = useMemo(() => {
-    const cards = dashboardSites.map((site) => {
-      const overview = site.overview ?? emptyOverviewMetrics();
-      const pagesPerSession =
-        overview.sessions > 0 ? overview.views / overview.sessions : 0;
-      return {
-        site,
-        overview,
-        pagesPerSession,
-        changeRates: site.changeRates ?? emptySiteMetricChangeRates(),
-        trend: siteTrendById[site.id] ?? [],
-      };
-    });
+  const siteDashboardCards = useMemo(
+    () =>
+      dashboardSites.map((site) => {
+        const overview = site.overview ?? emptyOverviewMetrics();
+        return {
+          site,
+          overview,
+          pagesPerSession:
+            overview.sessions > 0 ? overview.views / overview.sessions : 0,
+          changeRates: site.changeRates ?? emptySiteMetricChangeRates(),
+          trend: siteTrendById[site.id] ?? [],
+        };
+      }),
+    [dashboardSites, siteTrendById],
+  );
 
-    if (siteOrder.length === 0) return cards;
-
-    const cardById = new Map(cards.map((card) => [card.site.id, card]));
-    const orderedCards = [] as typeof cards;
-
-    for (const siteId of siteOrder) {
-      const card = cardById.get(siteId);
-      if (!card) continue;
-      orderedCards.push(card);
-      cardById.delete(siteId);
-    }
-
-    if (cardById.size > 0) {
-      orderedCards.push(...Array.from(cardById.values()));
-    }
-
-    return orderedCards;
-  }, [dashboardSites, siteTrendById, siteOrder]);
   const aggregateChartSites = useMemo(
     () =>
-      siteDashboardCards.map(({ site }) => ({
+      dashboardSites.map((site) => ({
         id: site.id,
         name: site.name,
       })),
-    [siteDashboardCards],
+    [dashboardSites],
   );
 
   const pagesPerSessionFormatter = useMemo(
@@ -1028,8 +998,6 @@ export function TeamManagementClient({
       : activeTab === "settings"
         ? copy.settings.subtitle
         : copy.members.subtitle;
-  const isSitesChartsLoading =
-    activeTab === "sites" && dashboardQuery.isFetching;
   const isPageDataLoading =
     activeTab === "sites"
       ? dashboardQuery.isPending && !dashboardData
@@ -1575,83 +1543,85 @@ export function TeamManagementClient({
         title={`${panelTitle} · ${currentTeamName}`}
         subtitle={panelSubtitle}
         actions={
-          <>
-            <Button variant="outline" asChild>
-              <Link href={`/${locale}/app/${activeTeam.slug}`}>
-                <RiGlobalLine />
-                <span className="inline-flex items-center gap-1.5">
-                  {copy.stats.sites}:
-                  <AutoResizer
-                    initial
-                    animateWidth
-                    animateHeight={false}
-                    className="inline-flex items-center"
-                  >
-                    <AutoTransition
+          canManage ? (
+            <>
+              <Button variant="outline" asChild>
+                <Link href={`/${locale}/app/${activeTeam.slug}/manage/sites`}>
+                  <RiGlobalLine />
+                  <span className="inline-flex items-center gap-1.5">
+                    {copy.stats.sites}:
+                    <AutoResizer
                       initial
+                      animateWidth
+                      animateHeight={false}
                       className="inline-flex items-center"
                     >
-                      {isPageDataLoading ? (
-                        <span
-                          key="sites-loading"
-                          className="inline-flex items-center"
-                        >
-                          <Spinner className="size-3.5" />
-                        </span>
-                      ) : (
-                        <span key="sites-value">{siteCount}</span>
-                      )}
-                    </AutoTransition>
-                  </AutoResizer>
-                </span>
-              </Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href={`/${locale}/app/${activeTeam.slug}/members`}>
-                <RiGroupLine />
-                <span className="inline-flex items-center gap-1.5">
-                  {copy.stats.members}:
-                  <AutoResizer
-                    initial
-                    animateWidth
-                    animateHeight={false}
-                    className="inline-flex items-center"
-                  >
-                    <AutoTransition
-                      initial
-                      className="inline-flex items-center"
-                    >
-                      {isPageDataLoading ? (
-                        <span
-                          key="members-loading"
-                          className="inline-flex items-center"
-                        >
-                          <Spinner className="size-3.5" />
-                        </span>
-                      ) : (
-                        <span key="members-value">{memberCount}</span>
-                      )}
-                    </AutoTransition>
-                  </AutoResizer>
-                </span>
-              </Link>
-            </Button>
-            {activeTab === "sites" && canManageSites ? (
-              <Button
-                type="button"
-                onClick={() => {
-                  setCreateSiteName("");
-                  setCreateSiteDomain("");
-                  setCreateSitePublicSlug("");
-                  setCreateSiteError("");
-                  setCreateSiteDialogOpen(true);
-                }}
-              >
-                <RiAddLine />
-                <span>{siteCreateCopy.create}</span>
+                      <AutoTransition
+                        initial
+                        className="inline-flex items-center"
+                      >
+                        {isPageDataLoading ? (
+                          <span
+                            key="sites-loading"
+                            className="inline-flex items-center"
+                          >
+                            <Spinner className="size-3.5" />
+                          </span>
+                        ) : (
+                          <span key="sites-value">{siteCount}</span>
+                        )}
+                      </AutoTransition>
+                    </AutoResizer>
+                  </span>
+                </Link>
               </Button>
-            ) : null}
-          </>
+              <Button variant="outline" asChild>
+                <Link href={`/${locale}/app/${activeTeam.slug}/members`}>
+                  <RiGroupLine />
+                  <span className="inline-flex items-center gap-1.5">
+                    {copy.stats.members}:
+                    <AutoResizer
+                      initial
+                      animateWidth
+                      animateHeight={false}
+                      className="inline-flex items-center"
+                    >
+                      <AutoTransition
+                        initial
+                        className="inline-flex items-center"
+                      >
+                        {isPageDataLoading ? (
+                          <span
+                            key="members-loading"
+                            className="inline-flex items-center"
+                          >
+                            <Spinner className="size-3.5" />
+                          </span>
+                        ) : (
+                          <span key="members-value">{memberCount}</span>
+                        )}
+                      </AutoTransition>
+                    </AutoResizer>
+                  </span>
+                </Link>
+              </Button>
+              {activeTab === "sites" && canManageSites ? (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setCreateSiteName("");
+                    setCreateSiteDomain("");
+                    setCreateSitePublicSlug("");
+                    setCreateSiteError("");
+                    setCreateSiteDialogOpen(true);
+                  }}
+                >
+                  <RiAddLine />
+                  <span>{siteCreateCopy.create}</span>
+                </Button>
+              ) : null}
+            </>
+          ) : null
         }
       />
 
@@ -1772,41 +1742,20 @@ export function TeamManagementClient({
               </CardHeader>
 
               <CardContent className="space-y-3">
-                <div className="relative">
+                <div>
                   <SiteTrafficStackChart
                     data={aggregateChartRenderData}
                     sites={aggregateChartSites}
+                    from={dashboardWindow.from}
+                    to={dashboardWindow.to}
                     locale={locale}
                     timeZone={dashboardWindow.timeZone}
                     interval={dashboardWindow.interval}
                     viewsLabel={messages.common.views}
                     visitorsLabel={messages.common.visitors}
                     messages={messages}
-                    loading={isSitesChartsLoading}
-                    className={isSitesChartsLoading ? "opacity-40" : undefined}
+                    loading={dashboardQuery.isFetching}
                   />
-                  <AutoTransition
-                    type="fade"
-                    duration={0.22}
-                    className="pointer-events-none absolute inset-0"
-                  >
-                    {isSitesChartsLoading ? (
-                      <div
-                        key="aggregate-overlay-loading"
-                        className="flex h-full w-full items-center justify-center bg-background/50 text-sm text-muted-foreground"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <Spinner className="size-4" />
-                          {messages.common.loading}
-                        </span>
-                      </div>
-                    ) : (
-                      <div
-                        key="aggregate-overlay-idle"
-                        className="h-full w-full bg-transparent"
-                      />
-                    )}
-                  </AutoTransition>
                 </div>
 
                 {!dashboardQuery.isPending && dashboardSites.length === 0 ? (
@@ -1817,143 +1766,127 @@ export function TeamManagementClient({
               </CardContent>
             </Card>
 
-            {dashboardSites.length > 0 ? (
+            {siteDashboardCards.length > 0 ? (
               <div className="grid gap-4 lg:grid-cols-2">
                 {siteDashboardCards.map(
                   ({ site, overview, pagesPerSession, changeRates, trend }) => (
                     <Link
                       key={site.id}
                       href={buildSitePath(locale, activeTeam.slug, site.slug)}
-                      className="group block h-full outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
+                      className="group block h-full cursor-pointer outline-none transition-transform hover:-translate-y-0.5 active:translate-y-0 focus-visible:ring-1 focus-visible:ring-ring/60"
                       aria-label={`${copy.sites.openAnalytics}: ${site.name}`}
                       title={copy.sites.openAnalytics}
                     >
-                      <motion.div
-                        className="h-full"
-                        whileHover={{ scale: 1.01 }}
-                        whileTap={{ scale: 0.994 }}
-                        transition={{ duration: 0.16, ease: "easeOut" }}
-                      >
-                        <Card className="h-full transition-colors group-hover:bg-accent/20">
-                          <CardHeader className="space-y-2">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex min-w-0 items-start gap-2.5">
-                                <div className="min-w-0 space-y-1">
-                                  <CardTitle className="truncate text-base flex items-center gap-2">
-                                    <SiteBrandIcon
-                                      siteId={site.id}
-                                      siteName={site.name}
-                                      domain={site.domain}
-                                      iconSrc={site.iconPath}
-                                      size="md"
-                                    />
-                                    {site.name}
-                                  </CardTitle>
-                                  <CardDescription className="truncate font-mono text-xs">
-                                    {site.domain}
-                                  </CardDescription>
-                                </div>
+                      <Card className="h-full transition-colors group-hover:bg-accent/20">
+                        <CardHeader className="space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex min-w-0 items-start gap-2.5">
+                              <div className="min-w-0 space-y-1">
+                                <CardTitle className="flex items-center gap-2 truncate text-base">
+                                  <SiteBrandIcon
+                                    siteId={site.id}
+                                    siteName={site.name}
+                                    domain={site.domain}
+                                    iconSrc={site.iconPath}
+                                    size="md"
+                                  />
+                                  {site.name}
+                                </CardTitle>
+                                <CardDescription className="truncate font-mono text-xs">
+                                  {site.domain}
+                                </CardDescription>
                               </div>
-                              <span className="inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground">
-                                <RiArrowRightSLine className="size-4" />
-                              </span>
                             </div>
-                          </CardHeader>
+                            <span className="inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground">
+                              <RiArrowRightSLine className="size-4" />
+                            </span>
+                          </div>
+                        </CardHeader>
 
-                          <CardContent className="space-y-4">
-                            <AutoTransition
-                              type="fade"
-                              duration={0.24}
-                              className="w-full"
-                            >
-                              <div key={`site-chart-${site.id}`}>
-                                <TrafficPairBarChart
-                                  data={trend}
-                                  locale={locale}
-                                  timeZone={dashboardWindow.timeZone}
-                                  interval={dashboardWindow.interval}
-                                  viewsLabel={messages.common.views}
-                                  visitorsLabel={messages.common.visitors}
-                                  maxPoints={SITE_CARD_MAX_TREND_POINTS}
+                        <CardContent className="space-y-4">
+                          <TrafficPairBarChart
+                            data={trend}
+                            locale={locale}
+                            timeZone={dashboardWindow.timeZone}
+                            interval={dashboardWindow.interval}
+                            viewsLabel={messages.common.views}
+                            visitorsLabel={messages.common.visitors}
+                            maxPoints={SITE_CARD_MAX_TREND_POINTS}
+                            loading={dashboardQuery.isFetching}
+                            range={dashboardWindow}
+                          />
+
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-[11px] sm:grid-cols-3">
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.views}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {numberFormat(locale, overview.views)}
+                                <ChangeRateInline value={changeRates.views} />
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.visitors}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {numberFormat(locale, overview.visitors)}
+                                <ChangeRateInline
+                                  value={changeRates.visitors}
                                 />
-                              </div>
-                            </AutoTransition>
-
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-[11px] sm:grid-cols-3">
-                              <div className="space-y-1">
-                                <p className="text-muted-foreground">
-                                  {messages.common.views}
-                                </p>
-                                <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
-                                  {numberFormat(locale, overview.views)}
-                                  <ChangeRateInline value={changeRates.views} />
-                                </p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-muted-foreground">
-                                  {messages.common.visitors}
-                                </p>
-                                <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
-                                  {numberFormat(locale, overview.visitors)}
-                                  <ChangeRateInline
-                                    value={changeRates.visitors}
-                                  />
-                                </p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-muted-foreground">
-                                  {messages.common.sessions}
-                                </p>
-                                <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
-                                  {numberFormat(locale, overview.sessions)}
-                                  <ChangeRateInline
-                                    value={changeRates.sessions}
-                                  />
-                                </p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-muted-foreground">
-                                  {messages.common.bounceRate}
-                                </p>
-                                <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
-                                  {percentFormat(locale, overview.bounceRate)}
-                                  <ChangeRateInline
-                                    value={changeRates.bounceRate}
-                                    lowerIsBetter
-                                  />
-                                </p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-muted-foreground">
-                                  {copy.sites.pagesPerSession}
-                                </p>
-                                <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
-                                  {pagesPerSessionFormatter.format(
-                                    pagesPerSession,
-                                  )}
-                                  <ChangeRateInline
-                                    value={changeRates.pagesPerSession}
-                                  />
-                                </p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-muted-foreground">
-                                  {messages.common.avgDuration}
-                                </p>
-                                <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
-                                  {durationFormat(
-                                    locale,
-                                    overview.avgDurationMs,
-                                  )}
-                                  <ChangeRateInline
-                                    value={changeRates.avgDurationMs}
-                                  />
-                                </p>
-                              </div>
+                              </p>
                             </div>
-                          </CardContent>
-                        </Card>
-                      </motion.div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.sessions}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {numberFormat(locale, overview.sessions)}
+                                <ChangeRateInline
+                                  value={changeRates.sessions}
+                                />
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.bounceRate}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {percentFormat(locale, overview.bounceRate)}
+                                <ChangeRateInline
+                                  value={changeRates.bounceRate}
+                                  lowerIsBetter
+                                />
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {copy.sites.pagesPerSession}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {pagesPerSessionFormatter.format(
+                                  pagesPerSession,
+                                )}
+                                <ChangeRateInline
+                                  value={changeRates.pagesPerSession}
+                                />
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">
+                                {messages.common.avgDuration}
+                              </p>
+                              <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                                {durationFormat(locale, overview.avgDurationMs)}
+                                <ChangeRateInline
+                                  value={changeRates.avgDurationMs}
+                                />
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
                     </Link>
                   ),
                 )}

@@ -38,7 +38,10 @@ function useChartConfig(): ChartConfig {
   return useChart().config;
 }
 
-export type ChartContainerProps = React.ComponentProps<"div"> & {
+export type ChartContainerProps = Omit<
+  React.ComponentProps<"div">,
+  "onResize"
+> & {
   /**
    * Defines the series exposed to shared tooltip and legend components.
    * Omit it for charts that only use explicit visual properties.
@@ -47,6 +50,8 @@ export type ChartContainerProps = React.ComponentProps<"div"> & {
   children: React.ComponentProps<
     typeof RechartsPrimitive.ResponsiveContainer
   >["children"];
+  /** Called after Recharts measures the responsive chart surface. */
+  onChartResize?: (width: number, height: number) => void;
 };
 
 function ChartContainer({
@@ -54,6 +59,7 @@ function ChartContainer({
   className,
   children,
   config = EMPTY_CHART_CONFIG,
+  onChartResize,
   ...props
 }: ChartContainerProps) {
   const uniqueId = React.useId();
@@ -71,7 +77,7 @@ function ChartContainer({
         {...props}
       >
         <ChartStyle id={chartId} config={config} />
-        <RechartsPrimitive.ResponsiveContainer>
+        <RechartsPrimitive.ResponsiveContainer onResize={onChartResize}>
           {children}
         </RechartsPrimitive.ResponsiveContainer>
       </div>

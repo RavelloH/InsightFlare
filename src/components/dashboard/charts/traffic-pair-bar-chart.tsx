@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -8,6 +8,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { AutoTransition } from "@/components/ui/auto-transition";
 import {
   calculateChartYAxisWidth,
   type ChartConfig,
@@ -16,6 +17,7 @@ import {
   ChartTooltipIndicator,
   createChartNumberFormatter,
 } from "@/components/ui/chart";
+import { Spinner } from "@/components/ui/spinner";
 import {
   useAnimationOnChartSwitch,
   useChartVisibility,
@@ -47,6 +49,7 @@ export interface TrafficPairBarChartProps {
   visitorsLabel: string;
   compact?: boolean;
   maxPoints?: number;
+  loading?: boolean;
   className?: string;
   range?: {
     from: number;
@@ -130,11 +133,17 @@ export const TrafficPairBarChart = memo(function TrafficPairBarChart({
   visitorsLabel,
   compact = false,
   maxPoints,
+  loading = false,
   className,
   range,
 }: TrafficPairBarChartProps) {
   const { containerRef, isVisible, hasMeasuredVisibility } =
-    useChartVisibility();
+    useChartVisibility("0px");
+  const [hasChartSize, setHasChartSize] = useState(false);
+  const handleChartResize = useCallback((width: number, height: number) => {
+    if (width <= 0 || height <= 0) return;
+    setHasChartSize(true);
+  }, []);
   const chartData = useMemo(() => {
     const completed = fillMissingTrafficData(data, interval, timeZone, range);
     const normalized = downsampleTrafficData(
@@ -182,6 +191,12 @@ export const TrafficPairBarChart = memo(function TrafficPairBarChart({
     const lastTimestamp = chartData[chartData.length - 1]?.timestampMs ?? 0;
     return `${interval}:${compact ? "compact" : "regular"}:${chartData.length}:${firstTimestamp}:${lastTimestamp}`;
   }, [interval, compact, chartData]);
+  const isAnimationActive = useAnimationOnChartSwitch({
+    switchKey: pairChartDataKey,
+    hasData: chartData.length > 0,
+    isVisible,
+    hasMeasuredVisibility,
+  });
   const yAxisValues = useMemo(
     () => chartData.map((point) => point.views),
     [chartData],
@@ -198,21 +213,22 @@ export const TrafficPairBarChart = memo(function TrafficPairBarChart({
       ),
     [yAxisNumberFormatter, yAxisValues],
   );
-  const isAnimationActive = useAnimationOnChartSwitch({
-    switchKey: pairChartDataKey,
-    hasData: chartData.length > 0,
-    isVisible,
-    hasMeasuredVisibility,
-  });
-
   return (
-    <div ref={containerRef} className="w-full">
+    <div ref={containerRef} className="relative w-full">
       <ChartContainer
         className={cn(
-          compact ? "h-4 w-full aspect-auto" : "h-[180px] w-full aspect-auto",
+          compact
+            ? "h-4 w-full aspect-auto"
+            : "h-[180px] w-full aspect-auto transition-opacity duration-200",
+          "[&_.recharts-bar-rectangles]:transition-[filter] [&_.recharts-bar-rectangles]:duration-200 motion-reduce:[&_.recharts-bar-rectangles]:transition-none",
+          compact || hasChartSize ? "opacity-100" : "opacity-0",
+          loading
+            ? "[&_.recharts-bar-rectangles]:brightness-50"
+            : "[&_.recharts-bar-rectangles]:brightness-100",
           className,
         )}
         config={config}
+        onChartResize={handleChartResize}
       >
         <BarChart
           data={chartData}
@@ -280,6 +296,19 @@ export const TrafficPairBarChart = memo(function TrafficPairBarChart({
           />
         </BarChart>
       </ChartContainer>
+      {compact ? null : (
+        <AutoTransition
+          aria-hidden={!loading && hasChartSize}
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-muted-foreground"
+          transitionKey={loading || !hasChartSize ? "loading" : "ready"}
+          duration={0.2}
+          presenceMode="sync"
+        >
+          {loading || !hasChartSize ? (
+            <Spinner key="traffic-pair-loading-indicator" className="size-5" />
+          ) : null}
+        </AutoTransition>
+      )}
     </div>
   );
 });

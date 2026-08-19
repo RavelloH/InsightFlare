@@ -211,14 +211,9 @@ function parseArgs(argv: string[]): CheckOptions {
 
 export async function runCli(argv = process.argv.slice(2)): Promise<void> {
   const { verbose } = parseArgs(argv);
-  const coverageTask = tasks.find((task) => task.name === "Coverage");
-  const parallelTasks = tasks.filter((task) => task !== coverageTask);
   const results = await Promise.all(
-    parallelTasks.map((task) => runTask(task, verbose)),
+    tasks.map((task) => runTask(task, verbose)),
   );
-
-  // Vitest's coverage output is process-global, so avoid competing with builds.
-  if (coverageTask) results.push(await runTask(coverageTask, verbose));
   const failures = results.filter((result) => !result.ok);
 
   for (const result of failures) {

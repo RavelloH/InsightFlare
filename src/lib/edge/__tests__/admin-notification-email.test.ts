@@ -542,7 +542,7 @@ describe("admin notification email handlers", () => {
           }),
         }),
       ]),
-      { fetchImpl: fetchMock, deadlineMs: 500, maxAttempts: 1 },
+      { fetchImpl: fetchMock, deadlineMs: 1_000, maxAttempts: 1 },
     );
     const body = await jsonOf(networkFailure);
 

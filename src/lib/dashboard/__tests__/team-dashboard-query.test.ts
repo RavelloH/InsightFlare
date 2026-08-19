@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   readDashboardQueryPreferences,
@@ -7,8 +7,10 @@ import {
 import {
   buildTeamAggregateTrend,
   buildTeamSiteTrends,
+  fetchTeamDashboard,
   sameTeamDashboardWindow,
   teamDashboardQueryKey,
+  teamDashboardQueryOptions,
 } from "@/lib/dashboard/team-dashboard-query";
 
 const window = {
@@ -19,6 +21,10 @@ const window = {
 };
 
 describe("team dashboard query helpers", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("uses the full request window as the shared cache identity", () => {
     expect(teamDashboardQueryKey("team-1", window)).toEqual([
       "dashboard",
@@ -72,6 +78,168 @@ describe("team dashboard query helpers", () => {
       ],
     });
   });
+
+  it("normalizes aggregate counts and ignores sites outside the requested set", () => {
+    const trend = [
+      {
+        bucket: 0,
+        timestampMs: window.from,
+        sites: [
+          { siteId: "site-1", views: 3, visitors: -4 },
+          { siteId: "site-1", views: Number.NaN, visitors: 2 },
+          { siteId: "other", views: 9, visitors: 8 },
+        ],
+      },
+    ];
+
+    expect(buildTeamAggregateTrend(trend, window)[0]).toEqual({
+      timestampMs: window.from,
+      sites: [
+        { siteId: "site-1", views: 3, visitors: 2 },
+        { siteId: "other", views: 9, visitors: 8 },
+      ],
+    });
+    expect(
+      buildTeamSiteTrends(["site-1"], trend, window)["site-1"]?.[0],
+    ).toEqual({ timestampMs: window.from, views: 3, visitors: 2 });
+  });
+
+  it("uses the response contract and rejects unsuccessful team dashboard requests", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          data: { sites: [{ id: "site-1" }], trend: [{ bucket: 0 }] },
+        }),
+      ),
+    );
+    await expect(fetchTeamDashboard("team-1", window)).resolves.toEqual({
+      sites: [{ id: "site-1" }],
+      trend: [{ bucket: 0 }],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("teamId=team-1"),
+      expect.objectContaining({ credentials: "include", method: "GET" }),
+    );
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 500 }));
+    await expect(fetchTeamDashboard("team-1", window)).rejects.toThrow(
+      "fetch_team_dashboard_failed",
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, data: {} })),
+    );
+    await expect(fetchTeamDashboard("team-1", window)).rejects.toThrow(
+      "fetch_team_dashboard_failed",
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, data: {} })),
+    );
+    await expect(fetchTeamDashboard("team-1", window)).resolves.toEqual({
+      sites: [],
+      trend: [],
+    });
+  });
+
+  it("uses only a matching snapshot as initial query data", () => {
+    const snapshot = {
+      data: { sites: [], trend: [] },
+      window,
+      range: "7d" as const,
+      fetchedAt: 123,
+    };
+    const withSnapshot = teamDashboardQueryOptions({
+      teamId: "team-1",
+      window,
+      range: "custom",
+      snapshot,
+    });
+    expect(withSnapshot.initialData).toBe(snapshot);
+    expect(withSnapshot.initialDataUpdatedAt).toBe(123);
+    expect(withSnapshot.enabled).toBe(true);
+
+    const withoutSnapshot = teamDashboardQueryOptions({
+      teamId: "",
+      window,
+      snapshot: { ...snapshot, window: { ...window, to: window.to + 1 } },
+      enabled: false,
+    });
+    expect(withoutSnapshot.initialData).toBeUndefined();
+    expect(withoutSnapshot.initialDataUpdatedAt).toBeUndefined();
+    expect(withoutSnapshot.enabled).toBe(false);
+
+    const defaulted = teamDashboardQueryOptions({
+      teamId: "team-1",
+      window,
+    });
+    expect(defaulted.enabled).toBe(true);
+    expect(defaulted.initialData).toBeUndefined();
+    expect(defaulted.initialDataUpdatedAt).toBeUndefined();
+
+    const trend = buildTeamAggregateTrend(
+      [
+        {
+          bucket: 0,
+          timestampMs: window.to + 24 * 60 * 60_000,
+          sites: [{ siteId: "site-1", views: 1, visitors: 1 }],
+        },
+      ],
+      window,
+    );
+    expect(trend.at(-1)).toEqual({
+      timestampMs: window.to + 24 * 60 * 60_000,
+      sites: [{ siteId: "site-1", views: 1, visitors: 1 }],
+    });
+
+    const siteTrend = buildTeamSiteTrends(
+      ["site-1"],
+      [
+        {
+          bucket: 0,
+          timestampMs: window.to + 24 * 60 * 60_000,
+          sites: [{ siteId: "site-1", views: 1, visitors: 1 }],
+        },
+      ],
+      window,
+    );
+    expect(siteTrend["site-1"]?.at(-1)).toEqual({
+      timestampMs: window.to + 24 * 60 * 60_000,
+      views: 1,
+      visitors: 1,
+    });
+  });
+
+  it("adds default and requested ranges when executing a dashboard query", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({ ok: true, data: { sites: [], trend: [] } }),
+          ),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const defaulted = teamDashboardQueryOptions({ teamId: "team-1", window });
+    await expect(
+      defaulted.queryFn!({ signal: new AbortController().signal } as never),
+    ).resolves.toMatchObject({ range: "30d" });
+
+    const requested = teamDashboardQueryOptions({
+      teamId: "team-1",
+      window,
+      range: "7d",
+    });
+    await expect(
+      requested.queryFn!({ signal: new AbortController().signal } as never),
+    ).resolves.toMatchObject({ range: "7d" });
+  });
 });
 
 describe("dashboard query preferences", () => {
@@ -93,5 +261,46 @@ describe("dashboard query preferences", () => {
       interval: "day",
       timeZone: "Asia/Tokyo",
     });
+  });
+
+  it("falls back safely for absent, malformed, and invalid preference cookies", () => {
+    expect(readDashboardQueryPreferences(null)).toEqual({
+      range: "30d",
+      customRange: null,
+    });
+    expect(readDashboardQueryPreferences("other=value")).toEqual({
+      range: "30d",
+      customRange: null,
+    });
+    expect(
+      readDashboardQueryPreferences(
+        "insightflare-dashboard-query=%7Binvalid-json",
+      ),
+    ).toEqual({ range: "30d", customRange: null });
+    expect(
+      readDashboardQueryPreferences(
+        "insightflare-dashboard-query=%7B%22interval%22%3A%22invalid%22%2C%22customRange%22%3A%7B%22from%22%3A10%2C%22to%22%3A5%7D%7D",
+      ),
+    ).toEqual({ range: "30d", interval: undefined, customRange: null });
+    expect(
+      readDashboardQueryPreferences(
+        "insightflare-dashboard-query=%7B%22customRange%22%3A%7B%22from%22%3A10%2C%22to%22%3A20%7D%7D",
+      ),
+    ).toEqual({
+      range: "30d",
+      interval: undefined,
+      customRange: { from: 10, to: 20 },
+    });
+    expect(
+      readDashboardQueryPreferences(
+        "insightflare-dashboard-query=%7B%22customRange%22%3A%7B%22from%22%3A%22bad%22%2C%22to%22%3A20%7D%7D",
+      ),
+    ).toEqual({ range: "30d", interval: undefined, customRange: null });
+    expect(
+      readDashboardQueryPreferences("insightflare-dashboard-query"),
+    ).toEqual({ range: "30d", customRange: null });
+    expect(
+      readDashboardQueryPreferences("insightflare-dashboard-query=%ZZ"),
+    ).toEqual({ range: "30d", customRange: null });
   });
 });

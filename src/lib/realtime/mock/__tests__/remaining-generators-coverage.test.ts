@@ -1237,7 +1237,7 @@ describe("mock remaining generator coverage", () => {
             teamId: "demo-team-001",
             overview: expect.objectContaining({ views: expect.any(Number) }),
             changeRates: expect.objectContaining({
-              pagesPerSession: null,
+              pagesPerSession: expect.any(Number),
             }),
           }),
         ]),

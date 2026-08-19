@@ -1,7 +1,15 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  startTransition,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
-import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import {
   calculateChartYAxisWidth,
@@ -11,17 +19,17 @@ import {
   ChartTooltipIndicator,
   createChartNumberFormatter,
 } from "@/components/ui/chart";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  useAnimationOnChartSwitch,
-  useChartVisibility,
-} from "@/hooks/use-chart-animation";
+import { Spinner } from "@/components/ui/spinner";
 import {
   createChartAxisDateFormatter,
   createChartTooltipDateFormatter,
 } from "@/lib/dashboard/chart-time";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import type { DashboardInterval } from "@/lib/dashboard/query-state";
+import {
+  addZonedInterval,
+  startOfZonedInterval,
+} from "@/lib/dashboard/time-zone";
 import { safeChartCount } from "@/lib/dashboard/traffic-chart-data";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -29,9 +37,9 @@ import { formatI18nTemplate } from "@/lib/i18n/template";
 import { cn } from "@/lib/utils";
 
 export interface SiteTrafficStackChartProps {
-  data: Array<{
+  data?: ReadonlyArray<{
     timestampMs: number;
-    sites: Array<{
+    sites: ReadonlyArray<{
       siteId: string;
       views: number;
       visitors: number;
@@ -41,6 +49,8 @@ export interface SiteTrafficStackChartProps {
     id: string;
     name: string;
   }>;
+  from: number;
+  to: number;
   locale: Locale;
   timeZone: string;
   interval: DashboardInterval;
@@ -63,6 +73,72 @@ interface SiteTrafficSeriesItem {
 type SiteTrafficChartRow = Record<string, number> & {
   timestampMs: number;
 };
+
+const MAX_INITIAL_CHART_POINTS = 2_000;
+const BAR_LAYER_FADE_DURATION_MS = 200;
+const BAR_LAYER_FADE_FALLBACK_DELAY_MS = BAR_LAYER_FADE_DURATION_MS + 100;
+
+function createZeroValueChartData(
+  from: number,
+  to: number,
+  interval: DashboardInterval,
+  timeZone: string,
+  series: readonly SiteTrafficSeriesItem[],
+): SiteTrafficChartRow[] {
+  const start = startOfZonedInterval(from, interval, timeZone);
+  const end = startOfZonedInterval(to, interval, timeZone);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
+    return [];
+  }
+
+  const rows: SiteTrafficChartRow[] = [];
+  let timestampMs = start;
+  for (
+    let index = 0;
+    index < MAX_INITIAL_CHART_POINTS && timestampMs <= end;
+    index += 1
+  ) {
+    const row: SiteTrafficChartRow = { timestampMs };
+    for (const item of series) {
+      row[item.visitorsKey] = 0;
+      row[item.viewsKey] = 0;
+    }
+    rows.push(row);
+
+    const nextTimestampMs = addZonedInterval(timestampMs, interval, timeZone);
+    if (!Number.isFinite(nextTimestampMs) || nextTimestampMs <= timestampMs) {
+      break;
+    }
+    timestampMs = nextTimestampMs;
+  }
+
+  return rows;
+}
+
+function createChartData(
+  data: NonNullable<SiteTrafficStackChartProps["data"]>,
+  series: readonly SiteTrafficSeriesItem[],
+): SiteTrafficChartRow[] {
+  return data.map((point) => {
+    const bySite = new Map(
+      point.sites.map((sitePoint) => [
+        sitePoint.siteId,
+        {
+          views: safeChartCount(sitePoint.views),
+          visitors: safeChartCount(sitePoint.visitors),
+        },
+      ]),
+    );
+    const row: SiteTrafficChartRow = { timestampMs: point.timestampMs };
+
+    for (const item of series) {
+      const values = bySite.get(item.siteId);
+      row[item.visitorsKey] = values?.visitors ?? 0;
+      row[item.viewsKey] = values?.views ?? 0;
+    }
+    return row;
+  });
+}
 
 interface RGB {
   r: number;
@@ -341,6 +417,108 @@ function SiteTrafficStackTooltip({
   );
 }
 
+function useBarLayerTransition(
+  chartData: SiteTrafficChartRow[],
+  transitionKey: string,
+): {
+  displayedChartData: SiteTrafficChartRow[];
+  barsVisible: boolean;
+  onBarLayerTransitionEnd: (
+    target: EventTarget | null,
+    propertyName: string,
+  ) => void;
+} {
+  const previousKeyRef = useRef<string | null>(null);
+  const pendingChartDataRef = useRef(chartData);
+  const isFadingOutRef = useRef(false);
+  const fadeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealFrameRef = useRef<number | null>(null);
+  const [barsVisible, setBarsVisible] = useState(true);
+  const [displayedChartData, setDisplayedChartData] = useState(chartData);
+
+  const clearScheduledTransition = useCallback(() => {
+    if (fadeTimeoutRef.current !== null) {
+      clearTimeout(fadeTimeoutRef.current);
+      fadeTimeoutRef.current = null;
+    }
+    if (revealFrameRef.current !== null) {
+      cancelAnimationFrame(revealFrameRef.current);
+      revealFrameRef.current = null;
+    }
+  }, []);
+
+  const revealPendingData = useCallback(() => {
+    if (!isFadingOutRef.current) return;
+
+    clearScheduledTransition();
+    isFadingOutRef.current = false;
+    setDisplayedChartData(pendingChartDataRef.current);
+    revealFrameRef.current = requestAnimationFrame(() => {
+      setBarsVisible(true);
+      revealFrameRef.current = null;
+    });
+  }, [clearScheduledTransition]);
+
+  const onBarLayerTransitionEnd = useCallback(
+    (target: EventTarget | null, propertyName: string) => {
+      if (
+        !isFadingOutRef.current ||
+        propertyName !== "opacity" ||
+        !(target instanceof Element) ||
+        !target.classList.contains("recharts-bar-rectangles")
+      ) {
+        return;
+      }
+
+      // `transitionend` fires only after opacity has reached zero. The first
+      // bar layer is sufficient because every layer uses the same transition.
+      revealPendingData();
+    },
+    [revealPendingData],
+  );
+
+  useLayoutEffect(() => {
+    const previousKey = previousKeyRef.current;
+    previousKeyRef.current = transitionKey;
+    pendingChartDataRef.current = chartData;
+    if (previousKey === null) return;
+    if (previousKey === transitionKey) {
+      if (!isFadingOutRef.current) {
+        setDisplayedChartData(chartData);
+      }
+      return;
+    }
+
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    if (reduceMotion) {
+      clearScheduledTransition();
+      isFadingOutRef.current = false;
+      setDisplayedChartData(chartData);
+      setBarsVisible(true);
+      return;
+    }
+
+    // Keep the existing chart data visible while its bar layers fade out.
+    // The new data is applied only after the outgoing layers are transparent.
+    clearScheduledTransition();
+    isFadingOutRef.current = true;
+    setBarsVisible(false);
+    fadeTimeoutRef.current = setTimeout(() => {
+      // Zero-height bars do not emit transition events; do not leave the
+      // chart hidden if the browser has no rectangle layer to animate.
+      revealPendingData();
+    }, BAR_LAYER_FADE_FALLBACK_DELAY_MS);
+
+    return () => {
+      clearScheduledTransition();
+    };
+  }, [chartData, clearScheduledTransition, revealPendingData, transitionKey]);
+
+  return { displayedChartData, barsVisible, onBarLayerTransitionEnd };
+}
+
 const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
   chartData,
   config,
@@ -353,7 +531,9 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
   visitorsLabel,
   locale,
   messages,
-  stackChartDataKey,
+  loading = false,
+  barsVisible,
+  onBarLayerTransitionEnd,
   onHoverPoint,
 }: {
   chartData: SiteTrafficChartRow[];
@@ -367,16 +547,20 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
   visitorsLabel: string;
   locale: Locale;
   messages: AppMessages;
-  stackChartDataKey: string;
+  loading: boolean;
+  barsVisible: boolean;
+  onBarLayerTransitionEnd: (
+    target: EventTarget | null,
+    propertyName: string,
+  ) => void;
   onHoverPoint: (point: SiteTrafficChartRow | null) => void;
 }) {
-  const { containerRef, isVisible, hasMeasuredVisibility } =
-    useChartVisibility();
-  const activeSiteIdSet = useMemo(
-    () => new Set(activeSiteIds),
-    [activeSiteIds],
-  );
-  const hasActiveSites = activeSiteIds.length > 0;
+  const [hasChartSize, setHasChartSize] = useState(false);
+  const chartRootRef = useRef<HTMLDivElement>(null);
+  const handleChartResize = useCallback((width: number, height: number) => {
+    if (width <= 0 || height <= 0) return;
+    setHasChartSize(true);
+  }, []);
   const yAxisNumberFormatter = useMemo(
     () => createChartNumberFormatter(intlLocale(locale)),
     [locale],
@@ -396,18 +580,44 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
 
     return calculateChartYAxisWidth(labels, 4);
   }, [chartData, series, yAxisNumberFormatter]);
-  const isAnimationActive = useAnimationOnChartSwitch({
-    switchKey: stackChartDataKey,
-    hasData: chartData.length > 0,
-    isVisible,
-    hasMeasuredVisibility,
-  });
+
+  useLayoutEffect(() => {
+    const root = chartRootRef.current;
+    if (!root) return;
+
+    const activeSiteIdSet = new Set(activeSiteIds);
+    const hasActiveSites = activeSiteIds.length > 0;
+    for (const [index, item] of series.entries()) {
+      const opacity =
+        !hasActiveSites || activeSiteIdSet.has(item.siteId) ? "1" : "0.28";
+      const groups = root.querySelectorAll<SVGGElement>(
+        `.site-traffic-series-${index}`,
+      );
+      for (const group of Array.from(groups)) {
+        group.style.opacity = opacity;
+      }
+    }
+  }, [activeSiteIds, chartData, series]);
 
   return (
-    <div ref={containerRef}>
+    <div ref={chartRootRef} className="relative">
       <ChartContainer
-        className={cn("h-[320px] w-full aspect-auto", className)}
+        className={cn(
+          "h-[320px] w-full aspect-auto transition-opacity duration-200 [&_.recharts-bar-rectangles]:transition-[filter,opacity] [&_.recharts-bar-rectangles]:duration-200 [&_.site-traffic-series]:transition-opacity [&_.site-traffic-series]:duration-200 motion-reduce:[&_.recharts-bar-rectangles]:transition-none motion-reduce:[&_.site-traffic-series]:transition-none",
+          hasChartSize ? "opacity-100" : "opacity-0",
+          loading
+            ? "[&_.recharts-bar-rectangles]:brightness-50"
+            : "[&_.recharts-bar-rectangles]:brightness-100",
+          barsVisible
+            ? "[&_.recharts-bar-rectangles]:opacity-100"
+            : "[&_.recharts-bar-rectangles]:opacity-0",
+          className,
+        )}
         config={config}
+        onChartResize={handleChartResize}
+        onTransitionEnd={(event) =>
+          onBarLayerTransitionEnd(event.target, event.propertyName)
+        }
       >
         <BarChart
           data={chartData}
@@ -468,36 +678,41 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
               />
             }
           />
-          {series.map((item) => (
+          {series.map((item, index) => (
             <Bar
               key={item.visitorsKey}
               dataKey={item.visitorsKey}
               stackId="visitors"
               fill={`var(--color-${item.visitorsKey})`}
-              fillOpacity={
-                !hasActiveSites || activeSiteIdSet.has(item.siteId) ? 1 : 0.28
-              }
+              className={`site-traffic-series site-traffic-series-${index}`}
               radius={0}
-              isAnimationActive={isAnimationActive}
-              animationDuration={isAnimationActive ? 260 : 0}
+              isAnimationActive={false}
             />
           ))}
-          {series.map((item) => (
+          {series.map((item, index) => (
             <Bar
               key={item.viewsKey}
               dataKey={item.viewsKey}
               stackId="views"
               fill={`var(--color-${item.viewsKey})`}
-              fillOpacity={
-                !hasActiveSites || activeSiteIdSet.has(item.siteId) ? 1 : 0.28
-              }
+              className={`site-traffic-series site-traffic-series-${index}`}
               radius={0}
-              isAnimationActive={isAnimationActive}
-              animationDuration={isAnimationActive ? 260 : 0}
+              isAnimationActive={false}
             />
           ))}
         </BarChart>
       </ChartContainer>
+      <AutoTransition
+        aria-hidden={!loading && hasChartSize}
+        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-muted-foreground"
+        transitionKey={loading || !hasChartSize ? "loading" : "ready"}
+        duration={0.2}
+        presenceMode="sync"
+      >
+        {loading || !hasChartSize ? (
+          <Spinner key="chart-loading-indicator" className="size-5" />
+        ) : null}
+      </AutoTransition>
     </div>
   );
 });
@@ -505,6 +720,8 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
 export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
   data,
   sites,
+  from,
+  to,
   locale,
   timeZone,
   interval,
@@ -613,46 +830,36 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
 
   const chartData = useMemo(
     () =>
-      // Input is already sorted upstream by timestamp.
-      data.map((point) => {
-        const bySite = new Map(
-          point.sites.map((sitePoint) => [
-            sitePoint.siteId,
-            {
-              views: safeChartCount(sitePoint.views),
-              visitors: safeChartCount(sitePoint.visitors),
-            },
-          ]),
-        );
-
-        const row: SiteTrafficChartRow = {
-          timestampMs: point.timestampMs,
-        };
-
-        for (const item of series) {
-          const values = bySite.get(item.siteId);
-          row[item.visitorsKey] = values?.visitors ?? 0;
-          row[item.viewsKey] = values?.views ?? 0;
-        }
-
-        return row;
-      }),
-    [data, series],
+      data
+        ? createChartData(data, series)
+        : createZeroValueChartData(from, to, interval, timeZone, series),
+    [data, from, to, interval, timeZone, series],
   );
+  const legendKey = useMemo(
+    () => series.map((item) => item.siteId).join("|"),
+    [series],
+  );
+  const barTransitionKey = useMemo(() => {
+    const firstTimestamp = chartData[0]?.timestampMs ?? 0;
+    const lastTimestamp = chartData[chartData.length - 1]?.timestampMs ?? 0;
+    return `${data ? "data" : "initial"}:${interval}:${legendKey}:${chartData.length}:${firstTimestamp}:${lastTimestamp}`;
+  }, [data, interval, legendKey, chartData]);
+  const { displayedChartData, barsVisible, onBarLayerTransitionEnd } =
+    useBarLayerTransition(chartData, barTransitionKey);
 
   const totals = useMemo(() => {
     const map = new Map<string, { views: number; visitors: number }>();
     for (const item of series) {
       let viewsSum = 0;
       let visitorsSum = 0;
-      for (const row of chartData) {
+      for (const row of displayedChartData) {
         viewsSum += row[item.viewsKey] ?? 0;
         visitorsSum += row[item.visitorsKey] ?? 0;
       }
       map.set(item.siteId, { views: viewsSum, visitors: visitorsSum });
     }
     return map;
-  }, [chartData, series]);
+  }, [displayedChartData, series]);
 
   const getSiteValues = (siteId: string, item: (typeof series)[number]) => {
     if (hoveredPoint) {
@@ -670,17 +877,19 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
     setHoveredPoint(point);
   }, []);
   const handleToggleSite = useCallback((siteId: string) => {
-    setActiveSiteIds((current) =>
-      current.includes(siteId)
-        ? current.filter((currentSiteId) => currentSiteId !== siteId)
-        : [...current, siteId],
-    );
+    startTransition(() => {
+      setActiveSiteIds((current) =>
+        current.includes(siteId)
+          ? current.filter((currentSiteId) => currentSiteId !== siteId)
+          : [...current, siteId],
+      );
+    });
   }, []);
 
   useEffect(() => {
     hoveredTimestampRef.current = null;
     setHoveredPoint((current) => (current === null ? current : null));
-  }, [chartData]);
+  }, [displayedChartData]);
 
   const tickFormatter = useMemo(
     () => createChartAxisDateFormatter(locale, interval, timeZone),
@@ -690,20 +899,10 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
     () => createChartTooltipDateFormatter(locale, interval, timeZone),
     [locale, interval, timeZone],
   );
-  const legendKey = useMemo(
-    () => series.map((item) => item.siteId).join("|"),
-    [series],
-  );
-  const stackChartDataKey = useMemo(() => {
-    const firstTimestamp = data[0]?.timestampMs ?? 0;
-    const lastTimestamp = data[data.length - 1]?.timestampMs ?? 0;
-    return `${interval}:${legendKey}:${data.length}:${firstTimestamp}:${lastTimestamp}`;
-  }, [interval, legendKey, data]);
-
   return (
     <div className="space-y-4">
       <SiteTrafficStackPlot
-        chartData={chartData}
+        chartData={displayedChartData}
         config={config}
         series={series}
         activeSiteIds={activeSiteIds}
@@ -714,122 +913,89 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
         visitorsLabel={visitorsLabel}
         locale={locale}
         messages={messages}
-        stackChartDataKey={stackChartDataKey}
+        loading={loading}
+        barsVisible={barsVisible}
+        onBarLayerTransitionEnd={onBarLayerTransitionEnd}
         onHoverPoint={handleHoverPoint}
       />
 
       <div className="flex flex-col gap-4 border-t border-border/40 pt-4">
         <div className="flex items-center justify-between text-xs">
-          {loading ? (
-            <Skeleton className="h-4 w-32 rounded-none bg-muted" />
-          ) : (
-            <span className="font-medium text-muted-foreground">
-              <AutoTransition>
-                {hoveredPoint ? (
-                  <span className="inline-flex items-center gap-1.5 text-primary font-medium">
-                    <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-none bg-primary/60 opacity-75"></span>
-                      <span className="relative inline-flex h-2 w-2 rounded-none bg-primary"></span>
-                    </span>
-                    {tooltipFormatter.format(
-                      new Date(Number(hoveredPoint.timestampMs)),
-                    )}
+          <span className="font-medium text-muted-foreground">
+            <AutoTransition>
+              {hoveredPoint ? (
+                <span className="inline-flex items-center gap-1.5 text-primary font-medium">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-none bg-primary/60 opacity-75"></span>
+                    <span className="relative inline-flex h-2 w-2 rounded-none bg-primary"></span>
                   </span>
-                ) : (
-                  messages.common.cumulativeTraffic
-                )}
-              </AutoTransition>
-            </span>
-          )}
-          {loading ? (
-            <Skeleton className="h-4 w-20 rounded-none bg-muted" />
-          ) : (
-            <span className="text-[11px] text-muted-foreground font-medium">
-              {viewsLabel} / {visitorsLabel}
-            </span>
-          )}
+                  {tooltipFormatter.format(
+                    new Date(Number(hoveredPoint.timestampMs)),
+                  )}
+                </span>
+              ) : (
+                messages.common.cumulativeTraffic
+              )}
+            </AutoTransition>
+          </span>
+          <span className="text-[11px] text-muted-foreground font-medium">
+            {viewsLabel} / {visitorsLabel}
+          </span>
         </div>
 
-        <AutoResizer initial className="min-h-5">
-          <AutoTransition initial={false} duration={0.2}>
-            {loading ? (
-              <div className="grid gap-x-6 gap-y-0.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {Array.from(
-                  { length: Math.max(4, sites.length) },
-                  (_, index) => (
-                    <div
-                      key={`legend-skeleton-${index}`}
-                      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-2.5 py-1"
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <Skeleton className="size-2.5 shrink-0 rounded-none bg-muted" />
-                        <Skeleton className="h-3.5 w-20 rounded-none bg-muted" />
-                      </div>
-                      <Skeleton className="h-3.5 w-16 rounded-none bg-muted" />
-                    </div>
-                  ),
+        <div className="grid gap-x-6 gap-y-0.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {series.map((item) => {
+            const { views, visitors } = getSiteValues(item.siteId, item);
+            return (
+              <button
+                key={item.siteId}
+                type="button"
+                aria-pressed={activeSiteIdSet.has(item.siteId)}
+                onClick={() => handleToggleSite(item.siteId)}
+                className={cn(
+                  "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-none px-2.5 py-1 text-left border-0 bg-transparent cursor-pointer transition-all hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
+                  hasActiveSites && !activeSiteIdSet.has(item.siteId)
+                    ? "opacity-40"
+                    : "opacity-100",
                 )}
-              </div>
-            ) : (
-              <div
-                key={legendKey}
-                className="grid gap-x-6 gap-y-0.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
               >
-                {series.map((item) => {
-                  const { views, visitors } = getSiteValues(item.siteId, item);
-                  return (
-                    <button
-                      key={item.siteId}
-                      type="button"
-                      aria-pressed={activeSiteIdSet.has(item.siteId)}
-                      onClick={() => handleToggleSite(item.siteId)}
-                      className={cn(
-                        "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-none px-2.5 py-1 text-left border-0 bg-transparent cursor-pointer transition-all hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
-                        hasActiveSites && !activeSiteIdSet.has(item.siteId)
-                          ? "opacity-40"
-                          : "opacity-100",
-                      )}
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span
-                          className="size-2.5 shrink-0 rounded-none"
-                          style={{ backgroundColor: item.viewsColor }}
-                        />
-                        <span
-                          className={cn(
-                            "truncate font-medium text-xs",
-                            activeSiteIdSet.has(item.siteId)
-                              ? "text-foreground"
-                              : "text-muted-foreground",
-                          )}
-                          title={item.siteName}
-                        >
-                          {item.siteName}
-                        </span>
-                      </div>
-                      <AutoTransition>
-                        <div
-                          className="flex shrink-0 items-baseline gap-1.5 text-xs"
-                          key={`${views}/${visitors}`}
-                        >
-                          <span className="font-mono tabular-nums text-foreground font-semibold">
-                            {numberFormat(locale, views)}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground font-light">
-                            /
-                          </span>
-                          <span className="font-mono tabular-nums text-muted-foreground">
-                            {numberFormat(locale, visitors)}
-                          </span>
-                        </div>
-                      </AutoTransition>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </AutoTransition>
-        </AutoResizer>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="size-2.5 shrink-0 rounded-none"
+                    style={{ backgroundColor: item.viewsColor }}
+                  />
+                  <span
+                    className={cn(
+                      "truncate font-medium text-xs",
+                      activeSiteIdSet.has(item.siteId)
+                        ? "text-foreground"
+                        : "text-muted-foreground",
+                    )}
+                    title={item.siteName}
+                  >
+                    {item.siteName}
+                  </span>
+                </div>
+                <AutoTransition>
+                  <div
+                    className="flex shrink-0 items-baseline gap-1.5 text-xs"
+                    key={`${views}/${visitors}`}
+                  >
+                    <span className="font-mono tabular-nums text-foreground font-semibold">
+                      {numberFormat(locale, views)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-light">
+                      /
+                    </span>
+                    <span className="font-mono tabular-nums text-muted-foreground">
+                      {numberFormat(locale, visitors)}
+                    </span>
+                  </div>
+                </AutoTransition>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

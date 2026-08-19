@@ -438,7 +438,13 @@ describe("API v1 typed query adapter", () => {
     if (result.ok) {
       expect(result.data).toEqual([
         { value: "/", label: "/", views: 10, sessions: 5, visitors: 3 },
-        { value: "/login", label: "/login", views: 4, sessions: 2, visitors: 2 },
+        {
+          value: "/login",
+          label: "/login",
+          views: 4,
+          sessions: 2,
+          visitors: 2,
+        },
       ]);
     }
   });

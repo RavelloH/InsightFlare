@@ -11,7 +11,7 @@ import {
 } from "@/lib/dashboard/server";
 import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
 import type { TeamDashboardSnapshot } from "@/lib/dashboard/team-dashboard-query";
-import { queryTeamDashboardForTeam } from "@/lib/edge/query/team";
+import { readTeamDashboard } from "@/lib/edge/query-runtime/team-dashboard";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 import { fetchPublicSite } from "@/lib/edge-client";
 import { fetchGithubReleases } from "@/lib/github-releases";
@@ -46,18 +46,18 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
     if (resolved instanceof Response) return null;
 
     const window = resolveDashboardInitialWindow(request.headers.get("cookie"));
-    const result = await queryTeamDashboardForTeam(
-      resolved.env,
-      resolved.teamId,
-      {
+    const result = await readTeamDashboard({
+      env: resolved.env,
+      teamId: resolved.teamId,
+      window: {
         startMs: window.from,
         endExclusiveMs: window.to,
         nowMs: window.to,
         timeZone: window.timeZone,
       },
-      window.interval,
-      resolved.allowedSiteIds ? [...resolved.allowedSiteIds] : undefined,
-    );
+      interval: window.interval,
+      allowedSiteIds: resolved.allowedSiteIds,
+    });
     return {
       data: result.data,
       window: {

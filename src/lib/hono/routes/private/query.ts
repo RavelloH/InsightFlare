@@ -2,15 +2,13 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 
 import { withDashboardCache } from "@/lib/edge/dashboard-cache";
-import {
-  notAllowed,
-  resolvePrivateTeamForSession,
-} from "@/lib/edge/query/core";
+import { notAllowed } from "@/lib/edge/query/core";
 import { DASHBOARD_QUERY_PATHS } from "@/lib/edge/query/router";
 import {
   executePrivateQuery,
   executePrivateTeamDashboard,
 } from "@/lib/edge/query-adapters/private";
+import { resolveTeamDashboardScope } from "@/lib/edge/query-runtime/team-dashboard";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import {
   requireMethodMiddleware,
@@ -49,12 +47,12 @@ privateQueryRoutes.all("/team-dashboard", async (c) => {
     throw new Error("private session context missing");
   }
   const url = requestUrl(c);
-  const team = await resolvePrivateTeamForSession(
-    c.req.raw,
-    c.env,
-    url,
+  const team = await resolveTeamDashboardScope({
+    request: c.req.raw,
+    env: c.env,
+    teamId: url.searchParams.get("teamId") || "",
     session,
-  );
+  });
   if (team instanceof Response) return team;
 
   return withDashboardCache(
@@ -63,14 +61,14 @@ privateQueryRoutes.all("/team-dashboard", async (c) => {
     () =>
       executePrivateTeamDashboard({
         env: c.env,
-        teamId: team.id,
+        teamId: team.teamId,
         allowedSiteIds: team.allowedSiteIds,
         url,
       }),
     {
       identity: {
         scope: "private-team",
-        tenantId: team.id,
+        tenantId: team.teamId,
         route: "team-dashboard",
         audienceId: session.userId,
       },

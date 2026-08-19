@@ -105,9 +105,7 @@ describe("mock/events-sort branch behavior", () => {
       sortDemoEventRecords(rows, { key: "occurredAt", direction: "asc" }).map(
         (event) => event.eventId,
       ),
-    ).toEqual(
-      expect.arrayContaining(["a", "b", "c"]),
-    );
+    ).toEqual(expect.arrayContaining(["a", "b", "c"]));
   });
 });
 

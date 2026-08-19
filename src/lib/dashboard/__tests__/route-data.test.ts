@@ -52,8 +52,8 @@ vi.mock("@/lib/dashboard/server-query", () => ({
   resolveTeamDashboardRequest: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/query/team", () => ({
-  queryTeamDashboardForTeam: vi.fn(),
+vi.mock("@/lib/edge/query-runtime/team-dashboard", () => ({
+  readTeamDashboard: vi.fn(),
 }));
 
 vi.mock("@/lib/edge/runtime", () => ({
@@ -86,7 +86,7 @@ import {
   loadVersionReleases,
 } from "@/lib/dashboard/route-data";
 import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
-import { queryTeamDashboardForTeam } from "@/lib/edge/query/team";
+import { readTeamDashboard } from "@/lib/edge/query-runtime/team-dashboard";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 import { fetchPublicSite } from "@/lib/edge-client";
 import { fetchGithubReleases } from "@/lib/github-releases";
@@ -128,7 +128,7 @@ describe("Dashboard route data loaders", () => {
       interval: "day",
       timeZone: "Asia/Tokyo",
     });
-    vi.mocked(queryTeamDashboardForTeam).mockResolvedValue({
+    vi.mocked(readTeamDashboard).mockResolvedValue({
       data: { sites: [], trend: [] },
       source: "raw",
     } as never);
@@ -252,18 +252,18 @@ describe("Dashboard route data loaders", () => {
         env: { DB: {} },
         teamId: "team-requested",
       });
-      expect(queryTeamDashboardForTeam).toHaveBeenCalledWith(
-        { DB: {} },
-        "team-1",
-        {
+      expect(readTeamDashboard).toHaveBeenCalledWith({
+        env: { DB: {} },
+        teamId: "team-1",
+        window: {
           startMs: 100,
           endExclusiveMs: 200,
           nowMs: 200,
           timeZone: "Asia/Tokyo",
         },
-        "day",
-        ["site-1"],
-      );
+        interval: "day",
+        allowedSiteIds: ["site-1"],
+      });
     });
 
     it("loads the dashboard root context", async () => {

@@ -201,6 +201,10 @@ export function generateDemoTeamDashboard(
     const prevMetrics = computeMetrics(site.id, Math.max(0, from - span), from);
     const cr = (cur: number, prev: number) =>
       prev === 0 ? null : Math.round(((cur - prev) / prev) * 10000) / 10000;
+    const pagesPerSession =
+      metrics.sessions > 0 ? metrics.views / metrics.sessions : 0;
+    const previousPagesPerSession =
+      prevMetrics.sessions > 0 ? prevMetrics.views / prevMetrics.sessions : 0;
     return {
       id: site.id,
       teamId: site.teamId,
@@ -219,7 +223,7 @@ export function generateDemoTeamDashboard(
         visitors: cr(metrics.visitors, prevMetrics.visitors),
         bounceRate: cr(metrics.bounceRate, prevMetrics.bounceRate),
         avgDurationMs: cr(metrics.avgDurationMs, prevMetrics.avgDurationMs),
-        pagesPerSession: null,
+        pagesPerSession: cr(pagesPerSession, previousPagesPerSession),
       },
     };
   });

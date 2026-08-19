@@ -1,4 +1,4 @@
-export type AnalyticsDataSource = "raw" | "rollup" | "mixed";
+export type AnalyticsDataSource = "raw" | "rollup" | "mixed" | "mock";
 
 export interface D1ReadDiagnostics {
   rowsRead: number;

@@ -92,6 +92,8 @@ export function useRouter() {
     () => ({
       back: () => router.history.back(),
       forward: () => router.history.forward(),
+      preload: (href: string) =>
+        router.preloadRoute({ to: href }).then(() => undefined),
       push: (href: string, options?: { scroll?: boolean }) =>
         navigate({ to: href, resetScroll: options?.scroll !== false }),
       refresh: () => router.invalidate(),

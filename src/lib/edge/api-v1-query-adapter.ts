@@ -73,11 +73,9 @@ import {
   createOverviewReader,
   toQueryTime,
 } from "./query/overview-contract-adapter";
-import {
-  queryTeamDashboardForTeam,
-  type TeamDashboardQueryResult,
-} from "./query/team";
+import type { TeamDashboardQueryResult } from "./query/team";
 import { queryCrossDimensionFromD1 } from "./query/technology/client-cross";
+import { readTeamDashboard } from "./query-runtime/team-dashboard";
 import type { ParsedTimeRange } from "./api-v1-helpers";
 import type { CursorPagination } from "./api-v1-helpers";
 import {
@@ -170,18 +168,18 @@ export function queryApiV1TeamDashboard(
       time: queryTime(timeRange),
     },
     async () => {
-      const result = await queryTeamDashboardForTeam(
+      const result = await readTeamDashboard({
         env,
         teamId,
-        {
+        window: {
           startMs: timeRange.startMs,
           endExclusiveMs: timeRange.endExclusiveMs,
           nowMs: Date.now(),
           timeZone: timeRange.timeZone,
         },
         interval,
-        authorizedSiteIds ? [...authorizedSiteIds] : undefined,
-      );
+        allowedSiteIds: authorizedSiteIds,
+      });
       return { value: result.data, source: result.source };
     },
   );

@@ -1,8 +1,7 @@
 import "@tanstack/react-start/server-only";
 
-import { resolvePrivateTeamForSession } from "@/lib/edge/query/core";
+import { resolveTeamDashboardScope } from "@/lib/edge/query-runtime/team-dashboard";
 import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
-import { requireSession } from "@/lib/edge/session-auth";
 import type { Env } from "@/lib/edge/types";
 
 import { readReportingTimeZoneFromCookie } from "./query-preferences";
@@ -26,24 +25,14 @@ export async function resolveTeamDashboardRequest(input: {
   env: Env;
   teamId: string;
 }): Promise<TeamDashboardRequestResolution> {
-  const session = await requireSession(input.request, input.env);
-  if (!session) return new Response("Unauthorized", { status: 401 });
-
-  const url = new URL(input.request.url);
-  url.searchParams.set("teamId", input.teamId);
-  const team = await resolvePrivateTeamForSession(
-    input.request,
-    input.env,
-    url,
-    session,
-  );
+  const team = await resolveTeamDashboardScope(input);
   if (team instanceof Response) return team;
 
   return {
     env: input.env,
     request: input.request,
-    session,
-    teamId: team.id,
+    session: team.session,
+    teamId: team.teamId,
     allowedSiteIds: team.allowedSiteIds,
     timeZone: readReportingTimeZoneFromCookie(
       input.request.headers.get("cookie"),

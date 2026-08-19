@@ -70,7 +70,7 @@ describe("Dashboard Format Utilities", () => {
 
     it("should return fallback for positive numbers that exceed the valid date range", () => {
       // Finite and > 0, but `new Date(value)` produces an Invalid Date.
-      expect(shortDateTime("en", 8.64e15 + 1000 as any)).toBe("--");
+      expect(shortDateTime("en", (8.64e15 + 1000) as any)).toBe("--");
       // Numeric-string path reaching the same invalid-Date branch.
       expect(shortDateTime("en", "1e20" as any)).toBe("--");
     });

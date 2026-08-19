@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { demoEventRecordPayload } from "@/lib/realtime/mock/events-payload";
 import type { DemoCustomEventFact } from "@/lib/realtime/mock/events-facts";
+import { demoEventRecordPayload } from "@/lib/realtime/mock/events-payload";
 import type { DemoVisitFact } from "@/lib/realtime/mock/types";
 
 describe("mock/events-payload", () => {
   it("attaches a product block for cart events", () => {
     const payload = demoEventRecordPayload(makeEvent("cart-1", "cart"));
+    expect("product" in payload).toBe(true);
+    if (!("product" in payload)) throw new Error("Expected product payload");
+
     expect(payload.product).toEqual(
       expect.objectContaining({
         id: expect.any(String),
@@ -14,7 +17,7 @@ describe("mock/events-payload", () => {
         price: expect.any(Number),
       }),
     );
-    expect(payload.order).toBeUndefined();
+    expect("order" in payload).toBe(false);
   });
 
   it("returns only the base payload for unrelated events", () => {
@@ -25,8 +28,8 @@ describe("mock/events-payload", () => {
         items: expect.any(Array),
       }),
     );
-    expect(payload.order).toBeUndefined();
-    expect(payload.product).toBeUndefined();
+    expect("order" in payload).toBe(false);
+    expect("product" in payload).toBe(false);
   });
 });
 

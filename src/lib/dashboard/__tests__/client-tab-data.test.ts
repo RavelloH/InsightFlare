@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  fetchFilterValues,
-} from "@/lib/dashboard/client-tab-data";
 import { fetchPrivateJson } from "@/lib/dashboard/client-request";
+import { fetchFilterValues } from "@/lib/dashboard/client-tab-data";
 
 vi.mock("@/lib/dashboard/client-request", () => ({
   fetchPrivateJson: vi.fn(),
@@ -31,7 +29,7 @@ describe("fetchFilterValues", () => {
     const result = await fetchFilterValues(
       "site-1",
       window,
-      "page",
+      "page.path",
       undefined,
       { search: "  Home  ", limit: 100 },
     );
@@ -50,7 +48,7 @@ describe("fetchFilterValues", () => {
     const result = await fetchFilterValues(
       "site-1",
       window,
-      "page",
+      "page.path",
       undefined,
       { signal: new AbortController().signal },
     );
@@ -66,7 +64,7 @@ describe("fetchFilterValues", () => {
   it("returns the empty option list when the request fails", async () => {
     fetchPrivateJsonMock.mockRejectedValue(new Error("network"));
 
-    const result = await fetchFilterValues("site-1", window, "page");
+    const result = await fetchFilterValues("site-1", window, "page.path");
 
     expect(result).toEqual([]);
   });

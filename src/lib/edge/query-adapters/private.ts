@@ -15,7 +15,6 @@ import {
 import type { SimpleDimensionKey } from "@/lib/edge/query/dimensions-contract-adapter";
 import type { OverviewTab } from "@/lib/edge/query/overview-tabs-contract-adapter";
 import { operationForQueryRoute } from "@/lib/edge/query/router";
-import { queryTeamDashboardForTeam } from "@/lib/edge/query/team";
 import {
   assertOperationAllowed,
   createQueryTime,
@@ -23,6 +22,7 @@ import {
   siteQueryContext,
   teamQueryContext,
 } from "@/lib/edge/query-contract";
+import { readTeamDashboard } from "@/lib/edge/query-runtime/team-dashboard";
 import type { Env } from "@/lib/edge/types";
 
 export interface PrivateQueryAdapterInput {
@@ -496,14 +496,14 @@ export async function executePrivateTeamDashboard(
       ),
     },
     async () => {
-      const dashboard = await queryTeamDashboardForTeam(
-        input.env,
-        input.teamId,
+      const dashboard = await readTeamDashboard({
+        env: input.env,
+        teamId: input.teamId,
         window,
-        parseInterval(input.url),
-        input.allowedSiteIds ? [...input.allowedSiteIds] : undefined,
+        interval: parseInterval(input.url),
+        allowedSiteIds: input.allowedSiteIds,
         diagnostics,
-      );
+      });
       return { value: dashboard.data, source: dashboard.source };
     },
   );

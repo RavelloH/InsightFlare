@@ -56,15 +56,25 @@ export function useAnimationOnChartSwitch({
   hasMeasuredVisibility: boolean;
 }): boolean {
   const appliedKeyRef = useRef<string | null>(null);
+  const hasInitializedRef = useRef(false);
   const animationEnabledRef = useRef(false);
 
-  if (appliedKeyRef.current !== switchKey && hasMeasuredVisibility) {
+  if (!hasMeasuredVisibility) {
+    return false;
+  }
+
+  // Visibility is measured after the first render. Treat that measurement as
+  // initialization, rather than as a chart-data switch that should replay.
+  if (!hasInitializedRef.current) {
+    hasInitializedRef.current = true;
     appliedKeyRef.current = switchKey;
-    animationEnabledRef.current = hasData && isVisible;
+    animationEnabledRef.current = false;
+    return false;
   }
 
   if (appliedKeyRef.current !== switchKey) {
-    return hasData && isVisible;
+    appliedKeyRef.current = switchKey;
+    animationEnabledRef.current = hasData && isVisible;
   }
 
   return animationEnabledRef.current;

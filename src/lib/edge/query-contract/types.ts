@@ -160,7 +160,7 @@ export interface KeysetPage<T, Cursor> {
   };
 }
 
-export type QuerySource = "raw" | "rollup" | "mixed";
+export type QuerySource = "raw" | "rollup" | "mixed" | "mock";
 
 export interface QueryResultMeta {
   readonly time: QueryTime;

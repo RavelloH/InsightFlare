@@ -3502,14 +3502,31 @@ describe("api v1 gateway", () => {
         {
           includes: ["PARTITION BY metric, bucket"],
           all: [
-            { metric: "lcp", bucket: 1, avgValue: 200, p50: 200, p95: 200, samples: 2 },
-            { metric: "lcp", bucket: 0, avgValue: 100, p50: 100, p95: 100, samples: 2 },
+            {
+              metric: "lcp",
+              bucket: 1,
+              avgValue: 200,
+              p50: 200,
+              p95: 200,
+              samples: 2,
+            },
+            {
+              metric: "lcp",
+              bucket: 0,
+              avgValue: 100,
+              p50: 100,
+              p95: 100,
+              samples: 2,
+            },
           ],
         },
       ],
     );
     expect(timeseries.response.status).toBe(200);
-    const timeseriesBody = await timeseries.response.json();
+    const timeseriesBody = (await timeseries.response.json()) as {
+      data: unknown[];
+      meta: { interval: string };
+    };
     expect(timeseriesBody).toMatchObject({
       data: [
         { start: "2026-06-01T00:00:00.000Z", lcp: 100 },

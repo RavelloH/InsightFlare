@@ -113,6 +113,9 @@ export function PageTransition({ children }: PageTransitionProps) {
       if (exitingRef.current) return;
       exitingRef.current = true;
       pendingRef.current = request;
+      if (router.preload) {
+        void router.preload(request.href).catch(() => undefined);
+      }
       setTransitionState("exit");
 
       if (timeoutRef.current) {

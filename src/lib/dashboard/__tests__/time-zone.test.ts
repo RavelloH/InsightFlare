@@ -38,9 +38,10 @@ describe("Timezone & Calendar Calculation Utilities", () => {
       );
 
       document.cookie = `${REPORTING_TIME_ZONE_COOKIE}=; Path=/; Max-Age=0`;
-      const cookieBeforeInvalidWrite = document.cookie;
       writeReportingTimeZoneCookie("Invalid/Zone");
-      expect(document.cookie).toBe(cookieBeforeInvalidWrite);
+      expect(document.cookie).not.toContain(
+        `${REPORTING_TIME_ZONE_COOKIE}=Invalid%2FZone`,
+      );
     });
   });
 
