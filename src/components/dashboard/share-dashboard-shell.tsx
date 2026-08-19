@@ -52,11 +52,7 @@ export function ShareDashboardShell({
     : "mx-auto w-full max-w-[1400px] p-4 md:p-6";
 
   return (
-    <DashboardQueryProvider
-      scopeKey={publicSiteId}
-      maxRangeDays={365}
-      initialTimeZonePreference=""
-    >
+    <DashboardQueryProvider scopeKey={publicSiteId} maxRangeDays={365}>
       <div className={rootClassName}>
         <div className="sticky top-0 z-20 shrink-0 border-b bg-background/92 backdrop-blur">
           <div className="p-3">

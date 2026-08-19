@@ -1,4 +1,7 @@
 export const FALLBACK_TIME_ZONE = "UTC";
+export const REPORTING_TIME_ZONE_COOKIE = "insightflare-reporting-time-zone";
+
+const REPORTING_TIME_ZONE_COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
 export const COMMON_TIME_ZONES = [
   "UTC",
@@ -99,6 +102,15 @@ export function browserTimeZone(): string {
   } catch {
     return "";
   }
+}
+
+/** Persists the effective reporting time zone without causing a navigation. */
+export function writeReportingTimeZoneCookie(timeZone: string): void {
+  if (typeof document === "undefined") return;
+  const resolved = normalizeTimeZone(timeZone);
+  if (!resolved) return;
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${REPORTING_TIME_ZONE_COOKIE}=${encodeURIComponent(resolved)}; Path=/; Max-Age=${REPORTING_TIME_ZONE_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
 }
 
 export function supportedTimeZones(): string[] {

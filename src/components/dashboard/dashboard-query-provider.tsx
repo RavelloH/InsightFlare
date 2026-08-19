@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 
+import { useReportingTimeZone } from "@/components/time-zone-provider";
 import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import {
   allowedIntervalsForRange,
@@ -22,10 +23,6 @@ import {
   resolveTimeWindow,
   type TimeWindow,
 } from "@/lib/dashboard/query-state";
-import {
-  browserTimeZone,
-  resolveReportingTimeZone,
-} from "@/lib/dashboard/time-zone";
 import {
   analyticsFilterRegistry,
   type FilterDocument,
@@ -54,16 +51,12 @@ interface DashboardQueryContextValue {
   clearUiFilters: () => void;
   allowedIntervals: DashboardInterval[];
   timeZone: string;
-  timeZonePreference: string;
-  browserTimeZone: string;
-  setTimeZonePreference: (timeZone: string) => void;
   maxRangeDays?: number;
 }
 
 interface DashboardQueryProviderProps {
   children: ReactNode;
   scopeKey?: string;
-  initialTimeZonePreference?: string;
   maxRangeDays?: number;
 }
 
@@ -120,8 +113,7 @@ function parsePersistedState(
   }
 }
 
-function buildInitialState(initialTimeZonePreference: string) {
-  const timeZone = resolveReportingTimeZone(initialTimeZonePreference);
+function buildInitialState(timeZone: string) {
   if (typeof window === "undefined") {
     const initialWindow = resolveTimeWindow(DEFAULT_RANGE, Date.now(), {
       timeZone,
@@ -132,7 +124,6 @@ function buildInitialState(initialTimeZonePreference: string) {
       customRange: null as CustomTimeRange | null,
       uiFilters: EMPTY_FILTERS,
       uiFilterDsl: undefined,
-      timeZonePreference: initialTimeZonePreference,
     };
   }
 
@@ -149,7 +140,6 @@ function buildInitialState(initialTimeZonePreference: string) {
       customRange: null as CustomTimeRange | null,
       uiFilters: EMPTY_FILTERS,
       uiFilterDsl: undefined,
-      timeZonePreference: initialTimeZonePreference,
     };
   }
 
@@ -167,7 +157,6 @@ function buildInitialState(initialTimeZonePreference: string) {
     customRange: persistedCustomRange,
     uiFilters: normalizeFilters(persisted.uiFilters),
     uiFilterDsl: persistedRawDsl(persisted.uiFilterDsl),
-    timeZonePreference: initialTimeZonePreference,
   };
 }
 
@@ -202,13 +191,10 @@ function clampPresetForMaxDays(
 export function DashboardQueryProvider({
   children,
   scopeKey = "",
-  initialTimeZonePreference = "",
   maxRangeDays,
 }: DashboardQueryProviderProps) {
-  const initial = useMemo(
-    () => buildInitialState(initialTimeZonePreference),
-    [initialTimeZonePreference],
-  );
+  const { timeZone } = useReportingTimeZone();
+  const [initial] = useState(() => buildInitialState(timeZone));
   const [range, setRangeState] = useState<RangePreset>(
     clampPresetForMaxDays(initial.range, maxRangeDays),
   );
@@ -227,15 +213,7 @@ export function DashboardQueryProvider({
   const [uiFilterDslDocumentKey, setUiFilterDslDocumentKey] = useState(() =>
     initial.uiFilterDsl ? filterDocumentKey(initial.uiFilters) : undefined,
   );
-  const [timeZonePreference, setTimeZonePreferenceState] = useState(
-    initial.timeZonePreference,
-  );
-  const [detectedBrowserTimeZone, setDetectedBrowserTimeZone] = useState("");
   const previousScopeKeyRef = useRef(scopeKey);
-  const timeZone = resolveReportingTimeZone(
-    timeZonePreference,
-    detectedBrowserTimeZone,
-  );
 
   const windowState = useMemo(
     () =>
@@ -250,10 +228,6 @@ export function DashboardQueryProvider({
       ),
     [range, maxRangeDays, customRange, interval, timeZone],
   );
-
-  useEffect(() => {
-    setDetectedBrowserTimeZone(browserTimeZone());
-  }, []);
 
   useEffect(() => {
     const clamped = clampIntervalForRange(
@@ -336,10 +310,6 @@ export function DashboardQueryProvider({
     setIntervalState(next);
   }, []);
 
-  const setTimeZonePreference = useCallback((next: string) => {
-    setTimeZonePreferenceState(next);
-  }, []);
-
   const setUiFilters = useCallback(
     (next: FilterDocument, rawDsl?: string) => {
       const normalized = normalizeFilters(next);
@@ -385,9 +355,6 @@ export function DashboardQueryProvider({
       clearUiFilters,
       allowedIntervals,
       timeZone,
-      timeZonePreference,
-      browserTimeZone: detectedBrowserTimeZone,
-      setTimeZonePreference,
       maxRangeDays,
     }),
     [
@@ -403,9 +370,6 @@ export function DashboardQueryProvider({
       clearUiFilters,
       allowedIntervals,
       timeZone,
-      timeZonePreference,
-      detectedBrowserTimeZone,
-      setTimeZonePreference,
       maxRangeDays,
     ],
   );
@@ -435,9 +399,6 @@ function useDashboardQueryContext(): DashboardQueryContextValue {
       clearUiFilters: () => {},
       allowedIntervals: ["hour", "day", "week", "month"],
       timeZone: fallbackWindow.timeZone,
-      timeZonePreference: "",
-      browserTimeZone: "",
-      setTimeZonePreference: () => {},
       maxRangeDays: undefined,
     };
   }

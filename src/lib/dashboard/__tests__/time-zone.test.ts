@@ -11,6 +11,7 @@ import {
   formatUtcOffset,
   isValidTimeZone,
   normalizeTimeZone,
+  REPORTING_TIME_ZONE_COOKIE,
   resolveReportingTimeZone,
   startOfZonedDay,
   startOfZonedHour,
@@ -21,11 +22,28 @@ import {
   startOfZonedYear,
   supportedTimeZones,
   timeZoneOffsetMinutes,
+  writeReportingTimeZoneCookie,
   zonedParts,
   zonedTimeToUtcMs,
 } from "@/lib/dashboard/time-zone";
 
 describe("Timezone & Calendar Calculation Utilities", () => {
+  describe("reporting timezone cookie", () => {
+    it("writes a normalized effective timezone and ignores invalid values", () => {
+      document.cookie = `${REPORTING_TIME_ZONE_COOKIE}=; Path=/; Max-Age=0`;
+
+      writeReportingTimeZoneCookie(" Asia/Shanghai ");
+      expect(document.cookie).toContain(
+        `${REPORTING_TIME_ZONE_COOKIE}=Asia%2FShanghai`,
+      );
+
+      document.cookie = `${REPORTING_TIME_ZONE_COOKIE}=; Path=/; Max-Age=0`;
+      const cookieBeforeInvalidWrite = document.cookie;
+      writeReportingTimeZoneCookie("Invalid/Zone");
+      expect(document.cookie).toBe(cookieBeforeInvalidWrite);
+    });
+  });
+
   describe("isValidTimeZone", () => {
     it("should correctly identify valid timezone strings", () => {
       expect(isValidTimeZone("UTC")).toBe(true);

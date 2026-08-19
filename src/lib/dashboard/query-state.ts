@@ -1,6 +1,5 @@
 import {
   addCalendarMonths,
-  browserTimeZone,
   endOfZonedDay,
   resolveReportingTimeZone,
   startOfZonedDay,
@@ -250,10 +249,7 @@ export function resolveTimeWindow(
   },
 ): TimeWindow {
   const preset = resolveRangePreset(range);
-  const timeZone = resolveReportingTimeZone(
-    options?.timeZone,
-    typeof window === "undefined" ? null : browserTimeZone(),
-  );
+  const timeZone = resolveReportingTimeZone(options?.timeZone);
   const bounds = rangeBounds(
     preset,
     preset === "custom" && isValidCustomRange(options?.customRange)
@@ -300,10 +296,7 @@ export function normalizeCustomDateRange(
   timeZone?: string | null,
 ): CustomTimeRange | null {
   if (!range?.from || !range?.to) return null;
-  const resolvedTimeZone = resolveReportingTimeZone(
-    timeZone,
-    typeof window === "undefined" ? null : browserTimeZone(),
-  );
+  const resolvedTimeZone = resolveReportingTimeZone(timeZone);
   const from = zonedTimeToUtcMs(resolvedTimeZone, {
     year: range.from.getFullYear(),
     month: range.from.getMonth() + 1,

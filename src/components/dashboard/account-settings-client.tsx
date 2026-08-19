@@ -10,8 +10,8 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
 import { PageHeading } from "@/components/dashboard/page-heading";
+import { useReportingTimeZone } from "@/components/time-zone-provider";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -108,7 +108,7 @@ export function AccountSettingsClient({
     timeZonePreference,
     browserTimeZone,
     setTimeZonePreference,
-  } = useDashboardQueryControls();
+  } = useReportingTimeZone();
   const [profileUser, setProfileUser] = useState(user);
   const [profileName, setProfileName] = useState(user.name || "");
   const [profileUsername, setProfileUsername] = useState(user.username || "");
@@ -483,7 +483,6 @@ export function AccountSettingsClient({
         setCustomTimeZone(savedTimeZone);
       }
       toast.success(copy.saved);
-      router.refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : copy.saveFailed);
     } finally {

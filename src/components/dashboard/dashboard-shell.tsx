@@ -31,6 +31,7 @@ import { SidebarMenuStage } from "@/components/dashboard/sidebar-menu-stage";
 import { SidebarSiteDetails } from "@/components/dashboard/sidebar-site-details";
 import { TeamSelect } from "@/components/dashboard/team-select";
 import { PageTransition } from "@/components/page-transition";
+import { useAccountTimeZonePreference } from "@/components/time-zone-provider";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import {
@@ -440,6 +441,7 @@ export function DashboardShell({
   managementSections,
   children,
 }: DashboardShellProps) {
+  useAccountTimeZonePreference(user.timeZone);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
     null,
@@ -756,7 +758,6 @@ export function DashboardShell({
     <SidebarProvider>
       <DashboardQueryProvider
         scopeKey={activeSiteId}
-        initialTimeZonePreference={user.timeZone || ""}
         maxRangeDays={isRequestObservationRoute ? 90 : undefined}
       >
         <Sidebar variant="inset" collapsible="icon">

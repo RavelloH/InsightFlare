@@ -10,6 +10,7 @@ import {
 import { GlobalScrollbars } from "@/components/global-scrollbars";
 import { AppQueryProvider } from "@/components/query-client-provider";
 import { ThemeProvider } from "@/components/theme-provider";
+import { TimeZoneProvider } from "@/components/time-zone-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_NAME } from "@/lib/constants";
@@ -56,12 +57,14 @@ function RootDocument() {
         <GlobalScrollbars />
         <ScriptOnce>{ESBUILD_NAME_HELPER_SCRIPT}</ScriptOnce>
         <AppQueryProvider>
-          <ThemeProvider>
-            <TooltipProvider>
-              <Outlet />
-            </TooltipProvider>
-            <Toaster />
-          </ThemeProvider>
+          <TimeZoneProvider>
+            <ThemeProvider>
+              <TooltipProvider>
+                <Outlet />
+              </TooltipProvider>
+              <Toaster />
+            </ThemeProvider>
+          </TimeZoneProvider>
         </AppQueryProvider>
         {import.meta.env.VITE_DEMO_MODE === "1" ? (
           <script defer src={DEMO_ANALYTICS_SCRIPT_SRC} />
