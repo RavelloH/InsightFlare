@@ -8,10 +8,10 @@ import {
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { motion } from "motion/react";
 
+import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { PagesShareTrendCard } from "@/components/dashboard/pages-share-trend-card";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
-import { TrafficPairBarChart } from "@/components/dashboard/site-traffic-charts";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
@@ -168,7 +168,6 @@ function PageTrafficCard({
               range={range}
               viewsLabel={messages.common.views}
               visitorsLabel={messages.common.visitors}
-              messages={messages}
               maxPoints={PAGE_CARD_CHART_MAX_POINTS}
               className="h-[116px]"
             />

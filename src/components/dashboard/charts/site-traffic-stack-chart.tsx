@@ -1,33 +1,34 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  type TooltipProps,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import {
+  calculateChartYAxisWidth,
   type ChartConfig,
   ChartContainer,
   ChartTooltip,
+  ChartTooltipIndicator,
+  createChartNumberFormatter,
 } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  useAnimationOnChartSwitch,
+  useChartVisibility,
+} from "@/hooks/use-chart-animation";
+import {
+  createChartAxisDateFormatter,
+  createChartTooltipDateFormatter,
+} from "@/lib/dashboard/chart-time";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import type { DashboardInterval } from "@/lib/dashboard/query-state";
-import {
-  addZonedInterval,
-  startOfZonedInterval,
-} from "@/lib/dashboard/time-zone";
+import { safeChartCount } from "@/lib/dashboard/traffic-chart-data";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 import { cn } from "@/lib/utils";
 
-interface SiteTrafficStackChartProps {
+export interface SiteTrafficStackChartProps {
   data: Array<{
     timestampMs: number;
     sites: Array<{
@@ -50,27 +51,6 @@ interface SiteTrafficStackChartProps {
   className?: string;
 }
 
-interface TrafficPairBarChartProps {
-  data: Array<{
-    timestampMs: number;
-    views: number;
-    visitors: number;
-  }>;
-  locale: Locale;
-  timeZone: string;
-  interval: DashboardInterval;
-  viewsLabel: string;
-  visitorsLabel: string;
-  messages: AppMessages;
-  compact?: boolean;
-  maxPoints?: number;
-  className?: string;
-  range?: {
-    from: number;
-    to: number;
-  };
-}
-
 interface SiteTrafficSeriesItem {
   siteId: string;
   siteName: string;
@@ -83,13 +63,6 @@ interface SiteTrafficSeriesItem {
 type SiteTrafficChartRow = Record<string, number> & {
   timestampMs: number;
 };
-
-interface TrafficPairChartPoint {
-  timestampMs: number;
-  views: number;
-  visitors: number;
-  nonVisitorViews: number;
-}
 
 interface RGB {
   r: number;
@@ -289,252 +262,6 @@ function buildSiteColorPairs(
   });
 }
 
-function safeCount(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.round(value));
-}
-
-function trafficIntervalStepMs(interval: DashboardInterval): number {
-  if (interval === "minute") return 60_000;
-  if (interval === "hour") return 60 * 60_000;
-  if (interval === "day") return 24 * 60 * 60_000;
-  if (interval === "week") return 7 * 24 * 60 * 60_000;
-  return 30 * 24 * 60 * 60_000;
-}
-
-function fillMissingTrafficData(
-  data: Array<{ timestampMs: number; views: number; visitors: number }>,
-  interval: DashboardInterval,
-  timeZone: string,
-  range?: {
-    from: number;
-    to: number;
-  },
-): Array<{ timestampMs: number; views: number; visitors: number }> {
-  if (data.length === 0) return data;
-
-  const bucketMap = new Map<
-    number,
-    { timestampMs: number; views: number; visitors: number }
-  >();
-
-  for (const point of data) {
-    const bucketStart = startOfZonedInterval(
-      Number(point.timestampMs ?? 0),
-      interval,
-      timeZone,
-    );
-    const current = bucketMap.get(bucketStart) ?? {
-      timestampMs: bucketStart,
-      views: 0,
-      visitors: 0,
-    };
-    current.views += safeCount(point.views);
-    current.visitors += safeCount(point.visitors);
-    bucketMap.set(bucketStart, current);
-  }
-
-  const sortedStarts = [...bucketMap.keys()].sort(
-    (left, right) => left - right,
-  );
-  const fallbackFrom = sortedStarts[0] ?? 0;
-  const fallbackTo = sortedStarts[sortedStarts.length - 1] ?? fallbackFrom;
-  const rangeFrom = Number.isFinite(range?.from)
-    ? startOfZonedInterval(Number(range?.from ?? 0), interval, timeZone)
-    : fallbackFrom;
-  const rangeTo = Number.isFinite(range?.to)
-    ? startOfZonedInterval(Number(range?.to ?? 0), interval, timeZone)
-    : fallbackTo;
-  const from = Math.min(rangeFrom, fallbackFrom);
-  const to = Math.max(from, Math.max(rangeTo, fallbackTo));
-
-  const filled: Array<{
-    timestampMs: number;
-    views: number;
-    visitors: number;
-  }> = [];
-  const hardLimit = 2000;
-  let current = from;
-  for (let index = 0; index < hardLimit && current <= to; index += 1) {
-    filled.push(
-      bucketMap.get(current) ?? {
-        timestampMs: current,
-        views: 0,
-        visitors: 0,
-      },
-    );
-    let next = addZonedInterval(current, interval, timeZone);
-    if (!Number.isFinite(next) || next <= current) {
-      next = current + trafficIntervalStepMs(interval);
-    }
-    current = next;
-  }
-
-  return filled;
-}
-
-function useChartVisibility(rootMargin = "120px 0px") {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [isVisible, setIsVisible] = useState(false);
-  const [hasMeasuredVisibility, setHasMeasuredVisibility] = useState(false);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    if (typeof IntersectionObserver === "undefined") {
-      setIsVisible(true);
-      setHasMeasuredVisibility(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        const nextVisible = Boolean(
-          entry?.isIntersecting || (entry?.intersectionRatio ?? 0) > 0,
-        );
-        setIsVisible(nextVisible);
-        setHasMeasuredVisibility(true);
-      },
-      {
-        root: null,
-        rootMargin,
-        threshold: 0.01,
-      },
-    );
-
-    observer.observe(container);
-    return () => {
-      observer.disconnect();
-    };
-  }, [rootMargin]);
-
-  return {
-    containerRef,
-    isVisible,
-    hasMeasuredVisibility,
-  };
-}
-
-function useAnimationOnChartSwitch({
-  switchKey,
-  hasData,
-  isVisible,
-  hasMeasuredVisibility,
-}: {
-  switchKey: string;
-  hasData: boolean;
-  isVisible: boolean;
-  hasMeasuredVisibility: boolean;
-}): boolean {
-  const appliedKeyRef = useRef<string | null>(null);
-  const animationEnabledRef = useRef(false);
-
-  if (appliedKeyRef.current !== switchKey && hasMeasuredVisibility) {
-    appliedKeyRef.current = switchKey;
-    animationEnabledRef.current = hasData && isVisible;
-  }
-
-  if (appliedKeyRef.current !== switchKey) {
-    // Before first visibility snapshot, keep this frame conservative.
-    return hasData && isVisible;
-  }
-
-  return animationEnabledRef.current;
-}
-
-function downsampleTrafficData(
-  data: Array<{ timestampMs: number; views: number; visitors: number }>,
-  maxPoints: number,
-): Array<{ timestampMs: number; views: number; visitors: number }> {
-  if (
-    !Number.isFinite(maxPoints) ||
-    maxPoints <= 0 ||
-    data.length <= maxPoints
-  ) {
-    return data;
-  }
-
-  const chunkSize = Math.ceil(data.length / maxPoints);
-  const next: Array<{ timestampMs: number; views: number; visitors: number }> =
-    [];
-
-  for (let index = 0; index < data.length; index += chunkSize) {
-    const chunk = data.slice(index, index + chunkSize);
-    if (chunk.length === 0) continue;
-
-    const timestampMs = chunk[chunk.length - 1]?.timestampMs ?? 0;
-    let views = 0;
-    let visitors = 0;
-
-    for (const point of chunk) {
-      views += safeCount(point.views);
-      visitors += safeCount(point.visitors);
-    }
-
-    next.push({
-      timestampMs,
-      views,
-      visitors: Math.min(visitors, views),
-    });
-  }
-
-  return next;
-}
-
-function tickDateFormat(
-  locale: Locale,
-  interval: DashboardInterval,
-  timeZone: string,
-): Intl.DateTimeFormat {
-  if (interval === "minute" || interval === "hour") {
-    return new Intl.DateTimeFormat(intlLocale(locale), {
-      timeZone,
-      month: "numeric",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  if (interval === "day") {
-    return new Intl.DateTimeFormat(intlLocale(locale), {
-      timeZone,
-      month: "numeric",
-      day: "numeric",
-    });
-  }
-  return new Intl.DateTimeFormat(intlLocale(locale), {
-    timeZone,
-    year: "2-digit",
-    month: "short",
-    day: interval === "week" ? "numeric" : undefined,
-  });
-}
-
-function tooltipDateFormat(
-  locale: Locale,
-  interval: DashboardInterval,
-  timeZone: string,
-): Intl.DateTimeFormat {
-  if (interval === "minute" || interval === "hour") {
-    return new Intl.DateTimeFormat(intlLocale(locale), {
-      timeZone,
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  return new Intl.DateTimeFormat(intlLocale(locale), {
-    timeZone,
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
 function SiteTrafficStackTooltip({
   active,
   payload,
@@ -543,8 +270,8 @@ function SiteTrafficStackTooltip({
   viewsLabel,
   visitorsLabel,
   activeSiteIds,
-  locale: _locale,
-  messages: _messages,
+  locale,
+  messages,
 }: {
   active?: boolean;
   payload?: Array<{ payload?: Record<string, unknown> }>;
@@ -573,8 +300,8 @@ function SiteTrafficStackTooltip({
   let totalVisitors = 0;
 
   for (const item of activeSeries) {
-    totalViews += safeCount(Number(row[item.viewsKey] ?? 0));
-    totalVisitors += safeCount(Number(row[item.visitorsKey] ?? 0));
+    totalViews += safeChartCount(Number(row[item.viewsKey] ?? 0));
+    totalVisitors += safeChartCount(Number(row[item.visitorsKey] ?? 0));
   }
 
   return (
@@ -585,26 +312,26 @@ function SiteTrafficStackTooltip({
       <div className="grid gap-1">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-none bg-primary" />
+            <ChartTooltipIndicator color="var(--color-primary)" />
             <span className="text-muted-foreground">{viewsLabel}</span>
           </div>
           <span className="font-mono font-semibold tabular-nums text-foreground">
-            {totalViews.toLocaleString()}
+            {numberFormat(locale, totalViews)}
           </span>
         </div>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-none bg-chart-3" />
+            <ChartTooltipIndicator color="var(--color-chart-3)" />
             <span className="text-muted-foreground">{visitorsLabel}</span>
           </div>
           <span className="font-mono font-semibold tabular-nums text-foreground">
-            {totalVisitors.toLocaleString()}
+            {numberFormat(locale, totalVisitors)}
           </span>
         </div>
       </div>
       {hasActiveSites ? (
         <div className="border-t border-border/30 pt-1 text-[10px] text-muted-foreground">
-          {formatI18nTemplate(_messages.common.sitesFiltered, {
+          {formatI18nTemplate(messages.common.sitesFiltered, {
             active: activeSiteIdSet.size,
             total: series.length,
           })}
@@ -650,6 +377,25 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
     [activeSiteIds],
   );
   const hasActiveSites = activeSiteIds.length > 0;
+  const yAxisNumberFormatter = useMemo(
+    () => createChartNumberFormatter(intlLocale(locale)),
+    [locale],
+  );
+  const yAxisWidth = useMemo(() => {
+    const labels = chartData.map((row) => {
+      let views = 0;
+      let visitors = 0;
+
+      for (const item of series) {
+        views += safeChartCount(Number(row[item.viewsKey] ?? 0));
+        visitors += safeChartCount(Number(row[item.visitorsKey] ?? 0));
+      }
+
+      return yAxisNumberFormatter.format(Math.max(views, visitors));
+    });
+
+    return calculateChartYAxisWidth(labels, 4);
+  }, [chartData, series, yAxisNumberFormatter]);
   const isAnimationActive = useAnimationOnChartSwitch({
     switchKey: stackChartDataKey,
     hasData: chartData.length > 0,
@@ -665,8 +411,8 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
       >
         <BarChart
           data={chartData}
-          margin={{ left: 8, right: 8 }}
-          barCategoryGap="22%"
+          margin={{ left: 0, right: 8 }}
+          barCategoryGap="12%"
           barGap={2}
           onMouseMove={(state) => {
             if (
@@ -698,10 +444,14 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
             minTickGap={14}
           />
           <YAxis
+            width={yAxisWidth}
+            tickFormatter={(value) =>
+              yAxisNumberFormatter.format(Number(value ?? 0))
+            }
             allowDecimals={false}
             tickLine={false}
             axisLine={false}
-            width={36}
+            tickMargin={4}
           />
           <ChartTooltip
             allowEscapeViewBox={{ x: false, y: true }}
@@ -869,8 +619,8 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
           point.sites.map((sitePoint) => [
             sitePoint.siteId,
             {
-              views: safeCount(sitePoint.views),
-              visitors: safeCount(sitePoint.visitors),
+              views: safeChartCount(sitePoint.views),
+              visitors: safeChartCount(sitePoint.visitors),
             },
           ]),
         );
@@ -933,11 +683,11 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
   }, [chartData]);
 
   const tickFormatter = useMemo(
-    () => tickDateFormat(locale, interval, timeZone),
+    () => createChartAxisDateFormatter(locale, interval, timeZone),
     [locale, interval, timeZone],
   );
   const tooltipFormatter = useMemo(
-    () => tooltipDateFormat(locale, interval, timeZone),
+    () => createChartTooltipDateFormatter(locale, interval, timeZone),
     [locale, interval, timeZone],
   );
   const legendKey = useMemo(
@@ -1081,217 +831,6 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
           </AutoTransition>
         </AutoResizer>
       </div>
-    </div>
-  );
-});
-
-const TRAFFIC_PAIR_CHART_CONFIG = {
-  visitors: {
-    label: "visitors",
-    color: "var(--color-chart-3)",
-  },
-  nonVisitorViews: {
-    label: "views",
-    color: "var(--color-chart-1)",
-  },
-} satisfies ChartConfig;
-
-function TrafficPairTooltip({
-  active,
-  payload,
-  label,
-  viewsLabel,
-  visitorsLabel,
-  tooltipFormatter,
-  countFormatter,
-}: TooltipProps<number, string> & {
-  viewsLabel: string;
-  visitorsLabel: string;
-  tooltipFormatter: Intl.DateTimeFormat;
-  countFormatter: Intl.NumberFormat;
-}) {
-  if (!active || !payload?.length) return null;
-  const point = payload[0]?.payload as Partial<TrafficPairChartPoint> | null;
-  const timestamp = Number(point?.timestampMs ?? label ?? 0);
-  const views = safeCount(Number(point?.views ?? 0));
-  const visitors = safeCount(Number(point?.visitors ?? 0));
-
-  return (
-    <div className="grid min-w-32 items-start gap-1.5 rounded-none border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-      <div className="font-medium">
-        {tooltipFormatter.format(new Date(timestamp))}
-      </div>
-      <div className="grid gap-1.5">
-        <div className="flex w-full items-center gap-2">
-          <div
-            className="h-2.5 w-1 shrink-0 rounded-[2px]"
-            style={{ backgroundColor: "var(--color-nonVisitorViews)" }}
-          />
-          <div className="flex flex-1 items-center justify-between gap-3 leading-none">
-            <span className="text-muted-foreground">{viewsLabel}</span>
-            <span className="font-mono font-medium tabular-nums text-foreground">
-              {countFormatter.format(views)}
-            </span>
-          </div>
-        </div>
-        <div className="flex w-full items-center gap-2">
-          <div
-            className="h-2.5 w-1 shrink-0 rounded-[2px]"
-            style={{ backgroundColor: "var(--color-visitors)" }}
-          />
-          <div className="flex flex-1 items-center justify-between gap-3 leading-none">
-            <span className="text-muted-foreground">{visitorsLabel}</span>
-            <span className="font-mono font-medium tabular-nums text-foreground">
-              {countFormatter.format(visitors)}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export const TrafficPairBarChart = memo(function TrafficPairBarChart({
-  data,
-  locale,
-  timeZone,
-  interval,
-  viewsLabel,
-  visitorsLabel,
-  messages: _messages,
-  compact = false,
-  maxPoints,
-  className,
-  range,
-}: TrafficPairBarChartProps) {
-  const { containerRef, isVisible, hasMeasuredVisibility } =
-    useChartVisibility();
-  const chartData = useMemo(() => {
-    const completed = fillMissingTrafficData(data, interval, timeZone, range);
-    const normalized = downsampleTrafficData(
-      completed,
-      maxPoints ?? (compact ? 72 : completed.length),
-    );
-    // Input is already sorted upstream by timestamp.
-    return normalized.map((point) => {
-      const views = safeCount(point.views);
-      const visitors = Math.min(safeCount(point.visitors), views);
-      return {
-        timestampMs: point.timestampMs,
-        views,
-        visitors,
-        nonVisitorViews: Math.max(0, views - visitors),
-      };
-    });
-  }, [data, interval, timeZone, maxPoints, compact, range]);
-  const config = useMemo(
-    () => ({
-      visitors: {
-        ...TRAFFIC_PAIR_CHART_CONFIG.visitors,
-        label: visitorsLabel,
-      },
-      nonVisitorViews: {
-        ...TRAFFIC_PAIR_CHART_CONFIG.nonVisitorViews,
-        label: viewsLabel,
-      },
-    }),
-    [viewsLabel, visitorsLabel],
-  );
-  const tickFormatter = useMemo(
-    () => tickDateFormat(locale, interval, timeZone),
-    [locale, interval, timeZone],
-  );
-  const tooltipFormatter = useMemo(
-    () => tooltipDateFormat(locale, interval, timeZone),
-    [locale, interval, timeZone],
-  );
-  const countFormatter = useMemo(
-    () => new Intl.NumberFormat(intlLocale(locale)),
-    [locale],
-  );
-  const pairChartDataKey = useMemo(() => {
-    const firstTimestamp = chartData[0]?.timestampMs ?? 0;
-    const lastTimestamp = chartData[chartData.length - 1]?.timestampMs ?? 0;
-    return `${interval}:${compact ? "compact" : "regular"}:${chartData.length}:${firstTimestamp}:${lastTimestamp}`;
-  }, [interval, compact, chartData]);
-  const isAnimationActive = useAnimationOnChartSwitch({
-    switchKey: pairChartDataKey,
-    hasData: chartData.length > 0,
-    isVisible,
-    hasMeasuredVisibility,
-  });
-
-  return (
-    <div ref={containerRef} className="w-full">
-      <ChartContainer
-        className={cn(
-          compact ? "h-4 w-full aspect-auto" : "h-[180px] w-full aspect-auto",
-          className,
-        )}
-        config={config}
-      >
-        <BarChart
-          data={chartData}
-          margin={
-            compact
-              ? { left: 0, right: 0, top: 0, bottom: 0 }
-              : { left: 8, right: 8 }
-          }
-          barGap={0}
-        >
-          {compact ? null : <CartesianGrid vertical={false} />}
-          {compact ? null : (
-            <XAxis
-              dataKey="timestampMs"
-              tickFormatter={(value) =>
-                tickFormatter.format(new Date(Number(value ?? 0)))
-              }
-              tickLine={false}
-              axisLine={false}
-              tickMargin={8}
-              minTickGap={14}
-            />
-          )}
-          {compact ? null : (
-            <YAxis
-              allowDecimals={false}
-              tickLine={false}
-              axisLine={false}
-              width={32}
-            />
-          )}
-          {compact ? null : (
-            <ChartTooltip
-              allowEscapeViewBox={{ x: false, y: true }}
-              wrapperStyle={{ zIndex: 20 }}
-              content={
-                <TrafficPairTooltip
-                  viewsLabel={viewsLabel}
-                  visitorsLabel={visitorsLabel}
-                  tooltipFormatter={tooltipFormatter}
-                  countFormatter={countFormatter}
-                />
-              }
-            />
-          )}
-          <Bar
-            dataKey="visitors"
-            stackId="traffic"
-            fill="var(--color-visitors)"
-            radius={0}
-            isAnimationActive={isAnimationActive}
-            animationDuration={isAnimationActive ? 220 : 0}
-          />
-          <Bar
-            dataKey="nonVisitorViews"
-            stackId="traffic"
-            fill="var(--color-nonVisitorViews)"
-            radius={0}
-            isAnimationActive={isAnimationActive}
-            animationDuration={isAnimationActive ? 220 : 0}
-          />
-        </BarChart>
-      </ChartContainer>
     </div>
   );
 });

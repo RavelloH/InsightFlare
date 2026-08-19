@@ -20,6 +20,8 @@ type ChartContextProps = {
   config: ChartConfig;
 };
 
+const EMPTY_CHART_CONFIG: ChartConfig = {};
+
 const ChartContext = React.createContext<ChartContextProps | null>(null);
 
 function useChart() {
@@ -32,18 +34,28 @@ function useChart() {
   return context;
 }
 
+function useChartConfig(): ChartConfig {
+  return useChart().config;
+}
+
+export type ChartContainerProps = React.ComponentProps<"div"> & {
+  /**
+   * Defines the series exposed to shared tooltip and legend components.
+   * Omit it for charts that only use explicit visual properties.
+   */
+  config?: ChartConfig;
+  children: React.ComponentProps<
+    typeof RechartsPrimitive.ResponsiveContainer
+  >["children"];
+};
+
 function ChartContainer({
   id,
   className,
   children,
-  config,
+  config = EMPTY_CHART_CONFIG,
   ...props
-}: React.ComponentProps<"div"> & {
-  config: ChartConfig;
-  children: React.ComponentProps<
-    typeof RechartsPrimitive.ResponsiveContainer
-  >["children"];
-}) {
+}: ChartContainerProps) {
   const uniqueId = React.useId();
   const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
 
@@ -67,7 +79,13 @@ function ChartContainer({
   );
 }
 
-const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
+const ChartStyle = ({
+  id,
+  config = EMPTY_CHART_CONFIG,
+}: {
+  id: string;
+  config?: ChartConfig;
+}) => {
   const colorConfig = Object.entries(config).filter(
     ([, config]) => config.theme || config.color,
   );
@@ -102,6 +120,59 @@ ${colorConfig
 
 const ChartTooltip = RechartsPrimitive.Tooltip;
 
+const CHART_AXIS_TICK_FONT_SIZE = 12;
+const CHART_AXIS_CHARACTER_WIDTH_EM = 0.6;
+const RECHARTS_AXIS_TICK_SIZE = 6;
+const MIN_CHART_Y_AXIS_WIDTH = 24;
+
+export function calculateChartYAxisWidth(
+  labels: readonly string[],
+  tickMargin: number,
+) {
+  if (labels.length === 0) return MIN_CHART_Y_AXIS_WIDTH;
+
+  const widestLabelLength = labels.reduce(
+    (longest, label) => Math.max(longest, label.length),
+    0,
+  );
+
+  // ChartContainer standardizes ticks to a 12px monospace font. Recharts
+  // positions tick text after its 6px tick offset and the supplied margin.
+  return Math.max(
+    MIN_CHART_Y_AXIS_WIDTH,
+    Math.ceil(
+      widestLabelLength *
+        CHART_AXIS_TICK_FONT_SIZE *
+        CHART_AXIS_CHARACTER_WIDTH_EM +
+        RECHARTS_AXIS_TICK_SIZE +
+        tickMargin,
+    ) + 1,
+  );
+}
+
+export function createChartNumberFormatter(locale?: string): Intl.NumberFormat {
+  return new Intl.NumberFormat(locale);
+}
+
+function ChartTooltipIndicator({
+  color,
+  className,
+}: {
+  color: string;
+  className?: string;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "inline-block size-[0.833em] shrink-0 rounded-none",
+        className,
+      )}
+      style={{ backgroundColor: color }}
+    />
+  );
+}
+
 function ChartTooltipContent({
   active,
   payload,
@@ -124,7 +195,7 @@ function ChartTooltipContent({
     nameKey?: string;
     labelKey?: string;
   }) {
-  const { config } = useChart();
+  const config = useChartConfig();
 
   const tooltipLabel = React.useMemo(() => {
     if (hideLabel || !payload?.length) {
@@ -199,12 +270,14 @@ function ChartTooltipContent({
                     {itemConfig?.icon ? (
                       <itemConfig.icon className="size-2.5 text-muted-foreground" />
                     ) : (
-                      !hideIndicator && (
+                      !hideIndicator &&
+                      (indicator === "dot" ? (
+                        <ChartTooltipIndicator color={indicatorColor} />
+                      ) : (
                         <div
                           className={cn(
                             "shrink-0 rounded-[2px] border-(--color-border) bg-(--color-bg)",
                             {
-                              "h-2.5 w-2.5": indicator === "dot",
                               "w-1": indicator === "line",
                               "w-0 border-[1.5px] border-dashed bg-transparent":
                                 indicator === "dashed",
@@ -218,7 +291,7 @@ function ChartTooltipContent({
                             } as React.CSSProperties
                           }
                         />
-                      )
+                      ))
                     )}
                     <div
                       className={cn(
@@ -232,7 +305,7 @@ function ChartTooltipContent({
                           {itemConfig?.label || item.name}
                         </span>
                       </div>
-                      {item.value && (
+                      {item.value !== undefined && item.value !== null && (
                         <span className="font-mono font-medium text-foreground tabular-nums">
                           {item.value.toLocaleString()}
                         </span>
@@ -261,7 +334,7 @@ function ChartLegendContent({
     hideIcon?: boolean;
     nameKey?: string;
   }) {
-  const { config } = useChart();
+  const config = useChartConfig();
 
   if (!payload?.length) {
     return null;
@@ -351,4 +424,6 @@ export {
   ChartStyle,
   ChartTooltip,
   ChartTooltipContent,
+  ChartTooltipIndicator,
+  useChartConfig,
 };

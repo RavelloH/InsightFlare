@@ -23,14 +23,12 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 
+import { SiteTrafficStackChart } from "@/components/dashboard/charts/site-traffic-stack-chart";
+import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { SiteBrandIcon } from "@/components/dashboard/site-brand-icon";
-import {
-  SiteTrafficStackChart,
-  TrafficPairBarChart,
-} from "@/components/dashboard/site-traffic-charts";
 import { TableActionButton } from "@/components/dashboard/table-action-button";
 import {
   AlertDialog,
@@ -2164,7 +2162,6 @@ export function TeamManagementClient({
                                   interval={chartWindow.interval}
                                   viewsLabel={messages.common.views}
                                   visitorsLabel={messages.common.visitors}
-                                  messages={messages}
                                   maxPoints={SITE_CARD_MAX_TREND_POINTS}
                                 />
                               </div>

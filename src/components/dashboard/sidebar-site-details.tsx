@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
 import { SiteBrandIcon } from "@/components/dashboard/site-brand-icon";
-import { TrafficPairBarChart } from "@/components/dashboard/site-traffic-charts";
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -19,7 +19,6 @@ import {
   startOfZonedInterval,
 } from "@/lib/dashboard/time-zone";
 import type { Locale } from "@/lib/i18n/config";
-import type { AppMessages } from "@/lib/i18n/messages";
 import Link from "@/lib/router";
 
 interface SiteOverviewMetrics {
@@ -70,7 +69,6 @@ interface SidebarSiteDetailsProps {
     views: string;
     visitors: string;
   };
-  messages: AppMessages;
 }
 
 interface SiteTrendPoint {
@@ -207,7 +205,6 @@ export function SidebarSiteDetails({
   currentSection,
   sites,
   labels,
-  messages,
 }: SidebarSiteDetailsProps) {
   const { state: sidebarState, isMobile } = useSidebar();
   const { window } = useDashboardQuery();
@@ -455,7 +452,6 @@ export function SidebarSiteDetails({
                         interval={chartWindow.interval}
                         viewsLabel={labels.views}
                         visitorsLabel={labels.visitors}
-                        messages={messages}
                         compact
                       />
                     ) : (

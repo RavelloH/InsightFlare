@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { RiPulseLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
+import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { JourneyDetailStateSwitch } from "@/components/dashboard/journey-detail-state";
 import { useDetailModalClose } from "@/components/dashboard/site-pages/detail-query-modal";
 import {
@@ -16,7 +17,6 @@ import {
   parseOverviewCardFilters,
 } from "@/components/dashboard/site-pages/overview-client-page";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
-import { TrafficPairBarChart } from "@/components/dashboard/site-traffic-charts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLiveSearchParams } from "@/lib/client-history";
 import {
@@ -259,7 +259,6 @@ export function EventTypeDetailClientPage({
                   }}
                   viewsLabel={labels.triggerCount}
                   visitorsLabel={labels.triggerVisitors}
-                  messages={messages}
                   className="h-[320px]"
                 />
               </CardContent>
