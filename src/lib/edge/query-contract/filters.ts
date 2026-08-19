@@ -421,6 +421,187 @@ interface Counters {
   groups: number;
 }
 
+type SetAlgebraCondition = {
+  readonly target: FilterTarget;
+  readonly operator: "in" | "notIn";
+  readonly sourceOperator: "eq" | "neq" | "in" | "notIn";
+  readonly values: readonly FilterValue[];
+};
+
+type IndexedSetAlgebraCondition = SetAlgebraCondition & {
+  readonly index: number;
+};
+
+function targetKey(target: FilterTarget): string {
+  return target.kind === "field"
+    ? `field\u0000${target.field}`
+    : `event-payload\u0000${target.path}`;
+}
+
+function targetDefinition(
+  target: FilterTarget,
+  registry: FilterFieldRegistry,
+): FilterFieldDefinition | undefined {
+  return registry.get(target.kind === "field" ? target.field : "event.payload");
+}
+
+function setAlgebraCondition(
+  expression: FilterExpression,
+): SetAlgebraCondition | undefined {
+  if (expression.kind !== "condition") return undefined;
+  if (
+    expression.operator !== "eq" &&
+    expression.operator !== "neq" &&
+    expression.operator !== "in" &&
+    expression.operator !== "notIn"
+  ) {
+    return undefined;
+  }
+  const values =
+    expression.operator === "eq" || expression.operator === "neq"
+      ? [expression.value!]
+      : expression.value;
+  if (!Array.isArray(values) || values.some((value) => value === null)) {
+    return undefined;
+  }
+  return {
+    target: expression.target,
+    operator:
+      expression.operator === "neq" || expression.operator === "notIn"
+        ? "notIn"
+        : "in",
+    sourceOperator: expression.operator,
+    values: values as readonly FilterValue[],
+  };
+}
+
+function canonicalSetValues(
+  values: Iterable<FilterValue>,
+): readonly FilterValue[] {
+  return [
+    ...new Map([...values].map((value) => [canonicalValueKey(value), value])),
+  ]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, value]) => value);
+}
+
+function setOperation(
+  left: readonly FilterValue[],
+  right: readonly FilterValue[],
+  operator: "union" | "intersection",
+): readonly FilterValue[] {
+  const leftEntries = new Map(
+    left.map((value) => [canonicalValueKey(value), value]),
+  );
+  const rightEntries = new Map(
+    right.map((value) => [canonicalValueKey(value), value]),
+  );
+  const values =
+    operator === "union"
+      ? [...leftEntries.values(), ...rightEntries.values()]
+      : [...leftEntries].flatMap(([key, value]) =>
+          rightEntries.has(key) ? [value] : [],
+        );
+  return canonicalSetValues(values);
+}
+
+function setCondition(
+  condition: SetAlgebraCondition,
+  values: readonly FilterValue[],
+  useEquality: boolean,
+): FilterCondition | undefined {
+  if (values.length === 0) return undefined;
+  if (values.length === 1 && useEquality) {
+    return {
+      kind: "condition",
+      target: condition.target,
+      operator: "eq",
+      value: values[0],
+    };
+  }
+  return {
+    kind: "condition",
+    target: condition.target,
+    operator: condition.operator,
+    value: values,
+  };
+}
+
+/**
+ * Performs only lossless finite-set algebra. Empty intersections remain as
+ * separate predicates because this AST intentionally has no boolean literals.
+ */
+function simplifySetGroups(
+  kind: "and" | "or",
+  children: readonly FilterExpression[],
+  registry: FilterFieldRegistry,
+  limits: FilterLimits,
+): readonly FilterExpression[] {
+  const groups = new Map<string, IndexedSetAlgebraCondition[]>();
+  for (const [index, child] of children.entries()) {
+    const condition = setAlgebraCondition(child);
+    if (!condition) continue;
+    if (
+      !targetDefinition(condition.target, registry)?.operators.has(
+        condition.operator,
+      )
+    ) {
+      continue;
+    }
+    const key = targetKey(condition.target);
+    const group = groups.get(key) ?? [];
+    group.push({ ...condition, index });
+    groups.set(key, group);
+  }
+  const removedIndexes = new Set<number>();
+  const replacements = new Map<number, FilterCondition>();
+  for (const group of groups.values()) {
+    const positive = group.filter(({ operator }) => operator === "in");
+    const negative = group.filter(({ operator }) => operator === "notIn");
+    if (positive.length > 1) {
+      const values = positive
+        .slice(1)
+        .reduce(
+          (current, condition) =>
+            setOperation(
+              current,
+              condition.values,
+              kind === "or" ? "union" : "intersection",
+            ),
+          positive[0]!.values,
+        );
+      const replacement = setCondition(
+        positive[0]!,
+        values,
+        kind === "and" &&
+          positive.some(({ sourceOperator }) => sourceOperator === "eq"),
+      );
+      if (replacement && values.length <= limits.maxSetValues) {
+        replacements.set(positive[0]!.index, replacement);
+        positive.slice(1).forEach(({ index }) => removedIndexes.add(index));
+      }
+    }
+    if (kind === "and" && negative.length > 1) {
+      const values = negative
+        .slice(1)
+        .reduce(
+          (current, condition) =>
+            setOperation(current, condition.values, "union"),
+          negative[0]!.values,
+        );
+      const replacement = setCondition(negative[0]!, values, false);
+      if (replacement && values.length <= limits.maxSetValues) {
+        replacements.set(negative[0]!.index, replacement);
+        negative.slice(1).forEach(({ index }) => removedIndexes.add(index));
+      }
+    }
+  }
+  return children.flatMap((child, index) => {
+    if (removedIndexes.has(index)) return [];
+    return [replacements.get(index) ?? child];
+  });
+}
+
 function canonicalCondition(
   input: Record<string, unknown>,
   registry: FilterFieldRegistry,
@@ -620,7 +801,14 @@ function canonicalExpression(
   const unique = new Map(
     children.map((child) => [filterExpressionFingerprint(child), child]),
   );
-  const ordered = [...unique.entries()]
+  const simplified = simplifySetGroups(
+    input.kind,
+    [...unique.values()],
+    registry,
+    limits,
+  );
+  const ordered = simplified
+    .map((child) => [filterExpressionFingerprint(child), child] as const)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([, child]) => child);
   if (ordered.length === 1) return ordered[0]!;

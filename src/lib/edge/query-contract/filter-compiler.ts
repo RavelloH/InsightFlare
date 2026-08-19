@@ -308,7 +308,11 @@ function comparison(
     if (operator === "between") {
       return `${normalized} BETWEEN ${push(compiler, scalar(value[0]!))} AND ${push(compiler, scalar(value[1]!))}`;
     }
-    return setComparison(compiler, normalized, operator, value);
+    const storedValues =
+      field.profile === "direct-referrer"
+        ? value.map((item) => (item === "__direct__" ? "" : item))
+        : value;
+    return setComparison(compiler, normalized, operator, storedValues);
   }
   const binding = scalar(value as FilterValue);
   if (

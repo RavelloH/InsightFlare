@@ -184,12 +184,25 @@ describe("filter URL codec", () => {
       },
     };
     const serialized = serializeFilterParams(source, analyticsFilterRegistry);
-    expect([...serialized.keys()].some((key) => key.includes("or:0"))).toBe(
-      true,
-    );
-    expect([...serialized.keys()].some((key) => key.includes("or:1"))).toBe(
-      true,
-    );
+    expect(
+      parseFilterParams(serialized, analyticsFilterRegistry).root,
+    ).toMatchObject({
+      kind: "and",
+      children: [
+        {
+          kind: "condition",
+          target: { kind: "field", field: "geo.country" },
+          operator: "in",
+          value: ["jp", "us"],
+        },
+        {
+          kind: "condition",
+          target: { kind: "field", field: "page.path" },
+          operator: "in",
+          value: ["/blog", "/docs"],
+        },
+      ],
+    });
     expect(
       serializeFilterParams(
         parseFilterParams(serialized, analyticsFilterRegistry),

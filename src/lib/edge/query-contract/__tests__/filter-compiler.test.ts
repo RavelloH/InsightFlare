@@ -106,11 +106,15 @@ describe("filter SQL compiler", () => {
       expect(optimized).toEqual(baseline);
       expect(compiledIds).toEqual(baseline);
       expect(compiled.clause).toContain("json_each(?)");
-      expect(compiled.bindings).toHaveLength(2);
+      expect(compiled.bindings).toHaveLength(7);
       expect(
-        new Set(
-          compiled.bindings.flatMap((binding) => JSON.parse(binding as string)),
-        ),
+        new Set([
+          ...compiled.bindings.flatMap((binding) =>
+            typeof binding === "string" && binding.startsWith("[")
+              ? JSON.parse(binding)
+              : [binding],
+          ),
+        ]),
       ).toEqual(new Set([...roots, ...roots.map((root) => `.${root}`)]));
       expect(optimized).toEqual([
         "case-and-space",
@@ -132,6 +136,91 @@ describe("filter SQL compiler", () => {
           .map((row) => (row as { detail: string }).detail)
           .join("\n"),
       ).toContain("SCAN roots VIRTUAL TABLE");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("preserves SQLite results when finite-set logic is normalized", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec("CREATE TABLE visits (id TEXT PRIMARY KEY, pathname TEXT)");
+      const insert = database.prepare(
+        "INSERT INTO visits (id, pathname) VALUES (?, ?)",
+      );
+      for (const [id, pathname] of [
+        ["docs", "/docs"],
+        ["pricing", "/pricing"],
+        ["guide", "/guide"],
+        ["home", "/home"],
+        ["internal", "/internal"],
+        ["preview", "/preview"],
+        ["other", "/other"],
+      ]) {
+        insert.run(id, pathname);
+      }
+      const raw = {
+        version: 1,
+        root: {
+          kind: "and",
+          children: [
+            {
+              kind: "or",
+              children: [
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "page.path" },
+                  operator: "eq",
+                  value: "/docs",
+                },
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "page.path" },
+                  operator: "in",
+                  value: ["/pricing", "/guide"],
+                },
+              ],
+            },
+            {
+              kind: "condition",
+              target: { kind: "field", field: "page.path" },
+              operator: "notIn",
+              value: ["/internal"],
+            },
+            {
+              kind: "condition",
+              target: { kind: "field", field: "page.path" },
+              operator: "notIn",
+              value: ["/preview"],
+            },
+          ],
+        },
+      } as const;
+      const normalized = document(raw.root);
+      const compiled = compileFilterDocument(normalized);
+      const ids = (sql: string, bindings: readonly string[]) =>
+        database
+          .prepare(sql)
+          .all(...bindings)
+          .map((row) => (row as { id: string }).id);
+      const baseline = ids(
+        `SELECT id FROM visits WHERE
+          (TRIM(COALESCE(pathname, '')) = ? OR TRIM(COALESCE(pathname, '')) IN (?, ?))
+          AND TRIM(COALESCE(pathname, '')) NOT IN (?)
+          AND TRIM(COALESCE(pathname, '')) NOT IN (?)
+          ORDER BY id`,
+        ["/docs", "/pricing", "/guide", "/internal", "/preview"],
+      );
+      const optimized = ids(
+        `SELECT id FROM visits AS visit_source ${compiled.clause} ORDER BY id`,
+        compiled.bindings as readonly string[],
+      );
+
+      expect(optimized).toEqual(baseline);
+      expect(optimized).toEqual(["docs", "guide", "pricing"]);
+      expect(compiled.bindings).toHaveLength(5);
+      expect(compiled.clause).toContain(" IN (?");
+      expect(compiled.clause).toContain("NOT IN (?, ?)");
     } finally {
       database.close();
     }
@@ -172,10 +261,10 @@ describe("filter SQL compiler", () => {
     );
 
     expect(result.clause).toContain(
-      "TRIM(COALESCE(vs.pathname, '')) IN (SELECT value FROM json_each(?))",
+      "TRIM(COALESCE(vs.pathname, '')) IN (?, ?)",
     );
     expect(result.clause).toContain("FROM json_each(?) AS filter_or_like_0");
-    expect(result.bindings).toHaveLength(2);
+    expect(result.bindings).toHaveLength(3);
   });
 
   it("lowers startsWith OR leaves with the same escaped JSON set", () => {
@@ -520,10 +609,7 @@ describe("filter SQL compiler", () => {
       }),
     );
 
-    expect(result.clause).toContain("IN (SELECT value FROM json_each(?))");
-    expect(JSON.parse(result.bindings[0] as string)).toEqual([
-      "",
-      "google.com",
-    ]);
+    expect(result.clause).toContain("IN (?, ?)");
+    expect(result.bindings).toEqual(["", "google.com"]);
   });
 });

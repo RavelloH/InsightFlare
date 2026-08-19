@@ -184,6 +184,110 @@ describe("typed filter contract", () => {
     ).toEqual(fieldCondition("geo.country", "eq", "US"));
   });
 
+  it("applies lossless finite-set algebra within commutative groups", () => {
+    const document = normalizeFilterDocument(
+      {
+        version: 1,
+        root: {
+          kind: "and",
+          children: [
+            fieldCondition("page.path", "in", ["/docs", "/pricing"]),
+            fieldCondition("page.path", "eq", "/pricing"),
+            fieldCondition("page.path", "notIn", ["/internal"]),
+            fieldCondition("page.path", "notIn", ["/preview"]),
+          ],
+        },
+      },
+      registry,
+    );
+
+    expect(document.root).toEqual({
+      kind: "and",
+      children: [
+        fieldCondition("page.path", "eq", "/pricing"),
+        fieldCondition("page.path", "notIn", ["/internal", "/preview"]),
+      ],
+    });
+  });
+
+  it("unions positive set predicates in OR without rewriting negative sets", () => {
+    const document = normalizeFilterDocument(
+      {
+        version: 1,
+        root: {
+          kind: "or",
+          children: [
+            fieldCondition("page.path", "eq", "/docs"),
+            fieldCondition("page.path", "in", ["/pricing", "/docs"]),
+            fieldCondition("page.path", "notIn", ["/internal"]),
+            fieldCondition("page.path", "notIn", ["/preview"]),
+          ],
+        },
+      },
+      registry,
+    );
+
+    expect(document.root).toEqual({
+      kind: "or",
+      children: [
+        fieldCondition("page.path", "in", ["/docs", "/pricing"]),
+        fieldCondition("page.path", "notIn", ["/internal"]),
+        fieldCondition("page.path", "notIn", ["/preview"]),
+      ],
+    });
+  });
+
+  it("does not introduce operators excluded by a field contract", () => {
+    const document = normalizeFilterDocument(
+      {
+        version: 1,
+        root: {
+          kind: "or",
+          children: [
+            fieldCondition("event.score", "eq", 1),
+            fieldCondition("event.score", "eq", 2),
+          ],
+        },
+      },
+      registry,
+    );
+
+    expect(document.root).toEqual({
+      kind: "or",
+      children: [
+        fieldCondition("event.score", "eq", 1),
+        fieldCondition("event.score", "eq", 2),
+      ],
+    });
+  });
+
+  it("does not create a set larger than the document limit", () => {
+    const document = normalizeFilterDocument(
+      {
+        version: 1,
+        root: {
+          kind: "or",
+          children: [
+            fieldCondition("page.path", "eq", "/docs"),
+            fieldCondition("page.path", "eq", "/pricing"),
+            fieldCondition("page.path", "eq", "/blog"),
+          ],
+        },
+      },
+      registry,
+      { maxSetValues: 2 },
+    );
+
+    expect(document.root).toEqual({
+      kind: "or",
+      children: [
+        fieldCondition("page.path", "eq", "/blog"),
+        fieldCondition("page.path", "eq", "/docs"),
+        fieldCondition("page.path", "eq", "/pricing"),
+      ],
+    });
+  });
+
   it("rejects unknown or unauthorized field/operator/value combinations", () => {
     expect(() =>
       normalizeFilterDocument(
