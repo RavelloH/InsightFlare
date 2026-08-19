@@ -63,6 +63,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { canManageTeam } from "@/lib/dashboard/permissions";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { buildTeamSections } from "@/lib/dashboard/team-sections";
 import {
   fetchAdminSites,
@@ -424,6 +425,7 @@ interface DashboardShellProps {
   unreadAttentionCount?: number;
   teamSections?: TeamSectionNavItem[];
   managementSections?: TeamSectionNavItem[];
+  initialQueryWindow?: TimeWindow;
   children: ReactNode;
 }
 
@@ -439,6 +441,7 @@ export function DashboardShell({
   unreadAttentionCount = 0,
   teamSections,
   managementSections,
+  initialQueryWindow,
   children,
 }: DashboardShellProps) {
   useAccountTimeZonePreference(user.timeZone);
@@ -759,6 +762,7 @@ export function DashboardShell({
       <DashboardQueryProvider
         scopeKey={activeSiteId}
         maxRangeDays={isRequestObservationRoute ? 90 : undefined}
+        initialWindow={initialQueryWindow}
       >
         <Sidebar variant="inset" collapsible="icon">
           <SidebarHeader className={SIDEBAR_COLLAPSE_SECTION_CLASS}>

@@ -79,17 +79,13 @@ import {
   shortDateTime,
 } from "@/lib/dashboard/format";
 import { canAdministerTeam, canManageTeam } from "@/lib/dashboard/permissions";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
-  addZonedInterval,
-  startOfZonedInterval,
-} from "@/lib/dashboard/time-zone";
-import type {
-  MemberData,
-  OverviewData,
-  SiteData,
-  TeamData,
-} from "@/lib/edge-client";
+  buildTeamAggregateTrend,
+  buildTeamSiteTrends,
+  teamDashboardQueryOptions,
+  type TeamDashboardSnapshot,
+} from "@/lib/dashboard/team-dashboard-query";
+import type { MemberData, SiteData, TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
@@ -99,7 +95,6 @@ import { useRouter } from "@/lib/router";
 
 type TeamTab = "sites" | "settings" | "members";
 
-type SiteOverviewMetrics = OverviewData["data"];
 type SiteMetricChangeRates = {
   views: number | null;
   visitors: number | null;
@@ -109,7 +104,7 @@ type SiteMetricChangeRates = {
   pagesPerSession: number | null;
 };
 
-function emptyOverviewMetrics(): SiteOverviewMetrics {
+function emptyOverviewMetrics() {
   return {
     views: 0,
     sessions: 0,
@@ -131,10 +126,6 @@ function emptySiteMetricChangeRates(): SiteMetricChangeRates {
     avgDurationMs: null,
     pagesPerSession: null,
   };
-}
-
-function normalizeChangeRate(value: number | null | undefined): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function formatChangeRate(value: number | null): string | null {
@@ -178,6 +169,7 @@ interface TeamManagementClientProps {
   activeTab: TeamTab;
   systemRole: "admin" | "user";
   currentUserId: string;
+  teamDashboardSnapshot?: TeamDashboardSnapshot | null;
 }
 
 function safeSlug(value: string): string {
@@ -195,7 +187,7 @@ function getSiteSlug(site: SiteData): string {
   return site.id.slice(0, 8);
 }
 
-function withSiteSlug(site: SiteData): SiteData & { slug: string } {
+function withSiteSlug<T extends SiteData>(site: T): T & { slug: string } {
   return {
     ...site,
     slug: getSiteSlug(site),
@@ -203,7 +195,11 @@ function withSiteSlug(site: SiteData): SiteData & { slug: string } {
 }
 
 function sortSitesForInitialOrder<
-  T extends { id: string; name: string; overview?: SiteOverviewMetrics | null },
+  T extends {
+    id: string;
+    name: string;
+    overview?: { views: number; visitors: number } | null;
+  },
 >(sites: T[]): T[] {
   return [...sites].sort((left, right) => {
     const leftViews = left.overview?.views ?? 0;
@@ -231,34 +227,6 @@ function buildSitePath(
   siteSlug: string,
 ): string {
   return `/${locale}/app/${teamSlug}/${siteSlug}`;
-}
-
-function intervalStepMs(interval: TimeWindow["interval"]): number {
-  if (interval === "minute") return 60 * 1000;
-  if (interval === "hour") return 60 * 60 * 1000;
-  if (interval === "day") return 24 * 60 * 60 * 1000;
-  if (interval === "week") return 7 * 24 * 60 * 60 * 1000;
-  return 30 * 24 * 60 * 60 * 1000;
-}
-
-interface TeamDashboardTrendPoint {
-  bucket: number;
-  timestampMs: number;
-  sites: Array<{
-    siteId: string;
-    views: number;
-    visitors: number;
-  }>;
-}
-
-interface TeamDashboardSite extends SiteData {
-  overview: SiteOverviewMetrics;
-  changeRates?: SiteMetricChangeRates;
-}
-
-interface TeamDashboardData {
-  sites: TeamDashboardSite[];
-  trend: TeamDashboardTrendPoint[];
 }
 
 interface TeamInviteData {
@@ -365,63 +333,6 @@ function SiteAccessSelectorButtons({
       )}
     </div>
   );
-}
-
-async function fetchTeamDashboard(
-  teamId: string,
-  window: Pick<TimeWindow, "from" | "to" | "interval" | "timeZone">,
-  signal?: AbortSignal,
-): Promise<TeamDashboardData> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: "/api/private/team-dashboard",
-      params: {
-        teamId,
-        from: window.from,
-        to: window.to,
-        interval: window.interval,
-        timeZone: window.timeZone,
-      },
-    }) as {
-      ok: boolean;
-      data?: { sites?: TeamDashboardSite[]; trend?: TeamDashboardTrendPoint[] };
-    };
-    return {
-      sites: Array.isArray(result.data?.sites) ? result.data.sites : [],
-      trend: Array.isArray(result.data?.trend) ? result.data.trend : [],
-    };
-  }
-  const params = new URLSearchParams({
-    teamId,
-    from: String(window.from),
-    to: String(window.to),
-    interval: window.interval,
-    timeZone: window.timeZone,
-  });
-  const response = await fetch(
-    `/api/private/team-dashboard?${params.toString()}`,
-    {
-      method: "GET",
-      credentials: "include",
-      signal,
-    },
-  );
-  if (!response.ok) throw new Error("fetch_team_dashboard_failed");
-  const payload = (await response.json()) as {
-    ok: boolean;
-    data?: {
-      sites?: TeamDashboardSite[];
-      trend?: TeamDashboardTrendPoint[];
-    };
-  };
-  if (!payload.ok || !payload.data) {
-    throw new Error("fetch_team_dashboard_failed");
-  }
-  return {
-    sites: Array.isArray(payload.data.sites) ? payload.data.sites : [],
-    trend: Array.isArray(payload.data.trend) ? payload.data.trend : [],
-  };
 }
 
 async function fetchTeamMembers(
@@ -548,9 +459,24 @@ export function TeamManagementClient({
   activeTab,
   systemRole,
   currentUserId,
+  teamDashboardSnapshot = null,
 }: TeamManagementClientProps) {
   const router = useRouter();
-  const { window } = useDashboardQuery();
+  const { window: selectedWindow } = useDashboardQuery();
+  const canUseInitialSnapshotWindow =
+    teamDashboardSnapshot &&
+    selectedWindow.preset === teamDashboardSnapshot.range &&
+    selectedWindow.interval === teamDashboardSnapshot.window.interval &&
+    selectedWindow.timeZone === teamDashboardSnapshot.window.timeZone &&
+    (selectedWindow.preset !== "custom" ||
+      (selectedWindow.from === teamDashboardSnapshot.window.from &&
+        selectedWindow.to === teamDashboardSnapshot.window.to));
+  const window = canUseInitialSnapshotWindow
+    ? {
+        ...teamDashboardSnapshot.window,
+        preset: selectedWindow.preset,
+      }
+    : selectedWindow;
   const copy = messages.teamManagement;
   const siteCreateCopy = messages.adminSites;
   const [sites, setSites] = useState<Array<SiteData & { slug: string }>>([]);
@@ -587,25 +513,9 @@ export function TeamManagementClient({
   const [siteAccessDialogMember, setSiteAccessDialogMember] =
     useState<MemberData | null>(null);
   const [editingSiteIds, setEditingSiteIds] = useState<string[]>([]);
-  const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [siteOverviewById, setSiteOverviewById] = useState<
-    Record<string, SiteOverviewMetrics>
-  >({});
-  const [siteChangeRatesById, setSiteChangeRatesById] = useState<
-    Record<string, SiteMetricChangeRates>
-  >({});
-  const [teamTrend, setTeamTrend] = useState<TeamDashboardTrendPoint[]>([]);
   const [transferTargetId, setTransferTargetId] = useState<string>("");
   const [transferring, setTransferring] = useState(false);
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
-  const [chartWindow, setChartWindow] = useState<
-    Pick<TimeWindow, "from" | "to" | "interval" | "timeZone">
-  >(() => ({
-    from: window.from,
-    to: window.to,
-    interval: window.interval,
-    timeZone: window.timeZone,
-  }));
   const canManage = canManageTeam(activeTeam.membershipRole, systemRole);
   const canAdminister = canAdministerTeam(
     activeTeam.membershipRole,
@@ -629,23 +539,41 @@ export function TeamManagementClient({
       typeof window !== "undefined" &&
       (activeTab === "settings" || activeTab === "members"),
   });
-  const dashboardQuery = useQuery({
-    queryKey: [
-      "dashboard",
-      "team-dashboard",
-      activeTeam.id,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
-    ],
-    queryFn: ({ signal }) => fetchTeamDashboard(activeTeam.id, window, signal),
-    enabled: typeof window !== "undefined" && activeTab === "sites",
-  });
+  const dashboardQuery = useQuery(
+    teamDashboardQueryOptions({
+      teamId: activeTeam.id,
+      window,
+      range: selectedWindow.preset,
+      snapshot: teamDashboardSnapshot,
+      enabled: activeTab === "sites",
+    }),
+  );
+  const dashboardSnapshot = dashboardQuery.data;
+  const dashboardData = dashboardSnapshot?.data;
+  const dashboardWindow = dashboardSnapshot?.window ?? window;
+  const dashboardSites = useMemo(
+    () => (dashboardData?.sites ?? []).map(withSiteSlug),
+    [dashboardData?.sites],
+  );
   const transferableMembers = useMemo(
     () => members.filter((m) => m.userId !== activeTeam.ownerUserId),
     [members, activeTeam.ownerUserId],
   );
+
+  useEffect(() => {
+    if (activeTab !== "sites" || !dashboardData) return;
+    setSiteOrder((currentOrder) => {
+      const nextIds = sortSitesForInitialOrder([...dashboardData.sites]).map(
+        (site) => site.id,
+      );
+      if (currentOrder.length === 0) return nextIds;
+      const knownIds = new Set(currentOrder);
+      const appended = nextIds.filter((id) => !knownIds.has(id));
+      return appended.length > 0
+        ? [...currentOrder, ...appended]
+        : currentOrder;
+    });
+  }, [activeTab, dashboardData]);
 
   useEffect(() => {
     if (activeTab !== "settings" && activeTab !== "members") return;
@@ -676,86 +604,15 @@ export function TeamManagementClient({
     setSiteOrder([]);
     setMembers([]);
     setInvites([]);
-    setSiteOverviewById({});
-    setSiteChangeRatesById({});
-    setTeamTrend([]);
     setTransferTargetId("");
     setTransferDialogOpen(false);
     setSiteAccessDialogMember(null);
     setEditingSiteIds([]);
-    setChartWindow({
-      from: window.from,
-      to: window.to,
-      interval: window.interval,
-      timeZone: window.timeZone,
-    });
   }, [activeTeam.id, activeTeam.name, activeTeam.slug]);
-
-  useEffect(() => {
-    if (activeTab !== "sites") return;
-    setLoading(dashboardQuery.isPending);
-    setAnalyticsLoading(dashboardQuery.isPending);
-    const dashboard = dashboardQuery.data;
-    if (!dashboard) return;
-    const nextSites = dashboard.sites.map(withSiteSlug);
-    const sortedSites = sortSitesForInitialOrder(dashboard.sites);
-    setSites(nextSites);
-    setSiteOrder((currentOrder) => {
-      const nextIds = sortedSites.map((site) => site.id);
-      if (currentOrder.length === 0) return nextIds;
-      const knownIds = new Set(currentOrder);
-      const appended = nextIds.filter((id) => !knownIds.has(id));
-      if (appended.length === 0) return currentOrder;
-      return [...currentOrder, ...appended];
-    });
-    setSiteOverviewById(
-      Object.fromEntries(
-        dashboard.sites.map((site) => [
-          site.id,
-          site.overview ?? emptyOverviewMetrics(),
-        ]),
-      ),
-    );
-    setSiteChangeRatesById(
-      Object.fromEntries(
-        dashboard.sites.map((site) => [
-          site.id,
-          {
-            views: normalizeChangeRate(site.changeRates?.views),
-            visitors: normalizeChangeRate(site.changeRates?.visitors),
-            sessions: normalizeChangeRate(site.changeRates?.sessions),
-            bounceRate: normalizeChangeRate(site.changeRates?.bounceRate),
-            avgDurationMs: normalizeChangeRate(site.changeRates?.avgDurationMs),
-            pagesPerSession: normalizeChangeRate(
-              site.changeRates?.pagesPerSession,
-            ),
-          },
-        ]),
-      ),
-    );
-    setTeamTrend(dashboard.trend);
-    setChartWindow({
-      from: window.from,
-      to: window.to,
-      interval: window.interval,
-      timeZone: window.timeZone,
-    });
-    setLoading(false);
-    setAnalyticsLoading(false);
-  }, [
-    activeTab,
-    dashboardQuery.data,
-    dashboardQuery.isPending,
-    window.from,
-    window.interval,
-    window.timeZone,
-    window.to,
-  ]);
 
   useEffect(() => {
     if (activeTab === "sites" || activeTab === "settings") return;
     setLoading(false);
-    setAnalyticsLoading(false);
   }, [activeTab]);
 
   async function refreshMembers() {
@@ -1085,177 +942,27 @@ export function TeamManagementClient({
   }
 
   const aggregateChartRenderData = useMemo(() => {
-    const timeline = new Map<
-      number,
-      {
-        timestampMs: number;
-        sites: Map<string, { views: number; visitors: number }>;
-      }
-    >();
-    const end = startOfZonedInterval(
-      chartWindow.to,
-      chartWindow.interval,
-      chartWindow.timeZone,
-    );
-    let current = startOfZonedInterval(
-      chartWindow.from,
-      chartWindow.interval,
-      chartWindow.timeZone,
-    );
-    const hardLimit = 2000;
-
-    for (let index = 0; index < hardLimit && current <= end; index += 1) {
-      timeline.set(current, {
-        timestampMs: current,
-        sites: new Map(),
-      });
-      let next = addZonedInterval(
-        current,
-        chartWindow.interval,
-        chartWindow.timeZone,
-      );
-      if (!Number.isFinite(next) || next <= current) {
-        next = current + intervalStepMs(chartWindow.interval);
-      }
-      current = next;
-    }
-
-    for (const point of teamTrend) {
-      const bucket = startOfZonedInterval(
-        Number(point.timestampMs ?? 0),
-        chartWindow.interval,
-        chartWindow.timeZone,
-      );
-      const current = timeline.get(bucket) ?? {
-        timestampMs: bucket,
-        sites: new Map<string, { views: number; visitors: number }>(),
-      };
-
-      for (const sitePoint of point.sites) {
-        const previous = current.sites.get(sitePoint.siteId) ?? {
-          views: 0,
-          visitors: 0,
-        };
-        current.sites.set(sitePoint.siteId, {
-          views: previous.views + (sitePoint.views ?? 0),
-          visitors: previous.visitors + (sitePoint.visitors ?? 0),
-        });
-      }
-      timeline.set(bucket, current);
-    }
-
-    return Array.from(timeline.entries())
-      .sort((left, right) => left[0] - right[0])
-      .map(([, value]) => ({
-        timestampMs: value.timestampMs,
-        sites: Array.from(value.sites.entries()).map(([siteId, siteValue]) => ({
-          siteId,
-          views: siteValue.views,
-          visitors: siteValue.visitors,
-        })),
-      }));
-  }, [
-    teamTrend,
-    chartWindow.from,
-    chartWindow.to,
-    chartWindow.interval,
-    chartWindow.timeZone,
-  ]);
+    return buildTeamAggregateTrend(dashboardData?.trend ?? [], dashboardWindow);
+  }, [dashboardData?.trend, dashboardWindow]);
 
   const siteTrendById = useMemo(() => {
-    const siteBuckets = new Map<
-      string,
-      Map<number, { timestampMs: number; views: number; visitors: number }>
-    >();
-    const starts: number[] = [];
-    const end = startOfZonedInterval(
-      chartWindow.to,
-      chartWindow.interval,
-      chartWindow.timeZone,
+    return buildTeamSiteTrends(
+      dashboardSites.map((site) => site.id),
+      dashboardData?.trend ?? [],
+      dashboardWindow,
     );
-    let current = startOfZonedInterval(
-      chartWindow.from,
-      chartWindow.interval,
-      chartWindow.timeZone,
-    );
-    const hardLimit = 2000;
-    for (let index = 0; index < hardLimit && current <= end; index += 1) {
-      starts.push(current);
-      let next = addZonedInterval(
-        current,
-        chartWindow.interval,
-        chartWindow.timeZone,
-      );
-      if (!Number.isFinite(next) || next <= current) {
-        next = current + intervalStepMs(chartWindow.interval);
-      }
-      current = next;
-    }
-
-    for (const site of sites) {
-      const bucketMap = new Map<
-        number,
-        { timestampMs: number; views: number; visitors: number }
-      >();
-      for (const start of starts) {
-        bucketMap.set(start, {
-          timestampMs: start,
-          views: 0,
-          visitors: 0,
-        });
-      }
-      siteBuckets.set(site.id, bucketMap);
-    }
-
-    for (const point of teamTrend) {
-      const bucket = startOfZonedInterval(
-        Number(point.timestampMs ?? 0),
-        chartWindow.interval,
-        chartWindow.timeZone,
-      );
-
-      for (const sitePoint of point.sites) {
-        const bucketMap = siteBuckets.get(sitePoint.siteId);
-        if (!bucketMap) continue;
-        const existing = bucketMap.get(bucket) ?? {
-          timestampMs: bucket,
-          views: 0,
-          visitors: 0,
-        };
-        existing.views += sitePoint.views ?? 0;
-        existing.visitors += sitePoint.visitors ?? 0;
-        bucketMap.set(bucket, existing);
-      }
-    }
-
-    return Object.fromEntries(
-      Array.from(siteBuckets.entries()).map(([siteId, bucketMap]) => [
-        siteId,
-        Array.from(bucketMap.entries())
-          .sort((left, right) => left[0] - right[0])
-          .map(([, value]) => value),
-      ]),
-    );
-  }, [
-    sites,
-    teamTrend,
-    chartWindow.from,
-    chartWindow.to,
-    chartWindow.interval,
-    chartWindow.timeZone,
-  ]);
+  }, [dashboardData?.trend, dashboardSites, dashboardWindow]);
 
   const siteDashboardCards = useMemo(() => {
-    const cards = sites.map((site) => {
-      const overview = siteOverviewById[site.id] ?? emptyOverviewMetrics();
+    const cards = dashboardSites.map((site) => {
+      const overview = site.overview ?? emptyOverviewMetrics();
       const pagesPerSession =
         overview.sessions > 0 ? overview.views / overview.sessions : 0;
       return {
         site,
         overview,
         pagesPerSession,
-        changeRates:
-          siteChangeRatesById[site.id] ?? emptySiteMetricChangeRates(),
+        changeRates: site.changeRates ?? emptySiteMetricChangeRates(),
         trend: siteTrendById[site.id] ?? [],
       };
     });
@@ -1277,7 +984,7 @@ export function TeamManagementClient({
     }
 
     return orderedCards;
-  }, [sites, siteOverviewById, siteChangeRatesById, siteTrendById, siteOrder]);
+  }, [dashboardSites, siteTrendById, siteOrder]);
   const aggregateChartSites = useMemo(
     () =>
       siteDashboardCards.map(({ site }) => ({
@@ -1296,8 +1003,9 @@ export function TeamManagementClient({
   );
 
   const siteCount = useMemo(
-    () => (activeTab === "sites" ? sites.length : activeTeam.siteCount),
-    [activeTab, sites.length, activeTeam.siteCount],
+    () =>
+      activeTab === "sites" ? dashboardSites.length : activeTeam.siteCount,
+    [activeTab, dashboardSites.length, activeTeam.siteCount],
   );
 
   const memberCount = useMemo(
@@ -1321,7 +1029,11 @@ export function TeamManagementClient({
         ? copy.settings.subtitle
         : copy.members.subtitle;
   const isSitesChartsLoading =
-    activeTab === "sites" && (loading || analyticsLoading);
+    activeTab === "sites" && dashboardQuery.isFetching;
+  const isPageDataLoading =
+    activeTab === "sites"
+      ? dashboardQuery.isPending && !dashboardData
+      : loading;
   const inviteCreateCard = (
     <Card className="h-full">
       <CardHeader>
@@ -1879,7 +1591,7 @@ export function TeamManagementClient({
                       initial
                       className="inline-flex items-center"
                     >
-                      {loading ? (
+                      {isPageDataLoading ? (
                         <span
                           key="sites-loading"
                           className="inline-flex items-center"
@@ -1909,7 +1621,7 @@ export function TeamManagementClient({
                       initial
                       className="inline-flex items-center"
                     >
-                      {loading ? (
+                      {isPageDataLoading ? (
                         <span
                           key="members-loading"
                           className="inline-flex items-center"
@@ -2065,8 +1777,8 @@ export function TeamManagementClient({
                     data={aggregateChartRenderData}
                     sites={aggregateChartSites}
                     locale={locale}
-                    timeZone={chartWindow.timeZone}
-                    interval={chartWindow.interval}
+                    timeZone={dashboardWindow.timeZone}
+                    interval={dashboardWindow.interval}
                     viewsLabel={messages.common.views}
                     visitorsLabel={messages.common.visitors}
                     messages={messages}
@@ -2097,7 +1809,7 @@ export function TeamManagementClient({
                   </AutoTransition>
                 </div>
 
-                {!loading && !analyticsLoading && sites.length === 0 ? (
+                {!dashboardQuery.isPending && dashboardSites.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     {copy.sites.noSites}
                   </p>
@@ -2105,7 +1817,7 @@ export function TeamManagementClient({
               </CardContent>
             </Card>
 
-            {sites.length > 0 ? (
+            {dashboardSites.length > 0 ? (
               <div className="grid gap-4 lg:grid-cols-2">
                 {siteDashboardCards.map(
                   ({ site, overview, pagesPerSession, changeRates, trend }) => (
@@ -2158,8 +1870,8 @@ export function TeamManagementClient({
                                 <TrafficPairBarChart
                                   data={trend}
                                   locale={locale}
-                                  timeZone={chartWindow.timeZone}
-                                  interval={chartWindow.interval}
+                                  timeZone={dashboardWindow.timeZone}
+                                  interval={dashboardWindow.interval}
                                   viewsLabel={messages.common.views}
                                   visitorsLabel={messages.common.visitors}
                                   maxPoints={SITE_CARD_MAX_TREND_POINTS}

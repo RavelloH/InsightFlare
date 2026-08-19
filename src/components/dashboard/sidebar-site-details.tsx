@@ -10,45 +10,12 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import type {
-  DashboardInterval,
-  TimeWindow,
-} from "@/lib/dashboard/query-state";
 import {
-  addZonedInterval,
-  startOfZonedInterval,
-} from "@/lib/dashboard/time-zone";
+  buildTeamSiteTrends,
+  teamDashboardQueryOptions,
+} from "@/lib/dashboard/team-dashboard-query";
 import type { Locale } from "@/lib/i18n/config";
 import Link from "@/lib/router";
-
-interface SiteOverviewMetrics {
-  views: number;
-  sessions: number;
-  visitors: number;
-  bounces: number;
-  totalDurationMs: number;
-  avgDurationMs: number;
-  bounceRate: number;
-  approximateVisitors: boolean;
-}
-
-interface TeamDashboardTrendPoint {
-  bucket: number;
-  timestampMs: number;
-  sites: Array<{
-    siteId: string;
-    views: number;
-    visitors: number;
-  }>;
-}
-
-interface TeamDashboardData {
-  sites: Array<{
-    id: string;
-    overview?: SiteOverviewMetrics;
-  }>;
-  trend: TeamDashboardTrendPoint[];
-}
 
 interface SidebarSiteSummary {
   id: string;
@@ -71,12 +38,6 @@ interface SidebarSiteDetailsProps {
   };
 }
 
-interface SiteTrendPoint {
-  timestampMs: number;
-  views: number;
-  visitors: number;
-}
-
 const SIDEBAR_EXPAND_CHART_DELAY_MS = 220;
 const SIDEBAR_COLLAPSE_CHART_DELAY_MS = 300;
 const SITE_ROW_DETAIL_CLASS =
@@ -93,110 +54,6 @@ function buildSitePath(
   return `${base}/${section}`;
 }
 
-function safeCount(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.round(value));
-}
-
-function intervalStepMs(interval: DashboardInterval): number {
-  if (interval === "minute") return 60 * 1000;
-  if (interval === "hour") return 60 * 60 * 1000;
-  if (interval === "day") return 24 * 60 * 60 * 1000;
-  if (interval === "week") return 7 * 24 * 60 * 60 * 1000;
-  return 30 * 24 * 60 * 60 * 1000;
-}
-
-function buildZeroTrend(
-  window: Pick<TimeWindow, "from" | "to" | "interval" | "timeZone">,
-): SiteTrendPoint[] {
-  const points: SiteTrendPoint[] = [];
-  const end = startOfZonedInterval(window.to, window.interval, window.timeZone);
-  let current = startOfZonedInterval(
-    window.from,
-    window.interval,
-    window.timeZone,
-  );
-  const hardLimit = 2000;
-
-  for (let index = 0; index < hardLimit && current <= end; index += 1) {
-    points.push({
-      timestampMs: current,
-      views: 0,
-      visitors: 0,
-    });
-    let next = addZonedInterval(current, window.interval, window.timeZone);
-    if (!Number.isFinite(next) || next <= current) {
-      next = current + intervalStepMs(window.interval);
-    }
-    current = next;
-  }
-
-  return points;
-}
-
-async function fetchTeamDashboard(
-  teamId: string,
-  window: Pick<TimeWindow, "from" | "to" | "interval" | "timeZone">,
-  signal?: AbortSignal,
-): Promise<TeamDashboardData> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: "/api/private/team-dashboard",
-      params: {
-        teamId,
-        from: window.from,
-        to: window.to,
-        interval: window.interval,
-        timeZone: window.timeZone,
-      },
-    }) as {
-      ok: boolean;
-      data?: {
-        sites?: Array<{ id: string; overview?: SiteOverviewMetrics }>;
-        trend?: TeamDashboardTrendPoint[];
-      };
-    };
-    return {
-      sites: Array.isArray(result.data?.sites) ? result.data.sites : [],
-      trend: Array.isArray(result.data?.trend) ? result.data.trend : [],
-    };
-  }
-  const params = new URLSearchParams({
-    teamId,
-    from: String(window.from),
-    to: String(window.to),
-    interval: window.interval,
-    timeZone: window.timeZone,
-  });
-  const response = await fetch(
-    `/api/private/team-dashboard?${params.toString()}`,
-    {
-      method: "GET",
-      credentials: "include",
-      signal,
-    },
-  );
-  if (!response.ok) throw new Error("fetch_team_dashboard_failed");
-  const payload = (await response.json()) as {
-    ok: boolean;
-    data?: {
-      sites?: Array<{
-        id: string;
-        overview?: SiteOverviewMetrics;
-      }>;
-      trend?: TeamDashboardTrendPoint[];
-    };
-  };
-  if (!payload.ok || !payload.data) {
-    throw new Error("fetch_team_dashboard_failed");
-  }
-  return {
-    sites: Array.isArray(payload.data.sites) ? payload.data.sites : [],
-    trend: Array.isArray(payload.data.trend) ? payload.data.trend : [],
-  };
-}
-
 export function SidebarSiteDetails({
   locale,
   teamId,
@@ -208,36 +65,19 @@ export function SidebarSiteDetails({
 }: SidebarSiteDetailsProps) {
   const { state: sidebarState, isMobile } = useSidebar();
   const { window } = useDashboardQuery();
-  const [teamTrend, setTeamTrend] = useState<TeamDashboardTrendPoint[]>([]);
-  const [chartWindow, setChartWindow] = useState<
-    Pick<TimeWindow, "from" | "to" | "interval" | "timeZone">
-  >(() => ({
-    from: window.from,
-    to: window.to,
-    interval: window.interval,
-    timeZone: window.timeZone,
-  }));
   const [shouldRenderCharts, setShouldRenderCharts] = useState(
     isMobile || sidebarState !== "collapsed",
   );
-  const teamDashboardQuery = useQuery({
-    queryKey: [
-      "dashboard",
-      "sidebar-team-dashboard",
+  const teamDashboardQuery = useQuery(
+    teamDashboardQueryOptions({
       teamId,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
-    ],
-    queryFn: ({ signal }) => fetchTeamDashboard(teamId, window, signal),
-    enabled:
-      typeof window !== "undefined" &&
-      Boolean(teamId) &&
-      sites.length > 0 &&
-      shouldRenderCharts,
-    retry: false,
-  });
+      window,
+      range: window.preset,
+      enabled: Boolean(teamId) && sites.length > 0 && shouldRenderCharts,
+    }),
+  );
+  const dashboardSnapshot = teamDashboardQuery.data;
+  const dashboardWindow = dashboardSnapshot?.window ?? window;
 
   useEffect(() => {
     if (isMobile) {
@@ -259,153 +99,21 @@ export function SidebarSiteDetails({
     return () => clearTimeout(timeout);
   }, [sidebarState, isMobile]);
 
-  useEffect(() => {
-    if (teamId && sites.length > 0) return;
-    setTeamTrend([]);
-    setChartWindow({
-      from: window.from,
-      to: window.to,
-      interval: window.interval,
-      timeZone: window.timeZone,
-    });
-  }, [
-    teamId,
-    sites.length,
-    window.from,
-    window.to,
-    window.interval,
-    window.timeZone,
-  ]);
-
-  useEffect(() => {
-    if (!teamDashboardQuery.data) return;
-    setTeamTrend(teamDashboardQuery.data.trend);
-    setChartWindow({
-      from: window.from,
-      to: window.to,
-      interval: window.interval,
-      timeZone: window.timeZone,
-    });
-  }, [
-    teamDashboardQuery.data,
-    window.from,
-    window.to,
-    window.interval,
-    window.timeZone,
-  ]);
-
-  useEffect(() => {
-    if (!teamDashboardQuery.isError) return;
-    setTeamTrend([]);
-    setChartWindow({
-      from: window.from,
-      to: window.to,
-      interval: window.interval,
-      timeZone: window.timeZone,
-    });
-  }, [
-    teamDashboardQuery.errorUpdatedAt,
-    teamDashboardQuery.isError,
-    window.from,
-    window.to,
-    window.interval,
-    window.timeZone,
-  ]);
-
   const siteTrendById = useMemo(() => {
-    const siteBuckets = new Map<string, Map<number, SiteTrendPoint>>();
-    const starts: number[] = [];
-    const end = startOfZonedInterval(
-      chartWindow.to,
-      chartWindow.interval,
-      chartWindow.timeZone,
+    return buildTeamSiteTrends(
+      sites.map((site) => site.id),
+      dashboardSnapshot?.data.trend ?? [],
+      dashboardWindow,
     );
-    const hardLimit = 2000;
-    let current = startOfZonedInterval(
-      chartWindow.from,
-      chartWindow.interval,
-      chartWindow.timeZone,
-    );
-    for (let index = 0; index < hardLimit && current <= end; index += 1) {
-      starts.push(current);
-      let next = addZonedInterval(
-        current,
-        chartWindow.interval,
-        chartWindow.timeZone,
-      );
-      if (!Number.isFinite(next) || next <= current) {
-        next = current + intervalStepMs(chartWindow.interval);
-      }
-      current = next;
-    }
-
-    for (const site of sites) {
-      const bucketMap = new Map<number, SiteTrendPoint>();
-      for (const start of starts) {
-        bucketMap.set(start, {
-          timestampMs: start,
-          views: 0,
-          visitors: 0,
-        });
-      }
-      siteBuckets.set(site.id, bucketMap);
-    }
-
-    for (const point of teamTrend) {
-      const bucket = startOfZonedInterval(
-        Number(point.timestampMs ?? 0),
-        chartWindow.interval,
-        chartWindow.timeZone,
-      );
-
-      for (const sitePoint of point.sites) {
-        const bucketMap = siteBuckets.get(sitePoint.siteId);
-        if (!bucketMap) continue;
-        const existing = bucketMap.get(bucket) ?? {
-          timestampMs: bucket,
-          views: 0,
-          visitors: 0,
-        };
-        existing.views += safeCount(sitePoint.views);
-        existing.visitors += safeCount(sitePoint.visitors);
-        bucketMap.set(bucket, existing);
-      }
-    }
-
-    return Object.fromEntries(
-      Array.from(siteBuckets.entries()).map(([siteId, bucketMap]) => [
-        siteId,
-        Array.from(bucketMap.entries())
-          .sort((left, right) => left[0] - right[0])
-          .map(([, value]) => value),
-      ]),
-    ) as Record<string, SiteTrendPoint[]>;
-  }, [
-    sites,
-    teamTrend,
-    chartWindow.from,
-    chartWindow.to,
-    chartWindow.interval,
-    chartWindow.timeZone,
-  ]);
-
-  const zeroTrend = useMemo(
-    () => buildZeroTrend(chartWindow),
-    [
-      chartWindow.from,
-      chartWindow.to,
-      chartWindow.interval,
-      chartWindow.timeZone,
-    ],
-  );
+  }, [dashboardSnapshot?.data.trend, dashboardWindow, sites]);
 
   const cards = useMemo(
     () =>
       sites.map((site) => ({
         site,
-        trend: siteTrendById[site.id] ?? zeroTrend,
+        trend: siteTrendById[site.id] ?? [],
       })),
-    [sites, siteTrendById, zeroTrend],
+    [sites, siteTrendById],
   );
 
   return (
@@ -448,8 +156,8 @@ export function SidebarSiteDetails({
                       <TrafficPairBarChart
                         data={trend}
                         locale={locale}
-                        timeZone={chartWindow.timeZone}
-                        interval={chartWindow.interval}
+                        timeZone={dashboardWindow.timeZone}
+                        interval={dashboardWindow.interval}
                         viewsLabel={labels.views}
                         visitorsLabel={labels.visitors}
                         compact
