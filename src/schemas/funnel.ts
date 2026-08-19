@@ -70,6 +70,13 @@ export const FunnelAnalyzeInputSchema = z
   })
   .strict();
 
+export const FunnelUpdateInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200).optional(),
+    steps: z.array(FunnelStepSchema).min(2).max(10).optional(),
+  })
+  .strict();
+
 // ─── Responses ──────────────────────────────────────────────────────────
 
 export const FunnelListResponseSchema = createEnvelopeSchema(
@@ -99,6 +106,7 @@ registerSchema("FunnelAnalysisStep", FunnelAnalysisStepSchema);
 registerSchema("FunnelAnalysisSummary", FunnelAnalysisSummarySchema);
 registerSchema("FunnelCreateInput", FunnelCreateInputSchema);
 registerSchema("FunnelAnalyzeInput", FunnelAnalyzeInputSchema);
+registerSchema("FunnelUpdateInput", FunnelUpdateInputSchema);
 registerSchema("FunnelListResponse", FunnelListResponseSchema);
 registerSchema("FunnelCreateResponse", FunnelCreateResponseSchema);
 registerSchema("FunnelAnalyzeResponse", FunnelAnalyzeResponseSchema);
@@ -109,3 +117,4 @@ export type FunnelStep = z.infer<typeof FunnelStepSchema>;
 export type FunnelDefinition = z.infer<typeof FunnelDefinitionSchema>;
 export type FunnelCreateInput = z.infer<typeof FunnelCreateInputSchema>;
 export type FunnelAnalyzeInput = z.infer<typeof FunnelAnalyzeInputSchema>;
+export type FunnelUpdateInput = z.infer<typeof FunnelUpdateInputSchema>;

@@ -84,6 +84,7 @@ import {
   executeQueryOperation,
   executeTrend,
   type FilterValueOption,
+  type FilterDocument,
   type OverviewResult,
   parseApiV1FilterUrl,
   siteQueryContext,
@@ -114,11 +115,19 @@ export function queryApiV1Overview(
   siteId: string,
   url: URL,
   timeRange: ParsedTimeRange,
+  options: {
+    filters?: FilterDocument;
+    previousTime?: ParsedTimeRange;
+  } = {},
 ): Promise<AnalyticsResult<OverviewResult>> {
+  const filters = options.filters ?? apiV1FilterSet(url);
   return executeOverview(createOverviewReader(env, siteId), {
     context: siteQueryContext(siteId, "api-v1"),
     time: queryTime(timeRange),
-    filters: apiV1FilterSet(url),
+    ...(options.previousTime
+      ? { previousTime: queryTime(options.previousTime) }
+      : {}),
+    filters,
   });
 }
 
@@ -194,11 +203,15 @@ interface ApiV1KeysetResult<T extends object> {
   };
 }
 
-function apiV1QueryBase(url: URL, timeRange: ParsedTimeRange) {
+function apiV1QueryBase(
+  url: URL,
+  timeRange: ParsedTimeRange,
+  filters: FilterDocument = apiV1FilterSet(url),
+) {
   return {
     context: siteQueryContext("", "api-v1"),
     time: queryTime(timeRange),
-    filters: apiV1FilterSet(url),
+    filters,
   };
 }
 
@@ -232,11 +245,12 @@ export function queryApiV1Explore<T>(
   url: URL,
   timeRange: ParsedTimeRange,
   reader: () => Promise<T>,
+  filters?: FilterDocument,
 ): Promise<AnalyticsResult<T>> {
   return executeQueryOperation(
     "explore",
     {
-      ...apiV1QueryBase(url, timeRange),
+      ...apiV1QueryBase(url, timeRange, filters),
       context: siteQueryContext(siteId, "api-v1"),
     },
     async () => ({ value: await reader() }),
@@ -341,13 +355,18 @@ export async function queryApiV1EventRecords(
   url: URL,
   timeRange: ParsedTimeRange,
   pagination: CursorPagination,
+  options: {
+    filters?: FilterDocument;
+    eventName?: string;
+  } = {},
 ): Promise<AnalyticsResult<ApiV1KeysetResult<Record<string, unknown>>>> {
   const sort = parseEventRecordSort(url);
   const cursor = pagination.cursor
     ? parseEventRecordCursor(pagination.cursor, sort)
     : null;
   if (pagination.cursor && !cursor) return invalidCursorResult("event-record");
-  const base = apiV1QueryBase(url, timeRange);
+  const filters = options.filters ?? apiV1FilterSet(url);
+  const base = apiV1QueryBase(url, timeRange, filters);
   return executeQueryOperation(
     "event-records",
     {
@@ -364,12 +383,15 @@ export async function queryApiV1EventRecords(
           nowMs: Date.now(),
           timeZone: timeRange.timeZone,
         },
-        apiV1FilterSet(url),
+        filters,
         {
           pageSize: pagination.limit,
           sort,
           search: parseListSearch(url),
-          eventName: url.searchParams.get("eventName")?.trim() || undefined,
+          eventName:
+            options.eventName ??
+            url.searchParams.get("eventName")?.trim() ??
+            undefined,
           cursor,
         },
       );

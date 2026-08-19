@@ -180,11 +180,13 @@ function errorResponses(...codes: string[]) {
             ? "Forbidden"
             : code === "404"
               ? "NotFound"
-              : code === "409"
-                ? "Conflict"
-                : code === "413"
-                  ? "PayloadTooLarge"
-                  : "InternalError";
+            : code === "409"
+              ? "Conflict"
+              : code === "413"
+                ? "PayloadTooLarge"
+                : code === "405"
+                  ? "MethodNotAllowed"
+                : "InternalError";
     map[code] = { $ref: `#/components/responses/${name}` };
   }
   return map;
@@ -208,7 +210,9 @@ function requiredScopesForOperation(input: Operation): string[] {
   if (tag === "Settings") {
     return isWrite ? ["site_config:write"] : ["site_config:read"];
   }
-  if (tag === "Funnels") return isWrite ? ["site:write"] : ["analytics:read"];
+  if (tag === "Funnels") {
+    return isWrite ? ["site_config:write"] : ["analytics:read"];
+  }
   if (tag === "Team") return ["site:read"];
 
   return [];
@@ -217,6 +221,7 @@ function requiredScopesForOperation(input: Operation): string[] {
 function op(input: Operation): Operation {
   return {
     ...input,
+    responses: { ...input.responses, ...errorResponses("405") },
     "x-required-scopes": requiredScopesForOperation(input),
   };
 }
@@ -370,7 +375,6 @@ const funnelExample = {
   id: sampleFunnelId,
   siteId: sampleSiteId,
   name: "Signup funnel",
-  description: "Pricing page to signup conversion.",
   steps: [
     { type: "pageview", value: "/pricing", label: "Pricing" },
     { type: "event", value: "signup", label: "Signup" },
@@ -527,6 +531,7 @@ function buildSchemas(): Record<string, unknown> {
                 "site_not_found",
                 "resource_not_found",
                 "conflict",
+                "method_not_allowed",
                 "payload_too_large",
                 "internal_error",
               ],
@@ -592,60 +597,56 @@ function buildSchemas(): Record<string, unknown> {
         },
       },
     },
-    FilterObject: {
+    FilterScalar: { type: ["string", "number", "boolean", "null"] },
+    FilterFieldTarget: {
       type: "object",
-      description: "Simple equality filters keyed by stable dimension name.",
-      additionalProperties: { type: "string", maxLength: 500 },
+      required: ["kind", "field"],
+      properties: { kind: { const: "field" }, field: { type: "string", maxLength: 128 } },
+      additionalProperties: false,
     },
-    ComplexFilter: {
+    FilterEventPayloadTarget: {
       type: "object",
-      description:
-        "Advanced filter rule for explore and search endpoints. For eq, neq, contains, startsWith, and endsWith, use a scalar value. For in and notIn, use an array value. For gt, gte, lt, and lte, use a number or ISO 8601 date-time string depending on the field. For exists and notExists, value may be omitted.",
-      required: ["field", "op"],
+      required: ["kind", "path"],
       properties: {
-        field: {
-          type: "string",
-          maxLength: 120,
-          description: "Stable filter field path.",
-        },
-        op: {
-          type: "string",
-          description:
-            "Filter operator. exists and notExists ignore value; in and notIn expect an array-compatible value.",
-          enum: [
-            "eq",
-            "neq",
-            "in",
-            "notIn",
-            "contains",
-            "startsWith",
-            "endsWith",
-            "gt",
-            "gte",
-            "lt",
-            "lte",
-            "exists",
-            "notExists",
-          ],
-        },
-        value: {
-          oneOf: [
-            { type: "string" },
-            { type: "number" },
-            { type: "boolean" },
-            {
-              type: "array",
-              items: {
-                oneOf: [
-                  { type: "string" },
-                  { type: "number" },
-                  { type: "boolean" },
-                ],
-              },
-            },
-          ],
-        },
+        kind: { const: "event-payload" },
+        path: { type: "string", pattern: "^/(?:[^/]|~[01])+(?:/(?:[^/]|~[01])+)*$", maxLength: 240 },
       },
+      additionalProperties: false,
+    },
+    FilterTarget: { oneOf: [ref("FilterFieldTarget"), ref("FilterEventPayloadTarget")] },
+    FilterCondition: {
+      type: "object",
+      required: ["kind", "target", "operator"],
+      properties: {
+        kind: { const: "condition" },
+        target: ref("FilterTarget"),
+        operator: { type: "string", enum: ["eq", "neq", "in", "notIn", "contains", "startsWith", "endsWith", "gt", "gte", "lt", "lte", "between", "exists", "notExists", "isNull", "notNull", "isEmpty", "notEmpty"] },
+        value: { oneOf: [ref("FilterScalar"), { type: "array", minItems: 1, maxItems: 128, items: ref("FilterScalar") }] },
+      },
+      additionalProperties: false,
+    },
+    FilterGroup: {
+      type: "object",
+      required: ["kind", "children"],
+      properties: {
+        kind: { type: "string", enum: ["and", "or"] },
+        children: { type: "array", minItems: 1, maxItems: 128, items: ref("FilterExpression") },
+      },
+      additionalProperties: false,
+    },
+    FilterNot: {
+      type: "object",
+      required: ["kind", "child"],
+      properties: { kind: { const: "not" }, child: ref("FilterExpression") },
+      additionalProperties: false,
+    },
+    FilterExpression: { oneOf: [ref("FilterCondition"), ref("FilterGroup"), ref("FilterNot")] },
+    FilterDocument: {
+      type: "object",
+      description: "Canonical filter AST. Conditions use registered fields or event-payload JSON Pointer targets; group expressions compose AND/OR/NOT.",
+      required: ["version", "root"],
+      properties: { version: { const: 1 }, root: { oneOf: [ref("FilterExpression"), { type: "null" }] } },
+      additionalProperties: false,
     },
     MetricDefinition: {
       type: "object",
@@ -995,6 +996,39 @@ function buildSchemas(): Record<string, unknown> {
         dimensions: { type: "array", items: ref("DimensionDefinition") },
         filters: { type: "array", items: { type: "string" } },
         operators: { type: "array", items: { type: "string" } },
+        filterProtocol: {
+          type: "object",
+          required: ["version", "urlGrammar", "fields"],
+          properties: {
+            version: { const: 1 },
+            urlGrammar: { type: "string" },
+            fields: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "valueKind", "operators"],
+                properties: {
+                  id: { type: "string" },
+                  valueKind: {
+                    type: "string",
+                    enum: [
+                      "string",
+                      "enum",
+                      "number",
+                      "boolean",
+                      "date",
+                      "datetime",
+                      "json-scalar",
+                    ],
+                  },
+                  operators: { type: "array", items: { type: "string" } },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+          additionalProperties: false,
+        },
         intervals: { type: "array", items: { type: "string" } },
         presets: { type: "array", items: ref("Preset") },
         timeRange: {
@@ -1161,7 +1195,7 @@ function buildSchemas(): Record<string, unknown> {
             "Dimensions to group by. Use analytics/schema to discover supported dimensions.",
           items: { type: "string", maxLength: 120 },
         },
-        filters: { type: "array", items: ref("ComplexFilter") },
+        filters: ref("FilterDocument"),
         orderBy: {
           type: "array",
           items: {
@@ -1184,8 +1218,8 @@ function buildSchemas(): Record<string, unknown> {
         change: {
           type: "object",
           description:
-            "Relative changes as 0-based rates. Example: 0.12 means +12%.",
-          additionalProperties: { type: "number" },
+            "Relative changes as 0-based rates. Example: 0.12 means +12%. A zero previous value yields 0 when current is also zero, otherwise null.",
+          additionalProperties: { type: ["number", "null"] },
         },
       },
     }),
@@ -1201,7 +1235,7 @@ function buildSchemas(): Record<string, unknown> {
         rows: { type: "array", items: ref("AnalyticsExploreRow") },
         metrics: { type: "array", items: { type: "string" } },
         dimensions: { type: "array", items: { type: "string" } },
-        filters: { type: "array", items: ref("ComplexFilter") },
+        filters: ref("FilterDocument"),
       },
     }),
     RetentionCohortsResponse: envelope({
@@ -1392,76 +1426,13 @@ function buildSchemas(): Record<string, unknown> {
       ref("EventType"),
       "Response envelope for one custom event type.",
     ),
-    EventPayloadFilter: {
-      type: "object",
-      description: "Filter applied to custom event payload fields.",
-      required: ["path", "op"],
-      properties: {
-        path: {
-          type: "string",
-          maxLength: 240,
-          description: "Dot-notation path inside the event payload.",
-        },
-        op: {
-          type: "string",
-          description:
-            "Payload filter operator. eq/neq compare equality, in/notIn compare sets, contains/startsWith/endsWith compare strings, gt/gte/lt/lte compare ordered values, exists/notExists ignore value.",
-          enum: [
-            "eq",
-            "neq",
-            "in",
-            "notIn",
-            "contains",
-            "startsWith",
-            "endsWith",
-            "gt",
-            "gte",
-            "lt",
-            "lte",
-            "exists",
-            "notExists",
-          ],
-        },
-        value: {
-          description:
-            "Comparison value. Required unless op is exists or notExists.",
-          oneOf: [
-            { type: "string" },
-            { type: "number" },
-            { type: "boolean" },
-            {
-              type: "array",
-              items: {
-                oneOf: [
-                  { type: "string" },
-                  { type: "number" },
-                  { type: "boolean" },
-                ],
-              },
-            },
-          ],
-        },
-      },
-      additionalProperties: false,
-    },
     EventSearchRequest: {
       type: "object",
-      description: "Request for searching event records with complex filters.",
+      description:
+        "Request for searching event records. Time range, filters, limit, and cursor are read only from this body.",
       properties: {
         timeRange: ref("TimeRangeInput"),
-        eventName: {
-          type: "string",
-          maxLength: 120,
-          description: "Optional event name filter.",
-        },
-        payloadFilters: {
-          type: "array",
-          items: ref("EventPayloadFilter"),
-        },
-        filters: {
-          type: "array",
-          items: ref("ComplexFilter"),
-        },
+        filters: ref("FilterDocument"),
         limit: { type: "integer", minimum: 1, maximum: 1000, default: 100 },
         cursor: { type: "string", maxLength: MAX_CURSOR_LENGTH },
       },
@@ -1591,11 +1562,6 @@ function buildSchemas(): Record<string, unknown> {
           maxLength: 200,
           description: "Human-readable funnel name.",
         },
-        description: {
-          type: ["string", "null"],
-          maxLength: 500,
-          description: "Optional funnel description.",
-        },
         steps: {
           type: "array",
           minItems: 2,
@@ -1610,7 +1576,6 @@ function buildSchemas(): Record<string, unknown> {
       description: "Partial update for a saved funnel.",
       properties: {
         name: { type: "string", minLength: 1, maxLength: 200 },
-        description: { type: ["string", "null"], maxLength: 500 },
         steps: {
           type: "array",
           minItems: 2,
@@ -1653,7 +1618,6 @@ function buildSchemas(): Record<string, unknown> {
         id: uuid,
         siteId: uuid,
         name: { type: "string", maxLength: 200 },
-        description: { type: ["string", "null"], maxLength: 500 },
         steps: { type: "array", items: ref("FunnelStep") },
         createdAt: iso,
         updatedAt: iso,
@@ -1756,7 +1720,15 @@ function buildSchemas(): Record<string, unknown> {
             properties: {
               id: { type: "string" },
               status: { type: "integer" },
-              body: {},
+              body: {
+                oneOf: [
+                  ref("SuccessEnvelope"),
+                  ref("ListEnvelope"),
+                  ref("PaginatedEnvelope"),
+                  ref("ErrorResponse"),
+                  { type: "null" },
+                ],
+              },
             },
           },
         },
@@ -1946,17 +1918,8 @@ function buildPaths(): OpenAPISpec["paths"] {
       post: op({
         operationId: "createSite",
         summary: "Create site",
-        description:
-          "Creates a site in the token's team. Supports Idempotency-Key.",
+        description: "Creates a site in the token's team.",
         tags: ["Sites"],
-        parameters: [
-          {
-            name: "Idempotency-Key",
-            in: "header",
-            schema: { type: "string", maxLength: 200 },
-            description: "Client-generated idempotency key.",
-          },
-        ],
         requestBody: requestBody("SiteCreateInput"),
         responses: {
           "201": ok("SiteResponse", "Created site"),
@@ -2219,15 +2182,20 @@ function buildPaths(): OpenAPISpec["paths"] {
       get: op({
         operationId: "compareAnalytics",
         summary: "Compare analytics",
-        description: "Compares analytics against another period.",
+        description:
+          "Compares analytics with the immediately preceding equal-width time window.",
         tags: ["Analytics"],
         parameters: [
           ...timeParams(),
           filterParam(),
           queryParam(
             "compare",
-            { type: "string", maxLength: 80, default: "previous_period" },
-            "Comparison mode.",
+            {
+              type: "string",
+              enum: ["previous_period"],
+              default: "previous_period",
+            },
+            "Comparison mode. Only previous_period is supported.",
           ),
         ],
         responses: {
@@ -2242,7 +2210,7 @@ function buildPaths(): OpenAPISpec["paths"] {
         operationId: "exploreAnalytics",
         summary: "Explore analytics",
         description:
-          "Runs an advanced multidimensional query with complex filters.",
+          "Runs an advanced multidimensional query using the canonical FilterDocument AST from the request body.",
         tags: ["Analytics"],
         requestBody: requestBody("AnalyticsExploreRequest"),
         responses: {
@@ -2365,7 +2333,8 @@ function buildPaths(): OpenAPISpec["paths"] {
       post: op({
         operationId: "searchEvents",
         summary: "Search events",
-        description: "Searches events using complex payload filters.",
+        description:
+          "Searches events using the canonical FilterDocument AST from the request body. Express event names with an event.name condition and payload fields with event-payload JSON Pointer targets.",
         tags: ["Events"],
         requestBody: requestBody("EventSearchRequest"),
         responses: {
@@ -2588,14 +2557,6 @@ function buildPaths(): OpenAPISpec["paths"] {
         summary: "Create funnel",
         description: "Creates a saved funnel.",
         tags: ["Funnels"],
-        parameters: [
-          {
-            name: "Idempotency-Key",
-            in: "header",
-            schema: { type: "string", maxLength: 200 },
-            description: "Client-generated idempotency key.",
-          },
-        ],
         requestBody: requestBody("FunnelCreateInput"),
         responses: {
           "201": ok("FunnelResponse", "Created funnel"),
@@ -2789,14 +2750,6 @@ function buildPaths(): OpenAPISpec["paths"] {
         summary: "Execute global batch",
         description: "Executes up to 20 GET subrequests under /api/v1.",
         tags: ["Batch"],
-        parameters: [
-          {
-            name: "Idempotency-Key",
-            in: "header",
-            schema: { type: "string", maxLength: 200 },
-            description: "Client-generated idempotency key.",
-          },
-        ],
         requestBody: requestBody("BatchRequest"),
         responses: {
           "200": ok("BatchResponse"),
@@ -3021,6 +2974,23 @@ function responseExampleFor(schemaName: string | null, operationId: string) {
       ],
       filters: ["page.path", "geo.country"],
       operators: ["eq", "in", "startsWith"],
+      filterProtocol: {
+        version: 1,
+        urlGrammar:
+          "filter[field]=operator:value; use filter[event.payload][/json-pointer]=operator:json:value for event payloads and [or.N]/[or.N.not] path segments for boolean groups.",
+        fields: [
+          {
+            id: "page.path",
+            valueKind: "string",
+            operators: ["eq", "in", "startsWith"],
+          },
+          {
+            id: "event.payload",
+            valueKind: "json-scalar",
+            operators: ["eq", "gte", "exists"],
+          },
+        ],
+      },
       intervals: ["hour", "day", "week"],
       presets: ["last_7_days", "last_30_days"],
       timeRange: {
@@ -3082,7 +3052,15 @@ function responseExampleFor(schemaName: string | null, operationId: string) {
         rows: [{ "page.path": "/pricing", "geo.country": "US", views: 850 }],
         metrics: ["views"],
         dimensions: ["page.path", "geo.country"],
-        filters: [{ field: "page.path", op: "startsWith", value: "/pricing" }],
+        filters: {
+          version: 1,
+          root: {
+            kind: "condition",
+            target: { kind: "field", field: "page.path" },
+            operator: "startsWith",
+            value: "/pricing",
+          },
+        },
       },
       { timeRange: sampleTimeRange },
     ),
@@ -3232,10 +3210,26 @@ function requestExamplesFor(schemaName: string | null) {
           timeRange: sampleTimeRange,
           metrics: ["views"],
           dimensions: ["page.path", "geo.country"],
-          filters: [
-            { field: "page.path", op: "startsWith", value: "/pricing" },
-            { field: "geo.country", op: "in", value: ["US", "CA"] },
-          ],
+          filters: {
+            version: 1,
+            root: {
+              kind: "and",
+              children: [
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "page.path" },
+                  operator: "startsWith",
+                  value: "/pricing",
+                },
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "geo.country" },
+                  operator: "in",
+                  value: ["US", "CA"],
+                },
+              ],
+            },
+          },
           limit: 100,
         },
       },
@@ -3245,9 +3239,26 @@ function requestExamplesFor(schemaName: string | null) {
         summary: "Search signup events",
         value: {
           timeRange: sampleTimeRange,
-          eventName: "signup",
-          payloadFilters: [{ path: "plan", op: "eq", value: "pro" }],
-          filters: [{ field: "page.path", op: "startsWith", value: "/signup" }],
+          filters: {
+            version: 1,
+            root: {
+              kind: "and",
+              children: [
+                {
+                  kind: "condition",
+                  target: { kind: "field", field: "event.name" },
+                  operator: "eq",
+                  value: "signup",
+                },
+                {
+                  kind: "condition",
+                  target: { kind: "event-payload", path: "/plan" },
+                  operator: "eq",
+                  value: "pro",
+                },
+              ],
+            },
+          },
           limit: 100,
         },
       },
@@ -3257,7 +3268,6 @@ function requestExamplesFor(schemaName: string | null) {
         summary: "Create signup funnel",
         value: {
           name: "Signup funnel",
-          description: "Pricing page to signup conversion.",
           steps: funnelExample.steps,
         },
       },
@@ -3508,8 +3518,9 @@ function buildSpec(): OpenAPISpec {
           in: "query",
           style: "deepObject",
           explode: true,
-          schema: ref("FilterObject"),
-          description: "Simple equality filters as filter[field]=value.",
+          schema: { type: "object", additionalProperties: { type: "string" } },
+          description:
+            "Canonical URL filter DSL. Use filter[field]=operator:value, for example filter[geo.country]=in:US,JP. Event payload targets use filter[event.payload][/score]=gte:json:7. Boolean groups use [or.N] and negation uses .not, for example filter[page.path][or.0]=/docs and filter[page.path][or.1.not]=/pricing. Typed values use json:<JSON>.",
         },
         LimitQueryParam: {
           name: "limit",
@@ -3531,6 +3542,10 @@ function buildSpec(): OpenAPISpec {
         NotFound: { description: "Resource not found", ...errorContent },
         Conflict: { description: "Conflict", ...errorContent },
         PayloadTooLarge: { description: "Payload too large", ...errorContent },
+        MethodNotAllowed: {
+          description: "Method not allowed",
+          ...errorContent,
+        },
         InternalError: { description: "Internal error", ...errorContent },
       },
     },

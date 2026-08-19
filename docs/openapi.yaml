@@ -88,6 +88,8 @@ paths:
                     timestamp: 2026-06-26T12:00:00Z
         "400":
           $ref: "#/components/responses/BadRequest"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
         "500":
           $ref: "#/components/responses/InternalError"
       x-required-scopes: []
@@ -127,6 +129,8 @@ paths:
                       generatedAt: 2026-06-26T12:00:00Z
         "400":
           $ref: "#/components/responses/BadRequest"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
         "500":
           $ref: "#/components/responses/InternalError"
       x-required-scopes: []
@@ -172,6 +176,8 @@ paths:
                       generatedAt: 2026-06-26T12:00:00Z
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes: []
   /api/v1/token/check:
     post:
@@ -218,6 +224,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes: []
   /api/v1/capabilities:
     get:
@@ -268,6 +276,8 @@ paths:
                       generatedAt: 2026-06-26T12:00:00Z
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes: []
   /api/v1/team:
     get:
@@ -300,6 +310,8 @@ paths:
                       generatedAt: 2026-06-26T12:00:00Z
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site:read
   /api/v1/team/usage:
@@ -327,6 +339,8 @@ paths:
                       generatedAt: 2026-06-26T12:00:00Z
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site:read
   /api/v1/team/analytics/overview:
@@ -376,6 +390,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/team/analytics/timeseries:
@@ -422,6 +438,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/team/analytics/sites:
@@ -469,6 +487,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/team/analytics/breakdowns/{dimension}:
@@ -525,6 +545,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites:
@@ -573,21 +595,16 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site:read
     post:
       operationId: createSite
       summary: Create site
-      description: Creates a site in the token's team. Supports Idempotency-Key.
+      description: Creates a site in the token's team.
       tags:
         - Sites
-      parameters:
-        - name: Idempotency-Key
-          in: header
-          schema:
-            type: string
-            maxLength: 200
-          description: Client-generated idempotency key.
       requestBody:
         required: true
         content:
@@ -623,6 +640,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
         "409":
           $ref: "#/components/responses/Conflict"
       x-required-scopes:
@@ -658,6 +677,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site:read
     patch:
@@ -701,6 +722,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
         "409":
           $ref: "#/components/responses/Conflict"
       x-required-scopes:
@@ -720,6 +743,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site:write
   /api/v1/sites/{siteId}/tracking:
@@ -764,6 +789,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site_config:read
     patch:
@@ -825,6 +852,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site_config:write
   /api/v1/sites/{siteId}/tracking/script:
@@ -861,6 +890,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site_config:read
   /api/v1/sites/{siteId}/privacy:
@@ -898,6 +929,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site_config:read
     patch:
@@ -946,6 +979,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site_config:write
   /api/v1/sites/{siteId}/sharing:
@@ -980,6 +1015,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - site_config:read
     patch:
@@ -1025,6 +1062,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
         "409":
           $ref: "#/components/responses/Conflict"
       x-required-scopes:
@@ -1093,6 +1132,25 @@ paths:
                         - eq
                         - in
                         - startsWith
+                      filterProtocol:
+                        version: 1
+                        urlGrammar: filter[field]=operator:value; use
+                          filter[event.payload][/json-pointer]=operator:json:value
+                          for event payloads and [or.N]/[or.N.not] path segments
+                          for boolean groups.
+                        fields:
+                          - id: page.path
+                            valueKind: string
+                            operators:
+                              - eq
+                              - in
+                              - startsWith
+                          - id: event.payload
+                            valueKind: json-scalar
+                            operators:
+                              - eq
+                              - gte
+                              - exists
                       intervals:
                         - hour
                         - day
@@ -1115,6 +1173,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/analytics/overview:
@@ -1157,6 +1217,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/analytics/timeseries:
@@ -1207,6 +1269,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/analytics/filter-values:
@@ -1271,6 +1335,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/analytics/breakdowns/{dimension}:
@@ -1330,6 +1396,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/analytics/cross-breakdowns:
@@ -1400,6 +1468,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/analytics/compare:
@@ -1408,7 +1478,9 @@ paths:
     get:
       operationId: compareAnalytics
       summary: Compare analytics
-      description: Compares analytics against another period.
+      description:
+        Compares analytics with the immediately preceding equal-width time
+        window.
       tags:
         - Analytics
       parameters:
@@ -1421,9 +1493,10 @@ paths:
           in: query
           schema:
             type: string
-            maxLength: 80
+            enum:
+              - previous_period
             default: previous_period
-          description: Comparison mode.
+          description: Comparison mode. Only previous_period is supported.
       responses:
         "200":
           description: Successful response
@@ -1460,6 +1533,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/analytics/explore:
@@ -1468,7 +1543,8 @@ paths:
     post:
       operationId: exploreAnalytics
       summary: Explore analytics
-      description: Runs an advanced multidimensional query with complex filters.
+      description: Runs an advanced multidimensional query using the canonical
+        FilterDocument AST from the request body.
       tags:
         - Analytics
       requestBody:
@@ -1488,14 +1564,24 @@ paths:
                     - page.path
                     - geo.country
                   filters:
-                    - field: page.path
-                      op: startsWith
-                      value: /pricing
-                    - field: geo.country
-                      op: in
-                      value:
-                        - US
-                        - CA
+                    version: 1
+                    root:
+                      kind: and
+                      children:
+                        - kind: condition
+                          target:
+                            kind: field
+                            field: page.path
+                          operator: startsWith
+                          value: /pricing
+                        - kind: condition
+                          target:
+                            kind: field
+                            field: geo.country
+                          operator: in
+                          value:
+                            - US
+                            - CA
                   limit: 100
       responses:
         "200":
@@ -1519,8 +1605,13 @@ paths:
                         - page.path
                         - geo.country
                       filters:
-                        - field: page.path
-                          op: startsWith
+                        version: 1
+                        root:
+                          kind: condition
+                          target:
+                            kind: field
+                            field: page.path
+                          operator: startsWith
                           value: /pricing
                     meta:
                       requestId: req_abc123
@@ -1534,6 +1625,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/analytics/retention/cohorts:
@@ -1586,6 +1679,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/event-types:
@@ -1643,6 +1738,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/event-types/{eventName}:
@@ -1708,6 +1805,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/events:
@@ -1775,6 +1874,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/events/summary:
@@ -1820,6 +1921,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/events/timeseries:
@@ -1875,6 +1978,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/events/search:
@@ -1883,7 +1988,10 @@ paths:
     post:
       operationId: searchEvents
       summary: Search events
-      description: Searches events using complex payload filters.
+      description:
+        Searches events using the canonical FilterDocument AST from the
+        request body. Express event names with an event.name condition and
+        payload fields with event-payload JSON Pointer targets.
       tags:
         - Events
       requestBody:
@@ -1897,15 +2005,23 @@ paths:
                 summary: Search signup events
                 value:
                   timeRange: *a1
-                  eventName: signup
-                  payloadFilters:
-                    - path: plan
-                      op: eq
-                      value: pro
                   filters:
-                    - field: page.path
-                      op: startsWith
-                      value: /signup
+                    version: 1
+                    root:
+                      kind: and
+                      children:
+                        - kind: condition
+                          target:
+                            kind: field
+                            field: event.name
+                          operator: eq
+                          value: signup
+                        - kind: condition
+                          target:
+                            kind: event-payload
+                            path: /plan
+                          operator: eq
+                          value: pro
                   limit: 100
       responses:
         "200":
@@ -1935,6 +2051,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/events/{eventId}:
@@ -1968,6 +2086,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/event-fields/values:
@@ -2046,6 +2166,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/event-fields:
@@ -2103,6 +2225,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/visitors:
@@ -2172,6 +2296,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/visitors/{visitorId}:
@@ -2206,6 +2332,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/visitors/{visitorId}/sessions:
@@ -2262,6 +2390,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/visitors/{visitorId}/events:
@@ -2309,6 +2439,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/sessions:
@@ -2368,6 +2500,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/sessions/{sessionId}:
@@ -2402,6 +2536,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/sessions/{sessionId}/events:
@@ -2449,6 +2585,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/funnels:
@@ -2481,7 +2619,6 @@ paths:
                         id: 7c10f7f2-0f8a-4788-b59d-289e69e95000
                         siteId: 550e8400-e29b-41d4-a716-446655440000
                         name: Signup funnel
-                        description: Pricing page to signup conversion.
                         steps: &a11
                           - type: pageview
                             value: /pricing
@@ -2505,6 +2642,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
     post:
@@ -2513,13 +2652,6 @@ paths:
       description: Creates a saved funnel.
       tags:
         - Funnels
-      parameters:
-        - name: Idempotency-Key
-          in: header
-          schema:
-            type: string
-            maxLength: 200
-          description: Client-generated idempotency key.
       requestBody:
         required: true
         content:
@@ -2531,7 +2663,6 @@ paths:
                 summary: Create signup funnel
                 value:
                   name: Signup funnel
-                  description: Pricing page to signup conversion.
                   steps: *a11
       responses:
         "201":
@@ -2556,8 +2687,10 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
-        - site:write
+        - site_config:write
   /api/v1/sites/{siteId}/funnels/analysis:
     parameters:
       - *a3
@@ -2632,6 +2765,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/funnels/{funnelId}:
@@ -2666,6 +2801,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
     patch:
@@ -2709,8 +2846,10 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
-        - site:write
+        - site_config:write
     delete:
       operationId: deleteFunnel
       summary: Delete funnel
@@ -2726,8 +2865,10 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
-        - site:write
+        - site_config:write
   /api/v1/sites/{siteId}/funnels/{funnelId}/analysis:
     parameters:
       - *a3
@@ -2769,6 +2910,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/performance/summary:
@@ -2814,6 +2957,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/performance/timeseries:
@@ -2864,6 +3009,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/performance/breakdowns/{dimension}:
@@ -2920,6 +3067,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/realtime/active-visitors:
@@ -2953,6 +3102,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/realtime/events:
@@ -2996,6 +3147,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/realtime/sessions:
@@ -3039,6 +3192,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/sites/{siteId}/realtime/snapshot:
@@ -3076,6 +3231,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
   /api/v1/batch:
@@ -3085,13 +3242,6 @@ paths:
       description: Executes up to 20 GET subrequests under /api/v1.
       tags:
         - Batch
-      parameters:
-        - name: Idempotency-Key
-          in: header
-          schema:
-            type: string
-            maxLength: 200
-          description: Client-generated idempotency key.
       requestBody:
         required: true
         content:
@@ -3148,6 +3298,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
       x-required-scopes:
         - analytics:read
 components:
@@ -3286,6 +3438,7 @@ components:
                 - site_not_found
                 - resource_not_found
                 - conflict
+                - method_not_allowed
                 - payload_too_large
                 - internal_error
             message:
@@ -3359,33 +3512,54 @@ components:
           maxLength: 80
           default: UTC
           description: IANA time zone used to resolve presets.
-    FilterObject:
+    FilterScalar:
+      type:
+        - string
+        - number
+        - boolean
+        - "null"
+    FilterFieldTarget:
       type: object
-      description: Simple equality filters keyed by stable dimension name.
-      additionalProperties:
-        type: string
-        maxLength: 500
-    ComplexFilter:
-      type: object
-      description:
-        Advanced filter rule for explore and search endpoints. For eq, neq,
-        contains, startsWith, and endsWith, use a scalar value. For in and
-        notIn, use an array value. For gt, gte, lt, and lte, use a number or ISO
-        8601 date-time string depending on the field. For exists and notExists,
-        value may be omitted.
       required:
+        - kind
         - field
-        - op
       properties:
+        kind:
+          const: field
         field:
           type: string
-          maxLength: 120
-          description: Stable filter field path.
-        op:
+          maxLength: 128
+      additionalProperties: false
+    FilterEventPayloadTarget:
+      type: object
+      required:
+        - kind
+        - path
+      properties:
+        kind:
+          const: event-payload
+        path:
           type: string
-          description:
-            Filter operator. exists and notExists ignore value; in and notIn
-            expect an array-compatible value.
+          pattern: ^/(?:[^/]|~[01])+(?:/(?:[^/]|~[01])+)*$
+          maxLength: 240
+      additionalProperties: false
+    FilterTarget:
+      oneOf:
+        - $ref: "#/components/schemas/FilterFieldTarget"
+        - $ref: "#/components/schemas/FilterEventPayloadTarget"
+    FilterCondition:
+      type: object
+      required:
+        - kind
+        - target
+        - operator
+      properties:
+        kind:
+          const: condition
+        target:
+          $ref: "#/components/schemas/FilterTarget"
+        operator:
+          type: string
           enum:
             - eq
             - neq
@@ -3398,19 +3572,72 @@ components:
             - gte
             - lt
             - lte
+            - between
             - exists
             - notExists
+            - isNull
+            - notNull
+            - isEmpty
+            - notEmpty
         value:
           oneOf:
-            - type: string
-            - type: number
-            - type: boolean
+            - $ref: "#/components/schemas/FilterScalar"
             - type: array
+              minItems: 1
+              maxItems: 128
               items:
-                oneOf:
-                  - type: string
-                  - type: number
-                  - type: boolean
+                $ref: "#/components/schemas/FilterScalar"
+      additionalProperties: false
+    FilterGroup:
+      type: object
+      required:
+        - kind
+        - children
+      properties:
+        kind:
+          type: string
+          enum:
+            - and
+            - or
+        children:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            $ref: "#/components/schemas/FilterExpression"
+      additionalProperties: false
+    FilterNot:
+      type: object
+      required:
+        - kind
+        - child
+      properties:
+        kind:
+          const: not
+        child:
+          $ref: "#/components/schemas/FilterExpression"
+      additionalProperties: false
+    FilterExpression:
+      oneOf:
+        - $ref: "#/components/schemas/FilterCondition"
+        - $ref: "#/components/schemas/FilterGroup"
+        - $ref: "#/components/schemas/FilterNot"
+    FilterDocument:
+      type: object
+      description: Canonical filter AST. Conditions use registered fields or
+        event-payload JSON Pointer targets; group expressions compose
+        AND/OR/NOT.
+      required:
+        - version
+        - root
+      properties:
+        version:
+          const: 1
+        root:
+          oneOf:
+            - $ref: "#/components/schemas/FilterExpression"
+            - type: "null"
+      additionalProperties: false
     MetricDefinition:
       type: object
       description: Metric available for analytics queries.
@@ -3976,6 +4203,44 @@ components:
                   type: array
                   items:
                     type: string
+                filterProtocol:
+                  type: object
+                  required:
+                    - version
+                    - urlGrammar
+                    - fields
+                  properties:
+                    version:
+                      const: 1
+                    urlGrammar:
+                      type: string
+                    fields:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - id
+                          - valueKind
+                          - operators
+                        properties:
+                          id:
+                            type: string
+                          valueKind:
+                            type: string
+                            enum:
+                              - string
+                              - enum
+                              - number
+                              - boolean
+                              - date
+                              - datetime
+                              - json-scalar
+                          operators:
+                            type: array
+                            items:
+                              type: string
+                        additionalProperties: false
+                  additionalProperties: false
                 intervals:
                   type: array
                   items:
@@ -4194,9 +4459,7 @@ components:
             type: string
             maxLength: 120
         filters:
-          type: array
-          items:
-            $ref: "#/components/schemas/ComplexFilter"
+          $ref: "#/components/schemas/FilterDocument"
         orderBy:
           type: array
           items:
@@ -4231,9 +4494,14 @@ components:
                   $ref: "#/components/schemas/OverviewMetrics"
                 change:
                   type: object
-                  description: "Relative changes as 0-based rates. Example: 0.12 means +12%."
+                  description:
+                    "Relative changes as 0-based rates. Example: 0.12 means +12%. A
+                    zero previous value yields 0 when current is also zero,
+                    otherwise null."
                   additionalProperties:
-                    type: number
+                    type:
+                      - number
+                      - "null"
     AnalyticsExploreRow:
       type: object
       description: One row returned by an analytics explore query.
@@ -4262,9 +4530,7 @@ components:
                   items:
                     type: string
                 filters:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/ComplexFilter"
+                  $ref: "#/components/schemas/FilterDocument"
     RetentionCohortsResponse:
       description: Response envelope.
       allOf:
@@ -4522,68 +4788,16 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/EventType"
-    EventPayloadFilter:
-      type: object
-      description: Filter applied to custom event payload fields.
-      required:
-        - path
-        - op
-      properties:
-        path:
-          type: string
-          maxLength: 240
-          description: Dot-notation path inside the event payload.
-        op:
-          type: string
-          description:
-            Payload filter operator. eq/neq compare equality, in/notIn compare
-            sets, contains/startsWith/endsWith compare strings, gt/gte/lt/lte
-            compare ordered values, exists/notExists ignore value.
-          enum:
-            - eq
-            - neq
-            - in
-            - notIn
-            - contains
-            - startsWith
-            - endsWith
-            - gt
-            - gte
-            - lt
-            - lte
-            - exists
-            - notExists
-        value:
-          description: Comparison value. Required unless op is exists or notExists.
-          oneOf:
-            - type: string
-            - type: number
-            - type: boolean
-            - type: array
-              items:
-                oneOf:
-                  - type: string
-                  - type: number
-                  - type: boolean
-      additionalProperties: false
     EventSearchRequest:
       type: object
-      description: Request for searching event records with complex filters.
+      description:
+        Request for searching event records. Time range, filters, limit,
+        and cursor are read only from this body.
       properties:
         timeRange:
           $ref: "#/components/schemas/TimeRangeInput"
-        eventName:
-          type: string
-          maxLength: 120
-          description: Optional event name filter.
-        payloadFilters:
-          type: array
-          items:
-            $ref: "#/components/schemas/EventPayloadFilter"
         filters:
-          type: array
-          items:
-            $ref: "#/components/schemas/ComplexFilter"
+          $ref: "#/components/schemas/FilterDocument"
         limit:
           type: integer
           minimum: 1
@@ -4808,12 +5022,6 @@ components:
           minLength: 1
           maxLength: 200
           description: Human-readable funnel name.
-        description:
-          type:
-            - string
-            - "null"
-          maxLength: 500
-          description: Optional funnel description.
         steps:
           type: array
           minItems: 2
@@ -4829,11 +5037,6 @@ components:
           type: string
           minLength: 1
           maxLength: 200
-        description:
-          type:
-            - string
-            - "null"
-          maxLength: 500
         steps:
           type: array
           minItems: 2
@@ -4890,11 +5093,6 @@ components:
         name:
           type: string
           maxLength: 200
-        description:
-          type:
-            - string
-            - "null"
-          maxLength: 500
         steps:
           type: array
           items:
@@ -5114,7 +5312,13 @@ components:
                         type: string
                       status:
                         type: integer
-                      body: {}
+                      body:
+                        oneOf:
+                          - $ref: "#/components/schemas/SuccessEnvelope"
+                          - $ref: "#/components/schemas/ListEnvelope"
+                          - $ref: "#/components/schemas/PaginatedEnvelope"
+                          - $ref: "#/components/schemas/ErrorResponse"
+                          - type: "null"
     HealthResponse:
       type: object
       description: Service health response.
@@ -5259,8 +5463,15 @@ components:
       style: deepObject
       explode: true
       schema:
-        $ref: "#/components/schemas/FilterObject"
-      description: Simple equality filters as filter[field]=value.
+        type: object
+        additionalProperties:
+          type: string
+      description:
+        Canonical URL filter DSL. Use filter[field]=operator:value, for
+        example filter[geo.country]=in:US,JP. Event payload targets use
+        filter[event.payload][/score]=gte:json:7. Boolean groups use [or.N] and
+        negation uses .not, for example filter[page.path][or.0]=/docs and
+        filter[page.path][or.1.not]=/pricing. Typed values use json:<JSON>.
     LimitQueryParam:
       name: limit
       in: query
@@ -5298,6 +5509,9 @@ components:
       content: *a17
     PayloadTooLarge:
       description: Payload too large
+      content: *a17
+    MethodNotAllowed:
+      description: Method not allowed
       content: *a17
     InternalError:
       description: Internal error

@@ -936,6 +936,16 @@ describe("api v1 gateway", () => {
         dimensions: expect.arrayContaining([
           expect.objectContaining({ key: "geo.country" }),
         ]),
+        filterProtocol: expect.objectContaining({
+          version: 1,
+          urlGrammar: expect.stringContaining("filter[field]"),
+          fields: expect.arrayContaining([
+            expect.objectContaining({
+              id: "event.payload",
+              valueKind: "json-scalar",
+            }),
+          ]),
+        }),
       },
     });
 
@@ -1329,7 +1339,7 @@ describe("api v1 gateway", () => {
     });
   });
 
-  it("executes global batch with partial failure metadata", async () => {
+  it("rejects batch subrequests that do not match the documented input schema", async () => {
     const { response } = await authed(
       "/api/v1/batch",
       [siteMatch("site-1", "Blog")],
@@ -1354,15 +1364,9 @@ describe("api v1 gateway", () => {
       },
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({
-      data: {
-        responses: [
-          { id: "overview", status: 200 },
-          { id: "bad", status: 400 },
-        ],
-      },
-      meta: { partialFailure: true },
+      error: { code: "validation_failed" },
     });
   });
 
@@ -1975,10 +1979,9 @@ describe("api v1 gateway", () => {
       },
       { scopes_json: JSON.stringify(["site_config:read"]) },
     );
-    expect(writeAttempt.response.status).toBe(200);
+    expect(writeAttempt.response.status).toBe(400);
     await expect(writeAttempt.response.json()).resolves.toMatchObject({
-      data: { responses: [{ id: "sharing", status: 400 }] },
-      meta: { partialFailure: true },
+      error: { code: "validation_failed" },
     });
   });
 
@@ -2045,12 +2048,67 @@ describe("api v1 gateway", () => {
 
   // ── additional coverage: analytics compare ──────────────────────
 
-  it("returns comparison analytics", async () => {
+  it("returns previous-period analytics with a same-width preceding window and zero-safe changes", async () => {
+    queryApiV1OverviewMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        current: {
+          views: 10,
+          sessions: 0,
+          visitors: 5,
+          bounces: 0,
+          totalDurationMs: 1_000,
+          durationViews: 1,
+        },
+        previous: {
+          views: 5,
+          sessions: 0,
+          visitors: 0,
+          bounces: 0,
+          totalDurationMs: 0,
+          durationViews: 0,
+        },
+      },
+      meta: { time: {} as never, source: "raw", approximateVisitors: false },
+    });
     const { response } = await authed(
       "/api/v1/sites/site-1/analytics/compare?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z&compare=previous_period",
       [siteMatch("site-1", "Blog")],
     );
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        current: { views: 10 },
+        previous: { views: 5 },
+        change: { views: 1, sessions: 0, visitors: null },
+      },
+    });
+    expect(queryApiV1OverviewMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "site-1",
+      expect.any(URL),
+      expect.objectContaining({
+        startMs: Date.parse("2026-06-01T00:00:00Z"),
+        endExclusiveMs: Date.parse("2026-06-02T00:00:00Z"),
+      }),
+      expect.objectContaining({
+        previousTime: expect.objectContaining({
+          startMs: Date.parse("2026-05-31T00:00:00Z"),
+          endExclusiveMs: Date.parse("2026-06-01T00:00:00Z"),
+        }),
+      }),
+    );
+  });
+
+  it("rejects comparison modes other than previous_period", async () => {
+    const { response } = await authed(
+      "/api/v1/sites/site-1/analytics/compare?from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z&compare=year_over_year",
+      [siteMatch("site-1", "Blog")],
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "validation_failed" },
+    });
   });
 
   // ── additional coverage: analytics explore (POST) ───────────────
@@ -2087,12 +2145,15 @@ describe("api v1 gateway", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       data: { metrics: string[]; dimensions: string[] };
+      meta: { timeRange: { from: string } };
     };
     expect(body.data.metrics).toEqual(["views"]);
     expect(body.data.dimensions).toEqual(["page.path"]);
     expect(body.data).toMatchObject({
       rows: [{ "page.path": "/pricing", views: 5 }],
     });
+    expect(body.meta.timeRange.from).not.toBe("2026-06-01T00:00:00.000Z");
+    expect(body.meta.timeRange.from).not.toBe("2026-06-01T00:00:00.000Z");
   });
 
   it("adds only the auxiliary analytics sources required by the requested metrics", async () => {
@@ -2934,26 +2995,22 @@ describe("api v1 gateway", () => {
 
   // ── additional coverage: token check edge cases ─────────────────
 
-  it("handles token check with non-object check items", async () => {
+  it("rejects token check with non-object check items", async () => {
     const { response } = await authed("/api/v1/token/check", [], {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ checks: [null, "string", 42] }),
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(400);
   });
 
-  it("handles token check with missing checks array", async () => {
+  it("rejects token check with a missing checks array", async () => {
     const { response } = await authed("/api/v1/token/check", [], {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({}),
     });
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: { checks: unknown[] };
-    };
-    expect(body.data.checks).toEqual([]);
+    expect(response.status).toBe(400);
   });
 
   // ── additional coverage: token check inactive reason ────────────

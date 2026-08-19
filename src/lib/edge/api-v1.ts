@@ -1,10 +1,11 @@
-import type { z } from "zod";
+import { z } from "zod";
 
 import { readJsonResponse } from "@/lib/response";
 import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
 import {
   FunnelAnalyzeInputSchema,
   FunnelCreateInputSchema,
+  FunnelUpdateInputSchema,
 } from "@/schemas/funnel";
 import { SiteCreateInputSchema, SiteUpdateInputSchema } from "@/schemas/site";
 import { SiteConfigUpdateInputSchema } from "@/schemas/site-config";
@@ -94,6 +95,8 @@ import {
   queryApiV1Visitors,
 } from "./api-v1-query-adapter";
 import {
+  analyticsFilterRegistry,
+  FILTER_DOCUMENT_VERSION,
   FILTER_OPERATOR_IDS,
   type FilterDocument,
   parseApiV1FilterDocument,
@@ -142,6 +145,113 @@ interface FunnelStepInput {
   type: "pageview" | "event";
   value: string;
 }
+
+const TimeRangeInputSchema = z
+  .object({
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
+    preset: z.enum(TIME_PRESETS).optional(),
+    timeZone: z.string().max(80).optional(),
+  })
+  .strict();
+
+const FilterDocumentInputSchema = z
+  .object({ version: z.literal(1), root: z.unknown().nullable() })
+  .strict();
+
+const AnalyticsExploreInputSchema = z
+  .object({
+    timeRange: TimeRangeInputSchema.optional(),
+    metrics: z.array(z.string().max(80)).min(1).max(20).optional(),
+    dimensions: z.array(z.string().max(120)).max(5).optional(),
+    filters: FilterDocumentInputSchema.optional(),
+    orderBy: z
+      .array(
+        z
+          .object({
+            field: z.string().min(1).max(120),
+            direction: z.enum(["asc", "desc"]).default("desc"),
+          })
+          .strict(),
+      )
+      .max(5)
+      .optional(),
+    limit: z.number().int().min(1).max(1000).optional(),
+  })
+  .strict();
+
+const EventSearchInputSchema = z
+  .object({
+    timeRange: TimeRangeInputSchema.optional(),
+    filters: FilterDocumentInputSchema.optional(),
+    limit: z.number().int().min(1).max(1000).default(100),
+    cursor: z.string().min(1).max(12_288).nullable().optional(),
+  })
+  .strict();
+
+const TokenCheckRequestSchema = z
+  .object({
+    checks: z
+      .array(
+        z
+          .object({
+            scope: z.string().min(1).max(80),
+            siteId: z.string().min(1).max(160).optional(),
+          })
+          .strict(),
+      )
+      .max(50),
+  })
+  .strict();
+
+const SharingUpdateInputSchema = z
+  .object({
+    publicEnabled: z.boolean(),
+    publicSlug: z.string().trim().max(80).nullable().optional(),
+  })
+  .strict();
+
+const PrivacyUpdateInputSchema = z
+  .object({
+    respectDoNotTrack: z.boolean().optional(),
+    euMode: z.boolean().optional(),
+  })
+  .strict();
+
+const TrackingUpdateInputSchema = z
+  .object({
+    trackPageviews: z.boolean().optional(),
+    trackQuery: z.boolean().optional(),
+    trackHash: z.boolean().optional(),
+    trackCustomEvents: z.boolean().optional(),
+    trackEngagement: z.boolean().optional(),
+    trackWebVitals: z.boolean().optional(),
+    autoTrackOutboundLinks: z.boolean().optional(),
+    trackingStrength: z.enum(["strong", "smart", "weak"]).optional(),
+    allowedDomains: z.array(z.string().max(255)).optional(),
+    excludedPaths: z.array(z.string().max(2048)).optional(),
+  })
+  .strict();
+
+const BatchRequestSchema = z
+  .object({
+    requests: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(80),
+            method: z.literal("GET"),
+            path: z.string().min(1).max(2048),
+            query: z
+              .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+              .optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(BATCH_MAX_REQUESTS),
+  })
+  .strict();
 
 const FUNNEL_KIND = "funnel";
 
@@ -247,6 +357,41 @@ function toQueryWindow(timeRange: ParsedTimeRange) {
     nowMs: Date.now(),
     timeZone: timeRange.timeZone,
   };
+}
+
+function previousPeriod(timeRange: ParsedTimeRange): ParsedTimeRange {
+  const width = timeRange.endExclusiveMs - timeRange.startMs;
+  const endExclusiveMs = timeRange.startMs;
+  const startMs = endExclusiveMs - width;
+  return {
+    from: new Date(startMs).toISOString(),
+    to: new Date(endExclusiveMs).toISOString(),
+    timeZone: timeRange.timeZone,
+    startMs,
+    endExclusiveMs,
+  };
+}
+
+function relativeChanges(
+  current: Record<string, unknown>,
+  previous: Record<string, unknown>,
+) {
+  return Object.fromEntries(
+    Object.keys(current).flatMap((key) => {
+      const currentValue = current[key];
+      const previousValue = previous[key];
+      if (typeof currentValue !== "number" || typeof previousValue !== "number") {
+        return [];
+      }
+      const change =
+        previousValue === 0
+          ? currentValue === 0
+            ? 0
+            : null
+          : (currentValue - previousValue) / previousValue;
+      return [[key, change]];
+    }),
+  );
 }
 
 function parseFunnelSteps(configJson: string): FunnelStepInput[] {
@@ -670,6 +815,13 @@ function urlWithBodyTimeRange(url: URL, record: Record<string, unknown>): URL {
     }
   }
   return next;
+}
+
+function urlForBodyQuery(url: URL, record: Record<string, unknown>): URL {
+  return urlWithBodyTimeRange(
+    new URL(`${url.protocol}//${url.host}${url.pathname}`),
+    record,
+  );
 }
 
 async function queryAnalyticsAggregateRows(
@@ -1142,21 +1294,17 @@ export async function handleTokenCheck(
   principal: ApiKeyPrincipal,
 ): Promise<Response> {
   if (request.method !== "POST") return methodNotAllowed(request);
-  const body = await parseJsonBody(request);
-  if (body instanceof Response) return body;
-  const checks = Array.isArray((body as Record<string, unknown>).checks)
-    ? ((body as Record<string, unknown>).checks as unknown[])
-    : [];
+  const parsed = await parseAndValidateApiV1Body(
+    request,
+    TokenCheckRequestSchema,
+  );
+  if (!parsed.ok) return parsed.response;
+  const checks = parsed.data.checks;
   return jsonSuccess(
     {
       checks: checks.map((check) => {
-        const item =
-          check && typeof check === "object"
-            ? (check as Record<string, unknown>)
-            : {};
-        const scope = String(item.scope || "");
-        const siteId =
-          typeof item.siteId === "string" ? item.siteId : undefined;
+        const scope = check.scope;
+        const siteId = check.siteId;
         const hasScope = principal.scopes.includes(scope as never);
         const hasSite = !siteId || canAccessSiteId(principal, siteId);
         const active = (principal.status ?? "active") === "active";
@@ -1587,11 +1735,14 @@ export async function handleTracking(
   if (request.method === "PATCH") {
     const denied = requireSiteScope(request, principal, "site_config:write");
     if (denied) return denied;
-    const body = await parseJsonBody(request);
-    if (body instanceof Response) return body;
+    const body = await parseAndValidateApiV1Body(
+      request,
+      TrackingUpdateInputSchema,
+    );
+    if (!body.ok) return body.response;
     const parsed = validateApiV1Value(
       request,
-      legacySettingsFromTracking(body),
+      legacySettingsFromTracking(body.data),
       SiteConfigUpdateInputSchema,
     );
     if (!parsed.ok) return parsed.response;
@@ -1623,10 +1774,12 @@ export async function handlePrivacy(
   if (request.method === "PATCH") {
     const denied = requireSiteScope(request, principal, "site_config:write");
     if (denied) return denied;
-    const body = await parseJsonBody(request);
-    if (body instanceof Response) return body;
-    const record =
-      body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const body = await parseAndValidateApiV1Body(
+      request,
+      PrivacyUpdateInputSchema,
+    );
+    if (!body.ok) return body.response;
+    const record = body.data;
     const parsed = validateApiV1Value(
       request,
       {
@@ -1665,13 +1818,13 @@ export async function handleSharing(
   if (request.method === "PATCH") {
     const denied = requireSiteScope(request, principal, "site_config:write");
     if (denied) return denied;
-    const body = await parseJsonBody(request);
-    if (body instanceof Response) return body;
-    const record =
-      body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-    const publicEnabled = Boolean(record.publicEnabled);
-    const publicSlug =
-      typeof record.publicSlug === "string" ? record.publicSlug : null;
+    const body = await parseAndValidateApiV1Body(
+      request,
+      SharingUpdateInputSchema,
+    );
+    if (!body.ok) return body.response;
+    const publicEnabled = body.data.publicEnabled;
+    const publicSlug = body.data.publicSlug ?? null;
     if (publicEnabled && publicSlug) {
       const available = await ensurePublicSlugAvailable(
         env,
@@ -1756,8 +1909,18 @@ function analyticsSchema(siteId: string) {
       type: "string",
       description: `Analytics dimension: ${key}.`,
     })),
-    filters: [...ANALYTICS_DIMENSIONS],
+    filters: [...analyticsFilterRegistry.keys()],
     operators: [...FILTER_OPERATOR_IDS],
+    filterProtocol: {
+      version: FILTER_DOCUMENT_VERSION,
+      urlGrammar:
+        "filter[field]=operator:value; use filter[event.payload][/json-pointer]=operator:json:value for event payloads and [or.N]/[or.N.not] path segments for boolean groups.",
+      fields: [...analyticsFilterRegistry.values()].map((field) => ({
+        id: field.id,
+        valueKind: field.valueKind,
+        operators: [...field.operators],
+      })),
+    },
     intervals: [...INTERVALS],
     presets: [...TIME_PRESETS],
     timeRange: {
@@ -1790,9 +1953,6 @@ export async function handleAnalytics(
 
   const timeRange = parseTimeRange(url);
   if (timeRange instanceof Response) return timeRange;
-  const filters = parseApiV1Filters(url, request);
-  if (filters instanceof Response) return filters;
-
   if (resource === "overview") {
     if (request.method !== "GET") return methodNotAllowed(request);
     const metrics = parseMetrics(
@@ -1927,28 +2087,46 @@ export async function handleAnalytics(
   }
   if (resource === "compare") {
     if (request.method !== "GET") return methodNotAllowed(request);
+    const compare = url.searchParams.get("compare") ?? "previous_period";
+    if (compare !== "previous_period") {
+      return jsonError(
+        "validation_failed",
+        "Unsupported comparison mode",
+        400,
+        { field: "compare", supported: ["previous_period"] },
+        request,
+      );
+    }
     const result = await queryApiV1Overview(
       env,
       siteId,
       buildInternalUrl(url, timeRange),
       timeRange,
+      { previousTime: previousPeriod(timeRange) },
     );
     if (!result.ok) return apiV1QueryFailure(result.error, request);
-    return jsonSuccess(apiV1OverviewMetrics(result.data), {
+    const current = apiV1OverviewMetrics(result.data);
+    const previous = result.data.previous
+      ? apiV1OverviewMetrics({ current: result.data.previous })
+      : current;
+    return jsonSuccess({
+      current,
+      previous,
+      change: relativeChanges(current, previous),
+    }, {
       request,
-      meta: {
-        timeRange,
-        compare: url.searchParams.get("compare") || "previous_period",
-      },
+      meta: { timeRange, compare },
     });
   }
   if (resource === "explore") {
     if (request.method !== "POST") return methodNotAllowed(request);
-    const body = await parseJsonBody(request);
-    if (body instanceof Response) return body;
-    const record =
-      body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-    const bodyUrl = urlWithBodyTimeRange(url, record);
+    const body = await parseAndValidateApiV1Body(
+      request,
+      AnalyticsExploreInputSchema,
+    );
+    if (!body.ok) return body.response;
+    const record = body.data;
+    const bodyUrl = urlForBodyQuery(url, record);
     const exploreTimeRange = parseTimeRange(bodyUrl);
     if (exploreTimeRange instanceof Response) return exploreTimeRange;
     const metrics = parseExploreMetrics(record.metrics);
@@ -1984,6 +2162,7 @@ export async function handleAnalytics(
             orderBy,
           },
         ),
+      filters,
     );
     if (!result.ok) return apiV1QueryFailure(result.error, request);
     const rows = result.data;
@@ -2007,8 +2186,7 @@ export async function handleAnalytics(
       timeRange,
     );
     if (!result.ok) return apiV1QueryFailure(result.error, request);
-    // Retention's legacy wire shape stored the typed payload in metadata.
-    return jsonSuccess({}, { request, meta: { timeRange, ...result.data } });
+    return jsonSuccess(result.data, { request, meta: { timeRange } });
   }
 
   return jsonError(
@@ -2030,6 +2208,36 @@ export async function handleEvents(
 ): Promise<Response> {
   const site = await ensureAnalyticsAccess(request, env, principal, siteId);
   if (site instanceof Response) return site;
+  if (path[2] === "events" && path[3] === "search") {
+    if (request.method !== "POST") return methodNotAllowed(request);
+    const body = await parseAndValidateApiV1Body(request, EventSearchInputSchema);
+    if (!body.ok) return body.response;
+    const bodyUrl = urlForBodyQuery(url, body.data);
+    const timeRange = parseTimeRange(bodyUrl);
+    if (timeRange instanceof Response) return timeRange;
+    if (body.data.cursor) bodyUrl.searchParams.set("cursor", body.data.cursor);
+    bodyUrl.searchParams.set("limit", String(body.data.limit));
+    const pagination = parseCursorPagination(bodyUrl);
+    if (pagination instanceof Response) return pagination;
+    const filters = parseApiV1Filters(
+      body.data.filters ?? { version: 1, root: null },
+      request,
+    );
+    if (filters instanceof Response) return filters;
+    const result = await queryApiV1EventRecords(
+      env,
+      siteId,
+      bodyUrl,
+      timeRange,
+      pagination,
+      { filters },
+    );
+    if (!result.ok) return apiV1QueryFailure(result.error, request);
+    return jsonPaginated([...result.data.data], result.data.pagination, {
+      request,
+      meta: { timeRange },
+    });
+  }
   const pagination = parseCursorPagination(url);
   if (pagination instanceof Response) return pagination;
   const timeRange = parseTimeRange(url);
@@ -2054,7 +2262,7 @@ export async function handleEvents(
       path[3],
     );
     if (!result.ok) return apiV1QueryFailure(result.error, request);
-    return jsonSuccess({}, { request, meta: { timeRange, ...result.data } });
+    return jsonSuccess(result.data, { request, meta: { timeRange } });
   }
   if (path[2] === "event-fields" && !path[3]) {
     if (request.method !== "GET") return methodNotAllowed(request);
@@ -2087,8 +2295,7 @@ export async function handleEvents(
       timeRange,
     );
     if (!result.ok) return apiV1QueryFailure(result.error, request);
-    // Legacy V1 exposed these as response metadata rather than `data`.
-    return jsonSuccess({}, { request, meta: { timeRange, ...result.data } });
+    return jsonSuccess(result.data, { request, meta: { timeRange } });
   }
   if (path[2] === "events" && path[3] === "timeseries") {
     if (request.method !== "GET") return methodNotAllowed(request);
@@ -2110,25 +2317,9 @@ export async function handleEvents(
         meta: {
           timeRange,
           interval: result.data.interval,
-          series: result.data.series,
         },
       },
     );
-  }
-  if (path[2] === "events" && path[3] === "search") {
-    if (request.method !== "POST") return methodNotAllowed(request);
-    const result = await queryApiV1EventRecords(
-      env,
-      siteId,
-      buildInternalUrl(url, timeRange),
-      timeRange,
-      pagination,
-    );
-    if (!result.ok) return apiV1QueryFailure(result.error, request);
-    return jsonPaginated([...result.data.data], result.data.pagination, {
-      request,
-      meta: { timeRange },
-    });
   }
   if (path[2] === "events" && path[3]) {
     if (request.method !== "GET") return methodNotAllowed(request);
@@ -2382,17 +2573,15 @@ async function handleFunnelResource(
   if (request.method === "PATCH") {
     const denied = requireSiteScope(request, principal, "site_config:write");
     if (denied) return denied;
-    const body = await parseJsonBody(request);
-    if (body instanceof Response) return body;
-    const record =
-      body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-    const name =
-      typeof record.name === "string" && record.name.trim()
-        ? record.name.trim().slice(0, 200)
-        : existing.name;
+    const parsed = await parseAndValidateApiV1Body(
+      request,
+      FunnelUpdateInputSchema,
+    );
+    if (!parsed.ok) return parsed.response;
+    const name = parsed.data.name ?? existing.name;
     const steps =
-      "steps" in record
-        ? normalizeFunnelSteps(record.steps)
+      parsed.data.steps
+        ? normalizeFunnelSteps(parsed.data.steps)
         : parseFunnelSteps(existing.config_json);
     if (steps.length < 2) {
       return jsonError(
@@ -2674,31 +2863,22 @@ export async function handleBatch(
   dispatch: ApiV1BatchDispatcher = handleApiV1,
 ): Promise<Response> {
   if (request.method !== "POST") return methodNotAllowed(request);
-  const body = await parseJsonBody(request);
-  if (body instanceof Response) return body;
-  const requests = Array.isArray((body as Record<string, unknown>).requests)
-    ? ((body as Record<string, unknown>).requests as BatchRequestInput[])
-    : [];
-  if (requests.length < 1 || requests.length > BATCH_MAX_REQUESTS) {
-    return jsonError(
-      "validation_failed",
-      "Invalid batch request count",
-      400,
-      {
-        max: BATCH_MAX_REQUESTS,
-      },
-      request,
-    );
-  }
+  const parsed = await parseAndValidateApiV1Body(request, BatchRequestSchema);
+  if (!parsed.ok) return parsed.response;
+  const requests = parsed.data.requests;
   const responses = await Promise.all(
     requests.map(async (item) => {
       if (item.method !== "GET") {
         return {
           id: item.id,
           status: 400,
-          body: {
-            error: { code: "invalid_request", message: "Only GET is allowed" },
-          },
+          body: await jsonError(
+            "invalid_request",
+            "Only GET is allowed",
+            400,
+            undefined,
+            request,
+          ).json(),
         };
       }
       if (
@@ -2708,9 +2888,13 @@ export async function handleBatch(
         return {
           id: item.id,
           status: 400,
-          body: {
-            error: { code: "invalid_request", message: "Invalid batch path" },
-          },
+          body: await jsonError(
+            "invalid_request",
+            "Invalid batch path",
+            400,
+            undefined,
+            request,
+          ).json(),
         };
       }
       const subUrl = new URL(item.path, `${url.protocol}//${url.host}`);

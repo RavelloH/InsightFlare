@@ -154,6 +154,18 @@ v1Routes.all("/sites/:siteId/event-types", (c) =>
     ),
   ),
 );
+v1Routes.all("/sites/:siteId/event-types/:eventName", (c) =>
+  withSiteId(c, (siteId, routePath) =>
+    handleEvents(
+      c.req.raw,
+      c.env,
+      requestUrl(c),
+      principal(c),
+      siteId,
+      routePath,
+    ),
+  ),
+);
 v1Routes.all("/sites/:siteId/events", (c) =>
   withSiteId(c, (siteId, routePath) =>
     handleEvents(
@@ -226,6 +238,18 @@ v1Routes.all("/sites/:siteId/visitors/:visitorId", (c) =>
     ),
   ),
 );
+v1Routes.all("/sites/:siteId/visitors/:visitorId/*", (c) =>
+  withSiteId(c, (siteId, routePath) =>
+    handleJourneys(
+      c.req.raw,
+      c.env,
+      requestUrl(c),
+      principal(c),
+      siteId,
+      routePath,
+    ),
+  ),
+);
 v1Routes.all("/sites/:siteId/sessions", (c) =>
   withSiteId(c, (siteId, routePath) =>
     handleJourneys(
@@ -239,6 +263,18 @@ v1Routes.all("/sites/:siteId/sessions", (c) =>
   ),
 );
 v1Routes.all("/sites/:siteId/sessions/:sessionId", (c) =>
+  withSiteId(c, (siteId, routePath) =>
+    handleJourneys(
+      c.req.raw,
+      c.env,
+      requestUrl(c),
+      principal(c),
+      siteId,
+      routePath,
+    ),
+  ),
+);
+v1Routes.all("/sites/:siteId/sessions/:sessionId/*", (c) =>
   withSiteId(c, (siteId, routePath) =>
     handleJourneys(
       c.req.raw,

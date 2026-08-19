@@ -179,6 +179,9 @@ for (const [path, pathItem] of Object.entries(openapi.paths ?? {})) {
       if (parameter.name === "queryName") {
         issues.push(`${key} has forbidden queryName parameter`);
       }
+      if (parameter.name === "Idempotency-Key") {
+        issues.push(`${key} must not expose Idempotency-Key`);
+      }
     }
 
     const hasCursor = parameters.some(
@@ -232,6 +235,10 @@ for (const [path, pathItem] of Object.entries(openapi.paths ?? {})) {
 
     if (operation.responses?.["429"]) {
       issues.push(`${key} must not declare 429 as a stable origin response`);
+    }
+
+    if (path.startsWith("/api/v1") && !operation.responses?.["405"]) {
+      issues.push(`${key} must document the standard 405 error response`);
     }
 
     if (!Object.prototype.hasOwnProperty.call(operation, "x-required-scopes")) {
@@ -348,10 +355,61 @@ if (sessionParam?.schema?.format === "uuid") {
   issues.push("SessionIdPathParam must not require uuid format");
 }
 
-const complexFilterValue =
-  openapi.components?.schemas?.ComplexFilter?.properties?.value;
-if (!Array.isArray(complexFilterValue?.oneOf)) {
-  issues.push("ComplexFilter.value must define a constrained oneOf schema");
+const filterDocument = openapi.components?.schemas?.FilterDocument;
+if (
+  filterDocument?.properties?.version?.const !== 1 ||
+  !Array.isArray(filterDocument?.properties?.root?.oneOf)
+) {
+  issues.push("FilterDocument must expose the recursive version 1 AST schema");
+}
+for (const legacyFilterSchema of ["ComplexFilter", "EventPayloadFilter", "FilterObject"]) {
+  if (openapi.components?.schemas?.[legacyFilterSchema]) {
+    issues.push(`${legacyFilterSchema} must not be exposed in API v1`);
+  }
+}
+for (const requestName of ["AnalyticsExploreRequest", "EventSearchRequest"]) {
+  if (
+    refName(openapi.components?.schemas?.[requestName]?.properties?.filters) !==
+    "FilterDocument"
+  ) {
+    issues.push(`${requestName}.filters must reference FilterDocument`);
+  }
+}
+const eventSearchProperties =
+  openapi.components?.schemas?.EventSearchRequest?.properties ?? {};
+if (eventSearchProperties.eventName || eventSearchProperties.payloadFilters) {
+  issues.push("EventSearchRequest must use FilterDocument instead of legacy event filters");
+}
+const filterQuery = openapi.components?.parameters?.FilterQueryParam;
+if (
+  !String(filterQuery?.description ?? "").includes("filter[geo.country]=in:US,JP") ||
+  !String(filterQuery?.description ?? "").includes("event.payload")
+) {
+  issues.push("FilterQueryParam must document the canonical URL filter DSL");
+}
+
+for (const schemaName of ["Funnel", "FunnelCreateInput", "FunnelUpdateInput"]) {
+  if (openapi.components?.schemas?.[schemaName]?.properties?.description) {
+    issues.push(`${schemaName} must not expose the removed funnel description field`);
+  }
+}
+
+const methodNotAllowed = openapi.components?.responses?.MethodNotAllowed;
+if (refName(methodNotAllowed?.content?.["application/json"]?.schema) !== "ErrorResponse") {
+  issues.push("MethodNotAllowed must use the standard ErrorResponse envelope");
+}
+
+const metaProperties = openapi.components?.schemas?.Meta?.properties ?? {};
+for (const businessField of [
+  "cohorts",
+  "summary",
+  "eventType",
+  "events",
+  "series",
+]) {
+  if (businessField in metaProperties) {
+    issues.push(`Meta must not expose business payload field ${businessField}`);
+  }
 }
 
 if (openapi.paths?.["/collect"]) {

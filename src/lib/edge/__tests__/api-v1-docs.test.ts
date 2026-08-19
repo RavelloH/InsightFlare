@@ -23,7 +23,11 @@ type OperationObject = {
 type OpenApiSpec = {
   tags?: Array<{ name: string }>;
   paths: Record<string, Record<string, OperationObject>>;
-  components: { schemas: Record<string, JsonSchemaObject> };
+  components: {
+    schemas: Record<string, JsonSchemaObject>;
+    responses?: Record<string, unknown>;
+    parameters?: Record<string, JsonSchemaObject>;
+  };
 };
 
 type JsonSchemaObject = {
@@ -89,12 +93,17 @@ describe("api v1 public docs", () => {
     expect(raw).not.toContain("sortDir");
     expect(raw).not.toContain("ifk_live_");
     expect(raw).not.toContain("RateLimit");
+    expect(raw).not.toContain("ComplexFilter");
+    expect(raw).not.toContain("EventPayloadFilter");
+    expect(raw).not.toContain("Idempotency-Key");
 
     expect(
       Object.keys(spec.components.schemas).some((name) => name.includes("___")),
     ).toBe(false);
     expect(spec.components.schemas.ErrorResponse).toBeDefined();
     expect(spec.components.schemas.PaginatedEnvelope).toBeDefined();
+    expect(spec.components.schemas.FilterDocument).toBeDefined();
+    expect(spec.components.responses?.MethodNotAllowed).toBeDefined();
     expect(spec.paths["/api/v1/sites/{siteId}/analytics/schema"]).toBeDefined();
     expect(spec.paths["/api/v1/batch"]).toBeDefined();
     expect(spec.paths["/api/v1/sites/{siteId}/config"]).toBeUndefined();
@@ -213,14 +222,7 @@ describe("api v1 public docs", () => {
     ).toBe("#/components/schemas/FunnelResponse");
     expect(
       spec.paths["/api/v1/sites/{siteId}/funnels"]?.post?.parameters,
-    ).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: "Idempotency-Key",
-          in: "header",
-        }),
-      ]),
-    );
+    ).toBeUndefined();
     expect(responseSchema("get", "/api/v1/team/usage")).toBe(
       "#/components/schemas/TeamUsageResponse",
     );
@@ -379,6 +381,54 @@ describe("api v1 public docs", () => {
     expect(explore.properties?.dimensions?.items).toEqual(
       expect.objectContaining({ type: "string", maxLength: 120 }),
     );
+  });
+
+  it("documents only canonical filter protocols and response envelopes", () => {
+    const spec = readJson<OpenApiSpec>("docs/openapi.json");
+    const filterDocument = spec.components.schemas.FilterDocument;
+    const filterQuery = JSON.stringify(
+      spec.components.parameters?.FilterQueryParam,
+    );
+    const explore = spec.components.schemas.AnalyticsExploreRequest;
+    const search = spec.components.schemas.EventSearchRequest;
+    const meta = spec.components.schemas.Meta;
+    const funnel = spec.components.schemas.Funnel;
+
+    expect(filterDocument.properties?.version).toEqual(
+      expect.objectContaining({ const: 1 }),
+    );
+    expect(JSON.stringify(filterDocument)).toContain("FilterExpression");
+    expect(explore.properties?.filters).toEqual({
+      $ref: "#/components/schemas/FilterDocument",
+    });
+    expect(search.properties?.filters).toEqual({
+      $ref: "#/components/schemas/FilterDocument",
+    });
+    expect(search.properties?.eventName).toBeUndefined();
+    expect(search.properties?.payloadFilters).toBeUndefined();
+    expect(filterQuery).toContain("filter[geo.country]=in:US,JP");
+    expect(filterQuery).toContain("event.payload");
+    expect(funnel.properties?.description).toBeUndefined();
+    expect(
+      spec.components.schemas.FunnelCreateInput.properties?.description,
+    ).toBeUndefined();
+    expect(
+      spec.components.schemas.FunnelUpdateInput.properties?.description,
+    ).toBeUndefined();
+    expect(Object.keys(meta.properties ?? {})).toEqual(
+      expect.arrayContaining(["generatedAt", "requestId", "timeRange"]),
+    );
+    expect(Object.keys(meta.properties ?? {})).not.toEqual(
+      expect.arrayContaining(["cohorts", "summary", "eventType"]),
+    );
+
+    for (const [path, item] of Object.entries(spec.paths)) {
+      if (!path.startsWith("/api/v1")) continue;
+      for (const operation of Object.values(item)) {
+        if (!operation?.operationId) continue;
+        expect(operation.responses?.["405"], `${operation.operationId} 405`).toBeDefined();
+      }
+    }
   });
 
   it("keeps skills calls aligned with OpenAPI path templates", () => {
