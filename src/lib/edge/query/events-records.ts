@@ -337,6 +337,7 @@ export async function queryEventRecordDetailFromD1(
   env: Env,
   siteId: string,
   eventId: string,
+  window?: QueryWindow,
 ) {
   const rows = await queryD1All<EventRecordRow>(
     env,
@@ -373,6 +374,7 @@ event_source AS (
     ON v.site_id = ce.site_id
    AND v.visit_id = ce.visit_id
   WHERE ce.site_id = ? AND ce.event_id = ?
+  ${window ? "AND ce.occurred_at >= ? AND ce.occurred_at < ?" : ""}
 )
 SELECT
   event_id AS eventId,
@@ -399,7 +401,9 @@ SELECT
 FROM event_source
 LIMIT 1
 `,
-    [siteId, eventId],
+    window
+      ? [siteId, eventId, window.startMs, window.endExclusiveMs]
+      : [siteId, eventId],
   );
   const record = rows[0];
   if (!record) return null;

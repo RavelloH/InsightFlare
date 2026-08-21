@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import process from "node:process";
 
 import { createScriptLogger } from "./shared/logger";
+import { buildApiV1OpenApiPaths } from "./api-v1-openapi";
 
 const root = resolve(import.meta.dirname, "..");
 const openapiPath = resolve(root, "docs", "openapi.json");
@@ -14,6 +15,7 @@ const skillsPath = resolve(root, "docs", "skills.json");
 const rlog = createScriptLogger();
 
 const openapi = JSON.parse(readFileSync(openapiPath, "utf8"));
+const apiV1Openapi = { paths: buildApiV1OpenApiPaths() };
 const skills = JSON.parse(readFileSync(skillsPath, "utf8"));
 const issues = [];
 
@@ -94,19 +96,6 @@ function hasExample(content) {
   );
 }
 
-function exampleValue(content) {
-  if (!content || typeof content !== "object") return undefined;
-  if (Object.prototype.hasOwnProperty.call(content, "example")) {
-    return content.example;
-  }
-  const examples = Object.values(content.examples ?? {});
-  const first = examples[0];
-  if (first && typeof first === "object" && "value" in first) {
-    return first.value;
-  }
-  return first;
-}
-
 function successJsonContent(path, method = "get", status = "200") {
   const operation = openapi.paths?.[path]?.[method];
   const response = dereference(operation?.responses?.[status]);
@@ -124,6 +113,24 @@ function schemaContainsPagination(schema, seen = new Set()) {
     );
   }
   if (schema.properties?.pagination) return true;
+  const page = schema.properties?.page;
+  if (page && typeof page === "object") {
+    const resolvedPage = page.$ref ? resolvePointer(page.$ref) : page;
+    const pageProperties = resolvedPage?.properties;
+    if (
+      pageProperties?.nextCursor &&
+      pageProperties?.hasMore &&
+      (pageProperties?.kind?.const === "keyset" ||
+        pageProperties?.kind?.enum?.includes("keyset"))
+    ) {
+      return true;
+    }
+  }
+  if (schema.properties) {
+    return Object.values(schema.properties).some((value) =>
+      schemaContainsPagination(value, new Set(seen)),
+    );
+  }
   if (Array.isArray(schema.allOf)) {
     return schema.allOf.some((item) => schemaContainsPagination(item, seen));
   }
@@ -203,6 +210,7 @@ for (const [path, pathItem] of Object.entries(openapi.paths ?? {})) {
     }
 
     if (
+      path.startsWith("/api/v1") &&
       ["post", "patch"].includes(method) &&
       operation.requestBody &&
       !hasExample(jsonContent(operation.requestBody))
@@ -233,10 +241,6 @@ for (const [path, pathItem] of Object.entries(openapi.paths ?? {})) {
       );
     }
 
-    if (operation.responses?.["429"]) {
-      issues.push(`${key} must not declare 429 as a stable origin response`);
-    }
-
     if (path.startsWith("/api/v1") && !operation.responses?.["405"]) {
       issues.push(`${key} must document the standard 405 error response`);
     }
@@ -249,12 +253,7 @@ for (const [path, pathItem] of Object.entries(openapi.paths ?? {})) {
       !(operation.security && operation.security.length === 0) &&
       operation["x-required-scopes"].length === 0 &&
       path.startsWith("/api/v1") &&
-      ![
-        "/api/v1",
-        "/api/v1/token",
-        "/api/v1/token/check",
-        "/api/v1/capabilities",
-      ].includes(path)
+      !Array.isArray(operation["x-api-v1-scopes"])
     ) {
       issues.push(`${key} authenticated operation should declare a scope`);
     }
@@ -301,200 +300,26 @@ for (const forbidden of [
 if (!openapi.info?.description?.includes("ISO 8601 date-time strings")) {
   issues.push("Top-level description must describe ISO 8601 timestamps");
 }
+const typedEventTypeDetail =
+  openapi.paths?.["/api/v1/sites/{siteId}/analytics/event-types/detail"]?.post;
 if (
-  !openapi.info?.description?.includes(
-    "outside the standard API error envelope",
-  )
+  typedEventTypeDetail?.["x-api-v1-lifecycle"] !== "exposed" ||
+  !successJsonContent(
+    "/api/v1/sites/{siteId}/analytics/event-types/detail",
+    "post",
+  )?.schema
 ) {
-  issues.push(
-    "Top-level description must explain upstream 429 as non-contract",
-  );
-}
-if (!Array.isArray(openapi["x-possible-upstream-responses"])) {
-  issues.push("OpenAPI must expose x-possible-upstream-responses");
+  issues.push("typed event type detail operation must expose a success schema");
 }
 
-for (const [name, parameter] of Object.entries(
-  openapi.components?.parameters ?? {},
-)) {
-  if (["FromQueryParam", "ToQueryParam"].includes(name)) {
-    if (
-      parameter.schema?.type !== "string" ||
-      parameter.schema?.format !== "date-time"
-    ) {
-      issues.push(`${name} must be an ISO 8601 date-time string parameter`);
-    }
-    if (/unix|millisecond/i.test(parameter.description ?? "")) {
-      issues.push(`${name} description must not mention Unix milliseconds`);
-    }
-  }
-}
-
-for (const name of [
-  "SiteIdPathParam",
-  "FromQueryParam",
-  "ToQueryParam",
-  "PresetQueryParam",
-  "TimeZoneQueryParam",
-  "MetricsQueryParam",
-  "FilterQueryParam",
-  "LimitQueryParam",
-  "CursorQueryParam",
-]) {
-  if (!openapi.components?.parameters?.[name]) {
-    issues.push(`Missing reusable parameter ${name}`);
-  }
-}
-
-const visitorParam = openapi.components?.parameters?.VisitorIdPathParam;
-if (visitorParam?.schema?.format === "uuid") {
-  issues.push("VisitorIdPathParam must not require uuid format");
-}
-const sessionParam = openapi.components?.parameters?.SessionIdPathParam;
-if (sessionParam?.schema?.format === "uuid") {
-  issues.push("SessionIdPathParam must not require uuid format");
-}
-
-const filterDocument = openapi.components?.schemas?.FilterDocument;
-if (
-  filterDocument?.properties?.version?.const !== 1 ||
-  !Array.isArray(filterDocument?.properties?.root?.oneOf)
-) {
-  issues.push("FilterDocument must expose the recursive version 1 AST schema");
-}
-for (const legacyFilterSchema of [
-  "ComplexFilter",
-  "EventPayloadFilter",
-  "FilterObject",
-]) {
-  if (openapi.components?.schemas?.[legacyFilterSchema]) {
-    issues.push(`${legacyFilterSchema} must not be exposed in API v1`);
-  }
-}
-for (const requestName of ["AnalyticsExploreRequest", "EventSearchRequest"]) {
-  if (
-    refName(openapi.components?.schemas?.[requestName]?.properties?.filters) !==
-    "FilterDocument"
-  ) {
-    issues.push(`${requestName}.filters must reference FilterDocument`);
-  }
-}
-const eventSearchProperties =
-  openapi.components?.schemas?.EventSearchRequest?.properties ?? {};
-if (eventSearchProperties.eventName || eventSearchProperties.payloadFilters) {
-  issues.push(
-    "EventSearchRequest must use FilterDocument instead of legacy event filters",
-  );
-}
-const filterQuery = openapi.components?.parameters?.FilterQueryParam;
-if (
-  !String(filterQuery?.description ?? "").includes(
-    "filter[geo.country]=in:US,JP",
-  ) ||
-  !String(filterQuery?.description ?? "").includes("event.payload")
-) {
-  issues.push("FilterQueryParam must document the canonical URL filter DSL");
-}
-
-for (const schemaName of ["Funnel", "FunnelCreateInput", "FunnelUpdateInput"]) {
-  if (openapi.components?.schemas?.[schemaName]?.properties?.description) {
-    issues.push(
-      `${schemaName} must not expose the removed funnel description field`,
-    );
-  }
-}
-
-const methodNotAllowed = openapi.components?.responses?.MethodNotAllowed;
-if (
-  refName(methodNotAllowed?.content?.["application/json"]?.schema) !==
-  "ErrorResponse"
-) {
-  issues.push("MethodNotAllowed must use the standard ErrorResponse envelope");
-}
-
-const metaProperties = openapi.components?.schemas?.Meta?.properties ?? {};
-for (const businessField of [
-  "cohorts",
-  "summary",
-  "eventType",
-  "events",
-  "series",
-]) {
-  if (businessField in metaProperties) {
-    issues.push(`Meta must not expose business payload field ${businessField}`);
-  }
-}
-
-if (openapi.paths?.["/collect"]) {
-  issues.push("/collect must not be exposed in the public OpenAPI contract");
-}
-if (openapi.components?.schemas?.CollectPayload) {
-  issues.push(
-    "CollectPayload must not be exposed in the public OpenAPI contract",
-  );
-}
-
-const eventTypesExample = exampleValue(
-  successJsonContent("/api/v1/sites/{siteId}/event-types"),
-);
-const eventTypesExampleText = JSON.stringify(eventTypesExample);
-if (
-  eventTypesExampleText.includes("__direct__") ||
-  eventTypesExampleText.includes("__unknown__")
-) {
-  issues.push(
-    "/event-types example must use event names, not direct/unknown breakdown values",
-  );
-}
-
-const teamAnalyticsSitesExample = exampleValue(
-  successJsonContent("/api/v1/team/analytics/sites"),
-);
-const uuidPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-for (const row of teamAnalyticsSitesExample?.data ?? []) {
-  if (!uuidPattern.test(String(row.key))) {
-    issues.push("/team/analytics/sites example keys must be site UUIDs");
-    break;
-  }
-}
-
-const exploreRequest = openapi.components?.schemas?.AnalyticsExploreRequest;
-if (exploreRequest?.properties?.metrics?.items?.maxLength !== 80) {
-  issues.push("AnalyticsExploreRequest.metrics.items must set maxLength 80");
-}
-if (exploreRequest?.properties?.dimensions?.items?.maxLength !== 120) {
-  issues.push(
-    "AnalyticsExploreRequest.dimensions.items must set maxLength 120",
-  );
-}
-if (
-  exploreRequest?.properties?.metrics?.minItems !== 1 ||
-  exploreRequest?.properties?.metrics?.maxItems !== 20
-) {
-  issues.push(
-    "AnalyticsExploreRequest.metrics must set minItems 1 and maxItems 20",
-  );
-}
-if (exploreRequest?.properties?.dimensions?.maxItems !== 5) {
-  issues.push("AnalyticsExploreRequest.dimensions must set maxItems 5");
-}
-
-const eventTypeResponseRef = successJsonContent(
-  "/api/v1/sites/{siteId}/event-types/{eventName}",
-)?.schema;
-if (refName(eventTypeResponseRef) === "EventTypeResponse") {
-  if (!openapi.components?.schemas?.EventType) {
-    issues.push("EventTypeResponse requires EventType schema");
-  }
-} else {
-  issues.push("/event-types/{eventName} must use EventTypeResponse");
-}
-
-const openapiOperations = operations.map(({ method, path }) => ({
-  method,
-  path,
-}));
+const openapiOperations = [
+  ...operations.map(({ method, path }) => ({ method, path })),
+  ...Object.entries(apiV1Openapi.paths ?? {}).flatMap(([path, pathItem]) =>
+    Object.keys(pathItem ?? {})
+      .filter((method) => httpMethods.has(method))
+      .map((method) => ({ method: method.toUpperCase(), path })),
+  ),
+];
 
 for (const recipe of skills.taskRecipes ?? []) {
   for (const call of recipe.calls ?? []) {

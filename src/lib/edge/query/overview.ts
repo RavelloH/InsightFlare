@@ -167,6 +167,43 @@ ORDER BY bucket ASC
   }));
 }
 
+/**
+ * Site-level activity is a composite concern, not a breakdown metric. Keep
+ * the filter and half-open window aligned with the overview/trend readers.
+ */
+export async function queryLatestSiteActivity(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  diagnostics?: D1ReadDiagnostics,
+): Promise<number | null> {
+  const filter = buildVisitFilterSql(filters);
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS MATERIALIZED (
+  SELECT *
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT MAX(last_activity_at) AS lastActivityAt
+FROM filtered_visits
+`;
+  const row = (
+    await queryD1All<Record<string, unknown>>(
+      env,
+      sql,
+      [...visitSourceBindings(siteId, window), ...filter.bindings],
+      diagnostics,
+    )
+  )[0];
+  const raw = row?.lastActivityAt;
+  if (raw === null || raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
 export async function queryOverviewAggregate(
   env: Env,
   siteId: string,

@@ -1591,18 +1591,23 @@ teamManagement:
       revoked: 取り消し済み
     scopes:
       analyticsRead: 分析の読み取り
+      analysisRead: 分析定義の読み取り
+      analysisWrite: 分析定義の書き込み
       siteRead: サイトの読み取り
       siteWrite: サイトの書き込み
       siteConfigRead: 設定の読み取り
       siteConfigWrite: 設定の書き込み
     scopeDescriptions:
       analyticsRead: 訪問、訪問者、ページビュー、その他の分析データを表示
+      analysisRead: 共有保存フィルターとファネル定義を表示
+      analysisWrite: ファネル定義を作成、更新、削除
       siteRead: サイト一覧とサイト詳細を表示
       siteWrite: サイトを作成、更新、削除
       siteConfigRead: トラッキングコードやドメイン許可リストなどのサイト設定を表示
       siteConfigWrite: トラッキング強度やパスブロックリストなどのサイト設定を変更
     scopeGroups:
       analytics: 分析
+      analysis: 分析定義
       site: サイト
       siteConfig: サイト設定
     columns:

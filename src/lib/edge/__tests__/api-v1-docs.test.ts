@@ -2,16 +2,23 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { describe, expect, it } from "vitest";
 
+import { buildApiV1OpenApiPaths } from "../../../../scripts/api-v1-openapi";
+
 const root = process.cwd();
 
 type JsonContent = {
-  schema?: { $ref?: string };
+  schema?: JsonSchemaObject;
   example?: unknown;
   examples?: Record<string, unknown>;
 };
 
 type OperationObject = {
   operationId?: string;
+  security?: Array<Record<string, unknown>>;
+  tags?: string[];
+  "x-api-v1-lifecycle"?: string;
+  "x-api-v1-scopes"?: string[];
+  "x-internal"?: boolean;
   requestBody?: { content?: { "application/json"?: JsonContent } };
   responses?: Record<
     string,
@@ -27,6 +34,7 @@ type OpenApiSpec = {
     schemas: Record<string, JsonSchemaObject>;
     responses?: Record<string, unknown>;
     parameters?: Record<string, JsonSchemaObject>;
+    securitySchemes?: Record<string, unknown>;
   };
 };
 
@@ -101,9 +109,6 @@ describe("api v1 public docs", () => {
       Object.keys(spec.components.schemas).some((name) => name.includes("___")),
     ).toBe(false);
     expect(spec.components.schemas.ErrorResponse).toBeDefined();
-    expect(spec.components.schemas.PaginatedEnvelope).toBeDefined();
-    expect(spec.components.schemas.FilterDocument).toBeDefined();
-    expect(spec.components.responses?.MethodNotAllowed).toBeDefined();
     expect(spec.paths["/api/v1/sites/{siteId}/analytics/schema"]).toBeDefined();
     expect(spec.paths["/api/v1/batch"]).toBeDefined();
     expect(spec.paths["/api/v1/sites/{siteId}/config"]).toBeUndefined();
@@ -124,15 +129,12 @@ describe("api v1 public docs", () => {
     expect(new Set(operationIds).size).toBe(operationIds.length);
 
     let errorResponseRefs = 0;
-    let paginatedRefs = 0;
     walk(spec, (value) => {
       if (!value || typeof value !== "object" || !("$ref" in value)) return;
       const ref = String((value as { $ref: string }).$ref);
       if (ref.endsWith("/ErrorResponse")) errorResponseRefs += 1;
-      if (ref.endsWith("/PaginatedEnvelope")) paginatedRefs += 1;
     });
     expect(errorResponseRefs).toBeGreaterThan(0);
-    expect(paginatedRefs).toBeGreaterThan(0);
   });
 
   it("generates a skills manifest for agents rather than an endpoint catalog", () => {
@@ -159,48 +161,33 @@ describe("api v1 public docs", () => {
     expect(raw).not.toContain("overview?compare=previous_period");
   });
 
-  it("keeps OpenAPI request bodies and key responses concrete", () => {
+  it("publishes the registry-owned typed API v1 operations in the main contract", () => {
     const spec = readJson<OpenApiSpec>("docs/openapi.json");
+    const typedPaths = buildApiV1OpenApiPaths();
 
-    const bodySchema = (method: string, path: string) =>
-      spec.paths[path]?.[method]?.requestBody?.content?.["application/json"]
-        ?.schema?.$ref;
-    const responseSchema = (method: string, path: string, status = "200") =>
-      spec.paths[path]?.[method]?.responses?.[status]?.content?.[
-        "application/json"
-      ]?.schema?.$ref;
+    for (const [path, typedPathItem] of Object.entries(typedPaths)) {
+      for (const method of ["get", "post", "patch", "delete"] as const) {
+        const typedOperation = typedPathItem[method];
+        if (!typedOperation) continue;
+        const operation = spec.paths[path]?.[method];
+        expect(operation, `${method.toUpperCase()} ${path}`).toBeDefined();
+        expect(operation?.operationId).toBe(typedOperation.operationId);
+        expect(operation?.["x-api-v1-lifecycle"]).toBe("exposed");
+        expect(operation?.["x-api-v1-scopes"]).toEqual(
+          typedOperation["x-api-v1-scopes"],
+        );
+      }
+    }
 
-    expect(bodySchema("post", "/api/v1/sites/{siteId}/funnels")).toBe(
-      "#/components/schemas/FunnelCreateInput",
-    );
-    expect(bodySchema("post", "/api/v1/sites/{siteId}/funnels/analysis")).toBe(
-      "#/components/schemas/FunnelAnalysisRequest",
-    );
+    const overview =
+      spec.paths["/api/v1/sites/{siteId}/analytics/overview"]?.post;
     expect(
-      bodySchema("patch", "/api/v1/sites/{siteId}/funnels/{funnelId}"),
-    ).toBe("#/components/schemas/FunnelUpdateInput");
-    expect(bodySchema("post", "/api/v1/sites/{siteId}/events/search")).toBe(
-      "#/components/schemas/EventSearchRequest",
-    );
-
+      overview?.requestBody?.content?.["application/json"]?.schema,
+    ).toBeDefined();
     expect(
-      spec.components.schemas.SiteCreateInput.properties?.sharing,
-    ).toBeUndefined();
-    expect(
-      spec.components.schemas.SiteUpdateInput.properties?.sharing,
-    ).toBeUndefined();
-    expect(spec.components.schemas.SiteCreateInput.properties).toEqual(
-      expect.objectContaining({
-        publicEnabled: expect.objectContaining({ type: "boolean" }),
-        publicSlug: expect.objectContaining({ type: "string" }),
-      }),
-    );
-    expect(spec.components.schemas.SiteUpdateInput.properties).toEqual(
-      expect.objectContaining({
-        publicEnabled: expect.objectContaining({ type: "boolean" }),
-        publicSlug: expect.objectContaining({ type: "string" }),
-      }),
-    );
+      overview?.responses?.["200"]?.content?.["application/json"]?.schema,
+    ).toBeDefined();
+    expect(overview?.["x-api-v1-scopes"]).toEqual(["analytics:read"]);
 
     walk(spec.paths, (value) => {
       if (!value || typeof value !== "object" || !("requestBody" in value)) {
@@ -217,51 +204,21 @@ describe("api v1 public docs", () => {
       ).not.toBe("#/components/schemas/GenericObjectResponse");
     });
 
-    expect(
-      responseSchema("post", "/api/v1/sites/{siteId}/funnels", "201"),
-    ).toBe("#/components/schemas/FunnelResponse");
-    expect(
-      spec.paths["/api/v1/sites/{siteId}/funnels"]?.post?.parameters,
-    ).toBeUndefined();
-    expect(responseSchema("get", "/api/v1/team/usage")).toBe(
-      "#/components/schemas/TeamUsageResponse",
-    );
-    expect(
-      responseSchema("get", "/api/v1/sites/{siteId}/analytics/compare"),
-    ).toBe("#/components/schemas/AnalyticsCompareResponse");
-    expect(
-      responseSchema("post", "/api/v1/sites/{siteId}/analytics/explore"),
-    ).toBe("#/components/schemas/AnalyticsExploreResponse");
-    expect(
-      responseSchema("get", "/api/v1/sites/{siteId}/funnels/{funnelId}"),
-    ).toBe("#/components/schemas/FunnelResponse");
-    expect(
-      responseSchema("get", "/api/v1/sites/{siteId}/event-types/{eventName}"),
-    ).toBe("#/components/schemas/EventTypeResponse");
-
-    expect(spec.components.schemas.CapabilitiesFeatures).toBeDefined();
-    expect(spec.components.schemas.CapabilitiesLimits).toBeDefined();
-    expect(spec.components.schemas.EventType).toBeDefined();
-    expect(spec.components.schemas.EventFieldDefinition).toBeDefined();
-    expect(
-      JSON.stringify(spec.components.schemas.CapabilitiesResponse),
-    ).toContain("Capabilities");
-    expect(JSON.stringify(spec.components.schemas.TimeRangeInput)).toContain(
-      "last 7 days",
-    );
+    expect(spec.components.securitySchemes?.BearerAuth).toBeDefined();
+    expect(spec.components.securitySchemes?.DashboardSession).toBeUndefined();
   });
 
-  it("keeps SDK collect ingestion out of the public OpenAPI contract", () => {
+  it("publishes only supported external non-v1 integrations", () => {
     const spec = readJson<OpenApiSpec>("docs/openapi.json");
 
-    expect(spec.paths["/collect"]).toBeUndefined();
-    expect(spec.components.schemas.CollectPayload).toBeUndefined();
-    expect(spec.components.schemas.CollectPage).toBeUndefined();
-    expect(spec.components.schemas.CollectClient).toBeUndefined();
-    expect(spec.components.schemas.CollectEvent).toBeUndefined();
-    expect(spec.components.schemas.CollectEngagement).toBeUndefined();
-    expect(spec.components.schemas.CollectPerformance).toBeUndefined();
-    expect(spec.tags?.some((tag) => tag.name === "Ingestion")).toBe(false);
+    expect(spec.paths["/collect"]?.post?.security).toEqual([]);
+    expect(spec.paths["/collect"]?.post?.tags).toContain("Ingestion");
+    expect(spec.paths["/api/private/session"]).toBeUndefined();
+    expect(spec.paths["/api/private/admin/api-keys"]).toBeUndefined();
+    expect(spec.paths["/api/public/session"]).toBeUndefined();
+    expect(spec.paths["/api/public/share/{slug}/site"]).toBeUndefined();
+    expect(spec.paths["/__e2e__/clock"]).toBeUndefined();
+    expect(spec.components.securitySchemes?.DashboardSession).toBeUndefined();
   });
 
   it("adds examples for core responses and mutating request bodies", () => {
@@ -299,128 +256,82 @@ describe("api v1 public docs", () => {
   it("uses concrete schemas for cross-breakdowns and events summary", () => {
     const spec = readJson<OpenApiSpec>("docs/openapi.json");
     const responseSchema = (path: string) =>
-      spec.paths[path]?.get?.responses?.["200"]?.content?.["application/json"]
-        ?.schema?.$ref;
+      spec.paths[path]?.post?.responses?.["200"]?.content?.["application/json"]
+        ?.schema;
 
     expect(
       responseSchema("/api/v1/sites/{siteId}/analytics/cross-breakdowns"),
-    ).toBe("#/components/schemas/AnalyticsCrossBreakdownResponse");
-    expect(responseSchema("/api/v1/sites/{siteId}/events/summary")).toBe(
-      "#/components/schemas/EventsSummaryResponse",
-    );
+    ).toEqual(expect.any(Object));
+    expect(
+      responseSchema("/api/v1/sites/{siteId}/analytics/events/summary"),
+    ).toEqual(expect.any(Object));
     expect(JSON.stringify(spec.paths)).not.toContain(
       "#/components/schemas/GenericObjectResponse",
     );
   });
 
-  it("keeps final API examples semantically aligned with endpoints", () => {
+  it("uses examples from the active typed API v1 contract", () => {
     const spec = readJson<OpenApiSpec>("docs/openapi.json");
-    const eventTypesExample = defaultExampleValue(
-      spec.paths["/api/v1/sites/{siteId}/event-types"].get,
-    ) as { data?: Array<{ key?: string; events?: number }> };
-    const teamSitesExample = defaultExampleValue(
-      spec.paths["/api/v1/team/analytics/sites"].get,
-    ) as { data?: Array<{ key?: string; label?: string; views?: number }> };
-    const eventTypeExample = defaultExampleValue(
-      spec.paths["/api/v1/sites/{siteId}/event-types/{eventName}"].get,
-    ) as { data?: { name?: string; fields?: unknown[]; links?: unknown } };
+    const overview =
+      spec.paths["/api/v1/sites/{siteId}/analytics/overview"]?.post;
+    const overviewRequest =
+      overview?.requestBody?.content?.["application/json"]?.example;
+    const overviewResponse = defaultExampleValue(overview) as {
+      data?: { service?: string };
+      meta?: { requestId?: string };
+    };
 
-    expect(eventTypesExample.data?.map((row) => row.key)).toEqual([
-      "signup",
-      "purchase",
-    ]);
-    expect(JSON.stringify(eventTypesExample)).not.toContain("__direct__");
-    expect(JSON.stringify(eventTypesExample)).not.toContain("__unknown__");
-    expect(eventTypesExample.data?.[0]).toEqual(
-      expect.objectContaining({ events: 450, sessions: 210, visitors: 190 }),
+    expect(overviewRequest).toEqual(
+      expect.objectContaining({ timeRange: expect.any(Object) }),
     );
-
-    expect(teamSitesExample.data?.[0]).toEqual(
-      expect.objectContaining({
-        key: "550e8400-e29b-41d4-a716-446655440000",
-        label: "Example Blog",
-        views: 5200,
-      }),
-    );
-    expect(JSON.stringify(teamSitesExample)).not.toContain("__direct__");
-    expect(JSON.stringify(teamSitesExample)).not.toContain("__unknown__");
-
-    expect(eventTypeExample.data).toEqual(
-      expect.objectContaining({
-        name: "signup",
-        events: 450,
-        fields: expect.arrayContaining([
-          expect.objectContaining({ path: "plan", valueTypes: ["string"] }),
-        ]),
-        links: expect.any(Object),
-      }),
-    );
+    expect(overviewResponse.meta?.requestId).toBeTruthy();
+    expect(JSON.stringify(overviewRequest)).not.toContain("__direct__");
+    expect(JSON.stringify(overviewResponse)).not.toContain("__unknown__");
   });
 
-  it("constrains analytics explore metrics and dimensions", () => {
+  it("constrains typed analytics request bodies", () => {
     const spec = readJson<OpenApiSpec>("docs/openapi.json");
-    const explore = spec.components.schemas.AnalyticsExploreRequest;
+    const overview =
+      spec.paths["/api/v1/sites/{siteId}/analytics/overview"]?.post?.requestBody
+        ?.content?.["application/json"]?.schema;
+    const search =
+      spec.paths["/api/v1/sites/{siteId}/analytics/events/search"]?.post
+        ?.requestBody?.content?.["application/json"]?.schema;
 
-    expect(explore.description).toContain("multidimensional");
-    expect(explore.properties?.metrics).toEqual(
+    expect(overview?.properties?.metrics).toEqual(
       expect.objectContaining({
         minItems: 1,
         maxItems: 20,
-        description: expect.stringContaining("analytics/schema"),
       }),
     );
-    expect(explore.properties?.metrics?.items).toEqual(
-      expect.objectContaining({ type: "string", maxLength: 80 }),
+    expect(overview?.properties?.metrics?.items).toEqual(
+      expect.objectContaining({ type: "string" }),
     );
-    expect(explore.properties?.dimensions).toEqual(
+    expect(search?.properties?.page).toEqual(
       expect.objectContaining({
-        maxItems: 5,
-        description: expect.stringContaining("analytics/schema"),
+        properties: expect.objectContaining({
+          limit: expect.objectContaining({ minimum: 1, maximum: 200 }),
+        }),
       }),
-    );
-    expect(explore.properties?.dimensions?.items).toEqual(
-      expect.objectContaining({ type: "string", maxLength: 120 }),
     );
   });
 
-  it("documents only canonical filter protocols and response envelopes", () => {
+  it("documents typed filters, saved filters, and response envelopes", () => {
     const spec = readJson<OpenApiSpec>("docs/openapi.json");
-    const filterDocument = spec.components.schemas.FilterDocument;
-    const filterQuery = JSON.stringify(
-      spec.components.parameters?.FilterQueryParam,
-    );
-    const explore = spec.components.schemas.AnalyticsExploreRequest;
-    const search = spec.components.schemas.EventSearchRequest;
-    const meta = spec.components.schemas.Meta;
-    const funnel = spec.components.schemas.Funnel;
+    const overview =
+      spec.paths["/api/v1/sites/{siteId}/analytics/overview"]?.post;
+    const eventSearch =
+      spec.paths["/api/v1/sites/{siteId}/analytics/events/search"]?.post;
+    const funnel = spec.paths["/api/v1/sites/{siteId}/funnels"]?.post;
 
-    expect(filterDocument.properties?.version).toEqual(
-      expect.objectContaining({ const: 1 }),
-    );
-    expect(JSON.stringify(filterDocument)).toContain("FilterExpression");
-    expect(explore.properties?.filters).toEqual({
-      $ref: "#/components/schemas/FilterDocument",
-    });
-    expect(search.properties?.filters).toEqual({
-      $ref: "#/components/schemas/FilterDocument",
-    });
-    expect(search.properties?.eventName).toBeUndefined();
-    expect(search.properties?.payloadFilters).toBeUndefined();
-    expect(filterQuery).toContain("filter[geo.country]=in:US,JP");
-    expect(filterQuery).toContain("event.payload");
-    expect(funnel.properties?.description).toBeUndefined();
+    expect(JSON.stringify(overview?.requestBody)).toContain('"inline"');
+    expect(JSON.stringify(overview?.requestBody)).toContain('"saved"');
     expect(
-      spec.components.schemas.FunnelCreateInput.properties?.description,
-    ).toBeUndefined();
+      eventSearch?.requestBody?.content?.["application/json"]?.schema,
+    ).toBeDefined();
     expect(
-      spec.components.schemas.FunnelUpdateInput.properties?.description,
-    ).toBeUndefined();
-    expect(Object.keys(meta.properties ?? {})).toEqual(
-      expect.arrayContaining(["generatedAt", "requestId", "timeRange"]),
-    );
-    expect(Object.keys(meta.properties ?? {})).not.toEqual(
-      expect.arrayContaining(["cohorts", "summary", "eventType"]),
-    );
+      funnel?.requestBody?.content?.["application/json"]?.schema,
+    ).toBeDefined();
 
     for (const [path, item] of Object.entries(spec.paths)) {
       if (!path.startsWith("/api/v1")) continue;

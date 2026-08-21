@@ -3,6 +3,7 @@ import type { Env } from "@/lib/edge/types";
 import type {
   GeoPointRow,
   JourneyEventRow,
+  QueryWindow,
   SessionRow,
   VisitorRow,
 } from "./core";
@@ -199,10 +200,13 @@ async function queryDetailSourceFromD1(
   env: Env,
   siteId: string,
   target: DetailTarget,
+  window?: QueryWindow,
 ): Promise<VisitorDetailSourceRow[]> {
   const sql = `
 WITH
-${buildTargetVisitSourceCte(detailTargetColumn(target))},
+${buildTargetVisitSourceCte(detailTargetColumn(target), {
+  withinWindow: Boolean(window),
+})},
 filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
@@ -287,7 +291,7 @@ SELECT
 FROM event_source
 `;
   return queryD1All<VisitorDetailSourceRow>(env, sql, [
-    ...targetVisitSourceBindings(siteId, target.value),
+    ...targetVisitSourceBindings(siteId, target.value, window),
     ...detailCustomEventSourceBindings(siteId),
   ]);
 }
@@ -509,16 +513,22 @@ export async function queryVisitorDetailFromD1(
   siteId: string,
   visitorId: string,
   timeZone: string,
+  window?: QueryWindow,
 ) {
   const {
     visitor,
     sessions,
     events: baseEvents,
   } = deriveVisitorDetailRows(
-    await queryDetailSourceFromD1(env, siteId, {
-      type: "visitor",
-      value: visitorId,
-    }),
+    await queryDetailSourceFromD1(
+      env,
+      siteId,
+      {
+        type: "visitor",
+        value: visitorId,
+      },
+      window,
+    ),
   );
   if (!visitor) return null;
 
@@ -573,11 +583,17 @@ export async function querySessionDetailFromD1(
   env: Env,
   siteId: string,
   sessionId: string,
+  window?: QueryWindow,
 ) {
-  const sourceRows = await queryDetailSourceFromD1(env, siteId, {
-    type: "session",
-    value: sessionId,
-  });
+  const sourceRows = await queryDetailSourceFromD1(
+    env,
+    siteId,
+    {
+      type: "session",
+      value: sessionId,
+    },
+    window,
+  );
   const { sessions, events: baseEvents } = deriveVisitorDetailRows(sourceRows);
   const locationPoints = deriveSessionLocationPoints(sourceRows);
   const session = sessions.find((item) => item.sessionId === sessionId);

@@ -1585,18 +1585,23 @@ teamManagement:
       revoked: 已撤销
     scopes:
       analyticsRead: 读取分析
+      analysisRead: 读取分析定义
+      analysisWrite: 写入分析定义
       siteRead: 读取站点
       siteWrite: 写入站点
       siteConfigRead: 读取配置
       siteConfigWrite: 写入配置
     scopeDescriptions:
       analyticsRead: 查看访问量、访客、页面浏览等分析数据
+      analysisRead: 查看团队共享的已保存筛选器和漏斗定义
+      analysisWrite: 创建、更新或删除漏斗定义
       siteRead: 查看站点列表和站点详情
       siteWrite: 创建、更新或删除站点
       siteConfigRead: 查看站点配置，如跟踪代码、域名白名单等
       siteConfigWrite: 修改站点配置，如跟踪强度、路径黑名单等
     scopeGroups:
       analytics: 分析
+      analysis: 分析定义
       site: 站点
       siteConfig: 站点配置
     columns:

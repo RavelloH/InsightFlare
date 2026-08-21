@@ -304,9 +304,17 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
 
     const overview = await apiV1Request<OverviewMetrics>(
       page,
-      "GET",
-      `/api/v1/sites/${encodeURIComponent(siteA?.id || "")}/analytics/overview?from=${encodeURIComponent(new Date(fromMs).toISOString())}&to=${encodeURIComponent(new Date(toMs).toISOString())}&timeZone=UTC`,
+      "POST",
+      `/api/v1/sites/${encodeURIComponent(siteA?.id || "")}/analytics/overview`,
       analyticsKey,
+      {
+        timeRange: {
+          kind: "absolute",
+          from: new Date(fromMs).toISOString(),
+          to: new Date(toMs).toISOString(),
+          timeZone: "UTC",
+        },
+      },
     );
     expect(overview.status).toBe(200);
     expect(overview.payload.data).toMatchObject({
@@ -337,9 +345,17 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
 
     const otherSite = await apiV1Request<OverviewMetrics>(
       page,
-      "GET",
-      `/api/v1/sites/${encodeURIComponent(siteB?.id || "")}/analytics/overview?from=${encodeURIComponent(new Date(fromMs).toISOString())}&to=${encodeURIComponent(new Date(toMs).toISOString())}`,
+      "POST",
+      `/api/v1/sites/${encodeURIComponent(siteB?.id || "")}/analytics/overview`,
       analyticsKey,
+      {
+        timeRange: {
+          kind: "absolute",
+          from: new Date(fromMs).toISOString(),
+          to: new Date(toMs).toISOString(),
+          timeZone: "UTC",
+        },
+      },
     );
     expect(otherSite.status).toBe(404);
 

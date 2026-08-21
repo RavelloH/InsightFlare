@@ -1,22 +1,35 @@
 #!/usr/bin/env tsx
 
-import { execSync } from "child_process";
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, renameSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import YAML from "yaml";
 
 import { createScriptLogger } from "./shared/logger";
+import { buildApiV1OpenApiPaths } from "./api-v1-openapi";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const rlog = createScriptLogger();
 const MAX_CURSOR_LENGTH = 12_288;
+
+function writeAtomically(path: string, content: string): void {
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, content, "utf8");
+  renameSync(temporaryPath, path);
+}
 
 function getAppVersion(): string {
   const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
   return pkg.version;
 }
 
-type HttpMethod = "get" | "post" | "patch" | "delete";
+type HttpMethod =
+  | "get"
+  | "post"
+  | "put"
+  | "patch"
+  | "delete"
+  | "options"
+  | "head";
 
 interface Operation {
   operationId: string;
@@ -28,13 +41,13 @@ interface Operation {
   requestBody?: unknown;
   responses: Record<string, unknown>;
   "x-required-scopes"?: string[];
+  "x-internal"?: boolean;
 }
 
 interface OpenAPISpec {
   openapi: string;
   info: Record<string, unknown>;
   externalDocs?: Record<string, unknown>;
-  "x-possible-upstream-responses"?: number[];
   servers: Array<{ url: string; description: string }>;
   security: Array<Record<string, unknown>>;
   tags: Array<{ name: string; description: string }>;
@@ -3404,7 +3417,7 @@ function buildSpec(): OpenAPISpec {
     info: {
       title: "InsightFlare API",
       description:
-        "Privacy-focused web analytics API. Authenticated endpoints require an API key passed as a Bearer token in the Authorization header. All timestamps in query parameters and response objects are ISO 8601 date-time strings unless the field name explicitly ends with `Ms`. Fields ending with `Ms` represent millisecond values, such as durations or Unix timestamps depending on context. Analytics ranges use [from, to) semantics. If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time. The default timeZone is UTC.\n\nThis OpenAPI document describes the behavior of the InsightFlare origin API. Depending on deployment configuration, upstream infrastructure, proxies, gateways, or edge providers may return additional HTTP responses before requests reach the API origin, such as 429 Too Many Requests. These responses are outside the standard API error envelope and are not part of the stable API contract.",
+        "Privacy-focused web analytics API. API v1 endpoints use an API key passed as a Bearer token in the Authorization header. All timestamps in typed API v1 query bodies and response objects are ISO 8601 date-time strings unless the field name explicitly ends with `Ms`. Fields ending with `Ms` represent millisecond values, such as durations or Unix timestamps depending on context. Analytics ranges use [from, to) semantics.",
       version: getAppVersion(),
       contact: {
         name: "InsightFlare",
@@ -3419,7 +3432,6 @@ function buildSpec(): OpenAPISpec {
       description: "InsightFlare API documentation",
       url: "https://insight.ravelloh.com/docs",
     },
-    "x-possible-upstream-responses": [429],
     servers: [
       { url: "https://insight.ravelloh.com", description: "Production" },
     ],
@@ -3442,6 +3454,11 @@ function buildSpec(): OpenAPISpec {
       { name: "Realtime", description: "Realtime activity" },
       { name: "Batch", description: "Global batch requests" },
       { name: "Health", description: "Health checks" },
+      { name: "Ingestion", description: "Browser event ingestion" },
+      { name: "Dashboard", description: "Dashboard session endpoints" },
+      { name: "Sharing", description: "Public shared-dashboard queries" },
+      { name: "Management", description: "Dashboard management endpoints" },
+      { name: "Internal", description: "Deployment or test-only endpoints" },
     ],
     paths: buildPaths(),
     components: {
@@ -3604,23 +3621,977 @@ function buildSpec(): OpenAPISpec {
   };
 }
 
+/** The typed registry is the sole source of API v1 operations. */
+function pointerSegment(value: string): string {
+  return value.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+/**
+ * Zod emits local $defs beside an inline schema, while its references are
+ * rooted at #/$defs. Once that schema is embedded in an OpenAPI operation,
+ * make the pointers absolute to the embedded $defs location.
+ */
+function rewriteEmbeddedSchemaRefs(
+  value: unknown,
+  pointer: string,
+  inheritedDefsPointer?: string,
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      rewriteEmbeddedSchemaRefs(
+        item,
+        `${pointer}/${index}`,
+        inheritedDefsPointer,
+      ),
+    );
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+
+  const node = value as Record<string, unknown>;
+  const defsPointer =
+    node.$defs && typeof node.$defs === "object" && !Array.isArray(node.$defs)
+      ? `${pointer}/$defs`
+      : inheritedDefsPointer;
+  if (
+    defsPointer &&
+    typeof node.$ref === "string" &&
+    node.$ref.startsWith("#/$defs/")
+  ) {
+    const definitionPath = node.$ref
+      .slice("#/$defs/".length)
+      .split("/")
+      .map(pointerSegment)
+      .join("/");
+    node.$ref = `${defsPointer}/${definitionPath}`;
+  }
+  for (const [key, child] of Object.entries(node)) {
+    if (key !== "$ref") {
+      rewriteEmbeddedSchemaRefs(
+        child,
+        `${pointer}/${pointerSegment(key)}`,
+        defsPointer,
+      );
+    }
+  }
+}
+
+function normalizeApiV1Security(operation: Record<string, unknown>): void {
+  if (!Array.isArray(operation.security)) return;
+  operation.security = operation.security.map((requirement) => {
+    if (!requirement || typeof requirement !== "object") return requirement;
+    const normalized = { ...(requirement as Record<string, unknown>) };
+    if ("bearerAuth" in normalized) {
+      normalized.BearerAuth = normalized.bearerAuth;
+      delete normalized.bearerAuth;
+    }
+    return normalized;
+  });
+}
+
+function resolveSpecPointer(spec: OpenAPISpec, pointer: string): unknown {
+  if (!pointer.startsWith("#/")) return undefined;
+  let current: unknown = spec;
+  for (const rawSegment of pointer.slice(2).split("/")) {
+    if (!current || typeof current !== "object") return undefined;
+    const segment = rawSegment.replaceAll("~1", "/").replaceAll("~0", "~");
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function exampleForSchema(
+  spec: OpenAPISpec,
+  schema: unknown,
+  seen = new Set<string>(),
+): unknown {
+  if (!schema || typeof schema !== "object") return undefined;
+  const source = schema as Record<string, unknown>;
+  if (typeof source.$ref === "string") {
+    if (seen.has(source.$ref)) return undefined;
+    const resolved = resolveSpecPointer(spec, source.$ref);
+    return resolved
+      ? exampleForSchema(spec, resolved, new Set([...seen, source.$ref]))
+      : undefined;
+  }
+  if ("const" in source) return source.const;
+  if (Array.isArray(source.enum) && source.enum.length > 0)
+    return source.enum[0];
+  if (source.default !== undefined) return source.default;
+  if (Array.isArray(source.oneOf) || Array.isArray(source.anyOf)) {
+    const variants = (source.oneOf ?? source.anyOf) as unknown[];
+    const nonNull = variants.find(
+      (candidate) =>
+        candidate &&
+        typeof candidate === "object" &&
+        (candidate as Record<string, unknown>).type !== "null",
+    );
+    return exampleForSchema(spec, nonNull ?? variants[0], seen);
+  }
+  if (Array.isArray(source.allOf)) {
+    const values = source.allOf
+      .map((part) => exampleForSchema(spec, part, seen))
+      .filter((value) => value !== undefined);
+    if (values.every((value) => value && typeof value === "object")) {
+      return Object.assign({}, ...values);
+    }
+    return values[0];
+  }
+
+  const type = Array.isArray(source.type)
+    ? source.type.find((candidate) => candidate !== "null")
+    : source.type;
+  if (type === "object" || source.properties) {
+    const properties = (source.properties ?? {}) as Record<string, unknown>;
+    // Include optional fields so a later allOf branch can refine a broadly
+    // typed envelope field such as data.
+    const fields = Object.keys(properties);
+    return Object.fromEntries(
+      fields.map((name) => [
+        name,
+        exampleForSchema(spec, properties[name], seen),
+      ]),
+    );
+  }
+  if (type === "array") {
+    const minItems = Math.max(1, Number(source.minItems) || 0);
+    return Array.from({ length: minItems }, () =>
+      exampleForSchema(spec, source.items, seen),
+    );
+  }
+  if (type === "boolean") return false;
+  if (type === "integer" || type === "number") {
+    const minimum = Number(source.minimum);
+    const exclusiveMinimum = source.exclusiveMinimum;
+    const lowerBound = Number.isFinite(minimum) ? minimum : 0;
+    if (exclusiveMinimum === true) return lowerBound + 1;
+    if (typeof exclusiveMinimum === "number") return exclusiveMinimum + 1;
+    return lowerBound;
+  }
+  if (type === "null") return null;
+  if (type === "string" || !type) {
+    if (source.format === "date-time") return "2026-01-01T00:00:00Z";
+    if (source.format === "uuid") return "550e8400-e29b-41d4-a716-446655440000";
+    if (source.format === "uri") return "https://example.com";
+    if (source.format === "email") return "user@example.com";
+    return "example";
+  }
+  return undefined;
+}
+
+function populateTypedApiV1Examples(spec: OpenAPISpec): void {
+  const legacyOperationsWithInvalidExamples = new Set([
+    "getAnalyticsFilterValues",
+    "getEventFields",
+  ]);
+  for (const pathItem of Object.values(spec.paths)) {
+    for (const operation of Object.values(pathItem)) {
+      if (
+        !operation ||
+        Array.isArray(operation) ||
+        typeof operation !== "object" ||
+        ((operation as unknown as Record<string, unknown>)[
+          "x-api-v1-lifecycle"
+        ] !== "exposed" &&
+          !legacyOperationsWithInvalidExamples.has(
+            String(
+              (operation as unknown as Record<string, unknown>).operationId,
+            ),
+          ))
+      ) {
+        continue;
+      }
+      const typedOperation = operation as unknown as Record<string, unknown>;
+      const bodies = [
+        typedOperation.requestBody,
+        ...Object.entries(
+          (typedOperation.responses ?? {}) as Record<string, unknown>,
+        )
+          .filter(([status]) => status === "200" || status === "201")
+          .map(([, response]) => response),
+      ];
+      for (const body of bodies) {
+        if (!body || typeof body !== "object") continue;
+        const content = (body as Record<string, unknown>).content as
+          | Record<string, unknown>
+          | undefined;
+        const jsonContent = content?.[json] as
+          | Record<string, unknown>
+          | undefined;
+        if (!jsonContent?.schema) continue;
+        const example = exampleForSchema(spec, jsonContent.schema);
+        if (example === undefined) continue;
+        jsonContent.example = example;
+        delete jsonContent.examples;
+      }
+    }
+  }
+}
+
+function pathParameterFor(name: string): unknown {
+  const reusableParameters: Record<string, string> = {
+    siteId: "SiteIdPathParam",
+    dimension: "DimensionPathParam",
+    eventName: "EventNamePathParam",
+    eventId: "EventIdPathParam",
+    visitorId: "VisitorIdPathParam",
+    sessionId: "SessionIdPathParam",
+    funnelId: "FunnelIdPathParam",
+  };
+  const reusable = reusableParameters[name];
+  if (reusable) return parameterRef(reusable);
+  return {
+    name,
+    in: "path",
+    required: true,
+    schema: { type: "string" },
+    description: `${name} path parameter.`,
+  };
+}
+
+function parameterName(parameter: unknown): string | undefined {
+  if (!parameter || typeof parameter !== "object") return undefined;
+  const entry = parameter as Record<string, unknown>;
+  if (typeof entry.name === "string") return entry.name;
+  if (typeof entry.$ref === "string") {
+    const componentName = entry.$ref
+      .split("/")
+      .at(-1)
+      ?.replace(/PathParam$/, "");
+    return componentName
+      ? componentName.charAt(0).toLowerCase() + componentName.slice(1)
+      : undefined;
+  }
+  return undefined;
+}
+
+function ensureTypedPathParameters(
+  path: string,
+  operation: Record<string, unknown>,
+): void {
+  const requiredNames = [...path.matchAll(/\{([^}]+)\}/g)].map(
+    (match) => match[1],
+  );
+  if (requiredNames.length === 0) return;
+  const parameters = Array.isArray(operation.parameters)
+    ? [...operation.parameters]
+    : [];
+  const declared = new Set(parameters.map(parameterName).filter(Boolean));
+  for (const name of requiredNames) {
+    if (!declared.has(name)) parameters.push(pathParameterFor(name));
+  }
+  operation.parameters = parameters;
+}
+
+function referencedComponentNames(value: unknown): Set<string> {
+  const names = new Set<string>();
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    const entry = node as Record<string, unknown>;
+    if (typeof entry.$ref === "string") {
+      const match = entry.$ref.match(/^#\/components\/([^/]+)\/([^/]+)$/);
+      if (match) names.add(`${match[1]}/${match[2]}`);
+    }
+    Object.values(entry).forEach(visit);
+  };
+  visit(value);
+  return names;
+}
+
+/** Remove legacy component definitions no longer reachable from the active API. */
+function pruneUnusedComponents(spec: OpenAPISpec): void {
+  const reachable = referencedComponentNames(spec.paths);
+  const componentGroups = ["schemas", "parameters", "responses"] as const;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const group of componentGroups) {
+      for (const [name, component] of Object.entries(spec.components[group])) {
+        const key = `${group}/${name}`;
+        if (!reachable.has(key)) continue;
+        for (const dependency of referencedComponentNames(component)) {
+          if (!reachable.has(dependency)) {
+            reachable.add(dependency);
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+  for (const group of componentGroups) {
+    spec.components[group] = Object.fromEntries(
+      Object.entries(spec.components[group]).filter(([name]) =>
+        reachable.has(`${group}/${name}`),
+      ),
+    );
+  }
+}
+
+function mergeApiV1TargetOperations(spec: OpenAPISpec): void {
+  const targetPaths = buildApiV1OpenApiPaths();
+  const methods = new Set<HttpMethod>(["get", "post", "patch", "delete"]);
+  // API v1 is registry-owned. The legacy generator is only retained as a
+  // source for shared components while its stale v1 operations are removed.
+  spec.paths = Object.fromEntries(
+    Object.entries(spec.paths).filter(([path]) => !path.startsWith("/api/v1")),
+  );
+  for (const [path, targetPathItem] of Object.entries(targetPaths)) {
+    const pathItem = spec.paths[path] ?? {};
+    for (const [method, targetOperation] of Object.entries(targetPathItem)) {
+      if (!methods.has(method as HttpMethod)) {
+        continue;
+      }
+      const operation = JSON.parse(JSON.stringify(targetOperation)) as Record<
+        string,
+        unknown
+      >;
+      rewriteEmbeddedSchemaRefs(
+        operation,
+        `#/paths/${pointerSegment(path)}/${method}`,
+      );
+      normalizeApiV1Security(operation);
+      ensureTypedPathParameters(path, operation);
+      operation["x-required-scopes"] = operation["x-api-v1-scopes"] ?? [];
+      pathItem[method as HttpMethod] = operation as unknown as Operation;
+    }
+    spec.paths[path] = pathItem;
+  }
+}
+
+/**
+ * The registry owns API v1, while these routes are implemented by the rest of
+ * the Hono application. Keep their public HTTP shapes in the same generated
+ * document so the main OpenAPI contract describes the whole origin API.
+ */
+function mergeProjectOperations(spec: OpenAPISpec): void {
+  const genericResponse = {
+    description:
+      "JSON response. The response shape is owned by the dashboard protocol and is not part of the public API v1 contract.",
+    content: {
+      [json]: {
+        schema: { type: "object", additionalProperties: true },
+      },
+    },
+  };
+  const genericError = {
+    description: "Error response.",
+    content: {
+      [json]: {
+        schema: ref("ErrorResponse"),
+      },
+    },
+  };
+  const publicRouteSecurity: Array<Record<string, unknown>> = [];
+  const dashboardSession = [{ DashboardSession: [] }];
+  const e2eControlToken = [{ E2EControlToken: [] }];
+  const sharedQueryPaths = [
+    "overview",
+    "trend",
+    "pages",
+    "pages-dashboard",
+    "referrers",
+    "retention",
+    "performance",
+    "countries",
+    "filter-values",
+    "event-types",
+    "overview-page-path",
+    "overview-page-title",
+    "overview-page-hostname",
+    "overview-page-entry",
+    "overview-page-exit",
+    "overview-source-domain",
+    "overview-client-browser",
+    "overview-client-os-version",
+    "overview-client-device-type",
+    "overview-client-language",
+    "overview-client-screen-size",
+    "overview-geo-country",
+    "overview-geo-region",
+    "overview-geo-city",
+    "overview-geo-continent",
+    "overview-geo-timezone",
+    "overview-geo-organization",
+    "overview-geo-points",
+    "browser-trend",
+    "browser-engine-trend",
+    "browser-version-breakdown",
+    "browser-cross-breakdown",
+    "client-cross-breakdown",
+    "browser-radar",
+    "referrer-radar",
+    "referrer-dimension-trend",
+    "client-dimension-trend",
+    "utm-dimension-trend",
+    "utm-source",
+    "utm-medium",
+    "utm-campaign",
+    "utm-term",
+    "utm-content",
+  ];
+  const dashboardQueryPaths = [
+    ...sharedQueryPaths,
+    "events-summary",
+    "events-trend",
+    "events-records",
+    "event-type-fields",
+    "event-type-field-values",
+    "event-type-context",
+    "event-type-detail",
+    "event-record-detail",
+    "sessions",
+    "session-detail",
+    "visitor-detail",
+    "visitors",
+  ];
+  const jsonObjectBody = {
+    required: true,
+    description:
+      "Dashboard protocol payload. This internal request shape is not part of the public API v1 contract.",
+    content: {
+      [json]: {
+        schema: { type: "object", additionalProperties: true },
+        example: {},
+      },
+    },
+  };
+  const routes: Array<{
+    path: string;
+    methods: readonly HttpMethod[];
+    operationId: string;
+    summary: string;
+    tag: string;
+    security?: Array<Record<string, unknown>>;
+    internal?: boolean;
+    parameters?: unknown[];
+    requestBody?: unknown;
+    responses?: Record<string, unknown>;
+  }> = [
+    {
+      path: "/collect",
+      methods: ["post"],
+      operationId: "collect.ingest",
+      summary: "Ingest a tracking event",
+      tag: "Ingestion",
+      security: publicRouteSecurity,
+      requestBody: {
+        description:
+          "Tracker event payload. The tracker SDK is the authoritative producer for this ingestion protocol.",
+        content: {
+          [json]: {
+            schema: { type: "object", additionalProperties: true },
+            example: {},
+          },
+        },
+      },
+    },
+    {
+      path: "/script.js",
+      methods: ["get"],
+      operationId: "tracker.script",
+      summary: "Get the tracking script",
+      tag: "Ingestion",
+      security: publicRouteSecurity,
+      parameters: [
+        {
+          name: "siteId",
+          in: "query",
+          required: true,
+          schema: { type: "string", minLength: 1 },
+          description: "Site identifier embedded in the tracker snippet.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "JavaScript tracker source.",
+          content: {
+            "application/javascript": { schema: { type: "string" } },
+          },
+        },
+        "400": {
+          description: "The siteId query parameter is missing or invalid.",
+          content: { "text/plain": { schema: { type: "string" } } },
+        },
+        "404": {
+          description: "The site does not have a tracking configuration.",
+          content: { "text/plain": { schema: { type: "string" } } },
+        },
+        "405": {
+          description: "Only GET is supported.",
+          content: { "text/plain": { schema: { type: "string" } } },
+        },
+        "500": {
+          description: "Tracker configuration or token issuance failed.",
+          content: { "text/plain": { schema: { type: "string" } } },
+        },
+      },
+    },
+    {
+      path: "/.well-known/openapi.json",
+      methods: ["get"],
+      operationId: "wellKnown.openapi",
+      summary: "Get the OpenAPI document",
+      tag: "Discovery",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/.well-known/skills.json",
+      methods: ["get"],
+      operationId: "wellKnown.skills",
+      summary: "Get the API skills manifest",
+      tag: "Discovery",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/.well-known/security.txt",
+      methods: ["get"],
+      operationId: "wellKnown.security",
+      summary: "Get security contact information",
+      tag: "Discovery",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/.well-known/health",
+      methods: ["get"],
+      operationId: "wellKnown.health",
+      summary: "Get service health",
+      tag: "Health",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/.well-known/change-password",
+      methods: ["get"],
+      operationId: "wellKnown.changePassword",
+      summary: "Get the password change entry point",
+      tag: "Discovery",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/api/public/session",
+      methods: ["post"],
+      operationId: "public.session.login",
+      summary: "Create a dashboard session",
+      tag: "Dashboard",
+      security: publicRouteSecurity,
+      requestBody: jsonObjectBody,
+    },
+    {
+      path: "/api/public/session",
+      methods: ["delete"],
+      operationId: "public.session.logout",
+      summary: "End a dashboard session",
+      tag: "Dashboard",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/api/public/login-security",
+      methods: ["get"],
+      operationId: "public.loginSecurity.get",
+      summary: "Get login security settings",
+      tag: "Dashboard",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/api/public/account-links/inspect",
+      methods: ["post"],
+      operationId: "public.accountLinks.inspect",
+      summary: "Inspect an account link",
+      tag: "Dashboard",
+      security: publicRouteSecurity,
+      requestBody: jsonObjectBody,
+    },
+    {
+      path: "/api/public/account-links/complete",
+      methods: ["post"],
+      operationId: "public.accountLinks.complete",
+      summary: "Complete an account link",
+      tag: "Dashboard",
+      security: publicRouteSecurity,
+      requestBody: jsonObjectBody,
+    },
+    {
+      path: "/api/public/resources/world-countries",
+      methods: ["get"],
+      operationId: "public.resources.worldCountries",
+      summary: "List world countries",
+      tag: "Dashboard",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/api/public/resources/wiki-summary",
+      methods: ["get"],
+      operationId: "public.resources.wikiSummary",
+      summary: "Get a wiki summary",
+      tag: "Dashboard",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/api/public/resources/map-tiles/{z}/{x}/{y}",
+      methods: ["get"],
+      operationId: "public.resources.mapTile",
+      summary: "Get a map tile",
+      tag: "Dashboard",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/api/public/share/{slug}/site",
+      methods: ["get"],
+      operationId: "public.share.site",
+      summary: "Get public shared-site metadata",
+      tag: "Sharing",
+      security: publicRouteSecurity,
+    },
+    {
+      path: "/api/public/share/{slug}/{queryPath}",
+      methods: ["get"],
+      operationId: "public.share.query",
+      summary: "Run a public shared-dashboard query",
+      tag: "Sharing",
+      security: publicRouteSecurity,
+      parameters: [
+        {
+          name: "queryPath",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: sharedQueryPaths },
+          description: "Shared dashboard query name.",
+        },
+      ],
+    },
+    {
+      path: "/api",
+      methods: ["get"],
+      operationId: "api.redirectToV1",
+      summary: "Redirect to the API v1 entry point",
+      tag: "Discovery",
+      security: publicRouteSecurity,
+      responses: { "307": { description: "Temporary redirect to /api/v1." } },
+    },
+    {
+      path: "/api/private/session",
+      methods: ["get"],
+      operationId: "private.session.get",
+      summary: "Get the current dashboard session",
+      tag: "Dashboard",
+      security: dashboardSession,
+    },
+    {
+      path: "/api/private/notifications",
+      methods: ["get"],
+      operationId: "private.notifications.list",
+      summary: "List dashboard notifications",
+      tag: "Dashboard",
+      security: dashboardSession,
+    },
+    {
+      path: "/api/private/notifications/preferences",
+      methods: ["get"],
+      operationId: "private.notifications.preferences.get",
+      summary: "Get notification preferences",
+      tag: "Dashboard",
+      security: dashboardSession,
+    },
+    {
+      path: "/api/private/notifications/preferences",
+      methods: ["patch"],
+      operationId: "private.notifications.preferences.update",
+      summary: "Update notification preferences",
+      tag: "Dashboard",
+      security: dashboardSession,
+      requestBody: jsonObjectBody,
+    },
+    {
+      path: "/api/private/notifications/{messageId}",
+      methods: ["patch"],
+      operationId: "private.notifications.update",
+      summary: "Update a notification",
+      tag: "Dashboard",
+      security: dashboardSession,
+      requestBody: jsonObjectBody,
+    },
+    {
+      path: "/api/private/notifications",
+      methods: ["patch"],
+      operationId: "private.notifications.markAllRead",
+      summary: "Mark all dashboard notifications as read",
+      tag: "Dashboard",
+      security: dashboardSession,
+      requestBody: jsonObjectBody,
+    },
+    {
+      path: "/api/private/releases/compare",
+      methods: ["get"],
+      operationId: "private.releases.compare",
+      summary: "Compare releases",
+      tag: "Dashboard",
+      security: dashboardSession,
+    },
+    {
+      path: "/api/private/archive/manifest",
+      methods: ["get"],
+      operationId: "private.archive.manifest",
+      summary: "Get an archive manifest",
+      tag: "Dashboard",
+      security: dashboardSession,
+    },
+    {
+      path: "/api/private/archive/file",
+      methods: ["get", "head"],
+      operationId: "private.archive.file",
+      summary: "Download an archive file",
+      tag: "Dashboard",
+      security: dashboardSession,
+    },
+    {
+      path: "/api/private/saved-filters",
+      methods: ["get"],
+      operationId: "private.savedFilters.list",
+      summary: "List saved filters",
+      tag: "Dashboard",
+      security: dashboardSession,
+    },
+    {
+      path: "/api/private/saved-filters",
+      methods: ["post"],
+      operationId: "private.savedFilters.create",
+      summary: "Create a saved filter",
+      tag: "Dashboard",
+      security: dashboardSession,
+      requestBody: jsonObjectBody,
+    },
+    {
+      path: "/api/private/saved-filters/{filterId}",
+      methods: ["get", "put", "delete"],
+      operationId: "private.savedFilters.update",
+      summary: "Get, update, or delete a saved filter",
+      tag: "Dashboard",
+      security: dashboardSession,
+      requestBody: jsonObjectBody,
+    },
+  ];
+
+  routes.push(
+    {
+      path: "/api/private/team-dashboard",
+      methods: ["get"],
+      operationId: "private.teamDashboard",
+      summary: "Get dashboard-wide team analytics",
+      tag: "Dashboard",
+      security: dashboardSession,
+    },
+    {
+      path: "/api/private/{queryPath}",
+      methods: ["get"],
+      operationId: "private.dashboardQuery",
+      summary: "Run a dashboard analytics query",
+      tag: "Dashboard",
+      security: dashboardSession,
+      parameters: [
+        {
+          name: "queryPath",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: dashboardQueryPaths },
+          description: "Dashboard analytics query name.",
+        },
+      ],
+    },
+    {
+      path: "/api/private/funnels",
+      methods: ["get", "post", "delete"],
+      operationId: "private.funnels",
+      summary: "Manage dashboard funnels",
+      tag: "Dashboard",
+      security: dashboardSession,
+      requestBody: jsonObjectBody,
+    },
+    {
+      path: "/api/private/realtime/ws",
+      methods: ["get"],
+      operationId: "private.realtime.websocket",
+      summary: "Open the dashboard realtime WebSocket",
+      tag: "Dashboard",
+      security: dashboardSession,
+      responses: { "101": { description: "WebSocket protocol switch." } },
+    },
+  );
+
+  const adminMethods: Record<string, readonly HttpMethod[]> = {
+    "account-links": ["post"],
+    users: ["get", "post", "patch"],
+    profile: ["get", "post", "patch"],
+    teams: ["get", "post", "patch"],
+    "team-invites": ["get", "post", "patch"],
+    sites: ["get", "post", "patch"],
+    members: ["get", "post", "patch"],
+    "site-config": ["get", "post", "patch"],
+    "script-snippet": ["get"],
+    "api-keys": ["get", "post", "patch"],
+    "notification-email": ["get", "post", "patch", "delete"],
+    "notification-email/test": ["post"],
+    "login-turnstile": ["get", "post", "patch", "delete"],
+    "login-turnstile/test": ["post"],
+    "bot-analytics-config": ["get", "post", "patch", "delete"],
+    "bot-analytics": ["get"],
+    "notification-email-preview": ["post"],
+    "notification-rules": ["get", "post", "patch", "delete"],
+    "notification-rules/preview": ["post"],
+    "notification-rules/run": ["post"],
+    "notification-test": ["post"],
+    "system-performance": ["get"],
+    "scheduled-tasks": ["get"],
+    "do-diagnostic": ["get"],
+    "e2e/flush": ["post"],
+  };
+  for (const [adminPath, methods] of Object.entries(adminMethods)) {
+    routes.push({
+      path: `/api/private/admin/${adminPath}`,
+      methods,
+      operationId: `private.admin.${adminPath.replaceAll("/", ".")}`,
+      summary: `Manage ${adminPath.replaceAll("-", " ")}`,
+      tag: "Management",
+      security: dashboardSession,
+      internal: true,
+      requestBody: jsonObjectBody,
+    });
+  }
+
+  const e2eRoutes: Array<[string, readonly HttpMethod[], string]> = [
+    ["/clock", ["get"], "Read the E2E clock"],
+    ["/clock/set", ["post"], "Set the E2E clock"],
+    ["/clock/advance", ["post"], "Advance the E2E clock"],
+    ["/scheduled/run", ["post"], "Run an E2E scheduled task"],
+    ["/ingest/flush", ["post"], "Flush E2E ingestion"],
+    ["/ingest/status", ["get"], "Get E2E ingestion status"],
+  ];
+  for (const [path, methods, summary] of e2eRoutes) {
+    routes.push({
+      path: `/__e2e__${path}`,
+      methods,
+      operationId: `internal.e2e${path.replaceAll("/", ".")}`,
+      summary,
+      tag: "Internal",
+      security: e2eControlToken,
+      internal: true,
+      requestBody: jsonObjectBody,
+    });
+  }
+
+  for (const route of routes) {
+    const pathItem = spec.paths[route.path] ?? {};
+    const definedParameters = new Set(
+      (route.parameters ?? [])
+        .map((parameter) =>
+          parameter && typeof parameter === "object" && "name" in parameter
+            ? String(parameter.name)
+            : "",
+        )
+        .filter(Boolean),
+    );
+    const pathParameters = [...route.path.matchAll(/\{([^}]+)\}/g)]
+      .map((match) => match[1])
+      .filter((name) => !definedParameters.has(name))
+      .map((name) => ({
+        name,
+        in: "path",
+        required: true,
+        schema: { type: "string" },
+        description: `${name} path parameter.`,
+      }));
+    for (const method of route.methods) {
+      const requiresBody = ["post", "put", "patch"].includes(method);
+      const responseSet = route.responses ?? {
+        "200": genericResponse,
+        "400": genericError,
+        ...(route.security && route.security.length > 0
+          ? { "401": genericError, "403": genericError }
+          : {}),
+      };
+      pathItem[method] = {
+        operationId:
+          route.methods.length === 1
+            ? route.operationId
+            : `${route.operationId}.${method}`,
+        summary: route.summary,
+        description: route.internal
+          ? `${route.summary}. This endpoint is internal to the InsightFlare dashboard and is not a public API v1 compatibility contract.`
+          : `${route.summary}.`,
+        tags: [route.tag],
+        "x-required-scopes": [],
+        ...(route.internal ? { "x-internal": true } : {}),
+        ...(route.security ? { security: route.security } : {}),
+        ...(route.parameters || pathParameters.length > 0
+          ? { parameters: [...pathParameters, ...(route.parameters ?? [])] }
+          : {}),
+        ...(requiresBody && route.requestBody
+          ? { requestBody: route.requestBody }
+          : {}),
+        responses: responseSet,
+      } as Operation;
+    }
+    spec.paths[route.path] = pathItem;
+  }
+}
+
+/**
+ * The published document is an external integration contract, not a catalog
+ * of dashboard browser protocols, administrative actions, or test controls.
+ */
+function retainPublishedOperations(spec: OpenAPISpec): void {
+  const publishedPaths = new Set([
+    "/collect",
+    "/script.js",
+    "/.well-known/openapi.json",
+    "/.well-known/skills.json",
+    "/.well-known/health",
+  ]);
+  spec.paths = Object.fromEntries(
+    Object.entries(spec.paths).filter(
+      ([path]) => path.startsWith("/api/v1") || publishedPaths.has(path),
+    ),
+  );
+}
+
+function pruneUnusedTags(spec: OpenAPISpec): void {
+  const usedTags = new Set<string>();
+  for (const pathItem of Object.values(spec.paths)) {
+    for (const operation of Object.values(pathItem)) {
+      if (
+        !operation ||
+        typeof operation !== "object" ||
+        Array.isArray(operation)
+      ) {
+        continue;
+      }
+      const tags = (operation as unknown as { tags?: unknown }).tags;
+      if (!Array.isArray(tags)) continue;
+      for (const tag of tags) {
+        if (typeof tag === "string") usedTags.add(tag);
+      }
+    }
+  }
+  spec.tags = spec.tags.filter((tag) => usedTags.has(tag.name));
+}
+
 function main() {
   const spec = buildSpec();
   enrichSpecWithExamples(spec);
   const root = resolve(import.meta.dirname, "..");
+  mergeApiV1TargetOperations(spec);
+  mergeProjectOperations(spec);
+  retainPublishedOperations(spec);
+  populateTypedApiV1Examples(spec);
+  pruneUnusedComponents(spec);
+  pruneUnusedTags(spec);
   const yamlPath = resolve(root, "docs", "openapi.yaml");
   const jsonPath = resolve(root, "docs", "openapi.json");
 
-  writeFileSync(yamlPath, YAML.stringify(spec, { indent: 2 }), "utf8");
-  writeFileSync(jsonPath, JSON.stringify(spec, null, 2), "utf8");
-
-  try {
-    execSync(`npx prettier --write "${yamlPath}" "${jsonPath}"`, {
-      stdio: "pipe",
-    });
-  } catch {
-    // Files are valid even if formatting fails.
-  }
+  writeAtomically(yamlPath, YAML.stringify(spec, { indent: 2 }));
+  writeAtomically(jsonPath, `${JSON.stringify(spec, null, 2)}\n`);
 
   rlog.success(`Generated ${yamlPath}`);
   rlog.success(`Generated ${jsonPath}`);

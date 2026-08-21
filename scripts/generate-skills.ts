@@ -1,8 +1,9 @@
 #!/usr/bin/env tsx
 
-import { execSync } from "child_process";
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, renameSync, writeFileSync } from "fs";
 import { resolve } from "path";
+
+import { apiV1RouteRegistry } from "@/lib/api-v1/route-registry";
 
 import { createScriptLogger } from "./shared/logger";
 
@@ -10,12 +11,21 @@ const ROOT = resolve(import.meta.dirname, "..");
 const OUTPUT_PATH = resolve(ROOT, "docs/skills.json");
 const rlog = createScriptLogger();
 
+function writeAtomically(path: string, content: string): void {
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, content, "utf8");
+  renameSync(temporaryPath, path);
+}
+
 function getAppVersion(): string {
   const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
   return pkg.version;
 }
 
 function generate() {
+  const analyticsRoutes = apiV1RouteRegistry.filter(
+    (route) => route.path.includes("/analytics/") && route.method === "POST",
+  );
   const manifest = {
     api: "InsightFlare Analytics API",
     version: getAppVersion(),
@@ -38,12 +48,13 @@ function generate() {
         "Call GET /api/v1/token to inspect the token.",
         "Call GET /api/v1/sites to list accessible sites.",
         "Call GET /api/v1/sites/{siteId}/analytics/schema before advanced analytics.",
-        "Use overview, timeseries, and breakdowns for most analysis tasks.",
-        "Use explore for multi-dimensional or complex filtering.",
-        "Use batch to reduce round trips when multiple GET requests are needed.",
+        "Use typed POST analytics routes with a JSON body for overview, timeseries, breakdowns, and detail reads.",
+        "Use the route registry and analytics schema to discover supported operations and filters.",
+        "Use batch only for explicitly batch-eligible read operations.",
       ],
       timeRanges: {
-        format: "ISO 8601 strings",
+        format:
+          "{ kind: 'absolute', from, to } or { kind: 'preset', preset, timeZone }",
         semantics: "[from, to)",
         default:
           "If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time. The default timeZone is UTC.",
@@ -59,27 +70,28 @@ function generate() {
         ],
       },
       filters:
-        "Use filter[field]=value for simple equality filters. Call analyticsSchema to discover supported fields.",
+        "Use the typed filter expression in the JSON body. Call analyticsSchema to discover supported fields.",
     },
+    typedAnalyticsOperations: analyticsRoutes.map((route) => ({
+      operationId: "operationId" in route ? route.operationId : route.id,
+      method: route.method,
+      path: route.path,
+    })),
     taskRecipes: [
       {
         intent: "traffic_overview",
         description: "Summarize traffic for a site over a time range.",
         calls: [
-          "GET /api/v1/sites/{siteId}/analytics/overview",
-          "GET /api/v1/sites/{siteId}/analytics/timeseries",
+          "POST /api/v1/sites/{siteId}/analytics/overview",
+          "POST /api/v1/sites/{siteId}/analytics/timeseries",
         ],
       },
       {
         intent: "traffic_drop_analysis",
         description: "Find likely causes of a traffic drop.",
         calls: [
-          "GET /api/v1/sites/{siteId}/analytics/compare",
-          "GET /api/v1/sites/{siteId}/analytics/timeseries",
-          "GET /api/v1/sites/{siteId}/analytics/breakdowns/referrer.domain",
-          "GET /api/v1/sites/{siteId}/analytics/breakdowns/page.path",
-          "GET /api/v1/sites/{siteId}/analytics/breakdowns/geo.country",
-          "GET /api/v1/sites/{siteId}/analytics/breakdowns/client.browser",
+          "POST /api/v1/sites/{siteId}/analytics/timeseries",
+          "POST /api/v1/sites/{siteId}/analytics/breakdowns/{dimension}",
         ],
       },
       {
@@ -87,20 +99,19 @@ function generate() {
         description:
           "Analyze Core Web Vitals and identify weak pages or regions.",
         calls: [
-          "GET /api/v1/sites/{siteId}/performance/summary",
-          "GET /api/v1/sites/{siteId}/performance/timeseries",
-          "GET /api/v1/sites/{siteId}/performance/breakdowns/page.path",
-          "GET /api/v1/sites/{siteId}/performance/breakdowns/geo.country",
+          "POST /api/v1/sites/{siteId}/analytics/performance/summary",
+          "POST /api/v1/sites/{siteId}/analytics/performance/timeseries",
+          "POST /api/v1/sites/{siteId}/analytics/performance/breakdowns/{dimension}",
         ],
       },
       {
         intent: "custom_event_analysis",
         description: "Analyze custom events and event payload fields.",
         calls: [
-          "GET /api/v1/sites/{siteId}/event-types",
-          "GET /api/v1/sites/{siteId}/events/summary",
-          "GET /api/v1/sites/{siteId}/events/timeseries",
-          "POST /api/v1/sites/{siteId}/events/search",
+          "POST /api/v1/sites/{siteId}/analytics/event-types",
+          "POST /api/v1/sites/{siteId}/analytics/events/summary",
+          "POST /api/v1/sites/{siteId}/analytics/events/timeseries",
+          "POST /api/v1/sites/{siteId}/analytics/events/search",
         ],
       },
     ],
@@ -117,12 +128,7 @@ function generate() {
     },
   };
 
-  writeFileSync(OUTPUT_PATH, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  try {
-    execSync(`npx prettier --write "${OUTPUT_PATH}"`, { stdio: "pipe" });
-  } catch {
-    // File remains valid JSON if formatting fails.
-  }
+  writeAtomically(OUTPUT_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
   rlog.success(`Generated ${OUTPUT_PATH}`);
 }
 

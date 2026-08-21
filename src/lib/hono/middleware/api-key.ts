@@ -1,8 +1,8 @@
 import type { MiddlewareHandler } from "hono";
 
+import { requireScope } from "@/lib/api-v1/auth-helpers";
 import { authenticateApiKey } from "@/lib/edge/api-key-auth";
 import type { ApiKeyScope } from "@/lib/edge/api-key-store";
-import { requireScope } from "@/lib/edge/api-v1-helpers";
 import type { AppEnv } from "@/lib/hono/types";
 import { executionContext } from "@/lib/hono/utils/context";
 

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { mapDimensionRows, type QueryWindow } from "@/lib/edge/query/core";
 import { handleFilterValuesContract } from "@/lib/edge/query/filter-values-contract-adapter";
 import {
+  queryLatestSiteActivity,
   queryOverviewFromD1,
   queryTrendFromD1,
 } from "@/lib/edge/query/overview";
@@ -942,6 +943,28 @@ describe("edge pages handlers", () => {
 });
 
 describe("edge overview D1 queries and handlers", () => {
+  it("reads the latest filtered site activity without turning an absent value into epoch", async () => {
+    const { env, calls } = createD1Env([
+      [{ lastActivityAt: 123 }],
+      [{ lastActivityAt: null }],
+      [{ lastActivityAt: "not-a-time" }],
+    ]);
+    const filters = filterFixture({ country: "US" });
+
+    await expect(
+      queryLatestSiteActivity(env, siteId, window, filters),
+    ).resolves.toBe(123);
+    await expect(
+      queryLatestSiteActivity(env, siteId, window, filters),
+    ).resolves.toBeNull();
+    await expect(
+      queryLatestSiteActivity(env, siteId, window, filters),
+    ).resolves.toBeNull();
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.sql).toContain("MAX(last_activity_at)");
+    expect(calls[0]?.bindings).toEqual([...visitBindings(), "us"]);
+  });
+
   it("maps overview aggregate fallback values and applies filters", async () => {
     const { env, calls } = createD1Env([[]]);
 

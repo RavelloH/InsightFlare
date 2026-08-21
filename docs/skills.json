@@ -19,12 +19,12 @@
       "Call GET /api/v1/token to inspect the token.",
       "Call GET /api/v1/sites to list accessible sites.",
       "Call GET /api/v1/sites/{siteId}/analytics/schema before advanced analytics.",
-      "Use overview, timeseries, and breakdowns for most analysis tasks.",
-      "Use explore for multi-dimensional or complex filtering.",
-      "Use batch to reduce round trips when multiple GET requests are needed."
+      "Use typed POST analytics routes with a JSON body for overview, timeseries, breakdowns, and detail reads.",
+      "Use the route registry and analytics schema to discover supported operations and filters.",
+      "Use batch only for explicitly batch-eligible read operations."
     ],
     "timeRanges": {
-      "format": "ISO 8601 strings",
+      "format": "{ kind: 'absolute', from, to } or { kind: 'preset', preset, timeZone }",
       "semantics": "[from, to)",
       "default": "If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time. The default timeZone is UTC.",
       "presets": [
@@ -38,47 +38,249 @@
         "last_month"
       ]
     },
-    "filters": "Use filter[field]=value for simple equality filters. Call analyticsSchema to discover supported fields."
+    "filters": "Use the typed filter expression in the JSON body. Call analyticsSchema to discover supported fields."
   },
+  "typedAnalyticsOperations": [
+    {
+      "operationId": "site.analytics.overview",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/overview"
+    },
+    {
+      "operationId": "team.analytics.overview",
+      "method": "POST",
+      "path": "/api/v1/team/analytics/overview"
+    },
+    {
+      "operationId": "site.analytics.comparisonOverview",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/comparison/overview"
+    },
+    {
+      "operationId": "site.analytics.comparisonTimeseries",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/comparison/timeseries"
+    },
+    {
+      "operationId": "site.analytics.comparisonBreakdown",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/comparison/breakdowns/{dimension}"
+    },
+    {
+      "operationId": "team.analytics.comparisonOverview",
+      "method": "POST",
+      "path": "/api/v1/team/analytics/comparison/overview"
+    },
+    {
+      "operationId": "team.analytics.comparisonTimeseries",
+      "method": "POST",
+      "path": "/api/v1/team/analytics/comparison/timeseries"
+    },
+    {
+      "operationId": "team.analytics.comparisonBreakdown",
+      "method": "POST",
+      "path": "/api/v1/team/analytics/comparison/breakdowns/{dimension}"
+    },
+    {
+      "operationId": "site.analytics.timeseries",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/timeseries"
+    },
+    {
+      "operationId": "team.analytics.timeseries",
+      "method": "POST",
+      "path": "/api/v1/team/analytics/timeseries"
+    },
+    {
+      "operationId": "team.analytics.sites",
+      "method": "POST",
+      "path": "/api/v1/team/analytics/sites"
+    },
+    {
+      "operationId": "site.analytics.breakdown",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/breakdowns/{dimension}"
+    },
+    {
+      "operationId": "team.analytics.breakdown",
+      "method": "POST",
+      "path": "/api/v1/team/analytics/breakdowns/{dimension}"
+    },
+    {
+      "operationId": "site.analytics.crossBreakdown",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/cross-breakdowns"
+    },
+    {
+      "operationId": "site.analytics.pages",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/pages"
+    },
+    {
+      "operationId": "site.analytics.referrers",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/referrers"
+    },
+    {
+      "operationId": "site.analytics.filterValues",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/filter-values"
+    },
+    {
+      "operationId": "site.analytics.retentionCohorts",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/retention/cohorts"
+    },
+    {
+      "operationId": "site.analytics.funnelAnalysis",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/funnel-analysis"
+    },
+    {
+      "operationId": "site.analytics.performanceSummary",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/performance/summary"
+    },
+    {
+      "operationId": "site.analytics.performanceTimeseries",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/performance/timeseries"
+    },
+    {
+      "operationId": "site.analytics.performanceBreakdown",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/performance/breakdowns/{dimension}"
+    },
+    {
+      "operationId": "site.analytics.eventsSummary",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/events/summary"
+    },
+    {
+      "operationId": "site.analytics.eventsTimeseries",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/events/timeseries"
+    },
+    {
+      "operationId": "site.analytics.eventsSearch",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/events/search"
+    },
+    {
+      "operationId": "site.analytics.eventDetail",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/events/detail"
+    },
+    {
+      "operationId": "site.analytics.eventTypes",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/event-types"
+    },
+    {
+      "operationId": "site.analytics.eventTypeDetail",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/event-types/detail"
+    },
+    {
+      "operationId": "site.analytics.eventFields",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/event-types/fields"
+    },
+    {
+      "operationId": "site.analytics.eventFieldValues",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/event-types/field-values"
+    },
+    {
+      "operationId": "site.analytics.visitorDetail",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/visitors/detail"
+    },
+    {
+      "operationId": "site.analytics.sessionDetail",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/sessions/detail"
+    },
+    {
+      "operationId": "site.analytics.visitorsSearch",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/visitors/search"
+    },
+    {
+      "operationId": "site.analytics.sessionsSearch",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/sessions/search"
+    },
+    {
+      "operationId": "site.analytics.visitorEvents",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/visitors/events"
+    },
+    {
+      "operationId": "site.analytics.visitorSessions",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/visitors/sessions"
+    },
+    {
+      "operationId": "site.analytics.sessionEvents",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/sessions/events"
+    },
+    {
+      "operationId": "site.analytics.realtimeSnapshot",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/realtime/snapshot"
+    },
+    {
+      "operationId": "site.analytics.realtimeActiveVisitors",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/realtime/active-visitors"
+    },
+    {
+      "operationId": "site.analytics.realtimeEvents",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/realtime/events"
+    },
+    {
+      "operationId": "site.analytics.realtimeSessions",
+      "method": "POST",
+      "path": "/api/v1/sites/{siteId}/analytics/realtime/sessions"
+    }
+  ],
   "taskRecipes": [
     {
       "intent": "traffic_overview",
       "description": "Summarize traffic for a site over a time range.",
       "calls": [
-        "GET /api/v1/sites/{siteId}/analytics/overview",
-        "GET /api/v1/sites/{siteId}/analytics/timeseries"
+        "POST /api/v1/sites/{siteId}/analytics/overview",
+        "POST /api/v1/sites/{siteId}/analytics/timeseries"
       ]
     },
     {
       "intent": "traffic_drop_analysis",
       "description": "Find likely causes of a traffic drop.",
       "calls": [
-        "GET /api/v1/sites/{siteId}/analytics/compare",
-        "GET /api/v1/sites/{siteId}/analytics/timeseries",
-        "GET /api/v1/sites/{siteId}/analytics/breakdowns/referrer.domain",
-        "GET /api/v1/sites/{siteId}/analytics/breakdowns/page.path",
-        "GET /api/v1/sites/{siteId}/analytics/breakdowns/geo.country",
-        "GET /api/v1/sites/{siteId}/analytics/breakdowns/client.browser"
+        "POST /api/v1/sites/{siteId}/analytics/timeseries",
+        "POST /api/v1/sites/{siteId}/analytics/breakdowns/{dimension}"
       ]
     },
     {
       "intent": "performance_analysis",
       "description": "Analyze Core Web Vitals and identify weak pages or regions.",
       "calls": [
-        "GET /api/v1/sites/{siteId}/performance/summary",
-        "GET /api/v1/sites/{siteId}/performance/timeseries",
-        "GET /api/v1/sites/{siteId}/performance/breakdowns/page.path",
-        "GET /api/v1/sites/{siteId}/performance/breakdowns/geo.country"
+        "POST /api/v1/sites/{siteId}/analytics/performance/summary",
+        "POST /api/v1/sites/{siteId}/analytics/performance/timeseries",
+        "POST /api/v1/sites/{siteId}/analytics/performance/breakdowns/{dimension}"
       ]
     },
     {
       "intent": "custom_event_analysis",
       "description": "Analyze custom events and event payload fields.",
       "calls": [
-        "GET /api/v1/sites/{siteId}/event-types",
-        "GET /api/v1/sites/{siteId}/events/summary",
-        "GET /api/v1/sites/{siteId}/events/timeseries",
-        "POST /api/v1/sites/{siteId}/events/search"
+        "POST /api/v1/sites/{siteId}/analytics/event-types",
+        "POST /api/v1/sites/{siteId}/analytics/events/summary",
+        "POST /api/v1/sites/{siteId}/analytics/events/timeseries",
+        "POST /api/v1/sites/{siteId}/analytics/events/search"
       ]
     }
   ],

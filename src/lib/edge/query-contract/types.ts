@@ -60,8 +60,8 @@ export type QueryOperation =
   | "pages-dashboard"
   | "referrers"
   | "filter-values"
-  | "geo-points"
   | "retention"
+  | "geo-points"
   | "performance"
   | "event-summary"
   | "event-trend"
@@ -223,8 +223,18 @@ export interface OverviewQuery extends BaseQuery {
 export interface TrendQuery extends BaseQuery {
   readonly interval: CalendarGranularity;
 }
-export type BreakdownQuery = DimensionQuery;
-export type CrossBreakdownQuery = DimensionQuery;
+export interface BreakdownQuery extends BaseQuery {
+  readonly dimension: AnalyticsDimension;
+  readonly limit: number;
+  readonly sort?: Sort<"views" | "sessions" | "visitors" | "key">;
+}
+
+export interface CrossBreakdownQuery extends BaseQuery {
+  readonly primaryDimension: AnalyticsDimension;
+  readonly secondaryDimension: AnalyticsDimension;
+  readonly primaryLimit: number;
+  readonly secondaryLimit: number;
+}
 export type ShareTrendQuery = TrendQuery;
 export type RadarQuery = DimensionQuery;
 export type FilterOptionsQuery = DimensionQuery;
@@ -302,8 +312,27 @@ export interface PagesResult {
 export interface ReferrersResult {
   readonly items: readonly ReferrerItem[];
 }
-export type BreakdownResult = CanonicalObject;
-export type CrossBreakdownResult = CanonicalObject;
+export interface BreakdownItem {
+  readonly key: string;
+  readonly label: string;
+  readonly views: number;
+  readonly sessions: number;
+  readonly visitors: number;
+}
+
+export interface BreakdownResult {
+  readonly items: readonly BreakdownItem[];
+}
+
+export interface CrossBreakdownRow extends BreakdownItem {
+  readonly cells: readonly BreakdownItem[];
+}
+
+export interface CrossBreakdownResult {
+  readonly columns: readonly BreakdownItem[];
+  readonly rows: readonly CrossBreakdownRow[];
+  readonly totalVisitors: number;
+}
 export type ShareTrendResult = CanonicalObject;
 export type RadarResult = CanonicalObject;
 export type FilterOptionsResult = CanonicalObject;

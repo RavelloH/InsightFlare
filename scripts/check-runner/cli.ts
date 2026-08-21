@@ -11,6 +11,7 @@ interface CheckStep {
 interface CheckTask {
   name: string;
   steps: CheckStep[];
+  exclusive?: boolean;
 }
 
 interface StepResult {
@@ -72,6 +73,7 @@ const tasks: CheckTask[] = [
   },
   {
     name: "Coverage",
+    exclusive: true,
     steps: [
       {
         name: "Coverage",
@@ -211,9 +213,14 @@ function parseArgs(argv: string[]): CheckOptions {
 
 export async function runCli(argv = process.argv.slice(2)): Promise<void> {
   const { verbose } = parseArgs(argv);
+  const parallelTasks = tasks.filter((task) => !task.exclusive);
+  const exclusiveTasks = tasks.filter((task) => task.exclusive);
   const results = await Promise.all(
-    tasks.map((task) => runTask(task, verbose)),
+    parallelTasks.map((task) => runTask(task, verbose)),
   );
+  for (const task of exclusiveTasks) {
+    results.push(await runTask(task, verbose));
+  }
   const failures = results.filter((result) => !result.ok);
 
   for (const result of failures) {

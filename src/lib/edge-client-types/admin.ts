@@ -58,6 +58,8 @@ export interface AccountUserData {
 
 export type ApiKeyScope =
   | "analytics:read"
+  | "analysis:read"
+  | "analysis:write"
   | "site:read"
   | "site:write"
   | "site_config:read"

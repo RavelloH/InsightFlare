@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleUsersAdmin } from "@/lib/edge/admin-users";
 import { handleAdminWs } from "@/lib/edge/admin-ws";
 import { authenticateApiKey } from "@/lib/edge/api-key-auth";
-import { handleApiV1, handleCapabilities, handleRoot } from "@/lib/edge/api-v1";
 import {
   handlePrivateArchive,
   handlePrivateArchiveFile,
@@ -92,34 +91,6 @@ vi.mock("@/lib/edge/query/overview-contract-adapter", () => ({
 vi.mock("@/lib/edge/query/pages-contract-adapter", () => ({
   handlePagesContract: vi.fn(),
   handleReferrersContract: vi.fn(),
-}));
-
-vi.mock("@/lib/edge/api-v1", () => ({
-  apiV1Segments: (url: URL) =>
-    url.pathname
-      .replace(/^\/api\/v1\/?/, "")
-      .split("/")
-      .filter(Boolean),
-  handleAnalytics: vi.fn(),
-  handleApiV1: vi.fn(),
-  handleApiV1ForPrincipal: vi.fn(),
-  handleBatch: vi.fn(),
-  handleCapabilities: vi.fn(),
-  handleEvents: vi.fn(),
-  handleFunnels: vi.fn(),
-  handleJourneys: vi.fn(),
-  handlePerformance: vi.fn(),
-  handlePrivacy: vi.fn(),
-  handleRealtime: vi.fn(),
-  handleRoot: vi.fn(),
-  handleSharing: vi.fn(),
-  handleSiteResource: vi.fn(),
-  handleSitesCollection: vi.fn(),
-  handleTeam: vi.fn(),
-  handleToken: vi.fn(),
-  handleTokenCheck: vi.fn(),
-  handleTracking: vi.fn(),
-  handleTrackingScript: vi.fn(),
 }));
 
 vi.mock("@/lib/edge/api-key-auth", () => ({
@@ -216,8 +187,6 @@ describe("Hono API app routing", () => {
     vi.mocked(handleOverviewContract).mockResolvedValue(
       new Response("private-query"),
     );
-    vi.mocked(handleApiV1).mockResolvedValue(new Response("v1"));
-    vi.mocked(handleRoot).mockResolvedValue(new Response("root"));
     vi.mocked(authenticateApiKey).mockResolvedValue({
       keyId: "key-1",
       teamId: "team-1",
@@ -225,7 +194,6 @@ describe("Hono API app routing", () => {
       scopes: ["analytics:read"],
       siteIds: ["site-1"],
     });
-    vi.mocked(handleCapabilities).mockResolvedValue(new Response("v1"));
     vi.mocked(handleLegacyAuthLogin).mockResolvedValue(
       new Response("legacy-login"),
     );
@@ -414,8 +382,6 @@ describe("Hono API app routing", () => {
       expect.objectContaining({ subject: { kind: "site", siteId: "site-1" } }),
     );
     expect(fetchPublicSite).toHaveBeenCalled();
-    expect(handleCapabilities).toHaveBeenCalled();
-    expect(handleApiV1).not.toHaveBeenCalled();
   });
 
   it("emits one aggregate Worker record with route and query diagnostics", async () => {

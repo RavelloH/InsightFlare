@@ -1,4 +1,7 @@
-import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
+import {
+  type FilterDocument,
+  parseFilterUrlForAudience,
+} from "@/lib/edge/query-contract";
 import {
   executeOverview,
   executeTrend,
@@ -29,7 +32,11 @@ import {
   createD1ReadDiagnostics,
   type D1ReadDiagnostics,
 } from "./diagnostics";
-import { queryOverviewAggregate, queryTrendAggregate } from "./overview";
+import {
+  queryLatestSiteActivity,
+  queryOverviewAggregate,
+  queryTrendAggregate,
+} from "./overview";
 
 export function toQueryTime(window: QueryWindow): QueryTime {
   return {
@@ -142,6 +149,17 @@ export function createOverviewReader(
       };
     },
   };
+}
+
+/** Typed provider fragment used only by the team-site composite reader. */
+export async function readLatestSiteActivity(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  diagnostics: D1ReadDiagnostics = createD1ReadDiagnostics(),
+): Promise<number | null> {
+  return queryLatestSiteActivity(env, siteId, window, filters, diagnostics);
 }
 
 export async function handleOverviewContract(

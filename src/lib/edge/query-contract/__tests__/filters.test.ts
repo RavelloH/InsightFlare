@@ -10,6 +10,7 @@ import {
   hasEffectiveFilters,
   normalizeFilterDocument,
   queryPolicyForAudience,
+  stripTopLevelFacet,
 } from "@/lib/edge/query-contract";
 
 const allAudiences = new Set([
@@ -170,6 +171,37 @@ describe("typed filter contract", () => {
       },
     });
     expect(hasEffectiveFilters(document)).toBe(true);
+  });
+
+  it("strips only top-level facet conditions after canonical normalization", () => {
+    const target = fieldCondition("page.path", "eq", "/pricing");
+    const other = fieldCondition("geo.country", "eq", "US");
+    const root = normalizeFilterDocument(
+      { version: 1, root: target },
+      registry,
+    );
+    expect(stripTopLevelFacet(root, "page.path").root).toBeNull();
+
+    const conjunction = normalizeFilterDocument(
+      { version: 1, root: { kind: "and", children: [target, other] } },
+      registry,
+    );
+    expect(stripTopLevelFacet(conjunction, "page.path").root).toEqual(other);
+
+    const nestedOr = normalizeFilterDocument(
+      {
+        version: 1,
+        root: { kind: "or", children: [target, other] },
+      },
+      registry,
+    );
+    expect(stripTopLevelFacet(nestedOr, "page.path")).toEqual(nestedOr);
+
+    const nestedNot = normalizeFilterDocument(
+      { version: 1, root: { kind: "not", child: target } },
+      registry,
+    );
+    expect(stripTopLevelFacet(nestedNot, "page.path")).toEqual(nestedNot);
   });
 
   it("converts one-item set predicates only after canonicalization", () => {

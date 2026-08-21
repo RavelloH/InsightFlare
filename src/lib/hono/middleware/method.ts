@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 
-import { methodNotAllowed } from "@/lib/edge/api-v1-helpers";
+import { methodNotAllowed } from "@/lib/api-v1/wire-helpers";
 import type { AppEnv } from "@/lib/hono/types";
 
 export function requireMethodMiddleware(

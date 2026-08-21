@@ -72,12 +72,14 @@ event_source AS (
 
 export function buildTargetVisitSourceCte(
   targetColumn: "session_id" | "visitor_id",
+  options?: { withinWindow?: boolean },
 ): string {
   return `
 visit_source AS (
   SELECT ${VISIT_SOURCE_COLUMNS}
   FROM visits
   WHERE site_id = ? AND ${targetColumn} = ?
+  ${options?.withinWindow ? "AND started_at >= ? AND started_at < ?" : ""}
 )`;
 }
 
@@ -245,8 +247,11 @@ export function eventSourceBindings(
 export function targetVisitSourceBindings(
   siteId: string,
   targetValue: string,
+  window?: QueryWindow,
 ): Array<string | number> {
-  return [siteId, targetValue];
+  return window
+    ? [siteId, targetValue, window.startMs, window.endExclusiveMs]
+    : [siteId, targetValue];
 }
 
 export function detailCustomEventSourceBindings(

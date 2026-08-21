@@ -1,3 +1,5 @@
+import { jsonError } from "@/lib/api-v1/wire-helpers";
+
 import {
   type ApiKeyScope,
   apiKeyStatus,
@@ -9,7 +11,6 @@ import {
   parseApiKey,
   timingSafeEqualString,
 } from "./api-key-store";
-import { jsonError } from "./api-v1-helpers";
 import type { Env } from "./types";
 import { nowEpochSeconds } from "./utils";
 

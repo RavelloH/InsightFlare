@@ -9,6 +9,8 @@ export const API_KEY_EXPIRATION_DAYS = [30, 90, 180, 365] as const;
 
 export const API_KEY_SCOPES = [
   "analytics:read",
+  "analysis:read",
+  "analysis:write",
   "site:read",
   "site:write",
   "site_config:read",

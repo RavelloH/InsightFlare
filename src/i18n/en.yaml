@@ -1641,18 +1641,23 @@ teamManagement:
       revoked: Revoked
     scopes:
       analyticsRead: Analytics read
+      analysisRead: Analysis definitions read
+      analysisWrite: Analysis definitions write
       siteRead: Site read
       siteWrite: Site write
       siteConfigRead: Config read
       siteConfigWrite: Config write
     scopeDescriptions:
       analyticsRead: View visits, visitors, page views, and other analytics data
+      analysisRead: View shared saved filters and funnel definitions
+      analysisWrite: Create, update, or delete funnel definitions
       siteRead: View site list and site details
       siteWrite: Create, update, or delete sites
       siteConfigRead: View site settings like tracking code and domain whitelist
       siteConfigWrite: Modify site settings like tracking strength and path blacklist
     scopeGroups:
       analytics: Analytics
+      analysis: Analysis definitions
       site: Site
       siteConfig: Site Configuration
     columns:

@@ -1604,6 +1604,8 @@ export interface AppMessages {
       };
       scopes: {
         analyticsRead: string;
+        analysisRead: string;
+        analysisWrite: string;
         siteRead: string;
         siteWrite: string;
         siteConfigRead: string;
@@ -1611,6 +1613,8 @@ export interface AppMessages {
       };
       scopeDescriptions: {
         analyticsRead: string;
+        analysisRead: string;
+        analysisWrite: string;
         siteRead: string;
         siteWrite: string;
         siteConfigRead: string;
@@ -1618,6 +1622,7 @@ export interface AppMessages {
       };
       scopeGroups: {
         analytics: string;
+        analysis: string;
         site: string;
         siteConfig: string;
       };
@@ -4013,6 +4018,8 @@ const enMessages = {
       },
       scopes: {
         analyticsRead: "Analytics read",
+        analysisRead: "Analysis definitions read",
+        analysisWrite: "Analysis definitions write",
         siteRead: "Site read",
         siteWrite: "Site write",
         siteConfigRead: "Config read",
@@ -4021,6 +4028,8 @@ const enMessages = {
       scopeDescriptions: {
         analyticsRead:
           "View visits, visitors, page views, and other analytics data",
+        analysisRead: "View shared saved filters and funnel definitions",
+        analysisWrite: "Create, update, or delete funnel definitions",
         siteRead: "View site list and site details",
         siteWrite: "Create, update, or delete sites",
         siteConfigRead:
@@ -4030,6 +4039,7 @@ const enMessages = {
       },
       scopeGroups: {
         analytics: "Analytics",
+        analysis: "Analysis definitions",
         site: "Site",
         siteConfig: "Site Configuration",
       },
@@ -6423,6 +6433,8 @@ const zhMessages = {
       },
       scopes: {
         analyticsRead: "读取分析",
+        analysisRead: "读取分析定义",
+        analysisWrite: "写入分析定义",
         siteRead: "读取站点",
         siteWrite: "写入站点",
         siteConfigRead: "读取配置",
@@ -6430,6 +6442,8 @@ const zhMessages = {
       },
       scopeDescriptions: {
         analyticsRead: "查看访问量、访客、页面浏览等分析数据",
+        analysisRead: "查看团队共享的已保存筛选器和漏斗定义",
+        analysisWrite: "创建、更新或删除漏斗定义",
         siteRead: "查看站点列表和站点详情",
         siteWrite: "创建、更新或删除站点",
         siteConfigRead: "查看站点配置，如跟踪代码、域名白名单等",
@@ -6437,6 +6451,7 @@ const zhMessages = {
       },
       scopeGroups: {
         analytics: "分析",
+        analysis: "分析定义",
         site: "站点",
         siteConfig: "站点配置",
       },
@@ -8877,6 +8892,8 @@ const jaMessages = {
       },
       scopes: {
         analyticsRead: "分析の読み取り",
+        analysisRead: "分析定義の読み取り",
+        analysisWrite: "分析定義の書き込み",
         siteRead: "サイトの読み取り",
         siteWrite: "サイトの書き込み",
         siteConfigRead: "設定の読み取り",
@@ -8884,6 +8901,8 @@ const jaMessages = {
       },
       scopeDescriptions: {
         analyticsRead: "訪問、訪問者、ページビュー、その他の分析データを表示",
+        analysisRead: "共有保存フィルターとファネル定義を表示",
+        analysisWrite: "ファネル定義を作成、更新、削除",
         siteRead: "サイト一覧とサイト詳細を表示",
         siteWrite: "サイトを作成、更新、削除",
         siteConfigRead:
@@ -8893,6 +8912,7 @@ const jaMessages = {
       },
       scopeGroups: {
         analytics: "分析",
+        analysis: "分析定義",
         site: "サイト",
         siteConfig: "サイト設定",
       },

@@ -1,7 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 
+import { jsonError } from "@/lib/api-v1/wire-helpers";
 import { canAccessSiteId } from "@/lib/edge/api-key-auth";
-import { jsonError } from "@/lib/edge/api-v1-helpers";
 import {
   fetchPublicSite,
   resolvePrivateSiteForSession,

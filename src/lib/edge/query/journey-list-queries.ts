@@ -63,6 +63,31 @@ export interface SessionListPage {
   nextCursor: SessionListCursor | null;
 }
 
+/**
+ * Establishes a target's site/window scope before reading its trajectory.
+ * Empty trajectories are valid, while IDs known only outside the window remain
+ * indistinguishable from missing IDs.
+ */
+export async function queryJourneyTargetExistsFromD1(
+  env: Env,
+  siteId: string,
+  target: { readonly type: "visitor" | "session"; readonly value: string },
+  window: QueryWindow,
+): Promise<boolean> {
+  const column = target.type === "visitor" ? "visitor_id" : "session_id";
+  const rows = await queryD1All<{ present: number }>(
+    env,
+    `
+SELECT 1 AS present
+FROM visits
+WHERE site_id = ? AND ${column} = ? AND started_at >= ? AND started_at < ?
+LIMIT 1
+`,
+    [siteId, target.value, window.startMs, window.endExclusiveMs],
+  );
+  return rows.length > 0;
+}
+
 function toBase64Url(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let binary = "";

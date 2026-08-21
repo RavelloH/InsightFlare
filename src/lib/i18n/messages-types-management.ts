@@ -802,6 +802,8 @@ export interface AppManagementMessages {
       };
       scopes: {
         analyticsRead: string;
+        analysisRead: string;
+        analysisWrite: string;
         siteRead: string;
         siteWrite: string;
         siteConfigRead: string;
@@ -809,6 +811,8 @@ export interface AppManagementMessages {
       };
       scopeDescriptions: {
         analyticsRead: string;
+        analysisRead: string;
+        analysisWrite: string;
         siteRead: string;
         siteWrite: string;
         siteConfigRead: string;
@@ -816,6 +820,7 @@ export interface AppManagementMessages {
       };
       scopeGroups: {
         analytics: string;
+        analysis: string;
         site: string;
         siteConfig: string;
       };

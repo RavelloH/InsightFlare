@@ -17,6 +17,7 @@ import {
   parseSort,
   parseTimeRange,
   requireScope,
+  validateCrossBreakdownDimension,
   validateDimension,
 } from "@/lib/edge/api-v1-helpers";
 import {
@@ -29,6 +30,10 @@ function url(path: string): URL {
 }
 
 interface TestEnvelope {
+  meta?: {
+    requestId?: string;
+    generatedAt?: string;
+  };
   links?: Record<string, string>;
   error?: {
     code?: string;
@@ -39,25 +44,32 @@ interface TestEnvelope {
 
 describe("api v1 helpers", () => {
   it("wraps success and error responses without ok", async () => {
-    const success = await jsonSuccess(
+    const request = new Request("https://edge.test/api/v1", {
+      headers: {
+        "x-request-id": "client-controlled",
+        "cf-ray": "client-ray",
+      },
+    });
+    const success = (await jsonSuccess(
       { value: 1 },
       {
-        request: new Request("https://edge.test/api/v1"),
+        request,
       },
-    ).json();
+    ).json()) as TestEnvelope;
     expect(success).toMatchObject({
       data: { value: 1 },
       meta: { generatedAt: expect.any(String), requestId: expect.any(String) },
     });
     expect(JSON.stringify(success)).not.toContain('"ok"');
+    const requestId = success.meta?.requestId;
 
-    const failure = await jsonError(
+    const failure = (await jsonError(
       "validation_failed",
       "Invalid",
       400,
       { field: "from" },
-      new Request("https://edge.test/api/v1"),
-    ).json();
+      request,
+    ).json()) as TestEnvelope;
     expect(failure).toMatchObject({
       error: {
         code: "validation_failed",
@@ -66,6 +78,30 @@ describe("api v1 helpers", () => {
       },
       meta: { generatedAt: expect.any(String) },
     });
+    expect(requestId).toBeDefined();
+    expect(requestId).not.toBe("client-controlled");
+    expect(requestId).not.toBe("client-ray");
+
+    const successResponse = jsonSuccess({ value: 1 }, { request });
+    expect(successResponse.headers.get("X-Request-Id")).toBe(requestId);
+    expect(successResponse.headers.get("Cache-Control")).toBe(
+      "private, no-store",
+    );
+    expect(successResponse.headers.get("X-Content-Type-Options")).toBe(
+      "nosniff",
+    );
+
+    const failureResponse = jsonError(
+      "validation_failed",
+      "Invalid",
+      400,
+      undefined,
+      request,
+    );
+    expect(failureResponse.headers.get("X-Request-Id")).toBe(requestId);
+    expect(failureResponse.headers.get("Cache-Control")).toBe(
+      "private, no-store",
+    );
   });
 
   it("parses ISO time ranges and defaults to the previous seven days", () => {
@@ -161,6 +197,10 @@ describe("api v1 helpers", () => {
   it("validates dimensions and structured filters", () => {
     expect(validateDimension("geo.country")).toBe("geo.country");
     expect(validateDimension("country")).toBeInstanceOf(Response);
+    expect(validateCrossBreakdownDimension("geo.country")).toBe("geo.country");
+    expect(validateCrossBreakdownDimension("event.name")).toBeInstanceOf(
+      Response,
+    );
     expect(
       parseApiV1FilterDocument({
         version: 1,
@@ -215,6 +255,27 @@ describe("api v1 helpers", () => {
     expect(res.headers.get("x-custom")).toBe("yes");
   });
 
+  it("does not allow caller metadata or headers to override server transport fields", async () => {
+    const request = new Request("https://edge.test/api/v1", {
+      headers: { "x-request-id": "client-id" },
+    });
+    const response = jsonSuccess(
+      { ok: true },
+      {
+        request,
+        meta: { requestId: "spoofed", generatedAt: "spoofed" },
+        headers: { "X-Request-Id": "spoofed", "Cache-Control": "public" },
+      },
+    );
+    const body = (await response.json()) as {
+      meta: { requestId: string; generatedAt: string };
+    };
+    expect(body.meta.requestId).not.toBe("spoofed");
+    expect(body.meta.generatedAt).not.toBe("spoofed");
+    expect(response.headers.get("X-Request-Id")).toBe(body.meta.requestId);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+
   it("jsonPaginated includes links when provided", async () => {
     const res = jsonPaginated(
       [],
@@ -241,6 +302,13 @@ describe("api v1 helpers", () => {
     const body = (await res.json()) as TestEnvelope;
     expect(body.error).toEqual({ code: "not_found", message: "Not Found" });
     expect(body.error).not.toHaveProperty("details");
+  });
+
+  it("always generates a request id when no request object is available", async () => {
+    const response = jsonSuccess({ ok: true });
+    const body = (await response.json()) as { meta: { requestId: string } };
+    expect(body.meta.requestId).toMatch(/^[a-f0-9]{32}$/);
+    expect(response.headers.get("X-Request-Id")).toBe(body.meta.requestId);
   });
 
   it("methodNotAllowed returns 405", async () => {

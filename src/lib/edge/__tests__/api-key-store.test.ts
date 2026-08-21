@@ -140,12 +140,19 @@ describe("api key store utilities", () => {
     expect(
       normalizeApiKeyScopes([
         "analytics:read",
+        "analysis:read",
+        "analysis:write",
         "unknown",
         null,
         "site:read",
         "analytics:read",
       ]),
-    ).toEqual(["analytics:read", "site:read"]);
+    ).toEqual([
+      "analytics:read",
+      "analysis:read",
+      "analysis:write",
+      "site:read",
+    ]);
     expect(normalizeApiKeyScopes(null as unknown as unknown[])).toEqual([]);
     expect(
       normalizeApiKeySiteIds([" site-1 ", "", "site-1", "site-2"]),

@@ -385,6 +385,39 @@ describe("edge journey detail D1 queries", () => {
     expect(calls[0]?.bindings).toEqual([siteId, "visitor-missing", siteId]);
   });
 
+  it("constrains visitor and session details to an explicit half-open query window", async () => {
+    const { env, calls } = createD1Env([[], []]);
+    const window = {
+      startMs: baseMs,
+      endExclusiveMs: baseMs + 60_000,
+      nowMs: baseMs + 60_000,
+      timeZone: "UTC",
+    };
+
+    await expect(
+      queryVisitorDetailFromD1(env, siteId, "visitor-outside", "UTC", window),
+    ).resolves.toBeNull();
+    await expect(
+      querySessionDetailFromD1(env, siteId, "session-outside", window),
+    ).resolves.toBeNull();
+
+    expect(calls[0]?.sql).toContain("started_at >= ? AND started_at < ?");
+    expect(calls[0]?.bindings).toEqual([
+      siteId,
+      "visitor-outside",
+      baseMs,
+      baseMs + 60_000,
+      siteId,
+    ]);
+    expect(calls[1]?.bindings).toEqual([
+      siteId,
+      "session-outside",
+      baseMs,
+      baseMs + 60_000,
+      siteId,
+    ]);
+  });
+
   it("uses target-visit and target-event indexes from the shared detail source", async () => {
     const sqlite = createSqliteDetailEnv();
     try {

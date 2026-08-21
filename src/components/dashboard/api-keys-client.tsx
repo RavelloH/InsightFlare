@@ -86,6 +86,8 @@ function scopeLabel(
   scope: ApiKeyScope,
 ) {
   if (scope === "analytics:read") return copy.scopes.analyticsRead;
+  if (scope === "analysis:read") return copy.scopes.analysisRead;
+  if (scope === "analysis:write") return copy.scopes.analysisWrite;
   if (scope === "site:read") return copy.scopes.siteRead;
   if (scope === "site:write") return copy.scopes.siteWrite;
   if (scope === "site_config:read") return copy.scopes.siteConfigRead;
@@ -97,6 +99,8 @@ function scopeDescription(
   scope: ApiKeyScope,
 ) {
   if (scope === "analytics:read") return copy.scopeDescriptions.analyticsRead;
+  if (scope === "analysis:read") return copy.scopeDescriptions.analysisRead;
+  if (scope === "analysis:write") return copy.scopeDescriptions.analysisWrite;
   if (scope === "site:read") return copy.scopeDescriptions.siteRead;
   if (scope === "site:write") return copy.scopeDescriptions.siteWrite;
   if (scope === "site_config:read")
@@ -112,6 +116,11 @@ function getScopeGroups(
       key: "analytics",
       label: copy.scopeGroups.analytics,
       scopes: ["analytics:read"],
+    },
+    {
+      key: "analysis",
+      label: copy.scopeGroups.analysis,
+      scopes: ["analysis:read", "analysis:write"],
     },
     {
       key: "site",
