@@ -1,296 +1,540 @@
 {
-  "api": "InsightFlare Analytics API",
+  "manifestVersion": 1,
+  "api": "InsightFlare API",
   "version": "0.6.0",
-  "description": "Privacy-focused web analytics platform.",
   "baseUrl": "${baseUrl}",
-  "openapiUrl": "/.well-known/openapi.json",
+  "description": "Agent operating guide for the InsightFlare public API.",
+  "openapi": {
+    "url": "/.well-known/openapi.json"
+  },
+  "openapiGuidance": {
+    "sourceOfTruth": "OpenAPI is the authoritative contract for every operation. Do not infer request fields, response fields, enum values, scopes, pagination, or errors from this manifest.",
+    "readingRules": [
+      "Fetch OpenAPI before the first API call in a session and use its server URL.",
+      "Resolve only the operationIds relevant to the current task instead of reading the entire document for every request.",
+      "Before each call, read the selected operation's security, parameters, request body, examples, success response, error responses, and extension fields.",
+      "Use only fields and values permitted by the selected operation. Never invent undocumented parameters or response fields."
+    ]
+  },
   "discovery": {
-    "root": "/api/v1",
-    "token": "/api/v1/token",
-    "capabilities": "/api/v1/capabilities",
-    "analyticsSchema": "/api/v1/sites/{siteId}/analytics/schema"
-  },
-  "agentGuidance": {
-    "authentication": {
-      "required": true,
-      "instruction": "Use a user-provided API key as a Bearer token. Do not guess or fabricate credentials."
-    },
-    "defaultWorkflow": [
-      "Call GET /api/v1/token to inspect the token.",
-      "Call GET /api/v1/sites to list accessible sites.",
-      "Call GET /api/v1/sites/{siteId}/analytics/schema before advanced analytics.",
-      "Use typed POST analytics routes with a JSON body for overview, timeseries, breakdowns, and detail reads.",
-      "Use the route registry and analytics schema to discover supported operations and filters.",
-      "Use batch only for explicitly batch-eligible read operations."
+    "sessionInitialization": [
+      "wellKnown.skills",
+      "wellKnown.openapi",
+      "core.root",
+      "core.token.get",
+      "core.token.check",
+      "core.capabilities",
+      "core.team.get",
+      "sites.list"
     ],
-    "timeRanges": {
-      "format": "{ kind: 'absolute', from, to } or { kind: 'preset', preset, timeZone }",
-      "semantics": "[from, to)",
-      "default": "If from, to, and preset are omitted, analytics endpoints default to the last 7 days ending at request time. The default timeZone is UTC.",
-      "presets": [
-        "today",
-        "yesterday",
-        "last_7_days",
-        "last_30_days",
-        "this_week",
-        "last_week",
-        "this_month",
-        "last_month"
-      ]
-    },
-    "filters": "Use the typed filter expression in the JSON body. Call analyticsSchema to discover supported fields."
+    "siteAnalyticsSchema": "site.analytics.schema",
+    "teamAnalyticsSchema": "team.analytics.schema",
+    "health": "wellKnown.health"
   },
-  "typedAnalyticsOperations": [
-    {
-      "operationId": "site.analytics.overview",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/overview"
-    },
-    {
-      "operationId": "team.analytics.overview",
-      "method": "POST",
-      "path": "/api/v1/team/analytics/overview"
-    },
-    {
-      "operationId": "site.analytics.comparisonOverview",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/comparison/overview"
-    },
-    {
-      "operationId": "site.analytics.comparisonTimeseries",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/comparison/timeseries"
-    },
-    {
-      "operationId": "site.analytics.comparisonBreakdown",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/comparison/breakdowns/{dimension}"
-    },
-    {
-      "operationId": "team.analytics.comparisonOverview",
-      "method": "POST",
-      "path": "/api/v1/team/analytics/comparison/overview"
-    },
-    {
-      "operationId": "team.analytics.comparisonTimeseries",
-      "method": "POST",
-      "path": "/api/v1/team/analytics/comparison/timeseries"
-    },
-    {
-      "operationId": "team.analytics.comparisonBreakdown",
-      "method": "POST",
-      "path": "/api/v1/team/analytics/comparison/breakdowns/{dimension}"
-    },
-    {
-      "operationId": "site.analytics.timeseries",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/timeseries"
-    },
-    {
-      "operationId": "team.analytics.timeseries",
-      "method": "POST",
-      "path": "/api/v1/team/analytics/timeseries"
-    },
-    {
-      "operationId": "team.analytics.sites",
-      "method": "POST",
-      "path": "/api/v1/team/analytics/sites"
-    },
-    {
-      "operationId": "site.analytics.breakdown",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/breakdowns/{dimension}"
-    },
-    {
-      "operationId": "team.analytics.breakdown",
-      "method": "POST",
-      "path": "/api/v1/team/analytics/breakdowns/{dimension}"
-    },
-    {
-      "operationId": "site.analytics.crossBreakdown",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/cross-breakdowns"
-    },
-    {
-      "operationId": "site.analytics.pages",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/pages"
-    },
-    {
-      "operationId": "site.analytics.referrers",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/referrers"
-    },
-    {
-      "operationId": "site.analytics.filterValues",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/filter-values"
-    },
-    {
-      "operationId": "site.analytics.retentionCohorts",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/retention/cohorts"
-    },
-    {
-      "operationId": "site.analytics.funnelAnalysis",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/funnel-analysis"
-    },
-    {
-      "operationId": "site.analytics.performanceSummary",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/performance/summary"
-    },
-    {
-      "operationId": "site.analytics.performanceTimeseries",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/performance/timeseries"
-    },
-    {
-      "operationId": "site.analytics.performanceBreakdown",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/performance/breakdowns/{dimension}"
-    },
-    {
-      "operationId": "site.analytics.eventsSummary",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/events/summary"
-    },
-    {
-      "operationId": "site.analytics.eventsTimeseries",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/events/timeseries"
-    },
-    {
-      "operationId": "site.analytics.eventsSearch",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/events/search"
-    },
-    {
-      "operationId": "site.analytics.eventDetail",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/events/detail"
-    },
-    {
-      "operationId": "site.analytics.eventTypes",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/event-types"
-    },
-    {
-      "operationId": "site.analytics.eventTypeDetail",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/event-types/detail"
-    },
-    {
-      "operationId": "site.analytics.eventFields",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/event-types/fields"
-    },
-    {
-      "operationId": "site.analytics.eventFieldValues",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/event-types/field-values"
-    },
-    {
-      "operationId": "site.analytics.visitorDetail",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/visitors/detail"
-    },
-    {
-      "operationId": "site.analytics.sessionDetail",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/sessions/detail"
-    },
-    {
-      "operationId": "site.analytics.visitorsSearch",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/visitors/search"
-    },
-    {
-      "operationId": "site.analytics.sessionsSearch",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/sessions/search"
-    },
-    {
-      "operationId": "site.analytics.visitorEvents",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/visitors/events"
-    },
-    {
-      "operationId": "site.analytics.visitorSessions",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/visitors/sessions"
-    },
-    {
-      "operationId": "site.analytics.sessionEvents",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/sessions/events"
-    },
-    {
-      "operationId": "site.analytics.realtimeSnapshot",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/realtime/snapshot"
-    },
-    {
-      "operationId": "site.analytics.realtimeActiveVisitors",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/realtime/active-visitors"
-    },
-    {
-      "operationId": "site.analytics.realtimeEvents",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/realtime/events"
-    },
-    {
-      "operationId": "site.analytics.realtimeSessions",
-      "method": "POST",
-      "path": "/api/v1/sites/{siteId}/analytics/realtime/sessions"
-    }
-  ],
+  "executionPolicy": {
+    "authentication": "Use only an API key supplied by the user with the Bearer authentication scheme defined by OpenAPI. Never guess, create, or expose credentials.",
+    "scopeSelection": "Use a site scope for a request about one site. Use team scope only when the user explicitly asks for a cross-site or team-wide result. Confirm access and required scopes from the token and selected OpenAPI operation.",
+    "timeRanges": "When an analytics request omits a time range, use the operation default of the last seven days ending at request time in UTC. State the effective time range and time zone in the result.",
+    "filters": "Before an analytics query with filters, retrieve the selected site or team analytics schema. Use only its filterProtocol fields and operators, then consult the target operation's OpenAPI request body. Use site.analytics.filterValues when candidate values are needed.",
+    "pagination": "Read pagination inputs and continuation behavior from the selected OpenAPI operation. Continue only while needed to answer the user, and disclose truncation or incomplete traversal.",
+    "batch": "Use batch only for read operations that the selected OpenAPI operation explicitly marks as batch-eligible. Each batched item must independently satisfy its operation contract.",
+    "retries": "Do not retry validation, authentication, authorization, or not-found failures. For rate limits and retryable service failures, follow the OpenAPI error details and retry only a bounded number of times.",
+    "resultReporting": "For numerical results, state scope, effective time range, time zone, filters, comparison baseline, units, partial failures, and material data limitations. Treat descriptive correlations as observations, not causal conclusions.",
+    "mutationConfirmation": "Before every create, update, or delete operation, inspect current state when available, present the exact proposed resource or field changes, and wait for explicit user confirmation. For deletion, name the exact identifier and irreversible effect."
+  },
   "taskRecipes": [
     {
-      "intent": "traffic_overview",
-      "description": "Summarize traffic for a site over a time range.",
-      "calls": [
-        "POST /api/v1/sites/{siteId}/analytics/overview",
-        "POST /api/v1/sites/{siteId}/analytics/timeseries"
-      ]
+      "id": "connect_and_authorize",
+      "intent": "Connect an Agent, inspect its API key, and establish accessible scope.",
+      "scope": "team",
+      "requiredContext": [
+        "user-provided API key"
+      ],
+      "preparation": [],
+      "operations": [
+        "wellKnown.skills",
+        "wellKnown.openapi",
+        "core.root",
+        "core.token.get",
+        "core.token.check",
+        "core.capabilities",
+        "core.team.get",
+        "sites.list"
+      ],
+      "decisionBranches": [
+        "If no key is supplied or the token is invalid, request a valid API key.",
+        "If multiple sites are available and a single-site task lacks a site choice, ask the user or identify the site by its known domain."
+      ],
+      "result": "Report the authenticated team, granted scopes, accessible sites, and any capability limitation relevant to the requested task."
     },
     {
-      "intent": "traffic_drop_analysis",
-      "description": "Find likely causes of a traffic drop.",
-      "calls": [
-        "POST /api/v1/sites/{siteId}/analytics/timeseries",
-        "POST /api/v1/sites/{siteId}/analytics/breakdowns/{dimension}"
-      ]
+      "id": "service_health",
+      "intent": "Check whether the publicly exposed service is healthy.",
+      "scope": "integration",
+      "requiredContext": [],
+      "preparation": [],
+      "operations": [
+        "wellKnown.health"
+      ],
+      "decisionBranches": [
+        "If health is unavailable, report the observed response and do not diagnose internal causes without evidence."
+      ],
+      "result": "Report the observed service-health result and any request failure."
     },
     {
-      "intent": "performance_analysis",
-      "description": "Analyze Core Web Vitals and identify weak pages or regions.",
-      "calls": [
-        "POST /api/v1/sites/{siteId}/analytics/performance/summary",
-        "POST /api/v1/sites/{siteId}/analytics/performance/timeseries",
-        "POST /api/v1/sites/{siteId}/analytics/performance/breakdowns/{dimension}"
-      ]
+      "id": "team_usage",
+      "intent": "Inspect team-level product usage or limits.",
+      "scope": "team",
+      "requiredContext": [],
+      "preparation": [
+        "core.token.get",
+        "core.team.get"
+      ],
+      "operations": [
+        "core.team.usage"
+      ],
+      "decisionBranches": [
+        "If the token lacks the required scope, explain the missing permission."
+      ],
+      "result": "Report usage values with their units, period, and any reported limits."
     },
     {
-      "intent": "custom_event_analysis",
-      "description": "Analyze custom events and event payload fields.",
-      "calls": [
-        "POST /api/v1/sites/{siteId}/analytics/event-types",
-        "POST /api/v1/sites/{siteId}/analytics/events/summary",
-        "POST /api/v1/sites/{siteId}/analytics/events/timeseries",
-        "POST /api/v1/sites/{siteId}/analytics/events/search"
-      ]
+      "id": "site_inventory",
+      "intent": "List or inspect accessible sites before analysis or management.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier when inspecting one site"
+      ],
+      "preparation": [
+        "core.token.get"
+      ],
+      "operations": [
+        "sites.list",
+        "sites.get"
+      ],
+      "decisionBranches": [
+        "Use sites.list first when the user has not named an accessible site."
+      ],
+      "result": "Report the matching sites and the selected site context."
+    },
+    {
+      "id": "site_traffic_overview",
+      "intent": "Summarize traffic for one site over a requested period.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "time range when not using the default"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.overview",
+        "site.analytics.timeseries"
+      ],
+      "decisionBranches": [
+        "Use the overview for aggregate metrics and timeseries when trend context is requested or needed to explain the aggregate."
+      ],
+      "result": "Report selected traffic metrics, trend, time range, and time zone."
+    },
+    {
+      "id": "team_traffic_overview",
+      "intent": "Summarize traffic across a team or compare its sites.",
+      "scope": "team",
+      "requiredContext": [
+        "time range when not using the default"
+      ],
+      "preparation": [
+        "team.analytics.schema"
+      ],
+      "operations": [
+        "team.analytics.overview",
+        "team.analytics.timeseries",
+        "team.analytics.sites"
+      ],
+      "decisionBranches": [
+        "Use team.analytics.sites when the user asks which sites contribute to a team result."
+      ],
+      "result": "Report team metrics, trend, and site contribution where requested."
+    },
+    {
+      "id": "site_traffic_comparison",
+      "intent": "Compare one site's performance between two periods or cohorts.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "comparison ranges",
+        "time zone when calendar boundaries matter"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.comparisonOverview",
+        "site.analytics.comparisonTimeseries",
+        "site.analytics.comparisonBreakdown"
+      ],
+      "decisionBranches": [
+        "Use a comparison breakdown after the aggregate comparison identifies a material change."
+      ],
+      "result": "Report both comparison ranges, shared time zone, absolute values, relative change, and any explanatory breakdown."
+    },
+    {
+      "id": "team_traffic_comparison",
+      "intent": "Compare team-wide performance between two periods or cohorts.",
+      "scope": "team",
+      "requiredContext": [
+        "comparison ranges",
+        "time zone when calendar boundaries matter"
+      ],
+      "preparation": [
+        "team.analytics.schema"
+      ],
+      "operations": [
+        "team.analytics.comparisonOverview",
+        "team.analytics.comparisonTimeseries",
+        "team.analytics.comparisonBreakdown"
+      ],
+      "decisionBranches": [
+        "Use a comparison breakdown after the aggregate comparison identifies a material change."
+      ],
+      "result": "Report both comparison ranges, shared time zone, absolute values, relative change, and any explanatory breakdown."
+    },
+    {
+      "id": "site_traffic_segmentation",
+      "intent": "Analyze one site's traffic by dimension or by the relationship between two dimensions.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "requested dimension or question"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.breakdown",
+        "site.analytics.crossBreakdown"
+      ],
+      "decisionBranches": [
+        "Validate dimensions against the selected analytics schema.",
+        "Use cross-breakdown when the question requires two dimensions."
+      ],
+      "result": "Report ranked segments, selected metrics, filters, and the portion of traffic represented."
+    },
+    {
+      "id": "team_traffic_segmentation",
+      "intent": "Analyze team-wide traffic by an allowed dimension.",
+      "scope": "team",
+      "requiredContext": [
+        "requested dimension or question"
+      ],
+      "preparation": [
+        "team.analytics.schema"
+      ],
+      "operations": [
+        "team.analytics.breakdown"
+      ],
+      "decisionBranches": [
+        "Validate dimensions against the team analytics schema."
+      ],
+      "result": "Report ranked segments, selected metrics, filters, and the portion of traffic represented."
+    },
+    {
+      "id": "page_referrer_and_filter_exploration",
+      "intent": "Find high-performing pages, referrers, or allowed candidate filter values.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "time range when not using the default"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.pages",
+        "site.analytics.referrers",
+        "site.analytics.filterValues"
+      ],
+      "decisionBranches": [
+        "Use filter-values before a filtered analysis when the user gives an ambiguous candidate value."
+      ],
+      "result": "Report ranked pages or referrers and the basis for any selected filter values."
+    },
+    {
+      "id": "performance_analysis",
+      "intent": "Analyze performance metrics and isolate weak pages or segments.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "time range when not using the default"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.performanceSummary",
+        "site.analytics.performanceTimeseries",
+        "site.analytics.performanceBreakdown"
+      ],
+      "decisionBranches": [
+        "Start with the summary, then use timeseries for changes and breakdown for likely concentration by allowed dimension."
+      ],
+      "result": "Report performance metrics, affected segments, time context, and observations without unsupported causality."
+    },
+    {
+      "id": "event_analysis",
+      "intent": "Analyze custom event volume, trends, records, and a selected event detail.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "time range when not using the default"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.eventsSummary",
+        "site.analytics.eventsTimeseries",
+        "site.analytics.eventsSearch",
+        "site.analytics.eventDetail"
+      ],
+      "decisionBranches": [
+        "Use summary and timeseries for aggregate questions; use search and detail only when record-level investigation is requested."
+      ],
+      "result": "Report event metrics, trend, selected event context, and any pagination limitation."
+    },
+    {
+      "id": "event_schema_exploration",
+      "intent": "Discover event types, payload fields, values, and a type-specific summary.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "event type when known"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.eventTypes",
+        "site.analytics.eventTypeDetail",
+        "site.analytics.eventFields",
+        "site.analytics.eventFieldValues"
+      ],
+      "decisionBranches": [
+        "List event types before requesting details when the event type is not known.",
+        "Use field values only after selecting a field from the event field response."
+      ],
+      "result": "Report available event types or fields and the selected event context."
+    },
+    {
+      "id": "funnel_analysis_and_management",
+      "intent": "Analyze an existing funnel or create, update, delete, list, and inspect funnel definitions.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "funnel identifier for an existing funnel"
+      ],
+      "preparation": [
+        "site.analytics.schema",
+        "funnels.list"
+      ],
+      "operations": [
+        "site.analytics.funnelAnalysis",
+        "funnels.list",
+        "funnels.get",
+        "funnels.create",
+        "funnels.update",
+        "funnels.delete"
+      ],
+      "decisionBranches": [
+        "For analysis, read the funnel definition before running analysis.",
+        "For a mutation, preview the exact funnel definition or change set before confirmation."
+      ],
+      "requiresConfirmation": true,
+      "result": "Report funnel conversion results or the confirmed funnel-management outcome."
+    },
+    {
+      "id": "retention_analysis",
+      "intent": "Analyze retention cohorts for a site.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "cohort range or time range when not using the default"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.retentionCohorts"
+      ],
+      "decisionBranches": [
+        "Explain cohort boundaries and incomplete cohorts before comparing retention values."
+      ],
+      "result": "Report cohort definition, retention values, and data completeness."
+    },
+    {
+      "id": "visitor_and_session_investigation",
+      "intent": "Search and inspect visitors, sessions, and their related events.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "investigation criteria or visitor or session identifier"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.visitorsSearch",
+        "site.analytics.visitorDetail",
+        "site.analytics.visitorEvents",
+        "site.analytics.visitorSessions",
+        "site.analytics.sessionsSearch",
+        "site.analytics.sessionDetail",
+        "site.analytics.sessionEvents"
+      ],
+      "decisionBranches": [
+        "Search before requesting a detail when the identifier is unknown.",
+        "Follow pagination only as far as necessary for the user question."
+      ],
+      "result": "Report the investigated records, filters, time context, and any pagination boundary."
+    },
+    {
+      "id": "realtime_monitoring",
+      "intent": "Inspect the current realtime snapshot, active visitors, events, or sessions.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.realtimeSnapshot",
+        "site.analytics.realtimeActiveVisitors",
+        "site.analytics.realtimeEvents",
+        "site.analytics.realtimeSessions"
+      ],
+      "decisionBranches": [
+        "Use the snapshot for a broad current-state answer and a specialized operation for a requested realtime record type."
+      ],
+      "result": "Report that results are realtime, include the observation time, and avoid comparing them to historical ranges without an explicit historical query."
+    },
+    {
+      "id": "saved_filter_inspection",
+      "intent": "List or inspect saved site filters before using one in a supported query.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "saved filter identifier when inspecting one filter"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "savedFilters.list",
+        "savedFilters.get"
+      ],
+      "decisionBranches": [
+        "List saved filters before selecting one when the identifier is unknown."
+      ],
+      "result": "Report available saved filters or the selected filter's meaning, then use it only where OpenAPI permits."
+    },
+    {
+      "id": "site_management",
+      "intent": "Create, update, or delete a site after reviewing its current state.",
+      "scope": "site",
+      "requiredContext": [
+        "requested site change",
+        "site identifier for update or deletion"
+      ],
+      "preparation": [
+        "sites.list"
+      ],
+      "operations": [
+        "sites.create",
+        "sites.update",
+        "sites.delete"
+      ],
+      "decisionBranches": [
+        "For creation, preview the complete new site configuration.",
+        "For update, compare requested fields with sites.get before confirmation.",
+        "For deletion, state the site identifier and irreversible effect before confirmation."
+      ],
+      "requiresConfirmation": true,
+      "result": "Report the confirmed site-management outcome and selected site identifier."
+    },
+    {
+      "id": "site_settings_management",
+      "intent": "Inspect or update site privacy, sharing, tracking, and tracking-script settings.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "requested setting change for updates"
+      ],
+      "preparation": [],
+      "operations": [
+        "settings.privacy.get",
+        "settings.privacy.update",
+        "settings.sharing.get",
+        "settings.sharing.update",
+        "settings.tracking.get",
+        "settings.tracking.update",
+        "settings.trackingScript.get"
+      ],
+      "decisionBranches": [
+        "Read the relevant current setting before proposing an update.",
+        "Preview every changed field and wait for confirmation before an update."
+      ],
+      "requiresConfirmation": true,
+      "result": "Report the current setting or the confirmed updated setting without exposing credentials."
+    },
+    {
+      "id": "batch_reporting",
+      "intent": "Combine compatible independent read operations into one report request.",
+      "scope": "team",
+      "requiredContext": [
+        "list of read questions",
+        "site or team scope for each question"
+      ],
+      "preparation": [
+        "core.capabilities"
+      ],
+      "operations": [
+        "batch"
+      ],
+      "decisionBranches": [
+        "Read each candidate operation's OpenAPI entry before batching it.",
+        "Do not batch mutations or operations not explicitly marked batch-eligible."
+      ],
+      "result": "Report each batch item independently, including any item-level error or partial result."
+    },
+    {
+      "id": "tracker_installation_and_ingestion",
+      "intent": "Retrieve tracker integration instructions or explain ingestion requirements.",
+      "scope": "integration",
+      "requiredContext": [
+        "site identifier when required by the selected integration operation"
+      ],
+      "preparation": [
+        "settings.tracking.get"
+      ],
+      "operations": [
+        "tracker.script",
+        "collect.ingest"
+      ],
+      "decisionBranches": [
+        "Use tracker.script for installation guidance.",
+        "Treat collect.ingest as a website integration protocol only; never use it to create synthetic analytics data or simulate user activity."
+      ],
+      "result": "Provide OpenAPI-grounded integration instructions and identify any required site configuration."
     }
   ],
-  "errorHandling": {
-    "400": "Check request parameters or JSON body against the OpenAPI schema.",
-    "401": "Ask the user to provide a valid API key.",
-    "403": "Explain that the API key lacks the required scope.",
-    "404": "Treat inaccessible sites as not found.",
-    "409": "Explain the conflict and ask the user for a different value.",
-    "413": "Reduce the request body size or number of batched items.",
-    "500": "Retry later or report that the service returned an internal error."
+  "errorPolicy": {
+    "authentication": "For authentication failures, request a valid user-provided API key and do not retry with invented credentials.",
+    "authorization": "For authorization failures, explain the required scope or site access shown by OpenAPI and the token inspection.",
+    "validation": "For validation failures, reread the selected operation's OpenAPI request definition and correct only user-authorized values.",
+    "rateLimit": "For rate limits, follow any documented retry guidance and use bounded retries.",
+    "serviceFailure": "For retryable service failures, use bounded retries; otherwise report the service response and request identifier when available.",
+    "unsupported": "If the capability, field, filter, or operation is absent from runtime discovery or OpenAPI, say it is unsupported rather than guessing a substitute."
   }
 }

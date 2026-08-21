@@ -273,6 +273,9 @@ describe("Hono API app routing", () => {
 
     expect(openapiHead.status).toBe(200);
     expect(await openapiHead.text()).toBe("");
+    expect(skills.headers.get("content-type")).toContain("application/json");
+    expect(skills.headers.get("access-control-allow-origin")).toBe("*");
+    expect(skills.headers.get("cache-control")).toContain("max-age=3600");
     expect(await skills.text()).toContain("http://skills.example.test");
     expect(skillsHead.status).toBe(200);
     expect(security.status).toBe(200);

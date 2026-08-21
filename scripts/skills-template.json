@@ -1,81 +1,288 @@
 {
-  "authentication_extras": {
-    "obtain": {
-      "method": "Ask the user",
-      "instructions": "Before making any API call, ask the user: 'Do you have an InsightFlare API key? If so, please provide it. If not, you can generate one from the InsightFlare dashboard under Settings → API Keys.' The key format is ifk_live_<prefix>.<secret>.",
-      "dashboard_path": "/app/{team-slug}/settings/api-keys"
-    },
-    "scopes": {
-      "site:read": "List and view sites",
-      "site:write": "Create, update, and delete sites",
-      "site_config:read": "View tracking configuration and script snippets",
-      "site_config:write": "Update tracking configuration",
-      "analytics:read": "Query all analytics, realtime, and batch data"
-    },
-    "error_responses": {
-      "401": {
-        "codes": ["invalid_api_key", "api_key_expired", "api_key_revoked"],
-        "action": "Ask the user for a valid key or to generate a new one."
-      },
-      "403": {
-        "codes": ["insufficient_scope"],
-        "action": "The key lacks the required scope. Ask the user to create a key with the needed permissions."
-      }
-    }
+  "manifestVersion": 1,
+  "api": "InsightFlare API",
+  "version": "${version}",
+  "baseUrl": "${baseUrl}",
+  "description": "Agent operating guide for the InsightFlare public API.",
+  "openapi": {
+    "url": "/.well-known/openapi.json"
   },
-  "common_query_parameters": {
-    "description": "These parameters are available on analytics query endpoints. The OpenAPI document remains the source of truth for endpoint-specific parameters.",
-    "time_window": {
-      "from": "Inclusive ISO 8601 date-time string. Optional when preset is used.",
-      "to": "Exclusive ISO 8601 date-time string. Optional when preset is used.",
-      "preset": "Named time range preset such as last_7_days or last_30_days. Mutually exclusive with from/to.",
-      "timeZone": "IANA timezone identifier (e.g. America/New_York). Defaults to UTC.",
-      "tz": "Alias for timeZone."
-    },
-    "filter_parameters": {
-      "description": "All analytics queries support these filters. Pass them as query parameters to narrow results.",
-      "filters": {
-        "country": "Filter by country code (ISO 3166-1 alpha-2).",
-        "device": "Filter by device type.",
-        "browser": "Filter by browser name.",
-        "path": "Filter by page path.",
-        "title": "Filter by page title.",
-        "hostname": "Filter by hostname.",
-        "entry": "Filter by entry page.",
-        "exit": "Filter by exit page.",
-        "sourceDomain": "Filter by referrer domain.",
-        "sourceLink": "Filter by full referrer URL.",
-        "query": "Filter by page query string.",
-        "clientBrowser": "Filter by client browser.",
-        "clientOsVersion": "Filter by client OS version.",
-        "clientDeviceType": "Filter by client device type.",
-        "clientLanguage": "Filter by client language.",
-        "clientScreenSize": "Filter by client screen size.",
-        "geo": "Filter by geo dimension (country/region/city code).",
-        "geoCountry": "Alias for geo (country level).",
-        "geoRegion": "Filter by region.",
-        "geoCity": "Filter by city.",
-        "geoContinent": "Filter by continent code.",
-        "geoTimezone": "Filter by IANA timezone.",
-        "geoOrganization": "Filter by organization/ISP.",
-        "eventPayloadFilters": "JSON-encoded array of event payload filter rules. Applied to event data at query time."
-      }
-    }
+  "openapiGuidance": {
+    "sourceOfTruth": "OpenAPI is the authoritative contract for every operation. Do not infer request fields, response fields, enum values, scopes, pagination, or errors from this manifest.",
+    "readingRules": [
+      "Fetch OpenAPI before the first API call in a session and use its server URL.",
+      "Resolve only the operationIds relevant to the current task instead of reading the entire document for every request.",
+      "Before each call, read the selected operation's security, parameters, request body, examples, success response, error responses, and extension fields.",
+      "Use only fields and values permitted by the selected operation. Never invent undocumented parameters or response fields."
+    ]
   },
-  "typical_workflow": [
-    "1. Obtain an API key from the user (ask them, or direct them to dashboard → Settings → API Keys).",
-    "2. Call GET /api/v1/sites to list available sites and get siteId values.",
-    "3. Use the siteId to query analytics: GET /api/v1/sites/{siteId}/analytics/overview?preset=last_7_days&timeZone=UTC.",
-    "4. For time-series data, use GET /api/v1/sites/{siteId}/analytics/timeseries with an interval parameter.",
-    "5. For multiple queries at once, use POST /api/v1/batch.",
-    "6. For team-level summary, use GET /api/v1/team/analytics/overview."
+  "discovery": {
+    "sessionInitialization": [
+      "wellKnown.skills",
+      "wellKnown.openapi",
+      "core.root",
+      "core.token.get",
+      "core.token.check",
+      "core.capabilities",
+      "core.team.get",
+      "sites.list"
+    ],
+    "siteAnalyticsSchema": "site.analytics.schema",
+    "teamAnalyticsSchema": "team.analytics.schema",
+    "health": "wellKnown.health"
+  },
+  "executionPolicy": {
+    "authentication": "Use only an API key supplied by the user with the Bearer authentication scheme defined by OpenAPI. Never guess, create, or expose credentials.",
+    "scopeSelection": "Use a site scope for a request about one site. Use team scope only when the user explicitly asks for a cross-site or team-wide result. Confirm access and required scopes from the token and selected OpenAPI operation.",
+    "timeRanges": "When an analytics request omits a time range, use the operation default of the last seven days ending at request time in UTC. State the effective time range and time zone in the result.",
+    "filters": "Before an analytics query with filters, retrieve the selected site or team analytics schema. Use only its filterProtocol fields and operators, then consult the target operation's OpenAPI request body. Use site.analytics.filterValues when candidate values are needed.",
+    "pagination": "Read pagination inputs and continuation behavior from the selected OpenAPI operation. Continue only while needed to answer the user, and disclose truncation or incomplete traversal.",
+    "batch": "Use batch only for read operations that the selected OpenAPI operation explicitly marks as batch-eligible. Each batched item must independently satisfy its operation contract.",
+    "retries": "Do not retry validation, authentication, authorization, or not-found failures. For rate limits and retryable service failures, follow the OpenAPI error details and retry only a bounded number of times.",
+    "resultReporting": "For numerical results, state scope, effective time range, time zone, filters, comparison baseline, units, partial failures, and material data limitations. Treat descriptive correlations as observations, not causal conclusions.",
+    "mutationConfirmation": "Before every create, update, or delete operation, inspect current state when available, present the exact proposed resource or field changes, and wait for explicit user confirmation. For deletion, name the exact identifier and irreversible effect."
+  },
+  "taskRecipes": [
+    {
+      "id": "connect_and_authorize",
+      "intent": "Connect an Agent, inspect its API key, and establish accessible scope.",
+      "scope": "team",
+      "requiredContext": ["user-provided API key"],
+      "preparation": [],
+      "operations": ["wellKnown.skills", "wellKnown.openapi", "core.root", "core.token.get", "core.token.check", "core.capabilities", "core.team.get", "sites.list"],
+      "decisionBranches": ["If no key is supplied or the token is invalid, request a valid API key.", "If multiple sites are available and a single-site task lacks a site choice, ask the user or identify the site by its known domain."],
+      "result": "Report the authenticated team, granted scopes, accessible sites, and any capability limitation relevant to the requested task."
+    },
+    {
+      "id": "service_health",
+      "intent": "Check whether the publicly exposed service is healthy.",
+      "scope": "integration",
+      "requiredContext": [],
+      "preparation": [],
+      "operations": ["wellKnown.health"],
+      "decisionBranches": ["If health is unavailable, report the observed response and do not diagnose internal causes without evidence."],
+      "result": "Report the observed service-health result and any request failure."
+    },
+    {
+      "id": "team_usage",
+      "intent": "Inspect team-level product usage or limits.",
+      "scope": "team",
+      "requiredContext": [],
+      "preparation": ["core.token.get", "core.team.get"],
+      "operations": ["core.team.usage"],
+      "decisionBranches": ["If the token lacks the required scope, explain the missing permission."],
+      "result": "Report usage values with their units, period, and any reported limits."
+    },
+    {
+      "id": "site_inventory",
+      "intent": "List or inspect accessible sites before analysis or management.",
+      "scope": "site",
+      "requiredContext": ["site identifier when inspecting one site"],
+      "preparation": ["core.token.get"],
+      "operations": ["sites.list", "sites.get"],
+      "decisionBranches": ["Use sites.list first when the user has not named an accessible site."],
+      "result": "Report the matching sites and the selected site context."
+    },
+    {
+      "id": "site_traffic_overview",
+      "intent": "Summarize traffic for one site over a requested period.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "time range when not using the default"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["site.analytics.overview", "site.analytics.timeseries"],
+      "decisionBranches": ["Use the overview for aggregate metrics and timeseries when trend context is requested or needed to explain the aggregate."],
+      "result": "Report selected traffic metrics, trend, time range, and time zone."
+    },
+    {
+      "id": "team_traffic_overview",
+      "intent": "Summarize traffic across a team or compare its sites.",
+      "scope": "team",
+      "requiredContext": ["time range when not using the default"],
+      "preparation": ["team.analytics.schema"],
+      "operations": ["team.analytics.overview", "team.analytics.timeseries", "team.analytics.sites"],
+      "decisionBranches": ["Use team.analytics.sites when the user asks which sites contribute to a team result."],
+      "result": "Report team metrics, trend, and site contribution where requested."
+    },
+    {
+      "id": "site_traffic_comparison",
+      "intent": "Compare one site's performance between two periods or cohorts.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "comparison ranges", "time zone when calendar boundaries matter"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["site.analytics.comparisonOverview", "site.analytics.comparisonTimeseries", "site.analytics.comparisonBreakdown"],
+      "decisionBranches": ["Use a comparison breakdown after the aggregate comparison identifies a material change."],
+      "result": "Report both comparison ranges, shared time zone, absolute values, relative change, and any explanatory breakdown."
+    },
+    {
+      "id": "team_traffic_comparison",
+      "intent": "Compare team-wide performance between two periods or cohorts.",
+      "scope": "team",
+      "requiredContext": ["comparison ranges", "time zone when calendar boundaries matter"],
+      "preparation": ["team.analytics.schema"],
+      "operations": ["team.analytics.comparisonOverview", "team.analytics.comparisonTimeseries", "team.analytics.comparisonBreakdown"],
+      "decisionBranches": ["Use a comparison breakdown after the aggregate comparison identifies a material change."],
+      "result": "Report both comparison ranges, shared time zone, absolute values, relative change, and any explanatory breakdown."
+    },
+    {
+      "id": "site_traffic_segmentation",
+      "intent": "Analyze one site's traffic by dimension or by the relationship between two dimensions.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "requested dimension or question"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["site.analytics.breakdown", "site.analytics.crossBreakdown"],
+      "decisionBranches": ["Validate dimensions against the selected analytics schema.", "Use cross-breakdown when the question requires two dimensions."],
+      "result": "Report ranked segments, selected metrics, filters, and the portion of traffic represented."
+    },
+    {
+      "id": "team_traffic_segmentation",
+      "intent": "Analyze team-wide traffic by an allowed dimension.",
+      "scope": "team",
+      "requiredContext": ["requested dimension or question"],
+      "preparation": ["team.analytics.schema"],
+      "operations": ["team.analytics.breakdown"],
+      "decisionBranches": ["Validate dimensions against the team analytics schema."],
+      "result": "Report ranked segments, selected metrics, filters, and the portion of traffic represented."
+    },
+    {
+      "id": "page_referrer_and_filter_exploration",
+      "intent": "Find high-performing pages, referrers, or allowed candidate filter values.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "time range when not using the default"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["site.analytics.pages", "site.analytics.referrers", "site.analytics.filterValues"],
+      "decisionBranches": ["Use filter-values before a filtered analysis when the user gives an ambiguous candidate value."],
+      "result": "Report ranked pages or referrers and the basis for any selected filter values."
+    },
+    {
+      "id": "performance_analysis",
+      "intent": "Analyze performance metrics and isolate weak pages or segments.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "time range when not using the default"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["site.analytics.performanceSummary", "site.analytics.performanceTimeseries", "site.analytics.performanceBreakdown"],
+      "decisionBranches": ["Start with the summary, then use timeseries for changes and breakdown for likely concentration by allowed dimension."],
+      "result": "Report performance metrics, affected segments, time context, and observations without unsupported causality."
+    },
+    {
+      "id": "event_analysis",
+      "intent": "Analyze custom event volume, trends, records, and a selected event detail.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "time range when not using the default"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["site.analytics.eventsSummary", "site.analytics.eventsTimeseries", "site.analytics.eventsSearch", "site.analytics.eventDetail"],
+      "decisionBranches": ["Use summary and timeseries for aggregate questions; use search and detail only when record-level investigation is requested."],
+      "result": "Report event metrics, trend, selected event context, and any pagination limitation."
+    },
+    {
+      "id": "event_schema_exploration",
+      "intent": "Discover event types, payload fields, values, and a type-specific summary.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "event type when known"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["site.analytics.eventTypes", "site.analytics.eventTypeDetail", "site.analytics.eventFields", "site.analytics.eventFieldValues"],
+      "decisionBranches": ["List event types before requesting details when the event type is not known.", "Use field values only after selecting a field from the event field response."],
+      "result": "Report available event types or fields and the selected event context."
+    },
+    {
+      "id": "funnel_analysis_and_management",
+      "intent": "Analyze an existing funnel or create, update, delete, list, and inspect funnel definitions.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "funnel identifier for an existing funnel"],
+      "preparation": ["site.analytics.schema", "funnels.list"],
+      "operations": ["site.analytics.funnelAnalysis", "funnels.list", "funnels.get", "funnels.create", "funnels.update", "funnels.delete"],
+      "decisionBranches": ["For analysis, read the funnel definition before running analysis.", "For a mutation, preview the exact funnel definition or change set before confirmation."],
+      "requiresConfirmation": true,
+      "result": "Report funnel conversion results or the confirmed funnel-management outcome."
+    },
+    {
+      "id": "retention_analysis",
+      "intent": "Analyze retention cohorts for a site.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "cohort range or time range when not using the default"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["site.analytics.retentionCohorts"],
+      "decisionBranches": ["Explain cohort boundaries and incomplete cohorts before comparing retention values."],
+      "result": "Report cohort definition, retention values, and data completeness."
+    },
+    {
+      "id": "visitor_and_session_investigation",
+      "intent": "Search and inspect visitors, sessions, and their related events.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "investigation criteria or visitor or session identifier"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["site.analytics.visitorsSearch", "site.analytics.visitorDetail", "site.analytics.visitorEvents", "site.analytics.visitorSessions", "site.analytics.sessionsSearch", "site.analytics.sessionDetail", "site.analytics.sessionEvents"],
+      "decisionBranches": ["Search before requesting a detail when the identifier is unknown.", "Follow pagination only as far as necessary for the user question."],
+      "result": "Report the investigated records, filters, time context, and any pagination boundary."
+    },
+    {
+      "id": "realtime_monitoring",
+      "intent": "Inspect the current realtime snapshot, active visitors, events, or sessions.",
+      "scope": "site",
+      "requiredContext": ["site identifier"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["site.analytics.realtimeSnapshot", "site.analytics.realtimeActiveVisitors", "site.analytics.realtimeEvents", "site.analytics.realtimeSessions"],
+      "decisionBranches": ["Use the snapshot for a broad current-state answer and a specialized operation for a requested realtime record type."],
+      "result": "Report that results are realtime, include the observation time, and avoid comparing them to historical ranges without an explicit historical query."
+    },
+    {
+      "id": "saved_filter_inspection",
+      "intent": "List or inspect saved site filters before using one in a supported query.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "saved filter identifier when inspecting one filter"],
+      "preparation": ["site.analytics.schema"],
+      "operations": ["savedFilters.list", "savedFilters.get"],
+      "decisionBranches": ["List saved filters before selecting one when the identifier is unknown."],
+      "result": "Report available saved filters or the selected filter's meaning, then use it only where OpenAPI permits."
+    },
+    {
+      "id": "site_management",
+      "intent": "Create, update, or delete a site after reviewing its current state.",
+      "scope": "site",
+      "requiredContext": ["requested site change", "site identifier for update or deletion"],
+      "preparation": ["sites.list"],
+      "operations": ["sites.create", "sites.update", "sites.delete"],
+      "decisionBranches": ["For creation, preview the complete new site configuration.", "For update, compare requested fields with sites.get before confirmation.", "For deletion, state the site identifier and irreversible effect before confirmation."],
+      "requiresConfirmation": true,
+      "result": "Report the confirmed site-management outcome and selected site identifier."
+    },
+    {
+      "id": "site_settings_management",
+      "intent": "Inspect or update site privacy, sharing, tracking, and tracking-script settings.",
+      "scope": "site",
+      "requiredContext": ["site identifier", "requested setting change for updates"],
+      "preparation": [],
+      "operations": ["settings.privacy.get", "settings.privacy.update", "settings.sharing.get", "settings.sharing.update", "settings.tracking.get", "settings.tracking.update", "settings.trackingScript.get"],
+      "decisionBranches": ["Read the relevant current setting before proposing an update.", "Preview every changed field and wait for confirmation before an update."],
+      "requiresConfirmation": true,
+      "result": "Report the current setting or the confirmed updated setting without exposing credentials."
+    },
+    {
+      "id": "batch_reporting",
+      "intent": "Combine compatible independent read operations into one report request.",
+      "scope": "team",
+      "requiredContext": ["list of read questions", "site or team scope for each question"],
+      "preparation": ["core.capabilities"],
+      "operations": ["batch"],
+      "decisionBranches": ["Read each candidate operation's OpenAPI entry before batching it.", "Do not batch mutations or operations not explicitly marked batch-eligible."],
+      "result": "Report each batch item independently, including any item-level error or partial result."
+    },
+    {
+      "id": "tracker_installation_and_ingestion",
+      "intent": "Retrieve tracker integration instructions or explain ingestion requirements.",
+      "scope": "integration",
+      "requiredContext": ["site identifier when required by the selected integration operation"],
+      "preparation": ["settings.tracking.get"],
+      "operations": ["tracker.script", "collect.ingest"],
+      "decisionBranches": ["Use tracker.script for installation guidance.", "Treat collect.ingest as a website integration protocol only; never use it to create synthetic analytics data or simulate user activity."],
+      "result": "Provide OpenAPI-grounded integration instructions and identify any required site configuration."
+    }
   ],
-  "implementation_notes": [
-    "All timestamps in query parameters and response objects are ISO 8601 date-time strings unless the field name explicitly ends with Ms.",
-    "The siteId parameter is a UUID. Obtain it from GET /api/v1/sites.",
-    "Pagination uses cursor/limit for visitors, sessions, and events endpoints.",
-    "Use the OpenAPI paths directly; analytics endpoints are explicit resources such as /analytics/overview, /analytics/timeseries, and /analytics/breakdowns/{dimension}.",
-    "Depending on deployment configuration, upstream infrastructure may return additional responses such as 429 before requests reach the API origin. Those responses are outside the stable API error envelope.",
-    "For LLM agents: always ask the user for an API key before making any request. Do not attempt to guess or generate keys."
-  ]
+  "errorPolicy": {
+    "authentication": "For authentication failures, request a valid user-provided API key and do not retry with invented credentials.",
+    "authorization": "For authorization failures, explain the required scope or site access shown by OpenAPI and the token inspection.",
+    "validation": "For validation failures, reread the selected operation's OpenAPI request definition and correct only user-authorized values.",
+    "rateLimit": "For rate limits, follow any documented retry guidance and use bounded retries.",
+    "serviceFailure": "For retryable service failures, use bounded retries; otherwise report the service response and request identifier when available.",
+    "unsupported": "If the capability, field, filter, or operation is absent from runtime discovery or OpenAPI, say it is unsupported rather than guessing a substitute."
+  }
 }

@@ -59,6 +59,19 @@ function prebuildArgs(options: CommonOptions): string[] {
   return args;
 }
 
+async function verifySkillsManifest(options: CommonOptions): Promise<void> {
+  await runtime.runCommand(
+    process.execPath,
+    [
+      localCli(ROOT_DIR, "tsx", path.join("dist", "cli.mjs")),
+      path.join(ROOT_DIR, "scripts", "check-skills.ts"),
+    ],
+    targetEnv(options.target),
+    ROOT_DIR,
+    "verify generated skills manifest",
+  );
+}
+
 async function runPrebuild(options: CommonOptions): Promise<void> {
   if (options.skipPrebuild) {
     runtime.rlog.info("Prebuild skipped.");
@@ -121,12 +134,17 @@ async function main(): Promise<void> {
   runtime.assertEnvironment(options);
 
   stages.push(
-    await runtime.runStage(1, 2, "Preparing build inputs", () =>
+    await runtime.runStage(1, 3, "Verifying skills manifest", () =>
+      verifySkillsManifest(options),
+    ),
+  );
+  stages.push(
+    await runtime.runStage(2, 3, "Preparing build inputs", () =>
       runPrebuild(options),
     ),
   );
   stages.push(
-    await runtime.runStage(2, 2, "Building Cloudflare worker", () =>
+    await runtime.runStage(3, 3, "Building Cloudflare worker", () =>
       runViteBuild(options),
     ),
   );

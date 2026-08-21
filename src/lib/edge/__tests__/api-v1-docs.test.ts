@@ -3,6 +3,11 @@ import { resolve } from "path";
 import { describe, expect, it } from "vitest";
 
 import { buildApiV1OpenApiPaths } from "../../../../scripts/api-v1-openapi";
+import {
+  readSkillsTemplate,
+  renderSkillsManifest,
+  serializeSkillsManifest,
+} from "../../../../scripts/skills-manifest";
 
 const root = process.cwd();
 
@@ -77,15 +82,6 @@ function walk(value: unknown, visit: (value: unknown) => void) {
   }
 }
 
-function pathMatchesTemplate(template: string, path: string): boolean {
-  const regex = new RegExp(
-    `^${template
-      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/\\\{[^/]+\\\}/g, "[^/]+")}$`,
-  );
-  return regex.test(path);
-}
-
 describe("api v1 public docs", () => {
   it("generates an OpenAPI contract without deprecated public API shapes", () => {
     const spec = readJson<OpenApiSpec>("docs/openapi.json");
@@ -137,28 +133,34 @@ describe("api v1 public docs", () => {
     expect(errorResponseRefs).toBeGreaterThan(0);
   });
 
-  it("generates a skills manifest for agents rather than an endpoint catalog", () => {
-    const manifest = readJson<{
-      openapiUrl?: string;
-      discovery?: Record<string, string>;
-      taskRecipes?: unknown[];
-      endpoints?: unknown;
-    }>("docs/skills.json");
+  it("renders the Agent manifest from its canonical template", () => {
+    const manifest = readJson<Record<string, unknown>>("docs/skills.json");
+    const template = readSkillsTemplate();
+    const version = readJson<{ version: string }>("package.json").version;
     const raw = JSON.stringify(manifest);
 
-    expect(manifest.openapiUrl).toBe("/.well-known/openapi.json");
-    expect(manifest.discovery).toMatchObject({
-      root: "/api/v1",
-      token: "/api/v1/token",
-      capabilities: "/api/v1/capabilities",
-      analyticsSchema: "/api/v1/sites/{siteId}/analytics/schema",
+    expect(manifest).toEqual(renderSkillsManifest(version, template));
+    expect(serializeSkillsManifest(manifest)).toBe(
+      readFileSync(resolve(root, "docs/skills.json"), "utf8"),
+    );
+    expect(manifest.manifestVersion).toBe(1);
+    expect(manifest.version).toBe(version);
+    expect(manifest.baseUrl).toBe("${baseUrl}");
+    expect(manifest.openapi).toMatchObject({ url: "/.well-known/openapi.json" });
+    expect(manifest.openapiGuidance).toMatchObject({
+      sourceOfTruth: expect.any(String),
+      readingRules: expect.any(Array),
     });
     expect(Array.isArray(manifest.taskRecipes)).toBe(true);
-    expect(manifest.endpoints).toBeUndefined();
+    expect(() =>
+      renderSkillsManifest(version, { version: "${unsupported}" }),
+    ).toThrow("Unknown skills template placeholder");
     expect(raw).not.toContain("queryName");
     expect(raw).not.toContain("Unix milliseconds");
     expect(raw).not.toContain('"ok"');
-    expect(raw).not.toContain("overview?compare=previous_period");
+    expect(raw).not.toContain("typedAnalyticsOperations");
+    expect(raw).not.toContain('"$ref"');
+    expect(raw).not.toContain('"requestBody"');
   });
 
   it("publishes the registry-owned typed API v1 operations in the main contract", () => {
@@ -345,46 +347,72 @@ describe("api v1 public docs", () => {
     }
   });
 
-  it("keeps skills calls aligned with OpenAPI path templates", () => {
-    const spec = readJson<{
-      paths: Record<string, Record<string, unknown>>;
-    }>("docs/openapi.json");
+  it("covers public operations with operationId-based recipes", () => {
+    const spec = readJson<OpenApiSpec>("docs/openapi.json");
     const manifest = readJson<{
-      discovery?: Record<string, string>;
-      taskRecipes?: Array<{ calls?: string[] }>;
-      endpoints?: unknown;
+      discovery: {
+        sessionInitialization: string[];
+        siteAnalyticsSchema: string;
+        teamAnalyticsSchema: string;
+        health: string;
+      };
+      taskRecipes: Array<{
+        scope: "site" | "team" | "integration";
+        preparation: string[];
+        operations: string[];
+        requiresConfirmation?: boolean;
+      }>;
     }>("docs/skills.json");
+    const publicOperationIds = new Set(
+      Object.values(spec.paths).flatMap((item) =>
+        Object.values(item)
+          .map((operation) => operation?.operationId)
+          .filter((operationId): operationId is string => Boolean(operationId)),
+      ),
+    );
+    const referenced = new Set([
+      ...manifest.discovery.sessionInitialization,
+      manifest.discovery.siteAnalyticsSchema,
+      manifest.discovery.teamAnalyticsSchema,
+      manifest.discovery.health,
+      ...manifest.taskRecipes.flatMap((recipe) => [
+        ...recipe.preparation,
+        ...recipe.operations,
+      ]),
+    ]);
 
-    const operations = Object.entries(spec.paths).flatMap(([path, item]) =>
-      Object.keys(item)
-        .filter((method) =>
-          ["get", "post", "patch", "delete", "put"].includes(method),
+    expect([...referenced].every((operationId) => publicOperationIds.has(operationId))).toBe(true);
+    expect([...publicOperationIds].filter((operationId) => !referenced.has(operationId))).toEqual([]);
+
+    for (const recipe of manifest.taskRecipes) {
+      const raw = JSON.stringify(recipe);
+      const operationIds = [...recipe.preparation, ...recipe.operations];
+      expect(raw).not.toMatch(/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\//);
+      expect(raw).not.toMatch(/\/api\/|\/collect|\/script\.js/);
+      expect(["site", "team", "integration"]).toContain(recipe.scope);
+      if (operationIds.some((id) => id.startsWith("site.analytics."))) {
+        expect(recipe.preparation).toContain("site.analytics.schema");
+      }
+      if (operationIds.some((id) => id.startsWith("team.analytics."))) {
+        expect(recipe.preparation).toContain("team.analytics.schema");
+      }
+      if (
+        operationIds.some((id) =>
+          [
+            "sites.create",
+            "sites.update",
+            "sites.delete",
+            "funnels.create",
+            "funnels.update",
+            "funnels.delete",
+            "settings.privacy.update",
+            "settings.sharing.update",
+            "settings.tracking.update",
+          ].includes(id),
         )
-        .map((method) => ({ method: method.toUpperCase(), path })),
-    );
-    const hasOperation = (method: string, path: string) =>
-      operations.some(
-        (operation) =>
-          operation.method === method &&
-          pathMatchesTemplate(operation.path, path),
-      );
-
-    expect(hasOperation("GET", manifest.discovery?.root ?? "")).toBe(true);
-    expect(hasOperation("GET", manifest.discovery?.token ?? "")).toBe(true);
-    expect(hasOperation("GET", manifest.discovery?.capabilities ?? "")).toBe(
-      true,
-    );
-    expect(hasOperation("GET", manifest.discovery?.analyticsSchema ?? "")).toBe(
-      true,
-    );
-
-    for (const recipe of manifest.taskRecipes ?? []) {
-      for (const call of recipe.calls ?? []) {
-        const [method, rawPath] = call.split(/\s+/, 2);
-        const path = rawPath.split("?")[0];
-        expect(hasOperation(method, path)).toBe(true);
+      ) {
+        expect(recipe.requiresConfirmation).toBe(true);
       }
     }
-    expect(manifest.endpoints).toBeUndefined();
   });
 });

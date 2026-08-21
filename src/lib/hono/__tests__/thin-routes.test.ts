@@ -273,6 +273,9 @@ describe("thin Hono route modules", () => {
     expect(openapiHead.status).toBe(200);
     expect((await openapi.json()) as unknown).toBeTruthy();
     expect(skillsHead.status).toBe(200);
+    expect(skills.headers.get("content-type")).toContain("application/json");
+    expect(skills.headers.get("access-control-allow-origin")).toBe("*");
+    expect(skills.headers.get("cache-control")).toContain("max-age=3600");
     expect(await skills.text()).toContain("InsightFlare");
     expect(securityHead.status).toBe(200);
     expect(await security.text()).toContain("Contact:");
