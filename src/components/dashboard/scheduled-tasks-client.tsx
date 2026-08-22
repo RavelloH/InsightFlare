@@ -41,6 +41,7 @@ import {
   DrawerContent,
   DrawerDescription,
   DrawerHeader,
+  DrawerScrollArea,
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { ModalOverlay, overlayZIndexFor } from "@/components/ui/modal-overlay";
@@ -694,7 +695,7 @@ function ScheduledTaskRunLogDrawer({
               </AutoResizer>
             </DrawerDescription>
           </DrawerHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <DrawerScrollArea contentClassName="p-4">
             <AutoResizer initial>
               <AutoTransition
                 transitionKey={bodyTransitionKey}
@@ -891,7 +892,7 @@ function ScheduledTaskRunLogDrawer({
                 )}
               </AutoTransition>
             </AutoResizer>
-          </div>
+          </DrawerScrollArea>
         </DrawerContent>
       </Drawer>
     </>

@@ -1,9 +1,11 @@
 import {
   type ComponentPropsWithoutRef,
   type ReactNode,
+  type Ref,
   useEffect,
   useRef,
 } from "react";
+import type { PartialOptions } from "overlayscrollbars";
 import { OverlayScrollbars } from "overlayscrollbars";
 
 import {
@@ -16,7 +18,9 @@ import { cn } from "@/lib/utils";
 interface VerticalScrollMaskProps extends ComponentPropsWithoutRef<"div"> {
   children: ReactNode;
   contentClassName?: string;
+  hostRef?: Ref<HTMLDivElement>;
   maskClassName?: string;
+  scrollbarOptions?: PartialOptions;
   syncKey?: string | number | boolean | null;
 }
 
@@ -24,7 +28,9 @@ export function VerticalScrollMask({
   children,
   className,
   contentClassName,
+  hostRef: forwardedHostRef,
   maskClassName,
+  scrollbarOptions,
   syncKey,
   ...props
 }: VerticalScrollMaskProps) {
@@ -36,6 +42,8 @@ export function VerticalScrollMask({
   const bottomMaskRef = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<number | null>(null);
   const nativeScrollbars = useNativeScrollbars();
+  const resolvedScrollbarOptions =
+    scrollbarOptions ?? VERTICAL_SCROLLBAR_OPTIONS;
 
   const syncMasks = (viewport?: HTMLDivElement | null) => {
     const current =
@@ -88,9 +96,9 @@ export function VerticalScrollMask({
 
     const existing = OverlayScrollbars(host);
     const instance =
-      existing ?? OverlayScrollbars(host, VERTICAL_SCROLLBAR_OPTIONS);
+      existing ?? OverlayScrollbars(host, resolvedScrollbarOptions);
     if (existing) {
-      existing.options(VERTICAL_SCROLLBAR_OPTIONS);
+      existing.options(resolvedScrollbarOptions);
     }
     scrollbarRef.current = instance;
 
@@ -115,7 +123,7 @@ export function VerticalScrollMask({
         scrollbarRef.current = null;
       }
     };
-  }, []);
+  }, [resolvedScrollbarOptions]);
 
   useEffect(() => {
     scrollbarRef.current?.update();
@@ -141,7 +149,14 @@ export function VerticalScrollMask({
         )}
       />
       <div
-        ref={hostRef}
+        ref={(node) => {
+          hostRef.current = node;
+          if (typeof forwardedHostRef === "function") {
+            forwardedHostRef(node);
+          } else if (forwardedHostRef) {
+            forwardedHostRef.current = node;
+          }
+        }}
         className={cn(
           nativeScrollbars ? "overflow-y-auto" : "overflow-hidden",
           contentClassName,

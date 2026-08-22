@@ -68,6 +68,7 @@ import {
   DrawerContent,
   DrawerDescription,
   DrawerHeader,
+  DrawerScrollArea,
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { ModalOverlay, overlayZIndexFor } from "@/components/ui/modal-overlay";
@@ -2813,7 +2814,7 @@ function BotRequestDetailDrawer({
                 copy.detailSubtitle}
             </DrawerDescription>
           </DrawerHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <DrawerScrollArea contentClassName="p-4">
             <AutoResizer initial duration={0.2} ease={[0.22, 1, 0.36, 1]}>
               <AutoTransition
                 transitionKey={contentKey}
@@ -3059,7 +3060,7 @@ function BotRequestDetailDrawer({
                 )}
               </AutoTransition>
             </AutoResizer>
-          </div>
+          </DrawerScrollArea>
         </DrawerContent>
       </Drawer>
     </>
@@ -3142,7 +3143,7 @@ function NormalRequestDetailDrawer({
             <DrawerTitle>{title}</DrawerTitle>
             <DrawerDescription>{subtitle}</DrawerDescription>
           </DrawerHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <DrawerScrollArea contentClassName="p-4">
             <AutoResizer initial duration={0.2} ease={[0.22, 1, 0.36, 1]}>
               <AutoTransition
                 transitionKey={contentKey}
@@ -3358,7 +3359,7 @@ function NormalRequestDetailDrawer({
                 )}
               </AutoTransition>
             </AutoResizer>
-          </div>
+          </DrawerScrollArea>
         </DrawerContent>
       </Drawer>
     </>

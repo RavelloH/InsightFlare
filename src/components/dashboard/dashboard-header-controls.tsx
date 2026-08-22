@@ -38,6 +38,7 @@ import {
   DrawerDescription,
   DrawerFooter,
   DrawerHeader,
+  DrawerScrollArea,
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer";
@@ -656,7 +657,7 @@ export function DashboardHeaderControls({
                   <FilterActiveCountBadge count={activeFilterCount} />
                 </Button>
               </DrawerTrigger>
-              <DrawerContent className="max-h-[90vh] flex flex-col">
+              <DrawerContent className="h-[80dvh] max-h-[80dvh] flex flex-col overflow-hidden">
                 <DrawerHeader>
                   <DrawerTitle>
                     {messages.dashboardHeader.filterTitle}
@@ -665,7 +666,10 @@ export function DashboardHeaderControls({
                     {messages.dashboardHeader.filterSubtitle}
                   </DrawerDescription>
                 </DrawerHeader>
-                <div className="min-h-0 flex-1 px-4">
+                <DrawerScrollArea
+                  className="overflow-hidden"
+                  contentClassName="px-4"
+                >
                   <FilterPanel
                     audience={filterAudience}
                     document={queryDocument}
@@ -676,7 +680,7 @@ export function DashboardHeaderControls({
                     window={window}
                     onApply={applyFilterDocument}
                   />
-                </div>
+                </DrawerScrollArea>
               </DrawerContent>
             </Drawer>
           ) : null}
@@ -691,7 +695,7 @@ export function DashboardHeaderControls({
                 {mobileTimeLabel}
               </Button>
             </DrawerTrigger>
-            <DrawerContent>
+            <DrawerContent className="max-h-[80dvh]">
               <DrawerHeader>
                 <DrawerTitle>{mobileTimeLabel}</DrawerTitle>
                 <DrawerDescription>
@@ -699,7 +703,7 @@ export function DashboardHeaderControls({
                 </DrawerDescription>
               </DrawerHeader>
 
-              <div className="space-y-4 overflow-y-auto px-4 pb-2">
+              <DrawerScrollArea contentClassName="space-y-4 px-4 pb-2">
                 <div className="space-y-2">
                   <Label>{cycleLabel}</Label>
                   <ButtonGroup className="w-full">
@@ -785,7 +789,7 @@ export function DashboardHeaderControls({
                     })}
                   </div>
                 </div>
-              </div>
+              </DrawerScrollArea>
 
               <DrawerFooter>
                 <DrawerClose asChild>

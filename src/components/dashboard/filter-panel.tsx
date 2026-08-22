@@ -40,17 +40,18 @@ import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Clickable } from "@/components/ui/clickable";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { OverlayScrollbar } from "@/components/ui/overlay-scrollbar";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/ui/responsive-dialog";
 import {
   Select,
   SelectContent,
@@ -711,130 +712,141 @@ function FilterExpressionHelpDialog({
     messages.filterBuilder.valueKinds[valueKind];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl gap-0 p-0">
-        <DialogHeader className="border-b px-4 py-4 sm:px-5">
-          <DialogTitle icon={RiInformationLine}>
+    <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
+      <ResponsiveDialogContent
+        className="gap-0 p-0"
+        desktopClassName="max-w-4xl"
+        drawerClassName="overflow-hidden"
+      >
+        <ResponsiveDialogHeader className="border-b px-4 py-4 sm:px-5">
+          <ResponsiveDialogTitle icon={RiInformationLine}>
             {messages.filterBuilder.expressionHelpTitle}
-          </DialogTitle>
-          <DialogDescription>
+          </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             {messages.filterBuilder.expressionHelpDescription}
-          </DialogDescription>
-        </DialogHeader>
-        <OverlayScrollbar
-          axis="vertical"
-          syncKey={`${audience}:${fields.length}:${operators.length}`}
-          className="max-h-[min(72vh,46rem)]"
-        >
-          <div className="space-y-6 p-4 sm:p-5">
-            <section className="space-y-3">
-              <h3 className="text-sm font-medium">
-                {messages.filterBuilder.expressionHelpSyntax}
-              </h3>
-              <div className="space-y-2 border-y border-border py-3 font-mono text-xs">
-                <p>&lt;field&gt; &lt;operator&gt; &lt;value&gt;</p>
-                <p>&lt;expression&gt; AND | OR &lt;expression&gt;</p>
-                <p>NOT &lt;expression&gt; · (&lt;expression&gt;)</p>
-                <p>AND(&lt;expression&gt;) · OR(&lt;expression&gt;)</p>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {messages.filterBuilder.expressionHelpLogicDescription}
-              </p>
-            </section>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
+        <ResponsiveDialogBody className="flex flex-col overflow-hidden p-0">
+          <VerticalScrollMask
+            syncKey={`${audience}:${fields.length}:${operators.length}`}
+            className="min-h-0 flex-1 max-h-[min(calc(80dvh-5rem),46rem)]"
+          >
+            <div className="space-y-6 p-4 sm:p-5">
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium">
+                  {messages.filterBuilder.expressionHelpSyntax}
+                </h3>
+                <div className="space-y-2 border-y border-border py-3 font-mono text-xs">
+                  <p>&lt;field&gt; &lt;operator&gt; &lt;value&gt;</p>
+                  <p>&lt;expression&gt; AND | OR &lt;expression&gt;</p>
+                  <p>NOT &lt;expression&gt; · (&lt;expression&gt;)</p>
+                  <p>AND(&lt;expression&gt;) · OR(&lt;expression&gt;)</p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {messages.filterBuilder.expressionHelpLogicDescription}
+                </p>
+              </section>
 
-            <section className="space-y-3">
-              <h3 className="text-sm font-medium">
-                {messages.filterBuilder.expressionHelpValues}
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                {messages.filterBuilder.expressionHelpValuesDescription}
-              </p>
-              <div className="flex flex-wrap gap-2 font-mono text-xs">
-                {['"text"', "42", "true", '["a", "b"]', "between [10, 20]"].map(
-                  (example) => (
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium">
+                  {messages.filterBuilder.expressionHelpValues}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  {messages.filterBuilder.expressionHelpValuesDescription}
+                </p>
+                <div className="flex flex-wrap gap-2 font-mono text-xs">
+                  {[
+                    '"text"',
+                    "42",
+                    "true",
+                    '["a", "b"]',
+                    "between [10, 20]",
+                  ].map((example) => (
                     <code key={example} className="bg-muted px-2 py-1">
                       {example}
                     </code>
-                  ),
-                )}
-              </div>
-            </section>
+                  ))}
+                </div>
+              </section>
 
-            <section className="space-y-3">
-              <h3 className="text-sm font-medium">
-                {messages.filterBuilder.expressionHelpOperators}
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {operators.map((operator) => (
-                  <span
-                    key={operator}
-                    className="inline-flex items-center gap-1 bg-muted px-2 py-1 text-xs"
-                  >
-                    <code className="font-mono">{operator}</code>
-                    <span className="text-muted-foreground">
-                      {messages.filterBuilder.operatorLabels[operator] ??
-                        operator}
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium">
+                  {messages.filterBuilder.expressionHelpOperators}
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {operators.map((operator) => (
+                    <span
+                      key={operator}
+                      className="inline-flex items-center gap-1 bg-muted px-2 py-1 text-xs"
+                    >
+                      <code className="font-mono">{operator}</code>
+                      <span className="text-muted-foreground">
+                        {messages.filterBuilder.operatorLabels[operator] ??
+                          operator}
+                      </span>
                     </span>
-                  </span>
-                ))}
-              </div>
-              {unaryOperators.length > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {messages.filterBuilder.expressionHelpUnaryOperators}:{" "}
-                  <span className="font-mono">{unaryOperators.join(", ")}</span>
-                </p>
-              ) : null}
-            </section>
+                  ))}
+                </div>
+                {unaryOperators.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {messages.filterBuilder.expressionHelpUnaryOperators}:{" "}
+                    <span className="font-mono">
+                      {unaryOperators.join(", ")}
+                    </span>
+                  </p>
+                ) : null}
+              </section>
 
-            <section className="space-y-3">
-              <h3 className="text-sm font-medium">
-                {messages.filterBuilder.expressionHelpFields}
-              </h3>
-              <div className="divide-y divide-border border-y border-border">
-                {fieldGroups.map((group) => (
-                  <div key={group.key}>
-                    <h4 className="bg-muted px-3 py-2 text-xs font-medium">
-                      {group.label}
-                    </h4>
-                    {group.fields.map((field) => (
-                      <div
-                        key={field.id}
-                        className="grid gap-2 px-3 py-2 sm:grid-cols-[minmax(13rem,0.75fr)_minmax(0,1fr)]"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-xs font-medium">
-                            {fieldLabel(field.id, messages)}
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium">
+                  {messages.filterBuilder.expressionHelpFields}
+                </h3>
+                <div className="divide-y divide-border border-y border-border">
+                  {fieldGroups.map((group) => (
+                    <div key={group.key}>
+                      <h4 className="bg-muted px-3 py-2 text-xs font-medium">
+                        {group.label}
+                      </h4>
+                      {group.fields.map((field) => (
+                        <div
+                          key={field.id}
+                          className="grid gap-2 px-3 py-2 sm:grid-cols-[minmax(13rem,0.75fr)_minmax(0,1fr)]"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-medium">
+                              {fieldLabel(field.id, messages)}
+                            </div>
+                            <code className="block truncate font-mono text-xs text-muted-foreground">
+                              {field.id}
+                            </code>
                           </div>
-                          <code className="block truncate font-mono text-xs text-muted-foreground">
-                            {field.id}
-                          </code>
+                          <div className="min-w-0 space-y-1">
+                            <div className="text-xs text-muted-foreground">
+                              {messages.filterBuilder.expressionHelpFieldType}:{" "}
+                              {valueKindLabel(field.valueKind)}
+                            </div>
+                            <div className="break-words text-xs text-muted-foreground">
+                              {
+                                messages.filterBuilder
+                                  .expressionHelpFieldOperators
+                              }
+                              :{" "}
+                              <span className="font-mono">
+                                {[...field.operators].join(", ")}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        <div className="min-w-0 space-y-1">
-                          <div className="text-xs text-muted-foreground">
-                            {messages.filterBuilder.expressionHelpFieldType}:{" "}
-                            {valueKindLabel(field.valueKind)}
-                          </div>
-                          <div className="break-words text-xs text-muted-foreground">
-                            {
-                              messages.filterBuilder
-                                .expressionHelpFieldOperators
-                            }
-                            :{" "}
-                            <span className="font-mono">
-                              {[...field.operators].join(", ")}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-        </OverlayScrollbar>
-      </DialogContent>
-    </Dialog>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </VerticalScrollMask>
+        </ResponsiveDialogBody>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }
 
@@ -2439,33 +2451,35 @@ export function FilterPanel({
           </div>
         </div>
       </div>
-      <Dialog
+      <ResponsiveDialog
         open={createSavedFilterOpen}
         onOpenChange={(nextOpen) => {
           setCreateSavedFilterOpen(nextOpen);
           if (!nextOpen) setSavedFilterOperationError(null);
         }}
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle icon={RiSaveLine}>
+        <ResponsiveDialogContent desktopClassName="max-w-md">
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle icon={RiSaveLine}>
               {messages.filterBuilder.createSavedFilter}
-            </DialogTitle>
-            <DialogDescription>
+            </ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
               {messages.filterBuilder.savedFilterCreateDescription}
-            </DialogDescription>
-          </DialogHeader>
-          <SavedFilterFormFields
-            form={savedFilterForm}
-            messages={messages}
-            onChange={setSavedFilterForm}
-          />
-          {savedFilterOperationError ? (
-            <p className="text-xs text-destructive">
-              {savedFilterOperationError}
-            </p>
-          ) : null}
-          <DialogFooter>
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
+          <ResponsiveDialogBody>
+            <SavedFilterFormFields
+              form={savedFilterForm}
+              messages={messages}
+              onChange={setSavedFilterForm}
+            />
+            {savedFilterOperationError ? (
+              <p className="text-xs text-destructive">
+                {savedFilterOperationError}
+              </p>
+            ) : null}
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter>
             <Button
               type="button"
               variant="outline"
@@ -2496,36 +2510,38 @@ export function FilterPanel({
                   : messages.filterBuilder.savedFilterSave}
               </span>
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
+      <ResponsiveDialog
         open={manageSavedFilterOpen}
         onOpenChange={(nextOpen) => {
           setManageSavedFilterOpen(nextOpen);
           if (!nextOpen) setSavedFilterOperationError(null);
         }}
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle icon={RiEditLine}>
+        <ResponsiveDialogContent desktopClassName="max-w-md">
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle icon={RiEditLine}>
               {messages.filterBuilder.manageSavedFilter}
-            </DialogTitle>
-            <DialogDescription>
+            </ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
               {messages.filterBuilder.savedFilterManageDescription}
-            </DialogDescription>
-          </DialogHeader>
-          <SavedFilterFormFields
-            form={savedFilterForm}
-            messages={messages}
-            onChange={setSavedFilterForm}
-          />
-          {savedFilterOperationError ? (
-            <p className="text-xs text-destructive">
-              {savedFilterOperationError}
-            </p>
-          ) : null}
-          <DialogFooter className="sm:justify-between">
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
+          <ResponsiveDialogBody>
+            <SavedFilterFormFields
+              form={savedFilterForm}
+              messages={messages}
+              onChange={setSavedFilterForm}
+            />
+            {savedFilterOperationError ? (
+              <p className="text-xs text-destructive">
+                {savedFilterOperationError}
+              </p>
+            ) : null}
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter className="sm:justify-between">
             <Button
               type="button"
               variant="destructive"
@@ -2595,9 +2611,9 @@ export function FilterPanel({
                 </span>
               </Button>
             </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
       <AlertDialog
         open={confirmSavedFilterDeleteOpen}
         onOpenChange={setConfirmSavedFilterDeleteOpen}

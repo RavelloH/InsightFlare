@@ -26,8 +26,8 @@ import { ModalOverlay } from "@/components/ui/modal-overlay";
 import {
   prepareNativeScrollbarHost,
   shouldUseNativeScrollbars,
-  useNativeScrollbars,
 } from "@/components/ui/overlay-scrollbar";
+import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { cn } from "@/lib/utils";
 
 export const DETAIL_QUERY_PARAM = "detail";
@@ -119,7 +119,6 @@ export function DetailDrawer({
   const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
     null,
   );
-  const nativeScrollbars = useNativeScrollbars();
   const isPreparingCloseRef = useRef(false);
   const layerIdRef = useRef<string | null>(null);
   if (layerIdRef.current === null) {
@@ -515,12 +514,11 @@ export function DetailDrawer({
           />
 
           <div className="fixed inset-y-0 z-10" style={contentAreaStyle}>
-            <div
-              ref={scrollContainerRef}
-              data-overlayscrollbars-initialize={
-                nativeScrollbars ? undefined : ""
-              }
-              className="h-full min-h-0 overflow-y-auto overscroll-contain"
+            <VerticalScrollMask
+              hostRef={scrollContainerRef}
+              className="h-full min-h-0"
+              contentClassName="h-full min-h-0 overscroll-contain"
+              scrollbarOptions={DETAIL_DRAWER_SCROLLBAR_OPTIONS}
               onClick={handleClose}
             >
               <div className="pointer-events-none relative mx-auto flex max-w-[1400px] items-start gap-6 px-4 pb-[4em] pt-[8em] sm:px-5 md:px-6">
@@ -568,7 +566,7 @@ export function DetailDrawer({
                   <div className="relative h-full">{children}</div>
                 </motion.div>
               </div>
-            </div>
+            </VerticalScrollMask>
           </div>
         </div>
       </DetailDrawerReadyContext.Provider>

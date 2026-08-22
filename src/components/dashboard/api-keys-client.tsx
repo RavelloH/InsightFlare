@@ -41,6 +41,15 @@ import {
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/ui/responsive-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -505,13 +514,17 @@ export function ApiKeysClient({
         </CardContent>
       </Card>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-h-screen max-w-full overflow-y-auto sm:max-h-none sm:max-w-2xl sm:overflow-visible">
-          <DialogHeader>
-            <DialogTitle icon={RiKey2Line}>{copy.createTitle}</DialogTitle>
-            <DialogDescription>{copy.createSubtitle}</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4">
+      <ResponsiveDialog open={createOpen} onOpenChange={setCreateOpen}>
+        <ResponsiveDialogContent desktopClassName="max-w-2xl">
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle icon={RiKey2Line}>
+              {copy.createTitle}
+            </ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
+              {copy.createSubtitle}
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
+          <ResponsiveDialogBody className="grid gap-4">
             <Field>
               <FieldLabel htmlFor="api-key-name">{copy.nameLabel}</FieldLabel>
               <Input
@@ -611,8 +624,8 @@ export function ApiKeysClient({
                 </SelectContent>
               </Select>
             </Field>
-          </div>
-          <DialogFooter>
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter>
             <Button onClick={createKey} disabled={submitting}>
               <AutoTransition className="inline-flex items-center gap-2">
                 {submitting ? (
@@ -631,9 +644,9 @@ export function ApiKeysClient({
                 )}
               </AutoTransition>
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
 
       <Dialog open={secretOpen} onOpenChange={setSecretOpen}>
         <DialogContent className="max-w-xl">

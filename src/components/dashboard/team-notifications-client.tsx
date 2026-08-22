@@ -41,6 +41,15 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/ui/responsive-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -2224,17 +2233,20 @@ export function TeamNotificationsClient({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-        <DialogContent className="max-h-[min(860px,calc(100vh-2rem))] max-w-5xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle icon={RiEyeLine}>
+      <ResponsiveDialog
+        open={previewDialogOpen}
+        onOpenChange={setPreviewDialogOpen}
+      >
+        <ResponsiveDialogContent desktopClassName="max-h-[min(860px,calc(100vh-2rem))] max-w-5xl">
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle icon={RiEyeLine}>
               {copy.previewDialogTitle}
-            </DialogTitle>
-            <DialogDescription>
+            </ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
               {copy.previewDialogDescription}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5">
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
+          <ResponsiveDialogBody className="space-y-5">
             {previewRule ? (
               <div className="grid gap-3 border bg-muted/20 p-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
                 <div>
@@ -2421,8 +2433,8 @@ export function TeamNotificationsClient({
                 )}
               </AutoTransition>
             </AutoResizer>
-          </div>
-          <DialogFooter>
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter>
             <Button
               type="button"
               variant="outline"
@@ -2431,21 +2443,27 @@ export function TeamNotificationsClient({
               <RiCloseLine className="size-4" />
               <span>{messages.teamSelect.cancel}</span>
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="flex max-h-screen max-w-full flex-col overflow-hidden p-0 sm:max-h-[min(860px,calc(100vh-1rem))] sm:max-w-6xl">
-          <div className="border-b p-4 sm:p-6">
-            <DialogHeader>
-              <DialogTitle icon={RiNotification3Line}>
+      <ResponsiveDialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <ResponsiveDialogContent
+          className="flex flex-col overflow-hidden p-0"
+          desktopClassName="max-h-[min(860px,calc(100vh-1rem))] max-w-6xl"
+          drawerClassName="h-[80dvh] max-h-[80dvh]"
+        >
+          <div className="shrink-0 border-b p-4 sm:p-6">
+            <ResponsiveDialogHeader>
+              <ResponsiveDialogTitle icon={RiNotification3Line}>
                 {form.id ? copy.editRule : copy.createRule}
-              </DialogTitle>
-              <DialogDescription>{copy.dialogDescription}</DialogDescription>
-            </DialogHeader>
+              </ResponsiveDialogTitle>
+              <ResponsiveDialogDescription>
+                {copy.dialogDescription}
+              </ResponsiveDialogDescription>
+            </ResponsiveDialogHeader>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+          <ResponsiveDialogBody className="flex-1 p-4 sm:p-6">
             <RuleFormFields
               copy={copy}
               terms={messages.conditionDescription}
@@ -2461,8 +2479,8 @@ export function TeamNotificationsClient({
                 }))
               }
             />
-          </div>
-          <DialogFooter className="border-t p-4 sm:p-6">
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter className="border-t p-4 sm:p-6">
             <Button
               type="button"
               variant="outline"
@@ -2480,9 +2498,9 @@ export function TeamNotificationsClient({
               {saving ? <Spinner className="size-4" /> : <RiSave3Line />}
               <span>{form.id ? copy.saveRule : copy.createRule}</span>
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
     </div>
   );
 }

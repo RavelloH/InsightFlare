@@ -2,13 +2,14 @@ import { RiBookOpenLine } from "@remixicon/react";
 
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@/components/ui/responsive-dialog";
 
 interface SystemSettingsGuideDialogProps {
   triggerLabel: string;
@@ -24,26 +25,32 @@ export function SystemSettingsGuideDialog({
   steps,
 }: SystemSettingsGuideDialogProps) {
   return (
-    <Dialog>
-      <DialogTrigger asChild>
+    <ResponsiveDialog>
+      <ResponsiveDialogTrigger asChild>
         <Button type="button" variant="outline" size="sm" className="ml-auto">
           <RiBookOpenLine className="size-4" />
           {triggerLabel}
         </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-lg">
-        <DialogHeader className="pr-8">
-          <DialogTitle icon={RiBookOpenLine}>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        <ol className="grid list-decimal gap-2 pl-4 text-xs/relaxed text-muted-foreground">
-          {steps.map((step) => (
-            <li key={step} className="pl-1">
-              {step}
-            </li>
-          ))}
-        </ol>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogTrigger>
+      <ResponsiveDialogContent desktopClassName="max-w-lg">
+        <ResponsiveDialogHeader className="pr-8">
+          <ResponsiveDialogTitle icon={RiBookOpenLine}>
+            {title}
+          </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
+            {description}
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
+        <ResponsiveDialogBody>
+          <ol className="grid list-decimal gap-2 pl-4 text-xs/relaxed text-muted-foreground">
+            {steps.map((step) => (
+              <li key={step} className="pl-1">
+                {step}
+              </li>
+            ))}
+          </ol>
+        </ResponsiveDialogBody>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }

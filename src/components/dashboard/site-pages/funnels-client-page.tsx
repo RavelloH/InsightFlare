@@ -44,17 +44,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogClose,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/ui/responsive-dialog";
 import {
   Select,
   SelectContent,
@@ -373,126 +374,132 @@ function CreateFunnelDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <form onSubmit={submit} className="space-y-5">
-          <DialogHeader>
-            <DialogTitle icon={RiFilter2Line}>{labels.createTitle}</DialogTitle>
-            <DialogDescription>{labels.createDescription}</DialogDescription>
-          </DialogHeader>
+    <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
+      <ResponsiveDialogContent desktopClassName="max-w-2xl">
+        <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col gap-5">
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle icon={RiFilter2Line}>
+              {labels.createTitle}
+            </ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
+              {labels.createDescription}
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
 
-          <div className="space-y-2">
-            <Label htmlFor="funnel-name">{labels.nameLabel}</Label>
-            <Input
-              id="funnel-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder={labels.namePlaceholder}
-            />
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <Label>{labels.stepsLabel}</Label>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  setSteps((current) => [
-                    ...current,
-                    { type: "pageview", value: "" },
-                  ])
-                }
-              >
-                <RiAddLine />
-                {labels.addStep}
-              </Button>
-            </div>
-
+          <ResponsiveDialogBody className="space-y-5">
             <div className="space-y-2">
-              {steps.map((step, index) => {
-                const listId =
-                  step.type === "pageview"
-                    ? "funnel-pageview-options"
-                    : "funnel-event-options";
-                return (
-                  <div
-                    key={index}
-                    className="grid min-w-0 gap-2 border bg-muted/20 p-2 md:grid-cols-[2.2rem_9rem_minmax(0,1fr)_2rem]"
-                  >
-                    <div className="flex h-8 items-center justify-center border bg-background font-mono text-xs text-muted-foreground">
-                      {numberFormat(locale, index + 1)}
-                    </div>
-                    <Select
-                      value={step.type}
-                      onValueChange={(value) =>
-                        updateStep(index, {
-                          type: value === "event" ? "event" : "pageview",
-                          value: "",
-                        })
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="pageview">
-                          {labels.stepTypePageview}
-                        </SelectItem>
-                        <SelectItem value="event">
-                          {labels.stepTypeEvent}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      className="min-w-0"
-                      value={step.value}
-                      onChange={(event) =>
-                        updateStep(index, { value: event.target.value })
-                      }
-                      list={listId}
-                      aria-label={labels.stepValueLabel}
-                      placeholder={
-                        step.type === "pageview"
-                          ? labels.pageviewPlaceholder
-                          : labels.eventPlaceholder
-                      }
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={labels.removeStep}
-                      disabled={steps.length <= 2}
-                      onClick={() => removeStep(index)}
-                    >
-                      <RiDeleteBinLine />
-                    </Button>
-                  </div>
-                );
-              })}
+              <Label htmlFor="funnel-name">{labels.nameLabel}</Label>
+              <Input
+                id="funnel-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={labels.namePlaceholder}
+              />
             </div>
-          </div>
 
-          <datalist id="funnel-pageview-options">
-            {candidates.pageviews.map((value) => (
-              <option key={value} value={value} />
-            ))}
-          </datalist>
-          <datalist id="funnel-event-options">
-            {candidates.events.map((value) => (
-              <option key={value} value={value} />
-            ))}
-          </datalist>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <Label>{labels.stepsLabel}</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setSteps((current) => [
+                      ...current,
+                      { type: "pageview", value: "" },
+                    ])
+                  }
+                >
+                  <RiAddLine />
+                  {labels.addStep}
+                </Button>
+              </div>
 
-          <DialogFooter>
-            <DialogClose asChild>
+              <div className="space-y-2">
+                {steps.map((step, index) => {
+                  const listId =
+                    step.type === "pageview"
+                      ? "funnel-pageview-options"
+                      : "funnel-event-options";
+                  return (
+                    <div
+                      key={index}
+                      className="grid min-w-0 gap-2 border bg-muted/20 p-2 md:grid-cols-[2.2rem_9rem_minmax(0,1fr)_2rem]"
+                    >
+                      <div className="flex h-8 items-center justify-center border bg-background font-mono text-xs text-muted-foreground">
+                        {numberFormat(locale, index + 1)}
+                      </div>
+                      <Select
+                        value={step.type}
+                        onValueChange={(value) =>
+                          updateStep(index, {
+                            type: value === "event" ? "event" : "pageview",
+                            value: "",
+                          })
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="pageview">
+                            {labels.stepTypePageview}
+                          </SelectItem>
+                          <SelectItem value="event">
+                            {labels.stepTypeEvent}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        className="min-w-0"
+                        value={step.value}
+                        onChange={(event) =>
+                          updateStep(index, { value: event.target.value })
+                        }
+                        list={listId}
+                        aria-label={labels.stepValueLabel}
+                        placeholder={
+                          step.type === "pageview"
+                            ? labels.pageviewPlaceholder
+                            : labels.eventPlaceholder
+                        }
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={labels.removeStep}
+                        disabled={steps.length <= 2}
+                        onClick={() => removeStep(index)}
+                      >
+                        <RiDeleteBinLine />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <datalist id="funnel-pageview-options">
+              {candidates.pageviews.map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
+            <datalist id="funnel-event-options">
+              {candidates.events.map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
+          </ResponsiveDialogBody>
+
+          <ResponsiveDialogFooter>
+            <ResponsiveDialogClose asChild>
               <Button type="button" variant="outline" disabled={submitting}>
                 <RiCloseLine className="size-4" />
                 <span>{labels.cancel}</span>
               </Button>
-            </DialogClose>
+            </ResponsiveDialogClose>
             <Button type="submit" disabled={!canSubmit}>
               {submitting ? (
                 <>
@@ -506,10 +513,10 @@ function CreateFunnelDialog({
                 </>
               )}
             </Button>
-          </DialogFooter>
+          </ResponsiveDialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }
 

@@ -62,22 +62,24 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Drawer,
   DrawerContent,
   DrawerDescription,
   DrawerHeader,
+  DrawerScrollArea,
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { ModalOverlay, overlayZIndexFor } from "@/components/ui/modal-overlay";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/ui/responsive-dialog";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
@@ -1442,7 +1444,7 @@ export function EventRecordDetailDrawer({
               {detail?.event.eventName || labels.detailSubtitle}
             </DrawerDescription>
           </DrawerHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <DrawerScrollArea contentClassName="p-4">
             {loading ? (
               <div className="space-y-4">
                 <Skeleton className="h-5 w-48" />
@@ -1597,7 +1599,7 @@ export function EventRecordDetailDrawer({
                 </section>
               </div>
             )}
-          </div>
+          </DrawerScrollArea>
         </DrawerContent>
       </Drawer>
 
@@ -2469,24 +2471,24 @@ export function EventFieldsCard({
         </div>
       </section>
 
-      <Dialog
+      <ResponsiveDialog
         open={payloadFilterDialogOpen}
         onOpenChange={setPayloadFilterDialogOpen}
       >
-        <DialogContent
+        <ResponsiveDialogContent
           data-dashboard-floating-layer="event-filter-dialog"
-          className="max-w-xl"
+          desktopClassName="max-w-xl"
           style={{ zIndex: EVENT_FILTER_DIALOG_Z_INDEX }}
         >
-          <DialogHeader>
-            <DialogTitle icon={RiFilter3Line}>
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle icon={RiFilter3Line}>
               {labels.payloadFilterTitle}
-            </DialogTitle>
-            <DialogDescription>
+            </ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
               {labels.payloadFilterSubtitle}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
+          <ResponsiveDialogBody className="space-y-2">
             <textarea
               value={payloadFilterDraft}
               onChange={(event) => {
@@ -2499,8 +2501,8 @@ export function EventFieldsCard({
             {payloadFilterError ? (
               <p className="text-xs text-destructive">{payloadFilterError}</p>
             ) : null}
-          </div>
-          <DialogFooter>
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter>
             <Button
               type="button"
               variant="outline"
@@ -2513,9 +2515,9 @@ export function EventFieldsCard({
               <RiCheckLine className="size-4" />
               <span>{labels.payloadFilterApply}</span>
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
     </>
   );
 }

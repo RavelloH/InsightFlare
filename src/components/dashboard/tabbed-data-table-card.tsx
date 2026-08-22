@@ -36,6 +36,7 @@ import {
   Drawer,
   DrawerContent,
   DrawerHeader,
+  DrawerScrollArea,
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
@@ -47,6 +48,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
+import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
@@ -1019,7 +1021,7 @@ export function TabbedDataTableCard<
         onChange={(event) => setSearchTerm(event.target.value)}
         placeholder={activeSearchPlaceholder}
       />
-      <div className="max-h-[60vh] overflow-auto pr-1">
+      <VerticalScrollMask className="max-h-[60vh]" contentClassName="pr-1">
         <DataTableSwitch
           loading={searchLoading}
           hasContent={searchedRows.length > 0}
@@ -1035,7 +1037,7 @@ export function TabbedDataTableCard<
           )}
           contentKey={`search-${activeSearchTab}-${deferredSearchTerm}-${searchedRows.length}`}
         />
-      </div>
+      </VerticalScrollMask>
     </div>
   ) : null;
 
@@ -1048,11 +1050,13 @@ export function TabbedDataTableCard<
             if (!open) setSearchTab(null);
           }}
         >
-          <DrawerContent className="max-h-[90vh]">
+          <DrawerContent className="max-h-[80dvh]">
             <DrawerHeader>
               <DrawerTitle>{activeSearchTitle}</DrawerTitle>
             </DrawerHeader>
-            <div className="px-4 pb-4">{searchContent}</div>
+            <DrawerScrollArea contentClassName="px-4 pb-4">
+              {searchContent}
+            </DrawerScrollArea>
           </DrawerContent>
         </Drawer>
       ) : (

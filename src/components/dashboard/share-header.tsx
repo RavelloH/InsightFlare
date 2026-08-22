@@ -24,6 +24,7 @@ import {
   DrawerClose,
   DrawerContent,
   DrawerHeader,
+  DrawerScrollArea,
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer";
@@ -150,7 +151,7 @@ export function ShareHeader({
             <DrawerHeader>
               <DrawerTitle>{messages.common.theme}</DrawerTitle>
             </DrawerHeader>
-            <div className="grid gap-2 px-4 pb-4">
+            <DrawerScrollArea contentClassName="grid gap-2 px-4 pb-4">
               <DrawerClose asChild>
                 <Button
                   type="button"
@@ -184,7 +185,7 @@ export function ShareHeader({
                   {messages.common.system}
                 </Button>
               </DrawerClose>
-            </div>
+            </DrawerScrollArea>
           </DrawerContent>
         </Drawer>
 
@@ -249,7 +250,7 @@ export function ShareHeader({
             <DrawerHeader>
               <DrawerTitle>{messages.common.language}</DrawerTitle>
             </DrawerHeader>
-            <div className="grid gap-2 px-4 pb-4">
+            <DrawerScrollArea contentClassName="grid gap-2 px-4 pb-4">
               {SUPPORTED_LOCALES.map((item) => (
                 <DrawerClose key={item} asChild>
                   <Button
@@ -263,7 +264,7 @@ export function ShareHeader({
                   </Button>
                 </DrawerClose>
               ))}
-            </div>
+            </DrawerScrollArea>
           </DrawerContent>
         </Drawer>
 

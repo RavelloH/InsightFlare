@@ -29,17 +29,16 @@ import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clickable } from "@/components/ui/clickable";
+import { prepareNativeScrollbarHost } from "@/components/ui/overlay-scrollbar";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  prepareNativeScrollbarHost,
-  useNativeScrollbars,
-} from "@/components/ui/overlay-scrollbar";
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/ui/responsive-dialog";
 import { Spinner } from "@/components/ui/spinner";
+import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
 import { parseGeoLocationValue } from "@/lib/dashboard/geo-location";
 import {
@@ -448,8 +447,6 @@ function LogStreamScrollbar({
     null,
   );
   const onReachEndRef = useRef<(() => void) | null>(onReachEnd ?? null);
-  const nativeScrollbars = useNativeScrollbars();
-
   useEffect(() => {
     onReachEndRef.current = onReachEnd ?? null;
   }, [onReachEnd]);
@@ -514,16 +511,14 @@ function LogStreamScrollbar({
   }, [syncKey]);
 
   return (
-    <div
-      ref={hostRef}
-      className={cn(
-        nativeScrollbars ? "overflow-y-auto" : "overflow-hidden",
-        className,
-      )}
-      data-overlayscrollbars-initialize={nativeScrollbars ? undefined : ""}
+    <VerticalScrollMask
+      hostRef={hostRef}
+      className={className}
+      scrollbarOptions={PANEL_SCROLLBAR_OPTIONS}
+      syncKey={syncKey}
     >
       {children}
-    </div>
+    </VerticalScrollMask>
   );
 }
 
@@ -1462,57 +1457,63 @@ function RealtimeLogEventDetailsDialog({
   ];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl gap-0 p-0">
-        <DialogHeader className="border-b px-4 py-4 sm:px-5">
-          <DialogTitle icon={RiPulseLine}>
+    <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
+      <ResponsiveDialogContent
+        className="gap-0 p-0"
+        desktopClassName="max-w-4xl"
+        drawerClassName="overflow-hidden"
+      >
+        <ResponsiveDialogHeader className="border-b px-4 py-4 sm:px-5">
+          <ResponsiveDialogTitle icon={RiPulseLine}>
             {messages.realtime.detailsTitle}
-          </DialogTitle>
-        </DialogHeader>
-        <LogStreamScrollbar
-          className="max-h-[min(78vh,44rem)]"
-          syncKey={event.id}
-        >
-          <div className="space-y-4 p-4 sm:p-5">
-            <RealtimeLogStreamItemCard
-              event={event}
-              locale={locale}
-              messages={messages}
-              now={now}
-              timeZone={timeZone}
-            />
-            <section className="space-y-2">
-              <h3 className="text-sm font-medium text-foreground">
-                {messages.realtime.detailsSection}
-              </h3>
-              <div className="divide-y divide-border/70 ring-1 ring-foreground/10">
-                {detailRows.map((row) => (
-                  <RealtimeEventDetailRow
-                    key={row.label}
-                    label={row.label}
-                    value={row.value}
-                  />
-                ))}
-              </div>
-            </section>
-            <RealtimeVisitorHistorySection
-              locale={locale}
-              messages={messages}
-              now={now}
-              event={event}
-              events={events}
-              visits={visits}
-              timeZone={timeZone}
-            />
-            <RealtimeVisitorLocationMapSection
-              locale={locale}
-              messages={messages}
-              event={event}
-            />
-          </div>
-        </LogStreamScrollbar>
-      </DialogContent>
-    </Dialog>
+          </ResponsiveDialogTitle>
+        </ResponsiveDialogHeader>
+        <ResponsiveDialogBody className="flex flex-col overflow-hidden p-0">
+          <LogStreamScrollbar
+            className="min-h-0 flex-1 max-h-[min(calc(80dvh-5rem),44rem)]"
+            syncKey={event.id}
+          >
+            <div className="space-y-4 p-4 sm:p-5">
+              <RealtimeLogStreamItemCard
+                event={event}
+                locale={locale}
+                messages={messages}
+                now={now}
+                timeZone={timeZone}
+              />
+              <section className="space-y-2">
+                <h3 className="text-sm font-medium text-foreground">
+                  {messages.realtime.detailsSection}
+                </h3>
+                <div className="divide-y divide-border/70 ring-1 ring-foreground/10">
+                  {detailRows.map((row) => (
+                    <RealtimeEventDetailRow
+                      key={row.label}
+                      label={row.label}
+                      value={row.value}
+                    />
+                  ))}
+                </div>
+              </section>
+              <RealtimeVisitorHistorySection
+                locale={locale}
+                messages={messages}
+                now={now}
+                event={event}
+                events={events}
+                visits={visits}
+                timeZone={timeZone}
+              />
+              <RealtimeVisitorLocationMapSection
+                locale={locale}
+                messages={messages}
+                event={event}
+              />
+            </div>
+          </LogStreamScrollbar>
+        </ResponsiveDialogBody>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }
 

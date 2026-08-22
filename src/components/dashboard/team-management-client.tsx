@@ -62,6 +62,15 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/ui/responsive-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -1351,32 +1360,38 @@ export function TeamManagementClient({
   );
 
   const inviteSiteAccessDialog = (
-    <Dialog
+    <ResponsiveDialog
       open={inviteSiteAccessDialogOpen}
       onOpenChange={setInviteSiteAccessDialogOpen}
     >
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{copy.members.siteAccessDialogTitle}</DialogTitle>
-          <DialogDescription>{copy.members.invitesTitle}</DialogDescription>
-        </DialogHeader>
-        <Field>
-          <FieldLabel>{copy.members.siteAccessLabel}</FieldLabel>
-          <FieldDescription>
-            {copy.members.siteAccessDescription}
-          </FieldDescription>
-          <SiteAccessSelectorButtons
-            siteIds={inviteSiteIds}
-            sites={sites}
-            allSitesLabel={copy.members.siteAccessAll}
-            noSitesLabel={copy.members.noSitesForAccess}
-            onAllSites={() => setInviteSiteIds([])}
-            onToggleSite={(siteId) =>
-              toggleInviteSite(siteId, !inviteSiteIds.includes(siteId))
-            }
-          />
-        </Field>
-        <DialogFooter>
+      <ResponsiveDialogContent desktopClassName="max-w-2xl">
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>
+            {copy.members.siteAccessDialogTitle}
+          </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
+            {copy.members.invitesTitle}
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
+        <ResponsiveDialogBody>
+          <Field>
+            <FieldLabel>{copy.members.siteAccessLabel}</FieldLabel>
+            <FieldDescription>
+              {copy.members.siteAccessDescription}
+            </FieldDescription>
+            <SiteAccessSelectorButtons
+              siteIds={inviteSiteIds}
+              sites={sites}
+              allSitesLabel={copy.members.siteAccessAll}
+              noSitesLabel={copy.members.noSitesForAccess}
+              onAllSites={() => setInviteSiteIds([])}
+              onToggleSite={(siteId) =>
+                toggleInviteSite(siteId, !inviteSiteIds.includes(siteId))
+              }
+            />
+          </Field>
+        </ResponsiveDialogBody>
+        <ResponsiveDialogFooter>
           <Button
             type="button"
             onClick={() => setInviteSiteAccessDialogOpen(false)}
@@ -1384,13 +1399,13 @@ export function TeamManagementClient({
             <RiSave3Line className="size-4" />
             <span>{copy.members.saveSiteAccess}</span>
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </ResponsiveDialogFooter>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 
   const siteAccessDialog = (
-    <Dialog
+    <ResponsiveDialog
       open={Boolean(siteAccessDialogMember)}
       onOpenChange={(open) => {
         if (open) return;
@@ -1398,32 +1413,36 @@ export function TeamManagementClient({
         setEditingSiteIds([]);
       }}
     >
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{copy.members.siteAccessDialogTitle}</DialogTitle>
-          <DialogDescription>
+      <ResponsiveDialogContent desktopClassName="max-w-2xl">
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>
+            {copy.members.siteAccessDialogTitle}
+          </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             {siteAccessDialogMember
               ? siteAccessDialogMember.name || siteAccessDialogMember.username
               : copy.members.roleLabels.member}
-          </DialogDescription>
-        </DialogHeader>
-        <Field>
-          <FieldLabel>{copy.members.siteAccessLabel}</FieldLabel>
-          <FieldDescription>
-            {copy.members.siteAccessDescription}
-          </FieldDescription>
-          <SiteAccessSelectorButtons
-            siteIds={editingSiteIds}
-            sites={sites}
-            allSitesLabel={copy.members.siteAccessAll}
-            noSitesLabel={copy.members.noSitesForAccess}
-            onAllSites={() => setEditingSiteIds([])}
-            onToggleSite={(siteId) =>
-              toggleEditingSite(siteId, !editingSiteIds.includes(siteId))
-            }
-          />
-        </Field>
-        <DialogFooter>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
+        <ResponsiveDialogBody>
+          <Field>
+            <FieldLabel>{copy.members.siteAccessLabel}</FieldLabel>
+            <FieldDescription>
+              {copy.members.siteAccessDescription}
+            </FieldDescription>
+            <SiteAccessSelectorButtons
+              siteIds={editingSiteIds}
+              sites={sites}
+              allSitesLabel={copy.members.siteAccessAll}
+              noSitesLabel={copy.members.noSitesForAccess}
+              onAllSites={() => setEditingSiteIds([])}
+              onToggleSite={(siteId) =>
+                toggleEditingSite(siteId, !editingSiteIds.includes(siteId))
+              }
+            />
+          </Field>
+        </ResponsiveDialogBody>
+        <ResponsiveDialogFooter>
           <Button
             type="button"
             variant="outline"
@@ -1452,9 +1471,9 @@ export function TeamManagementClient({
             )}
             <span>{copy.members.saveSiteAccess}</span>
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </ResponsiveDialogFooter>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 
   return (
