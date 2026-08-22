@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
+import type { CanonicalJsonPath, FilterDocument } from "@/lib/filter-contract";
 import {
   demoEventContextCards,
   demoEventDimensionRows,
@@ -635,6 +636,34 @@ describe("mock/events-payload-filter branch behavior", () => {
         parseDemoFilters({ "filter[event.payload][/page/path][not]": "/nope" }),
       ),
     ).toHaveLength(1);
+
+    const payloadPath = "/page/path" as CanonicalJsonPath;
+    const payloadCondition = (value: string) => ({
+      kind: "condition" as const,
+      target: { kind: "event-payload" as const, path: payloadPath },
+      operator: "eq" as const,
+      value,
+    });
+    const andDocument: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "and",
+        children: [payloadCondition("/home"), payloadCondition("/home")],
+      },
+    };
+    const orDocument: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "or",
+        children: [payloadCondition("/nope"), payloadCondition("/home")],
+      },
+    };
+    expect(filterDemoCustomEventsByPayload([event], andDocument)).toHaveLength(
+      1,
+    );
+    expect(filterDemoCustomEventsByPayload([event], orDocument)).toHaveLength(
+      1,
+    );
   });
 });
 

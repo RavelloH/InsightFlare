@@ -66,7 +66,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useRealtimeChannel } from "@/hooks/use-realtime-channel";
+import { useRealtimeChannelSelector } from "@/hooks/use-realtime-channel";
 import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
@@ -438,12 +438,25 @@ export function DashboardHeaderControls({
     shouldShowRealtimeBadge &&
     showFilterSheet &&
     (Boolean(siteId) || USE_REALTIME_MOCK);
-  const realtime = useRealtimeChannel(realtimeSiteId, {
-    enabled: showControls && showRealtimeBadge,
-  });
-  const activeNow = realtime.activeNow;
-  const realtimeStatus = realtime.status;
-  const hasRealtimeConnected = realtime.hasConnected;
+  const realtimeEnabled = showControls && showRealtimeBadge;
+  const activeNow = useRealtimeChannelSelector(
+    realtimeSiteId,
+    (state) => state.activeNow,
+    Object.is,
+    { enabled: realtimeEnabled },
+  );
+  const realtimeStatus = useRealtimeChannelSelector(
+    realtimeSiteId,
+    (state) => state.status,
+    Object.is,
+    { enabled: realtimeEnabled },
+  );
+  const hasRealtimeConnected = useRealtimeChannelSelector(
+    realtimeSiteId,
+    (state) => state.hasConnected,
+    Object.is,
+    { enabled: realtimeEnabled },
+  );
 
   const orderedAllowedIntervals = INTERVAL_ORDER.filter((value) =>
     allowedIntervals.includes(value),

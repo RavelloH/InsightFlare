@@ -14,11 +14,12 @@ import {
 import { useTheme } from "@/components/theme-provider";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { AutoTransition } from "@/components/ui/auto-transition";
-import { useRealtimeChannel } from "@/hooks/use-realtime-channel";
+import { useRealtimeChannelSelector } from "@/hooks/use-realtime-channel";
 import { useLiveSearchParams } from "@/lib/client-history";
 import dynamic from "@/lib/dynamic";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import type { RealtimeChannelState } from "@/lib/realtime/types";
 
 interface RealtimeClientPageProps {
   locale: Locale;
@@ -34,6 +35,31 @@ const NUMBER_FLOW_BASELINE_STYLE = {
   "--number-flow-mask-height": "0px",
   "--number-flow-mask-width": "0px",
 } as const;
+const selectRealtimePageState = (state: RealtimeChannelState) => ({
+  status: state.status,
+  hasConnected: state.hasConnected,
+  activeNow: state.activeNow,
+  visitorsLast30m: state.visitorsLast30m,
+  viewsLast30m: state.viewsLast30m,
+  events: state.events,
+  points: state.points,
+  visits: state.visits,
+});
+type RealtimePageState = ReturnType<typeof selectRealtimePageState>;
+
+const areRealtimePageStatesEqual = (
+  left: RealtimePageState,
+  right: RealtimePageState,
+) =>
+  left.status === right.status &&
+  left.hasConnected === right.hasConnected &&
+  left.activeNow === right.activeNow &&
+  left.visitorsLast30m === right.visitorsLast30m &&
+  left.viewsLast30m === right.viewsLast30m &&
+  Object.is(left.events, right.events) &&
+  Object.is(left.points, right.points) &&
+  Object.is(left.visits, right.visits);
+
 const RealtimeMapStage = dynamic<RealtimeMapStageProps>(
   () =>
     import("@/components/dashboard/site-pages/realtime-map-stage").then(
@@ -52,9 +78,12 @@ export function RealtimeClientPage({
   siteDomain,
 }: RealtimeClientPageProps) {
   const searchParams = useLiveSearchParams();
-  const realtime = useRealtimeChannel(siteId, {
-    enabled: Boolean(siteId),
-  });
+  const realtime = useRealtimeChannelSelector(
+    siteId,
+    selectRealtimePageState,
+    areRealtimePageStatesEqual,
+    { enabled: Boolean(siteId) },
+  );
   const { resolvedTheme } = useTheme();
   const searchParamsKey = searchParams.toString();
 

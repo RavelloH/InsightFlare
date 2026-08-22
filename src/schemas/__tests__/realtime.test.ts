@@ -39,9 +39,9 @@ describe("RealtimeEventSchema", () => {
     ).toBe(true);
   });
 
-  it("rejects invalid eventType", () => {
+  it("rejects invalid eventKind", () => {
     expect(
-      RealtimeEventSchema.safeParse({ ...validEvent, eventType: "click" })
+      RealtimeEventSchema.safeParse({ ...validEvent, eventKind: "click" })
         .success,
     ).toBe(false);
   });

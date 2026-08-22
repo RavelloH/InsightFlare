@@ -36,7 +36,7 @@ import {
   RealtimeSummaryCardsSection,
 } from "@/components/dashboard/site-pages/realtime-summary-cards-section";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useRealtimeChannel } from "@/hooks/use-realtime-channel";
+import { useRealtimeChannelSelector } from "@/hooks/use-realtime-channel";
 import { useLiveSearchParams } from "@/lib/client-history";
 import {
   fetchEventsSummary,
@@ -372,17 +372,33 @@ function RealtimeEmbedBlock({
   view: LandingEmbedView;
 }) {
   const filters = useRealtimeEmbedFilters();
-  const realtime = useRealtimeChannel(siteId, {
-    enabled: Boolean(siteId),
-  });
+  const realtimeEnabled = Boolean(siteId);
+  const hasConnected = useRealtimeChannelSelector(
+    siteId,
+    (state) => state.hasConnected,
+    Object.is,
+    { enabled: realtimeEnabled },
+  );
+  const events = useRealtimeChannelSelector(
+    siteId,
+    (state) => state.events,
+    Object.is,
+    { enabled: realtimeEnabled },
+  );
+  const visits = useRealtimeChannelSelector(
+    siteId,
+    (state) => state.visits,
+    Object.is,
+    { enabled: realtimeEnabled },
+  );
 
   if (view === "realtime-trend") {
     return (
       <RealtimeTrafficTrendCard
         locale={locale}
         messages={messages}
-        hasConnected={realtime.hasConnected}
-        events={realtime.events}
+        hasConnected={hasConnected}
+        events={events}
       />
     );
   }
@@ -394,7 +410,7 @@ function RealtimeEmbedBlock({
         messages={messages}
         siteId={siteId}
         siteDomain={siteDomain}
-        visits={realtime.visits}
+        visits={visits}
         filters={filters}
       />
     );
@@ -404,9 +420,9 @@ function RealtimeEmbedBlock({
     <RealtimeLogStreamCard
       locale={locale}
       messages={messages}
-      hasConnected={realtime.hasConnected}
-      events={realtime.events}
-      visits={realtime.visits}
+      hasConnected={hasConnected}
+      events={events}
+      visits={visits}
     />
   );
 }

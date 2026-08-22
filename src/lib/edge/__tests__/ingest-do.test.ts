@@ -943,7 +943,8 @@ describe("IngestDurableObject", () => {
           pathname: "/docs",
           hostname: "example.com",
           visitorId: "visitor-1",
-          screenSize: "1440x900",
+          screenWidth: 1440,
+          screenHeight: 900,
         },
       ],
     });
@@ -1983,7 +1984,8 @@ describe("IngestDurableObject", () => {
         visits: [
           {
             visitId: "socket-active",
-            screenSize: "",
+            screenWidth: null,
+            screenHeight: null,
             osVersion: "13",
           },
         ],

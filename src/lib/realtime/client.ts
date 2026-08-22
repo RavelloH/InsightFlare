@@ -16,6 +16,8 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 2_000;
 const CONNECT_WATCHDOG_MS = 4_000;
 const RECORD_RECOMPUTE_INTERVAL_MS = 5_000;
+const EVENT_BATCH_INTERVAL_MS = 80;
+const CHANNEL_IDLE_GRACE_MS = 30_000;
 const MAX_RENDERABLE_POINTS = 800;
 const PRESENCE_LEAVE_EVENT = "__presence_leave";
 const VIEW_EVENT_TYPES = new Set(["visit", "pageview"]);
@@ -36,6 +38,12 @@ interface ChannelContext {
   connectWatchdog: ReturnType<typeof setTimeout> | null;
   reconnectFailures: number;
   state: RealtimeChannelState;
+  snapshot: RealtimeChannelState;
+  subscribers: Set<() => void>;
+  pendingEvents: RealtimeEvent[];
+  eventFlushTimer: ReturnType<typeof setTimeout> | null;
+  releaseTimer: ReturnType<typeof setTimeout> | null;
+  running: boolean;
 }
 
 const channels = new Map<string, ChannelContext>();
@@ -60,11 +68,33 @@ export function createIdleRealtimeChannelState(
   };
 }
 
+const EMPTY_REALTIME_CHANNEL_STATE = createIdleRealtimeChannelState();
+
 export function getRealtimeChannelState(siteId?: string): RealtimeChannelState {
   if (!siteId) return createIdleRealtimeChannelState();
   const channel = channels.get(siteId);
   if (!channel) return createIdleRealtimeChannelState();
-  return cloneState(channel.state);
+  return cloneState(channel.snapshot, true);
+}
+
+export function getRealtimeChannelSnapshot(
+  siteId?: string,
+): RealtimeChannelState {
+  if (!siteId) return EMPTY_REALTIME_CHANNEL_STATE;
+  return channels.get(siteId)?.snapshot ?? EMPTY_REALTIME_CHANNEL_STATE;
+}
+
+export function subscribeRealtimeChannel(
+  siteId: string | undefined,
+  listener: () => void,
+): () => void {
+  if (!siteId) return () => {};
+
+  const channel = getOrCreateChannel(siteId);
+  channel.subscribers.add(listener);
+  return () => {
+    channel.subscribers.delete(listener);
+  };
 }
 
 export function acquireRealtimeChannel(siteId: string): () => void {
@@ -75,8 +105,13 @@ export function acquireRealtimeChannel(siteId: string): () => void {
   }
 
   const channel = getOrCreateChannel(siteId);
+  if (channel.releaseTimer) {
+    clearTimeout(channel.releaseTimer);
+    channel.releaseTimer = null;
+  }
+  const wasIdle = channel.refCount === 0;
   channel.refCount += 1;
-  if (channel.refCount === 1) {
+  if (wasIdle && !channel.running) {
     startChannel(channel);
   } else {
     publishChannelState(channel);
@@ -99,7 +134,13 @@ function getOrCreateChannel(siteId: string): ChannelContext {
     cleanupTimer: null,
     connectWatchdog: null,
     reconnectFailures: 0,
-    state: createIdleRealtimeChannelState("connecting"),
+    state: createIdleRealtimeChannelState(),
+    snapshot: EMPTY_REALTIME_CHANNEL_STATE,
+    subscribers: new Set(),
+    pendingEvents: [],
+    eventFlushTimer: null,
+    releaseTimer: null,
+    running: false,
   };
   channels.set(siteId, context);
   return context;
@@ -112,23 +153,34 @@ function releaseRealtimeChannel(siteId: string): void {
   channel.refCount = Math.max(0, channel.refCount - 1);
   if (channel.refCount > 0) return;
 
-  stopChannel(channel);
-  channels.delete(siteId);
+  if (channel.releaseTimer) return;
+  channel.releaseTimer = setTimeout(() => {
+    channel.releaseTimer = null;
+    if (channel.refCount > 0) return;
+    stopChannel(channel);
+    channels.delete(siteId);
+  }, CHANNEL_IDLE_GRACE_MS);
 }
 
 function startChannel(channel: ChannelContext): void {
+  channel.running = true;
   channel.reconnectFailures = 0;
   channel.state = createIdleRealtimeChannelState("connecting");
   publishChannelState(channel);
 
   connect(channel);
   channel.cleanupTimer = setInterval(() => {
-    recomputeDerivedState(channel);
-    publishChannelState(channel);
+    if (channel.refCount === 0) return;
+    pruneExpiredChannelState(channel);
   }, RECORD_RECOMPUTE_INTERVAL_MS);
 }
 
 function stopChannel(channel: ChannelContext): void {
+  channel.running = false;
+  if (channel.releaseTimer) {
+    clearTimeout(channel.releaseTimer);
+    channel.releaseTimer = null;
+  }
   if (channel.reconnectTimer) {
     clearTimeout(channel.reconnectTimer);
     channel.reconnectTimer = null;
@@ -141,6 +193,11 @@ function stopChannel(channel: ChannelContext): void {
     clearTimeout(channel.connectWatchdog);
     channel.connectWatchdog = null;
   }
+  if (channel.eventFlushTimer) {
+    clearTimeout(channel.eventFlushTimer);
+    channel.eventFlushTimer = null;
+  }
+  channel.pendingEvents = [];
   if (
     channel.socket &&
     (channel.socket.readyState === SOCKET_STATE.OPEN ||
@@ -212,7 +269,6 @@ function attachSocketHandlers(channel: ChannelContext): void {
 
     if (payload.type === "event") {
       applyEvent(channel, payload.data);
-      publishChannelState(channel);
     }
   };
 
@@ -249,6 +305,11 @@ function attachSocketHandlers(channel: ChannelContext): void {
 }
 
 function applySnapshot(channel: ChannelContext, payload: unknown): void {
+  if (channel.eventFlushTimer) {
+    clearTimeout(channel.eventFlushTimer);
+    channel.eventFlushTimer = null;
+  }
+  channel.pendingEvents = [];
   const snapshot = normalizeRealtimeSnapshot(payload);
   const now = Date.now();
   const snapshotEvents = resolveSnapshotEvents(snapshot);
@@ -262,12 +323,39 @@ function applyEvent(channel: ChannelContext, payload: unknown): void {
   const event = normalizeRealtimeEvent(payload);
   if (!event) return;
 
+  channel.pendingEvents.push(event);
+  if (channel.eventFlushTimer) return;
+  channel.eventFlushTimer = setTimeout(() => {
+    channel.eventFlushTimer = null;
+    flushPendingEvents(channel);
+  }, EVENT_BATCH_INTERVAL_MS);
+}
+
+function flushPendingEvents(channel: ChannelContext): void {
+  if (channel.pendingEvents.length === 0) return;
+  const pendingEvents = channel.pendingEvents;
+  channel.pendingEvents = [];
   channel.state.events = mergeEvents(
-    [event],
+    pendingEvents,
     channel.state.events,
-    event.eventAt,
+    Date.now(),
   );
-  recomputeDerivedState(channel, event.eventAt || Date.now());
+  recomputeDerivedState(channel, Date.now());
+  publishChannelState(channel);
+}
+
+function pruneExpiredChannelState(channel: ChannelContext): void {
+  const events = sortAndPruneEvents(channel.state.events, Date.now());
+  if (events === channel.state.events) return;
+
+  channel.state.events = events;
+  const derived = buildDerivedState(events, Date.now());
+  channel.state.activeNow = derived.activeNow;
+  channel.state.visitorsLast30m = derived.visitorsLast30m;
+  channel.state.viewsLast30m = derived.viewsLast30m;
+  channel.state.points = derived.points;
+  channel.state.visits = derived.visits;
+  publishChannelState(channel);
 }
 
 function recomputeDerivedState(
@@ -294,13 +382,25 @@ function setChannelStatus(
 }
 
 function publishChannelState(channel: ChannelContext): void {
+  channel.snapshot = cloneState(channel.state, true);
+  for (const subscriber of channel.subscribers) {
+    try {
+      subscriber();
+    } catch {
+      // Keep one subscriber from interrupting the realtime channel.
+    }
+  }
+
   void broadcastRealtimeMessage({
     siteId: channel.siteId,
-    state: cloneState(channel.state),
+    state: cloneState(channel.snapshot, true),
   });
 }
 
-function cloneState(state: RealtimeChannelState): RealtimeChannelState {
+function cloneState(
+  state: RealtimeChannelState,
+  copyCollections = false,
+): RealtimeChannelState {
   return {
     status: state.status,
     hasConnected: state.hasConnected,
@@ -308,9 +408,9 @@ function cloneState(state: RealtimeChannelState): RealtimeChannelState {
     visitorsLast30m: state.visitorsLast30m,
     viewsLast30m: state.viewsLast30m,
     snapshotActiveNow: state.snapshotActiveNow,
-    events: [...state.events],
-    points: [...state.points],
-    visits: [...state.visits],
+    events: copyCollections ? [...state.events] : state.events,
+    points: copyCollections ? [...state.points] : state.points,
+    visits: copyCollections ? [...state.visits] : state.visits,
   };
 }
 
@@ -590,16 +690,35 @@ function sortAndPruneEvents(
 ): RealtimeEvent[] {
   const cutoff = now - RECORD_WINDOW_MS;
   const deduped = new Map<string, RealtimeEvent>();
+  let changed = false;
 
-  for (const event of events) {
-    if (!event.id) continue;
-    if (!Number.isFinite(event.eventAt) || event.eventAt < cutoff) continue;
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    if (!event.id) {
+      changed = true;
+      continue;
+    }
+    if (!Number.isFinite(event.eventAt) || event.eventAt < cutoff) {
+      changed = true;
+      continue;
+    }
+    if (index > 0 && compareRealtimeEventsDesc(events[index - 1], event) > 0) {
+      changed = true;
+    }
 
     const existing = deduped.get(event.id);
-    if (!existing || compareRealtimeEventsDesc(event, existing) < 0) {
+    if (!existing) {
+      deduped.set(event.id, event);
+      continue;
+    }
+
+    changed = true;
+    if (compareRealtimeEventsDesc(event, existing) < 0) {
       deduped.set(event.id, event);
     }
   }
+
+  if (!changed && deduped.size === events.length) return events;
 
   return Array.from(deduped.values()).sort(compareRealtimeEventsDesc);
 }

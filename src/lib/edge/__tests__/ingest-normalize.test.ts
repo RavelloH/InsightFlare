@@ -81,7 +81,7 @@ describe("ingest normalization realtime payload helpers", () => {
     expect(formatRealtimeOsLabel(" ", " ")).toBe("");
   });
 
-  it("maps realtime event rows without leaking raw OS fields", () => {
+  it("maps realtime event rows with separate device fields", () => {
     const record: RealtimeSnapshotRecord = {
       id: "event-1",
       eventType: "pageview",
@@ -107,7 +107,8 @@ describe("ingest normalization realtime payload helpers", () => {
       osVersion: "14",
       deviceType: "desktop",
       language: "en-US",
-      screenSize: "1440x900",
+      screenWidth: 1440,
+      screenHeight: 900,
       latitude: 37.7,
       longitude: -122.4,
     };
@@ -115,10 +116,13 @@ describe("ingest normalization realtime payload helpers", () => {
     expect(toRealtimePayload(record)).toMatchObject({
       id: "event-1",
       eventType: "pageview",
-      osVersion: "macOS 14",
-      screenSize: "1440x900",
+      os: "macOS",
+      osVersion: "14",
+      deviceType: "desktop",
+      screenWidth: 1440,
+      screenHeight: 900,
     });
-    expect(toRealtimePayload(record)).not.toHaveProperty("os");
+    expect(toRealtimePayload(record)).not.toHaveProperty("screenSize");
   });
 
   it("maps active visit rows into realtime visit payloads", () => {
@@ -156,8 +160,10 @@ describe("ingest normalization realtime payload helpers", () => {
       visitId: "visit-1",
       hash: "#plans",
       organization: "Example ISP",
-      osVersion: "Windows 11",
-      screenSize: "1440x900",
+      os: "Windows",
+      osVersion: "11",
+      screenWidth: 1440.2,
+      screenHeight: 899.8,
     });
   });
 

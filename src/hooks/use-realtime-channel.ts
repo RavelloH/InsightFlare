@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 
-import { useRealtimeBroadcast } from "@/hooks/use-realtime-broadcast";
 import {
   acquireRealtimeChannel,
-  createIdleRealtimeChannelState,
-  getRealtimeChannelState,
+  getRealtimeChannelSnapshot,
+  subscribeRealtimeChannel,
 } from "@/lib/realtime/client";
 import type { RealtimeChannelState } from "@/lib/realtime/types";
 
@@ -12,34 +11,74 @@ interface UseRealtimeChannelOptions {
   enabled?: boolean;
 }
 
-export function useRealtimeChannel(
-  siteId?: string,
+type RealtimeStateSelector<T> = (state: RealtimeChannelState) => T;
+type RealtimeStateEquality<T> = (left: T, right: T) => boolean;
+
+export function useRealtimeChannelSelector<T>(
+  siteId: string | undefined,
+  selector: RealtimeStateSelector<T>,
+  isEqual: RealtimeStateEquality<T> = Object.is,
   options?: UseRealtimeChannelOptions,
-): RealtimeChannelState {
+): T {
   const enabled = options?.enabled ?? true;
-  const [state, setState] = useState<RealtimeChannelState>(() => {
-    if (!enabled || !siteId) return createIdleRealtimeChannelState();
-    return getRealtimeChannelState(siteId);
-  });
+  const selectedRef = useRef<{
+    snapshot: RealtimeChannelState | null;
+    hasValue: boolean;
+    value: T | undefined;
+  }>({ snapshot: null, hasValue: false, value: undefined });
+  const selectorRef = useRef(selector);
+  const selectorIdentityRef = useRef(selector);
+  if (selectorIdentityRef.current !== selector) {
+    selectorIdentityRef.current = selector;
+    selectedRef.current = {
+      snapshot: null,
+      hasValue: false,
+      value: undefined,
+    };
+  }
+  selectorRef.current = selector;
+  const equalityRef = useRef(isEqual);
+  equalityRef.current = isEqual;
 
-  useRealtimeBroadcast((message) => {
-    if (!enabled || !siteId) return;
-    if (message.siteId !== siteId) return;
-    setState(message.state);
-  });
-
-  useEffect(() => {
-    if (!enabled || !siteId) {
-      setState(createIdleRealtimeChannelState());
-      return;
+  const getSelectedSnapshot = useCallback(() => {
+    const snapshot = enabled
+      ? getRealtimeChannelSnapshot(siteId)
+      : getRealtimeChannelSnapshot();
+    const previous = selectedRef.current;
+    if (previous.snapshot === snapshot && previous.hasValue) {
+      return previous.value as T;
     }
 
-    setState(getRealtimeChannelState(siteId));
-    const release = acquireRealtimeChannel(siteId);
-    return () => {
-      release();
-    };
+    const next = selectorRef.current(snapshot);
+    if (previous.hasValue && equalityRef.current(previous.value as T, next)) {
+      selectedRef.current = {
+        snapshot,
+        hasValue: true,
+        value: previous.value,
+      };
+      return previous.value as T;
+    }
+
+    selectedRef.current = { snapshot, hasValue: true, value: next };
+    return next;
   }, [enabled, siteId]);
 
-  return state;
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      enabled ? subscribeRealtimeChannel(siteId, listener) : () => {},
+    [enabled, siteId],
+  );
+
+  const selected = useSyncExternalStore(
+    subscribe,
+    getSelectedSnapshot,
+    getSelectedSnapshot,
+  );
+
+  useEffect(() => {
+    if (!enabled || !siteId) return;
+    return acquireRealtimeChannel(siteId);
+  }, [enabled, siteId]);
+
+  return selected;
 }

@@ -138,6 +138,34 @@ describe("realtime client", () => {
     ).resolves.toBe(false);
   });
 
+  it("provides stable snapshots and notifies channel subscribers", async () => {
+    const client = await importClientWithEnv();
+    vi.stubGlobal("WebSocket", FakeSocket);
+
+    const listener = vi.fn();
+    const noopUnsubscribe = client.subscribeRealtimeChannel(
+      undefined,
+      listener,
+    );
+    noopUnsubscribe();
+
+    const idleSnapshot = client.getRealtimeChannelSnapshot();
+    expect(client.getRealtimeChannelSnapshot()).toBe(idleSnapshot);
+
+    const unsubscribe = client.subscribeRealtimeChannel(
+      "site-subscriber",
+      listener,
+    );
+    expect(client.getRealtimeChannelSnapshot("site-subscriber")).toBe(
+      client.getRealtimeChannelSnapshot("site-subscriber"),
+    );
+
+    releases.push(client.acquireRealtimeChannel("site-subscriber"));
+    expect(listener).toHaveBeenCalled();
+
+    unsubscribe();
+  });
+
   it("returns cloned idle state for empty and missing site ids", async () => {
     const client = await importClientWithEnv();
 
@@ -271,6 +299,7 @@ describe("realtime client", () => {
 
     releaseA();
     releases.pop();
+    vi.advanceTimersByTime(30_000);
     expect(socket.close).toHaveBeenCalledTimes(1);
     expect(client.getRealtimeChannelState("site-ref").status).toBe(
       "disconnected",
@@ -289,6 +318,7 @@ describe("realtime client", () => {
     socket.readyState = FakeSocket.CLOSING;
     release();
     releases.pop();
+    vi.advanceTimersByTime(30_000);
 
     expect(socket.close).not.toHaveBeenCalled();
     expect(client.getRealtimeChannelState("site-closing-release").status).toBe(
@@ -302,17 +332,19 @@ describe("realtime client", () => {
     releases.push(client.acquireRealtimeChannel("site-clone"));
     const socket = sockets[0]!;
     socket.open();
+    const eventNow = Date.now();
     socket.message(
       realtimeMessage("event", {
         id: "clone-event",
         eventType: "visit",
-        eventAt: Date.now(),
+        eventAt: eventNow,
         visitorId: "visitor-clone",
         visitId: "visit-clone",
         latitude: 10,
         longitude: 20,
       }),
     );
+    vi.advanceTimersByTime(80);
 
     const state = client.getRealtimeChannelState("site-clone");
     const broadcastState = latestBroadcastState();
@@ -336,11 +368,12 @@ describe("realtime client", () => {
       0,
     );
 
+    const eventNow = Date.now();
     socket.message(
       realtimeMessage("event", {
         id: "evt-old",
         event_type: "visit",
-        event_at: Date.now() - 1_000,
+        event_at: eventNow - 1_000,
         visit_id: "visit-1",
         session_id: "session-1",
         pathname: "/first",
@@ -354,7 +387,7 @@ describe("realtime client", () => {
       realtimeMessage("event", {
         id: "evt-new",
         eventType: "pageview",
-        eventAt: Date.now(),
+        eventAt: eventNow,
         visitId: "visit-1",
         sessionId: "session-1",
         pathname: "/second",
@@ -379,6 +412,7 @@ describe("realtime client", () => {
         longitude: -73,
       }),
     );
+    vi.advanceTimersByTime(80);
 
     const state = client.getRealtimeChannelState("site-events");
     expect(state.status).toBe("connected");
@@ -393,7 +427,7 @@ describe("realtime client", () => {
     expect(state.points).toEqual([
       {
         visitorId: "visitor-1",
-        eventAt: Date.now(),
+        eventAt: eventNow,
         latitude: 41,
         longitude: -73,
         country: "",
@@ -404,8 +438,8 @@ describe("realtime client", () => {
         visitId: "visit-1",
         visitorId: "visitor-1",
         sessionId: "session-1",
-        startedAt: Date.now() - 1_000,
-        lastActivityAt: Date.now(),
+        startedAt: eventNow - 1_000,
+        lastActivityAt: eventNow,
         pathname: "/second",
         hash: "#details",
         title: "Second",
@@ -440,6 +474,8 @@ describe("realtime client", () => {
     socket.message({
       toString: () => realtimeMessage("event", {}),
     });
+    const eventNow = Date.now();
+    vi.advanceTimersByTime(80);
 
     expect(client.getRealtimeChannelState("site-default-event")).toMatchObject({
       activeNow: 0,
@@ -447,9 +483,9 @@ describe("realtime client", () => {
       viewsLast30m: 0,
       events: [
         {
-          id: `${Date.now()}-`,
+          id: `${eventNow}-`,
           eventType: "",
-          eventAt: Date.now(),
+          eventAt: eventNow,
           visitorId: "",
           pathname: "/",
         },
@@ -866,17 +902,7 @@ describe("realtime client", () => {
 
     broadcastRealtimeMessageMock.mockClear();
     socket.message(realtimeMessage("event", null));
-    expect(broadcastRealtimeMessageMock).toHaveBeenCalledWith({
-      siteId: "site-invalid",
-      state: expect.objectContaining({
-        activeNow: 0,
-        visitorsLast30m: 0,
-        viewsLast30m: 0,
-        events: [],
-        points: [],
-        visits: [],
-      }),
-    });
+    expect(broadcastRealtimeMessageMock).not.toHaveBeenCalled();
   });
 
   it("falls back to Date.now for invalid event timestamps and coordinates", async () => {
@@ -886,6 +912,7 @@ describe("realtime client", () => {
     const socket = sockets[0]!;
     socket.open();
 
+    const eventNow = Date.now();
     socket.message(
       realtimeMessage("event", {
         eventAt: "not-a-date",
@@ -895,12 +922,13 @@ describe("realtime client", () => {
         longitude: -181,
       }),
     );
+    vi.advanceTimersByTime(80);
 
     const state = client.getRealtimeChannelState("site-invalid-event");
     expect(state.events).toMatchObject([
       {
         id: "NaN-visitor-invalid",
-        eventAt: Date.now(),
+        eventAt: eventNow,
         eventType: "custom",
         visitorId: "visitor-invalid",
         latitude: null,
@@ -926,6 +954,7 @@ describe("realtime client", () => {
         visitorId: "visitor-recompute",
       }),
     );
+    vi.advanceTimersByTime(80);
     expect(client.getRealtimeChannelState("site-recompute").activeNow).toBe(1);
 
     vi.advanceTimersByTime(30 * 60 * 1000 + 5_000);
@@ -1068,6 +1097,7 @@ describe("realtime client", () => {
     const release = client.acquireRealtimeChannel("site-release-before-mock");
     release();
     await flushMicrotasks();
+    vi.advanceTimersByTime(30_000);
 
     expect(createMockRealtimeSocketMock).not.toHaveBeenCalled();
     expect(sockets).toHaveLength(0);
