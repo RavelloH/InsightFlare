@@ -189,6 +189,11 @@ describe("target API v1 route registry", () => {
         path: "/api/v1/sites/{siteId}/analytics/referrers",
         operationId: "site.analytics.referrers",
       },
+      {
+        id: "site.analytics.channels",
+        path: "/api/v1/sites/{siteId}/analytics/channels",
+        operationId: "site.analytics.channels",
+      },
     ]);
   });
 
@@ -441,7 +446,7 @@ describe("target API v1 route registry", () => {
 
   it("includes planned saved-filter collection and item contracts", () => {
     expect(apiV1ApplicationRouteRegistry).toHaveLength(19);
-    expect(apiV1RouteRegistry).toHaveLength(69);
+    expect(apiV1RouteRegistry).toHaveLength(70);
     expect(
       apiV1ApplicationRouteRegistry
         .filter((route) => route.id.startsWith("site.saved-filters."))

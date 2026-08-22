@@ -378,7 +378,21 @@ overview:
   sourceDomainColumn: Source (Domain)
   sourceLinkTab: Source Link
   sourceLinkColumn: Source Link
+  channelTab: Channel
+  channelColumn: Channel
   direct: Direct
+  channelLabels:
+    direct: Direct
+    organic_search: Organic search
+    social: Social
+    paid_search: Paid search
+    paid_social: Paid social
+    display: Display ads
+    email: Email
+    affiliate: Affiliate
+    referral: Referral
+    campaign: Campaign
+    other: Other
   searchInTab: Search {tab}
 pages:
   title: Pages

@@ -4005,6 +4005,7 @@ function mergeProjectOperations(spec: OpenAPISpec): void {
     "overview-page-entry",
     "overview-page-exit",
     "overview-source-domain",
+    "overview-source-channel",
     "overview-client-browser",
     "overview-client-os-version",
     "overview-client-device-type",

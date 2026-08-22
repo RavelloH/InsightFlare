@@ -322,6 +322,11 @@ export const SiteReferrersQueryDtoSchema =
     includeFullUrl: z.boolean().default(false),
   }).strict();
 
+export const SiteChannelsQueryDtoSchema =
+  SiteAnalyticsQueryBaseDtoSchema.extend({
+    limit: z.number().int().min(1).max(200).default(20),
+  }).strict();
+
 const filterValueField = z
   .string()
   .min(1)
@@ -617,6 +622,10 @@ export type SitePagesQueryDtoInput = z.input<typeof SitePagesQueryDtoSchema>;
 export type SiteReferrersQueryDto = z.infer<typeof SiteReferrersQueryDtoSchema>;
 export type SiteReferrersQueryDtoInput = z.input<
   typeof SiteReferrersQueryDtoSchema
+>;
+export type SiteChannelsQueryDto = z.infer<typeof SiteChannelsQueryDtoSchema>;
+export type SiteChannelsQueryDtoInput = z.input<
+  typeof SiteChannelsQueryDtoSchema
 >;
 export type SiteFilterValuesQueryDto = z.infer<
   typeof SiteFilterValuesQueryDtoSchema

@@ -46,6 +46,8 @@ import {
 import {
   type SiteBreakdownQueryDtoInput,
   SiteBreakdownQueryDtoSchema,
+  type SiteChannelsQueryDtoInput,
+  SiteChannelsQueryDtoSchema,
   type SiteComparisonBreakdownQueryDtoInput,
   SiteComparisonBreakdownQueryDtoSchema,
   type SiteComparisonTimeseriesQueryDtoInput,
@@ -138,6 +140,8 @@ import {
 import {
   type AnalyticsBreakdownData,
   AnalyticsBreakdownResponseSchema,
+  type AnalyticsChannelsData,
+  AnalyticsChannelsResponseSchema,
   type AnalyticsComparisonBreakdownData,
   AnalyticsComparisonBreakdownResponseSchema,
   type AnalyticsComparisonOverviewData,
@@ -584,6 +588,11 @@ export interface ApiV1GeneratedClient {
     input: SiteReferrersQueryDtoInput,
     options?: ApiV1GeneratedRequestOptions,
   ): Promise<ApiV1GeneratedResult<AnalyticsReferrersData>>;
+  siteAnalyticsChannels(
+    siteId: string,
+    input: SiteChannelsQueryDtoInput,
+    options?: ApiV1GeneratedRequestOptions,
+  ): Promise<ApiV1GeneratedResult<AnalyticsChannelsData>>;
   siteAnalyticsFilterValues(
     siteId: string,
     input: SiteFilterValuesQueryDtoInput,
@@ -1137,6 +1146,18 @@ export function createApiV1GeneratedClient(
         method: apiV1GeneratedRouteMethod("site.analytics.referrers"),
         body: parsed,
         responseSchema: AnalyticsReferrersResponseSchema,
+        signal: options?.signal,
+      });
+    },
+    siteAnalyticsChannels(siteId, input, options) {
+      const parsed = SiteChannelsQueryDtoSchema.parse(input);
+      return request(transport, {
+        path: apiV1GeneratedRoutePath("site.analytics.channels", {
+          siteId: siteId,
+        }),
+        method: apiV1GeneratedRouteMethod("site.analytics.channels"),
+        body: parsed,
+        responseSchema: AnalyticsChannelsResponseSchema,
         signal: options?.signal,
       });
     },

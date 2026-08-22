@@ -4,6 +4,11 @@
  * participate in the saved-filter API or D1 storage.
  */
 
+import {
+  buildCombinedDiscoveryFilterDsl,
+  buildDomainDiscoveryFilterDsl,
+} from "@/lib/analytics/traffic-channel-rules";
+
 export const SYSTEM_FILTER_PRESET_IDS = [
   "directTraffic",
   "externalReferrals",
@@ -29,65 +34,6 @@ export interface SystemFilterPreset {
   readonly filterDsl: string;
 }
 
-const SEARCH_DOMAINS = [
-  // Google uses country-specific registrable domains rather than one suffix.
-  "google.com",
-  "google.com.hk",
-  "google.co.uk",
-  "google.co.jp",
-  "google.de",
-  "google.fr",
-  "google.ca",
-  "google.com.au",
-  "google.co.in",
-  "google.com.br",
-  "google.es",
-  "google.it",
-  "google.nl",
-  "google.pl",
-  "google.com.mx",
-  "google.com.tr",
-  "google.com.sg",
-  "google.co.kr",
-  "google.co.id",
-  "google.com.tw",
-  "bing.com",
-  "duckduckgo.com",
-  "search.yahoo.com",
-  "search.yahoo.co.jp",
-  "baidu.com",
-  "yandex.ru",
-  "yandex.com",
-  "ecosia.org",
-  "naver.com",
-  "sogou.com",
-  "so.com",
-] as const;
-
-const SOCIAL_DOMAINS = [
-  "linkedin.com",
-  "facebook.com",
-  "instagram.com",
-  "twitter.com",
-  "x.com",
-  "reddit.com",
-  "tiktok.com",
-  "youtube.com",
-  "pinterest.com",
-  "weibo.com",
-  "zhihu.com",
-] as const;
-
-const domainOrDescendantDsl = (domains: readonly string[]) =>
-  `(${domains
-    .map(
-      (domain) =>
-        `(referrer.domain eq ${JSON.stringify(domain)} OR referrer.domain endsWith ${JSON.stringify(`.${domain}`)})`,
-    )
-    .join(" OR ")})`;
-
-const SEARCH_DOMAINS_DSL = domainOrDescendantDsl(SEARCH_DOMAINS);
-const SOCIAL_DOMAINS_DSL = domainOrDescendantDsl(SOCIAL_DOMAINS);
 const TAGGED =
   "(utm.source notEmpty OR utm.medium notEmpty OR utm.campaign notEmpty)";
 const UNTAGGED =
@@ -98,11 +44,11 @@ export const SYSTEM_FILTER_PRESETS: readonly SystemFilterPreset[] = [
   { id: "externalReferrals", filterDsl: 'referrer.domain neq "__direct__"' },
   {
     id: "organicSearchDiscovery",
-    filterDsl: `${SEARCH_DOMAINS_DSL} AND ${UNTAGGED}`,
+    filterDsl: buildDomainDiscoveryFilterDsl("organic_search"),
   },
   {
     id: "organicSocialDiscovery",
-    filterDsl: `${SOCIAL_DOMAINS_DSL} AND ${UNTAGGED}`,
+    filterDsl: buildDomainDiscoveryFilterDsl("social"),
   },
   {
     id: "campaignTaggedTraffic",
@@ -128,7 +74,7 @@ export const SYSTEM_FILTER_PRESETS: readonly SystemFilterPreset[] = [
   },
   {
     id: "mobileOrganicDiscovery",
-    filterDsl: `client.deviceType eq "mobile" AND (${SEARCH_DOMAINS_DSL} OR ${SOCIAL_DOMAINS_DSL}) AND ${UNTAGGED}`,
+    filterDsl: `client.deviceType eq "mobile" AND ${buildCombinedDiscoveryFilterDsl(["organic_search", "social"])}`,
   },
   {
     id: "desktopDirectAudience",

@@ -10,6 +10,7 @@ import type { RetentionResult } from "@/lib/edge/query/journey-retention";
 import type {
   AnalyticsResult,
   BreakdownResult,
+  ChannelsResult,
   CrossBreakdownResult,
   FilterValuesResult,
   OverviewResult,
@@ -222,6 +223,15 @@ export const analyticsOperationRegistry = [
     operationRevision: "1",
     schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
     result: (_result: AnalyticsResult<ReferrersResult>) => undefined,
+  }),
+  operation({
+    id: "site.analytics.channels",
+    subjectKinds: ["site"],
+    audiences: ["api-v1", "private-dashboard"],
+    cache: "aggregate",
+    operationRevision: "1",
+    schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
+    result: (_result: AnalyticsResult<ChannelsResult>) => undefined,
   }),
   operation({
     id: "site.analytics.filterValues",

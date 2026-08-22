@@ -331,7 +331,7 @@
     },
     {
       "id": "page_referrer_and_filter_exploration",
-      "intent": "Find high-performing pages, referrers, or allowed candidate filter values.",
+      "intent": "Find high-performing pages, acquisition channels, referrers, or allowed candidate filter values.",
       "scope": "site",
       "requiredContext": [
         "site identifier",
@@ -340,6 +340,7 @@
       "preparation": ["site.analytics.schema"],
       "operations": [
         "site.analytics.pages",
+        "site.analytics.channels",
         "site.analytics.referrers",
         "site.analytics.filterValues"
       ],

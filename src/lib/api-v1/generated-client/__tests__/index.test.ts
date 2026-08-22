@@ -548,6 +548,47 @@ describe("API v1 generated client", () => {
     expect(referrerFetch.mock.calls[0]?.[0]).toBe(
       "https://api.test/api/v1/sites/site-1/analytics/referrers",
     );
+
+    const channelFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      response({
+        data: {
+          items: [
+            {
+              channel: "organic_search",
+              views: 10,
+              sessions: 4,
+              visitors: 3,
+            },
+          ],
+        },
+        meta: {
+          requestId: "req-channels",
+          generatedAt: "2026-08-02T00:00:00.000Z",
+          timeRange: {
+            from: overviewInput.timeRange.from,
+            to: overviewInput.timeRange.to,
+            timeZone: "UTC",
+          },
+          source: "raw",
+          accuracy: "exact",
+        },
+      }),
+    );
+    const channelClient = createApiV1GeneratedClient({
+      baseUrl: "https://api.test",
+      fetch: channelFetch,
+    });
+    await expect(
+      channelClient.siteAnalyticsChannels("site-1", {
+        timeRange: overviewInput.timeRange,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      data: { items: [{ channel: "organic_search" }] },
+    });
+    expect(channelFetch.mock.calls[0]?.[0]).toBe(
+      "https://api.test/api/v1/sites/site-1/analytics/channels",
+    );
   });
 
   it("posts filter-values with a body field and validates its typed envelope", async () => {

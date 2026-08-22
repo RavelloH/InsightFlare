@@ -18041,6 +18041,853 @@ paths:
           scopes:
             - analytics:read
             - analysis:read
+  /api/v1/sites/{siteId}/analytics/channels:
+    post:
+      operationId: site.analytics.channels
+      summary: API v1 site analytics channels operation
+      description: Typed API v1 operation. Authenticate with an API key through the
+        BearerAuth security scheme.
+      tags:
+        - Analytics
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: siteId path parameter.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timeRange:
+                  oneOf:
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: absolute
+                        from:
+                          type: string
+                          maxLength: 64
+                          format: date-time
+                          pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                        to:
+                          type: string
+                          maxLength: 64
+                          format: date-time
+                          pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                        timeZone:
+                          type: string
+                          minLength: 1
+                          maxLength: 80
+                      required:
+                        - kind
+                        - from
+                        - to
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: preset
+                        preset:
+                          type: string
+                          enum:
+                            - today
+                            - yesterday
+                            - last_7_days
+                            - last_30_days
+                            - this_week
+                            - last_week
+                            - this_month
+                            - last_month
+                        timeZone:
+                          type: string
+                          minLength: 1
+                          maxLength: 80
+                      required:
+                        - kind
+                        - preset
+                      additionalProperties: false
+                filter:
+                  anyOf:
+                    - oneOf:
+                        - type: object
+                          properties:
+                            type:
+                              type: string
+                              const: inline
+                            expression:
+                              $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1channels/post/requestBody\
+                                /content/application~1json/schema/$defs/__schem\
+                                a0"
+                          required:
+                            - type
+                            - expression
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            type:
+                              type: string
+                              const: saved
+                            id:
+                              type: string
+                              minLength: 1
+                              maxLength: 256
+                          required:
+                            - type
+                            - id
+                          additionalProperties: false
+                    - type: "null"
+                limit:
+                  default: 20
+                  type: integer
+                  minimum: 1
+                  maximum: 200
+              required:
+                - timeRange
+                - limit
+              additionalProperties: false
+              $defs:
+                __schema0:
+                  oneOf:
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: condition
+                        target:
+                          oneOf:
+                            - type: object
+                              properties:
+                                kind:
+                                  type: string
+                                  const: field
+                                field:
+                                  type: string
+                                  minLength: 1
+                                  maxLength: 128
+                              required:
+                                - kind
+                                - field
+                              additionalProperties: false
+                            - type: object
+                              properties:
+                                kind:
+                                  type: string
+                                  const: event-payload
+                                path:
+                                  type: string
+                                  minLength: 1
+                                  maxLength: 240
+                              required:
+                                - kind
+                                - path
+                              additionalProperties: false
+                        operator:
+                          type: string
+                          minLength: 1
+                          maxLength: 32
+                        value:
+                          anyOf:
+                            - anyOf:
+                                - type: string
+                                  maxLength: 4096
+                                - type: number
+                                - type: boolean
+                                - type: "null"
+                            - minItems: 1
+                              maxItems: 128
+                              type: array
+                              items:
+                                anyOf:
+                                  - type: string
+                                    maxLength: 4096
+                                  - type: number
+                                  - type: boolean
+                                  - type: "null"
+                      required:
+                        - kind
+                        - target
+                        - operator
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: and
+                        children:
+                          minItems: 1
+                          maxItems: 128
+                          type: array
+                          items:
+                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1channels/post/requestBody\
+                              /content/application~1json/schema/$defs/__schema0"
+                      required:
+                        - kind
+                        - children
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: or
+                        children:
+                          minItems: 1
+                          maxItems: 128
+                          type: array
+                          items:
+                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1channels/post/requestBody\
+                              /content/application~1json/schema/$defs/__schema0"
+                      required:
+                        - kind
+                        - children
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: not
+                        child:
+                          $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1channels/post/requestBody\
+                            /content/application~1json/schema/$defs/__schema0"
+                      required:
+                        - kind
+                        - child
+                      additionalProperties: false
+            example:
+              timeRange:
+                kind: absolute
+                from: 2026-01-01T00:00:00Z
+                to: 2026-01-01T00:00:00Z
+                timeZone: example
+              filter:
+                type: inline
+                expression:
+                  kind: condition
+                  target:
+                    kind: field
+                    field: example
+                  operator: example
+                  value: example
+              limit: 20
+      responses:
+        "200":
+          description: Successful response.
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            channel:
+                              type: string
+                              enum:
+                                - direct
+                                - organic_search
+                                - social
+                                - paid_search
+                                - paid_social
+                                - display
+                                - email
+                                - affiliate
+                                - referral
+                                - campaign
+                                - other
+                            views:
+                              type: number
+                            sessions:
+                              type: number
+                            visitors:
+                              type: number
+                          required:
+                            - channel
+                            - views
+                            - sessions
+                            - visitors
+                          additionalProperties: false
+                    required:
+                      - items
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                      generatedAt:
+                        type: string
+                        format: date-time
+                        pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                      timeRange:
+                        type: object
+                        properties:
+                          from:
+                            type: string
+                            format: date-time
+                            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                          to:
+                            type: string
+                            format: date-time
+                            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                          timeZone:
+                            type: string
+                            minLength: 1
+                        required:
+                          - from
+                          - to
+                          - timeZone
+                        additionalProperties: false
+                      source:
+                        type: string
+                        enum:
+                          - raw
+                          - rollup
+                          - realtime
+                          - mixed
+                          - mock
+                      accuracy:
+                        type: string
+                        enum:
+                          - exact
+                          - approximate
+                    required:
+                      - requestId
+                      - generatedAt
+                      - timeRange
+                      - source
+                      - accuracy
+                    additionalProperties: false
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+              example:
+                data:
+                  items:
+                    - channel: direct
+                      views: 0
+                      sessions: 0
+                      visitors: 0
+                meta:
+                  requestId: example
+                  generatedAt: 2026-01-01T00:00:00Z
+                  timeRange:
+                    from: 2026-01-01T00:00:00Z
+                    to: 2026-01-01T00:00:00Z
+                    timeZone: example
+                  source: raw
+                  accuracy: exact
+        "400":
+          description: "API v1 error: validation_failed."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: validation_failed
+                  message: Request validation failed.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "403":
+          description: "API v1 error: missing_scope."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: missing_scope
+                  message: The API key lacks the required scope.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "404":
+          description: "API v1 error: resource_not_found."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: resource_not_found
+                  message: Resource not found.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "405":
+          description: "API v1 error: method_not_allowed."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: method_not_allowed
+                  message: The HTTP method is not allowed for this route.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "406":
+          description: "API v1 error: not_acceptable."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: not_acceptable
+                  message: The requested response media type is not acceptable.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "415":
+          description: "API v1 error: unsupported_media_type."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: unsupported_media_type
+                  message: The request media type is unsupported.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "500":
+          description: "API v1 error: internal_error."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: internal_error
+                  message: An internal error occurred.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "504":
+          description: "API v1 error: deadline_exceeded."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: deadline_exceeded
+                  message: The analytics query exceeded its deadline.
+                  retryable: true
+                meta:
+                  requestId: req_01J7EXAMPLE
+      x-api-v1-lifecycle: exposed
+      x-api-v1-scopes: &a27
+        - analytics:read
+      x-required-scopes: *a27
+      x-api-v1-batch-eligible: true
+      x-api-v1-conditional-scopes:
+        - when: filter.type=saved
+          scopes:
+            - analytics:read
+            - analysis:read
   /api/v1/sites/{siteId}/analytics/filter-values:
     post:
       operationId: site.analytics.filterValues
@@ -18154,7 +19001,7 @@ paths:
                   type: string
                   maxLength: 256
                 page:
-                  default: &a27
+                  default: &a28
                     limit: 50
                   type: object
                   properties:
@@ -18298,7 +19145,7 @@ paths:
                   value: example
               field: example
               search: example
-              page: *a27
+              page: *a28
       responses:
         "200":
           description: Successful response.
@@ -18911,9 +19758,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a28
+      x-api-v1-scopes: &a29
         - analytics:read
-      x-required-scopes: *a28
+      x-required-scopes: *a29
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -19779,9 +20626,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a29
+      x-api-v1-scopes: &a30
         - analytics:read
-      x-required-scopes: *a29
+      x-required-scopes: *a30
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -20753,9 +21600,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a30
+      x-api-v1-scopes: &a31
         - analytics:read
-      x-required-scopes: *a30
+      x-required-scopes: *a31
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -21751,9 +22598,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a31
+      x-api-v1-scopes: &a32
         - analytics:read
-      x-required-scopes: *a31
+      x-required-scopes: *a32
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -22809,9 +23656,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a32
+      x-api-v1-scopes: &a33
         - analytics:read
-      x-required-scopes: *a32
+      x-required-scopes: *a33
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -23708,9 +24555,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a33
+      x-api-v1-scopes: &a34
         - analytics:read
-      x-required-scopes: *a33
+      x-required-scopes: *a34
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -24662,9 +25509,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a34
+      x-api-v1-scopes: &a35
         - analytics:read
-      x-required-scopes: *a34
+      x-required-scopes: *a35
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -25566,9 +26413,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a35
+      x-api-v1-scopes: &a36
         - analytics:read
-      x-required-scopes: *a35
+      x-required-scopes: *a36
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -25690,7 +26537,7 @@ paths:
                   minLength: 1
                   maxLength: 120
                 sort:
-                  default: &a36
+                  default: &a37
                     field: occurredAt
                     direction: desc
                   type: object
@@ -25711,7 +26558,7 @@ paths:
                     - direction
                   additionalProperties: false
                 page:
-                  default: &a37
+                  default: &a38
                     limit: 80
                   type: object
                   properties:
@@ -25861,8 +26708,8 @@ paths:
                   value: example
               search: example
               eventName: example
-              sort: *a36
-              page: *a37
+              sort: *a37
+              page: *a38
       responses:
         "200":
           description: Successful response.
@@ -26543,9 +27390,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a38
+      x-api-v1-scopes: &a39
         - analytics:read
-      x-required-scopes: *a38
+      x-required-scopes: *a39
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -27367,9 +28214,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a39
+      x-api-v1-scopes: &a40
         - analytics:read
-      x-required-scopes: *a39
+      x-required-scopes: *a40
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/event-types:
     post:
@@ -27481,7 +28328,7 @@ paths:
                   minLength: 1
                   maxLength: 160
                 page:
-                  default: &a40
+                  default: &a41
                     limit: 20
                   type: object
                   properties:
@@ -27623,7 +28470,7 @@ paths:
                   operator: example
                   value: example
               search: example
-              page: *a40
+              page: *a41
       responses:
         "200":
           description: Successful response.
@@ -28230,9 +29077,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a41
+      x-api-v1-scopes: &a42
         - analytics:read
-      x-required-scopes: *a41
+      x-required-scopes: *a42
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -29813,9 +30660,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a42
+      x-api-v1-scopes: &a43
         - analytics:read
-      x-required-scopes: *a42
+      x-required-scopes: *a43
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -29932,7 +30779,7 @@ paths:
                   minLength: 1
                   maxLength: 120
                 page:
-                  default: &a43
+                  default: &a44
                     limit: 100
                   type: object
                   properties:
@@ -30075,7 +30922,7 @@ paths:
                   operator: example
                   value: example
               eventName: example
-              page: *a43
+              page: *a44
       responses:
         "200":
           description: Successful response.
@@ -30705,9 +31552,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a44
+      x-api-v1-scopes: &a45
         - analytics:read
-      x-required-scopes: *a44
+      x-required-scopes: *a45
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -30840,7 +31687,7 @@ paths:
                   type: string
                   maxLength: 256
                 page:
-                  default: &a45
+                  default: &a46
                     limit: 25
                   type: object
                   properties:
@@ -30988,7 +31835,7 @@ paths:
               fieldPath: example
               fieldValueType: string
               search: example
-              page: *a45
+              page: *a46
       responses:
         "200":
           description: Successful response.
@@ -31618,9 +32465,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a46
+      x-api-v1-scopes: &a47
         - analytics:read
-      x-required-scopes: *a46
+      x-required-scopes: *a47
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -32979,9 +33826,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a47
+      x-api-v1-scopes: &a48
         - analytics:read
-      x-required-scopes: *a47
+      x-required-scopes: *a48
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/sessions/detail:
     post:
@@ -34211,9 +35058,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a48
+      x-api-v1-scopes: &a49
         - analytics:read
-      x-required-scopes: *a48
+      x-required-scopes: *a49
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/visitors/search:
     post:
@@ -34325,7 +35172,7 @@ paths:
                   minLength: 1
                   maxLength: 160
                 sort:
-                  default: &a49
+                  default: &a50
                     field: lastSeenAt
                     direction: desc
                   type: object
@@ -34347,7 +35194,7 @@ paths:
                     - direction
                   additionalProperties: false
                 page:
-                  default: &a50
+                  default: &a51
                     limit: 80
                   type: object
                   properties:
@@ -34496,8 +35343,8 @@ paths:
                   operator: example
                   value: example
               search: example
-              sort: *a49
-              page: *a50
+              sort: *a50
+              page: *a51
       responses:
         "200":
           description: Successful response.
@@ -35178,9 +36025,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a51
+      x-api-v1-scopes: &a52
         - analytics:read
-      x-required-scopes: *a51
+      x-required-scopes: *a52
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -35297,7 +36144,7 @@ paths:
                   minLength: 1
                   maxLength: 160
                 sort:
-                  default: &a52
+                  default: &a53
                     field: startedAt
                     direction: desc
                   type: object
@@ -35318,7 +36165,7 @@ paths:
                     - direction
                   additionalProperties: false
                 page:
-                  default: &a53
+                  default: &a54
                     limit: 80
                   type: object
                   properties:
@@ -35467,8 +36314,8 @@ paths:
                   operator: example
                   value: example
               search: example
-              sort: *a52
-              page: *a53
+              sort: *a53
+              page: *a54
       responses:
         "200":
           description: Successful response.
@@ -36214,9 +37061,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a54
+      x-api-v1-scopes: &a55
         - analytics:read
-      x-required-scopes: *a54
+      x-required-scopes: *a55
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -37184,9 +38031,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a55
+      x-api-v1-scopes: &a56
         - analytics:read
-      x-required-scopes: *a55
+      x-required-scopes: *a56
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -38161,9 +39008,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a56
+      x-api-v1-scopes: &a57
         - analytics:read
-      x-required-scopes: *a56
+      x-required-scopes: *a57
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -39131,9 +39978,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a57
+      x-api-v1-scopes: &a58
         - analytics:read
-      x-required-scopes: *a57
+      x-required-scopes: *a58
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -40031,9 +40878,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a58
+      x-api-v1-scopes: &a59
         - analytics:read
-      x-required-scopes: *a58
+      x-required-scopes: *a59
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/active-visitors:
     post:
@@ -40689,9 +41536,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a59
+      x-api-v1-scopes: &a60
         - analytics:read
-      x-required-scopes: *a59
+      x-required-scopes: *a60
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/events:
     post:
@@ -41465,9 +42312,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a60
+      x-api-v1-scopes: &a61
         - analytics:read
-      x-required-scopes: *a60
+      x-required-scopes: *a61
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/sessions:
     post:
@@ -42237,9 +43084,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a61
+      x-api-v1-scopes: &a62
         - analytics:read
-      x-required-scopes: *a61
+      x-required-scopes: *a62
       x-api-v1-batch-eligible: true
   /api/v1/sites:
     get:
@@ -42506,9 +43353,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a62
+      x-api-v1-scopes: &a63
         - site:read
-      x-required-scopes: *a62
+      x-required-scopes: *a63
       x-api-v1-batch-eligible: false
     post:
       operationId: sites.create
@@ -43103,9 +43950,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a63
+      x-api-v1-scopes: &a64
         - site:write
-      x-required-scopes: *a63
+      x-required-scopes: *a64
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}:
     get:
@@ -43439,9 +44286,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a64
+      x-api-v1-scopes: &a65
         - site:read
-      x-required-scopes: *a64
+      x-required-scopes: *a65
       x-api-v1-batch-eligible: false
     patch:
       operationId: sites.update
@@ -44100,9 +44947,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a65
+      x-api-v1-scopes: &a66
         - site:write
-      x-required-scopes: *a65
+      x-required-scopes: *a66
       x-api-v1-batch-eligible: false
     delete:
       operationId: sites.delete
@@ -44366,9 +45213,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a66
+      x-api-v1-scopes: &a67
         - site:write
-      x-required-scopes: *a66
+      x-required-scopes: *a67
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/tracking:
     get:
@@ -44700,9 +45547,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a67
+      x-api-v1-scopes: &a68
         - site_config:read
-      x-required-scopes: *a67
+      x-required-scopes: *a68
       x-api-v1-batch-eligible: false
     patch:
       operationId: settings.tracking.update
@@ -45313,9 +46160,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a68
+      x-api-v1-scopes: &a69
         - site_config:write
-      x-required-scopes: *a68
+      x-required-scopes: *a69
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/privacy:
     get:
@@ -45617,9 +46464,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a69
+      x-api-v1-scopes: &a70
         - site_config:read
-      x-required-scopes: *a69
+      x-required-scopes: *a70
       x-api-v1-batch-eligible: false
     patch:
       operationId: settings.privacy.update
@@ -46175,9 +47022,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a70
+      x-api-v1-scopes: &a71
         - site_config:write
-      x-required-scopes: *a70
+      x-required-scopes: *a71
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/sharing:
     get:
@@ -46466,9 +47313,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a71
+      x-api-v1-scopes: &a72
         - site_config:read
-      x-required-scopes: *a71
+      x-required-scopes: *a72
       x-api-v1-batch-eligible: false
     patch:
       operationId: settings.sharing.update
@@ -47073,9 +47920,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a72
+      x-api-v1-scopes: &a73
         - site_config:write
-      x-required-scopes: *a72
+      x-required-scopes: *a73
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/tracking-script:
     get:
@@ -47369,9 +48216,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a73
+      x-api-v1-scopes: &a74
         - site_config:read
-      x-required-scopes: *a73
+      x-required-scopes: *a74
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/funnels:
     get:
@@ -47715,9 +48562,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a74
+      x-api-v1-scopes: &a75
         - analysis:read
-      x-required-scopes: *a74
+      x-required-scopes: *a75
       x-api-v1-batch-eligible: false
     post:
       operationId: funnels.create
@@ -48341,9 +49188,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a75
+      x-api-v1-scopes: &a76
         - analysis:write
-      x-required-scopes: *a75
+      x-required-scopes: *a76
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/funnels/{funnelId}:
     get:
@@ -48693,9 +49540,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a76
+      x-api-v1-scopes: &a77
         - analysis:read
-      x-required-scopes: *a76
+      x-required-scopes: *a77
       x-api-v1-batch-eligible: false
     patch:
       operationId: funnels.update
@@ -49324,9 +50171,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a77
+      x-api-v1-scopes: &a78
         - analysis:write
-      x-required-scopes: *a77
+      x-required-scopes: *a78
       x-api-v1-batch-eligible: false
     delete:
       operationId: funnels.delete
@@ -49598,9 +50445,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a78
+      x-api-v1-scopes: &a79
         - analysis:write
-      x-required-scopes: *a78
+      x-required-scopes: *a79
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/saved-filters:
     get:
@@ -50137,9 +50984,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a79
+      x-api-v1-scopes: &a80
         - analysis:read
-      x-required-scopes: *a79
+      x-required-scopes: *a80
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/saved-filters/{savedFilterId}:
     get:
@@ -50635,9 +51482,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a80
+      x-api-v1-scopes: &a81
         - analysis:read
-      x-required-scopes: *a80
+      x-required-scopes: *a81
       x-api-v1-batch-eligible: true
   /api/v1/batch:
     post:
@@ -51184,9 +52031,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a81
+      x-api-v1-scopes: &a82
         - analytics:read
-      x-required-scopes: *a81
+      x-required-scopes: *a82
       x-api-v1-batch-eligible: false
   /collect:
     post:
@@ -51196,7 +52043,7 @@ paths:
       tags:
         - Ingestion
       x-required-scopes: []
-      security: &a82 []
+      security: &a83 []
       requestBody:
         description: Tracker event payload. The tracker SDK is the authoritative
           producer for this ingestion protocol.
@@ -51207,7 +52054,7 @@ paths:
               additionalProperties: true
             example: {}
       responses:
-        "200": &a83
+        "200": &a84
           description: JSON response. The response shape is owned by the dashboard
             protocol and is not part of the public API v1 contract.
           content:
@@ -51215,7 +52062,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-        "400": &a84
+        "400": &a85
           description: Error response.
           content:
             application/json:
@@ -51229,7 +52076,7 @@ paths:
       tags:
         - Ingestion
       x-required-scopes: []
-      security: *a82
+      security: *a83
       parameters:
         - name: siteId
           in: query
@@ -51277,10 +52124,10 @@ paths:
       tags:
         - Discovery
       x-required-scopes: []
-      security: *a82
+      security: *a83
       responses:
-        "200": *a83
-        "400": *a84
+        "200": *a84
+        "400": *a85
   /.well-known/skills.json:
     get:
       operationId: wellKnown.skills
@@ -51289,10 +52136,10 @@ paths:
       tags:
         - Discovery
       x-required-scopes: []
-      security: *a82
+      security: *a83
       responses:
-        "200": *a83
-        "400": *a84
+        "200": *a84
+        "400": *a85
   /.well-known/health:
     get:
       operationId: wellKnown.health
@@ -51301,10 +52148,10 @@ paths:
       tags:
         - Health
       x-required-scopes: []
-      security: *a82
+      security: *a83
       responses:
-        "200": *a83
-        "400": *a84
+        "200": *a84
+        "400": *a85
 components:
   schemas:
     Meta:

@@ -348,7 +348,22 @@ export interface AppMessages {
     sourceDomainColumn: string;
     sourceLinkTab: string;
     sourceLinkColumn: string;
+    channelTab: string;
+    channelColumn: string;
     direct: string;
+    channelLabels: {
+      direct: string;
+      organic_search: string;
+      social: string;
+      paid_search: string;
+      paid_social: string;
+      display: string;
+      email: string;
+      affiliate: string;
+      referral: string;
+      campaign: string;
+      other: string;
+    };
     searchInTab: string;
   };
   pages: {
@@ -2661,7 +2676,22 @@ const enMessages = {
     sourceDomainColumn: "Source (Domain)",
     sourceLinkTab: "Source Link",
     sourceLinkColumn: "Source Link",
+    channelTab: "Channel",
+    channelColumn: "Channel",
     direct: "Direct",
+    channelLabels: {
+      direct: "Direct",
+      organic_search: "Organic search",
+      social: "Social",
+      paid_search: "Paid search",
+      paid_social: "Paid social",
+      display: "Display ads",
+      email: "Email",
+      affiliate: "Affiliate",
+      referral: "Referral",
+      campaign: "Campaign",
+      other: "Other",
+    },
     searchInTab: "Search {tab}",
   },
   pages: {
@@ -5130,7 +5160,22 @@ const zhMessages = {
     sourceDomainColumn: "来源（域名）",
     sourceLinkTab: "来源链接",
     sourceLinkColumn: "来源链接",
+    channelTab: "渠道",
+    channelColumn: "渠道",
     direct: "直接访问",
+    channelLabels: {
+      direct: "直接访问",
+      organic_search: "自然搜索",
+      social: "社交媒体",
+      paid_search: "付费搜索",
+      paid_social: "付费社交",
+      display: "展示广告",
+      email: "邮件",
+      affiliate: "联盟/合作",
+      referral: "外部引荐",
+      campaign: "营销活动",
+      other: "其他",
+    },
     searchInTab: "搜索{tab}",
   },
   pages: {
@@ -7536,7 +7581,22 @@ const jaMessages = {
     sourceDomainColumn: "ソース（ドメイン）",
     sourceLinkTab: "ソースリンク",
     sourceLinkColumn: "ソースリンク",
+    channelTab: "チャネル",
+    channelColumn: "チャネル",
     direct: "直接",
+    channelLabels: {
+      direct: "直接",
+      organic_search: "オーガニック検索",
+      social: "ソーシャル",
+      paid_search: "有料検索",
+      paid_social: "有料ソーシャル",
+      display: "ディスプレイ広告",
+      email: "メール",
+      affiliate: "アフィリエイト",
+      referral: "外部参照",
+      campaign: "キャンペーン",
+      other: "その他",
+    },
     searchInTab: "{tab} を検索",
   },
   pages: {

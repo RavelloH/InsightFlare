@@ -27,6 +27,7 @@ import { handlePlannedSavedFilters } from "@/lib/api-v1/saved-filters-handler";
 import { handlePlannedSiteBreakdown } from "@/lib/api-v1/site-breakdown-handler";
 import { handlePlannedSiteCrossBreakdown } from "@/lib/api-v1/site-cross-breakdown-handler";
 import {
+  handlePlannedSiteChannels,
   handlePlannedSiteEventDetail,
   handlePlannedSiteEventFields,
   handlePlannedSiteEventFieldValues,
@@ -72,6 +73,7 @@ import { jsonError, jsonSuccess } from "@/lib/api-v1/wire-helpers";
 import {
   createOverviewReader,
   readSiteBreakdown,
+  readSiteChannels,
   readSiteCrossBreakdown,
   readSiteEventDetail,
   readSiteEventFields,
@@ -749,6 +751,30 @@ v1Routes.post("/sites/:siteId/analytics/referrers", (c) => {
         siteId: input.siteId,
         limit: input.limit,
         includeFullUrl: input.includeFullUrl,
+        window: {
+          startMs: input.startMs,
+          endExclusiveMs: input.endExclusiveMs,
+          timeZone: input.timeZone,
+          nowMs: Date.now(),
+        },
+        filters: input.filters,
+      }),
+    { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+    createAnalysisDefinitionReader(c.env, principal(c)),
+  );
+});
+v1Routes.post("/sites/:siteId/analytics/channels", (c) => {
+  const siteId = c.req.param("siteId");
+  if (!siteId) return resourceNotFound(c);
+  return handlePlannedSiteChannels(
+    c.req.raw,
+    principal(c),
+    siteId,
+    (input) =>
+      readSiteChannels({
+        env: c.env,
+        siteId: input.siteId,
+        limit: input.limit,
         window: {
           startMs: input.startMs,
           endExclusiveMs: input.endExclusiveMs,

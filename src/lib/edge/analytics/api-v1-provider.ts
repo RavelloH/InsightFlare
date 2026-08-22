@@ -5,6 +5,7 @@
  */
 export { createOverviewReader } from "@/lib/edge/query/overview-contract-adapter";
 export { readSiteBreakdown } from "@/lib/edge/query-runtime/site-breakdown";
+export { readSiteChannels } from "@/lib/edge/query-runtime/site-channels";
 export { readSiteCrossBreakdown } from "@/lib/edge/query-runtime/site-cross-breakdown";
 export {
   readSiteEventDetail,

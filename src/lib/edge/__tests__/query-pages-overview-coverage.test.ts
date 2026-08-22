@@ -1575,6 +1575,14 @@ describe("edge overview D1 queries and handlers", () => {
         ],
         [
           {
+            channel: "organic_search",
+            views: "3",
+            sessions: "2",
+            visitors: "2",
+          },
+        ],
+        [
+          {
             value: "1440x900",
             views: "2",
             sessions: "2",
@@ -1613,6 +1621,16 @@ describe("edge overview D1 queries and handlers", () => {
       }),
       "source.domain",
     );
+    const sourceChannelTab = await handleOverviewTabContract(
+      env,
+      siteId,
+      url("/overview/source-channel-tab", {
+        from: window.startMs,
+        to: window.endExclusiveMs,
+        limit: 3,
+      }),
+      "source.channel",
+    );
     const clientTab = await handleOverviewTabContract(
       env,
       siteId,
@@ -1643,6 +1661,17 @@ describe("edge overview D1 queries and handlers", () => {
       ok: true,
       data: [{ label: "", views: 4, sessions: 2, visitors: 2 }],
     });
+    await expect(sourceChannelTab.json()).resolves.toEqual({
+      ok: true,
+      data: [
+        {
+          label: "organic_search",
+          views: 3,
+          sessions: 2,
+          visitors: 2,
+        },
+      ],
+    });
     await expect(clientTab.json()).resolves.toEqual({
       ok: true,
       data: [{ label: "1440x900", views: 2, sessions: 2, visitors: 0 }],
@@ -1664,8 +1693,10 @@ describe("edge overview D1 queries and handlers", () => {
       [...visitBindings(), 3],
       [...visitBindings(), 3],
       [...visitBindings(), 3],
+      [...visitBindings(), 3],
     ]);
-    for (const call of [calls[0], calls[2], calls[3]]) {
+    expect(calls[2].sql).toContain("channel_rollup AS");
+    for (const call of [calls[0], calls[3], calls[4]]) {
       expect(call.sql).toContain("GROUP BY value");
       expect(call.sql).toContain("WHERE TRIM(value) != ''");
     }

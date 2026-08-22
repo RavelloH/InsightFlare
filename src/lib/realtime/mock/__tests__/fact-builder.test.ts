@@ -12,6 +12,7 @@ import {
   collectGeoTabs,
   collectPageDataAndTabs,
   collectReferrerRows,
+  collectTrafficChannelRows,
   DEMO_FACT_DATASET_CACHE,
   emptyDemoFactDataset,
   weightedSessionCount,
@@ -82,6 +83,33 @@ describe("mock/fact-builder", () => {
           dataset.visits[i - 1].startedAt,
         );
       }
+    });
+
+    it("includes varied UTM channels in demo facts", () => {
+      DEMO_FACT_DATASET_CACHE.clear();
+      const dataset = buildDemoFactDataset(SITE_ID, DAY_MS, 2 * DAY_MS);
+      const rows = collectTrafficChannelRows(
+        dataset,
+        applyDemoFilters(dataset, {}),
+        100,
+      );
+      const channels = new Set(rows.map((row) => row.channel));
+
+      expect(channels).toEqual(
+        new Set([
+          "direct",
+          "organic_search",
+          "social",
+          "paid_search",
+          "paid_social",
+          "display",
+          "email",
+          "affiliate",
+          "referral",
+          "campaign",
+          "other",
+        ]),
+      );
     });
 
     it("adapts long-window sampling while preserving weighted metrics", () => {

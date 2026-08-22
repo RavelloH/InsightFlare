@@ -6,6 +6,7 @@ export {
   collectGeoTabs,
   collectPageDataAndTabs,
   collectReferrerRows,
+  collectTrafficChannelRows,
 } from "@/lib/realtime/mock/fact-aggregates";
 export {
   buildDemoFactDataset,

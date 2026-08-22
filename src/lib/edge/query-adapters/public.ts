@@ -66,6 +66,7 @@ const OVERVIEW_TABS: Readonly<Record<string, OverviewTab>> = {
   "overview-page-entry": "page.entry",
   "overview-page-exit": "page.exit",
   "overview-source-domain": "source.domain",
+  "overview-source-channel": "source.channel",
   "overview-client-browser": "client.browser",
   "overview-client-os-version": "client.osVersion",
   "overview-client-device-type": "client.deviceType",

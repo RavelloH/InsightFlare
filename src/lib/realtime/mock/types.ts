@@ -60,6 +60,9 @@ export interface DemoVisitFact {
   hostname: string;
   referrerHost: string;
   referrerUrl: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
   browser: string;
   browserVersion: string;
   osVersion: string;

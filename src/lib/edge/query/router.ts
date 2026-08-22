@@ -18,6 +18,7 @@ export const PUBLIC_QUERY_PATHS = [
   "overview-page-entry",
   "overview-page-exit",
   "overview-source-domain",
+  "overview-source-channel",
   "overview-client-browser",
   "overview-client-os-version",
   "overview-client-device-type",
@@ -145,6 +146,7 @@ export function operationForQueryRoute(pathname: string): QueryOperation {
     return "radar";
   if (pathname.includes("cross-breakdown")) return "cross-dimension";
   if (pathname.includes("trend")) return "share-trend";
+  if (pathname === "overview-source-channel") return "channels";
   if (pathname.startsWith("overview-source-")) return "referrers";
   return "dimension";
 }

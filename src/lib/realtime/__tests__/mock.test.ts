@@ -611,6 +611,7 @@ describe("mock — handleDemoRequest", () => {
       "/api/private/overview-page-hostname",
       "/api/private/overview-page-entry",
       "/api/private/overview-page-exit",
+      "/api/private/overview-source-channel",
       "/api/private/overview-source-domain",
       "/api/private/overview-source-link",
       "/api/private/overview-client-browser",
@@ -660,6 +661,17 @@ describe("mock — handleDemoRequest", () => {
     it.each(routes)("returns a defined result for %s", (route) => {
       const res = handleDemoRequest({ path: route, params: baseParams });
       expect(res).toBeDefined();
+    });
+
+    it("returns channel data for the demo source tab", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/overview-source-channel",
+          params: baseParams,
+        }),
+      );
+      expect(res).toMatchObject({ ok: true, data: expect.any(Array) });
+      expect((res.data as unknown[]).length).toBeGreaterThan(0);
     });
 
     it("client-cross-breakdown handles missing dimensions gracefully", () => {

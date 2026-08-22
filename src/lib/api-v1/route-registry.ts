@@ -28,6 +28,7 @@ import {
 import { apiV1CoreRouteRegistry } from "@/lib/api-v1/core-registry";
 import {
   SiteBreakdownQueryDtoSchema,
+  SiteChannelsQueryDtoSchema,
   SiteComparisonBreakdownQueryDtoSchema,
   SiteComparisonTimeseriesQueryDtoSchema,
   SiteCrossBreakdownQueryDtoSchema,
@@ -74,6 +75,7 @@ import { TypedBatchRequestSchema } from "@/lib/api-v1/dto/batch";
 import type { ApiV1ErrorCode } from "@/lib/api-v1/errors";
 import {
   AnalyticsBreakdownResponseSchema,
+  AnalyticsChannelsResponseSchema,
   AnalyticsComparisonBreakdownResponseSchema,
   AnalyticsComparisonOverviewResponseSchema,
   AnalyticsComparisonTimeseriesResponseSchema,
@@ -257,15 +259,20 @@ export interface ApiV1AnalyticsListRouteDescriptor<Id extends string> {
   readonly lifecycle: ApiV1RouteLifecycle;
   readonly method: "POST";
   readonly path: string;
-  readonly operationId: "site.analytics.pages" | "site.analytics.referrers";
+  readonly operationId:
+    | "site.analytics.pages"
+    | "site.analytics.referrers"
+    | "site.analytics.channels";
   readonly scopes: readonly string[];
   readonly conditionalScopes?: ApiV1AnalyticsRouteDescriptor<string>["conditionalScopes"];
   readonly requestSchema:
     | typeof SitePagesQueryDtoSchema
-    | typeof SiteReferrersQueryDtoSchema;
+    | typeof SiteReferrersQueryDtoSchema
+    | typeof SiteChannelsQueryDtoSchema;
   readonly responseSchema:
     | typeof AnalyticsPagesResponseSchema
-    | typeof AnalyticsReferrersResponseSchema;
+    | typeof AnalyticsReferrersResponseSchema
+    | typeof AnalyticsChannelsResponseSchema;
   readonly declaredErrors: readonly string[];
 }
 
@@ -949,6 +956,32 @@ export const apiV1AnalyticsListRouteRegistry = [
     ],
     requestSchema: SiteReferrersQueryDtoSchema,
     responseSchema: AnalyticsReferrersResponseSchema,
+    declaredErrors: [
+      "validation_failed",
+      "missing_scope",
+      "resource_not_found",
+      "deadline_exceeded",
+      "internal_error",
+      "method_not_allowed",
+      "not_acceptable",
+      "unsupported_media_type",
+    ],
+  },
+  {
+    id: "site.analytics.channels",
+    lifecycle: "exposed",
+    method: "POST",
+    path: "/api/v1/sites/{siteId}/analytics/channels",
+    operationId: "site.analytics.channels",
+    scopes: ["analytics:read"],
+    conditionalScopes: [
+      {
+        when: "filter.type=saved",
+        scopes: ["analytics:read", "analysis:read"],
+      },
+    ],
+    requestSchema: SiteChannelsQueryDtoSchema,
+    responseSchema: AnalyticsChannelsResponseSchema,
     declaredErrors: [
       "validation_failed",
       "missing_scope",
@@ -1940,6 +1973,7 @@ export const apiV1BatchEligibleRouteIds = [
   "site.analytics.crossBreakdown",
   "site.analytics.pages",
   "site.analytics.referrers",
+  "site.analytics.channels",
   "site.analytics.filterValues",
   "site.analytics.retentionCohorts",
   "site.analytics.funnelAnalysis",

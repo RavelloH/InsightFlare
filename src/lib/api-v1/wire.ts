@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { TRAFFIC_CHANNEL_IDS } from "@/lib/analytics/traffic-channel-rules";
 import {
   SavedFilterDefinitionSchema,
   SavedFilterPageSchema,
@@ -333,6 +334,23 @@ export type AnalyticsReferrersData = z.infer<
 >;
 export const AnalyticsReferrersResponseSchema = apiV1SuccessEnvelopeSchema(
   AnalyticsReferrersDataSchema,
+  ApiV1AnalyticsResponseMetaSchema,
+);
+
+export const AnalyticsChannelItemSchema = z
+  .object({
+    channel: z.enum(TRAFFIC_CHANNEL_IDS),
+    views: z.number(),
+    sessions: z.number(),
+    visitors: z.number(),
+  })
+  .strict();
+export const AnalyticsChannelsDataSchema = z
+  .object({ items: z.array(AnalyticsChannelItemSchema) })
+  .strict();
+export type AnalyticsChannelsData = z.infer<typeof AnalyticsChannelsDataSchema>;
+export const AnalyticsChannelsResponseSchema = apiV1SuccessEnvelopeSchema(
+  AnalyticsChannelsDataSchema,
   ApiV1AnalyticsResponseMetaSchema,
 );
 

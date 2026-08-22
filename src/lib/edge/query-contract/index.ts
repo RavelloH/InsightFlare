@@ -1,3 +1,4 @@
+export * from "./channels";
 export * from "./filter-adapters";
 export * from "./filter-codec";
 export * from "./filter-compiler";

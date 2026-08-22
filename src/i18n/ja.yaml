@@ -378,7 +378,21 @@ overview:
   sourceDomainColumn: ソース（ドメイン）
   sourceLinkTab: ソースリンク
   sourceLinkColumn: ソースリンク
+  channelTab: チャネル
+  channelColumn: チャネル
   direct: 直接
+  channelLabels:
+    direct: 直接
+    organic_search: オーガニック検索
+    social: ソーシャル
+    paid_search: 有料検索
+    paid_social: 有料ソーシャル
+    display: ディスプレイ広告
+    email: メール
+    affiliate: アフィリエイト
+    referral: 外部参照
+    campaign: キャンペーン
+    other: その他
   searchInTab: "{tab} を検索"
 pages:
   title: ページ

@@ -1034,6 +1034,9 @@ function handleDemoRequestInner(options: {
   if (path.includes("/overview-page-exit")) {
     return generateDemoOverviewPageTab(siteId, params, "exit");
   }
+  if (path.includes("/overview-source-channel")) {
+    return generateDemoOverviewSourceTab(siteId, params, "channel");
+  }
   if (path.includes("/overview-source-domain")) {
     return generateDemoOverviewSourceTab(siteId, params, "domain");
   }

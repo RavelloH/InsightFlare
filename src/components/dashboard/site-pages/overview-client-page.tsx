@@ -9,11 +9,20 @@ import {
 } from "react";
 import { Icon } from "@iconify/react";
 import {
+  RiAdvertisementLine,
   RiArrowDownLine,
   RiArrowRightUpLine,
   RiArrowUpLine,
+  RiCursorLine,
   RiLineChartLine,
+  RiLinksLine,
+  RiMailLine,
+  RiMegaphoneLine,
+  RiMoneyDollarCircleLine,
+  RiPriceTag3Line,
+  RiQuestionLine,
   RiSearchLine,
+  RiShareForwardLine,
 } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Area, AreaChart, ResponsiveContainer, Tooltip } from "recharts";
@@ -21,6 +30,7 @@ import { Area, AreaChart, ResponsiveContainer, Tooltip } from "recharts";
 import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
 import {
   DeviceMeta,
+  InlineMeta,
   resolveDeviceTypeMeta,
 } from "@/components/dashboard/journey-display";
 import {
@@ -40,6 +50,10 @@ import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clickable } from "@/components/ui/clickable";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  TRAFFIC_CHANNEL_IDS,
+  type TrafficChannelId,
+} from "@/lib/analytics/traffic-channel-rules";
 import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
@@ -339,7 +353,7 @@ type PageCardTab = "path" | "query" | "title" | "hostname" | "entry" | "exit";
 type PageCardSortKey = "views" | "visitors";
 type PageCardNavigableTab = "path" | "query" | "hostname" | "entry" | "exit";
 type PageCardDetailTab = "path" | "entry" | "exit";
-type SourceCardTab = "domain" | "link";
+type SourceCardTab = "domain" | "link" | "channel";
 type OverviewPagesSectionCardKind = "page" | "source" | "client" | "geo";
 type ClientDimensionCardTab =
   | "browser"
@@ -372,6 +386,7 @@ export interface OverviewPagesSectionCardData {
   source: {
     domain: OverviewTabRows;
     link: OverviewTabRows;
+    channel?: OverviewTabRows;
   };
   client: {
     browser: OverviewTabRows;
@@ -463,6 +478,7 @@ interface SourceCardRow {
   views: number;
   visitors: number;
   mono: boolean;
+  channelId?: TrafficChannelId;
 }
 
 const ALL_PAGE_CARD_TABS: PageCardTab[] = [
@@ -480,7 +496,7 @@ const PAGE_CARD_TABS: PageCardTab[] = [
   "entry",
   "exit",
 ];
-const SOURCE_CARD_TABS: SourceCardTab[] = ["domain", "link"];
+const SOURCE_CARD_TABS: SourceCardTab[] = ["domain", "link", "channel"];
 const PAGE_CARD_NAVIGABLE_TAB_LIST: PageCardNavigableTab[] = [
   "path",
   "hostname",
@@ -505,7 +521,7 @@ const PAGE_CARD_FILTER_CONTROL_BY_TAB: Record<
   exit: "exit",
 };
 const SOURCE_CARD_FILTER_CONTROL_BY_TAB: Record<
-  SourceCardTab,
+  Exclude<SourceCardTab, "channel">,
   DashboardFilterControlKey
 > = {
   domain: "sourceDomain",
@@ -1263,6 +1279,33 @@ function LabelWithLeadingIcon({
   );
 }
 
+function ChannelIcon({ channel }: { channel: TrafficChannelId }) {
+  const className = "size-4 text-muted-foreground";
+  switch (channel) {
+    case "organic_search":
+      return <RiSearchLine className={className} />;
+    case "social":
+      return <RiShareForwardLine className={className} />;
+    case "paid_search":
+      return <RiMoneyDollarCircleLine className={className} />;
+    case "paid_social":
+      return <RiMegaphoneLine className={className} />;
+    case "display":
+      return <RiAdvertisementLine className={className} />;
+    case "email":
+      return <RiMailLine className={className} />;
+    case "affiliate":
+    case "referral":
+      return <RiLinksLine className={className} />;
+    case "campaign":
+      return <RiPriceTag3Line className={className} />;
+    case "direct":
+      return <RiCursorLine className={className} />;
+    case "other":
+      return <RiQuestionLine className={className} />;
+  }
+}
+
 function normalizeDimensionLabel(
   value: string,
   unknownLabel: string,
@@ -1859,6 +1902,19 @@ export function OverviewPagesSection({
   const resolvedPageCardTabData = cardDataOverride?.page ?? pageCardTabData;
   const resolvedSourceCardTabData =
     cardDataOverride?.source ?? sourceCardTabData;
+  const resolvedSourceCardTabs = useMemo(() => {
+    const hasChannelData =
+      resolvedSourceCardTabData.channel !== undefined ||
+      Boolean(sourceCardFetchers?.channel) ||
+      (!hasCardDataOverride && !sourceCardFetchers);
+    return hasChannelData
+      ? SOURCE_CARD_TABS
+      : SOURCE_CARD_TABS.filter((tab) => tab !== "channel");
+  }, [
+    hasCardDataOverride,
+    resolvedSourceCardTabData.channel,
+    sourceCardFetchers,
+  ]);
   const resolvedClientDimensionCardTabData =
     cardDataOverride?.client ?? clientDimensionCardTabData;
   const resolvedGeoDimensionCardTabData =
@@ -1900,6 +1956,11 @@ export function OverviewPagesSection({
     if (resolvedPageCardTabs.includes(pageCardTab)) return;
     setPageCardTab(resolvedPageCardTabs[0] ?? "path");
   }, [pageCardTab, resolvedPageCardTabs]);
+
+  useEffect(() => {
+    if (resolvedSourceCardTabs.includes(sourceCardTab)) return;
+    setSourceCardTab(resolvedSourceCardTabs[0] ?? "domain");
+  }, [resolvedSourceCardTabs, sourceCardTab]);
 
   useEffect(() => {
     if (hasCardDataOverride) return;
@@ -1976,6 +2037,7 @@ export function OverviewPagesSection({
 
   useEffect(() => {
     if (hasCardDataOverride) return;
+    if (!resolvedSourceCardTabs.includes(sourceCardTab)) return;
     if (activeSourceCardTabData !== null) return;
     let active = true;
 
@@ -2018,6 +2080,7 @@ export function OverviewPagesSection({
     filtersKey,
     siteId,
     sourceCardTab,
+    resolvedSourceCardTabs,
     window.from,
     window.interval,
     window.to,
@@ -2347,6 +2410,12 @@ export function OverviewPagesSection({
       mono: true,
       showIcon: true,
     },
+    channel: {
+      label: messages.overview.channelTab,
+      columnLabel: messages.overview.channelColumn,
+      mono: false,
+      showIcon: true,
+    },
   };
   const sourceCardDirectLabel = messages.overview.direct;
   const sourceDomainRows = useMemo<SourceCardRow[]>(() => {
@@ -2384,21 +2453,41 @@ export function OverviewPagesSection({
       };
     });
   }, [sourceCardDirectLabel, resolvedSourceCardTabData.link]);
+  const sourceChannelRows = useMemo<SourceCardRow[]>(() => {
+    return (resolvedSourceCardTabData.channel ?? []).map((item, index) => {
+      const raw = String(item.label || "").trim();
+      const channelId = TRAFFIC_CHANNEL_IDS.includes(raw as TrafficChannelId)
+        ? (raw as TrafficChannelId)
+        : "other";
+      return {
+        key: `channel-${channelId}-${index}`,
+        label: messages.overview.channelLabels[channelId],
+        filterValue: channelId,
+        targetUrl: null,
+        views: Math.max(0, Number(item.views || 0)),
+        visitors: Math.max(0, Number(item.visitors || 0)),
+        mono: false,
+        channelId,
+      };
+    });
+  }, [messages.overview.channelLabels, resolvedSourceCardTabData.channel]);
   const sourceCardRows = useMemo<Record<SourceCardTab, SourceCardRow[]>>(
     () => ({
       domain: sourceDomainRows,
       link: sourceLinkRows,
+      channel: sourceChannelRows,
     }),
-    [sourceDomainRows, sourceLinkRows],
+    [sourceChannelRows, sourceDomainRows, sourceLinkRows],
   );
-  const activeSourceCardFilterValue = useMemo(
-    () =>
+  const activeSourceCardFilterValue = useMemo(() => {
+    if (sourceCardTab === "channel") return null;
+    return (
       dashboardFilterValue(
         filters,
         SOURCE_CARD_FILTER_CONTROL_BY_TAB[sourceCardTab],
-      ) ?? null,
-    [filters, sourceCardTab],
-  );
+      ) ?? null
+    );
+  }, [filters, sourceCardTab]);
   const clientDimensionCardTabMeta: Record<
     ClientDimensionCardTab,
     { label: string; columnLabel: string; mono: boolean }
@@ -2697,6 +2786,7 @@ export function OverviewPagesSection({
     next: { tab: SourceCardTab; value: string } | null,
   ) => {
     const activeTab = next?.tab ?? sourceCardTab;
+    if (activeTab === "channel") return;
     const nextFilters = setDashboardFilterValue(
       filters,
       SOURCE_CARD_FILTER_CONTROL_BY_TAB[activeTab],
@@ -2808,6 +2898,12 @@ export function OverviewPagesSection({
           : sourceCardRows.domain,
       link:
         resolvedSourceCardTabData.link === null ? null : sourceCardRows.link,
+      channel:
+        resolvedSourceCardTabData.channel === undefined
+          ? null
+          : resolvedSourceCardTabData.channel === null
+            ? null
+            : sourceCardRows.channel,
     }),
     [resolvedSourceCardTabData, sourceCardRows],
   );
@@ -2941,7 +3037,7 @@ export function OverviewPagesSection({
   );
   const sourceCardTableTabs = useMemo(
     () =>
-      SOURCE_CARD_TABS.map((tab) => ({
+      resolvedSourceCardTabs.map((tab) => ({
         value: tab,
         label: sourceCardTabMeta[tab].label,
         columnLabel: sourceCardTabMeta[tab].columnLabel,
@@ -2949,7 +3045,7 @@ export function OverviewPagesSection({
         TabbedDataTableTab<SourceCardTab>,
         ...TabbedDataTableTab<SourceCardTab>[],
       ],
-    [sourceCardTabMeta],
+    [resolvedSourceCardTabs, sourceCardTabMeta],
   );
   const clientDimensionCardTableTabs = useMemo(
     () =>
@@ -2989,13 +3085,18 @@ export function OverviewPagesSection({
   const loadingBySourceCardTab = useMemo(
     () =>
       Object.fromEntries(
-        SOURCE_CARD_TABS.map((tab) => [
+        resolvedSourceCardTabs.map((tab) => [
           tab,
           loading ||
             (!hasCardDataOverride && resolvedSourceCardTabData[tab] === null),
         ]),
       ) as Record<SourceCardTab, boolean>,
-    [hasCardDataOverride, loading, resolvedSourceCardTabData],
+    [
+      hasCardDataOverride,
+      loading,
+      resolvedSourceCardTabData,
+      resolvedSourceCardTabs,
+    ],
   );
   const loadingByClientDimensionCardTab = useMemo(
     () =>
@@ -3324,6 +3425,14 @@ export function OverviewPagesSection({
                     source === "search"
                       ? row.label
                       : (row.displayLabel ?? row.label);
+                  if (tab === "channel" && row.channelId) {
+                    return (
+                      <InlineMeta
+                        icon={<ChannelIcon channel={row.channelId} />}
+                        label={displayLabel}
+                      />
+                    );
+                  }
                   return (
                     <span
                       className={cn(
@@ -3354,9 +3463,11 @@ export function OverviewPagesSection({
                 getSearchText: (row) => row.label,
                 getExportLabel: (row) => row.label,
                 getActive: (row) =>
+                  activeSourceCardFilterValue !== null &&
                   activeSourceCardFilterValue === row.filterValue,
-                getInteractive: () => true,
+                getInteractive: (_row, tab) => tab !== "channel",
                 onClick: (row, { tab }) => {
+                  if (tab === "channel") return;
                   const normalized = row.filterValue.trim();
                   setSourceCardFilter(
                     activeSourceCardFilterValue === normalized

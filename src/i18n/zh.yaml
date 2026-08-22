@@ -378,7 +378,21 @@ overview:
   sourceDomainColumn: 来源（域名）
   sourceLinkTab: 来源链接
   sourceLinkColumn: 来源链接
+  channelTab: 渠道
+  channelColumn: 渠道
   direct: 直接访问
+  channelLabels:
+    direct: 直接访问
+    organic_search: 自然搜索
+    social: 社交媒体
+    paid_search: 付费搜索
+    paid_social: 付费社交
+    display: 展示广告
+    email: 邮件
+    affiliate: 联盟/合作
+    referral: 外部引荐
+    campaign: 营销活动
+    other: 其他
   searchInTab: "搜索{tab}"
 pages:
   title: 页面分析

@@ -106,6 +106,7 @@ import {
   collectGeoTabs,
   collectPageDataAndTabs,
   collectReferrerRows,
+  collectTrafficChannelRows,
   DEMO_FACT_DATASET_CACHE,
   emptyDemoFactDataset,
   weightedSessionCount,
@@ -447,7 +448,7 @@ export function generateDemoOverviewPageTab(
 export function generateDemoOverviewSourceTab(
   siteId: string,
   params: Record<string, string | number>,
-  tab: "domain" | "link",
+  tab: "domain" | "link" | "channel",
 ): Record<string, unknown> {
   const limit = parseDemoLimit(params.limit, 100, 1, 500);
   const from = parseDemoNumber(params.from, 0);
@@ -455,6 +456,18 @@ export function generateDemoOverviewSourceTab(
   const filters = parseDemoFilters(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
+  if (tab === "channel") {
+    const rows = collectTrafficChannelRows(dataset, filtered, limit);
+    return {
+      ok: true,
+      data: rows.map((item) => ({
+        label: item.channel,
+        views: item.views,
+        sessions: item.sessions,
+        visitors: item.visitors,
+      })),
+    };
+  }
   const rows = collectReferrerRows(dataset, filtered, limit, {
     includeFullUrl: tab === "link",
     directValue: "",

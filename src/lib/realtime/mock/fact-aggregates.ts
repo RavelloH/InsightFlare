@@ -1,4 +1,8 @@
 import {
+  classifyTrafficChannel,
+  type TrafficChannelId,
+} from "@/lib/analytics/traffic-channel-rules";
+import {
   weightedSessionCount,
   weightedVisitorCount,
 } from "@/lib/realtime/mock/fact-weights";
@@ -294,6 +298,61 @@ export function collectReferrerRows(
     sessions: row.sessions,
     visitors: row.visitors,
   }));
+}
+
+export function collectTrafficChannelRows(
+  dataset: DemoFactDataset,
+  filtered: DemoFilteredFacts,
+  limit: number,
+): Array<{
+  channel: TrafficChannelId;
+  views: number;
+  sessions: number;
+  visitors: number;
+}> {
+  const buckets = new Map<
+    TrafficChannelId,
+    { views: number; sessions: Set<string>; visitors: Set<string> }
+  >();
+
+  for (const visit of filtered.visits) {
+    const channel = classifyTrafficChannel({
+      referrerHost: visit.referrerHost,
+      utmSource: visit.utmSource,
+      utmMedium: visit.utmMedium,
+      utmCampaign: visit.utmCampaign,
+    });
+    const bucket = buckets.get(channel) ?? {
+      views: 0,
+      sessions: new Set<string>(),
+      visitors: new Set<string>(),
+    };
+    bucket.views += dataset.viewWeight;
+    bucket.sessions.add(visit.sessionId);
+    bucket.visitors.add(visit.visitorId);
+    buckets.set(channel, bucket);
+  }
+
+  return Array.from(buckets.entries())
+    .map(([channel, bucket]) => ({
+      channel,
+      views: Math.max(0, Math.round(bucket.views)),
+      sessions: Math.max(
+        0,
+        Math.round(weightedSessionCount(dataset, bucket.sessions)),
+      ),
+      visitors: Math.max(
+        0,
+        Math.round(weightedVisitorCount(dataset, bucket.visitors)),
+      ),
+    }))
+    .sort(
+      (left, right) =>
+        right.views - left.views ||
+        right.sessions - left.sessions ||
+        left.channel.localeCompare(right.channel),
+    )
+    .slice(0, limit);
 }
 
 export function collectClientTabs(

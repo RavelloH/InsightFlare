@@ -18,8 +18,10 @@ describe("query route policy", () => {
     expect(PUBLIC_QUERY_PATHS).not.toContain("page-query");
     expect(PUBLIC_QUERY_PATHS).not.toContain("page-hash");
     expect(PUBLIC_QUERY_PATHS).not.toContain("overview-source-link");
+    expect(PUBLIC_QUERY_PATHS).toContain("overview-source-channel");
     expect(DASHBOARD_QUERY_PATHS).toContain("event-record-detail");
     expect(DASHBOARD_QUERY_PATHS).toContain("funnels");
+    expect(DASHBOARD_QUERY_PATHS).toContain("overview-source-channel");
   });
 
   it("maps protocol paths to typed operation capabilities", () => {

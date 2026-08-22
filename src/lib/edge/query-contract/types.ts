@@ -59,6 +59,7 @@ export type QueryOperation =
   | "pages"
   | "pages-dashboard"
   | "referrers"
+  | "channels"
   | "filter-values"
   | "retention"
   | "geo-points"
@@ -254,6 +255,7 @@ export type GeoPointsQuery = BaseQuery;
 export type TopPagesQuery = PagesQuery;
 export type PagesDashboardQuery = PageQuery;
 export type ReferrerQuery = ReferrersQuery;
+export type ChannelQuery = ChannelsQuery;
 
 export interface OverviewMetrics {
   readonly views: number;
@@ -295,6 +297,13 @@ export interface ReferrerItem {
   readonly visitors: number;
 }
 
+export interface ChannelItem {
+  readonly channel: string;
+  readonly views: number;
+  readonly sessions: number;
+  readonly visitors: number;
+}
+
 export interface PagesQuery extends BaseQuery {
   readonly limit: number;
   readonly includeDetails: boolean;
@@ -305,12 +314,20 @@ export interface ReferrersQuery extends BaseQuery {
   readonly includeFullUrl: boolean;
 }
 
+export interface ChannelsQuery extends BaseQuery {
+  readonly limit: number;
+}
+
 export interface PagesResult {
   readonly items: readonly PageItem[];
 }
 
 export interface ReferrersResult {
   readonly items: readonly ReferrerItem[];
+}
+
+export interface ChannelsResult {
+  readonly items: readonly ChannelItem[];
 }
 export interface BreakdownItem {
   readonly key: string;
@@ -349,6 +366,7 @@ export type GeoPointsResult = CanonicalObject;
 export type TopPagesResult = PagesResult;
 export type DashboardPage = CanonicalObject;
 export type ReferrerResult = ReferrersResult;
+export type ChannelResult = ChannelsResult;
 
 export type EventQuery = BaseQuery;
 export type JourneyQuery = BaseQuery;
@@ -404,6 +422,9 @@ export interface AnalyticsQueryService {
       input: PagesDashboardQuery,
     ): Promise<AnalyticsResult<OffsetPage<DashboardPage>>>;
     referrers(input: ReferrerQuery): Promise<AnalyticsResult<ReferrerResult>>;
+  };
+  readonly channels: {
+    list(input: ChannelsQuery): Promise<AnalyticsResult<ChannelsResult>>;
   };
   readonly events: EventQueryOperations;
   readonly journeys: JourneyQueryOperations;

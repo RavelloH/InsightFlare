@@ -48,6 +48,74 @@ const LONG_WINDOW_START_DAYS = 30;
 const LONG_WINDOW_MIN_CAP = 4_000;
 const LONG_WINDOW_CAP_POWER = 1;
 
+interface DemoUtmAttribution {
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
+}
+
+const EMPTY_DEMO_UTM: DemoUtmAttribution = {
+  utmSource: "",
+  utmMedium: "",
+  utmCampaign: "",
+};
+
+/**
+ * Keep demo traffic varied enough for the channel table to exercise every
+ * bucket. The empty slots intentionally preserve the profile's organic,
+ * social, referral, and direct referrer mix.
+ */
+function demoUtmAttributionForSession(
+  sessionIndex: number,
+): DemoUtmAttribution {
+  switch (sessionIndex % 13) {
+    case 6:
+      return {
+        utmSource: "google",
+        utmMedium: "cpc",
+        utmCampaign: "brand-search",
+      };
+    case 7:
+      return {
+        utmSource: "meta",
+        utmMedium: "paid-social",
+        utmCampaign: "summer-social",
+      };
+    case 8:
+      return {
+        utmSource: "ad-network",
+        utmMedium: "display",
+        utmCampaign: "awareness",
+      };
+    case 9:
+      return {
+        utmSource: "newsletter",
+        utmMedium: "email",
+        utmCampaign: "product-update",
+      };
+    case 10:
+      return {
+        utmSource: "partner-network",
+        utmMedium: "affiliate",
+        utmCampaign: "launch-partners",
+      };
+    case 11:
+      return {
+        utmSource: "marketing",
+        utmMedium: "campaign",
+        utmCampaign: "spring-launch",
+      };
+    case 12:
+      return {
+        utmSource: "unknown-source",
+        utmMedium: "unknown",
+        utmCampaign: "",
+      };
+    default:
+      return EMPTY_DEMO_UTM;
+  }
+}
+
 function sampledViewsCapForWindow(from: number, to: number): number {
   const windowDays = Math.max(1, (to - from) / DEMO_DAY_MS);
   if (windowDays <= LONG_WINDOW_START_DAYS) return MAX_SAMPLED_VIEWS;
@@ -271,6 +339,7 @@ export function buildDemoFactDataset(
     const referrerUrl = isDirect
       ? ""
       : `https://${referrerHost}/${pickFromList(rng, ["search", "r", "ref", "posts", "share"], "search")}/${keyword}`;
+    const utm = demoUtmAttributionForSession(sessionIndex);
 
     // C1 方案 — 反 CDF 时间采样,会话起点按昼夜曲线分布。
     let cursor = sampleTimestamp(rng);
@@ -321,6 +390,9 @@ export function buildDemoFactDataset(
         hostname: profile.domain,
         referrerHost,
         referrerUrl,
+        utmSource: utm.utmSource,
+        utmMedium: utm.utmMedium,
+        utmCampaign: utm.utmCampaign,
         browser,
         browserVersion,
         osVersion,

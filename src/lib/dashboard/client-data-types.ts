@@ -51,7 +51,7 @@ export type OverviewPageCardTab =
   | "entry"
   | "exit";
 
-export type OverviewSourceCardTab = "domain" | "link";
+export type OverviewSourceCardTab = "domain" | "link" | "channel";
 
 export type OverviewClientDimensionTab =
   | "browser"

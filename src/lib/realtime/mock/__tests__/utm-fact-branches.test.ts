@@ -307,6 +307,34 @@ describe("mock UTM and fact branch coverage", () => {
       data: [{ label: "", views: 0, sessions: 0, visitors: 0 }],
     });
   });
+
+  it("generates channel rows in overview source tabs", () => {
+    setFacts([
+      makeVisit({ referrerHost: "google.com" }),
+      makeVisit({
+        visitId: "visit-2",
+        sessionId: "s2",
+        visitorId: "u2",
+        referrerHost: "facebook.com",
+      }),
+      makeVisit({
+        visitId: "visit-3",
+        sessionId: "s3",
+        visitorId: "u3",
+      }),
+    ]);
+
+    expect(
+      generateDemoOverviewSourceTab("demo-site-001", {}, "channel"),
+    ).toEqual({
+      ok: true,
+      data: [
+        { label: "direct", views: 1, sessions: 1, visitors: 1 },
+        { label: "organic_search", views: 1, sessions: 1, visitors: 1 },
+        { label: "social", views: 1, sessions: 1, visitors: 1 },
+      ],
+    });
+  });
 });
 
 function setFacts(visits: DemoVisitFact[]): DemoFactDataset {

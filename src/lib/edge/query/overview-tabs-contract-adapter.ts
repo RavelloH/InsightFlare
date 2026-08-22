@@ -5,6 +5,7 @@ import {
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
+import { queryChannelAggregate } from "./channels";
 import {
   badRequest,
   geoTabLabel,
@@ -33,6 +34,7 @@ export type OverviewTab =
   | "page.exit"
   | "source.domain"
   | "source.link"
+  | "source.channel"
   | "client.browser"
   | "client.osVersion"
   | "client.deviceType"
@@ -66,7 +68,12 @@ export async function handleOverviewTabContract(
   const kind = category(tab);
   const filters =
     tab === "geo.country" ? withoutGeoFilter(rawFilters) : rawFilters;
-  const operation = kind === "source" ? "referrers" : "dimension";
+  const operation =
+    tab === "source.channel"
+      ? "channels"
+      : kind === "source"
+        ? "referrers"
+        : "dimension";
   const result = await executeQueryOperation(
     operation,
     {
@@ -77,6 +84,25 @@ export async function handleOverviewTabContract(
     async () => {
       const limit = parseLimit(url, 100, 200);
       if (kind === "source") {
+        if (tab === "source.channel") {
+          const rows = await queryChannelAggregate(
+            env,
+            siteId,
+            window,
+            filters,
+            limit,
+          );
+          return {
+            value: {
+              data: rows.map((row) => ({
+                label: row.channel,
+                views: row.views,
+                sessions: row.sessions,
+                visitors: row.visitors,
+              })),
+            },
+          };
+        }
         const rows = await queryReferrerAggregate(
           env,
           siteId,

@@ -90,6 +90,7 @@ const OVERVIEW_TABS: Readonly<Record<string, OverviewTab>> = {
   "overview-page-exit": "page.exit",
   "overview-source-domain": "source.domain",
   "overview-source-link": "source.link",
+  "overview-source-channel": "source.channel",
   "overview-client-browser": "client.browser",
   "overview-client-os-version": "client.osVersion",
   "overview-client-device-type": "client.deviceType",

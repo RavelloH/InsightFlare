@@ -1,3 +1,5 @@
+import type { TrafficChannelId } from "@/lib/analytics/traffic-channel-rules";
+
 export interface AppAnalyticsMessages {
   realtime: {
     title: string;
@@ -36,6 +38,9 @@ export interface AppAnalyticsMessages {
     sourceDomainColumn: string;
     sourceLinkTab: string;
     sourceLinkColumn: string;
+    channelTab: string;
+    channelColumn: string;
+    channelLabels: Record<TrafficChannelId, string>;
     direct: string;
     searchInTab: string;
   };

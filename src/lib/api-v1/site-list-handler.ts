@@ -7,6 +7,8 @@ import {
 } from "@/lib/api-v1/analysis-definition-reader";
 import {
   type SiteAnalyticsQueryBaseDto,
+  type SiteChannelsQueryDto,
+  SiteChannelsQueryDtoSchema,
   type SiteEventDetailQueryDto,
   SiteEventDetailQueryDtoSchema,
   type SiteEventFieldsQueryDto,
@@ -94,6 +96,10 @@ export type SiteListReader<
 
 export type SitePagesReader = SiteListReader<
   SitePagesQueryDto,
+  { readonly items: readonly unknown[] }
+>;
+export type SiteChannelsReader = SiteListReader<
+  SiteChannelsQueryDto,
   { readonly items: readonly unknown[] }
 >;
 export type SiteReferrersReader = SiteListReader<
@@ -576,6 +582,27 @@ export function handlePlannedSiteReferrers(
     siteId,
     SiteReferrersQueryDtoSchema,
     "site.analytics.referrers",
+    reader,
+    execution,
+    definitions,
+  );
+}
+
+/** Planned channels adapter; Hono registration remains rollout-gated. */
+export function handlePlannedSiteChannels(
+  request: Request,
+  principal: ApiKeyPrincipal,
+  siteId: string,
+  reader: SiteChannelsReader,
+  execution?: ExecutionContext,
+  definitions?: AnalysisDefinitionReader,
+): Promise<Response> {
+  return handlePlannedSiteList(
+    request,
+    principal,
+    siteId,
+    SiteChannelsQueryDtoSchema,
+    "site.analytics.channels",
     reader,
     execution,
     definitions,

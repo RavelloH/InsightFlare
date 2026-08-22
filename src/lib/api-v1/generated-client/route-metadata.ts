@@ -169,6 +169,13 @@ export const apiV1GeneratedRouteMetadata = {
     path: "/api/v1/sites/{siteId}/analytics/referrers",
     lifecycle: "exposed",
   },
+  "site.analytics.channels": {
+    id: "site.analytics.channels",
+    operationId: "site.analytics.channels",
+    method: "POST",
+    path: "/api/v1/sites/{siteId}/analytics/channels",
+    lifecycle: "exposed",
+  },
   "site.analytics.filterValues": {
     id: "site.analytics.filterValues",
     operationId: "site.analytics.filterValues",
