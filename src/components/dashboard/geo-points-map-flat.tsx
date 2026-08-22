@@ -40,6 +40,7 @@ interface GeoPointsMapProps {
   loading?: boolean;
   emptyLabel?: string;
   heightClassName?: string;
+  initialZoom?: number;
   countryHoverEnabled?: boolean;
   pointColor?: [number, number, number];
   bordered?: boolean;
@@ -378,6 +379,7 @@ export function FlatGeoPointsMap({
   loading = false,
   emptyLabel,
   heightClassName = DEFAULT_MAP_HEIGHT_CLASS,
+  initialZoom,
   countryHoverEnabled = true,
   pointColor = MAP_ACCENT_RGB,
   bordered = true,
@@ -461,16 +463,29 @@ export function FlatGeoPointsMap({
   );
   const mobileMinZoom =
     initialViewState.minZoom ?? DEFAULT_VIEW_STATE.minZoom ?? 0;
-  const mapInitialViewState = useMemo(
-    () =>
-      isMobile
-        ? {
-            ...initialViewState,
-            zoom: mobileMinZoom,
-          }
-        : initialViewState,
-    [initialViewState, isMobile, mobileMinZoom],
-  );
+  const requestedInitialZoom =
+    typeof initialZoom === "number" && Number.isFinite(initialZoom)
+      ? clamp(
+          initialZoom,
+          initialViewState.minZoom ?? DEFAULT_VIEW_STATE.minZoom ?? 0,
+          initialViewState.maxZoom ?? DEFAULT_VIEW_STATE.maxZoom ?? 19,
+        )
+      : null;
+  const mapInitialViewState = useMemo(() => {
+    if (requestedInitialZoom !== null) {
+      return {
+        ...initialViewState,
+        zoom: requestedInitialZoom,
+      };
+    }
+    if (isMobile) {
+      return {
+        ...initialViewState,
+        zoom: mobileMinZoom,
+      };
+    }
+    return initialViewState;
+  }, [initialViewState, isMobile, mobileMinZoom, requestedInitialZoom]);
 
   useEffect(() => {
     setCurrentZoom(

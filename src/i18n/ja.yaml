@@ -360,8 +360,21 @@ realtime:
   customEvent: イベント
   detailsTitle: イベント詳細
   detailsSection: 情報
+  browsingSection: 閲覧
+  geographySection: 地理位置
+  sourceSection: 参照元
+  statusLabels:
+    active: アクティブ
+    completed: 完了
+    open: オープン
+    complete: 完了
+    hidden_pending: 非表示待ち
+  visibilityStateLabels:
+    visible: 表示
+    hidden: 非表示
   visitorHistorySection: 訪問者アクティビティ
   visitorHistorySubtitle: 現在のリアルタイム範囲における、この訪問者のすべての記録です。
+  visitorHistoryRange: 閲覧期間
   visitorHistoryEmpty: この訪問者の追加記録はまだありません。
   visitorMapSection: 訪問者の地域
   visitorMapSubtitle: このイベントの座標から推定したおおよその地域です。
@@ -371,6 +384,42 @@ realtime:
   visitId: 訪問 ID
   eventType: イベント種別
   eventTime: イベント時刻
+  eventKind: イベント種別
+  eventName: イベント名
+  eventId: イベント ID
+  siteId: サイト ID
+  traceId: トレース ID
+  sequence: シーケンス
+  receivedAt: 受信時刻
+  startedAt: 開始時刻
+  previousVisitId: 前回の訪問 ID
+  previousVisitStartedAt: 前回の訪問開始時刻
+  userId: ユーザー ID
+  userName: ユーザー名
+  isEU: EU の訪問者
+  queryString: クエリ文字列
+  utmSource: UTM ソース
+  utmMedium: UTM メディア
+  utmCampaign: UTM キャンペーン
+  utmTerm: UTM キーワード
+  utmContent: UTM コンテンツ
+  browserVersion: ブラウザーのバージョン
+  osVersion: OS バージョン
+  userAgent: ユーザーエージェント
+  screenWidth: 画面の幅
+  screenHeight: 画面の高さ
+  postalCode: 郵便番号
+  metroCode: 都市圏コード
+  status: ステータス
+  visibilityState: 表示状態
+  hiddenAt: 非表示時刻
+  endedAt: 終了時刻
+  finalizedAt: 確定時刻
+  duration: 継続時間
+  durationSource: 継続時間のソース
+  exitReason: 退出理由
+  leaveAt: 離脱時刻
+  performanceVisitId: パフォーマンス訪問 ID
 overview:
   title: トラフィック概要
   subtitle: 高レベルのパフォーマンスとオーディエンス行動を監視します。

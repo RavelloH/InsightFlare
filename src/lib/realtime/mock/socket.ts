@@ -43,6 +43,163 @@ const READY_STATE = {
 } as const;
 
 const RECENT_RECORD_WINDOW_MS = 30 * 60 * 1000;
+const DEMO_EU_COUNTRIES = new Set([
+  "AT",
+  "BE",
+  "BG",
+  "HR",
+  "CY",
+  "CZ",
+  "DE",
+  "DK",
+  "EE",
+  "ES",
+  "FI",
+  "FR",
+  "GR",
+  "HU",
+  "IE",
+  "IT",
+  "LT",
+  "LU",
+  "LV",
+  "MT",
+  "NL",
+  "PL",
+  "PT",
+  "RO",
+  "SE",
+  "SI",
+  "SK",
+]);
+
+function demoOperatingSystemName(osVersion: string): string {
+  const normalized = osVersion.trim().toLowerCase();
+  if (normalized.includes("ios")) return "iOS";
+  if (normalized.includes("android")) return "Android";
+  if (normalized.includes("harmony")) return "HarmonyOS";
+  if (normalized.includes("mac")) return "macOS";
+  if (normalized.includes("windows")) return "Windows";
+  if (normalized.includes("linux")) return "Linux";
+  return osVersion.trim().split(/\s+/)[0] || "Linux";
+}
+
+function demoUserName(visitorId: string): string {
+  const suffix = visitorId.trim().slice(-6).toUpperCase() || "000000";
+  return `Demo visitor ${suffix}`;
+}
+
+function demoPostalCode(country: string, visitorId: string): string {
+  const checksum = Array.from(visitorId).reduce(
+    (sum, character) => sum + character.charCodeAt(0),
+    0,
+  );
+  const suffix = String(checksum % 10_000).padStart(4, "0");
+  return country === "US"
+    ? String(10_000 + (checksum % 89_999))
+    : `${country}-${suffix}`;
+}
+
+function demoUserAgent(
+  browser: string,
+  browserVersion: string,
+  os: string,
+  deviceType: string,
+): string {
+  return `Mozilla/5.0 (${os}; ${deviceType}) AppleWebKit/537.36 (KHTML, like Gecko) ${browser}/${browserVersion}`;
+}
+
+function demoQueryString(visit: DemoVisitFact): string {
+  const values = [
+    visit.utmSource ? `utm_source=${encodeURIComponent(visit.utmSource)}` : "",
+    visit.utmMedium ? `utm_medium=${encodeURIComponent(visit.utmMedium)}` : "",
+    visit.utmCampaign
+      ? `utm_campaign=${encodeURIComponent(visit.utmCampaign)}`
+      : "",
+  ].filter(Boolean);
+  return values.length > 0 ? values.join("&") : "ref=direct";
+}
+
+function demoRealtimeMetadata(
+  visit: DemoVisitFact,
+  eventAt: number,
+  status: "active" | "completed",
+) {
+  const os = demoOperatingSystemName(visit.osVersion);
+  const endedAt = status === "completed" ? eventAt + visit.durationMs : null;
+  const performance = {
+    ttfb: Math.max(45, Math.round(80 + visit.durationMs * 0.02)),
+    fcp: Math.max(120, Math.round(260 + visit.durationMs * 0.03)),
+    lcp: Math.max(280, Math.round(620 + visit.durationMs * 0.05)),
+    cls: Number((0.02 + (visit.durationMs % 17) / 1000).toFixed(3)),
+    inp: Math.max(35, Math.round(110 + visit.durationMs * 0.01)),
+  };
+
+  return {
+    queryString: demoQueryString(visit),
+    utmSource: visit.utmSource ?? "",
+    utmMedium: visit.utmMedium ?? "",
+    utmCampaign: visit.utmCampaign ?? "",
+    utmTerm: visit.utmSource ? `${visit.eventType}-intent` : "",
+    utmContent: visit.utmSource ? "demo-cta" : "",
+    userId: `demo-user-${visit.visitorId}`,
+    userName: demoUserName(visit.visitorId),
+    isEU: DEMO_EU_COUNTRIES.has(visit.country.trim().toUpperCase()),
+    postalCode: demoPostalCode(visit.country, visit.visitorId),
+    metroCode: `${visit.country}-${visit.regionCode || "global"}`,
+    uaRaw: demoUserAgent(
+      visit.browser,
+      visit.browserVersion,
+      os,
+      visit.deviceType,
+    ),
+    os,
+    status,
+    endedAt,
+    finalizedAt: endedAt === null ? null : endedAt + 80,
+    durationMs: visit.durationMs,
+    durationSource: "mock",
+    exitReason: status === "completed" ? "navigation" : "pending",
+    leaveAt: endedAt,
+    performanceVisitId: `${visit.visitId}-perf`,
+    performance,
+    visibilityState: "visible",
+  };
+}
+
+function demoEventData(
+  visit: DemoVisitFact,
+  eventId: string,
+  isPageview: boolean,
+): Record<string, unknown> {
+  const context = {
+    path: visit.pathname,
+    title: visit.title,
+    source: visit.referrerHost || "(direct)",
+  };
+
+  if (isPageview) {
+    return {
+      page: context,
+      navigation: {
+        query: demoQueryString(visit),
+        hostname: visit.hostname,
+      },
+    };
+  }
+
+  return {
+    event: {
+      id: eventId,
+      name: visit.eventType,
+    },
+    properties: {
+      path: visit.pathname,
+      source: visit.referrerHost || "(direct)",
+      value: visit.durationMs,
+    },
+  };
+}
 
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -65,6 +222,7 @@ class MockRealtimeSocket implements RealtimeSocketLike {
   // Stable visit fact slice; events are derived from this by replaying
   // `startedAt` as `eventAt`. Same site/time → same data, even across reconnects.
   private futureVisits: DemoVisitFact[] = [];
+  private lastVisitsByVisitorId = new Map<string, DemoVisitFact>();
   private visitorsByVisitorId = new Map<string, RealtimeVisit>();
   private recentEvents: RealtimeEvent[] = [];
   private sequence = 0;
@@ -137,6 +295,7 @@ class MockRealtimeSocket implements RealtimeSocketLike {
     past.sort((a, b) => a.startedAt - b.startedAt);
     future.sort((a, b) => a.startedAt - b.startedAt);
     this.futureVisits = future;
+    this.lastVisitsByVisitorId.clear();
     this.visitorsByVisitorId.clear();
     this.recentEvents = [];
 
@@ -146,6 +305,7 @@ class MockRealtimeSocket implements RealtimeSocketLike {
       if (visit.startedAt < recordCutoff) continue;
       const event = this.demoVisitToEvent(visit);
       this.recentEvents.push(event);
+      this.lastVisitsByVisitorId.set(visit.visitorId, visit);
       if (visit.startedAt >= activeCutoff) {
         this.visitorsByVisitorId.set(
           visit.visitorId,
@@ -198,6 +358,7 @@ class MockRealtimeSocket implements RealtimeSocketLike {
     // *which* visit comes next.
     const event = this.demoVisitToEvent(visit, now);
     this.recentEvents.push(event);
+    this.lastVisitsByVisitorId.set(visit.visitorId, visit);
     this.visitorsByVisitorId.set(
       visit.visitorId,
       this.demoVisitToVisit(visit, now),
@@ -296,18 +457,36 @@ class MockRealtimeSocket implements RealtimeSocketLike {
       .split("x")
       .map((value) => Number(value));
     const isPageview = visit.eventType === "pageview";
+    const eventAt = overrideEventAt ?? visit.startedAt;
+    const status = overrideEventAt === undefined ? "completed" : "active";
+    const eventId = this.nextEventId();
+    const previous = this.lastVisitsByVisitorId.get(visit.visitorId);
+    const metadata = demoRealtimeMetadata(visit, eventAt, status);
     return {
-      id: this.nextEventId(),
+      id: eventId,
       eventType: visit.eventType,
       eventKind: isPageview ? "pageview" : "custom_event",
-      eventAt: overrideEventAt ?? visit.startedAt,
+      eventAt,
       siteId: this.siteId,
-      eventName: isPageview ? "" : visit.eventType,
-      eventData: null,
+      traceId: `${this.siteId}-${visit.sessionId}`,
+      receivedAt: eventAt + 120,
+      sequence: this.sequence,
+      eventId,
+      eventName: visit.eventType,
+      eventData: demoEventData(visit, eventId, isPageview),
       visitId: visit.visitId,
       sessionId: visit.sessionId,
       startedAt: visit.startedAt,
+      previousVisitId:
+        previous && previous.sessionId !== visit.sessionId
+          ? previous.visitId
+          : "",
+      previousVisitStartedAt:
+        previous && previous.sessionId !== visit.sessionId
+          ? previous.startedAt
+          : null,
       pathname: visit.pathname,
+      ...metadata,
       hash: "",
       title: visit.title,
       hostname: visit.hostname || profile.domain,
@@ -322,7 +501,6 @@ class MockRealtimeSocket implements RealtimeSocketLike {
       timezone: visit.timezone,
       organization: visit.organization,
       browserVersion: visit.browserVersion,
-      os: "",
       browser: visit.browser,
       osVersion: visit.osVersion,
       deviceType: visit.deviceType,
@@ -345,6 +523,7 @@ class MockRealtimeSocket implements RealtimeSocketLike {
     const [screenWidth, screenHeight] = visit.screenSize
       .split("x")
       .map((value) => Number(value));
+    const metadata = demoRealtimeMetadata(visit, activityAt, "active");
     return {
       visitId: visit.visitId,
       visitorId: visit.visitorId,
@@ -365,8 +544,8 @@ class MockRealtimeSocket implements RealtimeSocketLike {
       timezone: visit.timezone,
       organization: visit.organization,
       siteId: this.siteId,
+      ...metadata,
       browserVersion: visit.browserVersion,
-      os: "",
       browser: visit.browser,
       osVersion: visit.osVersion,
       deviceType: visit.deviceType,

@@ -360,8 +360,21 @@ realtime:
   customEvent: Event
   detailsTitle: Event details
   detailsSection: Information
+  browsingSection: Browsing
+  geographySection: Geography
+  sourceSection: Source
+  statusLabels:
+    active: Active
+    completed: Completed
+    open: Open
+    complete: Complete
+    hidden_pending: Pending hidden
+  visibilityStateLabels:
+    visible: Visible
+    hidden: Hidden
   visitorHistorySection: Visitor activity
   visitorHistorySubtitle: All records for this visitor in the current realtime window.
+  visitorHistoryRange: Activity range
   visitorHistoryEmpty: No additional records are available for this visitor yet.
   visitorMapSection: Visitor location
   visitorMapSubtitle: Approximate location inferred from this event's coordinates.
@@ -371,6 +384,42 @@ realtime:
   visitId: Visit ID
   eventType: Event type
   eventTime: Event time
+  eventKind: Event kind
+  eventName: Event name
+  eventId: Event ID
+  siteId: Site ID
+  traceId: Trace ID
+  sequence: Sequence
+  receivedAt: Received at
+  startedAt: Started at
+  previousVisitId: Previous visit ID
+  previousVisitStartedAt: Previous visit started at
+  userId: User ID
+  userName: User name
+  isEU: EU visitor
+  queryString: Query string
+  utmSource: UTM source
+  utmMedium: UTM medium
+  utmCampaign: UTM campaign
+  utmTerm: UTM term
+  utmContent: UTM content
+  browserVersion: Browser version
+  osVersion: OS version
+  userAgent: User agent
+  screenWidth: Screen width
+  screenHeight: Screen height
+  postalCode: Postal code
+  metroCode: Metro code
+  status: Status
+  visibilityState: Visibility state
+  hiddenAt: Hidden at
+  endedAt: Ended at
+  finalizedAt: Finalized at
+  duration: Duration
+  durationSource: Duration source
+  exitReason: Exit reason
+  leaveAt: Left at
+  performanceVisitId: Performance visit ID
 overview:
   title: Traffic Overview
   subtitle: Monitor high-level performance and audience behavior.

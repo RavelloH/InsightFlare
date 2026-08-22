@@ -17,7 +17,6 @@ import { OverlayScrollbars } from "overlayscrollbars";
 
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
 import {
-  type GeoPointsMapCountryCount,
   GeoPointsMapIsland,
   type GeoPointsMapPoint,
 } from "@/components/dashboard/geo-points-map-island";
@@ -25,19 +24,22 @@ import {
   formatPathWithHash,
   resolveDeviceTypeMeta,
 } from "@/components/dashboard/journey-display";
+import { JsonTreePanel } from "@/components/dashboard/json-tree";
 import { useGeoStateTranslationBundle } from "@/components/dashboard/lazy-geo-location-label";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clickable } from "@/components/ui/clickable";
-import { prepareNativeScrollbarHost } from "@/components/ui/overlay-scrollbar";
 import {
-  ResponsiveDialog,
-  ResponsiveDialogBody,
-  ResponsiveDialogContent,
-  ResponsiveDialogHeader,
-  ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerScrollArea,
+  DrawerTitle,
+} from "@/components/ui/drawer";
+import { prepareNativeScrollbarHost } from "@/components/ui/overlay-scrollbar";
+import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
@@ -108,17 +110,6 @@ type RealtimeEventDisplayData = {
   countryLabel: string;
   countryFlagCode: string | null;
   sourceLabel: string;
-};
-type RealtimeVisitorVisitHistory = {
-  visitId: string;
-  sessionId: string;
-  startedAt: number;
-  lastActivityAt: number;
-  pathname: string;
-  hash: string;
-  title: string;
-  hostname: string;
-  events: RealtimeEvent[];
 };
 const LOG_STREAM_ITEM_LAYOUT_TRANSITION = {
   layout: {
@@ -589,6 +580,75 @@ function formatCoordinateValue(value: number | null): string {
   return value.toFixed(4);
 }
 
+function formatOptionalDetailDateTime(
+  locale: Locale,
+  value: number | null | undefined,
+  timeZone: string,
+  unknownLabel: string,
+): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return unknownLabel;
+  }
+  return formatDetailDateTime(locale, value, timeZone);
+}
+
+function formatDetailBoolean(
+  value: boolean | undefined,
+  unknownLabel: string,
+  trueLabel: string,
+  falseLabel: string,
+): string {
+  if (typeof value !== "boolean") return unknownLabel;
+  return value ? trueLabel : falseLabel;
+}
+
+function resolveLocalizedDetailValue(
+  value: string | undefined,
+  labels: Record<string, string>,
+  unknownLabel: string,
+): string {
+  const normalized = value?.trim().toLowerCase() || "";
+  if (!normalized) return unknownLabel;
+  return labels[normalized] || value?.trim() || unknownLabel;
+}
+
+function readRealtimePerformanceMetric(
+  performance: unknown,
+  key: "ttfb" | "fcp" | "lcp" | "cls" | "inp",
+): number | null {
+  if (
+    !performance ||
+    typeof performance !== "object" ||
+    Array.isArray(performance)
+  ) {
+    return null;
+  }
+  const value = (performance as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function formatRealtimePerformanceMetric(
+  performance: unknown,
+  key: "ttfb" | "fcp" | "lcp" | "cls" | "inp",
+  messages: AppMessages,
+  unknownLabel: string,
+): string {
+  const value = readRealtimePerformanceMetric(performance, key);
+  if (value === null) return unknownLabel;
+  const unit =
+    key === "cls" ? messages.performance.clsUnit : messages.performance.msUnit;
+  return `${value} ${unit}`;
+}
+
+function formatDetailDuration(
+  value: number | null | undefined,
+  unknownLabel: string,
+): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${value} ms`
+    : unknownLabel;
+}
+
 function normalizeDetailLabel(value: string, unknownLabel: string): string {
   const normalized = value.trim();
   return normalized || unknownLabel;
@@ -637,72 +697,12 @@ function resolveRealtimeEventDisplayData(
     avatarSeed: event.visitorId.trim() || event.sessionId.trim() || event.id,
     browserLabel: event.browser.trim() || messages.common.unknown,
     browserIconKey: resolveBrowserIconKey(event.browser),
-    osLabel: event.osVersion.trim() || messages.common.unknown,
-    osIconKey: resolveOsIconKey(event.osVersion),
+    osLabel: event.os?.trim() || messages.common.unknown,
+    osIconKey: resolveOsIconKey(event.os ?? ""),
     countryLabel,
     countryFlagCode: resolveCountryFlagCode(countryCode, locale),
     sourceLabel: event.referrerHost.trim() || messages.overview.direct,
   };
-}
-
-function buildRealtimeVisitorVisitHistory(
-  selectedEvent: RealtimeEvent,
-  events: RealtimeEvent[],
-  visits: RealtimeVisit[],
-): RealtimeVisitorVisitHistory[] {
-  const visitorId = selectedEvent.visitorId.trim();
-  if (!visitorId) return [];
-
-  const visitById = new Map(
-    visits
-      .filter((visit) => visit.visitorId.trim() === visitorId)
-      .map((visit) => [visit.visitId, visit] as const),
-  );
-  const eventGroups = new Map<string, RealtimeEvent[]>();
-
-  for (const event of events) {
-    if (event.visitorId.trim() !== visitorId) continue;
-    const group = eventGroups.get(event.visitId) ?? [];
-    group.push(event);
-    eventGroups.set(event.visitId, group);
-  }
-
-  const visitIds = new Set<string>([
-    ...eventGroups.keys(),
-    ...visitById.keys(),
-  ]);
-
-  return [...visitIds]
-    .map((visitId) => {
-      const visit = visitById.get(visitId);
-      const visitEvents = [...(eventGroups.get(visitId) ?? [])].sort(
-        (left, right) => right.eventAt - left.eventAt,
-      );
-      const mostRecentEvent = visitEvents[0] ?? selectedEvent;
-      const oldestEvent = visitEvents[visitEvents.length - 1] ?? selectedEvent;
-
-      return {
-        visitId,
-        sessionId:
-          visit?.sessionId.trim() ||
-          mostRecentEvent.sessionId.trim() ||
-          selectedEvent.sessionId.trim(),
-        startedAt: visit?.startedAt ?? oldestEvent.eventAt,
-        lastActivityAt: visit?.lastActivityAt ?? mostRecentEvent.eventAt,
-        pathname:
-          visit?.pathname.trim() || mostRecentEvent.pathname.trim() || "/",
-        hash: visit?.hash || mostRecentEvent.hash || "",
-        title:
-          visit?.title.trim() ||
-          mostRecentEvent.title.trim() ||
-          mostRecentEvent.pathname.trim() ||
-          "/",
-        hostname:
-          visit?.hostname.trim() || mostRecentEvent.hostname.trim() || "",
-        events: visitEvents,
-      };
-    })
-    .sort((left, right) => right.lastActivityAt - left.lastActivityAt);
 }
 
 interface RealtimeLogStreamItemProps {
@@ -730,6 +730,7 @@ function areRealtimeLogStreamItemPropsEqual(
     previousProps.event.visitorId === nextProps.event.visitorId &&
     previousProps.event.sessionId === nextProps.event.sessionId &&
     previousProps.event.browser === nextProps.event.browser &&
+    previousProps.event.os === nextProps.event.os &&
     previousProps.event.osVersion === nextProps.event.osVersion &&
     previousProps.event.country === nextProps.event.country &&
     previousProps.event.referrerHost === nextProps.event.referrerHost
@@ -748,7 +749,7 @@ function RealtimeEventDetailValue({
   return (
     <span
       className={cn(
-        "inline-flex max-w-full items-center gap-2 break-words text-[11px] text-foreground sm:justify-end",
+        "inline-flex max-w-full items-center gap-2 break-words text-[11px] text-foreground",
         mono && "font-mono",
       )}
     >
@@ -757,26 +758,24 @@ function RealtimeEventDetailValue({
           {icon}
         </span>
       ) : null}
-      <span className="min-w-0 break-all sm:text-right">{value}</span>
+      <span className="min-w-0 break-all">{value}</span>
     </span>
   );
 }
 
-function RealtimeEventDetailRow({
+function RealtimeDetailItem({
   label,
   value,
+  wide = false,
 }: {
   label: string;
   value: ReactNode;
+  wide?: boolean;
 }) {
   return (
-    <div className="grid items-start gap-1 px-4 py-3 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-center sm:gap-4">
-      <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </p>
-      <div className="min-w-0 text-left text-[11px] text-foreground sm:self-center sm:text-right">
-        {value}
-      </div>
+    <div className={cn("space-y-1", wide && "sm:col-span-2")}>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0">{value}</dd>
     </div>
   );
 }
@@ -962,7 +961,6 @@ function RealtimeVisitorHistorySection({
   timeZone,
   event,
   events,
-  visits,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -970,17 +968,26 @@ function RealtimeVisitorHistorySection({
   timeZone: string;
   event: RealtimeEvent;
   events: RealtimeEvent[];
-  visits: RealtimeVisit[];
 }) {
-  const visitHistory = useMemo(
-    () => buildRealtimeVisitorVisitHistory(event, events, visits),
-    [event, events, visits],
-  );
-  const totalEventCount = visitHistory.reduce(
-    (sum, visit) => sum + visit.events.length,
-    0,
-  );
-  const historyStateKey = visitHistory.length === 0 ? "empty" : "history";
+  const timelineEvents = useMemo(() => {
+    const visitorId = event.visitorId.trim();
+    if (!visitorId) return [];
+
+    const dedupedEvents = new Map<string, RealtimeEvent>();
+    for (const candidate of events) {
+      if (candidate.visitorId.trim() !== visitorId || !candidate.id) {
+        continue;
+      }
+      dedupedEvents.set(candidate.id, candidate);
+    }
+
+    return Array.from(dedupedEvents.values()).sort(
+      (left, right) => left.eventAt - right.eventAt,
+    );
+  }, [event.visitorId, events]);
+  const firstTimelineEvent = timelineEvents[0] ?? null;
+  const lastTimelineEvent = timelineEvents[timelineEvents.length - 1] ?? null;
+  const historyStateKey = timelineEvents.length === 0 ? "empty" : "history";
 
   return (
     <section className="space-y-2">
@@ -993,14 +1000,16 @@ function RealtimeVisitorHistorySection({
             {messages.realtime.visitorHistorySubtitle}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-          <span className="inline-flex items-center rounded-sm border border-border px-2 py-1">
-            {visitHistory.length} {messages.common.sessions}
-          </span>
-          <span className="inline-flex items-center rounded-sm border border-border px-2 py-1">
-            {totalEventCount} {messages.common.event}
-          </span>
-        </div>
+        {firstTimelineEvent && lastTimelineEvent ? (
+          <div className="min-w-0 text-right text-[10px] text-muted-foreground">
+            <p>{messages.realtime.visitorHistoryRange}</p>
+            <p className="font-mono text-foreground">
+              {shortDateTime(locale, firstTimelineEvent.eventAt, timeZone)}
+              {" – "}
+              {shortDateTime(locale, lastTimelineEvent.eventAt, timeZone)}
+            </p>
+          </div>
+        ) : null}
       </div>
       <AutoResizer initial duration={0.22}>
         <AutoTransition
@@ -1008,93 +1017,77 @@ function RealtimeVisitorHistorySection({
           duration={0.2}
           transitionKey={historyStateKey}
         >
-          {visitHistory.length === 0 ? (
-            <div className="flex min-h-24 items-center justify-center rounded-sm border border-dashed border-border text-[11px] text-muted-foreground">
+          {timelineEvents.length === 0 ? (
+            <div className="flex min-h-24 items-center justify-center border border-dashed border-foreground/25 text-[11px] text-muted-foreground">
               {messages.realtime.visitorHistoryEmpty}
             </div>
           ) : (
-            <div className="space-y-2">
-              {visitHistory.map((visit) => (
-                <Card key={visit.visitId} size="sm">
-                  <CardContent className="space-y-3 px-3 sm:px-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0 space-y-1">
-                        <p className="truncate text-sm font-medium text-foreground">
-                          {visit.title}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                          <span className="truncate">
-                            {messages.common.path}:{" "}
-                            {formatPathWithHash(visit.pathname, visit.hash)}
-                          </span>
-                          <span className="truncate">
-                            {messages.common.hostname}:{" "}
-                            {visit.hostname || messages.common.unknown}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="font-mono text-[11px] text-foreground">
-                          {formatRelativeTime(
-                            locale,
-                            visit.lastActivityAt,
-                            now,
-                          )}
-                        </p>
-                        <p className="font-mono text-[11px] text-muted-foreground">
-                          {shortDateTime(
-                            locale,
-                            visit.lastActivityAt,
-                            timeZone,
-                          )}
-                        </p>
-                      </div>
+            <div className="space-y-0">
+              {timelineEvents.map((timelineEvent, index) => {
+                const isCurrentEvent = timelineEvent.id === event.id;
+                const isCurrentConnector =
+                  index < timelineEvents.length - 1 &&
+                  (isCurrentEvent ||
+                    timelineEvents[index + 1]?.id === event.id);
+
+                return (
+                  <div
+                    key={timelineEvent.id}
+                    className="grid grid-cols-[4.5rem_1.25rem_minmax(0,1fr)] gap-3 pb-4 last:pb-0 sm:grid-cols-[5.5rem_1.25rem_minmax(0,1fr)]"
+                  >
+                    <div className="min-w-0 pt-0.5 text-right">
+                      <p className="font-mono text-[10px] text-foreground">
+                        {shortDateTime(locale, timelineEvent.eventAt, timeZone)}
+                      </p>
+                      <p className="font-mono text-[10px] text-muted-foreground">
+                        {formatRelativeTime(locale, timelineEvent.eventAt, now)}
+                      </p>
                     </div>
-                    <div className="grid gap-2 text-[11px] text-muted-foreground sm:grid-cols-3">
-                      <span>
-                        {messages.common.startedAt}:{" "}
-                        {formatDetailDateTime(
-                          locale,
-                          visit.startedAt,
-                          timeZone,
+                    <div className="relative flex justify-center">
+                      {index < timelineEvents.length - 1 ? (
+                        <span
+                          className={cn(
+                            "absolute left-1/2 top-5 bottom-0 w-px -translate-x-1/2",
+                            isCurrentConnector
+                              ? "bg-primary/70"
+                              : "bg-foreground/30",
+                          )}
+                        />
+                      ) : null}
+                      <span
+                        className={cn(
+                          "relative z-10 inline-flex size-5 shrink-0 items-center justify-center border font-mono text-[10px]",
+                          isCurrentEvent
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-foreground/35 bg-card text-foreground/80",
                         )}
-                      </span>
-                      <span>
-                        {messages.realtime.visitId}: {visit.visitId}
-                      </span>
-                      <span>
-                        {messages.realtime.sessionId}:{" "}
-                        {visit.sessionId || messages.common.unknown}
+                      >
+                        {index + 1}
                       </span>
                     </div>
-                    <div className="space-y-1.5 border-t border-border/70 pt-3">
-                      {visit.events.map((visitEvent) => (
-                        <div
-                          key={visitEvent.id}
-                          className="flex items-center justify-between gap-3 rounded-sm bg-muted/25 px-2 py-1.5"
-                        >
-                          <p className="min-w-0 truncate text-[11px] text-foreground">
-                            {formatLogTitle(
-                              messages,
-                              visitEvent,
-                              classifyRealtimeLogEvent(
-                                visitEvent.eventType.trim(),
-                              ),
-                            )}
-                          </p>
-                          <p className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                            {shortDateTime(
-                              locale,
-                              visitEvent.eventAt,
-                              timeZone,
-                            )}
-                          </p>
-                        </div>
-                      ))}
+                    <div className="min-w-0 border-b border-foreground/15 pb-3 last:border-b-0">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {formatLogTitle(
+                          messages,
+                          timelineEvent,
+                          classifyRealtimeLogEvent(
+                            timelineEvent.eventType.trim(),
+                          ),
+                        )}
+                      </p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {formatPathWithHash(
+                          timelineEvent.pathname,
+                          timelineEvent.hash,
+                        )}
+                        {timelineEvent.hostname.trim()
+                          ? " · " + timelineEvent.hostname.trim()
+                          : ""}
+                      </p>
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           )}
         </AutoTransition>
@@ -1126,43 +1119,20 @@ function RealtimeVisitorLocationMapSection({
         : [],
     [event.country, event.latitude, event.longitude, hasLocation],
   );
-  const countryCounts = useMemo<GeoPointsMapCountryCount[]>(() => {
-    const country = String(event.country ?? "")
-      .trim()
-      .toUpperCase();
-    if (!country) return [];
-    return [
-      {
-        country,
-        views: 1,
-        sessions: 1,
-        visitors: 1,
-      },
-    ];
-  }, [event.country]);
-
   return (
-    <section className="space-y-2">
-      <div className="space-y-1">
-        <h3 className="text-sm font-medium text-foreground">
-          {messages.realtime.visitorMapSection}
-        </h3>
-        <p className="text-[11px] text-muted-foreground">
-          {messages.realtime.visitorMapSubtitle}
-        </p>
-      </div>
-      <GeoPointsMapIsland
-        locale={locale}
-        messages={messages}
-        points={points}
-        countryCounts={countryCounts}
-        emptyLabel={messages.realtime.visitorMapUnavailable}
-      />
-    </section>
+    <GeoPointsMapIsland
+      locale={locale}
+      messages={messages}
+      points={points}
+      emptyLabel={messages.realtime.visitorMapUnavailable}
+      heightClassName="h-[11rem] sm:h-[13rem]"
+      initialZoom={0.3}
+      countryHoverEnabled={false}
+    />
   );
 }
 
-function RealtimeLogEventDetailsDialog({
+function RealtimeLogEventDetailsDrawer({
   locale,
   messages,
   now,
@@ -1171,7 +1141,6 @@ function RealtimeLogEventDetailsDialog({
   open,
   onOpenChange,
   events,
-  visits,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -1181,7 +1150,6 @@ function RealtimeLogEventDetailsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   events: RealtimeEvent[];
-  visits: RealtimeVisit[];
 }) {
   const displayData = event
     ? resolveRealtimeEventDisplayData(locale, messages, event)
@@ -1231,8 +1199,43 @@ function RealtimeLogEventDetailsDialog({
     messages.common.unknown,
   );
   const DeviceTypeIcon = deviceTypeMeta.Icon;
+  const unknownLabel = messages.common.unknown;
+  const localizedStatus = resolveLocalizedDetailValue(
+    event.status,
+    messages.realtime.statusLabels,
+    unknownLabel,
+  );
+  const localizedVisibilityState = resolveLocalizedDetailValue(
+    event.visibilityState,
+    messages.realtime.visibilityStateLabels,
+    unknownLabel,
+  );
   const detailRows = [
     {
+      section: "event",
+      priority: 3,
+      label: messages.realtime.eventKind,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.eventKind?.trim() || unknownLabel}
+          mono
+        />
+      ),
+    },
+    {
+      section: "event",
+      priority: 2,
+      label: messages.realtime.traceId,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.traceId?.trim() || unknownLabel}
+          mono
+        />
+      ),
+    },
+    {
+      section: "event",
+      priority: 1,
       label: messages.common.id,
       value: (
         <RealtimeEventDetailValue
@@ -1242,6 +1245,19 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "event",
+      priority: 4,
+      label: messages.realtime.eventName,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.eventName?.trim() || unknownLabel}
+        />
+      ),
+    },
+    {
+      section: "visitor",
+      priority: 1,
+      wide: true,
       label: messages.realtime.visitorId,
       value: (
         <RealtimeEventDetailValue
@@ -1251,6 +1267,9 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "session",
+      priority: 1,
+      wide: true,
       label: messages.realtime.sessionId,
       value: (
         <RealtimeEventDetailValue
@@ -1260,24 +1279,40 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
-      label: messages.realtime.visitId,
+      section: "session",
+      priority: 5,
+      label: messages.realtime.startedAt,
       value: (
         <RealtimeEventDetailValue
-          value={event.visitId.trim() || messages.common.unknown}
+          value={formatOptionalDetailDateTime(
+            locale,
+            event.startedAt,
+            timeZone,
+            unknownLabel,
+          )}
           mono
         />
       ),
     },
     {
-      label: messages.realtime.eventType,
+      section: "session",
+      priority: 6,
+      label: messages.realtime.previousVisitStartedAt,
       value: (
         <RealtimeEventDetailValue
-          value={event.eventType.trim() || messages.common.unknown}
+          value={formatOptionalDetailDateTime(
+            locale,
+            event.previousVisitStartedAt,
+            timeZone,
+            unknownLabel,
+          )}
           mono
         />
       ),
     },
     {
+      section: "event",
+      priority: 5,
       label: messages.realtime.eventTime,
       value: (
         <RealtimeEventDetailValue
@@ -1287,6 +1322,60 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "event",
+      priority: 6,
+      label: messages.realtime.receivedAt,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatOptionalDetailDateTime(
+            locale,
+            event.receivedAt,
+            timeZone,
+            unknownLabel,
+          )}
+          mono
+        />
+      ),
+    },
+    {
+      section: "visitor",
+      priority: 3,
+      label: messages.realtime.userId,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.userId?.trim() || unknownLabel}
+          mono
+        />
+      ),
+    },
+    {
+      section: "visitor",
+      priority: 2,
+      label: messages.realtime.userName,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.userName?.trim() || unknownLabel}
+        />
+      ),
+    },
+    {
+      section: "visitor",
+      priority: 9,
+      label: messages.realtime.isEU,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatDetailBoolean(
+            event.isEU,
+            unknownLabel,
+            messages.sessionDetail.yes,
+            messages.sessionDetail.no,
+          )}
+        />
+      ),
+    },
+    {
+      section: "browsing",
+      priority: 1,
       label: messages.common.title,
       value: (
         <RealtimeEventDetailValue
@@ -1295,6 +1384,9 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "browsing",
+      priority: 3,
+      wide: true,
       label: messages.common.path,
       value: (
         <RealtimeEventDetailValue
@@ -1304,6 +1396,20 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "browsing",
+      priority: 4,
+      wide: true,
+      label: messages.realtime.queryString,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.queryString?.trim() || unknownLabel}
+          mono
+        />
+      ),
+    },
+    {
+      section: "browsing",
+      priority: 2,
       label: messages.common.hostname,
       value: (
         <RealtimeEventDetailValue
@@ -1313,6 +1419,8 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "visitor",
+      priority: 4,
       label: messages.common.browser,
       value: (
         <RealtimeEventDetailValue
@@ -1328,6 +1436,19 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "visitor",
+      priority: 5,
+      label: messages.realtime.browserVersion,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.browserVersion?.trim() || unknownLabel}
+          mono
+        />
+      ),
+    },
+    {
+      section: "visitor",
+      priority: 6,
       label: messages.common.operatingSystem,
       value: (
         <RealtimeEventDetailValue
@@ -1343,6 +1464,19 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "visitor",
+      priority: 7,
+      label: messages.realtime.osVersion,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.osVersion.trim() || unknownLabel}
+          mono
+        />
+      ),
+    },
+    {
+      section: "visitor",
+      priority: 8,
       label: messages.common.deviceType,
       value: (
         <RealtimeEventDetailValue
@@ -1352,6 +1486,8 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "geography",
+      priority: 1,
       label: messages.common.country,
       value: (
         <RealtimeEventDetailValue
@@ -1375,6 +1511,8 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "geography",
+      priority: 2,
       label: messages.common.region,
       value: (
         <RealtimeEventDetailValue
@@ -1387,6 +1525,8 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "geography",
+      priority: 3,
       label: messages.common.regionCode,
       value: (
         <RealtimeEventDetailValue
@@ -1396,6 +1536,30 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "geography",
+      priority: 4,
+      label: messages.realtime.postalCode,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.postalCode?.trim() || unknownLabel}
+          mono
+        />
+      ),
+    },
+    {
+      section: "geography",
+      priority: 5,
+      label: messages.realtime.metroCode,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.metroCode?.trim() || unknownLabel}
+          mono
+        />
+      ),
+    },
+    {
+      section: "geography",
+      priority: 6,
       label: messages.common.city,
       value: (
         <RealtimeEventDetailValue
@@ -1408,6 +1572,8 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "geography",
+      priority: 7,
       label: messages.common.continent,
       value: (
         <RealtimeEventDetailValue
@@ -1420,6 +1586,8 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "geography",
+      priority: 8,
       label: messages.common.timezone,
       value: (
         <RealtimeEventDetailValue
@@ -1429,6 +1597,8 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "source",
+      priority: 1,
       label: messages.common.referrerHost,
       value: (
         <RealtimeEventDetailValue
@@ -1438,6 +1608,8 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "source",
+      priority: 2,
       label: messages.common.referrer,
       value: (
         <RealtimeEventDetailValue
@@ -1453,6 +1625,58 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "source",
+      priority: 3,
+      label: messages.realtime.utmSource,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.utmSource?.trim() || unknownLabel}
+        />
+      ),
+    },
+    {
+      section: "source",
+      priority: 4,
+      label: messages.realtime.utmMedium,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.utmMedium?.trim() || unknownLabel}
+        />
+      ),
+    },
+    {
+      section: "source",
+      priority: 5,
+      label: messages.realtime.utmCampaign,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.utmCampaign?.trim() || unknownLabel}
+        />
+      ),
+    },
+    {
+      section: "source",
+      priority: 6,
+      label: messages.realtime.utmTerm,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.utmTerm?.trim() || unknownLabel}
+        />
+      ),
+    },
+    {
+      section: "source",
+      priority: 7,
+      label: messages.realtime.utmContent,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.utmContent?.trim() || unknownLabel}
+        />
+      ),
+    },
+    {
+      section: "visitor",
+      priority: 10,
       label: messages.common.screenSize,
       value: (
         <RealtimeEventDetailValue
@@ -1462,10 +1686,15 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "visitor",
+      priority: 11,
       label: messages.common.language,
       value: <RealtimeEventDetailValue value={languageLabel} mono />,
     },
     {
+      section: "session",
+      priority: 2,
+      wide: true,
       label: messages.common.organization,
       value: (
         <RealtimeEventDetailValue
@@ -1474,6 +1703,67 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "session",
+      priority: 4,
+      label: messages.realtime.status,
+      value: <RealtimeEventDetailValue value={localizedStatus} />,
+    },
+    {
+      section: "session",
+      priority: 3,
+      label: messages.realtime.visibilityState,
+      value: <RealtimeEventDetailValue value={localizedVisibilityState} />,
+    },
+    {
+      section: "session",
+      priority: 7,
+      label: messages.realtime.duration,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatDetailDuration(event.durationMs, unknownLabel)}
+          mono
+        />
+      ),
+    },
+    {
+      section: "session",
+      priority: 8,
+      label: messages.realtime.durationSource,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.durationSource?.trim() || unknownLabel}
+        />
+      ),
+    },
+    {
+      section: "session",
+      priority: 10,
+      label: messages.realtime.exitReason,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.exitReason?.trim() || unknownLabel}
+        />
+      ),
+    },
+    {
+      section: "session",
+      priority: 9,
+      label: messages.realtime.leaveAt,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatOptionalDetailDateTime(
+            locale,
+            event.leaveAt,
+            timeZone,
+            unknownLabel,
+          )}
+          mono
+        />
+      ),
+    },
+    {
+      section: "geography",
+      priority: 9,
       label: messages.common.latitude,
       value: (
         <RealtimeEventDetailValue
@@ -1483,6 +1773,8 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
     {
+      section: "geography",
+      priority: 10,
       label: messages.common.longitude,
       value: (
         <RealtimeEventDetailValue
@@ -1492,65 +1784,273 @@ function RealtimeLogEventDetailsDialog({
       ),
     },
   ];
-
+  const performanceDetailRows = [
+    {
+      label: messages.performance.ttfb,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatRealtimePerformanceMetric(
+            event.performance,
+            "ttfb",
+            messages,
+            unknownLabel,
+          )}
+          mono
+        />
+      ),
+    },
+    {
+      label: messages.performance.fcp,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatRealtimePerformanceMetric(
+            event.performance,
+            "fcp",
+            messages,
+            unknownLabel,
+          )}
+          mono
+        />
+      ),
+    },
+    {
+      label: messages.performance.lcp,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatRealtimePerformanceMetric(
+            event.performance,
+            "lcp",
+            messages,
+            unknownLabel,
+          )}
+          mono
+        />
+      ),
+    },
+    {
+      label: messages.performance.cls,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatRealtimePerformanceMetric(
+            event.performance,
+            "cls",
+            messages,
+            unknownLabel,
+          )}
+          mono
+        />
+      ),
+    },
+    {
+      label: messages.performance.inp,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatRealtimePerformanceMetric(
+            event.performance,
+            "inp",
+            messages,
+            unknownLabel,
+          )}
+          mono
+        />
+      ),
+    },
+  ];
+  const sortDetailRows = (rows: typeof detailRows) =>
+    rows.sort((left, right) => {
+      const leftPriority = "priority" in left ? left.priority : 0;
+      const rightPriority = "priority" in right ? right.priority : 0;
+      return leftPriority - rightPriority;
+    });
+  const eventDetailRows = sortDetailRows(
+    detailRows.filter((row) => "section" in row && row.section === "event"),
+  );
+  const browsingDetailRows = sortDetailRows(
+    detailRows.filter((row) => "section" in row && row.section === "browsing"),
+  );
+  const visitorDetailRows = sortDetailRows(
+    detailRows
+      .filter((row) => "section" in row && row.section === "visitor")
+      .filter(
+        (row) =>
+          row.label !== messages.realtime.userId ||
+          Boolean(event.userId?.trim()),
+      ),
+  );
+  const sessionDetailRows = sortDetailRows(
+    detailRows.filter((row) => "section" in row && row.section === "session"),
+  );
+  const geographyDetailRows = sortDetailRows(
+    detailRows.filter((row) => "section" in row && row.section === "geography"),
+  );
+  const sourceDetailRows = sortDetailRows(
+    detailRows.filter((row) => "section" in row && row.section === "source"),
+  );
   return (
-    <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
-      <ResponsiveDialogContent
-        className="gap-0 p-0"
-        desktopClassName="max-w-4xl"
-        drawerClassName="overflow-hidden"
-      >
-        <ResponsiveDialogHeader className="border-b px-4 py-4 sm:px-5">
-          <ResponsiveDialogTitle icon={RiPulseLine}>
-            {messages.realtime.detailsTitle}
-          </ResponsiveDialogTitle>
-        </ResponsiveDialogHeader>
-        <ResponsiveDialogBody className="flex flex-col overflow-hidden p-0">
-          <LogStreamScrollbar
-            className="min-h-0 flex-1 max-h-[min(calc(80dvh-5rem),44rem)]"
-            syncKey={event.id}
-          >
-            <div className="space-y-4 p-4 sm:p-5">
-              <RealtimeLogStreamItemCard
-                event={event}
-                locale={locale}
-                messages={messages}
-                now={now}
-                timeZone={timeZone}
+    <Drawer direction="right" open={open} onOpenChange={onOpenChange}>
+      <DrawerContent className="!w-full !max-w-none sm:!w-[min(58vw,34rem)]">
+        <DrawerHeader className="border-b">
+          <div className="flex min-w-0 items-center gap-2">
+            <RiPulseLine className="size-4 shrink-0 text-muted-foreground" />
+            <DrawerTitle>{messages.realtime.detailsTitle}</DrawerTitle>
+          </div>
+          <DrawerDescription>{displayData.title}</DrawerDescription>
+        </DrawerHeader>
+        <DrawerScrollArea
+          className="min-h-0"
+          contentClassName="space-y-4 p-4 sm:p-5"
+          syncKey={event.id}
+        >
+          <div className="space-y-5">
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.realtime.detailsTitle}
+              </h3>
+              <dl className="grid gap-3 sm:grid-cols-2">
+                {eventDetailRows.map((row, index) => (
+                  <RealtimeDetailItem
+                    key={`${row.label}:${index}`}
+                    label={row.label}
+                    value={row.value}
+                  />
+                ))}
+              </dl>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <JsonTreePanel
+                value={event.eventData ?? null}
+                labels={messages.events}
               />
-              <section className="space-y-2">
-                <h3 className="text-sm font-medium text-foreground">
-                  {messages.realtime.detailsSection}
-                </h3>
-                <div className="divide-y divide-border/70 ring-1 ring-foreground/10">
-                  {detailRows.map((row) => (
-                    <RealtimeEventDetailRow
-                      key={row.label}
-                      label={row.label}
-                      value={row.value}
-                    />
-                  ))}
-                </div>
-              </section>
-              <RealtimeVisitorHistorySection
-                locale={locale}
-                messages={messages}
-                now={now}
-                event={event}
-                events={events}
-                visits={visits}
-                timeZone={timeZone}
-              />
-              <RealtimeVisitorLocationMapSection
-                locale={locale}
-                messages={messages}
-                event={event}
-              />
-            </div>
-          </LogStreamScrollbar>
-        </ResponsiveDialogBody>
-      </ResponsiveDialogContent>
-    </ResponsiveDialog>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.realtime.browsingSection}
+              </h3>
+              <dl className="grid gap-3 sm:grid-cols-2">
+                {browsingDetailRows.map((row, index) => (
+                  <RealtimeDetailItem
+                    key={`${row.label}:${index}`}
+                    label={row.label}
+                    value={row.value}
+                    wide={"wide" in row ? row.wide : false}
+                  />
+                ))}
+              </dl>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.navigation.visitors}
+              </h3>
+              <dl className="grid gap-3 sm:grid-cols-2">
+                {visitorDetailRows.map((row, index) => (
+                  <RealtimeDetailItem
+                    key={`${row.label}:${index}`}
+                    label={row.label}
+                    value={row.value}
+                    wide={"wide" in row ? row.wide : false}
+                  />
+                ))}
+              </dl>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.navigation.sessions}
+              </h3>
+              <dl className="grid gap-3 sm:grid-cols-2">
+                {sessionDetailRows.map((row, index) => (
+                  <RealtimeDetailItem
+                    key={`${row.label}:${index}`}
+                    label={row.label}
+                    value={row.value}
+                    wide={"wide" in row ? row.wide : false}
+                  />
+                ))}
+              </dl>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.realtime.geographySection}
+              </h3>
+              <dl className="grid gap-3 sm:grid-cols-2">
+                {geographyDetailRows.map((row, index) => (
+                  <RealtimeDetailItem
+                    key={`${row.label}:${index}`}
+                    label={row.label}
+                    value={row.value}
+                  />
+                ))}
+              </dl>
+            </section>
+
+            <RealtimeVisitorLocationMapSection
+              locale={locale}
+              messages={messages}
+              event={event}
+            />
+
+            <Separator />
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.realtime.sourceSection}
+              </h3>
+              <dl className="grid gap-3 sm:grid-cols-2">
+                {sourceDetailRows.map((row, index) => (
+                  <RealtimeDetailItem
+                    key={`${row.label}:${index}`}
+                    label={row.label}
+                    value={row.value}
+                  />
+                ))}
+              </dl>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">
+                {messages.navigation.performance}
+              </h3>
+              <dl className="grid gap-3 sm:grid-cols-2">
+                {performanceDetailRows.map((row, index) => (
+                  <RealtimeDetailItem
+                    key={`${row.label}:${index}`}
+                    label={row.label}
+                    value={row.value}
+                  />
+                ))}
+              </dl>
+            </section>
+
+            <Separator />
+
+            <RealtimeVisitorHistorySection
+              locale={locale}
+              messages={messages}
+              now={now}
+              event={event}
+              events={events}
+              timeZone={timeZone}
+            />
+          </div>
+        </DrawerScrollArea>
+      </DrawerContent>
+    </Drawer>
   );
 }
 
@@ -1559,7 +2059,6 @@ export function RealtimeLogStreamCard({
   messages,
   hasConnected,
   events,
-  visits,
 }: RealtimeLogStreamCardProps) {
   const { timeZone } = useDashboardQueryControls();
   const reduceLogItemMotion = useReducedMotion() ?? false;
@@ -1607,7 +2106,7 @@ export function RealtimeLogStreamCard({
       Math.min(events.length, previous + LOAD_MORE_STEP),
     );
   }, [events.length, hasMoreEvents]);
-  const handleDialogOpenChange = useCallback((open: boolean) => {
+  const handleEventDetailsOpenChange = useCallback((open: boolean) => {
     if (!open) {
       setSelectedEvent(null);
     }
@@ -1671,16 +2170,15 @@ export function RealtimeLogStreamCard({
           </AutoResizer>
         </CardContent>
       </Card>
-      <RealtimeLogEventDetailsDialog
+      <RealtimeLogEventDetailsDrawer
         event={selectedEvent}
         locale={locale}
         messages={messages}
         now={now}
         timeZone={timeZone}
         events={events}
-        visits={visits}
         open={selectedEvent !== null}
-        onOpenChange={handleDialogOpenChange}
+        onOpenChange={handleEventDetailsOpenChange}
       />
     </>
   );

@@ -328,8 +328,23 @@ export interface AppMessages {
     customEvent: string;
     detailsTitle: string;
     detailsSection: string;
+    browsingSection: string;
+    geographySection: string;
+    sourceSection: string;
+    statusLabels: {
+      active: string;
+      completed: string;
+      open: string;
+      complete: string;
+      hidden_pending: string;
+    };
+    visibilityStateLabels: {
+      visible: string;
+      hidden: string;
+    };
     visitorHistorySection: string;
     visitorHistorySubtitle: string;
+    visitorHistoryRange: string;
     visitorHistoryEmpty: string;
     visitorMapSection: string;
     visitorMapSubtitle: string;
@@ -339,6 +354,42 @@ export interface AppMessages {
     visitId: string;
     eventType: string;
     eventTime: string;
+    eventKind: string;
+    eventName: string;
+    eventId: string;
+    siteId: string;
+    traceId: string;
+    sequence: string;
+    receivedAt: string;
+    startedAt: string;
+    previousVisitId: string;
+    previousVisitStartedAt: string;
+    userId: string;
+    userName: string;
+    isEU: string;
+    queryString: string;
+    utmSource: string;
+    utmMedium: string;
+    utmCampaign: string;
+    utmTerm: string;
+    utmContent: string;
+    browserVersion: string;
+    osVersion: string;
+    userAgent: string;
+    screenWidth: string;
+    screenHeight: string;
+    postalCode: string;
+    metroCode: string;
+    status: string;
+    visibilityState: string;
+    hiddenAt: string;
+    endedAt: string;
+    finalizedAt: string;
+    duration: string;
+    durationSource: string;
+    exitReason: string;
+    leaveAt: string;
+    performanceVisitId: string;
   };
   overview: {
     title: string;
@@ -2654,9 +2705,24 @@ const enMessages = {
     customEvent: "Event",
     detailsTitle: "Event details",
     detailsSection: "Information",
+    browsingSection: "Browsing",
+    geographySection: "Geography",
+    sourceSection: "Source",
+    statusLabels: {
+      active: "Active",
+      completed: "Completed",
+      open: "Open",
+      complete: "Complete",
+      hidden_pending: "Pending hidden",
+    },
+    visibilityStateLabels: {
+      visible: "Visible",
+      hidden: "Hidden",
+    },
     visitorHistorySection: "Visitor activity",
     visitorHistorySubtitle:
       "All records for this visitor in the current realtime window.",
+    visitorHistoryRange: "Activity range",
     visitorHistoryEmpty:
       "No additional records are available for this visitor yet.",
     visitorMapSection: "Visitor location",
@@ -2668,6 +2734,42 @@ const enMessages = {
     visitId: "Visit ID",
     eventType: "Event type",
     eventTime: "Event time",
+    eventKind: "Event kind",
+    eventName: "Event name",
+    eventId: "Event ID",
+    siteId: "Site ID",
+    traceId: "Trace ID",
+    sequence: "Sequence",
+    receivedAt: "Received at",
+    startedAt: "Started at",
+    previousVisitId: "Previous visit ID",
+    previousVisitStartedAt: "Previous visit started at",
+    userId: "User ID",
+    userName: "User name",
+    isEU: "EU visitor",
+    queryString: "Query string",
+    utmSource: "UTM source",
+    utmMedium: "UTM medium",
+    utmCampaign: "UTM campaign",
+    utmTerm: "UTM term",
+    utmContent: "UTM content",
+    browserVersion: "Browser version",
+    osVersion: "OS version",
+    userAgent: "User agent",
+    screenWidth: "Screen width",
+    screenHeight: "Screen height",
+    postalCode: "Postal code",
+    metroCode: "Metro code",
+    status: "Status",
+    visibilityState: "Visibility state",
+    hiddenAt: "Hidden at",
+    endedAt: "Ended at",
+    finalizedAt: "Finalized at",
+    duration: "Duration",
+    durationSource: "Duration source",
+    exitReason: "Exit reason",
+    leaveAt: "Left at",
+    performanceVisitId: "Performance visit ID",
   },
   overview: {
     title: "Traffic Overview",
@@ -5142,8 +5244,23 @@ const zhMessages = {
     customEvent: "事件",
     detailsTitle: "事件详情",
     detailsSection: "信息",
+    browsingSection: "浏览",
+    geographySection: "地理位置",
+    sourceSection: "来源",
+    statusLabels: {
+      active: "活跃",
+      completed: "已完成",
+      open: "进行中",
+      complete: "已完成",
+      hidden_pending: "等待隐藏确认",
+    },
+    visibilityStateLabels: {
+      visible: "可见",
+      hidden: "隐藏",
+    },
     visitorHistorySection: "访客记录",
     visitorHistorySubtitle: "查看该访客在当前实时窗口内的全部访问记录。",
+    visitorHistoryRange: "浏览时间",
     visitorHistoryEmpty: "当前还没有更多该访客的访问记录。",
     visitorMapSection: "访客位置",
     visitorMapSubtitle: "根据当前事件里的经纬度展示该访客的大致位置。",
@@ -5153,6 +5270,42 @@ const zhMessages = {
     visitId: "访问 ID",
     eventType: "事件类型",
     eventTime: "事件时间",
+    eventKind: "事件种类",
+    eventName: "事件名称",
+    eventId: "事件 ID",
+    siteId: "站点 ID",
+    traceId: "追踪 ID",
+    sequence: "序号",
+    receivedAt: "接收时间",
+    startedAt: "开始时间",
+    previousVisitId: "上一次访问 ID",
+    previousVisitStartedAt: "上一次访问开始时间",
+    userId: "用户 ID",
+    userName: "用户名",
+    isEU: "欧盟访客",
+    queryString: "查询字符串",
+    utmSource: "UTM 来源",
+    utmMedium: "UTM 媒介",
+    utmCampaign: "UTM 活动",
+    utmTerm: "UTM 关键词",
+    utmContent: "UTM 内容",
+    browserVersion: "浏览器版本",
+    osVersion: "操作系统版本",
+    userAgent: "User-Agent",
+    screenWidth: "屏幕宽度",
+    screenHeight: "屏幕高度",
+    postalCode: "邮政编码",
+    metroCode: "都会区编码",
+    status: "状态",
+    visibilityState: "可见性状态",
+    hiddenAt: "隐藏时间",
+    endedAt: "结束时间",
+    finalizedAt: "最终确定时间",
+    duration: "持续时间",
+    durationSource: "持续时间来源",
+    exitReason: "退出原因",
+    leaveAt: "离开时间",
+    performanceVisitId: "性能访问 ID",
   },
   overview: {
     title: "访问总览",
@@ -7563,9 +7716,24 @@ const jaMessages = {
     customEvent: "イベント",
     detailsTitle: "イベント詳細",
     detailsSection: "情報",
+    browsingSection: "閲覧",
+    geographySection: "地理位置",
+    sourceSection: "参照元",
+    statusLabels: {
+      active: "アクティブ",
+      completed: "完了",
+      open: "オープン",
+      complete: "完了",
+      hidden_pending: "非表示待ち",
+    },
+    visibilityStateLabels: {
+      visible: "表示",
+      hidden: "非表示",
+    },
     visitorHistorySection: "訪問者アクティビティ",
     visitorHistorySubtitle:
       "現在のリアルタイム範囲における、この訪問者のすべての記録です。",
+    visitorHistoryRange: "閲覧期間",
     visitorHistoryEmpty: "この訪問者の追加記録はまだありません。",
     visitorMapSection: "訪問者の地域",
     visitorMapSubtitle: "このイベントの座標から推定したおおよその地域です。",
@@ -7575,6 +7743,42 @@ const jaMessages = {
     visitId: "訪問 ID",
     eventType: "イベント種別",
     eventTime: "イベント時刻",
+    eventKind: "イベント種別",
+    eventName: "イベント名",
+    eventId: "イベント ID",
+    siteId: "サイト ID",
+    traceId: "トレース ID",
+    sequence: "シーケンス",
+    receivedAt: "受信時刻",
+    startedAt: "開始時刻",
+    previousVisitId: "前回の訪問 ID",
+    previousVisitStartedAt: "前回の訪問開始時刻",
+    userId: "ユーザー ID",
+    userName: "ユーザー名",
+    isEU: "EU の訪問者",
+    queryString: "クエリ文字列",
+    utmSource: "UTM ソース",
+    utmMedium: "UTM メディア",
+    utmCampaign: "UTM キャンペーン",
+    utmTerm: "UTM キーワード",
+    utmContent: "UTM コンテンツ",
+    browserVersion: "ブラウザーのバージョン",
+    osVersion: "OS バージョン",
+    userAgent: "ユーザーエージェント",
+    screenWidth: "画面の幅",
+    screenHeight: "画面の高さ",
+    postalCode: "郵便番号",
+    metroCode: "都市圏コード",
+    status: "ステータス",
+    visibilityState: "表示状態",
+    hiddenAt: "非表示時刻",
+    endedAt: "終了時刻",
+    finalizedAt: "確定時刻",
+    duration: "継続時間",
+    durationSource: "継続時間のソース",
+    exitReason: "退出理由",
+    leaveAt: "離脱時刻",
+    performanceVisitId: "パフォーマンス訪問 ID",
   },
   overview: {
     title: "トラフィック概要",

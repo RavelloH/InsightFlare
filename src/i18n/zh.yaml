@@ -360,8 +360,21 @@ realtime:
   customEvent: 事件
   detailsTitle: 事件详情
   detailsSection: 信息
+  browsingSection: 浏览
+  geographySection: 地理位置
+  sourceSection: 来源
+  statusLabels:
+    active: 活跃
+    completed: 已完成
+    open: 进行中
+    complete: 已完成
+    hidden_pending: 等待隐藏确认
+  visibilityStateLabels:
+    visible: 可见
+    hidden: 隐藏
   visitorHistorySection: 访客记录
   visitorHistorySubtitle: 查看该访客在当前实时窗口内的全部访问记录。
+  visitorHistoryRange: 浏览时间
   visitorHistoryEmpty: 当前还没有更多该访客的访问记录。
   visitorMapSection: 访客位置
   visitorMapSubtitle: 根据当前事件里的经纬度展示该访客的大致位置。
@@ -371,6 +384,42 @@ realtime:
   visitId: 访问 ID
   eventType: 事件类型
   eventTime: 事件时间
+  eventKind: 事件种类
+  eventName: 事件名称
+  eventId: 事件 ID
+  siteId: 站点 ID
+  traceId: 追踪 ID
+  sequence: 序号
+  receivedAt: 接收时间
+  startedAt: 开始时间
+  previousVisitId: 上一次访问 ID
+  previousVisitStartedAt: 上一次访问开始时间
+  userId: 用户 ID
+  userName: 用户名
+  isEU: 欧盟访客
+  queryString: 查询字符串
+  utmSource: UTM 来源
+  utmMedium: UTM 媒介
+  utmCampaign: UTM 活动
+  utmTerm: UTM 关键词
+  utmContent: UTM 内容
+  browserVersion: 浏览器版本
+  osVersion: 操作系统版本
+  userAgent: User-Agent
+  screenWidth: 屏幕宽度
+  screenHeight: 屏幕高度
+  postalCode: 邮政编码
+  metroCode: 都会区编码
+  status: 状态
+  visibilityState: 可见性状态
+  hiddenAt: 隐藏时间
+  endedAt: 结束时间
+  finalizedAt: 最终确定时间
+  duration: 持续时间
+  durationSource: 持续时间来源
+  exitReason: 退出原因
+  leaveAt: 离开时间
+  performanceVisitId: 性能访问 ID
 overview:
   title: 访问总览
   subtitle: 查看核心指标与访问趋势。

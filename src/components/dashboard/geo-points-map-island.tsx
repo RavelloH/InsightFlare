@@ -18,6 +18,7 @@ interface GeoPointsMapIslandProps {
   loading?: boolean;
   emptyLabel?: string;
   heightClassName?: string;
+  initialZoom?: number;
   countryHoverEnabled?: boolean;
   pointColor?: [number, number, number];
   bordered?: boolean;
@@ -47,7 +48,10 @@ type FlatGeoPointsMapProps = Omit<
   | "pointCrossfadeEnabled"
 >;
 
-type GeoPointsMap3DProps = Omit<GeoPointsMapIslandProps, "projectionMode">;
+type GeoPointsMap3DProps = Omit<
+  GeoPointsMapIslandProps,
+  "projectionMode" | "initialZoom"
+>;
 
 const FlatGeoPointsMapClient = createIsomorphicFn()
   .server(() => GeoPointsMapFallback)
@@ -83,6 +87,7 @@ export type { GeoPointsMapCountryCount, GeoPointsMapPoint };
 
 export function GeoPointsMapIsland({
   heightClassName,
+  initialZoom,
   projectionMode = "mercator",
   autoRotate,
   collapseOverlappingPointColors,
@@ -102,7 +107,11 @@ export function GeoPointsMapIsland({
           heightClassName="h-full"
         />
       ) : (
-        <FlatGeoPointsMapClient {...props} heightClassName="h-full" />
+        <FlatGeoPointsMapClient
+          {...props}
+          heightClassName="h-full"
+          initialZoom={initialZoom}
+        />
       )}
     </div>
   );
