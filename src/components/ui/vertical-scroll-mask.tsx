@@ -131,7 +131,7 @@ export function VerticalScrollMask({
   }, [syncKey]);
 
   return (
-    <div className={cn("relative", className)} {...props}>
+    <div className={cn("relative flex min-h-0 flex-col", className)} {...props}>
       <div
         ref={topMaskRef}
         aria-hidden
@@ -158,6 +158,7 @@ export function VerticalScrollMask({
           }
         }}
         className={cn(
+          "min-h-0 flex-1",
           nativeScrollbars ? "overflow-y-auto" : "overflow-hidden",
           contentClassName,
         )}

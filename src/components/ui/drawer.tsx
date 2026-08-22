@@ -180,7 +180,7 @@ function DrawerScrollArea({
   return (
     <VerticalScrollMask
       className={cn("min-h-0 flex-1", className)}
-      contentClassName={cn("h-full min-h-0", contentClassName)}
+      contentClassName={cn("min-h-0", contentClassName)}
       {...props}
     />
   );

@@ -2140,7 +2140,7 @@ export function FilterPanel({
     <div className="flex h-full min-h-0 flex-col">
       <VerticalScrollMask
         className="min-h-0 flex-1"
-        contentClassName="h-full min-h-0 pb-4"
+        contentClassName="min-h-0 pb-4"
       >
         <div className="mb-4 border-b border-border pb-4">
           <Select
