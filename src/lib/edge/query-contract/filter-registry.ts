@@ -83,6 +83,7 @@ export const ANALYTICS_FILTER_FIELD_IDS = [
   "session.exitPath",
   "referrer.domain",
   "referrer.url",
+  "traffic.channel",
   "utm.source",
   "utm.medium",
   "utm.campaign",
@@ -110,7 +111,7 @@ export type AnalyticsFilterFieldId =
   (typeof ANALYTICS_FILTER_FIELD_IDS)[number];
 
 /** Bump when canonical IDs, value kinds, or operator semantics change. */
-export const ANALYTICS_FILTER_REGISTRY_REVISION = "analytics-filter-v1";
+export const ANALYTICS_FILTER_REGISTRY_REVISION = "analytics-filter-v2";
 
 const PUBLIC_AUDIENCES = readonlySet<QueryAudience>([
   "private-dashboard",
@@ -320,6 +321,7 @@ const FIELDS: readonly RegisteredFilterField[] = [
     }),
     profile: "direct-referrer",
   },
+  enumField("traffic.channel", PUBLIC_AUDIENCES),
   text("utm.source", PUBLIC_AUDIENCES),
   text("utm.medium", PUBLIC_AUDIENCES),
   text("utm.campaign", PUBLIC_AUDIENCES),

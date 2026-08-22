@@ -19,6 +19,7 @@ export interface DemoQueryFilters {
   exit?: string;
   sourceDomain?: string;
   sourceLink?: string;
+  channel?: string;
   clientBrowser?: string;
   clientOsVersion?: string;
   clientDeviceType?: string;

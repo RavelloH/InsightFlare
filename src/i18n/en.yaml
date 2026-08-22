@@ -181,6 +181,7 @@ filterBuilder:
     session.exitPath: Exit page
     referrer.domain: Referrer domain
     referrer.url: Referrer URL
+    traffic.channel: Traffic channel
     utm.source: Campaign source
     utm.medium: Campaign medium
     utm.campaign: Campaign name

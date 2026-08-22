@@ -1,3 +1,4 @@
+import { classifyTrafficChannel } from "@/lib/analytics/traffic-channel-rules";
 import { browserEngineLabel } from "@/lib/browser-engine";
 import { dashboardFilterPresentation } from "@/lib/dashboard/filter-state";
 import {
@@ -314,6 +315,13 @@ function filterValueForVisit(field: string, visit: DemoVisitFact): string {
       return visit.referrerHost || DEMO_DIRECT_REFERRER_FILTER_VALUE;
     case "referrer.url":
       return visit.referrerUrl || DEMO_DIRECT_REFERRER_FILTER_VALUE;
+    case "traffic.channel":
+      return classifyTrafficChannel({
+        referrerHost: visit.referrerHost,
+        utmSource: visit.utmSource,
+        utmMedium: visit.utmMedium,
+        utmCampaign: visit.utmCampaign,
+      });
     case "client.browser":
       return visit.browser;
     case "client.browserVersion":

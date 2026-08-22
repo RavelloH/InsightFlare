@@ -47,6 +47,21 @@ function envWithDirectReferrer(): Env {
   return { DB: { prepare: () => statement } } as unknown as Env;
 }
 
+function envWithChannelRows(): Env {
+  const statement = {
+    bind() {
+      return statement;
+    },
+    all: async () => ({
+      results: [
+        { value: "organic_search", views: 7, sessions: 4, visitors: 3 },
+        { value: "social", views: 2, sessions: 2, visitors: 2 },
+      ],
+    }),
+  };
+  return { DB: { prepare: () => statement } } as unknown as Env;
+}
+
 describe("canonical filter value reader", () => {
   it("routes event, referrer, session, and visit fields through their typed sources", async () => {
     const env = envWithRows();
@@ -155,5 +170,19 @@ describe("canonical filter value reader", () => {
         "missing",
       ),
     ).resolves.toEqual([]);
+  });
+
+  it("searches values from the derived traffic channel dimension", async () => {
+    await expect(
+      queryFilterValuesFromD1(
+        envWithChannelRows(),
+        "site-1",
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "traffic.channel",
+        10,
+        "organic",
+      ),
+    ).resolves.toEqual([{ value: "organic_search", occurrences: 7 }]);
   });
 });

@@ -521,11 +521,12 @@ const PAGE_CARD_FILTER_CONTROL_BY_TAB: Record<
   exit: "exit",
 };
 const SOURCE_CARD_FILTER_CONTROL_BY_TAB: Record<
-  Exclude<SourceCardTab, "channel">,
+  SourceCardTab,
   DashboardFilterControlKey
 > = {
   domain: "sourceDomain",
   link: "sourceLink",
+  channel: "channel",
 };
 const CLIENT_DIMENSION_CARD_TABS: ClientDimensionCardTab[] = [
   "browser",
@@ -2480,7 +2481,6 @@ export function OverviewPagesSection({
     [sourceChannelRows, sourceDomainRows, sourceLinkRows],
   );
   const activeSourceCardFilterValue = useMemo(() => {
-    if (sourceCardTab === "channel") return null;
     return (
       dashboardFilterValue(
         filters,
@@ -2786,7 +2786,6 @@ export function OverviewPagesSection({
     next: { tab: SourceCardTab; value: string } | null,
   ) => {
     const activeTab = next?.tab ?? sourceCardTab;
-    if (activeTab === "channel") return;
     const nextFilters = setDashboardFilterValue(
       filters,
       SOURCE_CARD_FILTER_CONTROL_BY_TAB[activeTab],
@@ -3465,9 +3464,8 @@ export function OverviewPagesSection({
                 getActive: (row) =>
                   activeSourceCardFilterValue !== null &&
                   activeSourceCardFilterValue === row.filterValue,
-                getInteractive: (_row, tab) => tab !== "channel",
+                getInteractive: () => true,
                 onClick: (row, { tab }) => {
-                  if (tab === "channel") return;
                   const normalized = row.filterValue.trim();
                   setSourceCardFilter(
                     activeSourceCardFilterValue === normalized

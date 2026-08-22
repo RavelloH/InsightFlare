@@ -1,3 +1,4 @@
+import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
 import { browserEngineCaseSql } from "@/lib/browser-engine";
 
 import {
@@ -81,6 +82,14 @@ function column(compiler: Compiler, name: string): string {
 
 function directColumn(compiler: Compiler, fieldId: string): string {
   if (fieldId === "event.name") return `${compiler.eventAlias}.event_name`;
+  if (fieldId === "traffic.channel") {
+    return buildTrafficChannelSqlExpression({
+      referrerHost: column(compiler, "referrer_host"),
+      utmSource: column(compiler, "utm_source"),
+      utmMedium: column(compiler, "utm_medium"),
+      utmCampaign: column(compiler, "utm_campaign"),
+    });
+  }
   if (fieldId === "client.browserEngine") {
     return browserEngineCaseSql(
       column(compiler, "browser"),

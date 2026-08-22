@@ -21,6 +21,13 @@ export const TRAFFIC_CHANNEL_IDS = [
 export type TrafficChannelId = (typeof TRAFFIC_CHANNEL_IDS)[number];
 export type DiscoveryChannelId = "organic_search" | "social";
 
+export interface TrafficChannelSqlColumns {
+  readonly referrerHost?: string;
+  readonly utmSource?: string;
+  readonly utmMedium?: string;
+  readonly utmCampaign?: string;
+}
+
 export const TRAFFIC_CHANNEL_RULES: Readonly<
   Record<
     DiscoveryChannelId,
@@ -129,6 +136,7 @@ export function buildCombinedDiscoveryFilterDsl(
 export function buildDomainDiscoverySqlPredicate(
   channel: DiscoveryChannelId,
   column = "referrer_host",
+  columns: TrafficChannelSqlColumns = {},
 ): string {
   const rule = TRAFFIC_CHANNEL_RULES[channel];
   const normalizedColumn = `LOWER(TRIM(COALESCE(${column}, '')))`;
@@ -140,19 +148,29 @@ export function buildDomainDiscoverySqlPredicate(
     .join(" OR ")})`;
 
   if (!rule.requiresUntaggedCampaign) return domainExpression;
-  return `${domainExpression} AND ${buildUntaggedCampaignSqlPredicate()}`;
+  return `${domainExpression} AND ${buildUntaggedCampaignSqlPredicate(columns)}`;
 }
 
-export function buildUntaggedCampaignSqlPredicate(): string {
-  return `TRIM(COALESCE(utm_source, '')) = ''
-    AND TRIM(COALESCE(utm_medium, '')) = ''
-    AND TRIM(COALESCE(utm_campaign, '')) = ''`;
+export function buildUntaggedCampaignSqlPredicate(
+  columns: TrafficChannelSqlColumns = {},
+): string {
+  const utmSource = columns.utmSource ?? "utm_source";
+  const utmMedium = columns.utmMedium ?? "utm_medium";
+  const utmCampaign = columns.utmCampaign ?? "utm_campaign";
+  return `TRIM(COALESCE(${utmSource}, '')) = ''
+    AND TRIM(COALESCE(${utmMedium}, '')) = ''
+    AND TRIM(COALESCE(${utmCampaign}, '')) = ''`;
 }
 
-export function buildTaggedCampaignSqlPredicate(): string {
-  return `TRIM(COALESCE(utm_source, '')) != ''
-    OR TRIM(COALESCE(utm_medium, '')) != ''
-    OR TRIM(COALESCE(utm_campaign, '')) != ''`;
+export function buildTaggedCampaignSqlPredicate(
+  columns: TrafficChannelSqlColumns = {},
+): string {
+  const utmSource = columns.utmSource ?? "utm_source";
+  const utmMedium = columns.utmMedium ?? "utm_medium";
+  const utmCampaign = columns.utmCampaign ?? "utm_campaign";
+  return `TRIM(COALESCE(${utmSource}, '')) != ''
+    OR TRIM(COALESCE(${utmMedium}, '')) != ''
+    OR TRIM(COALESCE(${utmCampaign}, '')) != ''`;
 }
 
 export const UTM_CHANNEL_MEDIUMS = {
@@ -182,6 +200,41 @@ export function buildUtmMediumSqlPredicate(
   return `(${UTM_CHANNEL_MEDIUMS[channel]
     .map((medium) => `${normalizedColumn}=LOWER('${medium}')`)
     .join(" OR ")})`;
+}
+
+/**
+ * Builds the derived channel expression for a visit row. Callers may provide
+ * qualified columns so the same precedence can be used in filters and
+ * aggregates without duplicating the classification logic.
+ */
+export function buildTrafficChannelSqlExpression(
+  columns: TrafficChannelSqlColumns = {},
+): string {
+  const referrerHost = columns.referrerHost ?? "referrer_host";
+  const utmMedium = columns.utmMedium ?? "utm_medium";
+  const mappedMediums = (
+    Object.keys(UTM_CHANNEL_MEDIUMS) as Array<keyof typeof UTM_CHANNEL_MEDIUMS>
+  )
+    .map(
+      (channel) =>
+        `WHEN ${buildUtmMediumSqlPredicate(channel, utmMedium)} THEN '${channel}'`,
+    )
+    .join("\n    ");
+
+  return `CASE
+    WHEN ${buildDomainDiscoverySqlPredicate(
+      "organic_search",
+      referrerHost,
+      columns,
+    )} THEN 'organic_search'
+    WHEN ${buildDomainDiscoverySqlPredicate("social", referrerHost, columns)} THEN 'social'
+    ${mappedMediums}
+    WHEN ${buildTaggedCampaignSqlPredicate(columns)} THEN 'campaign'
+    WHEN TRIM(COALESCE(${referrerHost}, '')) != '' THEN 'referral'
+    WHEN ${buildUntaggedCampaignSqlPredicate(columns)}
+      AND TRIM(COALESCE(${referrerHost}, '')) = '' THEN 'direct'
+    ELSE 'other'
+  END`;
 }
 
 export interface TrafficChannelAttributionInput {

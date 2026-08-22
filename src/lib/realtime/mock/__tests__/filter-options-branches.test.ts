@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as FactBuilder from "@/lib/realtime/mock/fact-builder";
-import { generateDemoFilterOptions } from "@/lib/realtime/mock/filter-options";
+import {
+  generateDemoFilterOptions,
+  generateDemoFilterValues,
+} from "@/lib/realtime/mock/filter-options";
 
 const {
   mockAggregateDimensionRowsFromVisits,
@@ -113,6 +116,27 @@ describe("generateDemoFilterOptions branch coverage", () => {
       200,
       { includeFullUrl: true, directValue: "" },
     );
+  });
+
+  it("searches demo values for the derived traffic channel field", () => {
+    mockApplyDemoFilters.mockReturnValue({
+      visits: [
+        { referrerHost: "www.google.com", referrerUrl: "" },
+        { referrerHost: "", referrerUrl: "", utmMedium: "cpc" },
+      ],
+      sessions: new Set(),
+      visitors: new Set(),
+      visitsBySession: new Map(),
+    });
+
+    expect(
+      generateDemoFilterValues(SITE_ID, {
+        filterKey: "traffic.channel",
+        search: "organic",
+      }).data,
+    ).toEqual([
+      { value: "organic_search", label: "organic_search", occurrences: 1 },
+    ]);
   });
 
   it("handles missing client tabs and sparse client labels", () => {

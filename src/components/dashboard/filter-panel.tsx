@@ -626,6 +626,7 @@ const FILTER_FIELD_GROUPS: readonly {
   {
     key: "campaign",
     fieldIds: [
+      "traffic.channel",
       "utm.source",
       "utm.medium",
       "utm.campaign",

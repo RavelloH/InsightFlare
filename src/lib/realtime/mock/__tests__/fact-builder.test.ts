@@ -112,6 +112,41 @@ describe("mock/fact-builder", () => {
       );
     });
 
+    it("filters demo visits by the same derived channel classification", () => {
+      const dataset = emptyDemoFactDataset(0, 1);
+      dataset.visits.push(
+        makeVisit({
+          visitId: "organic",
+          referrerHost: "www.google.com",
+        }),
+        makeVisit({
+          visitId: "paid",
+          utmSource: "google",
+          utmMedium: "cpc",
+        }),
+        makeVisit({
+          visitId: "other",
+          utmMedium: "unknown",
+        }),
+      );
+
+      expect(
+        applyDemoFilters(dataset, { channel: "organic_search" }).visits.map(
+          (visit) => visit.visitId,
+        ),
+      ).toEqual(["organic"]);
+      expect(
+        applyDemoFilters(dataset, { channel: "paid_search" }).visits.map(
+          (visit) => visit.visitId,
+        ),
+      ).toEqual(["paid"]);
+      expect(
+        applyDemoFilters(dataset, { channel: "other" }).visits.map(
+          (visit) => visit.visitId,
+        ),
+      ).toEqual(["other"]);
+    });
+
     it("adapts long-window sampling while preserving weighted metrics", () => {
       DEMO_FACT_DATASET_CACHE.clear();
       const to = Date.now();

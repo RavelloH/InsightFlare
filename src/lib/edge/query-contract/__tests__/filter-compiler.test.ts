@@ -13,6 +13,23 @@ function document(root: unknown) {
 }
 
 describe("filter SQL compiler", () => {
+  it("compiles traffic channel filters from the shared attribution expression", () => {
+    const result = compileFilterDocument(
+      document({
+        kind: "condition",
+        target: { kind: "field", field: "traffic.channel" },
+        operator: "eq",
+        value: "organic_search",
+      }),
+      { alias: "vs" },
+    );
+
+    expect(result.clause).toContain("vs.referrer_host");
+    expect(result.clause).toContain("vs.utm_medium");
+    expect(result.clause).toContain("= ?");
+    expect(result.bindings).toEqual(["organic_search"]);
+  });
+
   it("matches strict root-or-subdomain predicates with generic JSON-bound OR sets", () => {
     const database = new DatabaseSync(":memory:");
     try {

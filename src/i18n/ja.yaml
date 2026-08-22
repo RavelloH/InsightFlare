@@ -181,6 +181,7 @@ filterBuilder:
     session.exitPath: 出口ページ
     referrer.domain: リファラードメイン
     referrer.url: リファラー URL
+    traffic.channel: トラフィックチャネル
     utm.source: キャンペーンソース
     utm.medium: キャンペーンメディア
     utm.campaign: キャンペーン名

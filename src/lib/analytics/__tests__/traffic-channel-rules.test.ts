@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDomainDiscoveryFilterDsl,
   buildDomainDiscoverySqlPredicate,
+  buildTrafficChannelSqlExpression,
   buildUtmMediumSqlPredicate,
   classifyTrafficChannel,
 } from "@/lib/analytics/traffic-channel-rules";
@@ -33,6 +34,22 @@ describe("traffic channel rules", () => {
     expect(buildUtmMediumSqlPredicate("paid_social")).toContain(
       "'paid_social'",
     );
+  });
+
+  it("supports qualified columns for derived channel filters", () => {
+    const sql = buildTrafficChannelSqlExpression({
+      referrerHost: "vs.referrer_host",
+      utmSource: "vs.utm_source",
+      utmMedium: "vs.utm_medium",
+      utmCampaign: "vs.utm_campaign",
+    });
+
+    expect(sql).toContain("vs.referrer_host");
+    expect(sql).toContain("vs.utm_source");
+    expect(sql).toContain("vs.utm_medium");
+    expect(sql).toContain("vs.utm_campaign");
+    expect(sql).toContain("THEN 'organic_search'");
+    expect(sql).toContain("THEN 'other'");
   });
 
   it("classifies discovery, tagged, referral, and direct visits", () => {

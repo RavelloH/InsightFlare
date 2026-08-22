@@ -181,6 +181,7 @@ filterBuilder:
     session.exitPath: 出口页面
     referrer.domain: 来源域名
     referrer.url: 来源 URL
+    traffic.channel: 流量渠道
     utm.source: 活动来源
     utm.medium: 活动媒介
     utm.campaign: 活动名称

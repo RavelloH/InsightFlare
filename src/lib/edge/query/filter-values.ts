@@ -1,3 +1,4 @@
+import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
 import {
   analyticsFilterDefinition,
   type FilterDocument,
@@ -94,6 +95,16 @@ export async function queryFilterValuesFromD1(
       field === "session.entryPath" ? "entry" : "exit",
       undefined,
       search,
+    );
+  } else if (field === "traffic.channel") {
+    rows = await queryDimensionFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      readLimit,
+      buildTrafficChannelSqlExpression(),
+      { excludeEmpty: true, search },
     );
   } else {
     const dimension = resolveCrossBreakdownDimension(field);

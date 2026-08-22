@@ -278,6 +278,7 @@ describe("dashboard query-state helpers", () => {
         exit: "/pricing",
         sourceDomain: "google.com",
         sourceLink: "https://google.com/search",
+        channel: "organic_search",
         clientBrowser: "Chrome",
         clientOsVersion: "macOS 15",
         clientDeviceType: "Desktop",
@@ -299,6 +300,9 @@ describe("dashboard query-state helpers", () => {
       );
       expect(url.searchParams.get("filter[geo.organization]")).toBe(
         "Example ISP",
+      );
+      expect(url.searchParams.get("filter[traffic.channel]")).toBe(
+        "organic_search",
       );
     });
 

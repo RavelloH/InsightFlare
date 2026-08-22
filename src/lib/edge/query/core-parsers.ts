@@ -200,6 +200,7 @@ export function parseFilterOptionKey(url: URL): FilterOptionKey | null {
     "session.exitPath",
     "referrer.domain",
     "referrer.url",
+    "traffic.channel",
     "client.osVersion",
     "client.language",
     "client.screenSize",

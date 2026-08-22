@@ -1,4 +1,8 @@
 import {
+  classifyTrafficChannel,
+  type TrafficChannelId,
+} from "@/lib/analytics/traffic-channel-rules";
+import {
   DEMO_DIRECT_REFERRER_FILTER_VALUE,
   parseDemoGeoFilterValue,
 } from "@/lib/realtime/mock/filters";
@@ -32,8 +36,21 @@ export function applyDemoFilters(
   const equalsTrimmed = (left: string, right: string) => left.trim() === right;
   const equalsCaseInsensitive = (left: string, right: string) =>
     left.trim().toLowerCase() === right.toLowerCase();
+  const channel = filters.channel?.trim().toLowerCase() as
+    | TrafficChannelId
+    | undefined;
 
   for (const visit of dataset.visits) {
+    if (
+      channel &&
+      classifyTrafficChannel({
+        referrerHost: visit.referrerHost,
+        utmSource: visit.utmSource,
+        utmMedium: visit.utmMedium,
+        utmCampaign: visit.utmCampaign,
+      }) !== channel
+    )
+      continue;
     if (
       filters.country &&
       !equalsCaseInsensitive(visit.country, filters.country)

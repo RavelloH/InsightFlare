@@ -1,9 +1,6 @@
 import {
-  buildDomainDiscoverySqlPredicate,
-  buildTaggedCampaignSqlPredicate,
-  buildUtmMediumSqlPredicate,
+  buildTrafficChannelSqlExpression,
   type TrafficChannelId,
-  UTM_CHANNEL_MEDIUMS,
 } from "@/lib/analytics/traffic-channel-rules";
 import type { Env } from "@/lib/edge/types";
 
@@ -29,27 +26,7 @@ export interface ChannelAggregateRow {
  * shared traffic-channel rules module; do not duplicate those lists here.
  */
 export function buildTrafficChannelCaseSql(): string {
-  const mappedMediums = (
-    Object.keys(UTM_CHANNEL_MEDIUMS) as Array<keyof typeof UTM_CHANNEL_MEDIUMS>
-  )
-    .map(
-      (channel) =>
-        `WHEN ${buildUtmMediumSqlPredicate(channel)} THEN '${channel}'`,
-    )
-    .join("\n    ");
-
-  return `CASE
-    WHEN ${buildDomainDiscoverySqlPredicate("organic_search")} THEN 'organic_search'
-    WHEN ${buildDomainDiscoverySqlPredicate("social")} THEN 'social'
-    ${mappedMediums}
-    WHEN ${buildTaggedCampaignSqlPredicate()} THEN 'campaign'
-    WHEN TRIM(COALESCE(referrer_host, '')) != '' THEN 'referral'
-    WHEN TRIM(COALESCE(utm_source, '')) = ''
-      AND TRIM(COALESCE(utm_medium, '')) = ''
-      AND TRIM(COALESCE(utm_campaign, '')) = ''
-      AND TRIM(COALESCE(referrer_host, '')) = '' THEN 'direct'
-    ELSE 'other'
-  END`;
+  return buildTrafficChannelSqlExpression();
 }
 
 export async function queryChannelsFromD1(
