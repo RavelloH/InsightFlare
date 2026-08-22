@@ -17,6 +17,7 @@ import {
   weightedSessionCount,
   weightedVisitorCount,
 } from "@/lib/realtime/mock/fact-builder";
+import { computeMetrics } from "@/lib/realtime/mock/site-curves";
 import type {
   DemoFactDataset,
   DemoFilteredFacts,
@@ -81,6 +82,67 @@ describe("mock/fact-builder", () => {
           dataset.visits[i - 1].startedAt,
         );
       }
+    });
+
+    it("adapts long-window sampling while preserving weighted metrics", () => {
+      DEMO_FACT_DATASET_CACHE.clear();
+      const to = Date.now();
+      const thirtyDayFrom = to - 30 * DAY_MS;
+      const ninetyDayFrom = to - 90 * DAY_MS;
+      const thirtyDayMetrics = computeMetrics(SITE_ID, thirtyDayFrom, to);
+      const ninetyDayMetrics = computeMetrics(SITE_ID, ninetyDayFrom, to);
+      const thirtyDay = buildDemoFactDataset(SITE_ID, thirtyDayFrom, to);
+      const ninetyDay = buildDemoFactDataset(SITE_ID, ninetyDayFrom, to);
+
+      const originalThirtyDayTarget = Math.max(
+        320,
+        Math.min(
+          12_000,
+          Math.round(Math.sqrt(thirtyDayMetrics.views + 1) * 46),
+        ),
+      );
+      const originalNinetyDayTarget = Math.max(
+        320,
+        Math.min(
+          12_000,
+          Math.round(Math.sqrt(ninetyDayMetrics.views + 1) * 46),
+        ),
+      );
+      expect(thirtyDay.visits.length).toBe(
+        Math.max(1, Math.min(thirtyDayMetrics.views, originalThirtyDayTarget)),
+      );
+      expect(ninetyDay.visits.length).toBeGreaterThan(0);
+      expect(ninetyDay.visits.length).toBeLessThan(thirtyDay.visits.length);
+      expect(ninetyDay.visits.length).toBeLessThan(originalNinetyDayTarget);
+      expect(
+        new Set(ninetyDay.visits.map((visit) => visit.pathname)).size,
+      ).toBeGreaterThan(1);
+      expect(
+        new Set(ninetyDay.visits.map((visit) => visit.country)).size,
+      ).toBeGreaterThan(1);
+      expect(ninetyDay.viewWeight).toBeGreaterThan(0);
+      expect(
+        [...ninetyDay.sessions.values()].every(
+          (session) => Number.isFinite(session.weight) && session.weight > 0,
+        ),
+      ).toBe(true);
+      expect(
+        [...ninetyDay.visitors.values()].every(
+          (visitor) => Number.isFinite(visitor.weight) && visitor.weight > 0,
+        ),
+      ).toBe(true);
+
+      const aggregated = aggregateOverviewMetrics(
+        ninetyDay,
+        applyDemoFilters(ninetyDay, {}),
+      );
+      expect(aggregated.views).toBe(ninetyDayMetrics.views);
+      expect(aggregated.sessions).toBe(ninetyDayMetrics.sessions);
+      expect(aggregated.visitors).toBe(ninetyDayMetrics.visitors);
+      expect(
+        Math.abs(aggregated.totalDurationMs - ninetyDayMetrics.totalDurationMs),
+      ).toBeLessThan(10_000);
+      expect(aggregated.bounceRate).toBeCloseTo(ninetyDayMetrics.bounceRate, 2);
     });
 
     it("caches results", () => {

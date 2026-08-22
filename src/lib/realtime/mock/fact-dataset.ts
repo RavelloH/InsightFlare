@@ -25,7 +25,7 @@ import {
 } from "@/lib/realtime/mock/path-markov";
 import {
   computeMetrics,
-  sampleTimestampByCurve,
+  createTimestampCurveSampler,
   siteRatios,
 } from "@/lib/realtime/mock/site-curves";
 import type {
@@ -40,6 +40,29 @@ import {
 } from "@/lib/realtime/mock/visitor-pool";
 
 export const DEMO_FACT_DATASET_CACHE = new Map<string, DemoFactDataset>();
+
+const DEMO_DAY_MS = 86_400_000;
+const MIN_SAMPLED_VIEWS = 320;
+const MAX_SAMPLED_VIEWS = 12_000;
+const LONG_WINDOW_START_DAYS = 30;
+const LONG_WINDOW_MIN_CAP = 4_000;
+const LONG_WINDOW_CAP_POWER = 1;
+
+function sampledViewsCapForWindow(from: number, to: number): number {
+  const windowDays = Math.max(1, (to - from) / DEMO_DAY_MS);
+  if (windowDays <= LONG_WINDOW_START_DAYS) return MAX_SAMPLED_VIEWS;
+
+  return Math.max(
+    LONG_WINDOW_MIN_CAP,
+    Math.min(
+      MAX_SAMPLED_VIEWS,
+      Math.round(
+        MAX_SAMPLED_VIEWS *
+          Math.pow(LONG_WINDOW_START_DAYS / windowDays, LONG_WINDOW_CAP_POWER),
+      ),
+    ),
+  );
+}
 
 export function buildDemoPathTitleMap(
   profile: DemoSiteProfile,
@@ -98,9 +121,10 @@ export function buildDemoFactDataset(
   }
 
   const rng = createDemoRng(siteId, `facts:${bucket}`);
+  const sampledViewsCap = sampledViewsCapForWindow(from, to);
   const sampledViewsTarget = Math.max(
-    320,
-    Math.min(12_000, Math.round(Math.sqrt(metrics.views + 1) * 46)),
+    MIN_SAMPLED_VIEWS,
+    Math.min(sampledViewsCap, Math.round(Math.sqrt(metrics.views + 1) * 46)),
   );
   const sampledViews = Math.max(1, Math.min(metrics.views, sampledViewsTarget));
   const sampledSessionsRaw = Math.round(
@@ -195,6 +219,7 @@ export function buildDemoFactDataset(
 
   const sessions = new Map<string, DemoSessionFact>();
   const visits: DemoVisitFact[] = [];
+  const sampleTimestamp = createTimestampCurveSampler(siteId, from, to);
 
   for (
     let sessionIndex = 0;
@@ -248,7 +273,7 @@ export function buildDemoFactDataset(
       : `https://${referrerHost}/${pickFromList(rng, ["search", "r", "ref", "posts", "share"], "search")}/${keyword}`;
 
     // C1 方案 — 反 CDF 时间采样,会话起点按昼夜曲线分布。
-    let cursor = sampleTimestampByCurve(siteId, from, to, rng);
+    let cursor = sampleTimestamp(rng);
     let previousPath = "";
     let entryPath = "/";
     let exitPath = "/";

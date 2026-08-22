@@ -286,6 +286,179 @@ export function demoIntervalStepMs(interval: string): number {
   }
 }
 
+export interface TimestampCurveDistribution {
+  from: number;
+  to: number;
+  bucketMs: number;
+  cumulative: number[];
+  totalWeight: number;
+}
+
+/**
+ * Build the bucketed inverse-CDF used for timestamp sampling once per window.
+ * The resulting distribution is independent of the caller's RNG, so it can
+ * be reused for every session in a dataset.
+ */
+export function buildTimestampCurveDistribution(
+  siteId: string,
+  from: number,
+  to: number,
+): TimestampCurveDistribution | null {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+    return null;
+  }
+
+  const span = to - from;
+  if (span <= 0) return null;
+
+  const HOUR_MS = 3600000;
+  const DAY_H = 24;
+  const hp = findSiteProfile(siteId).hourProfile;
+  const dayInt = siteDayIntegral(siteId);
+
+  // Aim for ~10-min buckets, but cap so we never explode for huge windows.
+  const desiredBuckets = Math.min(
+    256,
+    Math.max(8, Math.ceil(span / (10 * 60_000))),
+  );
+  const bucketMs = span / desiredBuckets;
+
+  // Precompute one daily prefix sum. Without this, a long window would walk
+  // every day once per bucket (256 × ~20,000 days for an epoch-to-now
+  // request), which is enough to hit a Worker CPU limit before sampling even
+  // starts. A day contributes its full daily view count because the hourly
+  // curve is normalized by `dayInt`.
+  const fromH = from / HOUR_MS;
+  const toH = to / HOUR_MS;
+  const firstDay = Math.floor(fromH / DAY_H);
+  const lastDay = Math.floor((toH - 1e-9) / DAY_H);
+  const dayCount = Math.max(0, lastDay - firstDay + 1);
+  const dailyPrefix = new Float64Array(dayCount + 1);
+  for (let offset = 0; offset < dayCount; offset += 1) {
+    const dayWeight = Math.max(0, dailyViewCount(siteId, firstDay + offset));
+    dailyPrefix[offset + 1] = dailyPrefix[offset] + dayWeight;
+  }
+
+  const daySectionWeight = (day: number, h1: number, h2: number) => {
+    if (h1 >= h2) return 0;
+    const index = day - firstDay;
+    const dayWeight =
+      index >= 0 && index < dayCount
+        ? dailyPrefix[index + 1] - dailyPrefix[index]
+        : 0;
+    return (
+      (dayWeight *
+        siteHourShapeIntegral(
+          h1,
+          h2,
+          hp.riseHour,
+          hp.activeWidth,
+          hp.baseLevel,
+        )) /
+      dayInt
+    );
+  };
+
+  const fullDayRangeWeight = (startDay: number, endDay: number) => {
+    if (startDay > endDay) return 0;
+    const startIndex = startDay - firstDay;
+    const endIndex = endDay - firstDay;
+    return dailyPrefix[endIndex + 1] - dailyPrefix[startIndex];
+  };
+
+  let totalWeight = 0;
+  const cumulative: number[] = new Array(desiredBuckets);
+  for (let i = 0; i < desiredBuckets; i += 1) {
+    const segFrom = from + i * bucketMs;
+    const segTo = segFrom + bucketMs;
+    const segFromH = segFrom / HOUR_MS;
+    const segToH = segTo / HOUR_MS;
+    const segFromDay = Math.floor(segFromH / DAY_H);
+    const segToDay = Math.floor((segToH - 1e-9) / DAY_H);
+    let weight = 0;
+    if (segFromDay === segToDay) {
+      const dayStartH = segFromDay * DAY_H;
+      weight = daySectionWeight(
+        segFromDay,
+        Math.max(segFromH - dayStartH, 0),
+        Math.min(segToH - dayStartH, DAY_H),
+      );
+    } else {
+      const firstDayStartH = segFromDay * DAY_H;
+      weight += daySectionWeight(
+        segFromDay,
+        Math.max(segFromH - firstDayStartH, 0),
+        DAY_H,
+      );
+      weight += fullDayRangeWeight(segFromDay + 1, segToDay - 1);
+      const lastDayStartH = segToDay * DAY_H;
+      weight += daySectionWeight(
+        segToDay,
+        0,
+        Math.min(segToH - lastDayStartH, DAY_H),
+      );
+    }
+    totalWeight += Math.max(0, weight);
+    cumulative[i] = totalWeight;
+  }
+
+  return { from, to, bucketMs, cumulative, totalWeight };
+}
+
+function sampleTimestampFromDistribution(
+  distribution: TimestampCurveDistribution,
+  rng: () => number,
+): number {
+  const { from, to, bucketMs, cumulative, totalWeight } = distribution;
+  const span = to - from;
+
+  if (totalWeight <= 0) {
+    return clampTimestampToWindow(from + Math.floor(rng() * span), from, to);
+  }
+
+  const hit = rng() * totalWeight;
+  // Find the first cumulative weight at or above the hit in O(log N).
+  let low = 0;
+  let high = cumulative.length - 1;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (hit <= (cumulative[middle] ?? 0)) {
+      high = middle;
+    } else {
+      low = middle + 1;
+    }
+  }
+  const bucketStart = from + low * bucketMs;
+  return clampTimestampToWindow(bucketStart + rng() * bucketMs, from, to);
+}
+
+function clampTimestampToWindow(value: number, from: number, to: number) {
+  if (value <= from) return from;
+  if (value >= to) {
+    if (Number.isInteger(from) && Number.isInteger(to)) {
+      return Math.max(from, to - 1);
+    }
+    return Math.max(
+      from,
+      to - Math.max(Number.EPSILON, Math.abs(to) * Number.EPSILON),
+    );
+  }
+  return value;
+}
+
+/** Create a reusable timestamp sampler for a single site/window pair. */
+export function createTimestampCurveSampler(
+  siteId: string,
+  from: number,
+  to: number,
+): (rng: () => number) => number {
+  const distribution = buildTimestampCurveDistribution(siteId, from, to);
+  return (rng: () => number) => {
+    if (!distribution) return from;
+    return sampleTimestampFromDistribution(distribution, rng);
+  };
+}
+
 /**
  * Sample a timestamp in [from, to) following the site's day/hour traffic
  * curve. Uses inverse-CDF sampling over N buckets — each bucket's weight is
@@ -301,67 +474,7 @@ export function sampleTimestampByCurve(
   to: number,
   rng: () => number,
 ): number {
-  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
-    return from;
-  }
-  const span = to - from;
-  if (span <= 0) return from;
-
-  const HOUR_MS = 3600000;
-  const DAY_H = 24;
-  const hp = findSiteProfile(siteId).hourProfile;
-  const dayInt = siteDayIntegral(siteId);
-
-  // Aim for ~10-min buckets, but cap so we never explode for huge windows.
-  const desiredBuckets = Math.min(
-    256,
-    Math.max(8, Math.ceil(span / (10 * 60_000))),
-  );
-  const bucketMs = span / desiredBuckets;
-
-  let totalWeight = 0;
-  const cumulative: number[] = new Array(desiredBuckets);
-  for (let i = 0; i < desiredBuckets; i += 1) {
-    const segFrom = from + i * bucketMs;
-    const segTo = segFrom + bucketMs;
-    const segFromH = segFrom / HOUR_MS;
-    const segToH = segTo / HOUR_MS;
-    const segFromDay = Math.floor(segFromH / DAY_H);
-    const segToDay = Math.floor((segToH - 1e-9) / DAY_H);
-    let weight = 0;
-    for (let d = segFromDay; d <= segToDay; d += 1) {
-      const dayStartH = d * DAY_H;
-      const h1 = Math.max(segFromH - dayStartH, 0);
-      const h2 = Math.min(segToH - dayStartH, DAY_H);
-      if (h1 >= h2) continue;
-      weight +=
-        (dailyViewCount(siteId, d) *
-          siteHourShapeIntegral(
-            h1,
-            h2,
-            hp.riseHour,
-            hp.activeWidth,
-            hp.baseLevel,
-          )) /
-        dayInt;
-    }
-    totalWeight += Math.max(0, weight);
-    cumulative[i] = totalWeight;
-  }
-
-  if (totalWeight <= 0) {
-    return from + Math.floor(rng() * span);
-  }
-
-  const hit = rng() * totalWeight;
-  // Linear scan — buckets are at most 256 so this is negligible.
-  let bucketIndex = desiredBuckets - 1;
-  for (let i = 0; i < desiredBuckets; i += 1) {
-    if (hit <= (cumulative[i] ?? 0)) {
-      bucketIndex = i;
-      break;
-    }
-  }
-  const bucketStart = from + bucketIndex * bucketMs;
-  return Math.min(to - 1, Math.max(from, bucketStart + rng() * bucketMs));
+  const distribution = buildTimestampCurveDistribution(siteId, from, to);
+  if (!distribution) return from;
+  return sampleTimestampFromDistribution(distribution, rng);
 }

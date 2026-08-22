@@ -255,10 +255,21 @@ export function findDemoTimeBucketIndex(
   buckets: DemoTimeBucket[],
   timestampMs: number,
 ): number | null {
-  const bucket = buckets.find(
-    (item) => timestampMs >= item.fromMs && timestampMs < item.toMs,
-  );
-  return bucket?.index ?? null;
+  let low = 0;
+  let high = buckets.length - 1;
+  while (low <= high) {
+    const middle = low + Math.floor((high - low) / 2);
+    const bucket = buckets[middle];
+    if (!bucket) break;
+    if (timestampMs < bucket.fromMs) {
+      high = middle - 1;
+    } else if (timestampMs >= bucket.toMs) {
+      low = middle + 1;
+    } else {
+      return bucket.index;
+    }
+  }
+  return null;
 }
 
 export function buildDemoTrendBuckets(

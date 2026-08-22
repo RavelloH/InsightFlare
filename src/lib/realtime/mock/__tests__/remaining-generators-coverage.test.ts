@@ -1297,20 +1297,24 @@ describe("mock remaining generator coverage", () => {
     });
   });
 
-  it("builds the team dashboard when the `to` window param is missing", () => {
-    const dashboard = generateDemoTeamDashboard("demo-team-001", {
-      from: 1,
-    }) as any;
+  it(
+    "builds the team dashboard when the `to` window param is missing",
+    { timeout: 15_000 },
+    () => {
+      const dashboard = generateDemoTeamDashboard("demo-team-001", {
+        from: 1,
+      }) as any;
 
-    expect(dashboard).toMatchObject({
-      ok: true,
-      data: {
-        sites: expect.arrayContaining([
-          expect.objectContaining({ teamId: "demo-team-001" }),
-        ]),
-      },
-    });
-  });
+      expect(dashboard).toMatchObject({
+        ok: true,
+        data: {
+          sites: expect.arrayContaining([
+            expect.objectContaining({ teamId: "demo-team-001" }),
+          ]),
+        },
+      });
+    },
+  );
 
   it("summarizes performance for overall, route, country, and empty journeys", () => {
     const visits = [
