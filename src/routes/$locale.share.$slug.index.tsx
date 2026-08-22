@@ -19,6 +19,7 @@ function Page() {
       siteId={c.publicSiteId}
       siteDomain={c.site.domain}
       pathname={sharePath(locale, slug)}
+      showSourceLinkTab={false}
     />
   );
 }

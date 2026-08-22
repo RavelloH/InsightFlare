@@ -2431,7 +2431,7 @@ const enMessages = {
     fieldGroups: {
       page: "Page",
       session: "Session",
-      referrer: "Referrer",
+      referrer: "Sources & channels",
       campaign: "Campaign",
       client: "Client",
       geography: "Geography",
@@ -4925,7 +4925,7 @@ const zhMessages = {
     fieldGroups: {
       page: "页面",
       session: "会话",
-      referrer: "来源",
+      referrer: "来源与渠道",
       campaign: "营销活动",
       client: "客户端",
       geography: "地理位置",
@@ -7337,7 +7337,7 @@ const jaMessages = {
     fieldGroups: {
       page: "ページ",
       session: "セッション",
-      referrer: "リファラー",
+      referrer: "参照元とチャネル",
       campaign: "キャンペーン",
       client: "クライアント",
       geography: "地域",

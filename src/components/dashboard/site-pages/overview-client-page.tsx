@@ -124,6 +124,7 @@ interface OverviewClientPageProps {
   siteId: string;
   siteDomain: string;
   pathname: string;
+  showSourceLinkTab?: boolean;
 }
 
 function toDeltaPercent(current: number, previous: number): number | null {
@@ -1833,6 +1834,7 @@ export function OverviewPagesSection({
   loading = false,
   cardDataOverride,
   visibleCards,
+  showSourceLinkTab = true,
   pageCardTabs,
   pageCardTabMetaOverride,
   pageCardFilterEnabledOverride,
@@ -1908,12 +1910,14 @@ export function OverviewPagesSection({
       resolvedSourceCardTabData.channel !== undefined ||
       Boolean(sourceCardFetchers?.channel) ||
       (!hasCardDataOverride && !sourceCardFetchers);
-    return hasChannelData
+    const tabs = hasChannelData
       ? SOURCE_CARD_TABS
       : SOURCE_CARD_TABS.filter((tab) => tab !== "channel");
+    return showSourceLinkTab ? tabs : tabs.filter((tab) => tab !== "link");
   }, [
     hasCardDataOverride,
     resolvedSourceCardTabData.channel,
+    showSourceLinkTab,
     sourceCardFetchers,
   ]);
   const resolvedClientDimensionCardTabData =
@@ -4067,6 +4071,7 @@ export function OverviewClientPage({
   siteId,
   siteDomain,
   pathname,
+  showSourceLinkTab,
 }: OverviewClientPageProps) {
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
@@ -4138,6 +4143,7 @@ export function OverviewClientPage({
         siteDomain={siteDomain}
         pathname={pathname}
         filters={requestFilters}
+        showSourceLinkTab={showSourceLinkTab}
       />
       <OverviewGeoPointsMapCard
         locale={locale}

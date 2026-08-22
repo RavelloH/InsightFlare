@@ -166,7 +166,7 @@ filterBuilder:
   fieldGroups:
     page: Page
     session: Session
-    referrer: Referrer
+    referrer: Sources & channels
     campaign: Campaign
     client: Client
     geography: Geography

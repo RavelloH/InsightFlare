@@ -166,7 +166,7 @@ filterBuilder:
   fieldGroups:
     page: ページ
     session: セッション
-    referrer: リファラー
+    referrer: 参照元とチャネル
     campaign: キャンペーン
     client: クライアント
     geography: 地域

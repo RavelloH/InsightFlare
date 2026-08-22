@@ -166,7 +166,7 @@ filterBuilder:
   fieldGroups:
     page: 页面
     session: 会话
-    referrer: 来源
+    referrer: 来源与渠道
     campaign: 营销活动
     client: 客户端
     geography: 地理位置

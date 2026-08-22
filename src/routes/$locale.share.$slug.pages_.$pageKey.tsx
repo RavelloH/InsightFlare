@@ -27,6 +27,7 @@ function Page() {
       siteDomain={c.site.domain}
       pathname={sharePath(locale, slug)}
       pagePath={pagePath}
+      showSourceLinkTab={false}
     />
   );
 }

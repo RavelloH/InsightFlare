@@ -32,6 +32,7 @@ interface PageDetailClientPageProps {
   siteDomain: string;
   pathname: string;
   pagePath: string;
+  showSourceLinkTab?: boolean;
 }
 
 function buildPageDetailFilters(
@@ -73,6 +74,7 @@ export function PageDetailClientPage({
   siteDomain,
   pathname,
   pagePath,
+  showSourceLinkTab,
 }: PageDetailClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
     filters: FilterDocument;
@@ -312,6 +314,7 @@ export function PageDetailClientPage({
         siteDomain={siteDomain}
         pathname={pathname}
         filters={detailFilters}
+        showSourceLinkTab={showSourceLinkTab}
         pageCardTabs={pageCardTabs}
         pageCardFetchers={pageCardFetchers}
         pageCardNavigableTabs={pageCardNavigableTabs}
