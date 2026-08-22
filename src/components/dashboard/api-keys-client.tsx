@@ -506,7 +506,7 @@ export function ApiKeysClient({
       </Card>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-screen max-w-full overflow-y-auto sm:max-h-none sm:max-w-2xl sm:overflow-visible">
           <DialogHeader>
             <DialogTitle icon={RiKey2Line}>{copy.createTitle}</DialogTitle>
             <DialogDescription>{copy.createSubtitle}</DialogDescription>

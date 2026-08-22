@@ -2436,7 +2436,7 @@ export function TeamNotificationsClient({
       </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="flex max-h-[min(860px,calc(100vh-1rem))] max-w-6xl flex-col overflow-hidden p-0">
+        <DialogContent className="flex max-h-screen max-w-full flex-col overflow-hidden p-0 sm:max-h-[min(860px,calc(100vh-1rem))] sm:max-w-6xl">
           <div className="border-b p-4 sm:p-6">
             <DialogHeader>
               <DialogTitle icon={RiNotification3Line}>

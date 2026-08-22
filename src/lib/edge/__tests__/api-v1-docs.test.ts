@@ -146,7 +146,9 @@ describe("api v1 public docs", () => {
     expect(manifest.manifestVersion).toBe(1);
     expect(manifest.version).toBe(version);
     expect(manifest.baseUrl).toBe("${baseUrl}");
-    expect(manifest.openapi).toMatchObject({ url: "/.well-known/openapi.json" });
+    expect(manifest.openapi).toMatchObject({
+      url: "/.well-known/openapi.json",
+    });
     expect(manifest.openapiGuidance).toMatchObject({
       sourceOfTruth: expect.any(String),
       readingRules: expect.any(Array),
@@ -381,8 +383,16 @@ describe("api v1 public docs", () => {
       ]),
     ]);
 
-    expect([...referenced].every((operationId) => publicOperationIds.has(operationId))).toBe(true);
-    expect([...publicOperationIds].filter((operationId) => !referenced.has(operationId))).toEqual([]);
+    expect(
+      [...referenced].every((operationId) =>
+        publicOperationIds.has(operationId),
+      ),
+    ).toBe(true);
+    expect(
+      [...publicOperationIds].filter(
+        (operationId) => !referenced.has(operationId),
+      ),
+    ).toEqual([]);
 
     for (const recipe of manifest.taskRecipes) {
       const raw = JSON.stringify(recipe);

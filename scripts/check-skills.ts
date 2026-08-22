@@ -15,7 +15,8 @@ const root = resolve(import.meta.dirname, "..");
 const rlog = createScriptLogger();
 
 function appVersion(): string {
-  return JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version;
+  return JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"))
+    .version;
 }
 
 const expected = serializeSkillsManifest(renderSkillsManifest(appVersion()));

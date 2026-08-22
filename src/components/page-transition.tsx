@@ -62,7 +62,6 @@ export function PageTransition({ children }: PageTransitionProps) {
   const navigationStartedRef = useRef(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const enterTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const settleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<NavigateRequest | null>(null);
   const previousPathnameRef = useRef(pathname);
   const [isReady, setIsReady] = useState(false);
@@ -70,30 +69,6 @@ export function PageTransition({ children }: PageTransitionProps) {
     "idle" | "enter" | "exit"
   >("idle");
   const routeKey = `${resolvedLocation.pathname}${resolvedLocation.searchStr}${resolvedLocation.hash}`;
-
-  const finishExit = useCallback(() => {
-    if (!exitingRef.current) return;
-    if (settleTimeoutRef.current) {
-      clearTimeout(settleTimeoutRef.current);
-      settleTimeoutRef.current = null;
-    }
-    if (enterTimeoutRef.current) {
-      clearTimeout(enterTimeoutRef.current);
-      enterTimeoutRef.current = null;
-    }
-    exitingRef.current = false;
-    navigationStartedRef.current = false;
-    pendingRef.current = null;
-    if (reduceMotion.current) {
-      setTransitionState("idle");
-      return;
-    }
-    setTransitionState("enter");
-    enterTimeoutRef.current = setTimeout(() => {
-      setTransitionState("idle");
-      enterTimeoutRef.current = null;
-    }, ENTER_DURATION_MS);
-  }, []);
 
   const performNavigation = useCallback(
     (request: NavigateRequest) => {
@@ -152,12 +127,9 @@ export function PageTransition({ children }: PageTransitionProps) {
         if (!next) return;
         navigationStartedRef.current = true;
         performNavigation(next);
-        // URL changes can complete before a route-key/router-status update is
-        // observable (for example after a redirect). Always restore the view.
-        settleTimeoutRef.current = setTimeout(finishExit, ENTER_DURATION_MS);
       }, EXIT_DURATION_MS);
     },
-    [finishExit, performNavigation],
+    [performNavigation],
   );
 
   useEffect(() => {
@@ -181,12 +153,30 @@ export function PageTransition({ children }: PageTransitionProps) {
 
   useEffect(() => {
     if (!exitingRef.current) return;
+
+    if (enterTimeoutRef.current) {
+      clearTimeout(enterTimeoutRef.current);
+      enterTimeoutRef.current = null;
+    }
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
-    finishExit();
-  }, [finishExit, routeKey]);
+    const shouldEnter = exitingRef.current && !reduceMotion.current;
+    exitingRef.current = false;
+    navigationStartedRef.current = false;
+    pendingRef.current = null;
+    if (shouldEnter) {
+      setTransitionState("enter");
+      enterTimeoutRef.current = setTimeout(() => {
+        setTransitionState("idle");
+        enterTimeoutRef.current = null;
+      }, ENTER_DURATION_MS);
+      return;
+    }
+
+    setTransitionState("idle");
+  }, [routeKey]);
 
   useEffect(() => {
     if (
@@ -196,9 +186,16 @@ export function PageTransition({ children }: PageTransitionProps) {
     ) {
       // A redirect, cancelled navigation, or same-route resolution may not
       // change the resolved location. Do not leave the outgoing view hidden.
-      finishExit();
+      exitingRef.current = false;
+      navigationStartedRef.current = false;
+      pendingRef.current = null;
+      setTransitionState("enter");
+      enterTimeoutRef.current = setTimeout(() => {
+        setTransitionState("idle");
+        enterTimeoutRef.current = null;
+      }, ENTER_DURATION_MS);
     }
-  }, [finishExit, routerStatus]);
+  }, [routerStatus]);
 
   useEffect(() => {
     return () => {
@@ -209,10 +206,6 @@ export function PageTransition({ children }: PageTransitionProps) {
       if (enterTimeoutRef.current) {
         clearTimeout(enterTimeoutRef.current);
         enterTimeoutRef.current = null;
-      }
-      if (settleTimeoutRef.current) {
-        clearTimeout(settleTimeoutRef.current);
-        settleTimeoutRef.current = null;
       }
     };
   }, []);

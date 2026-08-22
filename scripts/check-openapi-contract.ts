@@ -7,10 +7,7 @@ import { resolve } from "node:path";
 import process from "node:process";
 
 import { createScriptLogger } from "./shared/logger";
-import {
-  readSkillsTemplate,
-  renderSkillsManifest,
-} from "./skills-manifest";
+import { readSkillsTemplate, renderSkillsManifest } from "./skills-manifest";
 
 const root = resolve(import.meta.dirname, "..");
 const openapiPath = resolve(root, "docs", "openapi.json");
@@ -321,7 +318,9 @@ if (skills.version !== packageVersion) {
   issues.push("skills.json version must match package.json");
 }
 if (skills.baseUrl !== "${baseUrl}") {
-  issues.push("skills.json baseUrl must preserve the runtime baseUrl placeholder");
+  issues.push(
+    "skills.json baseUrl must preserve the runtime baseUrl placeholder",
+  );
 }
 if (skills.openapi?.url !== "/.well-known/openapi.json") {
   issues.push("skills.json must expose the well-known OpenAPI URL");
@@ -337,7 +336,9 @@ if (
 const templateText = JSON.stringify(skillsTemplate);
 for (const placeholder of templateText.matchAll(/\$\{([^}]+)\}/g)) {
   if (!["baseUrl", "version"].includes(placeholder[1])) {
-    issues.push(`skills template contains an unknown placeholder: ${placeholder[0]}`);
+    issues.push(
+      `skills template contains an unknown placeholder: ${placeholder[0]}`,
+    );
   }
 }
 
@@ -352,7 +353,9 @@ for (const deprecated of [
   "implementation_notes",
 ]) {
   if (Object.hasOwn(skills, deprecated)) {
-    issues.push(`skills.json must not expose deprecated manifest field: ${deprecated}`);
+    issues.push(
+      `skills.json must not expose deprecated manifest field: ${deprecated}`,
+    );
   }
 }
 
@@ -371,7 +374,9 @@ const referenceOperation = (operationId, location) => {
     return;
   }
   if (!publicOperationIds.has(operationId)) {
-    issues.push(`${location} references unknown OpenAPI operationId: ${operationId}`);
+    issues.push(
+      `${location} references unknown OpenAPI operationId: ${operationId}`,
+    );
     return;
   }
   referencedOperationIds.add(operationId);
@@ -402,8 +407,10 @@ referenceOperation(skills.discovery?.health, "skills.discovery.health");
 
 const stateMutationIds = new Set(
   [...publicOperationIds.entries()]
-    .filter(([, { method, operation }]) =>
-      ["patch", "delete"].includes(method) || Boolean(operation.responses?.["201"]),
+    .filter(
+      ([, { method, operation }]) =>
+        ["patch", "delete"].includes(method) ||
+        Boolean(operation.responses?.["201"]),
     )
     .map(([operationId]) => operationId),
 );
@@ -431,7 +438,9 @@ if (!Array.isArray(recipes) || recipes.length === 0) {
     if (typeof recipe?.id !== "string" || recipe.id.length === 0) {
       issues.push(`${location} must have a non-empty id`);
     } else if (recipeIds.has(recipe.id)) {
-      issues.push(`skills.json contains duplicate task recipe id: ${recipe.id}`);
+      issues.push(
+        `skills.json contains duplicate task recipe id: ${recipe.id}`,
+      );
     } else {
       recipeIds.add(recipe.id);
     }
@@ -446,36 +455,55 @@ if (!Array.isArray(recipes) || recipes.length === 0) {
     referenceOperationList(recipe?.preparation, `${location}.preparation`);
     referenceOperationList(recipe?.operations, `${location}.operations`);
 
-    const operationIds = [...(recipe?.preparation ?? []), ...(recipe?.operations ?? [])];
+    const operationIds = [
+      ...(recipe?.preparation ?? []),
+      ...(recipe?.operations ?? []),
+    ];
     const rawRecipe = JSON.stringify(recipe);
-    if (/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\//.test(rawRecipe) ||
-      /\/api\/|\/collect|\/script\.js/.test(rawRecipe)) {
-      issues.push(`${location} must reference operations by operationId, not method or path`);
+    if (
+      /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\//.test(rawRecipe) ||
+      /\/api\/|\/collect|\/script\.js/.test(rawRecipe)
+    ) {
+      issues.push(
+        `${location} must reference operations by operationId, not method or path`,
+      );
     }
     if (
-      operationIds.some((operationId) => String(operationId).startsWith("site.analytics.")) &&
+      operationIds.some((operationId) =>
+        String(operationId).startsWith("site.analytics."),
+      ) &&
       !recipe?.preparation?.includes("site.analytics.schema")
     ) {
-      issues.push(`${location} must prepare site.analytics.schema before site analytics`);
+      issues.push(
+        `${location} must prepare site.analytics.schema before site analytics`,
+      );
     }
     if (
-      operationIds.some((operationId) => String(operationId).startsWith("team.analytics.")) &&
+      operationIds.some((operationId) =>
+        String(operationId).startsWith("team.analytics."),
+      ) &&
       !recipe?.preparation?.includes("team.analytics.schema")
     ) {
-      issues.push(`${location} must prepare team.analytics.schema before team analytics`);
+      issues.push(
+        `${location} must prepare team.analytics.schema before team analytics`,
+      );
     }
     if (
       operationIds.some((operationId) => stateMutationIds.has(operationId)) &&
       recipe?.requiresConfirmation !== true
     ) {
-      issues.push(`${location} contains a state mutation but does not require confirmation`);
+      issues.push(
+        `${location} contains a state mutation but does not require confirmation`,
+      );
     }
   }
 }
 
 for (const operationId of publicOperationIds.keys()) {
   if (!referencedOperationIds.has(operationId)) {
-    issues.push(`skills.json does not cover public OpenAPI operationId: ${operationId}`);
+    issues.push(
+      `skills.json does not cover public OpenAPI operationId: ${operationId}`,
+    );
   }
 }
 
