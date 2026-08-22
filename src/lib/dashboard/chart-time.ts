@@ -2,11 +2,38 @@ import { intlLocale } from "@/lib/dashboard/format";
 import type { DashboardInterval } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 
+export type ChartAxisDateFormat = "compact" | "regular";
+
 export function createChartAxisDateFormatter(
   locale: Locale,
   interval: DashboardInterval,
   timeZone: string,
+  format: ChartAxisDateFormat = "compact",
 ): Intl.DateTimeFormat {
+  if (format === "regular") {
+    if (interval === "minute" || interval === "hour") {
+      return new Intl.DateTimeFormat(intlLocale(locale), {
+        timeZone,
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+    if (interval === "month") {
+      return new Intl.DateTimeFormat(intlLocale(locale), {
+        timeZone,
+        year: "numeric",
+        month: "short",
+      });
+    }
+    return new Intl.DateTimeFormat(intlLocale(locale), {
+      timeZone,
+      month: "short",
+      day: "numeric",
+    });
+  }
+
   if (interval === "minute" || interval === "hour") {
     return new Intl.DateTimeFormat(intlLocale(locale), {
       timeZone,

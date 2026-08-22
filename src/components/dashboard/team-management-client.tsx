@@ -1691,6 +1691,7 @@ export function TeamManagementClient({
                     viewsLabel={messages.common.views}
                     visitorsLabel={messages.common.visitors}
                     messages={messages}
+                    axisDateFormat="regular"
                     loading={dashboardQuery.isFetching}
                   />
                 </div>
@@ -1748,6 +1749,7 @@ export function TeamManagementClient({
                             interval={dashboardWindow.interval}
                             viewsLabel={messages.common.views}
                             visitorsLabel={messages.common.visitors}
+                            axisDateFormat="compact"
                             maxPoints={SITE_CARD_MAX_TREND_POINTS}
                             loading={dashboardQuery.isFetching}
                             range={dashboardWindow}

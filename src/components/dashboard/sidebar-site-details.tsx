@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
@@ -10,6 +10,10 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import type {
+  TeamDashboardWindow,
+  TeamTrafficPoint,
+} from "@/lib/dashboard/team-dashboard-query";
 import {
   buildTeamSiteTrends,
   teamDashboardQueryOptions,
@@ -53,6 +57,79 @@ function buildSitePath(
   if (!section) return base;
   return `${base}/${section}`;
 }
+
+interface SidebarSiteRowProps {
+  locale: Locale;
+  teamSlug: string;
+  activeSiteSlug?: string;
+  currentSection?: string;
+  site: SidebarSiteSummary;
+  trend: TeamTrafficPoint[];
+  dashboardWindow: TeamDashboardWindow;
+  viewsLabel: string;
+  visitorsLabel: string;
+  shouldRenderCharts: boolean;
+}
+
+const SidebarSiteRow = memo(function SidebarSiteRow({
+  locale,
+  teamSlug,
+  activeSiteSlug,
+  currentSection,
+  site,
+  trend,
+  dashboardWindow,
+  viewsLabel,
+  visitorsLabel,
+  shouldRenderCharts,
+}: SidebarSiteRowProps) {
+  const isActive = Boolean(
+    activeSiteSlug &&
+    (site.slug === activeSiteSlug || site.id === activeSiteSlug),
+  );
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        asChild
+        isActive={isActive}
+        tooltip={site.name}
+        className="h-8 rounded-none"
+      >
+        <Link href={buildSitePath(locale, teamSlug, site.slug, currentSection)}>
+          <SiteBrandIcon
+            siteId={site.id}
+            siteName={site.name}
+            domain={site.domain}
+            iconSrc={site.iconPath}
+            size="sm"
+          />
+          <div className={SITE_ROW_DETAIL_CLASS}>
+            <div className="min-w-0">
+              <span className="block truncate text-xs">{site.name}</span>
+            </div>
+            <div className="min-w-0">
+              {shouldRenderCharts ? (
+                <TrafficPairBarChart
+                  data={trend}
+                  locale={locale}
+                  timeZone={dashboardWindow.timeZone}
+                  interval={dashboardWindow.interval}
+                  viewsLabel={viewsLabel}
+                  visitorsLabel={visitorsLabel}
+                  compact
+                  dataIsComplete
+                />
+              ) : (
+                <div className="h-4 w-full" />
+              )}
+            </div>
+          </div>
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+});
 
 export function SidebarSiteDetails({
   locale,
@@ -119,57 +196,20 @@ export function SidebarSiteDetails({
   return (
     <SidebarMenu>
       {cards.map(({ site, trend }) => {
-        const isActive = Boolean(
-          activeSiteSlug &&
-          (site.slug === activeSiteSlug || site.id === activeSiteSlug),
-        );
-
         return (
-          <SidebarMenuItem key={site.id}>
-            <SidebarMenuButton
-              asChild
-              isActive={isActive}
-              tooltip={site.name}
-              className="h-8 rounded-none"
-            >
-              <Link
-                href={buildSitePath(
-                  locale,
-                  teamSlug,
-                  site.slug,
-                  currentSection,
-                )}
-              >
-                <SiteBrandIcon
-                  siteId={site.id}
-                  siteName={site.name}
-                  domain={site.domain}
-                  iconSrc={site.iconPath}
-                  size="sm"
-                />
-                <div className={SITE_ROW_DETAIL_CLASS}>
-                  <div className="min-w-0">
-                    <span className="block truncate text-xs">{site.name}</span>
-                  </div>
-                  <div className="min-w-0">
-                    {shouldRenderCharts ? (
-                      <TrafficPairBarChart
-                        data={trend}
-                        locale={locale}
-                        timeZone={dashboardWindow.timeZone}
-                        interval={dashboardWindow.interval}
-                        viewsLabel={labels.views}
-                        visitorsLabel={labels.visitors}
-                        compact
-                      />
-                    ) : (
-                      <div className="h-4 w-full" />
-                    )}
-                  </div>
-                </div>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
+          <SidebarSiteRow
+            key={site.id}
+            locale={locale}
+            teamSlug={teamSlug}
+            activeSiteSlug={activeSiteSlug}
+            currentSection={currentSection}
+            site={site}
+            trend={trend}
+            dashboardWindow={dashboardWindow}
+            viewsLabel={labels.views}
+            visitorsLabel={labels.visitors}
+            shouldRenderCharts={shouldRenderCharts}
+          />
         );
       })}
     </SidebarMenu>

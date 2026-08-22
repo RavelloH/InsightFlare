@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/chart";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  type ChartAxisDateFormat,
   createChartAxisDateFormatter,
   createChartTooltipDateFormatter,
 } from "@/lib/dashboard/chart-time";
@@ -57,6 +58,7 @@ export interface SiteTrafficStackChartProps {
   viewsLabel: string;
   visitorsLabel: string;
   messages: AppMessages;
+  axisDateFormat?: ChartAxisDateFormat;
   loading?: boolean;
   className?: string;
 }
@@ -729,6 +731,7 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
   viewsLabel,
   visitorsLabel,
   messages,
+  axisDateFormat = "regular",
   loading = false,
   className,
 }: SiteTrafficStackChartProps) {
@@ -893,8 +896,9 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
   }, [displayedChartData]);
 
   const tickFormatter = useMemo(
-    () => createChartAxisDateFormatter(locale, interval, timeZone),
-    [locale, interval, timeZone],
+    () =>
+      createChartAxisDateFormatter(locale, interval, timeZone, axisDateFormat),
+    [locale, interval, timeZone, axisDateFormat],
   );
   const tooltipFormatter = useMemo(
     () => createChartTooltipDateFormatter(locale, interval, timeZone),

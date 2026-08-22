@@ -13,6 +13,8 @@ import {
   calculateChartYAxisWidth,
   type ChartConfig,
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipIndicator,
   createChartNumberFormatter,
@@ -23,6 +25,7 @@ import {
   useChartVisibility,
 } from "@/hooks/use-chart-animation";
 import {
+  type ChartAxisDateFormat,
   createChartAxisDateFormatter,
   createChartTooltipDateFormatter,
 } from "@/lib/dashboard/chart-time";
@@ -48,6 +51,9 @@ export interface TrafficPairBarChartProps {
   viewsLabel: string;
   visitorsLabel: string;
   compact?: boolean;
+  dataIsComplete?: boolean;
+  axisDateFormat?: ChartAxisDateFormat;
+  showLegend?: boolean;
   maxPoints?: number;
   loading?: boolean;
   className?: string;
@@ -74,6 +80,36 @@ const TRAFFIC_PAIR_CHART_CONFIG = {
     color: "var(--color-chart-1)",
   },
 } satisfies ChartConfig;
+
+const COMPACT_CHART_ANIMATION_DURATION = 220;
+
+function createTrafficPairChartData(
+  data: TrafficPairBarChartProps["data"],
+  interval: DashboardInterval,
+  timeZone: string,
+  maxPoints?: number,
+  range?: TrafficPairBarChartProps["range"],
+  dataIsComplete = false,
+): TrafficPairChartPoint[] {
+  const completed = dataIsComplete
+    ? data
+    : fillMissingTrafficData(data, interval, timeZone, range);
+  const normalized = downsampleTrafficData(
+    completed,
+    maxPoints ?? completed.length,
+  );
+
+  return normalized.map((point) => {
+    const views = safeChartCount(point.views);
+    const visitors = Math.min(safeChartCount(point.visitors), views);
+    return {
+      timestampMs: point.timestampMs,
+      views,
+      visitors,
+      nonVisitorViews: Math.max(0, views - visitors),
+    };
+  });
+}
 
 function TrafficPairTooltip({
   active,
@@ -124,7 +160,7 @@ function TrafficPairTooltip({
   );
 }
 
-export const TrafficPairBarChart = memo(function TrafficPairBarChart({
+const TrafficPairRegularBarChart = memo(function TrafficPairRegularBarChart({
   data,
   locale,
   timeZone,
@@ -132,6 +168,9 @@ export const TrafficPairBarChart = memo(function TrafficPairBarChart({
   viewsLabel,
   visitorsLabel,
   compact = false,
+  dataIsComplete = false,
+  axisDateFormat = "compact",
+  showLegend = false,
   maxPoints,
   loading = false,
   className,
@@ -145,22 +184,15 @@ export const TrafficPairBarChart = memo(function TrafficPairBarChart({
     setHasChartSize(true);
   }, []);
   const chartData = useMemo(() => {
-    const completed = fillMissingTrafficData(data, interval, timeZone, range);
-    const normalized = downsampleTrafficData(
-      completed,
-      maxPoints ?? (compact ? 72 : completed.length),
+    return createTrafficPairChartData(
+      data,
+      interval,
+      timeZone,
+      maxPoints ?? (compact ? 72 : undefined),
+      range,
+      dataIsComplete,
     );
-    return normalized.map((point) => {
-      const views = safeChartCount(point.views);
-      const visitors = Math.min(safeChartCount(point.visitors), views);
-      return {
-        timestampMs: point.timestampMs,
-        views,
-        visitors,
-        nonVisitorViews: Math.max(0, views - visitors),
-      };
-    });
-  }, [data, interval, timeZone, maxPoints, compact, range]);
+  }, [data, interval, timeZone, maxPoints, compact, range, dataIsComplete]);
   const config = useMemo(
     () => ({
       visitors: {
@@ -175,8 +207,9 @@ export const TrafficPairBarChart = memo(function TrafficPairBarChart({
     [viewsLabel, visitorsLabel],
   );
   const tickFormatter = useMemo(
-    () => createChartAxisDateFormatter(locale, interval, timeZone),
-    [locale, interval, timeZone],
+    () =>
+      createChartAxisDateFormatter(locale, interval, timeZone, axisDateFormat),
+    [locale, interval, timeZone, axisDateFormat],
   );
   const tooltipFormatter = useMemo(
     () => createChartTooltipDateFormatter(locale, interval, timeZone),
@@ -294,6 +327,9 @@ export const TrafficPairBarChart = memo(function TrafficPairBarChart({
             isAnimationActive={isAnimationActive}
             animationDuration={isAnimationActive ? 220 : 0}
           />
+          {showLegend && !compact ? (
+            <ChartLegend content={<ChartLegendContent className="pt-4" />} />
+          ) : null}
         </BarChart>
       </ChartContainer>
       {compact ? null : (
@@ -312,4 +348,73 @@ export const TrafficPairBarChart = memo(function TrafficPairBarChart({
       )}
     </div>
   );
+});
+
+const TrafficPairCompactBarChart = memo(function TrafficPairCompactBarChart({
+  data,
+  interval,
+  timeZone,
+  maxPoints,
+  dataIsComplete = false,
+  loading = false,
+  className,
+  range,
+}: TrafficPairBarChartProps) {
+  const chartData = useMemo(
+    () =>
+      createTrafficPairChartData(
+        data,
+        interval,
+        timeZone,
+        maxPoints ?? 72,
+        range,
+        dataIsComplete,
+      ),
+    [data, interval, timeZone, maxPoints, range, dataIsComplete],
+  );
+
+  return (
+    <ChartContainer
+      className={cn(
+        "h-4 w-full aspect-auto [&_.recharts-bar-rectangles]:transition-[filter] [&_.recharts-bar-rectangles]:duration-200 motion-reduce:[&_.recharts-bar-rectangles]:transition-none",
+        loading
+          ? "[&_.recharts-bar-rectangles]:brightness-50"
+          : "[&_.recharts-bar-rectangles]:brightness-100",
+        className,
+      )}
+    >
+      <BarChart
+        data={chartData}
+        margin={{ left: 0, right: 0, top: 0, bottom: 0 }}
+        barGap={0}
+      >
+        <Bar
+          dataKey="visitors"
+          stackId="traffic"
+          fill="var(--color-chart-3)"
+          radius={0}
+          isAnimationActive
+          animationDuration={COMPACT_CHART_ANIMATION_DURATION}
+        />
+        <Bar
+          dataKey="nonVisitorViews"
+          stackId="traffic"
+          fill="var(--color-chart-1)"
+          radius={0}
+          isAnimationActive
+          animationDuration={COMPACT_CHART_ANIMATION_DURATION}
+        />
+      </BarChart>
+    </ChartContainer>
+  );
+});
+
+export const TrafficPairBarChart = memo(function TrafficPairBarChart(
+  props: TrafficPairBarChartProps,
+) {
+  if (props.compact) {
+    return <TrafficPairCompactBarChart {...props} />;
+  }
+
+  return <TrafficPairRegularBarChart {...props} />;
 });

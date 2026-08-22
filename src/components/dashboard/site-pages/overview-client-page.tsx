@@ -2,7 +2,6 @@ import {
   type MouseEvent,
   useCallback,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -25,8 +24,12 @@ import {
   RiShareForwardLine,
 } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Area, AreaChart, ResponsiveContainer, Tooltip } from "recharts";
 
+import {
+  MetricAreaChart,
+  type MetricAreaPoint,
+} from "@/components/dashboard/charts/metric-area-chart";
+import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
 import {
   DeviceMeta,
@@ -44,7 +47,6 @@ import {
   type TabbedDataTableColumn,
   type TabbedDataTableTab,
 } from "@/components/dashboard/tabbed-data-table-card";
-import { TrendChart } from "@/components/dashboard/trend-chart";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -156,6 +158,8 @@ function emptyTrendData(interval: TimeWindow["interval"]): TrendData {
     data: [],
   };
 }
+
+const EMPTY_TREND_POINTS: TrendData["data"] = [];
 
 function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
   if (error instanceof Error && error.name === "AbortError") throw error;
@@ -343,11 +347,6 @@ function ChangeRateInline({
       {formatChangeRate(value)}
     </span>
   );
-}
-
-interface MetricAreaPoint {
-  timestampMs: number;
-  value: number;
 }
 
 type PageCardTab = "path" | "query" | "title" | "hostname" | "entry" | "exit";
@@ -1600,195 +1599,6 @@ function resolvePageCardTargetUrl(params: {
   }
 
   return null;
-}
-
-function useChartVisibility(rootMargin = "120px 0px") {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [isVisible, setIsVisible] = useState(false);
-  const [hasMeasuredVisibility, setHasMeasuredVisibility] = useState(false);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    if (typeof IntersectionObserver === "undefined") {
-      setIsVisible(true);
-      setHasMeasuredVisibility(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        const nextVisible = Boolean(
-          entry?.isIntersecting || (entry?.intersectionRatio ?? 0) > 0,
-        );
-        setIsVisible(nextVisible);
-        setHasMeasuredVisibility(true);
-      },
-      {
-        root: null,
-        rootMargin,
-        threshold: 0.01,
-      },
-    );
-
-    observer.observe(container);
-    return () => {
-      observer.disconnect();
-    };
-  }, [rootMargin]);
-
-  return {
-    containerRef,
-    isVisible,
-    hasMeasuredVisibility,
-  };
-}
-
-function useAnimationOnChartSwitch({
-  switchKey,
-  hasData,
-  isVisible,
-  hasMeasuredVisibility,
-}: {
-  switchKey: string;
-  hasData: boolean;
-  isVisible: boolean;
-  hasMeasuredVisibility: boolean;
-}): boolean {
-  const appliedKeyRef = useRef<string | null>(null);
-  const animationEnabledRef = useRef(false);
-
-  if (appliedKeyRef.current !== switchKey && hasMeasuredVisibility) {
-    appliedKeyRef.current = switchKey;
-    animationEnabledRef.current = hasData && isVisible;
-  }
-
-  if (appliedKeyRef.current !== switchKey) {
-    return hasData && isVisible;
-  }
-
-  return animationEnabledRef.current;
-}
-
-function MetricAreaMap({
-  points,
-  color,
-  locale,
-  label,
-  formatValue,
-  animationKey,
-}: {
-  points: MetricAreaPoint[];
-  color: string;
-  locale: Locale;
-  label: string;
-  formatValue: (value: number) => string;
-  animationKey: string;
-}) {
-  const gradientId = useId().replace(/:/g, "");
-  const { containerRef, isVisible, hasMeasuredVisibility } =
-    useChartVisibility("80px 0px");
-  const dateFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(intlLocale(locale), {
-        month: "numeric",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    [locale],
-  );
-  const chartData = useMemo(() => {
-    const normalized = points.map((point, index) => ({
-      index,
-      timestampMs: Number.isFinite(point.timestampMs) ? point.timestampMs : 0,
-      value: Number.isFinite(point.value) ? Math.max(0, point.value) : 0,
-    }));
-
-    if (normalized.length >= 2) return normalized;
-    if (normalized.length === 1) {
-      const first = normalized[0] ?? { index: 0, value: 0, timestampMs: 0 };
-      return [
-        first,
-        {
-          index: 1,
-          value: first.value,
-          timestampMs: first.timestampMs + 1,
-        },
-      ];
-    }
-    return [
-      { index: 0, value: 0, timestampMs: 0 },
-      { index: 1, value: 0, timestampMs: 1 },
-    ];
-  }, [points]);
-  const areaChartSwitchKey = useMemo(() => {
-    const firstTimestamp = chartData[0]?.timestampMs ?? 0;
-    const lastTimestamp = chartData[chartData.length - 1]?.timestampMs ?? 0;
-    return `${label}:${animationKey}:${chartData.length}:${firstTimestamp}:${lastTimestamp}`;
-  }, [animationKey, chartData, label]);
-  const isAreaAnimationActive = useAnimationOnChartSwitch({
-    switchKey: areaChartSwitchKey,
-    hasData: chartData.length > 0,
-    isVisible,
-    hasMeasuredVisibility,
-  });
-
-  return (
-    <div ref={containerRef} className="h-full w-full">
-      <div className="relative h-full w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart
-            data={chartData}
-            margin={{ top: 12, right: 0, left: 0, bottom: 0 }}
-          >
-            <defs>
-              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={color} stopOpacity={0.36} />
-                <stop offset="100%" stopColor={color} stopOpacity={0.04} />
-              </linearGradient>
-            </defs>
-            <Tooltip
-              cursor={{ stroke: color, strokeOpacity: 0.28, strokeWidth: 1 }}
-              content={({ active, payload }) => {
-                if (!active || !payload || payload.length === 0) return null;
-                const item = payload[0]?.payload as
-                  | { timestampMs?: number; value?: number }
-                  | undefined;
-                const timestampMs = Number(item?.timestampMs ?? 0);
-                const value = Number(item?.value ?? 0);
-
-                return (
-                  <div className="rounded-none border border-border/50 bg-background px-2 py-1 text-[11px] shadow-xl">
-                    <p className="text-muted-foreground">
-                      {dateFormatter.format(new Date(timestampMs))}
-                    </p>
-                    <p className="font-mono text-foreground">
-                      {label}: {formatValue(value)}
-                    </p>
-                  </div>
-                );
-              }}
-            />
-            <Area
-              type="linear"
-              dataKey="value"
-              stroke={color}
-              fill={`url(#${gradientId})`}
-              strokeWidth={1.5}
-              dot={false}
-              activeDot={{ r: 2, stroke: color, fill: color }}
-              isAnimationActive={isAreaAnimationActive}
-              animationDuration={isAreaAnimationActive ? 280 : 0}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-5 bg-gradient-to-r from-card via-card/80 to-transparent" />
-      </div>
-    </div>
-  );
 }
 
 interface OverviewPagesSectionProps extends OverviewClientPageProps {
@@ -3793,7 +3603,7 @@ export function OverviewMetricsSection({
   const loading = isPending || isFetching;
   const overview = metricsData?.overview ?? emptyOverviewData();
   const previousOverview = metricsData?.previousOverview ?? emptyOverviewData();
-  const detailSeries = metricsData?.trendData.data ?? [];
+  const detailSeries = metricsData?.trendData.data ?? EMPTY_TREND_POINTS;
 
   const pagesPerSessionFormatter = useMemo(
     () =>
@@ -3810,36 +3620,45 @@ export function OverviewMetricsSection({
   const previousPagesPerSession =
     previous.sessions > 0 ? previous.views / previous.sessions : 0;
 
-  const viewsSeries = detailSeries.map((point) => ({
-    timestampMs: point.timestampMs,
-    value: point.views,
-  }));
-  const visitorsSeries = detailSeries.map((point) => ({
-    timestampMs: point.timestampMs,
-    value: point.visitors,
-  }));
-  const sessionsSeries = detailSeries.map((point) => ({
-    timestampMs: point.timestampMs,
-    value: point.sessions,
-  }));
-  const bounceRateSeries = detailSeries
-    .filter((point) => point.sessions > 0)
-    .map((point) => ({
-      timestampMs: point.timestampMs,
-      value: point.bounces / point.sessions,
-    }));
-  const pagesPerSessionSeries = detailSeries
-    .filter((point) => point.sessions > 0)
-    .map((point) => ({
-      timestampMs: point.timestampMs,
-      value: point.views / point.sessions,
-    }));
-  const avgDurationSeries = detailSeries
-    .filter((point) => point.views > 0)
-    .map((point) => ({
-      timestampMs: point.timestampMs,
-      value: point.avgDurationMs,
-    }));
+  const metricSeries = useMemo(() => {
+    const views: MetricAreaPoint[] = [];
+    const visitors: MetricAreaPoint[] = [];
+    const sessions: MetricAreaPoint[] = [];
+    const bounceRate: MetricAreaPoint[] = [];
+    const pagesPerSession: MetricAreaPoint[] = [];
+    const avgDuration: MetricAreaPoint[] = [];
+
+    for (const point of detailSeries) {
+      const { timestampMs } = point;
+      views.push({ timestampMs, value: point.views });
+      visitors.push({ timestampMs, value: point.visitors });
+      sessions.push({ timestampMs, value: point.sessions });
+
+      if (point.sessions > 0) {
+        bounceRate.push({
+          timestampMs,
+          value: point.bounces / point.sessions,
+        });
+        pagesPerSession.push({
+          timestampMs,
+          value: point.views / point.sessions,
+        });
+      }
+
+      if (point.views > 0) {
+        avgDuration.push({ timestampMs, value: point.avgDurationMs });
+      }
+    }
+
+    return {
+      views,
+      visitors,
+      sessions,
+      bounceRate,
+      pagesPerSession,
+      avgDuration,
+    };
+  }, [detailSeries]);
   const metricChartAnimationKey = useMemo(() => {
     const firstTimestamp = detailSeries[0]?.timestampMs ?? 0;
     const lastTimestamp =
@@ -3847,59 +3666,84 @@ export function OverviewMetricsSection({
     return `${detailSeries.length}:${firstTimestamp}:${lastTimestamp}`;
   }, [detailSeries]);
 
-  const metrics = [
-    {
-      label: messages.common.views,
-      value: numberFormat(locale, overview.data.views),
-      delta: toDeltaPercent(overview.data.views, previous.views),
-      trend: viewsSeries,
-      formatTrendValue: (value: number) =>
-        numberFormat(locale, Math.round(value)),
-    },
-    {
-      label: messages.common.visitors,
-      value: numberFormat(locale, overview.data.visitors),
-      delta: toDeltaPercent(overview.data.visitors, previous.visitors),
-      trend: visitorsSeries,
-      formatTrendValue: (value: number) =>
-        numberFormat(locale, Math.round(value)),
-    },
-    {
-      label: messages.common.sessions,
-      value: numberFormat(locale, overview.data.sessions),
-      delta: toDeltaPercent(overview.data.sessions, previous.sessions),
-      trend: sessionsSeries,
-      formatTrendValue: (value: number) =>
-        numberFormat(locale, Math.round(value)),
-    },
-    {
-      label: messages.common.bounceRate,
-      value: percentFormat(locale, overview.data.bounceRate),
-      delta: toDeltaPercent(overview.data.bounceRate, previous.bounceRate),
-      lowerIsBetter: true,
-      trend: bounceRateSeries,
-      formatTrendValue: (value: number) => percentFormat(locale, value),
-    },
-    {
-      label: messages.teamManagement.sites.pagesPerSession,
-      value: pagesPerSessionFormatter.format(currentPagesPerSession),
-      delta: toDeltaPercent(currentPagesPerSession, previousPagesPerSession),
-      trend: pagesPerSessionSeries,
-      formatTrendValue: (value: number) =>
-        pagesPerSessionFormatter.format(value),
-    },
-    {
-      label: messages.common.avgDuration,
-      value: durationFormat(locale, overview.data.avgDurationMs),
-      delta: toDeltaPercent(
-        overview.data.avgDurationMs,
-        previous.avgDurationMs,
-      ),
-      trend: avgDurationSeries,
-      formatTrendValue: (value: number) =>
-        durationFormat(locale, Math.max(0, Math.round(value))),
-    },
-  ];
+  const metrics = useMemo(
+    () => [
+      {
+        label: messages.common.views,
+        value: numberFormat(locale, overview.data.views),
+        delta: toDeltaPercent(overview.data.views, previous.views),
+        trend: metricSeries.views,
+        formatTrendValue: (value: number) =>
+          numberFormat(locale, Math.round(value)),
+      },
+      {
+        label: messages.common.visitors,
+        value: numberFormat(locale, overview.data.visitors),
+        delta: toDeltaPercent(overview.data.visitors, previous.visitors),
+        trend: metricSeries.visitors,
+        formatTrendValue: (value: number) =>
+          numberFormat(locale, Math.round(value)),
+      },
+      {
+        label: messages.common.sessions,
+        value: numberFormat(locale, overview.data.sessions),
+        delta: toDeltaPercent(overview.data.sessions, previous.sessions),
+        trend: metricSeries.sessions,
+        formatTrendValue: (value: number) =>
+          numberFormat(locale, Math.round(value)),
+      },
+      {
+        label: messages.common.bounceRate,
+        value: percentFormat(locale, overview.data.bounceRate),
+        delta: toDeltaPercent(overview.data.bounceRate, previous.bounceRate),
+        lowerIsBetter: true,
+        trend: metricSeries.bounceRate,
+        formatTrendValue: (value: number) => percentFormat(locale, value),
+      },
+      {
+        label: messages.teamManagement.sites.pagesPerSession,
+        value: pagesPerSessionFormatter.format(currentPagesPerSession),
+        delta: toDeltaPercent(currentPagesPerSession, previousPagesPerSession),
+        trend: metricSeries.pagesPerSession,
+        formatTrendValue: (value: number) =>
+          pagesPerSessionFormatter.format(value),
+      },
+      {
+        label: messages.common.avgDuration,
+        value: durationFormat(locale, overview.data.avgDurationMs),
+        delta: toDeltaPercent(
+          overview.data.avgDurationMs,
+          previous.avgDurationMs,
+        ),
+        trend: metricSeries.avgDuration,
+        formatTrendValue: (value: number) =>
+          durationFormat(locale, Math.max(0, Math.round(value))),
+      },
+    ],
+    [
+      currentPagesPerSession,
+      locale,
+      messages.common.avgDuration,
+      messages.common.bounceRate,
+      messages.common.sessions,
+      messages.common.views,
+      messages.common.visitors,
+      messages.teamManagement.sites.pagesPerSession,
+      metricSeries,
+      overview.data.avgDurationMs,
+      overview.data.bounceRate,
+      overview.data.sessions,
+      overview.data.visitors,
+      overview.data.views,
+      pagesPerSessionFormatter,
+      previous.avgDurationMs,
+      previous.bounceRate,
+      previous.sessions,
+      previous.visitors,
+      previous.views,
+      previousPagesPerSession,
+    ],
+  );
 
   return (
     <Card className="gap-0 py-0">
@@ -3914,10 +3758,12 @@ export function OverviewMetricsSection({
               <div key={item.label} className={metricCellBorderClasses(index)}>
                 <div className="relative min-h-[74px]">
                   <div className="absolute inset-y-0 right-0 w-1/2 min-w-0">
-                    <MetricAreaMap
+                    <MetricAreaChart
                       points={item.trend}
                       color={METRIC_AREA_COLOR}
                       locale={locale}
+                      timeZone={window.timeZone}
+                      interval={window.interval}
                       label={item.label}
                       formatValue={item.formatTrendValue}
                       animationKey={metricChartAnimationKey}
@@ -4004,17 +3850,6 @@ export function OverviewTrendSection({
     isPending,
     trendData.data,
   ]);
-  const visitorTrendChartData = useMemo(
-    () =>
-      trendDisplayData.map((point) => ({
-        timestampMs: point.timestampMs,
-        views: point.views,
-        sessions: point.visitors,
-      })),
-    [trendDisplayData],
-  );
-  const showTrendOverlayLoading = loading && hasTrendData;
-
   return (
     <Card className="overflow-visible">
       <CardHeader className="flex flex-row items-center justify-between">
@@ -4028,37 +3863,19 @@ export function OverviewTrendSection({
         </span>
       </CardHeader>
       <CardContent>
-        <div className="relative">
-          <div>
-            <TrendChart
-              locale={locale}
-              timeZone={dataWindow.timeZone}
-              interval={dataWindow.interval}
-              data={visitorTrendChartData}
-              viewsLabel={messages.common.views}
-              sessionsLabel={messages.common.visitors}
-            />
-          </div>
-          <AutoTransition
-            type="fade"
-            duration={0.22}
-            className="pointer-events-none absolute top-2 right-2"
-          >
-            {showTrendOverlayLoading ? (
-              <span
-                key="overview-trend-overlay-loading"
-                className="inline-flex items-center gap-2 rounded-none border border-border/50 bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm"
-              >
-                <Spinner className="size-3.5" />
-                {messages.common.loading}
-              </span>
-            ) : (
-              <div
-                key="overview-trend-overlay-idle"
-                className="h-0 w-0 overflow-hidden"
-              />
-            )}
-          </AutoTransition>
+        <div>
+          <TrafficPairBarChart
+            data={trendDisplayData}
+            locale={locale}
+            timeZone={dataWindow.timeZone}
+            interval={dataWindow.interval}
+            viewsLabel={messages.common.views}
+            visitorsLabel={messages.common.visitors}
+            axisDateFormat="regular"
+            showLegend
+            loading={loading}
+            className="h-[280px]"
+          />
         </div>
       </CardContent>
     </Card>
