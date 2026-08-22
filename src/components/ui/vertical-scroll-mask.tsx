@@ -136,7 +136,7 @@ export function VerticalScrollMask({
         ref={topMaskRef}
         aria-hidden
         className={cn(
-          "pointer-events-none absolute top-0 right-0 left-0 z-10 h-5 bg-gradient-to-b opacity-0 transition-opacity duration-300",
+          "pointer-events-none absolute -top-px right-0 left-0 z-10 h-5 bg-gradient-to-b opacity-0 transition-opacity duration-300",
           maskClassName ?? "from-background via-background/80 to-transparent",
         )}
       />
@@ -144,7 +144,7 @@ export function VerticalScrollMask({
         ref={bottomMaskRef}
         aria-hidden
         className={cn(
-          "pointer-events-none absolute right-0 bottom-0 left-0 z-10 h-5 bg-gradient-to-t opacity-0 transition-opacity duration-300",
+          "pointer-events-none absolute right-0 -bottom-px left-0 z-10 h-5 bg-gradient-to-t opacity-0 transition-opacity duration-300",
           maskClassName ?? "from-background via-background/80 to-transparent",
         )}
       />
