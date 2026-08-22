@@ -27,6 +27,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { requestAdminService } from "@/lib/admin-service-client";
 import { shortDateTime } from "@/lib/dashboard/format";
+import type { AdminTeamsInitialData } from "@/lib/dashboard/management-data";
 import type { TeamData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -36,6 +37,7 @@ import { useRouter } from "@/lib/router";
 interface AdminTeamsManagementClientProps {
   locale: Locale;
   messages: AppMessages;
+  initialData?: AdminTeamsInitialData | null;
 }
 
 async function fetchTeams(signal?: AbortSignal): Promise<TeamData[]> {
@@ -45,6 +47,7 @@ async function fetchTeams(signal?: AbortSignal): Promise<TeamData[]> {
 export function AdminTeamsManagementClient({
   locale,
   messages,
+  initialData = null,
 }: AdminTeamsManagementClientProps) {
   const { timeZone } = useDashboardQueryControls();
   const router = useRouter();
@@ -55,6 +58,8 @@ export function AdminTeamsManagementClient({
   const teamsQuery = useQuery({
     queryKey: ["dashboard", "admin-teams"],
     queryFn: ({ signal }) => fetchTeams(signal),
+    initialData: initialData?.teams,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const teams = teamsQuery.data ?? [];

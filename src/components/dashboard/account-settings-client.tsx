@@ -41,6 +41,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { requestAdminService } from "@/lib/admin-service-client";
 import { intlLocale } from "@/lib/dashboard/format";
+import type { AccountNotificationPreferencesInitialData } from "@/lib/dashboard/management-data";
 import {
   buildTimeZoneOptions,
   FALLBACK_TIME_ZONE,
@@ -61,6 +62,7 @@ interface AccountSettingsClientProps {
   locale: Locale;
   messages: AppMessages;
   user: AccountUserData;
+  initialData?: AccountNotificationPreferencesInitialData | null;
 }
 
 type TimeZoneMode = "browser" | "custom";
@@ -90,6 +92,7 @@ export function AccountSettingsClient({
   locale,
   messages,
   user,
+  initialData = null,
 }: AccountSettingsClientProps) {
   const copy = messages.accountSettings;
   const notificationCopy = messages.notificationCenter;
@@ -114,9 +117,13 @@ export function AccountSettingsClient({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [notificationPreferences, setNotificationPreferences] =
-    useState<NotificationPreferencesData | null>(null);
+    useState<NotificationPreferencesData | null>(
+      initialData?.preferences ?? null,
+    );
   const [draftNotificationPreferences, setDraftNotificationPreferences] =
-    useState<NotificationPreferencesData | null>(null);
+    useState<NotificationPreferencesData | null>(
+      initialData?.preferences ?? null,
+    );
   const [notificationPreferencesSaving, setNotificationPreferencesSaving] =
     useState(false);
   const appliedNotificationPreferencesUserIdRef = useRef<string | null>(null);
@@ -127,6 +134,8 @@ export function AccountSettingsClient({
         "notifications/preferences",
         { signal },
       ).then(normalizeNotificationPreferencesData),
+    initialData: initialData?.preferences,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const notificationPreferencesLoading = notificationPreferencesQuery.isPending;

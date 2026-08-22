@@ -63,6 +63,7 @@ import {
   requestAdminService,
 } from "@/lib/admin-service-client";
 import type { AdminServiceRoute } from "@/lib/admin-service-contract";
+import type { SiteSettingsInitialData } from "@/lib/dashboard/management-data";
 import type { SiteData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -74,6 +75,7 @@ import {
   normalizeSiteScriptSettings,
   parseDomainWhitelist,
   parsePathBlacklist,
+  type SiteScriptSettings,
   type TrackingStrength,
 } from "@/lib/site-settings";
 import { cn } from "@/lib/utils";
@@ -93,6 +95,7 @@ interface SiteSettingsClientPageProps {
     SiteData,
     "id" | "name" | "domain" | "publicEnabled" | "publicSlug"
   >;
+  initialData?: SiteSettingsInitialData | null;
 }
 
 function safeSlug(value: string): string {
@@ -143,9 +146,13 @@ export function SettingsClientPage({
   siteSlug,
   teams,
   site,
+  initialData = null,
 }: SiteSettingsClientPageProps) {
   const router = useRouter();
   const copy = messages.siteSettings;
+  const initialTrackerSettings = normalizeSiteScriptSettings(
+    initialData?.config,
+  );
   const [name, setName] = useState(site.name);
   const [domain, setDomain] = useState(site.domain);
   const [publicEnabled, setPublicEnabled] = useState(
@@ -174,34 +181,32 @@ export function SettingsClientPage({
   const [currentSiteSlug, setCurrentSiteSlug] = useState(siteSlug);
   const [transferTeamId, setTransferTeamId] = useState(activeTeamId);
   const [trackingStrength, setTrackingStrength] = useState<TrackingStrength>(
-    DEFAULT_SITE_SCRIPT_SETTINGS.trackingStrength,
+    initialTrackerSettings.trackingStrength,
   );
   const [trackQueryParams, setTrackQueryParams] = useState(
-    DEFAULT_SITE_SCRIPT_SETTINGS.trackQueryParams,
+    initialTrackerSettings.trackQueryParams,
   );
-  const [trackHash, setTrackHash] = useState(
-    DEFAULT_SITE_SCRIPT_SETTINGS.trackHash,
-  );
+  const [trackHash, setTrackHash] = useState(initialTrackerSettings.trackHash);
   const [ignoreDoNotTrack, setIgnoreDoNotTrack] = useState(
-    DEFAULT_SITE_SCRIPT_SETTINGS.ignoreDoNotTrack,
+    initialTrackerSettings.ignoreDoNotTrack,
   );
   const [autoTrackOutboundLinks, setAutoTrackOutboundLinks] = useState(
-    DEFAULT_SITE_SCRIPT_SETTINGS.autoTrackOutboundLinks,
+    initialTrackerSettings.autoTrackOutboundLinks,
   );
   const [savingAutoTracking, setSavingAutoTracking] = useState(false);
   const [performanceSampleRate, setPerformanceSampleRate] = useState(
-    DEFAULT_SITE_SCRIPT_SETTINGS.performanceSampleRate,
+    initialTrackerSettings.performanceSampleRate,
   );
   const [domainWhitelistInput, setDomainWhitelistInput] = useState(
-    formatListInput(DEFAULT_SITE_SCRIPT_SETTINGS.domainWhitelist),
+    formatListInput(initialTrackerSettings.domainWhitelist),
   );
   const [pathBlacklistInput, setPathBlacklistInput] = useState(
-    formatListInput(DEFAULT_SITE_SCRIPT_SETTINGS.pathBlacklist),
+    formatListInput(initialTrackerSettings.pathBlacklist),
   );
   const [persistedSettings, setPersistedSettings] = useState(
-    DEFAULT_SITE_SCRIPT_SETTINGS,
+    initialTrackerSettings,
   );
-  const [origin, setOrigin] = useState("");
+  const [origin, setOrigin] = useState(initialData?.origin ?? "");
   const appliedConfigSiteIdRef = useRef<string | null>(null);
   const appliedSnippetSiteIdRef = useRef<string | null>(null);
 
@@ -273,10 +278,12 @@ export function SettingsClientPage({
   const siteConfigQuery = useQuery({
     queryKey: ["dashboard", "site-config", site.id],
     queryFn: ({ signal }) =>
-      requestAdminService<Record<string, unknown>>("site-config", {
+      requestAdminService<SiteScriptSettings>("site-config", {
         params: { siteId: site.id },
         signal,
       }),
+    initialData: initialData?.config,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const scriptSnippetQuery = useQuery({
@@ -292,6 +299,8 @@ export function SettingsClientPage({
       });
       return data.snippet;
     },
+    initialData: initialData?.scriptSnippet,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const loadingSettings = siteConfigQuery.isPending;

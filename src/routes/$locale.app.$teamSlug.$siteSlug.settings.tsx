@@ -1,11 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { SettingsClientPage } from "@/components/dashboard/site-pages/settings-client-page";
+import { loadSiteSettingsInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute(
   "/$locale/app/$teamSlug/$siteSlug/settings",
 )({
+  beforeLoad: async ({ context }) => ({
+    siteSettingsInitialData: await loadSiteSettingsInitialData({
+      data: { siteId: context.siteContext.activeSite.id },
+    }),
+  }),
   head: ({ match }) => ({
     meta: [
       {
@@ -19,7 +25,12 @@ export const Route = createFileRoute(
   component: Page,
 });
 function Page() {
-  const { locale, messages, siteContext: c } = Route.useRouteContext();
+  const {
+    locale,
+    messages,
+    siteContext: c,
+    siteSettingsInitialData,
+  } = Route.useRouteContext();
   return (
     <SettingsClientPage
       locale={locale}
@@ -39,6 +50,7 @@ function Page() {
         publicEnabled: c.activeSite.publicEnabled,
         publicSlug: c.activeSite.publicSlug,
       }}
+      initialData={siteSettingsInitialData}
     />
   );
 }

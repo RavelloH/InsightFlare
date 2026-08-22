@@ -4,9 +4,21 @@ import { createFileRoute } from "@tanstack/react-router";
 import { TeamNotificationsClient } from "@/components/dashboard/team-notifications-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { canManageTeam } from "@/lib/dashboard/permissions";
+import { loadTeamNotificationsInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute("/$locale/app/$teamSlug/notifications")({
+  beforeLoad: async ({ context }) => {
+    const c = context.teamContext;
+    if (!canManageTeam(c.activeTeam.membershipRole, c.user.systemRole)) {
+      return { teamNotificationsInitialData: null };
+    }
+    return {
+      teamNotificationsInitialData: await loadTeamNotificationsInitialData({
+        data: { teamId: c.activeTeam.id },
+      }),
+    };
+  },
   head: ({ match }) => ({
     meta: [
       {
@@ -20,7 +32,12 @@ export const Route = createFileRoute("/$locale/app/$teamSlug/notifications")({
   component: Page,
 });
 function Page() {
-  const { locale, messages, teamContext: c } = Route.useRouteContext();
+  const {
+    locale,
+    messages,
+    teamContext: c,
+    teamNotificationsInitialData,
+  } = Route.useRouteContext();
   if (!canManageTeam(c.activeTeam.membershipRole, c.user.systemRole)) {
     return (
       <Card>
@@ -45,6 +62,7 @@ function Page() {
       teamId={c.activeTeam.id}
       teamSlug={c.activeTeam.slug}
       currentUserId={c.user.id}
+      initialData={teamNotificationsInitialData}
     />
   );
 }

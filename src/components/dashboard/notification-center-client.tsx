@@ -30,6 +30,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { requestAdminService } from "@/lib/admin-service-client";
 import { shortDateTime } from "@/lib/dashboard/format";
+import type { NotificationCenterInitialData } from "@/lib/dashboard/management-data";
 import { type NotificationMessageData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -40,6 +41,7 @@ interface NotificationCenterClientProps {
   locale: Locale;
   messages: AppMessages;
   teamId?: string;
+  initialData?: NotificationCenterInitialData | null;
 }
 
 type NotificationTab = "all" | "unread" | "attention" | "report";
@@ -378,6 +380,7 @@ export function NotificationCenterClient({
   locale,
   messages,
   teamId,
+  initialData = null,
 }: NotificationCenterClientProps) {
   const copy = messages.notificationCenter;
   const queryClient = useQueryClient();
@@ -416,6 +419,13 @@ export function NotificationCenterClient({
         },
         signal,
       }),
+    initialData: initialData
+      ? {
+          messages: initialData.messages,
+          unreadAttentionCount: initialData.unreadAttentionCount,
+        }
+      : undefined,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const messagesList = messagesQuery.data?.messages ?? [];

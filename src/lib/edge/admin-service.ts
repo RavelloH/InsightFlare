@@ -1,11 +1,22 @@
 import type { AdminServiceRoute } from "@/lib/admin-service-contract";
+import type { AdminPublicLoginTurnstileConfig } from "@/lib/auth/login-turnstile-config";
+import type { PublicBotAnalyticsConfig } from "@/lib/bot-analytics-config";
+import type { ScriptSnippetData } from "@/lib/dashboard/management-data";
+import type { TeamInviteData } from "@/lib/dashboard/management-data";
+import type { NotificationPreferencesData } from "@/lib/edge-client";
 import type {
   AccountUserData,
+  ApiKeyData,
   MemberData,
   NotificationMessageData,
+  NotificationRuleData,
   SiteData,
   TeamData,
 } from "@/lib/edge-client-types";
+import type { PublicNotificationEmailConfig } from "@/lib/notifications/email-config";
+import type { ScheduledTasksData } from "@/lib/scheduled-tasks";
+import type { SiteScriptSettings } from "@/lib/site-settings";
+import type { SystemPerformanceData } from "@/lib/system-performance";
 
 export {
   adminServicePath,
@@ -49,8 +60,19 @@ export interface AdminServiceReadMap {
   teams: TeamData[];
   sites: SiteData[];
   members: MemberData[];
+  "team-invites": TeamInviteData[];
   users: AccountUserData[];
   notifications: AdminNotificationsData;
+  "site-config": SiteScriptSettings;
+  "script-snippet": ScriptSnippetData;
+  "api-keys": ApiKeyData[];
+  "notification-rules": NotificationRuleData[];
+  "notification-email": PublicNotificationEmailConfig;
+  "login-turnstile": AdminPublicLoginTurnstileConfig;
+  "bot-analytics-config": PublicBotAnalyticsConfig;
+  "notifications/preferences": NotificationPreferencesData;
+  "scheduled-tasks": ScheduledTasksData;
+  "system-performance": SystemPerformanceData;
 }
 
 export async function executeAdminService(

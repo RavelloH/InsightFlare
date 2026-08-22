@@ -46,6 +46,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { requestAdminService } from "@/lib/admin-service-client";
 import { shortDateTime } from "@/lib/dashboard/format";
+import type { AdminUsersInitialData } from "@/lib/dashboard/management-data";
 import type { AccountUserData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -54,6 +55,7 @@ interface AdminUsersManagementClientProps {
   locale: Locale;
   messages: AppMessages;
   currentUserId?: string;
+  initialData?: AdminUsersInitialData | null;
 }
 
 interface CreatedAccountLink {
@@ -77,6 +79,7 @@ export function AdminUsersManagementClient({
   locale,
   messages,
   currentUserId,
+  initialData = null,
 }: AdminUsersManagementClientProps) {
   const { timeZone } = useDashboardQueryControls();
   const t = messages.adminUsers;
@@ -105,6 +108,8 @@ export function AdminUsersManagementClient({
   const usersQuery = useQuery({
     queryKey: ["dashboard", "admin-users"],
     queryFn: ({ signal }) => getUsers(signal),
+    initialData: initialData?.users,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const users = usersQuery.data ?? [];

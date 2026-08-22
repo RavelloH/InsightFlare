@@ -41,12 +41,14 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { requestAdminService } from "@/lib/admin-service-client";
+import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
 import type { AppMessages } from "@/lib/i18n/messages";
 
 import { SystemSettingsGuideDialog } from "./system-settings-guide-dialog";
 
 interface LoginTurnstileSettingsClientProps {
   messages: AppMessages;
+  initialData?: SystemSettingsInitialData | null;
 }
 
 interface PublicLoginTurnstileAdminConfig {
@@ -173,14 +175,16 @@ function loadTurnstileScript(): Promise<void> {
 
 export function LoginTurnstileSettingsClient({
   messages,
+  initialData = null,
 }: LoginTurnstileSettingsClientProps) {
   const copy = messages.systemSettings;
   const turnstileRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
-  const [config, setConfig] =
-    useState<PublicLoginTurnstileAdminConfig>(defaultConfig);
+  const [config, setConfig] = useState<PublicLoginTurnstileAdminConfig>(
+    initialData?.loginTurnstile ?? defaultConfig(),
+  );
   const [form, setForm] = useState<FormState>(() =>
-    toFormState(defaultConfig()),
+    toFormState(initialData?.loginTurnstile ?? defaultConfig()),
   );
   const [secretKey, setSecretKey] = useState("");
   const [secretKeyDirty, setSecretKeyDirty] = useState(false);
@@ -193,6 +197,8 @@ export function LoginTurnstileSettingsClient({
   const configQuery = useQuery({
     queryKey: ["dashboard", "login-turnstile-config"],
     queryFn: ({ signal }) => fetchConfig(signal),
+    initialData: initialData?.loginTurnstile,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const loading = configQuery.isPending;

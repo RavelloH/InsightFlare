@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   RiAddLine,
   RiArrowDownLine,
@@ -91,6 +91,11 @@ import {
   percentFormat,
   shortDateTime,
 } from "@/lib/dashboard/format";
+import type {
+  CreatedTeamInviteData,
+  TeamInviteData,
+  TeamManagementInitialData,
+} from "@/lib/dashboard/management-data";
 import { canAdministerTeam, canManageTeam } from "@/lib/dashboard/permissions";
 import {
   buildTeamAggregateTrend,
@@ -182,6 +187,7 @@ interface TeamManagementClientProps {
   systemRole: "admin" | "user";
   currentUserId: string;
   teamDashboardSnapshot?: TeamDashboardSnapshot | null;
+  teamManagementInitialData?: TeamManagementInitialData | null;
 }
 
 function safeSlug(value: string): string {
@@ -239,29 +245,6 @@ function buildSitePath(
   siteSlug: string,
 ): string {
   return `/${locale}/app/${teamSlug}/${siteSlug}`;
-}
-
-interface TeamInviteData {
-  id: string;
-  email: string;
-  payload: {
-    teamRole?: "member" | "admin";
-    siteIds?: string[];
-  };
-  code?: string;
-  url?: string;
-  createdByUserId: string;
-  createdAt: number;
-  expiresAt: number;
-  usedAt: number | null;
-  usedByUserId: string;
-  revokedAt: number | null;
-  status: "active" | "used" | "revoked" | "expired";
-}
-
-interface CreatedTeamInviteData {
-  invite: TeamInviteData;
-  url: string;
 }
 
 const SITE_CARD_MAX_TREND_POINTS = 120;
@@ -393,6 +376,7 @@ export function TeamManagementClient({
   systemRole,
   currentUserId,
   teamDashboardSnapshot = null,
+  teamManagementInitialData = null,
 }: TeamManagementClientProps) {
   const router = useRouter();
   const { window: selectedWindow } = useDashboardQuery();
@@ -412,9 +396,13 @@ export function TeamManagementClient({
     : selectedWindow;
   const copy = messages.teamManagement;
   const siteCreateCopy = messages.adminSites;
-  const [sites, setSites] = useState<Array<SiteData & { slug: string }>>([]);
-  const [members, setMembers] = useState<MemberData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [sites, setSites] = useState<Array<SiteData & { slug: string }>>(() =>
+    (teamManagementInitialData?.sites ?? []).map(withSiteSlug),
+  );
+  const [members, setMembers] = useState<MemberData[]>(
+    () => teamManagementInitialData?.members ?? [],
+  );
+  const [loading, setLoading] = useState(!teamManagementInitialData);
   const [createSiteDialogOpen, setCreateSiteDialogOpen] = useState(false);
   const [createSiteName, setCreateSiteName] = useState("");
   const [createSiteDomain, setCreateSiteDomain] = useState("");
@@ -424,7 +412,9 @@ export function TeamManagementClient({
   const [currentTeamName, setCurrentTeamName] = useState(activeTeam.name);
   const [teamName, setTeamName] = useState(activeTeam.name);
   const [teamSlug, setTeamSlug] = useState(activeTeam.slug);
-  const [invites, setInvites] = useState<TeamInviteData[]>([]);
+  const [invites, setInvites] = useState<TeamInviteData[]>(
+    () => teamManagementInitialData?.invites ?? [],
+  );
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
   const [inviteSiteIds, setInviteSiteIds] = useState<string[]>([]);
@@ -455,6 +445,7 @@ export function TeamManagementClient({
   );
   const canManageSites = canManage;
   const isRealOwner = activeTeam.ownerUserId === currentUserId;
+  const previousTeamIdRef = useRef<string | null>(null);
   const managementDataQuery = useQuery({
     queryKey: ["dashboard", "team-management-data", activeTeam.id, canManage],
     queryFn: async ({ signal }) => {
@@ -465,11 +456,13 @@ export function TeamManagementClient({
           : Promise.resolve([]),
         canManage ? fetchTeamSites(activeTeam.id, signal) : Promise.resolve([]),
       ]);
-      return { members, invites, sites };
+      return { members, invites, sites, fetchedAt: Date.now() };
     },
     enabled:
       typeof window !== "undefined" &&
       (activeTab === "settings" || activeTab === "members"),
+    initialData: teamManagementInitialData ?? undefined,
+    initialDataUpdatedAt: teamManagementInitialData?.fetchedAt,
   });
   const dashboardQuery = useQuery(
     teamDashboardQueryOptions({
@@ -504,6 +497,9 @@ export function TeamManagementClient({
   }, [activeTab, managementDataQuery.data, managementDataQuery.isPending]);
 
   useEffect(() => {
+    const previousTeamId = previousTeamIdRef.current;
+    previousTeamIdRef.current = activeTeam.id;
+    if (!previousTeamId || previousTeamId === activeTeam.id) return;
     setCreateSiteDialogOpen(false);
     setCreateSiteName("");
     setCreateSiteDomain("");

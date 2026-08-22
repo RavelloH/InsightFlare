@@ -610,8 +610,8 @@ function percentile(
 
 export function generateDemoRequestObservationData(
   minutes: WindowMinutes,
+  generatedAt = Date.now(),
 ): DemoRequestObservationData {
-  const generatedAt = Date.now();
   const from = generatedAt - minutes * 60 * 1000;
   const rng = createDemoRng(
     "global",

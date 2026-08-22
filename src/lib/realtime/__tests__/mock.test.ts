@@ -466,6 +466,47 @@ describe("mock — handleDemoRequest", () => {
       expect(res.ok).toBe(true);
     });
 
+    it("limits bot analytics overview data and paginates detail rows", () => {
+      const path = "/api/private/admin/bot-analytics";
+      const params = {
+        from: FIXED_FROM,
+        to: FIXED_FROM + 60 * 60 * 1000,
+        limit: 7,
+      };
+      const overview = asRecord(handleDemoRequest({ path, params }));
+      const abnormal = overview.abnormal as Record<string, unknown>;
+      const normal = overview.normal as Record<string, unknown>;
+      const abnormalEvents = overview.events as unknown[];
+      const normalEvents = overview.normalEvents as unknown[];
+
+      expect(abnormalEvents).toHaveLength(7);
+      expect(normalEvents).toHaveLength(7);
+      expect(abnormal.events).toEqual(abnormalEvents);
+      expect(normal.events).toEqual(normalEvents);
+      expect(abnormal.hasMore).toBe(true);
+      expect(normal.hasMore).toBe(true);
+
+      const nextPage = asRecord(
+        handleDemoRequest({
+          path,
+          params: {
+            ...params,
+            page: "abnormal",
+            cursor: JSON.stringify(abnormal.nextCursor),
+          },
+        }),
+      ).page as Record<string, unknown>;
+
+      const nextPageEvents = nextPage.events as unknown[];
+      expect(nextPageEvents).toHaveLength(7);
+      expect(nextPageEvents).not.toEqual(abnormalEvents);
+      expect((nextPageEvents[0] as Record<string, unknown>).traceId).not.toBe(
+        (abnormalEvents[0] as Record<string, unknown>).traceId,
+      );
+      expect(nextPage.hasMore).toBe(true);
+      expect(nextPage.nextCursor).toEqual(expect.any(Object));
+    });
+
     it("returns notification admin lists", () => {
       expect(
         ok(

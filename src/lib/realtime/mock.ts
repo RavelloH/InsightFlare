@@ -1294,7 +1294,10 @@ function demoBotAnalyticsResponse(
         : requestedMinutes <= 10080
           ? 10080
           : 43200;
-  const data = generateDemoRequestObservationData(minutes) as unknown as {
+  const data = generateDemoRequestObservationData(
+    minutes,
+    Number.isFinite(to) && to > 0 ? to : undefined,
+  ) as unknown as {
     ok: true;
     configured: boolean;
     generatedAt: number;
@@ -1320,16 +1323,18 @@ function demoBotAnalyticsResponse(
   const events =
     source === "normal" ? (data.normal?.events ?? []) : data.events;
   if (params.page === "normal" || params.page === "abnormal") {
-    const limit = Math.max(1, Math.min(100, Number(params.limit) || 50));
+    const page = paginateDemoBotEvents(
+      events,
+      parseDemoBotAnalyticsLimit(params.limit),
+      params.cursor,
+    );
     return {
       ok: true,
       configured: data.configured,
       generatedAt: data.generatedAt,
       page: {
         source,
-        events: events.slice(0, limit),
-        hasMore: events.length > limit,
-        nextCursor: null,
+        ...page,
       },
     };
   }
@@ -1355,7 +1360,103 @@ function demoBotAnalyticsResponse(
     };
   }
 
-  return data;
+  const abnormalPage = paginateDemoBotEvents(
+    data.events,
+    parseDemoBotAnalyticsLimit(params.limit),
+  );
+  const normalPage = paginateDemoBotEvents(
+    data.normal?.events ?? [],
+    parseDemoBotAnalyticsLimit(params.limit),
+  );
+
+  return {
+    ...data,
+    events: abnormalPage.events,
+    normalEvents: normalPage.events,
+    abnormal: data.abnormal
+      ? {
+          ...data.abnormal,
+          events: abnormalPage.events,
+          hasMore: abnormalPage.hasMore,
+          nextCursor: abnormalPage.nextCursor,
+        }
+      : data.abnormal,
+    normal: data.normal
+      ? {
+          ...data.normal,
+          events: normalPage.events,
+          hasMore: normalPage.hasMore,
+          nextCursor: normalPage.nextCursor,
+        }
+      : data.normal,
+  };
+}
+
+const DEMO_BOT_ANALYTICS_DEFAULT_LIMIT = 50;
+
+function parseDemoBotAnalyticsLimit(value: unknown): number {
+  const parsed = Number(value);
+  return Math.max(
+    1,
+    Math.min(
+      100,
+      Number.isFinite(parsed)
+        ? Math.trunc(parsed)
+        : DEMO_BOT_ANALYTICS_DEFAULT_LIMIT,
+    ),
+  );
+}
+
+function parseDemoBotAnalyticsCursor(
+  value: unknown,
+): { timestamp: string; receivedAt: number } | null {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const parsed = JSON.parse(value) as {
+      timestamp?: unknown;
+      receivedAt?: unknown;
+    };
+    const timestamp = String(parsed.timestamp || "");
+    const receivedAt = Number(parsed.receivedAt);
+    if (!timestamp || !Number.isFinite(receivedAt)) return null;
+    return { timestamp, receivedAt };
+  } catch {
+    return null;
+  }
+}
+
+function paginateDemoBotEvents(
+  events: Array<Record<string, unknown>>,
+  limit: number,
+  cursorValue?: unknown,
+): {
+  events: Array<Record<string, unknown>>;
+  hasMore: boolean;
+  nextCursor: { timestamp: string; receivedAt: number } | null;
+} {
+  const cursor = parseDemoBotAnalyticsCursor(cursorValue);
+  const startIndex = cursor
+    ? Math.max(
+        0,
+        events.findIndex(
+          (event) =>
+            String(event.timestamp || "") === cursor.timestamp &&
+            Number(event.receivedAt) === cursor.receivedAt,
+        ) + 1,
+      )
+    : 0;
+  const pageEvents = events.slice(startIndex, startIndex + limit);
+  const hasMore = startIndex + pageEvents.length < events.length;
+  const lastEvent = pageEvents[pageEvents.length - 1];
+  const nextCursor =
+    hasMore && lastEvent
+      ? {
+          timestamp: String(lastEvent.timestamp || ""),
+          receivedAt: Number(lastEvent.receivedAt),
+        }
+      : null;
+
+  return { events: pageEvents, hasMore, nextCursor };
 }
 
 /**

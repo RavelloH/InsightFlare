@@ -68,6 +68,7 @@ import {
   percentFormat,
   shortDateTimeWithSeconds,
 } from "@/lib/dashboard/format";
+import type { ScheduledTasksInitialData } from "@/lib/dashboard/management-data";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type {
@@ -83,6 +84,7 @@ import { cn } from "@/lib/utils";
 interface ScheduledTasksClientProps {
   locale: Locale;
   messages: AppMessages;
+  initialData?: ScheduledTasksInitialData | null;
 }
 
 const STATUS_OPTIONS: Array<ScheduledTaskStatus | "all"> = [
@@ -902,6 +904,7 @@ function ScheduledTaskRunLogDrawer({
 export function ScheduledTasksClient({
   locale,
   messages,
+  initialData = null,
 }: ScheduledTasksClientProps) {
   const t = messages.managementPages.scheduledTasks;
   const { timeZone } = useDashboardQueryControls();
@@ -922,6 +925,14 @@ export function ScheduledTasksClient({
       lastPage.runsMeta.hasMore
         ? (lastPage.runsMeta.nextPage ?? undefined)
         : undefined,
+    initialData: initialData
+      ? {
+          pages: [initialData],
+          pageParams: [1],
+        }
+      : undefined,
+    initialDataUpdatedAt: initialData?.fetchedAt,
+    staleTime: initialData ? 30_000 : 0,
     enabled: typeof window !== "undefined",
   });
   const runs = useMemo(

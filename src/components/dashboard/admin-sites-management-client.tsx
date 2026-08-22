@@ -31,6 +31,7 @@ interface AdminSitesManagementClientProps {
   locale: Locale;
   messages: AppMessages;
   activeTeam: TeamData;
+  initialSites?: readonly SiteData[] | null;
 }
 
 function safeSlug(value: string): string {
@@ -62,6 +63,7 @@ export function AdminSitesManagementClient({
   locale,
   messages,
   activeTeam,
+  initialSites = null,
 }: AdminSitesManagementClientProps) {
   const { timeZone } = useDashboardQueryControls();
   const router = useRouter();
@@ -73,6 +75,7 @@ export function AdminSitesManagementClient({
   const sitesQuery = useQuery({
     queryKey: ["dashboard", "admin-sites", activeTeam.id],
     queryFn: ({ signal }) => fetchSites(activeTeam.id, signal),
+    initialData: initialSites ?? undefined,
     enabled: typeof window !== "undefined" && Boolean(activeTeam.id),
   });
   const sites = sitesQuery.data ?? [];

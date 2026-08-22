@@ -35,6 +35,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { requestAdminService } from "@/lib/admin-service-client";
 import type { PublicBotAnalyticsConfig } from "@/lib/bot-analytics-config";
+import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +43,7 @@ import { SystemSettingsGuideDialog } from "./system-settings-guide-dialog";
 
 interface BotAnalyticsSettingsClientProps {
   messages: AppMessages;
+  initialData?: SystemSettingsInitialData | null;
 }
 
 type FormState = Pick<PublicBotAnalyticsConfig, "accountId">;
@@ -90,9 +92,12 @@ async function deleteConfig(): Promise<PublicBotAnalyticsConfig> {
 
 export function BotAnalyticsSettingsClient({
   messages,
+  initialData = null,
 }: BotAnalyticsSettingsClientProps) {
   const copy = messages.systemSettings;
-  const [config, setConfig] = useState<PublicBotAnalyticsConfig>(defaultConfig);
+  const [config, setConfig] = useState<PublicBotAnalyticsConfig>(
+    initialData?.botAnalytics ?? defaultConfig(),
+  );
   const [form, setForm] = useState<FormState>(() => toFormState(config));
   const [apiToken, setApiToken] = useState("");
   const [apiTokenDirty, setApiTokenDirty] = useState(false);
@@ -103,6 +108,8 @@ export function BotAnalyticsSettingsClient({
   const configQuery = useQuery({
     queryKey: ["dashboard", "bot-analytics-config"],
     queryFn: ({ signal }) => fetchConfig(signal),
+    initialData: initialData?.botAnalytics,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const loading = configQuery.isPending;

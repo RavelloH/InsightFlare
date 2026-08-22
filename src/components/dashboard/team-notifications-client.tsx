@@ -67,6 +67,7 @@ import {
 } from "@/components/ui/table";
 import { requestAdminService } from "@/lib/admin-service-client";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
+import type { TeamNotificationsInitialData } from "@/lib/dashboard/management-data";
 import {
   browserTimeZone,
   buildTimeZoneOptions,
@@ -98,6 +99,7 @@ interface TeamNotificationsClientProps {
   teamId: string;
   teamSlug: string;
   currentUserId: string;
+  initialData?: TeamNotificationsInitialData | null;
 }
 
 type RuleFormType = "report" | "milestone" | "threshold" | "change" | "health";
@@ -1744,6 +1746,7 @@ export function TeamNotificationsClient({
   teamId,
   teamSlug,
   currentUserId,
+  initialData = null,
 }: TeamNotificationsClientProps) {
   const copy = messages.teamManagement.notifications;
   const queryClient = useQueryClient();
@@ -1785,19 +1788,28 @@ export function TeamNotificationsClient({
         requestAdminService<PublicNotificationEmailConfig>(
           "notification-email",
           { signal },
-        ),
+        ).catch(() => null),
       ]);
       return {
         rules,
         sites,
         members,
         emailConfigured:
-          emailConfig.enabled &&
+          emailConfig?.enabled &&
           emailConfig.provider === "resend" &&
           Boolean(emailConfig.fromEmail) &&
           emailConfig.resend.configured,
       };
     },
+    initialData: initialData
+      ? {
+          rules: initialData.rules,
+          sites: initialData.sites,
+          members: initialData.members,
+          emailConfigured: initialData.emailConfigured,
+        }
+      : undefined,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const rules = rulesQuery.data?.rules ?? [];

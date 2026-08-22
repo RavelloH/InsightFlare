@@ -29,6 +29,7 @@ function Page() {
       locale={locale}
       messages={messages}
       activeTeam={c.activeTeam}
+      initialSites={c.sites}
     />
   );
 }

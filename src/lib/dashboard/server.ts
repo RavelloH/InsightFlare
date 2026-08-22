@@ -116,6 +116,14 @@ async function readAdmin<K extends keyof AdminServiceReadMap>(
   }
 }
 
+/** Server-only typed reads shared by route-level SSR loaders. */
+export async function readDashboardAdmin<K extends keyof AdminServiceReadMap>(
+  route: K,
+  params?: Record<string, string | number>,
+): Promise<AdminServiceReadMap[K] | null> {
+  return readAdmin(route, params);
+}
+
 function teamGroupsForProfile(
   me: Awaited<ReturnType<typeof readAdmin<"session">>>,
 ) {

@@ -66,6 +66,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { requestAdminService } from "@/lib/admin-service-client";
+import type { ApiKeysInitialData } from "@/lib/dashboard/management-data";
 import type { ApiKeyData, ApiKeyScope } from "@/lib/edge-client-types";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -75,6 +76,7 @@ interface ApiKeysClientProps {
   messages: AppMessages;
   teamId: string;
   sites: Array<{ id: string; name: string; domain: string }>;
+  initialData?: ApiKeysInitialData | null;
 }
 
 interface ApiKeyCreateResponse {
@@ -157,6 +159,7 @@ export function ApiKeysClient({
   messages,
   teamId,
   sites,
+  initialData = null,
 }: ApiKeysClientProps) {
   const copy = messages.teamManagement.apiKeys;
   const cancelLabel = messages.teamSelect.cancel;
@@ -169,6 +172,8 @@ export function ApiKeysClient({
         params: { teamId },
         signal,
       }),
+    initialData: initialData?.keys,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const keys = keysQuery.data ?? [];

@@ -50,6 +50,7 @@ import {
   numberFormat,
   shortDateTime,
 } from "@/lib/dashboard/format";
+import type { SystemPerformanceInitialData } from "@/lib/dashboard/management-data";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
@@ -64,6 +65,7 @@ import { cn } from "@/lib/utils";
 interface SystemPerformanceClientProps {
   locale: Locale;
   messages: AppMessages;
+  initialData?: SystemPerformanceInitialData | null;
 }
 
 const WINDOW_OPTIONS: readonly SystemPerformanceWindowMinutes[] = [
@@ -857,6 +859,7 @@ function DoDiagnosticSiteRow({
 export function SystemPerformanceClient({
   locale,
   messages,
+  initialData = null,
 }: SystemPerformanceClientProps) {
   const { timeZone } = useDashboardQueryControls();
   const t = messages.systemPerformance;
@@ -865,6 +868,9 @@ export function SystemPerformanceClient({
   const performanceQuery = useQuery({
     queryKey: ["dashboard", "system-performance", minutes],
     queryFn: ({ signal }) => fetchSystemPerformance(minutes, signal),
+    initialData: initialData?.data,
+    initialDataUpdatedAt: initialData?.fetchedAt,
+    staleTime: initialData ? 15_000 : 0,
     enabled: typeof window !== "undefined",
   });
   const diagnosticQuery = useQuery({

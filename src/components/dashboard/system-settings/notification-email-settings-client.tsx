@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { requestAdminService } from "@/lib/admin-service-client";
+import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type {
@@ -54,6 +55,7 @@ interface NotificationEmailSettingsClientProps {
   messages: AppMessages;
   currentUserEmail: string;
   showHeading?: boolean;
+  initialData?: SystemSettingsInitialData | null;
 }
 
 interface TestEmailResponse {
@@ -129,12 +131,14 @@ export function NotificationEmailSettingsClient({
   messages,
   currentUserEmail,
   showHeading = true,
+  initialData = null,
 }: NotificationEmailSettingsClientProps) {
   const copy = messages.systemSettings;
-  const [config, setConfig] =
-    useState<PublicNotificationEmailConfig>(defaultConfig);
+  const [config, setConfig] = useState<PublicNotificationEmailConfig>(
+    initialData?.notificationEmail ?? defaultConfig(),
+  );
   const [form, setForm] = useState<FormState>(() =>
-    toFormState(defaultConfig()),
+    toFormState(initialData?.notificationEmail ?? defaultConfig()),
   );
   const [apiKey, setApiKey] = useState("");
   const [apiKeyDirty, setApiKeyDirty] = useState(false);
@@ -147,6 +151,8 @@ export function NotificationEmailSettingsClient({
   const configQuery = useQuery({
     queryKey: ["dashboard", "notification-email-config"],
     queryFn: ({ signal }) => fetchEmailConfig(signal),
+    initialData: initialData?.notificationEmail,
+    initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const loading = configQuery.isPending;
