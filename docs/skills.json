@@ -7,6 +7,144 @@
   "openapi": {
     "url": "/.well-known/openapi.json"
   },
+  "credentialGuidance": {
+    "apiKeyCreation": {
+      "whenToUse": [
+        "When the user has not supplied an API key.",
+        "When token inspection reports that the supplied key is invalid, expired, revoked, or missing a required scope."
+      ],
+      "creationPage": {
+        "requires": [
+          "The user must be signed in.",
+          "The user must have permission to manage API keys for the selected team."
+        ],
+        "navigation": [
+          "Open the InsightFlare application and sign in.",
+          "Use the left sidebar team switcher to select the team that will own the key.",
+          "In that team's sidebar, open API Keys under the team management section."
+        ]
+      },
+      "creationDialog": {
+        "title": "Create API key",
+        "titleSource": "Use the application's localized teamManagement.apiKeys.createTitle value; do not invent or translate a different dialog title.",
+        "fields": {
+          "name": {
+            "instruction": "Enter a recognizable purpose-based name, such as 'analytics read for reporting'. Do not put the secret itself in the name."
+          },
+          "permissions": {
+            "instruction": "Select at least one permission and grant only what the requested task needs. Permissions are additive; do not select write permissions for a read-only task.",
+            "options": [
+              {
+                "id": "analytics:read",
+                "label": "Analytics read",
+                "useWhen": "The agent needs visits, visitors, page views, performance, events, realtime, retention, or other analytics data."
+              },
+              {
+                "id": "analysis:read",
+                "label": "Analysis definitions read",
+                "useWhen": "The agent needs shared saved filters, funnel definitions, or a query that explicitly requires this scope."
+              },
+              {
+                "id": "analysis:write",
+                "label": "Analysis definitions write",
+                "useWhen": "The user explicitly asks the agent to create, update, or delete funnel or other analysis definitions."
+              },
+              {
+                "id": "site:read",
+                "label": "Site read",
+                "useWhen": "The agent needs to list accessible sites or inspect site details. If the user already supplies a site identifier and only analytics data is needed, this may not be necessary."
+              },
+              {
+                "id": "site:write",
+                "label": "Site write",
+                "useWhen": "The user explicitly asks the agent to create, update, or delete a site."
+              },
+              {
+                "id": "site_config:read",
+                "label": "Site configuration read",
+                "useWhen": "The agent needs to inspect tracking, domain allowlist, privacy, sharing, or other site configuration."
+              },
+              {
+                "id": "site_config:write",
+                "label": "Site configuration write",
+                "useWhen": "The user explicitly asks the agent to change site configuration."
+              }
+            ],
+            "bundles": [
+              {
+                "task": "Read analytics for one known site",
+                "select": [
+                  "analytics:read"
+                ],
+                "note": "Add site:read only when site discovery or site metadata is also required."
+              },
+              {
+                "task": "Discover sites and then read analytics",
+                "select": [
+                  "site:read",
+                  "analytics:read"
+                ]
+              },
+              {
+                "task": "Manage funnels or other analysis definitions",
+                "select": [
+                  "analysis:read",
+                  "analysis:write"
+                ],
+                "note": "Include analysis:read for inspection and add analysis:write only for requested mutations."
+              }
+            ]
+          },
+          "siteScope": {
+            "instruction": "Choose the narrowest site range that covers the task.",
+            "allSites": "Leave site selection on All sites only for a team-wide report, a workflow that must work across the team, or an explicitly requested all-sites scope. This includes current and future sites.",
+            "specificSites": "Select one or more named sites for a site-specific task. Prefer this option when the agent should not access unrelated sites."
+          },
+          "expiration": {
+            "instruction": "Choose an expiry that matches how long the integration needs to run; avoid Never unless there is a documented rotation policy.",
+            "options": [
+              {
+                "value": "30",
+                "useWhen": "A short-lived test, one-off investigation, or temporary handoff."
+              },
+              {
+                "value": "90",
+                "useWhen": "A limited project or quarterly integration."
+              },
+              {
+                "value": "180",
+                "useWhen": "A normal medium-term integration when no shorter lifecycle is known."
+              },
+              {
+                "value": "365",
+                "useWhen": "A long-running integration with an owner and a scheduled review or rotation."
+              },
+              {
+                "value": "never",
+                "useWhen": "Only a stable service account with explicit owner, monitoring, and key-rotation controls."
+              }
+            ],
+            "default": "180"
+          }
+        },
+        "afterCreate": [
+          "Click Create only after checking the name, permissions, site range, and expiry.",
+          "Copy the complete secret from the one-time secret dialog immediately; closing it makes the secret unavailable for later viewing.",
+          "Store the secret in an approved secret manager or secure credential input. Do not put it in screenshots, URLs, source code, logs, or ordinary chat messages."
+        ]
+      },
+      "steps": [
+        "Follow creationPage.navigation and open the Create API key dialog.",
+        "Complete creationDialog.fields using the required task and the least-privilege bundle that fits it.",
+        "Review all choices, create the key, and follow creationDialog.afterCreate."
+      ],
+      "handling": [
+        "Ask the user to provide the newly created key only after explaining the required scope and intended use.",
+        "Never guess, generate, log, repeat, or expose an API key. Do not put it in a URL, code sample, report, or error message.",
+        "If secure credential input is unavailable, tell the user how to configure the key through their approved secret-management path instead of requesting it in an unsafe channel."
+      ]
+    }
+  },
   "openapiGuidance": {
     "sourceOfTruth": "OpenAPI is the authoritative contract for every operation. Do not infer request fields, response fields, enum values, scopes, pagination, or errors from this manifest.",
     "readingRules": [
@@ -32,7 +170,7 @@
     "health": "wellKnown.health"
   },
   "executionPolicy": {
-    "authentication": "Use only an API key supplied by the user with the Bearer authentication scheme defined by OpenAPI. Never guess, create, or expose credentials.",
+    "authentication": "Use only an API key supplied by the user with the Bearer authentication scheme defined by OpenAPI. If no key is supplied, follow credentialGuidance.apiKeyCreation and provide its sidebar navigation before requesting a key. Never guess, create, or expose credentials.",
     "scopeSelection": "Use a site scope for a request about one site. Use team scope only when the user explicitly asks for a cross-site or team-wide result. Confirm access and required scopes from the token and selected OpenAPI operation.",
     "timeRanges": "When an analytics request omits a time range, use the operation default of the last seven days ending at request time in UTC. State the effective time range and time zone in the result.",
     "filters": "Before an analytics query with filters, retrieve the selected site or team analytics schema. Use only its filterProtocol fields and operators, then consult the target operation's OpenAPI request body. Use site.analytics.filterValues when candidate values are needed.",
@@ -62,7 +200,7 @@
         "sites.list"
       ],
       "decisionBranches": [
-        "If no key is supplied or the token is invalid, request a valid API key.",
+        "If no key is supplied, provide the sidebar navigation and creation steps from credentialGuidance.apiKeyCreation, then request a newly created user-provided API key. If the token is invalid, expired, revoked, or missing a required scope, explain the issue, provide the same navigation and least-privilege guidance, and request a replacement key only after the user confirms.",
         "If multiple sites are available and a single-site task lacks a site choice, ask the user or identify the site by its known domain."
       ],
       "result": "Report the authenticated team, granted scopes, accessible sites, and any capability limitation relevant to the requested task."
@@ -530,7 +668,7 @@
     }
   ],
   "errorPolicy": {
-    "authentication": "For authentication failures, request a valid user-provided API key and do not retry with invented credentials.",
+    "authentication": "For authentication failures, provide the sidebar navigation and creation steps from credentialGuidance.apiKeyCreation, then request a valid user-provided API key. Do not retry with invented credentials, and never repeat or expose the key.",
     "authorization": "For authorization failures, explain the required scope or site access shown by OpenAPI and the token inspection.",
     "validation": "For validation failures, reread the selected operation's OpenAPI request definition and correct only user-authorized values.",
     "rateLimit": "For rate limits, follow any documented retry guidance and use bounded retries.",

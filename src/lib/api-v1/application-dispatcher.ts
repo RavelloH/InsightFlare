@@ -12,12 +12,13 @@ import {
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import { canAccessSiteId } from "@/lib/edge/api-key-auth";
 import type { Env } from "@/lib/edge/types";
+import { rootSecret } from "@/lib/secrets";
 
 type SavedFilterRouteId = "site.saved-filters.list" | "site.saved-filters.get";
 
 export interface ApiV1ApplicationDispatchInput {
   readonly request: Request;
-  readonly env: Pick<Env, "DB" | "MAIN_SECRET">;
+  readonly env: Pick<Env, "DB" | "MAIN_SECRET" | "DAILY_SALT_SECRET">;
   readonly principal: ApiKeyPrincipal;
   readonly routeId: SavedFilterRouteId;
   readonly siteId: string;
@@ -116,12 +117,13 @@ export async function dispatchApiV1ApplicationRoute(
   if (!canAccessSiteId(principal, siteId)) {
     return errorResponse(request, "not_found");
   }
-  if (!input.service && !env.MAIN_SECRET) {
+  const cursorSecret = rootSecret(env);
+  if (!input.service && !cursorSecret) {
     return errorResponse(request, "internal_error");
   }
 
   const application =
-    input.service ?? createSavedFilterApplicationService(env, env.MAIN_SECRET!);
+    input.service ?? createSavedFilterApplicationService(env, cursorSecret!);
   const context = { teamId: principal.teamId, siteIds: principal.siteIds };
   if (routeId === "site.saved-filters.get") {
     if (!savedFilterId) return errorResponse(request, "validation_failed");

@@ -169,6 +169,25 @@ describe("planned saved-filter HTTP adapter", () => {
     expect(response.status).toBe(500);
   });
 
+  it("uses the legacy root secret when MAIN_SECRET is absent", async () => {
+    const all = vi.fn().mockResolvedValue({ results: [] });
+    const response = await dispatchApiV1ApplicationRoute({
+      request: new Request(
+        "https://app.test/api/v1/sites/site-1/saved-filters?limit=5",
+      ),
+      env: {
+        DB: { prepare: vi.fn(() => ({ bind: vi.fn(() => ({ all })) })) },
+        DAILY_SALT_SECRET: "legacy-root",
+      } as never,
+      principal: principal(),
+      routeId: "site.saved-filters.list",
+      siteId: "site-1",
+    });
+
+    expect(response.status).toBe(200);
+    expect(all).toHaveBeenCalledOnce();
+  });
+
   it("rejects a malformed application item route before execution", async () => {
     const { application, execute } = service({ ok: true, value: {} });
     const response = await dispatchApiV1ApplicationRoute({

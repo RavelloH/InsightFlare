@@ -9,6 +9,7 @@ import {
   GetSiteInputSchema,
   ListSitesInputSchema,
   SiteSettingsInputSchema,
+  TrackingScriptInputSchema,
   UpdateFunnelInputSchema,
   UpdatePrivacySettingsInputSchema,
   UpdateSharingSettingsInputSchema,
@@ -132,7 +133,7 @@ const routeConfigs: Record<ResourceRouteId, ResourceRouteConfig> = {
     operation: "settings.trackingScript.get",
     method: "GET",
     scope: "site_config:read",
-    schema: SiteSettingsInputSchema,
+    schema: TrackingScriptInputSchema,
   },
   "funnels.list": {
     operation: "funnels.list",

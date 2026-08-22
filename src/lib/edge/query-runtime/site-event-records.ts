@@ -20,6 +20,7 @@ import {
 import { createQueryTime } from "@/lib/edge/query-contract/helpers";
 import type { Env } from "@/lib/edge/types";
 import { sha256Hex } from "@/lib/edge/utils";
+import { rootSecret } from "@/lib/secrets";
 
 export interface ReadSiteEventRecordsInput {
   readonly env: Env;
@@ -81,7 +82,7 @@ async function decodeCursor(
   input: ReadSiteEventRecordsInput,
 ): Promise<string | null> {
   if (!input.page.cursor) return null;
-  const secret = input.env.MAIN_SECRET;
+  const secret = rootSecret(input.env);
   if (!secret) return null;
   const [payload, signature, extra] = input.page.cursor.split(".");
   if (
@@ -116,7 +117,7 @@ async function encodeCursor(
   input: ReadSiteEventRecordsInput,
   cursor: string,
 ): Promise<string> {
-  const secret = input.env.MAIN_SECRET;
+  const secret = rootSecret(input.env);
   if (!secret) throw new Error("data-unavailable");
   const payload = base64Url(
     new TextEncoder().encode(
@@ -158,7 +159,7 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
     key: input.sort.field,
     direction: input.sort.direction,
   } as const;
-  if (!input.env.MAIN_SECRET) throw new Error("data-unavailable");
+  if (!rootSecret(input.env)) throw new Error("data-unavailable");
   const rawCursor = await decodeCursor(input);
   const cursor = rawCursor ? parseEventRecordCursor(rawCursor, sort) : null;
   if (input.page.cursor && !cursor) throw new Error("invalid-cursor");

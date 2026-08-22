@@ -118,6 +118,22 @@ describe("site event-record runtime", () => {
     );
   });
 
+  it("accepts DAILY_SALT_SECRET as the existing deployment root", async () => {
+    vi.mocked(queryEventRecordPageFromD1).mockResolvedValue({
+      rows: [],
+      nextCursor: null,
+    });
+
+    await expect(
+      readSiteEventRecords({
+        ...base,
+        env: { DAILY_SALT_SECRET: "legacy-root" } as never,
+        sort: { field: "occurredAt", direction: "desc" },
+        page: { limit: 20 },
+      }),
+    ).resolves.toMatchObject({ page: { hasMore: false, nextCursor: null } });
+  });
+
   it("returns window-scoped detail and maps provider failures", async () => {
     const detail = { event: { eventId: "evt" }, context: {}, eventData: {} };
     vi.mocked(queryEventRecordDetailFromD1).mockResolvedValueOnce(

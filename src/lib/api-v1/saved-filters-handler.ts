@@ -9,7 +9,7 @@ import type { Env } from "@/lib/edge/types";
  */
 export function handlePlannedSavedFilters(
   request: Request,
-  env: Pick<Env, "DB" | "MAIN_SECRET">,
+  env: Pick<Env, "DB" | "MAIN_SECRET" | "DAILY_SALT_SECRET">,
   principal: ApiKeyPrincipal,
   siteId: string,
   filterId?: string,

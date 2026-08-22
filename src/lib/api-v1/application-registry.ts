@@ -187,6 +187,9 @@ export const UpdateSiteInputSchema = SiteUpdateInputSchema.extend({
   .refine(sitePatchRefinement, "A site patch must change at least one field");
 export const DeleteSiteInputSchema = GetSiteInputSchema;
 export const SiteSettingsInputSchema = GetSiteInputSchema;
+export const TrackingScriptInputSchema = SiteSettingsInputSchema.extend({
+  origin: z.string().url(),
+}).strict();
 const TrackingSettingsPatchFieldsSchema = z
   .object({
     trackQuery: z.boolean().optional(),
@@ -373,9 +376,7 @@ export interface ApiV1ApplicationOperationMap {
     error: "not_found" | "conflict" | "internal_error";
   };
   "settings.trackingScript.get": {
-    input: z.infer<typeof SiteSettingsInputSchema> & {
-      readonly origin: string;
-    };
+    input: z.infer<typeof TrackingScriptInputSchema>;
     result: z.infer<typeof TrackingScriptSchema>;
     error: "not_found" | "internal_error";
   };

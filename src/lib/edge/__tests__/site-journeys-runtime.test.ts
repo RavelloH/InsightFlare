@@ -229,6 +229,23 @@ describe("site journey detail runtime", () => {
     expect(queryVisitorListPageFromD1).not.toHaveBeenCalled();
   });
 
+  it("accepts DAILY_SALT_SECRET as the existing deployment root", async () => {
+    vi.mocked(queryVisitorListPageFromD1).mockResolvedValue({
+      rows: [],
+      nextCursor: null,
+    });
+
+    await expect(
+      readSiteVisitors({
+        ...base,
+        env: { DAILY_SALT_SECRET: "legacy-root" } as never,
+        filters: { version: 1, root: null },
+        sort: { field: "lastSeenAt", direction: "desc" },
+        page: { limit: 20 },
+      }),
+    ).resolves.toMatchObject({ page: { hasMore: false, nextCursor: null } });
+  });
+
   it("validates trajectory filters before checking the opaque target", async () => {
     await expect(
       readSiteVisitorEvents({

@@ -29,6 +29,7 @@ import {
 import { createQueryTime } from "@/lib/edge/query-contract/helpers";
 import type { Env } from "@/lib/edge/types";
 import { sha256Hex } from "@/lib/edge/utils";
+import { rootSecret } from "@/lib/secrets";
 
 interface JourneyDetailInput {
   readonly env: Env;
@@ -129,7 +130,7 @@ async function decodeCursor(
   sort: unknown,
 ): Promise<string | null> {
   if (!input.page.cursor) return null;
-  const secret = input.env.MAIN_SECRET;
+  const secret = rootSecret(input.env);
   if (!secret) return null;
   const [payload, signature, extra] = input.page.cursor.split(".");
   if (
@@ -164,7 +165,7 @@ async function encodeCursor(
   sort: unknown,
   cursor: string,
 ): Promise<string> {
-  const secret = input.env.MAIN_SECRET;
+  const secret = rootSecret(input.env);
   if (!secret) throw new Error("data-unavailable");
   const payload = base64Url(
     new TextEncoder().encode(
@@ -226,7 +227,7 @@ export async function readSiteVisitors(
     };
   },
 ) {
-  if (!input.env.MAIN_SECRET) throw new Error("data-unavailable");
+  if (!rootSecret(input.env)) throw new Error("data-unavailable");
   const sort = {
     key: input.sort.field,
     direction: input.sort.direction,
@@ -276,7 +277,7 @@ export async function readSiteSessions(
     };
   },
 ) {
-  if (!input.env.MAIN_SECRET) throw new Error("data-unavailable");
+  if (!rootSecret(input.env)) throw new Error("data-unavailable");
   const sort = {
     key: input.sort.field,
     direction: input.sort.direction,

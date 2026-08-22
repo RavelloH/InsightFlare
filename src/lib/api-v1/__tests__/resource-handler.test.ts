@@ -201,6 +201,27 @@ describe("typed API v1 resource boundary", () => {
     expect(prepare).not.toHaveBeenCalled();
   });
 
+  it("accepts the server-derived origin for a tracking-script read", async () => {
+    const db = resourceEnv();
+    const response = await handlePlannedResourceRoute({
+      request: new Request(
+        "https://app.test/api/v1/sites/site-1/settings/tracking-script",
+      ),
+      env: db.env,
+      principal: principal(["site_config:read"]),
+      routeId: "settings.trackingScript.get",
+      siteId: "site-1",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        siteId: "site-1",
+        src: "https://app.test/script.js?siteId=site-1",
+      },
+    });
+  });
+
   it("keeps resource service inputs HTTP-free and filters a site list by the trusted context", async () => {
     const db = envWithSite();
     const service = createResourceApplicationService(db.env);
