@@ -77,19 +77,24 @@ export function RealtimeTrafficTrendCard({
   events,
 }: RealtimeTrafficTrendCardProps) {
   const { timeZone } = useDashboardQueryControls();
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => floorToMinute(Date.now()));
 
   useEffect(() => {
-    setNow(Date.now());
-  }, [events]);
+    let timeoutId: number | null = null;
+    const scheduleNextMinute = () => {
+      const delay = Math.max(1, MINUTE_MS - (Date.now() % MINUTE_MS) + 1);
+      timeoutId = window.setTimeout(() => {
+        setNow(floorToMinute(Date.now()));
+        scheduleNextMinute();
+      }, delay);
+    };
 
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setNow(Date.now());
-    }, 15_000);
+    scheduleNextMinute();
 
     return () => {
-      window.clearInterval(intervalId);
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
     };
   }, []);
 

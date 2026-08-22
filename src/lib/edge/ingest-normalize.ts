@@ -5,32 +5,76 @@ import { coerceNumber } from "./utils";
 
 export const MAX_CLIENT_EVENT_LAG_MS = 30 * 1000;
 
+export type RealtimeSnapshotRecordKind =
+  | "pageview"
+  | "custom_event"
+  | "leave"
+  | "visibility"
+  | "identify";
+
 export interface RealtimeSnapshotRecord {
   id: string;
   eventType: string;
+  eventKind?: RealtimeSnapshotRecordKind;
   eventAt: number;
+  siteId?: string;
+  traceId?: string;
+  receivedAt?: number | null;
+  sequence?: number | null;
+  eventId?: string;
+  eventName?: string;
+  eventDataJson?: string | null;
   visitId: string;
   sessionId: string;
+  startedAt?: number | null;
+  previousVisitId?: string;
+  previousVisitStartedAt?: number | null;
   pathname: string;
+  queryString?: string;
   hash: string;
   title: string;
   hostname: string;
   referrerUrl: string;
   referrerHost: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmTerm?: string;
+  utmContent?: string;
   visitorId: string;
+  userId?: string;
+  userName?: string;
+  isEU?: boolean | number;
   country: string;
   region: string;
   regionCode: string;
   city: string;
   continent: string;
+  postalCode?: string;
+  metroCode?: string;
   timezone: string;
   organization: string;
+  uaRaw?: string;
   browser: string;
+  browserVersion?: string;
   os: string;
   osVersion: string;
   deviceType: string;
   language: string;
-  screenSize: string;
+  screenWidth?: number | null;
+  screenHeight?: number | null;
+  status?: string;
+  hiddenAt?: number | null;
+  endedAt?: number | null;
+  finalizedAt?: number | null;
+  durationMs?: number | null;
+  durationSource?: string;
+  exitReason?: string;
+  leaveAt?: number | null;
+  performanceVisitId?: string;
+  performance?: TrackerPerformancePayload | null;
+  visibilityState?: string;
+  screenSize?: string;
   latitude: number | null;
   longitude: number | null;
 }
@@ -63,6 +107,33 @@ export interface RealtimeVisitPayloadInput {
   screenHeight: number | null;
   latitude: number | null;
   longitude: number | null;
+  siteId?: string;
+  status?: string;
+  queryString?: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmTerm?: string;
+  utmContent?: string;
+  isEU?: boolean | number;
+  postalCode?: string;
+  metroCode?: string;
+  uaRaw?: string;
+  browserVersion?: string;
+  userId?: string;
+  userName?: string;
+  hiddenAt?: number | null;
+  endedAt?: number | null;
+  finalizedAt?: number | null;
+  durationMs?: number | null;
+  durationSource?: string;
+  exitReason?: string;
+  performance?: TrackerPerformancePayload | null;
+  perfTtfbMs?: number | null;
+  perfFcpMs?: number | null;
+  perfLcpMs?: number | null;
+  perfCls?: number | null;
+  perfInpMs?: number | null;
 }
 
 export { jsonResponse };
@@ -144,34 +215,116 @@ export function formatRealtimeOsLabel(os: string, osVersion: string): string {
   return normalizedOs || normalizedVersion;
 }
 
+function inferRealtimeEventKind(
+  record: RealtimeSnapshotRecord,
+): RealtimeSnapshotRecordKind {
+  if (record.eventKind) return record.eventKind;
+  if (record.eventType === "visit" || record.eventType === "pageview") {
+    return "pageview";
+  }
+  if (record.eventType === "__presence_leave") return "leave";
+  return "custom_event";
+}
+
+function parseRealtimeJsonValue(input: unknown): unknown {
+  if (input === null || input === undefined || input === "") return null;
+  if (typeof input !== "string") return input;
+  try {
+    return JSON.parse(input);
+  } catch {
+    return input;
+  }
+}
+
+function toRealtimePerformance(
+  input: RealtimeVisitPayloadInput,
+): TrackerPerformancePayload | null {
+  const values = {
+    ttfb: input.perfTtfbMs,
+    fcp: input.perfFcpMs,
+    lcp: input.perfLcpMs,
+    cls: input.perfCls,
+    inp: input.perfInpMs,
+  };
+  const hasValue = Object.values(values).some(
+    (value) => typeof value === "number" && Number.isFinite(value),
+  );
+  if (!hasValue) return null;
+  return Object.fromEntries(
+    Object.entries(values).filter(
+      ([, value]) => typeof value === "number" && Number.isFinite(value),
+    ),
+  ) as TrackerPerformancePayload;
+}
+
 export function toRealtimePayload(
   record: RealtimeSnapshotRecord,
 ): Record<string, unknown> {
+  const eventKind = inferRealtimeEventKind(record);
   return {
     id: record.id,
     eventType: record.eventType,
+    eventKind,
     eventAt: record.eventAt,
+    siteId: record.siteId ?? "",
+    traceId: record.traceId ?? "",
+    receivedAt: record.receivedAt ?? null,
+    sequence: record.sequence ?? null,
+    eventId: record.eventId ?? (eventKind === "custom_event" ? record.id : ""),
+    eventName:
+      record.eventName ??
+      (eventKind === "custom_event" ? record.eventType : ""),
+    eventData: parseRealtimeJsonValue(record.eventDataJson),
     visitId: record.visitId,
     sessionId: record.sessionId,
+    startedAt: record.startedAt ?? null,
+    previousVisitId: record.previousVisitId ?? "",
+    previousVisitStartedAt: record.previousVisitStartedAt ?? null,
     pathname: record.pathname,
+    queryString: record.queryString ?? "",
     hash: record.hash,
     title: record.title,
     hostname: record.hostname,
     referrerUrl: record.referrerUrl,
     referrerHost: record.referrerHost,
+    utmSource: record.utmSource ?? "",
+    utmMedium: record.utmMedium ?? "",
+    utmCampaign: record.utmCampaign ?? "",
+    utmTerm: record.utmTerm ?? "",
+    utmContent: record.utmContent ?? "",
     visitorId: record.visitorId,
+    userId: record.userId ?? "",
+    userName: record.userName ?? "",
+    isEU: Boolean(record.isEU),
     country: record.country,
     region: record.region,
     regionCode: record.regionCode,
     city: record.city,
     continent: record.continent,
+    postalCode: record.postalCode ?? "",
+    metroCode: record.metroCode ?? "",
     timezone: record.timezone,
     organization: record.organization,
+    uaRaw: record.uaRaw ?? "",
     browser: record.browser,
-    osVersion: formatRealtimeOsLabel(record.os, record.osVersion),
+    browserVersion: record.browserVersion ?? "",
+    os: record.os,
+    osVersion: record.osVersion,
     deviceType: record.deviceType,
+    screenWidth: record.screenWidth ?? null,
+    screenHeight: record.screenHeight ?? null,
     language: record.language,
-    screenSize: record.screenSize,
+    status: record.status ?? "",
+    hiddenAt: record.hiddenAt ?? null,
+    endedAt: record.endedAt ?? null,
+    finalizedAt: record.finalizedAt ?? null,
+    durationMs: record.durationMs ?? null,
+    durationSource: record.durationSource ?? "",
+    exitReason: record.exitReason ?? "",
+    leaveAt: record.leaveAt ?? null,
+    performanceVisitId: record.performanceVisitId ?? "",
+    performance: parseRealtimeJsonValue(record.performance),
+    visibilityState: record.visibilityState ?? "",
     latitude: record.latitude,
     longitude: record.longitude,
   };
@@ -200,10 +353,34 @@ export function toRealtimeVisitPayload(
     timezone: visit.timezone,
     organization: visit.asOrganization,
     browser: visit.browser,
-    osVersion: formatRealtimeOsLabel(visit.os, visit.osVersion),
+    browserVersion: visit.browserVersion ?? "",
+    os: visit.os,
+    osVersion: visit.osVersion,
     deviceType: visit.deviceType,
     language: visit.language,
-    screenSize: toRealtimeScreenSize(visit.screenWidth, visit.screenHeight),
+    siteId: visit.siteId ?? "",
+    status: visit.status ?? "",
+    queryString: visit.queryString ?? "",
+    utmSource: visit.utmSource ?? "",
+    utmMedium: visit.utmMedium ?? "",
+    utmCampaign: visit.utmCampaign ?? "",
+    utmTerm: visit.utmTerm ?? "",
+    utmContent: visit.utmContent ?? "",
+    isEU: Boolean(visit.isEU),
+    postalCode: visit.postalCode ?? "",
+    metroCode: visit.metroCode ?? "",
+    uaRaw: visit.uaRaw ?? "",
+    userId: visit.userId ?? "",
+    userName: visit.userName ?? "",
+    screenWidth: visit.screenWidth,
+    screenHeight: visit.screenHeight,
+    hiddenAt: visit.hiddenAt ?? null,
+    endedAt: visit.endedAt ?? null,
+    finalizedAt: visit.finalizedAt ?? null,
+    durationMs: visit.durationMs ?? null,
+    durationSource: visit.durationSource ?? "",
+    exitReason: visit.exitReason ?? "",
+    performance: visit.performance ?? toRealtimePerformance(visit),
     latitude: visit.latitude,
     longitude: visit.longitude,
   };

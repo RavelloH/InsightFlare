@@ -4,6 +4,7 @@ import type {
   RealtimeChannelState,
   RealtimeConnectionState,
   RealtimeEvent,
+  RealtimeEventKind,
   RealtimeSnapshot,
   RealtimeVisit,
   RealtimeVisitorPoint,
@@ -322,6 +323,7 @@ function resolveSnapshotEvents(snapshot: RealtimeSnapshot): RealtimeEvent[] {
     return snapshot.visits.map((visit) => ({
       id: `snapshot:${visit.visitId}:${visit.lastActivityAt}`,
       eventType: "visit",
+      eventKind: "pageview",
       eventAt: visit.lastActivityAt,
       visitId: visit.visitId,
       sessionId: visit.sessionId,
@@ -339,11 +341,27 @@ function resolveSnapshotEvents(snapshot: RealtimeSnapshot): RealtimeEvent[] {
       continent: visit.continent,
       timezone: visit.timezone,
       organization: visit.organization,
+      siteId: visit.siteId,
+      queryString: visit.queryString,
+      utmSource: visit.utmSource,
+      utmMedium: visit.utmMedium,
+      utmCampaign: visit.utmCampaign,
+      utmTerm: visit.utmTerm,
+      utmContent: visit.utmContent,
+      userId: visit.userId,
+      userName: visit.userName,
+      isEU: visit.isEU,
+      postalCode: visit.postalCode,
+      metroCode: visit.metroCode,
+      browserVersion: visit.browserVersion,
+      os: visit.os,
       browser: visit.browser,
       osVersion: visit.osVersion,
       deviceType: visit.deviceType,
       language: visit.language,
       screenSize: visit.screenSize,
+      screenWidth: visit.screenWidth,
+      screenHeight: visit.screenHeight,
       latitude: visit.latitude,
       longitude: visit.longitude,
     }));
@@ -352,6 +370,7 @@ function resolveSnapshotEvents(snapshot: RealtimeSnapshot): RealtimeEvent[] {
   return snapshot.points.map((point) => ({
     id: `snapshot-point:${point.visitorId}:${point.eventAt}`,
     eventType: "visit",
+    eventKind: "pageview",
     eventAt: point.eventAt,
     visitId: "",
     sessionId: "",
@@ -388,12 +407,26 @@ function buildDerivedState(
 > {
   const activeCutoff = now - ACTIVE_WINDOW_MS;
   const latestVisitorEvents = new Map<string, RealtimeEvent>();
+  const latestVisitVisibility = new Map<string, "hidden" | "visible">();
   const visitsById = new Map<string, RealtimeVisit>();
   const visitorsLast30m = new Set<string>();
   let viewsLast30m = 0;
 
   for (const event of events) {
-    upsertRecentVisit(visitsById, event);
+    const eventKind =
+      event.eventKind ?? normalizeRealtimeEventKind(undefined, event.eventType);
+    if (eventKind === "visibility") {
+      if (event.visitId && !latestVisitVisibility.has(event.visitId)) {
+        latestVisitVisibility.set(
+          event.visitId,
+          event.visibilityState === "visible" ? "visible" : "hidden",
+        );
+      }
+      continue;
+    }
+    if (eventKind !== "identify") {
+      upsertRecentVisit(visitsById, event);
+    }
     if (event.visitorId) {
       visitorsLast30m.add(event.visitorId);
     }
@@ -401,7 +434,15 @@ function buildDerivedState(
       viewsLast30m += 1;
     }
 
-    if (!event.visitorId || event.eventAt < activeCutoff) continue;
+    if (
+      !event.visitorId ||
+      event.eventAt < activeCutoff ||
+      eventKind === "identify" ||
+      event.status === "hidden_pending" ||
+      latestVisitVisibility.get(event.visitId) === "hidden"
+    ) {
+      continue;
+    }
     const existing = latestVisitorEvents.get(event.visitorId);
     if (!existing || compareRealtimeEventsDesc(event, existing) < 0) {
       latestVisitorEvents.set(event.visitorId, event);
@@ -452,7 +493,7 @@ function upsertRecentVisit(
       visitId: event.visitId,
       visitorId: event.visitorId,
       sessionId: event.sessionId,
-      startedAt: event.eventAt,
+      startedAt: event.startedAt ?? event.eventAt,
       lastActivityAt: event.eventAt,
       pathname: event.pathname,
       hash: event.hash,
@@ -467,11 +508,35 @@ function upsertRecentVisit(
       continent: event.continent,
       timezone: event.timezone,
       organization: event.organization,
+      siteId: event.siteId,
+      queryString: event.queryString,
+      utmSource: event.utmSource,
+      utmMedium: event.utmMedium,
+      utmCampaign: event.utmCampaign,
+      utmTerm: event.utmTerm,
+      utmContent: event.utmContent,
+      userId: event.userId,
+      userName: event.userName,
+      isEU: event.isEU,
+      postalCode: event.postalCode,
+      metroCode: event.metroCode,
+      browserVersion: event.browserVersion,
+      os: event.os,
       browser: event.browser,
       osVersion: event.osVersion,
       deviceType: event.deviceType,
       language: event.language,
       screenSize: event.screenSize,
+      screenWidth: event.screenWidth,
+      screenHeight: event.screenHeight,
+      status: event.status,
+      hiddenAt: event.hiddenAt,
+      endedAt: event.endedAt,
+      finalizedAt: event.finalizedAt,
+      durationMs: event.durationMs,
+      durationSource: event.durationSource,
+      exitReason: event.exitReason,
+      performance: event.performance,
       latitude: event.latitude,
       longitude: event.longitude,
     });
@@ -495,11 +560,26 @@ function upsertRecentVisit(
   previous.continent ||= event.continent;
   previous.timezone ||= event.timezone;
   previous.organization ||= event.organization;
+  previous.siteId ||= event.siteId;
+  previous.queryString ||= event.queryString;
+  previous.utmSource ||= event.utmSource;
+  previous.utmMedium ||= event.utmMedium;
+  previous.utmCampaign ||= event.utmCampaign;
+  previous.utmTerm ||= event.utmTerm;
+  previous.utmContent ||= event.utmContent;
+  previous.userId ||= event.userId;
+  previous.userName ||= event.userName;
+  previous.postalCode ||= event.postalCode;
+  previous.metroCode ||= event.metroCode;
+  previous.browserVersion ||= event.browserVersion;
+  previous.os ||= event.os;
   previous.browser ||= event.browser;
   previous.osVersion ||= event.osVersion;
   previous.deviceType ||= event.deviceType;
   previous.language ||= event.language;
   previous.screenSize ||= event.screenSize;
+  previous.screenWidth ??= event.screenWidth;
+  previous.screenHeight ??= event.screenHeight;
   previous.latitude ??= event.latitude;
   previous.longitude ??= event.longitude;
 }
@@ -557,25 +637,64 @@ function normalizeRealtimeEvent(payload: unknown): RealtimeEvent | null {
   const id = String(record.id ?? `${eventAt}-${visitorId}`);
   const latitude = normalizeCoordinate(record.latitude, -90, 90);
   const longitude = normalizeCoordinate(record.longitude, -180, 180);
+  const eventType = String(record.eventType ?? record.event_type ?? "");
+  const eventKind = normalizeRealtimeEventKind(record.eventKind, eventType);
+  const screenSize = normalizeScreenSize(
+    record.screenSize ?? record.screen_size,
+    record.screenWidth ?? record.screen_width,
+    record.screenHeight ?? record.screen_height,
+  );
 
   return {
     id,
-    eventType: String(record.eventType ?? record.event_type ?? ""),
+    eventType,
+    eventKind,
     eventAt: Number.isFinite(eventAt) ? eventAt : Date.now(),
+    siteId: String(record.siteId ?? record.site_id ?? ""),
+    traceId: String(record.traceId ?? record.trace_id ?? ""),
+    receivedAt: normalizeNullableNumber(
+      record.receivedAt ?? record.received_at,
+    ),
+    sequence: normalizeNullableNumber(record.sequence),
+    eventId: String(record.eventId ?? record.event_id ?? ""),
+    eventName: String(
+      record.eventName ??
+        record.event_name ??
+        (eventKind === "custom_event" ? eventType : ""),
+    ),
+    eventData: record.eventData ?? record.event_data ?? null,
     visitId: String(record.visitId ?? record.visit_id ?? ""),
     sessionId: String(record.sessionId ?? record.session_id ?? ""),
+    startedAt: normalizeNullableNumber(record.startedAt ?? record.started_at),
+    previousVisitId: String(
+      record.previousVisitId ?? record.previous_visit_id ?? "",
+    ),
+    previousVisitStartedAt: normalizeNullableNumber(
+      record.previousVisitStartedAt ?? record.previous_visit_started_at,
+    ),
     pathname: String(record.pathname ?? "/"),
+    queryString: String(record.queryString ?? record.query_string ?? ""),
     hash: String(record.hash ?? record.hash_fragment ?? ""),
     title: String(record.title ?? ""),
     hostname: String(record.hostname ?? ""),
     referrerUrl: String(record.referrerUrl ?? record.referrer_url ?? ""),
     referrerHost: String(record.referrerHost ?? record.referrer_host ?? ""),
+    utmSource: String(record.utmSource ?? record.utm_source ?? ""),
+    utmMedium: String(record.utmMedium ?? record.utm_medium ?? ""),
+    utmCampaign: String(record.utmCampaign ?? record.utm_campaign ?? ""),
+    utmTerm: String(record.utmTerm ?? record.utm_term ?? ""),
+    utmContent: String(record.utmContent ?? record.utm_content ?? ""),
     visitorId,
+    userId: String(record.userId ?? record.user_id ?? ""),
+    userName: String(record.userName ?? record.user_name ?? ""),
+    isEU: normalizeBoolean(record.isEU ?? record.is_eu),
     country: String(record.country ?? ""),
     region: String(record.region ?? ""),
     regionCode: String(record.regionCode ?? record.region_code ?? ""),
     city: String(record.city ?? ""),
     continent: String(record.continent ?? ""),
+    postalCode: String(record.postalCode ?? record.postal_code ?? ""),
+    metroCode: String(record.metroCode ?? record.metro_code ?? ""),
     timezone: String(record.timezone ?? ""),
     organization: String(
       record.organization ??
@@ -583,14 +702,92 @@ function normalizeRealtimeEvent(payload: unknown): RealtimeEvent | null {
         record.as_organization ??
         "",
     ),
+    uaRaw: String(record.uaRaw ?? record.ua_raw ?? ""),
     browser: String(record.browser ?? ""),
+    browserVersion: String(
+      record.browserVersion ?? record.browser_version ?? "",
+    ),
+    os: String(record.os ?? ""),
     osVersion: String(record.osVersion ?? record.os_version ?? ""),
     deviceType: String(record.deviceType ?? record.device_type ?? ""),
     language: String(record.language ?? ""),
-    screenSize: String(record.screenSize ?? record.screen_size ?? ""),
+    screenSize,
+    screenWidth: normalizeNullableNumber(
+      record.screenWidth ?? record.screen_width,
+    ),
+    screenHeight: normalizeNullableNumber(
+      record.screenHeight ?? record.screen_height,
+    ),
+    status: String(record.status ?? ""),
+    hiddenAt: normalizeNullableNumber(record.hiddenAt ?? record.hidden_at),
+    endedAt: normalizeNullableNumber(record.endedAt ?? record.ended_at),
+    finalizedAt: normalizeNullableNumber(
+      record.finalizedAt ?? record.finalized_at,
+    ),
+    durationMs: normalizeNullableNumber(
+      record.durationMs ?? record.duration_ms,
+    ),
+    durationSource: String(
+      record.durationSource ?? record.duration_source ?? "",
+    ),
+    exitReason: String(record.exitReason ?? record.exit_reason ?? ""),
+    leaveAt: normalizeNullableNumber(record.leaveAt ?? record.leave_at),
+    performanceVisitId: String(
+      record.performanceVisitId ?? record.performance_visit_id ?? "",
+    ),
+    performance: record.performance ?? null,
+    visibilityState: String(
+      record.visibilityState ?? record.visibility_state ?? "",
+    ),
     latitude,
     longitude,
   };
+}
+
+function normalizeRealtimeEventKind(
+  value: unknown,
+  eventType: string,
+): RealtimeEventKind {
+  if (
+    value === "pageview" ||
+    value === "custom_event" ||
+    value === "leave" ||
+    value === "visibility" ||
+    value === "identify"
+  ) {
+    return value;
+  }
+  if (eventType === "visit" || eventType === "pageview") return "pageview";
+  if (eventType === PRESENCE_LEAVE_EVENT) return "leave";
+  if (eventType === "visibility") return "visibility";
+  if (eventType === "identify") return "identify";
+  return "custom_event";
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeBoolean(value: unknown): boolean {
+  if (value === true || value === 1 || value === "1" || value === "true") {
+    return true;
+  }
+  return false;
+}
+
+function normalizeScreenSize(
+  value: unknown,
+  width: unknown,
+  height: unknown,
+): string {
+  const explicit = String(value ?? "").trim();
+  if (explicit) return explicit;
+  const normalizedWidth = normalizeNullableNumber(width);
+  const normalizedHeight = normalizeNullableNumber(height);
+  if (normalizedWidth === null || normalizedHeight === null) return "";
+  return `${Math.round(normalizedWidth)}x${Math.round(normalizedHeight)}`;
 }
 
 function normalizeCoordinate(
@@ -680,6 +877,11 @@ function normalizeRealtimeVisit(payload: unknown): RealtimeVisit | null {
   );
   const latitude = normalizeCoordinate(record.latitude, -90, 90);
   const longitude = normalizeCoordinate(record.longitude, -180, 180);
+  const screenSize = normalizeScreenSize(
+    record.screenSize ?? record.screen_size,
+    record.screenWidth ?? record.screen_width,
+    record.screenHeight ?? record.screen_height,
+  );
 
   return {
     visitId,
@@ -707,11 +909,48 @@ function normalizeRealtimeVisit(payload: unknown): RealtimeVisit | null {
         record.as_organization ??
         "",
     ),
+    siteId: String(record.siteId ?? record.site_id ?? ""),
+    queryString: String(record.queryString ?? record.query_string ?? ""),
+    utmSource: String(record.utmSource ?? record.utm_source ?? ""),
+    utmMedium: String(record.utmMedium ?? record.utm_medium ?? ""),
+    utmCampaign: String(record.utmCampaign ?? record.utm_campaign ?? ""),
+    utmTerm: String(record.utmTerm ?? record.utm_term ?? ""),
+    utmContent: String(record.utmContent ?? record.utm_content ?? ""),
+    userId: String(record.userId ?? record.user_id ?? ""),
+    userName: String(record.userName ?? record.user_name ?? ""),
+    isEU: normalizeBoolean(record.isEU ?? record.is_eu),
+    postalCode: String(record.postalCode ?? record.postal_code ?? ""),
+    metroCode: String(record.metroCode ?? record.metro_code ?? ""),
+    uaRaw: String(record.uaRaw ?? record.ua_raw ?? ""),
     browser: String(record.browser ?? ""),
+    browserVersion: String(
+      record.browserVersion ?? record.browser_version ?? "",
+    ),
+    os: String(record.os ?? ""),
     osVersion: String(record.osVersion ?? record.os_version ?? ""),
     deviceType: String(record.deviceType ?? record.device_type ?? ""),
     language: String(record.language ?? ""),
-    screenSize: String(record.screenSize ?? record.screen_size ?? ""),
+    screenSize,
+    screenWidth: normalizeNullableNumber(
+      record.screenWidth ?? record.screen_width,
+    ),
+    screenHeight: normalizeNullableNumber(
+      record.screenHeight ?? record.screen_height,
+    ),
+    status: String(record.status ?? ""),
+    hiddenAt: normalizeNullableNumber(record.hiddenAt ?? record.hidden_at),
+    endedAt: normalizeNullableNumber(record.endedAt ?? record.ended_at),
+    finalizedAt: normalizeNullableNumber(
+      record.finalizedAt ?? record.finalized_at,
+    ),
+    durationMs: normalizeNullableNumber(
+      record.durationMs ?? record.duration_ms,
+    ),
+    durationSource: String(
+      record.durationSource ?? record.duration_source ?? "",
+    ),
+    exitReason: String(record.exitReason ?? record.exit_reason ?? ""),
+    performance: record.performance ?? null,
     latitude,
     longitude,
   };

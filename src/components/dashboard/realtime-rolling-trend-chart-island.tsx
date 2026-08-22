@@ -1,9 +1,9 @@
 import dynamic from "@/lib/dynamic";
 import type { Locale } from "@/lib/i18n/config";
 
-import type { RealtimeRollingTrendPoint } from "./realtime-rolling-trend-chart";
+import type { RealtimeRollingTrendPoint } from "./charts/realtime-rolling-trend-chart";
 
-export type { RealtimeRollingTrendPoint } from "./realtime-rolling-trend-chart";
+export type { RealtimeRollingTrendPoint } from "./charts/realtime-rolling-trend-chart";
 
 interface RealtimeRollingTrendChartIslandProps {
   locale: Locale;
@@ -16,7 +16,7 @@ interface RealtimeRollingTrendChartIslandProps {
 
 const RealtimeRollingTrendChart = dynamic<RealtimeRollingTrendChartIslandProps>(
   () =>
-    import("@/components/dashboard/realtime-rolling-trend-chart").then(
+    import("@/components/dashboard/charts/realtime-rolling-trend-chart").then(
       (module) => module.RealtimeRollingTrendChart,
     ),
   {

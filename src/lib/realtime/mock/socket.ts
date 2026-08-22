@@ -292,12 +292,21 @@ class MockRealtimeSocket implements RealtimeSocketLike {
     overrideEventAt?: number,
   ): RealtimeEvent {
     const profile = findSiteProfile(this.siteId);
+    const [screenWidth, screenHeight] = visit.screenSize
+      .split("x")
+      .map((value) => Number(value));
+    const isPageview = visit.eventType === "pageview";
     return {
       id: this.nextEventId(),
       eventType: visit.eventType,
+      eventKind: isPageview ? "pageview" : "custom_event",
       eventAt: overrideEventAt ?? visit.startedAt,
+      siteId: this.siteId,
+      eventName: isPageview ? "" : visit.eventType,
+      eventData: null,
       visitId: visit.visitId,
       sessionId: visit.sessionId,
+      startedAt: visit.startedAt,
       pathname: visit.pathname,
       hash: "",
       title: visit.title,
@@ -312,11 +321,15 @@ class MockRealtimeSocket implements RealtimeSocketLike {
       continent: visit.continent,
       timezone: visit.timezone,
       organization: visit.organization,
+      browserVersion: visit.browserVersion,
+      os: "",
       browser: visit.browser,
       osVersion: visit.osVersion,
       deviceType: visit.deviceType,
       language: visit.language,
       screenSize: visit.screenSize,
+      screenWidth: Number.isFinite(screenWidth) ? screenWidth : null,
+      screenHeight: Number.isFinite(screenHeight) ? screenHeight : null,
       latitude: Number.isFinite(visit.latitude) ? visit.latitude : null,
       longitude: Number.isFinite(visit.longitude) ? visit.longitude : null,
     };
@@ -329,6 +342,9 @@ class MockRealtimeSocket implements RealtimeSocketLike {
     const profile = findSiteProfile(this.siteId);
     const previous = this.visitorsByVisitorId.get(visit.visitorId);
     const activityAt = overrideActivityAt ?? visit.startedAt;
+    const [screenWidth, screenHeight] = visit.screenSize
+      .split("x")
+      .map((value) => Number(value));
     return {
       visitId: visit.visitId,
       visitorId: visit.visitorId,
@@ -348,11 +364,16 @@ class MockRealtimeSocket implements RealtimeSocketLike {
       continent: visit.continent,
       timezone: visit.timezone,
       organization: visit.organization,
+      siteId: this.siteId,
+      browserVersion: visit.browserVersion,
+      os: "",
       browser: visit.browser,
       osVersion: visit.osVersion,
       deviceType: visit.deviceType,
       language: visit.language,
       screenSize: visit.screenSize,
+      screenWidth: Number.isFinite(screenWidth) ? screenWidth : null,
+      screenHeight: Number.isFinite(screenHeight) ? screenHeight : null,
       latitude: Number.isFinite(visit.latitude) ? visit.latitude : null,
       longitude: Number.isFinite(visit.longitude) ? visit.longitude : null,
     };

@@ -29,26 +29,104 @@ interface TimedOutVisitCandidate {
   lastActivityAt: number;
   hiddenAt: number | null;
   pathname: string;
+  queryString: string;
   hash: string;
   title: string;
   hostname: string;
   referrerUrl: string;
   referrerHost: string;
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
+  utmTerm: string;
+  utmContent: string;
+  userId: string;
+  userName: string;
+  isEU: number;
   country: string;
   region: string;
   regionCode: string;
   city: string;
   continent: string;
+  postalCode: string;
+  metroCode: string;
   timezone: string;
   organization: string;
+  uaRaw: string;
   browser: string;
+  browserVersion: string;
   os: string;
   osVersion: string;
   deviceType: string;
   language: string;
+  screenWidth: number | null;
+  screenHeight: number | null;
   screenSize: string;
   latitude: number | null;
   longitude: number | null;
+}
+
+async function pushFinalizedVisitRealtimeEvent(
+  context: IngestFlushContext,
+  visit: TimedOutVisitCandidate,
+  eventAt: number,
+  durationMs: number | null,
+  durationSource: string,
+  exitReason: string,
+): Promise<void> {
+  await context.pushRealtimeRecord({
+    id: `leave:${visit.visitId}`,
+    eventType: WS_PRESENCE_LEAVE_EVENT,
+    eventKind: "leave",
+    eventAt,
+    siteId: visit.siteId,
+    visitId: visit.visitId,
+    sessionId: visit.sessionId,
+    startedAt: visit.startedAt,
+    pathname: visit.pathname,
+    queryString: visit.queryString,
+    hash: visit.hash,
+    title: visit.title,
+    hostname: visit.hostname,
+    referrerUrl: visit.referrerUrl,
+    referrerHost: visit.referrerHost,
+    utmSource: visit.utmSource,
+    utmMedium: visit.utmMedium,
+    utmCampaign: visit.utmCampaign,
+    utmTerm: visit.utmTerm,
+    utmContent: visit.utmContent,
+    visitorId: visit.visitorId,
+    userId: visit.userId,
+    userName: visit.userName,
+    isEU: visit.isEU,
+    country: visit.country,
+    region: visit.region,
+    regionCode: visit.regionCode,
+    city: visit.city,
+    continent: visit.continent,
+    postalCode: visit.postalCode,
+    metroCode: visit.metroCode,
+    timezone: visit.timezone,
+    organization: visit.organization,
+    uaRaw: visit.uaRaw,
+    browser: visit.browser,
+    browserVersion: visit.browserVersion,
+    os: visit.os,
+    osVersion: visit.osVersion,
+    deviceType: visit.deviceType,
+    screenWidth: visit.screenWidth,
+    screenHeight: visit.screenHeight,
+    language: visit.language,
+    status: "complete",
+    endedAt: eventAt,
+    finalizedAt: eventAt,
+    durationMs,
+    durationSource,
+    exitReason,
+    leaveAt: eventAt,
+    latitude: visit.latitude,
+    longitude: visit.longitude,
+  });
 }
 
 export async function flushPendingToD1(
@@ -249,25 +327,38 @@ export async function flushTimeouts(
         last_activity_at AS lastActivityAt,
         hidden_at AS hiddenAt,
         pathname,
+        query_string AS queryString,
         hash_fragment AS hash,
         title,
         hostname,
         referrer_url AS referrerUrl,
         referrer_host AS referrerHost,
+        utm_source AS utmSource,
+        utm_medium AS utmMedium,
+        utm_campaign AS utmCampaign,
+        utm_term AS utmTerm,
+        utm_content AS utmContent,
+        user_id AS userId,
+        user_name AS userName,
+        is_eu AS isEU,
         country,
         region,
         region_code AS regionCode,
         city,
         continent,
+        postal_code AS postalCode,
+        metro_code AS metroCode,
         timezone,
         as_organization AS organization,
+        ua_raw AS uaRaw,
         browser,
+        browser_version AS browserVersion,
         os,
         os_version AS osVersion,
         device_type AS deviceType,
         language,
-        user_id,
-        user_name,
+        screen_width AS screenWidth,
+        screen_height AS screenHeight,
         CASE
           WHEN screen_width IS NOT NULL AND screen_height IS NOT NULL
             THEN CAST(screen_width AS TEXT) || 'x' || CAST(screen_height AS TEXT)
@@ -311,35 +402,14 @@ export async function flushTimeouts(
     );
     if (rowsWritten === 0) continue;
     if (!context.hasOpenVisitsForVisitor(visit.siteId, visit.visitorId)) {
-      await context.pushRealtimeRecord({
-        id: `leave:${visit.visitId}`,
-        eventType: WS_PRESENCE_LEAVE_EVENT,
-        eventAt: now,
-        visitId: visit.visitId,
-        sessionId: visit.sessionId,
-        pathname: visit.pathname,
-        hash: visit.hash,
-        title: visit.title,
-        hostname: visit.hostname,
-        referrerUrl: visit.referrerUrl,
-        referrerHost: visit.referrerHost,
-        visitorId: visit.visitorId,
-        country: visit.country,
-        region: visit.region,
-        regionCode: visit.regionCode,
-        city: visit.city,
-        continent: visit.continent,
-        timezone: visit.timezone,
-        organization: visit.organization,
-        browser: visit.browser,
-        os: visit.os,
-        osVersion: visit.osVersion,
-        deviceType: visit.deviceType,
-        language: visit.language,
-        screenSize: visit.screenSize,
-        latitude: visit.latitude,
-        longitude: visit.longitude,
-      });
+      await pushFinalizedVisitRealtimeEvent(
+        context,
+        visit,
+        now,
+        null,
+        "timeout",
+        "timeout",
+      );
     }
   }
 }
@@ -360,23 +430,38 @@ async function flushHiddenFallbacks(
         last_activity_at AS lastActivityAt,
         hidden_at AS hiddenAt,
         pathname,
+        query_string AS queryString,
         hash_fragment AS hash,
         title,
         hostname,
         referrer_url AS referrerUrl,
         referrer_host AS referrerHost,
+        utm_source AS utmSource,
+        utm_medium AS utmMedium,
+        utm_campaign AS utmCampaign,
+        utm_term AS utmTerm,
+        utm_content AS utmContent,
+        user_id AS userId,
+        user_name AS userName,
+        is_eu AS isEU,
         country,
         region,
         region_code AS regionCode,
         city,
         continent,
+        postal_code AS postalCode,
+        metro_code AS metroCode,
         timezone,
         as_organization AS organization,
+        ua_raw AS uaRaw,
         browser,
+        browser_version AS browserVersion,
         os,
         os_version AS osVersion,
         device_type AS deviceType,
         language,
+        screen_width AS screenWidth,
+        screen_height AS screenHeight,
         CASE
           WHEN screen_width IS NOT NULL AND screen_height IS NOT NULL
             THEN CAST(screen_width AS TEXT) || 'x' || CAST(screen_height AS TEXT)
@@ -425,35 +510,14 @@ async function flushHiddenFallbacks(
     );
     if (rowsWritten === 0) continue;
     if (!context.hasOpenVisitsForVisitor(visit.siteId, visit.visitorId)) {
-      await context.pushRealtimeRecord({
-        id: `leave:${visit.visitId}`,
-        eventType: WS_PRESENCE_LEAVE_EVENT,
-        eventAt: hiddenAt,
-        visitId: visit.visitId,
-        sessionId: visit.sessionId,
-        pathname: visit.pathname,
-        hash: visit.hash,
-        title: visit.title,
-        hostname: visit.hostname,
-        referrerUrl: visit.referrerUrl,
-        referrerHost: visit.referrerHost,
-        visitorId: visit.visitorId,
-        country: visit.country,
-        region: visit.region,
-        regionCode: visit.regionCode,
-        city: visit.city,
-        continent: visit.continent,
-        timezone: visit.timezone,
-        organization: visit.organization,
-        browser: visit.browser,
-        os: visit.os,
-        osVersion: visit.osVersion,
-        deviceType: visit.deviceType,
-        language: visit.language,
-        screenSize: visit.screenSize,
-        latitude: visit.latitude,
-        longitude: visit.longitude,
-      });
+      await pushFinalizedVisitRealtimeEvent(
+        context,
+        visit,
+        hiddenAt,
+        durationMs,
+        "hidden",
+        "hidden_timeout",
+      );
     }
   }
 }

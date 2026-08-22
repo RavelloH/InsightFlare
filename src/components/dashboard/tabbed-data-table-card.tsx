@@ -1,6 +1,8 @@
 import {
+  memo,
   type ReactNode,
   startTransition,
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -241,7 +243,9 @@ export interface TabbedDataTableCardProps<
 function defaultNormalizeRows<TRow extends TabbedDataTableRowBase>(
   rows: readonly TRow[],
 ): TRow[] {
-  return [...rows];
+  // Sorting always works on a copy, so the default path can preserve the
+  // external rows reference and avoid cloning every inactive tab.
+  return rows as TRow[];
 }
 
 function createTabRecord<TTab extends string, TValue>(
@@ -353,7 +357,7 @@ const DEFAULT_EXPORT_LABELS = {
   allTabsUnavailable: "All tabs are available after their data has loaded.",
 } satisfies Required<TabbedDataTableExportLabels>;
 
-export function TabbedDataTableCard<
+function TabbedDataTableCardImpl<
   TTab extends string,
   TRow extends TabbedDataTableRowBase,
   TKey extends string = string,
@@ -590,9 +594,8 @@ export function TabbedDataTableCard<
     [activeTab, dataQuery.data, dataQuery.isFetching, loadingByTab, tabs],
   );
 
-  const sortedRowsByTab = useMemo(() => {
-    return createTabRecord(tabs, (tab) => {
-      const tabValue = tab.value;
+  const sortRowsForTab = useCallback(
+    (tabValue: TTab): TRow[] => {
       const tabRows = resolvedRowsByTab[tabValue] ?? [];
       const tabColumns = getColumnsForTab(columns, tabValue);
       const sort = effectiveSortByTab[tabValue];
@@ -631,21 +634,28 @@ export function TabbedDataTableCard<
       });
 
       return filterRows ? filterRows(sorted, tabValue) : sorted;
-    });
-  }, [
-    columns,
-    compareRows,
-    filterRows,
-    getRowSearchText,
-    rowAdapter,
-    resolvedRowsByTab,
-    effectiveSortByTab,
-    tabs,
-  ]);
+    },
+    [
+      columns,
+      compareRows,
+      effectiveSortByTab,
+      filterRows,
+      getRowSearchText,
+      resolvedRowsByTab,
+      rowAdapter,
+    ],
+  );
 
+  const activeRows = useMemo(
+    () => sortRowsForTab(activeTab),
+    [activeTab, sortRowsForTab],
+  );
   const normalizedSearchTerm = deferredSearchTerm.trim().toLocaleLowerCase();
   const searchedRows = useMemo(() => {
-    const rows = sortedRowsByTab[activeSearchTab];
+    const rows =
+      activeSearchTab === activeTab
+        ? activeRows
+        : sortRowsForTab(activeSearchTab);
     if (!normalizedSearchTerm) return rows;
     const getText =
       searchConfig?.getText ??
@@ -659,11 +669,13 @@ export function TabbedDataTableCard<
     );
   }, [
     activeSearchTab,
+    activeTab,
+    activeRows,
     getRowSearchText,
     normalizedSearchTerm,
     rowAdapter,
     searchConfig,
-    sortedRowsByTab,
+    sortRowsForTab,
   ]);
 
   const tabByValue = useMemo(
@@ -672,7 +684,6 @@ export function TabbedDataTableCard<
   );
   const activeTabMeta = tabByValue.get(activeTab) ?? tabs[0];
   const activeSearchTabMeta = tabByValue.get(activeSearchTab) ?? activeTabMeta;
-  const activeRows = sortedRowsByTab[activeTab];
   const activeLoading =
     resolvedLoadingByTab[activeTab] || resolvedRowsByTab[activeTab] === null;
   const searchLoading =
@@ -960,7 +971,7 @@ export function TabbedDataTableCard<
     if (exportRows === "rawRows") {
       return rawRowsByTab[tab] ?? [];
     }
-    return sortedRowsByTab[tab] ?? [];
+    return tab === activeTab ? activeRows : sortRowsForTab(tab);
   }
 
   function buildExportCsv() {
@@ -1244,3 +1255,7 @@ export function TabbedDataTableCard<
     </>
   );
 }
+
+export const TabbedDataTableCard = memo(
+  TabbedDataTableCardImpl,
+) as typeof TabbedDataTableCardImpl;

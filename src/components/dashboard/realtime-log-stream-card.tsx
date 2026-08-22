@@ -2,6 +2,7 @@ import {
   memo,
   type ReactNode,
   type SyntheticEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -434,11 +435,13 @@ function maybeReachScrollElementEnd(
 function LogStreamScrollbar({
   children,
   className,
+  maskClassName,
   syncKey,
   onReachEnd,
 }: {
   children: ReactNode;
   className?: string;
+  maskClassName?: string;
   syncKey?: string | number | boolean | null;
   onReachEnd?: (() => void) | null;
 }) {
@@ -514,6 +517,7 @@ function LogStreamScrollbar({
     <VerticalScrollMask
       hostRef={hostRef}
       className={className}
+      maskClassName={maskClassName}
       scrollbarOptions={PANEL_SCROLLBAR_OPTIONS}
       syncKey={syncKey}
     >
@@ -527,9 +531,7 @@ function formatRelativeTime(
   timestamp: number,
   now: number,
 ): string {
-  const formatter = new Intl.RelativeTimeFormat(intlLocale(locale), {
-    numeric: "auto",
-  });
+  const formatter = getRelativeTimeFormatter(locale);
   const diffSeconds = Math.round((timestamp - now) / 1000);
   const absoluteSeconds = Math.abs(diffSeconds);
 
@@ -549,6 +551,19 @@ function formatRelativeTime(
 
   const diffDays = Math.round(diffHours / 24);
   return formatter.format(diffDays, "day");
+}
+
+const relativeTimeFormatterCache = new Map<Locale, Intl.RelativeTimeFormat>();
+
+function getRelativeTimeFormatter(locale: Locale): Intl.RelativeTimeFormat {
+  const cached = relativeTimeFormatterCache.get(locale);
+  if (cached) return cached;
+
+  const formatter = new Intl.RelativeTimeFormat(intlLocale(locale), {
+    numeric: "auto",
+  });
+  relativeTimeFormatterCache.set(locale, formatter);
+  return formatter;
 }
 
 function formatDetailDateTime(
@@ -711,6 +726,7 @@ function areRealtimeLogStreamItemPropsEqual(
     previousProps.event.eventType === nextProps.event.eventType &&
     previousProps.event.eventAt === nextProps.event.eventAt &&
     previousProps.event.pathname === nextProps.event.pathname &&
+    previousProps.event.hash === nextProps.event.hash &&
     previousProps.event.visitorId === nextProps.event.visitorId &&
     previousProps.event.sessionId === nextProps.event.sessionId &&
     previousProps.event.browser === nextProps.event.browser &&
@@ -772,6 +788,10 @@ const RealtimeLogStreamItemCard = memo(function RealtimeLogStreamItemCard({
   now,
   timeZone,
 }: RealtimeLogStreamItemProps) {
+  const displayData = useMemo(
+    () => resolveRealtimeEventDisplayData(locale, messages, event),
+    [event, locale, messages],
+  );
   const {
     avatarSeed,
     browserLabel,
@@ -782,7 +802,11 @@ const RealtimeLogStreamItemCard = memo(function RealtimeLogStreamItemCard({
     osLabel,
     sourceLabel,
     title,
-  } = resolveRealtimeEventDisplayData(locale, messages, event);
+  } = displayData;
+  const eventDateTime = useMemo(
+    () => shortDateTime(locale, event.eventAt, timeZone),
+    [event.eventAt, locale, timeZone],
+  );
 
   return (
     <Card size="sm" className="w-full">
@@ -857,7 +881,7 @@ const RealtimeLogStreamItemCard = memo(function RealtimeLogStreamItemCard({
                   {formatRelativeTime(locale, event.eventAt, now)}
                 </p>
                 <p className="font-mono text-[11px] text-muted-foreground">
-                  {shortDateTime(locale, event.eventAt, timeZone)}
+                  {eventDateTime}
                 </p>
               </div>
             </div>
@@ -868,7 +892,23 @@ const RealtimeLogStreamItemCard = memo(function RealtimeLogStreamItemCard({
   );
 }, areRealtimeLogStreamItemPropsEqual);
 
-function RealtimeLogStreamItem({
+interface RealtimeLogStreamItemMotionProps extends RealtimeLogStreamItemProps {
+  onSelect: (event: RealtimeEvent) => void;
+  reduceMotion: boolean;
+}
+
+function areRealtimeLogStreamItemMotionPropsEqual(
+  previousProps: RealtimeLogStreamItemMotionProps,
+  nextProps: RealtimeLogStreamItemMotionProps,
+): boolean {
+  return (
+    areRealtimeLogStreamItemPropsEqual(previousProps, nextProps) &&
+    previousProps.onSelect === nextProps.onSelect &&
+    previousProps.reduceMotion === nextProps.reduceMotion
+  );
+}
+
+const RealtimeLogStreamItem = memo(function RealtimeLogStreamItem({
   event,
   locale,
   messages,
@@ -876,10 +916,7 @@ function RealtimeLogStreamItem({
   timeZone,
   onSelect,
   reduceMotion,
-}: RealtimeLogStreamItemProps & {
-  onSelect: (event: RealtimeEvent) => void;
-  reduceMotion: boolean;
-}) {
+}: RealtimeLogStreamItemMotionProps) {
   const title = formatLogTitle(
     messages,
     event,
@@ -916,7 +953,7 @@ function RealtimeLogStreamItem({
       </Clickable>
     </motion.li>
   );
-}
+}, areRealtimeLogStreamItemMotionPropsEqual);
 
 function RealtimeVisitorHistorySection({
   locale,
@@ -1532,7 +1569,10 @@ export function RealtimeLogStreamCard({
     null,
   );
 
-  const visibleEvents = events.slice(0, visibleCount);
+  const visibleEvents = useMemo(
+    () => events.slice(0, visibleCount),
+    [events, visibleCount],
+  );
   const hasMoreEvents = visibleCount < events.length;
   const isInitialLoading = !hasConnected && visibleEvents.length === 0;
   const logStateKey = isInitialLoading
@@ -1561,12 +1601,17 @@ export function RealtimeLogStreamCard({
     });
   }, [events.length]);
 
-  const loadMoreEvents = () => {
+  const loadMoreEvents = useCallback(() => {
     if (!hasMoreEvents) return;
     setVisibleCount((previous) =>
       Math.min(events.length, previous + LOAD_MORE_STEP),
     );
-  };
+  }, [events.length, hasMoreEvents]);
+  const handleDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setSelectedEvent(null);
+    }
+  }, []);
 
   return (
     <>
@@ -1598,6 +1643,7 @@ export function RealtimeLogStreamCard({
               ) : (
                 <LogStreamScrollbar
                   className="max-h-[30rem]"
+                  maskClassName="from-card via-card/80 to-transparent"
                   syncKey={`${visibleEvents.length}:${events.length}`}
                   onReachEnd={hasMoreEvents ? loadMoreEvents : null}
                 >
@@ -1634,11 +1680,7 @@ export function RealtimeLogStreamCard({
         events={events}
         visits={visits}
         open={selectedEvent !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setSelectedEvent(null);
-          }
-        }}
+        onOpenChange={handleDialogOpenChange}
       />
     </>
   );

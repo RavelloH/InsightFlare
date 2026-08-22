@@ -23,11 +23,7 @@ import {
   flushPendingToD1 as flushPendingToD1InFlushStore,
   flushTimeouts as flushTimeoutsInFlushStore,
 } from "./ingest-flush";
-import {
-  jsonResponse,
-  type RealtimeSnapshotRecord,
-  toRealtimeScreenSize,
-} from "./ingest-normalize";
+import { jsonResponse, type RealtimeSnapshotRecord } from "./ingest-normalize";
 import {
   pushInitialRealtimeSnapshot,
   pushRealtimeRecordToSockets,
@@ -549,32 +545,143 @@ export class IngestDurableObject extends DurableObject {
     await this.pushRealtimeRecord({
       id: record.visitId,
       eventType: "visit",
+      eventKind: "pageview",
       eventAt: record.startedAt,
+      siteId: record.siteId,
+      traceId: record.traceId,
+      receivedAt: record.receivedAt,
       visitId: record.visitId,
       sessionId: record.sessionId,
+      startedAt: record.startedAt,
+      previousVisitId: record.previousVisitId,
+      previousVisitStartedAt: record.previousVisitStartedAt,
       pathname: record.pathname,
+      queryString: record.queryString,
       hash: record.hashFragment,
       title: record.title,
       hostname: record.hostname,
       referrerUrl: record.referrerUrl,
       referrerHost: record.referrerHost,
+      utmSource: record.utmSource,
+      utmMedium: record.utmMedium,
+      utmCampaign: record.utmCampaign,
+      utmTerm: record.utmTerm,
+      utmContent: record.utmContent,
       visitorId: record.visitorId,
+      userId: record.userId,
+      userName: record.userName,
+      isEU: record.isEU,
       country: record.country,
       region: record.region,
       regionCode: record.regionCode,
       city: record.city,
       continent: record.continent,
+      postalCode: record.postalCode,
+      metroCode: record.metroCode,
       timezone: record.timezone,
       organization: record.asOrganization,
+      uaRaw: record.uaRaw,
       browser: record.browser,
+      browserVersion: record.browserVersion,
       os: record.os,
       osVersion: record.osVersion,
       deviceType: record.deviceType,
+      screenWidth: record.screenWidth,
+      screenHeight: record.screenHeight,
       language: record.language,
-      screenSize: toRealtimeScreenSize(record.screenWidth, record.screenHeight),
+      status: "open",
       latitude: record.latitude,
       longitude: record.longitude,
     });
+    await this.pushBufferedCustomEventsForVisit(record);
+  }
+
+  private async pushBufferedCustomEventsForVisit(
+    record: NormalizedPageview,
+  ): Promise<void> {
+    if (this.sockets.size === 0) return;
+
+    const pendingEvents = this.sqlAll<{
+      eventId: string;
+      eventAt: number;
+      receivedAt: number;
+      sequence: number;
+      eventName: string;
+      eventDataJson: string;
+      userId: string;
+    }>(
+      `
+        SELECT
+          event_id AS eventId,
+          occurred_at AS eventAt,
+          received_at AS receivedAt,
+          sequence,
+          event_name AS eventName,
+          event_data_json AS eventDataJson,
+          user_id AS userId
+        FROM buffered_custom_events
+        WHERE site_id = ? AND visit_id = ?
+        ORDER BY occurred_at ASC, created_at ASC
+      `,
+      record.siteId,
+      record.visitId,
+    );
+
+    for (const pending of pendingEvents) {
+      await this.pushRealtimeRecord({
+        id: pending.eventId,
+        eventType: pending.eventName,
+        eventKind: "custom_event",
+        eventAt: pending.eventAt,
+        siteId: record.siteId,
+        traceId: record.traceId,
+        receivedAt: pending.receivedAt,
+        sequence: pending.sequence,
+        eventId: pending.eventId,
+        eventName: pending.eventName,
+        eventDataJson: pending.eventDataJson,
+        visitId: record.visitId,
+        sessionId: record.sessionId,
+        startedAt: record.startedAt,
+        pathname: record.pathname,
+        queryString: record.queryString,
+        hash: record.hashFragment,
+        title: record.title,
+        hostname: record.hostname,
+        referrerUrl: record.referrerUrl,
+        referrerHost: record.referrerHost,
+        utmSource: record.utmSource,
+        utmMedium: record.utmMedium,
+        utmCampaign: record.utmCampaign,
+        utmTerm: record.utmTerm,
+        utmContent: record.utmContent,
+        visitorId: record.visitorId,
+        userId: pending.userId || record.userId,
+        userName: record.userName,
+        isEU: record.isEU,
+        country: record.country,
+        region: record.region,
+        regionCode: record.regionCode,
+        city: record.city,
+        continent: record.continent,
+        postalCode: record.postalCode,
+        metroCode: record.metroCode,
+        timezone: record.timezone,
+        organization: record.asOrganization,
+        uaRaw: record.uaRaw,
+        browser: record.browser,
+        browserVersion: record.browserVersion,
+        os: record.os,
+        osVersion: record.osVersion,
+        deviceType: record.deviceType,
+        screenWidth: record.screenWidth,
+        screenHeight: record.screenHeight,
+        language: record.language,
+        status: "open",
+        latitude: record.latitude,
+        longitude: record.longitude,
+      });
+    }
   }
 
   private async handleLeave(
@@ -588,23 +695,43 @@ export class IngestDurableObject extends DurableObject {
       siteId: string;
       sessionId: string;
       pathname: string;
+      queryString: string;
       hash: string;
       title: string;
       hostname: string;
       referrerUrl: string;
       referrerHost: string;
+      utmSource: string;
+      utmMedium: string;
+      utmCampaign: string;
+      utmTerm: string;
+      utmContent: string;
+      userId: string;
+      userName: string;
+      isEU: number;
       country: string;
       region: string;
       regionCode: string;
       city: string;
       continent: string;
+      postalCode: string;
+      metroCode: string;
       timezone: string;
       organization: string;
+      uaRaw: string;
       browser: string;
+      browserVersion: string;
       os: string;
       osVersion: string;
       deviceType: string;
       language: string;
+      screenWidth: number | null;
+      screenHeight: number | null;
+      endedAt: number | null;
+      finalizedAt: number | null;
+      durationMs: number | null;
+      durationSource: string;
+      exitReason: string;
       screenSize: string;
       latitude: number | null;
       longitude: number | null;
@@ -613,17 +740,27 @@ export class IngestDurableObject extends DurableObject {
     }>(
       `
         SELECT visit_id AS visitId, started_at AS startedAt, visitor_id AS visitorId, site_id AS siteId,
-               session_id AS sessionId, pathname, hash_fragment AS hash, title, hostname,
+               session_id AS sessionId, pathname, query_string AS queryString,
+               hash_fragment AS hash, title, hostname,
                referrer_url AS referrerUrl, referrer_host AS referrerHost,
+               utm_source AS utmSource, utm_medium AS utmMedium,
+               utm_campaign AS utmCampaign, utm_term AS utmTerm,
+               utm_content AS utmContent,
+               user_id AS userId, user_name AS userName, is_eu AS isEU,
                country, region, region_code AS regionCode, city, continent, timezone,
-               as_organization AS organization, browser, os, os_version AS osVersion,
+               postal_code AS postalCode, metro_code AS metroCode,
+               as_organization AS organization, ua_raw AS uaRaw,
+               browser, browser_version AS browserVersion, os, os_version AS osVersion,
                device_type AS deviceType, language,
+               screen_width AS screenWidth, screen_height AS screenHeight,
                CASE
                  WHEN screen_width IS NOT NULL AND screen_height IS NOT NULL
                    THEN CAST(screen_width AS TEXT) || 'x' || CAST(screen_height AS TEXT)
                  ELSE ''
                END AS screenSize,
-               latitude, longitude,
+               latitude, longitude, ended_at AS endedAt, finalized_at AS finalizedAt,
+               duration_ms AS durationMs, duration_source AS durationSource,
+               exit_reason AS exitReason,
                status, hidden_at AS hiddenAt
         FROM buffered_visits
         WHERE site_id = ? AND visit_id = ? AND status IN ('open', 'hidden_pending')
@@ -635,6 +772,9 @@ export class IngestDurableObject extends DurableObject {
 
     let closedVisit = false;
     let closedLeaveAt = record.leaveAt;
+    let closedDurationMs: number | null = null;
+    let closedDurationSource = "";
+    let closedExitReason = "";
     if (visit) {
       const reportedLeaveAt = Math.max(record.leaveAt, visit.startedAt);
       const hiddenAt =
@@ -650,6 +790,9 @@ export class IngestDurableObject extends DurableObject {
       const exitReason = useHiddenFallback
         ? "hidden_timeout"
         : record.exitReason || "pagehide";
+      closedDurationMs = durationMs;
+      closedDurationSource = durationSource;
+      closedExitReason = exitReason;
 
       const rowsWritten = this.sqlRun(
         `
@@ -699,29 +842,57 @@ export class IngestDurableObject extends DurableObject {
       await this.pushRealtimeRecord({
         id: `leave:${visit.visitId}`,
         eventType: WS_PRESENCE_LEAVE_EVENT,
+        eventKind: "leave",
         eventAt: closedLeaveAt,
+        siteId: visit.siteId,
+        receivedAt: record.receivedAt,
         visitId: visit.visitId,
         sessionId: visit.sessionId,
+        startedAt: visit.startedAt,
         pathname: visit.pathname,
+        queryString: visit.queryString,
         hash: visit.hash,
         title: visit.title,
         hostname: visit.hostname,
         referrerUrl: visit.referrerUrl,
         referrerHost: visit.referrerHost,
+        utmSource: visit.utmSource,
+        utmMedium: visit.utmMedium,
+        utmCampaign: visit.utmCampaign,
+        utmTerm: visit.utmTerm,
+        utmContent: visit.utmContent,
         visitorId: visit.visitorId,
+        userId: visit.userId,
+        userName: visit.userName,
+        isEU: visit.isEU,
         country: visit.country,
         region: visit.region,
         regionCode: visit.regionCode,
         city: visit.city,
         continent: visit.continent,
+        postalCode: visit.postalCode,
+        metroCode: visit.metroCode,
         timezone: visit.timezone,
         organization: visit.organization,
+        uaRaw: visit.uaRaw,
         browser: visit.browser,
+        browserVersion: visit.browserVersion,
         os: visit.os,
         osVersion: visit.osVersion,
         deviceType: visit.deviceType,
         language: visit.language,
-        screenSize: visit.screenSize,
+        screenWidth: visit.screenWidth,
+        screenHeight: visit.screenHeight,
+        status: "complete",
+        hiddenAt: null,
+        endedAt: closedLeaveAt,
+        finalizedAt: closedLeaveAt,
+        durationMs: closedDurationMs,
+        durationSource: closedDurationSource,
+        exitReason: closedExitReason,
+        leaveAt: closedLeaveAt,
+        performanceVisitId: record.performanceVisitId,
+        performance: record.performance,
         latitude: visit.latitude,
         longitude: visit.longitude,
       });
@@ -778,6 +949,41 @@ export class IngestDurableObject extends DurableObject {
           ? "do.ingest.visibility_hidden_buffered"
           : "do.ingest.visibility_hidden_ignored",
       );
+      if (rowsWritten > 0) {
+        await this.pushRealtimeRecord({
+          id: `visibility:${record.visitId}:${record.eventAt}:${record.visibilityState}`,
+          eventType: "visibility",
+          eventKind: "visibility",
+          eventAt: record.eventAt,
+          siteId: record.siteId,
+          traceId: record.traceId,
+          receivedAt: record.receivedAt,
+          visitId: record.visitId,
+          sessionId: "",
+          pathname: "",
+          hash: "",
+          title: "",
+          hostname: "",
+          referrerUrl: "",
+          referrerHost: "",
+          visitorId: "",
+          country: "",
+          region: "",
+          regionCode: "",
+          city: "",
+          continent: "",
+          timezone: "",
+          organization: "",
+          browser: "",
+          os: "",
+          osVersion: "",
+          deviceType: "",
+          language: "",
+          visibilityState: record.visibilityState,
+          latitude: null,
+          longitude: null,
+        });
+      }
       return;
     }
 
@@ -807,6 +1013,41 @@ export class IngestDurableObject extends DurableObject {
         ? "do.ingest.visibility_visible_restored"
         : "do.ingest.visibility_visible_ignored",
     );
+    if (rowsWritten > 0) {
+      await this.pushRealtimeRecord({
+        id: `visibility:${record.visitId}:${record.eventAt}:${record.visibilityState}`,
+        eventType: "visibility",
+        eventKind: "visibility",
+        eventAt: record.eventAt,
+        siteId: record.siteId,
+        traceId: record.traceId,
+        receivedAt: record.receivedAt,
+        visitId: record.visitId,
+        sessionId: "",
+        pathname: "",
+        hash: "",
+        title: "",
+        hostname: "",
+        referrerUrl: "",
+        referrerHost: "",
+        visitorId: "",
+        country: "",
+        region: "",
+        regionCode: "",
+        city: "",
+        continent: "",
+        timezone: "",
+        organization: "",
+        browser: "",
+        os: "",
+        osVersion: "",
+        deviceType: "",
+        language: "",
+        visibilityState: record.visibilityState,
+        latitude: null,
+        longitude: null,
+      });
+    }
   }
 
   private async attachPerformanceToVisit(
@@ -838,29 +1079,52 @@ export class IngestDurableObject extends DurableObject {
     await this.pushRealtimeRecord({
       id: record.eventId,
       eventType: record.eventName,
+      eventKind: "custom_event",
       eventAt: record.eventAt,
+      siteId: record.siteId,
+      traceId: record.traceId,
+      receivedAt: record.receivedAt,
+      sequence: record.sequence,
+      eventId: record.eventId,
+      eventName: record.eventName,
+      eventDataJson: record.eventDataJson,
       visitId: record.visitId,
       sessionId: record.sessionId,
+      startedAt: record.startedAt,
       pathname: record.pathname,
+      queryString: record.queryString,
       hash: record.hashFragment,
       title: record.title,
       hostname: record.hostname,
       referrerUrl: record.referrerUrl,
       referrerHost: record.referrerHost,
+      utmSource: record.utmSource,
+      utmMedium: record.utmMedium,
+      utmCampaign: record.utmCampaign,
+      utmTerm: record.utmTerm,
+      utmContent: record.utmContent,
       visitorId: record.visitorId,
+      userId: record.userId,
+      userName: record.userName,
+      isEU: record.isEU,
       country: record.country,
       region: record.region,
       regionCode: record.regionCode,
       city: record.city,
       continent: record.continent,
+      postalCode: record.postalCode,
+      metroCode: record.metroCode,
       timezone: record.timezone,
       organization: record.asOrganization,
+      uaRaw: record.uaRaw,
       browser: record.browser,
+      browserVersion: record.browserVersion,
       os: record.os,
       osVersion: record.osVersion,
       deviceType: record.deviceType,
+      screenWidth: record.screenWidth,
+      screenHeight: record.screenHeight,
       language: record.language,
-      screenSize: toRealtimeScreenSize(record.screenWidth, record.screenHeight),
       latitude: record.latitude,
       longitude: record.longitude,
     });
@@ -960,6 +1224,40 @@ export class IngestDurableObject extends DurableObject {
         ? "do.ingest.identify_buffered"
         : "do.ingest.identify_persisted",
     );
+    await this.pushRealtimeRecord({
+      id: `identify:${record.visitId}:${record.receivedAt}`,
+      eventType: "identify",
+      eventKind: "identify",
+      eventAt: record.receivedAt,
+      siteId: record.siteId,
+      traceId: record.traceId,
+      receivedAt: record.receivedAt,
+      visitId: record.visitId,
+      sessionId: serverSessionId,
+      pathname: "",
+      hash: "",
+      title: "",
+      hostname: "",
+      referrerUrl: "",
+      referrerHost: "",
+      visitorId: "",
+      userId: record.userId,
+      userName: record.userName,
+      country: "",
+      region: "",
+      regionCode: "",
+      city: "",
+      continent: "",
+      timezone: "",
+      organization: "",
+      browser: "",
+      os: "",
+      osVersion: "",
+      deviceType: "",
+      language: "",
+      latitude: null,
+      longitude: null,
+    });
   }
 
   private async getVisitContext(
