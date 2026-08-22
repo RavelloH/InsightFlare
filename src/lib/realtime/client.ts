@@ -1,5 +1,5 @@
 import { broadcastRealtimeMessage } from "@/lib/realtime/broadcast-store";
-import type { RealtimeSocketLike } from "@/lib/realtime/mock";
+import type { RealtimeSocketLike } from "@/lib/realtime/mock/socket";
 import type {
   RealtimeChannelState,
   RealtimeConnectionState,
@@ -156,14 +156,16 @@ function connect(channel: ChannelContext): void {
   setChannelStatus(channel, "connecting");
 
   if (USE_REALTIME_MOCK) {
-    import("@/lib/realtime/mock").then(({ createMockRealtimeSocket }) => {
-      if (channel.refCount <= 0) return;
-      channel.socket = createMockRealtimeSocket({
-        siteId: channel.siteId,
-        activeWindowMs: ACTIVE_WINDOW_MS,
-      });
-      attachSocketHandlers(channel);
-    });
+    import("@/lib/realtime/mock/socket").then(
+      ({ createMockRealtimeSocket }) => {
+        if (channel.refCount <= 0) return;
+        channel.socket = createMockRealtimeSocket({
+          siteId: channel.siteId,
+          activeWindowMs: ACTIVE_WINDOW_MS,
+        });
+        attachSocketHandlers(channel);
+      },
+    );
   } else {
     channel.socket = new WebSocket(toRealtimeWsUrl(channel.siteId));
     attachSocketHandlers(channel);

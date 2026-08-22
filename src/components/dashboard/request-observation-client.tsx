@@ -420,40 +420,6 @@ interface BotDimensionRow {
   sampleEvent: BotEvent | null;
 }
 
-type DemoWindowMinutes = 60 | 1440 | 10080 | 43200;
-
-async function generateDemoRequestObservation(
-  minutes: DemoWindowMinutes,
-  overrides?: Pick<RequestObservationData, "configured" | "error"> & {
-    config?: RequestObservationData["config"];
-  },
-): Promise<RequestObservationData> {
-  const { generateDemoRequestObservationData } =
-    await import("@/lib/realtime/mock/request-observation");
-  const data = withRequestObservabilityDefaults(
-    generateDemoRequestObservationData(minutes) as RequestObservationData,
-  );
-  return withRequestObservabilityDefaults({
-    ...data,
-    ...overrides,
-    config: {
-      ...(data.config ?? {}),
-      ...overrides?.config,
-    },
-  });
-}
-
-function demoMinutesForWindow(timeWindow: TimeWindow): DemoWindowMinutes {
-  const minutes = Math.max(
-    1,
-    Math.ceil((timeWindow.to - timeWindow.from) / 60000),
-  );
-  if (minutes <= 60) return 60;
-  if (minutes <= 1440) return 1440;
-  if (minutes <= 10080) return 10080;
-  return 43200;
-}
-
 function withRequestObservabilityDefaults(
   data: RequestObservationData,
 ): RequestObservationData {
@@ -584,12 +550,6 @@ function withRequestObservabilityDefaults(
   };
 }
 
-function shouldShowDemoOverlay(data: RequestObservationData): boolean {
-  return (
-    data.config?.analyticsEngineDisabled === true || data.configured === false
-  );
-}
-
 export function RequestObservationClient({
   locale,
   messages,
@@ -659,12 +619,7 @@ export function RequestObservationClient({
   const loadMoreEvents = useMemo(
     () => async (source: "abnormal" | "normal") => {
       const section = data?.[source];
-      if (
-        !section?.hasMore ||
-        !section.nextCursor ||
-        loadingMore !== null ||
-        import.meta.env.VITE_DEMO_MODE === "1"
-      ) {
+      if (!section?.hasMore || !section.nextCursor || loadingMore !== null) {
         return;
       }
       setLoadingMore(source);
@@ -1962,19 +1917,6 @@ export function RequestObservationClient({
     </div>
   );
 }
-async function withDemoOverlayData(
-  timeWindow: TimeWindow,
-  data: RequestObservationData,
-): Promise<RequestObservationData> {
-  const normalized = withRequestObservabilityDefaults(data);
-  if (!shouldShowDemoOverlay(normalized)) return normalized;
-  return generateDemoRequestObservation(demoMinutesForWindow(timeWindow), {
-    configured: false,
-    error: normalized.error,
-    config: normalized.config,
-  });
-}
-
 async function fetchRequestObservation(
   timeWindow: TimeWindow,
   signal?: AbortSignal,
@@ -1992,7 +1934,7 @@ async function fetchRequestObservation(
       signal,
     },
   );
-  return withDemoOverlayData(timeWindow, payload);
+  return withRequestObservabilityDefaults(payload);
 }
 
 async function fetchRequestObservationPage(

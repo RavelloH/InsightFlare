@@ -57,13 +57,6 @@ export async function fetchPrivateJson<T>(
     ? publicPathForPrivateRequest(path, publicSlug)
     : path;
   const requestParams = publicSlug ? paramsWithoutSiteId(params) : params;
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    if (options?.signal?.aborted) {
-      throwAbortError();
-    }
-    return demoRequest({ path: requestPath, params: requestParams }) as T;
-  }
   const url = `${requestPath}${toQueryString(requestParams)}`;
   const shouldDedupe = options?.dedupe !== false && !options?.signal;
   const existing = shouldDedupe
@@ -101,10 +94,6 @@ export async function fetchPrivateJsonMutate<T>(
   params?: PrivateRequestParams,
   body?: unknown,
 ): Promise<T> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    return demoRequest({ path, method, params, body }) as T;
-  }
   const url = `${path}${toQueryString(params)}`;
   const res = await fetch(url, {
     method,

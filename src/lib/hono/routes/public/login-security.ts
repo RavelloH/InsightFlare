@@ -4,10 +4,14 @@ import { readPublicLoginTurnstileRuntimeConfig } from "@/lib/edge/login-turnstil
 import type { AppEnv } from "@/lib/hono/types";
 import { jsonResponseFor, nf as notFound } from "@/lib/response";
 
+const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
+
 export const publicLoginSecurityRoutes = new Hono<AppEnv>();
 
 publicLoginSecurityRoutes.get("/", async (c) => {
-  const turnstile = await readPublicLoginTurnstileRuntimeConfig(c.env);
+  const turnstile = isDemoBuild
+    ? { enabled: false as const, siteKey: "", mode: "invisible" as const }
+    : await readPublicLoginTurnstileRuntimeConfig(c.env);
   return jsonResponseFor(
     c.req.raw,
     {

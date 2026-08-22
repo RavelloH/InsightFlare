@@ -25,6 +25,8 @@ import {
 import { readTeamDashboard } from "@/lib/edge/query-runtime/team-dashboard";
 import type { Env } from "@/lib/edge/types";
 
+const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
+
 export interface PrivateQueryAdapterInput {
   readonly env: Env;
   readonly siteId: string;
@@ -123,6 +125,16 @@ export function executePrivateQuery(
     assertOperationAllowed(queryContext, operationForQueryRoute(input.pathname))
   ) {
     return Promise.resolve(notFound());
+  }
+  if (isDemoBuild) {
+    return import("../query-runtime/demo-query").then(({ executeDemoQuery }) =>
+      executeDemoQuery({
+        request: input.request ?? new Request(input.url, { method: "GET" }),
+        url: input.url,
+        siteId: input.siteId,
+        context: ctx,
+      }),
+    );
   }
   if (input.pathname === "overview") {
     return import("../query/overview-contract-adapter").then(

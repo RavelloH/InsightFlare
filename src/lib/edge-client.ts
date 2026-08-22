@@ -48,8 +48,6 @@ export interface FetchEdgeOptions {
   body?: unknown;
   isPublic?: boolean;
   signal?: AbortSignal;
-  /** Keep server-owned mock services reachable from demo clients. */
-  skipDemo?: boolean;
 }
 
 async function edgeBaseUrl(): Promise<string> {
@@ -104,23 +102,6 @@ function withFilters(
 }
 
 export async function fetchEdgeJson<T>(options: FetchEdgeOptions): Promise<T> {
-  const isAdminServiceRequest =
-    options.path === "/api/private/session" ||
-    options.path.startsWith("/api/private/admin/") ||
-    options.path.startsWith("/api/private/notifications");
-  if (
-    import.meta.env.VITE_DEMO_MODE === "1" &&
-    !options.skipDemo &&
-    !isAdminServiceRequest
-  ) {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    return demoRequest({
-      path: options.path,
-      method: options.method,
-      params: options.params as Record<string, string | number> | undefined,
-      body: options.body,
-    }) as T;
-  }
   const method = options.method || "GET";
   const baseUrl = await edgeBaseUrl();
   const url = withQuery(new URL(options.path, baseUrl), options.params);

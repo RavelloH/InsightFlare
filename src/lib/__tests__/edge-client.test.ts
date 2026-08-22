@@ -48,21 +48,15 @@ import {
   updateNotificationRule,
   upsertAdminSiteConfig,
 } from "@/lib/edge-client";
-import { demoRequest } from "@/lib/realtime/mock";
 import { requestHeader } from "@/lib/request-headers";
 
 vi.mock("@/lib/auth", () => ({
   getSessionToken: vi.fn(),
 }));
 
-vi.mock("@/lib/realtime/mock", () => ({
-  demoRequest: vi.fn(),
-}));
-
 vi.mock("@/lib/request-headers", () => ({ requestHeader: vi.fn() }));
 
 const getSessionTokenMock = vi.mocked(getSessionToken);
-const demoRequestMock = vi.mocked(demoRequest);
 const requestHeaderMock = vi.mocked(requestHeader);
 
 function fetchMock() {
@@ -82,7 +76,6 @@ describe("edge client request wrappers", () => {
     vi.stubEnv("VITE_DEMO_MODE", "");
     getSessionTokenMock.mockReset();
     getSessionTokenMock.mockResolvedValue("session-token");
-    demoRequestMock.mockReset();
     requestHeaderMock.mockReset();
     requestHeaderMock.mockResolvedValue(null);
     vi.stubGlobal(
@@ -756,23 +749,18 @@ describe("edge client request wrappers", () => {
     );
   });
 
-  it("delegates to the realtime demo handler in demo mode", async () => {
+  it("uses the API for public requests in demo mode", async () => {
     vi.stubEnv("VITE_DEMO_MODE", "1");
-    demoRequestMock.mockReturnValue({
-      ok: true,
-      data: [{ bucket: 1 }],
-    });
+    fetchMock().mockResolvedValueOnce(
+      jsonResponse({ ok: true, data: [{ bucket: 1 }] }),
+    );
 
     const result = await fetchPublicTrend("demo-site", { from: 1, to: 2 });
 
     expect(result).toEqual({ ok: true, data: [{ bucket: 1 }] });
-    expect(demoRequestMock).toHaveBeenCalledWith({
-      path: "/api/public/share/demo-site/trend",
-      method: undefined,
-      params: { from: 1, to: 2, interval: "day" },
-      body: undefined,
-    });
-    expect(fetchMock()).not.toHaveBeenCalled();
+    expect(lastFetchCall()[0]).toBe(
+      "http://127.0.0.1:8787/api/public/share/demo-site/trend?from=1&to=2&interval=day",
+    );
   });
 
   it("keeps admin mutations on the server service in demo mode", async () => {
@@ -787,7 +775,6 @@ describe("edge client request wrappers", () => {
     const result = await createAdminTeam({ name: "Team", slug: "team" });
 
     expect(result).toEqual({ id: "team-1", name: "Team" });
-    expect(demoRequestMock).not.toHaveBeenCalled();
     expect(lastFetchCall()).toMatchObject([
       "http://127.0.0.1:8787/api/private/admin/teams",
       {
@@ -824,7 +811,6 @@ describe("edge client request wrappers", () => {
     expect((init.headers as Headers).get("authorization")).toBe(
       "Bearer session-token",
     );
-    expect(demoRequestMock).not.toHaveBeenCalled();
   });
 
   it("wires the edge-client filter helper into at least one exported request wrapper", () => {

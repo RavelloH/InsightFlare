@@ -111,17 +111,6 @@ function apiErrorCode(payload: LoginResponse): string {
 }
 
 async function fetchLoginTurnstileConfig(): Promise<LoginTurnstileClientConfig> {
-  if (import.meta.env.VITE_DEMO_MODE === "1") {
-    const { demoRequest } = await import("@/lib/realtime/mock");
-    const result = demoRequest({
-      path: "/api/public/login-security",
-    }) as TurnstilePublicResponse;
-    const turnstile = result.data?.turnstile;
-    return turnstile?.enabled && turnstile.siteKey
-      ? { enabled: true, siteKey: turnstile.siteKey, mode: "invisible" }
-      : { enabled: false };
-  }
-
   const response = await fetch("/api/public/login-security", {
     method: "GET",
     credentials: "include",

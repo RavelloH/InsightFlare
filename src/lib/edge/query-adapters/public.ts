@@ -15,6 +15,8 @@ import {
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
+const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
+
 export interface PublicQueryAdapterInput {
   readonly env: Env;
   readonly siteId: string;
@@ -77,6 +79,22 @@ const OVERVIEW_TABS: Readonly<Record<string, OverviewTab>> = {
   "overview-geo-organization": "geo.organization",
 };
 
+const PUBLIC_QUERY_PATHS = new Set([
+  "overview",
+  "trend",
+  "pages",
+  "referrers",
+  "pages-dashboard",
+  "retention",
+  "performance",
+  "event-types",
+  "filter-values",
+  "overview-geo-points",
+  ...Object.keys(SIMPLE_DIMENSIONS),
+  ...Object.keys(TECHNOLOGY_HANDLERS),
+  ...Object.keys(OVERVIEW_TABS),
+]);
+
 function responseContext(
   input: PublicQueryAdapterInput,
 ): ResponseContext | undefined {
@@ -88,6 +106,9 @@ function responseContext(
 export function executePublicQuery(
   input: PublicQueryAdapterInput,
 ): Promise<Response> {
+  if (!PUBLIC_QUERY_PATHS.has(input.pathname)) {
+    return Promise.resolve(notFound());
+  }
   const policy = applyPublicQueryPolicy(input.url);
   if (!policy.allowed) return Promise.resolve(notFound());
   const url = policy.url;
@@ -97,6 +118,17 @@ export function executePublicQuery(
     assertOperationAllowed(queryContext, operationForQueryRoute(input.pathname))
   ) {
     return Promise.resolve(notFound());
+  }
+  if (isDemoBuild) {
+    return import("../query-runtime/demo-query").then(({ executeDemoQuery }) =>
+      executeDemoQuery({
+        request: input.request ?? new Request(url, { method: "GET" }),
+        url,
+        siteId: input.siteId,
+        publicQuery: true,
+        context: ctx,
+      }),
+    );
   }
   if (input.pathname === "overview") {
     return import("../query/overview-contract-adapter").then(

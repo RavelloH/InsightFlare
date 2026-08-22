@@ -17,7 +17,7 @@ vi.mock("@/lib/realtime/broadcast-store", () => ({
   broadcastRealtimeMessage: broadcastRealtimeMessageMock,
 }));
 
-vi.mock("@/lib/realtime/mock", () => ({
+vi.mock("@/lib/realtime/mock/socket", () => ({
   createMockRealtimeSocket: createMockRealtimeSocketMock,
 }));
 

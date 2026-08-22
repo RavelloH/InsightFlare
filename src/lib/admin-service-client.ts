@@ -48,7 +48,6 @@ export async function requestAdminService<T>(
     params: normalizeParams(options.params),
     body: options.body,
     signal: options.signal,
-    skipDemo: true,
   });
   if (!response.ok) {
     throw new Error(

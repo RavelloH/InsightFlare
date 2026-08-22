@@ -12,6 +12,32 @@ import { normalizeFilterValue } from "./core-parsers";
 import { badRequest, notFound, unauthorized } from "./core-responses";
 import { type SiteRow } from "./core-types";
 
+const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
+
+async function demoSiteById(siteId: string): Promise<SiteRow | null> {
+  const { DEMO_SITE_PROFILES } =
+    await import("@/lib/realtime/demo-site-profiles");
+  const profile = DEMO_SITE_PROFILES.find(
+    (candidate) => candidate.id === siteId,
+  );
+  return profile
+    ? { id: profile.id, name: profile.name, domain: profile.domain }
+    : null;
+}
+
+async function demoSiteByPublicSlug(slug: string): Promise<SiteRow | null> {
+  try {
+    const { findSiteProfileByPublicSlug } =
+      await import("@/lib/realtime/demo-site-profiles");
+    const profile = findSiteProfileByPublicSlug(slug);
+    return profile
+      ? { id: profile.id, name: profile.name, domain: profile.domain }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function resolvePrivateSite(
   request: Request,
   env: Env,
@@ -31,6 +57,11 @@ export async function resolvePrivateSiteForSession(
 ): Promise<SiteRow | Response> {
   const siteId = normalizeFilterValue(url.searchParams.get("siteId"));
   if (!siteId) return badRequest("siteId is required", undefined, request);
+
+  if (isDemoBuild) {
+    const site = await demoSiteById(siteId);
+    return site ?? notFound("Site not found", undefined, request);
+  }
 
   if (session.systemRole === "admin") {
     const site = await env.DB.prepare(
@@ -149,6 +180,11 @@ export async function fetchPublicSite(
     return notFound("Public site not found");
   }
   if (!slug) return notFound("Public site not found");
+
+  if (isDemoBuild) {
+    const site = await demoSiteByPublicSlug(slug);
+    return site ?? notFound("Public site not found");
+  }
 
   const site = await env.DB.prepare(
     "SELECT id,name,domain FROM sites WHERE public_enabled=1 AND public_slug=? LIMIT 1",

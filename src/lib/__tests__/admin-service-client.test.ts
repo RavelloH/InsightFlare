@@ -14,7 +14,7 @@ describe("admin service client", () => {
     fetchEdgeJsonMock.mockReset();
   });
 
-  it("uses the shared management route contract and server demo path", async () => {
+  it("uses the shared management route contract", async () => {
     fetchEdgeJsonMock.mockResolvedValue({
       ok: true,
       data: [{ id: "team-1" }],
@@ -32,7 +32,6 @@ describe("admin service client", () => {
       path: "/api/private/admin/teams",
       params: { userId: "user-1", includeArchived: "false" },
       signal: controller.signal,
-      skipDemo: true,
     });
   });
 

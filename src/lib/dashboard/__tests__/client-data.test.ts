@@ -52,6 +52,8 @@ import {
   withFilters,
 } from "@/lib/dashboard/client-data";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
+import { handleDemoRequest } from "@/lib/realtime/mock";
+import { isErrorEnvelope } from "@/lib/realtime/mock/envelope";
 
 describe("Dashboard Client Data Processing Utilities", () => {
   describe("normalizeOverviewRows", () => {
@@ -173,7 +175,8 @@ describe("Dashboard Client Data Processing Utilities", () => {
     });
   });
 
-  describe("API Data Fetching in Demo Mode", () => {
+  describe("Dashboard demo API contract smoke", () => {
+    const realFetch = globalThis.fetch;
     const mockWindow = {
       preset: "24h" as const,
       from: Date.now() - 24 * 60 * 60 * 1000,
@@ -183,15 +186,30 @@ describe("Dashboard Client Data Processing Utilities", () => {
     };
 
     beforeAll(() => {
-      process.env.VITE_DEMO_MODE = "1";
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init) => {
+        const url = new URL(String(input), "https://app.test");
+        const result = handleDemoRequest({
+          path: url.pathname,
+          method: init?.method,
+          params: Object.fromEntries(url.searchParams),
+        });
+        return new Response(JSON.stringify(result), {
+          status: isErrorEnvelope(result)
+            ? result.error.code === "not_found"
+              ? 404
+              : 400
+            : 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof globalThis.fetch;
     });
 
     afterAll(() => {
-      delete process.env.VITE_DEMO_MODE;
+      globalThis.fetch = realFetch;
     });
 
     it(
-      "should fetch all dashboard metrics correctly under demo mode",
+      "should fetch all dashboard metrics through an HTTP response boundary",
       { timeout: 30000 },
       async () => {
         // 1. Overview
@@ -2058,16 +2076,12 @@ describe("Dashboard Client Data Processing Utilities", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("should reject demo requests if the signal aborts during module resolution", async () => {
-      const fetchMock = vi.fn();
+    it("should keep demo detail requests on the network path", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(freshJsonResponse({ ok: true, data: null }));
       globalThis.fetch = fetchMock as any;
-      let abortedReads = 0;
-      const signal = {
-        get aborted() {
-          abortedReads += 1;
-          return abortedReads > 1;
-        },
-      } as AbortSignal;
+      const controller = new AbortController();
 
       process.env.VITE_DEMO_MODE = "1";
       try {
@@ -2078,18 +2092,19 @@ describe("Dashboard Client Data Processing Utilities", () => {
             undefined,
             undefined,
             {
-              signal,
+              signal: controller.signal,
             },
           ),
-        ).rejects.toMatchObject({
-          name: "AbortError",
-          message: "Aborted",
-        });
+        ).resolves.toMatchObject({ ok: true, data: null });
       } finally {
         delete process.env.VITE_DEMO_MODE;
       }
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(abortedReads).toBeGreaterThanOrEqual(2);
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "/api/private/visitor-detail?siteId=demo-site-001",
+        ),
+        expect.objectContaining({ signal: controller.signal }),
+      );
     });
 
     it("should return empty field values when the field path is nullish", async () => {

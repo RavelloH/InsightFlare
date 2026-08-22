@@ -118,16 +118,14 @@ describe("auth helpers", () => {
     await expect(isAuthenticated()).resolves.toBe(false);
   });
 
-  it("returns demo session data without verifying tokens in demo mode", async () => {
+  it("does not synthesize client-side session data in demo mode", async () => {
     vi.stubEnv("VITE_DEMO_MODE", "1");
+    document.cookie = "if_session=demo-cookie-token; path=/";
+    verifySessionTokenMock.mockResolvedValue(null);
 
-    await expect(getSessionToken()).resolves.toBe("demo-token");
-    await expect(isAuthenticated()).resolves.toBe(true);
-    await expect(getSession()).resolves.toMatchObject({
-      userId: "demo-user-001",
-      username: "demo",
-      systemRole: "admin",
-    });
-    expect(verifySessionTokenMock).not.toHaveBeenCalled();
+    await expect(getSessionToken()).resolves.toBe("demo-cookie-token");
+    await expect(getSession()).resolves.toBeNull();
+    await expect(isAuthenticated()).resolves.toBe(false);
+    expect(verifySessionTokenMock).toHaveBeenCalledWith("demo-cookie-token");
   });
 });
