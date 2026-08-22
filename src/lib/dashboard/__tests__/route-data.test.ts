@@ -9,8 +9,19 @@ vi.mock("@tanstack/react-start", async (importOriginal) => {
   return {
     ...actual,
     createServerFn: () => {
+      let validatorFn: ((value: unknown) => unknown) | null = null;
       const callable = ((...args: unknown[]) =>
-        callable.__handler(...args)) as unknown as {
+        callable.__handler(
+          ...(validatorFn && args[0] && typeof args[0] === "object"
+            ? [
+                {
+                  ...(args[0] as Record<string, unknown>),
+                  data: validatorFn((args[0] as Record<string, unknown>).data),
+                },
+                ...args.slice(1),
+              ]
+            : args),
+        )) as unknown as {
         __handler: (...args: unknown[]) => unknown;
         handler: (fn: (...args: unknown[]) => unknown) => unknown;
         validator: (v: unknown) => {
@@ -22,12 +33,15 @@ vi.mock("@tanstack/react-start", async (importOriginal) => {
         callable.__handler = fn;
         return callable;
       };
-      callable.validator = () => ({
-        handler: (fn) => {
-          callable.__handler = fn;
-          return callable;
-        },
-      });
+      callable.validator = (v) => {
+        validatorFn = v as (value: unknown) => unknown;
+        return {
+          handler: (fn) => {
+            callable.__handler = fn;
+            return callable;
+          },
+        };
+      };
       return callable as never;
     },
   };
@@ -42,6 +56,7 @@ vi.mock("@/lib/dashboard/server", () => ({
   getDashboardRootContext: vi.fn(),
   getDashboardTeamContext: vi.fn(),
   getTeamSiteContext: vi.fn(),
+  readDashboardAdmin: vi.fn(),
 }));
 
 vi.mock("@/lib/dashboard/query-preferences", () => ({
@@ -62,6 +77,7 @@ vi.mock("@/lib/edge/runtime", () => ({
 
 vi.mock("@/lib/edge-client", () => ({
   fetchPublicSite: vi.fn(),
+  normalizeNotificationPreferencesData: vi.fn((value: unknown) => value),
 }));
 
 vi.mock("@/lib/github-releases", () => ({
@@ -76,27 +92,52 @@ import { getRequest } from "@tanstack/react-start/server";
 
 import { resolveDashboardInitialWindow } from "@/lib/dashboard/query-preferences";
 import {
+  loadAccountNotificationPreferences,
+  loadAdminTeamsInitialData,
+  loadAdminUsersInitialData,
+  loadApiKeysInitialData,
   loadDashboardInitialWindow,
   loadDashboardRoot,
   loadDashboardSite,
   loadDashboardTeam,
+  loadNotificationCenterInitialData,
   loadRequestOrigin,
+  loadScheduledTasksInitialData,
   loadShareSite,
+  loadSiteSettingsInitialData,
+  loadSystemPerformanceInitialData,
+  loadSystemSettingsInitialData,
   loadTeamDashboardSnapshot,
+  loadTeamManagementInitialData,
+  loadTeamNotificationsInitialData,
   loadVersionReleases,
 } from "@/lib/dashboard/route-data";
+import { readDashboardAdmin } from "@/lib/dashboard/server";
 import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
 import { readTeamDashboard } from "@/lib/edge/query-runtime/team-dashboard";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
-import { fetchPublicSite } from "@/lib/edge-client";
+import {
+  fetchPublicSite,
+  normalizeNotificationPreferencesData,
+} from "@/lib/edge-client";
 import { fetchGithubReleases } from "@/lib/github-releases";
 
 function headersOf(init: Record<string, string>) {
   return {
+    url: "https://app.test/",
     headers: {
       get: (name: string) => init[name] ?? null,
     },
   } as unknown as Request;
+}
+
+function mockAdminReads(reads: Record<string, unknown>) {
+  vi.mocked(readDashboardAdmin).mockImplementation(async (route) => {
+    const key = String(route);
+    return Object.prototype.hasOwnProperty.call(reads, key)
+      ? (reads[key] as never)
+      : null;
+  });
 }
 
 describe("Dashboard route data loaders", () => {
@@ -299,6 +340,273 @@ describe("Dashboard route data loaders", () => {
         } as never),
       ).resolves.toEqual({ site: "s" });
       expect(server.getTeamSiteContext).toHaveBeenCalledWith("acme", "web");
+    });
+  });
+
+  describe("management initial data loaders", () => {
+    it("loads team management data without exposing invite secrets", async () => {
+      mockAdminReads({
+        members: [{ id: "member-1" }],
+        sites: [{ id: "site-1" }],
+        "team-invites": [
+          {
+            id: "invite-1",
+            email: "member@example.com",
+            payload: { teamRole: "member" },
+            code: "secret-code",
+            url: "https://app.test/invite/secret-code",
+            createdByUserId: "user-1",
+            createdAt: 1,
+            expiresAt: 2,
+            usedAt: null,
+            usedByUserId: "",
+            revokedAt: null,
+            status: "active",
+          },
+        ],
+      });
+
+      const result = await loadTeamManagementInitialData({
+        data: { teamId: "team-1" },
+      } as never);
+
+      expect(result).toMatchObject({
+        members: [{ id: "member-1" }],
+        sites: [{ id: "site-1" }],
+        invites: [{ id: "invite-1", email: "member@example.com" }],
+        fetchedAt: expect.any(Number),
+      });
+      expect(result?.invites[0]).not.toHaveProperty("code");
+      expect(result?.invites[0]).not.toHaveProperty("url");
+    });
+
+    it("loads normalized site settings and the install snippet", async () => {
+      vi.mocked(getRequest).mockReturnValue({
+        ...headersOf({}),
+        url: "https://edge.example/zh/app/site/settings",
+      } as never);
+      mockAdminReads({
+        "site-config": {
+          trackingStrength: "strong",
+          trackQueryParams: "true",
+          trackHash: false,
+          autoTrackOutboundLinks: false,
+          domainWhitelist: "edge.example",
+          pathBlacklist: "/private",
+          ignoreDoNotTrack: true,
+          performanceSampleRate: "80",
+        },
+        "script-snippet": { snippet: "<script data-test />" },
+      });
+
+      const result = await loadSiteSettingsInitialData({
+        data: { siteId: "site-1" },
+      } as never);
+
+      expect(result).toMatchObject({
+        config: {
+          trackingStrength: "strong",
+          trackQueryParams: true,
+          performanceSampleRate: 80,
+        },
+        scriptSnippet: "<script data-test />",
+        origin: "https://edge.example",
+        fetchedAt: expect.any(Number),
+      });
+    });
+
+    it("loads API keys, teams, and users snapshots", async () => {
+      mockAdminReads({ "api-keys": [{ id: "key-1" }] });
+      await expect(
+        loadApiKeysInitialData({ data: { teamId: "team-1" } } as never),
+      ).resolves.toMatchObject({
+        keys: [{ id: "key-1" }],
+        fetchedAt: expect.any(Number),
+      });
+
+      mockAdminReads({ teams: [{ id: "team-1" }] });
+      await expect(loadAdminTeamsInitialData()).resolves.toMatchObject({
+        teams: [{ id: "team-1" }],
+        fetchedAt: expect.any(Number),
+      });
+
+      mockAdminReads({ users: [{ id: "user-1" }] });
+      await expect(loadAdminUsersInitialData()).resolves.toMatchObject({
+        users: [{ id: "user-1" }],
+        fetchedAt: expect.any(Number),
+      });
+    });
+
+    it("serializes team notifications and computes email availability", async () => {
+      mockAdminReads({
+        "notification-rules": [
+          {
+            id: "rule-1",
+            schedule: { type: "daily" },
+            condition: { field: "views" },
+            recipient: { type: "team" },
+            state: { lastStatus: "ok" },
+          },
+        ],
+        sites: [{ id: "site-1" }],
+        members: [{ id: "member-1" }],
+        "notification-email": {
+          enabled: true,
+          provider: "resend",
+          fromEmail: "alerts@example.com",
+          resend: { configured: true },
+        },
+      });
+
+      const result = await loadTeamNotificationsInitialData({
+        data: { teamId: "team-1" },
+      } as never);
+
+      expect(result).toMatchObject({
+        rules: [
+          {
+            id: "rule-1",
+            schedule: { type: "daily" },
+            condition: { field: "views" },
+            recipient: { type: "team" },
+            state: { lastStatus: "ok" },
+          },
+        ],
+        emailConfigured: true,
+        fetchedAt: expect.any(Number),
+      });
+    });
+
+    it("serializes notification center messages with the requested scope", async () => {
+      mockAdminReads({
+        notifications: {
+          messages: [
+            {
+              id: "message-1",
+              data: { source: "test" },
+              channels: { inApp: true },
+              deliveryResults: { inApp: "created" },
+            },
+          ],
+          unreadAttentionCount: 3,
+        },
+      });
+
+      const result = await loadNotificationCenterInitialData({
+        data: { teamId: "team-1", ruleId: "rule-1", locale: "zh" },
+      } as never);
+
+      expect(result).toMatchObject({
+        messages: [
+          {
+            id: "message-1",
+            data: { source: "test" },
+            channels: { inApp: true },
+            deliveryResults: { inApp: "created" },
+          },
+        ],
+        unreadAttentionCount: 3,
+        fetchedAt: expect.any(Number),
+      });
+      expect(readDashboardAdmin).toHaveBeenCalledWith("notifications", {
+        teamId: "team-1",
+        ruleId: "rule-1",
+        locale: "zh",
+        limit: 80,
+      });
+    });
+
+    it("normalizes account preferences and loads system settings", async () => {
+      const preferences = {
+        inApp: true,
+        email: false,
+        webPush: false,
+        attention: {
+          reportsCreateUnread: true,
+          milestonesCreateUnread: false,
+          alertsCreateUnread: true,
+        },
+      };
+      mockAdminReads({ "notifications/preferences": preferences });
+
+      await expect(loadAccountNotificationPreferences()).resolves.toEqual({
+        preferences,
+        fetchedAt: expect.any(Number),
+      });
+      expect(normalizeNotificationPreferencesData).toHaveBeenCalledWith(
+        preferences,
+      );
+
+      mockAdminReads({
+        "bot-analytics-config": { enabled: true },
+        "login-turnstile": { enabled: true },
+        "notification-email": { enabled: true },
+      });
+      await expect(loadSystemSettingsInitialData()).resolves.toMatchObject({
+        botAnalytics: { enabled: true },
+        loginTurnstile: { enabled: true },
+        notificationEmail: { enabled: true },
+        fetchedAt: expect.any(Number),
+      });
+    });
+
+    it("loads the first scheduled-task page and system performance snapshot", async () => {
+      const scheduledTasks = {
+        ok: true,
+        generatedAt: 100,
+        retentionDays: 30,
+        tasks: [],
+        runs: [],
+        runsMeta: {
+          page: 1,
+          pageSize: 50,
+          returned: 0,
+          hasMore: false,
+          nextPage: null,
+        },
+        selectedRun: null,
+        logs: [],
+        health: {
+          totalRuns24h: 0,
+          failedRuns24h: 0,
+          partialRuns24h: 0,
+          runningRuns: 0,
+          staleRunningRuns: 0,
+          successRate24h: null,
+          lastRunAt: null,
+        },
+      };
+      mockAdminReads({ "scheduled-tasks": scheduledTasks });
+
+      await expect(loadScheduledTasksInitialData()).resolves.toMatchObject({
+        ...scheduledTasks,
+        fetchedAt: expect.any(Number),
+      });
+      expect(readDashboardAdmin).toHaveBeenCalledWith("scheduled-tasks", {
+        page: 1,
+        pageSize: 50,
+      });
+
+      const systemPerformance = {
+        ok: true,
+        generatedAt: 200,
+        window: { minutes: 60 },
+        thresholds: {},
+        summary: { totalEvents: 10 },
+        openVisits: { total: 2 },
+        trend: [],
+        topSites: [],
+        slowEvents: [],
+      };
+      mockAdminReads({ "system-performance": systemPerformance });
+
+      await expect(loadSystemPerformanceInitialData()).resolves.toEqual({
+        data: systemPerformance,
+        fetchedAt: expect.any(Number),
+      });
+      expect(readDashboardAdmin).toHaveBeenCalledWith("system-performance", {
+        minutes: 60,
+      });
     });
   });
 });
