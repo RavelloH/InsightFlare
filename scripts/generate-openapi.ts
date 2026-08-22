@@ -2936,7 +2936,7 @@ function responseExampleFor(schemaName: string | null, operationId: string) {
         batch: true,
       },
       limits: {
-        batchMaxRequests: 20,
+        batchMaxRequests: 50,
         defaultTimeRangeDays: 7,
         maxTimeRangeDays: 365,
         defaultPageLimit: 100,

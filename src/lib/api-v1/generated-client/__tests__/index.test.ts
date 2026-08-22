@@ -833,7 +833,7 @@ describe("API v1 generated client", () => {
 
     const seriesFetch = vi.fn<typeof fetch>().mockResolvedValue(
       response({
-        data: { interval: "day", series: [], data: [] },
+        data: { interval: "day", series: [], points: [] },
         meta,
       }),
     );

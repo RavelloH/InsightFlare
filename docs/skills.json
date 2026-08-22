@@ -641,7 +641,7 @@
         "batch"
       ],
       "decisionBranches": [
-        "Read each candidate operation's OpenAPI entry before batching it.",
+        "Read each candidate operation's OpenAPI entry before batching it and require x-api-v1-batch-eligible=true.",
         "Do not batch mutations or operations not explicitly marked batch-eligible."
       ],
       "result": "Report each batch item independently, including any item-level error or partial result."

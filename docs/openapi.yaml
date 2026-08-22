@@ -840,6 +840,7 @@ paths:
       x-api-v1-scopes: &a1
         - analytics:read
       x-required-scopes: *a1
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -1728,6 +1729,7 @@ paths:
       x-api-v1-scopes: &a2
         - analytics:read
       x-required-scopes: *a2
+      x-api-v1-batch-eligible: true
   /api/v1:
     get:
       operationId: core.root
@@ -1941,6 +1943,7 @@ paths:
       x-api-v1-lifecycle: exposed
       x-api-v1-scopes: &a3 []
       x-required-scopes: *a3
+      x-api-v1-batch-eligible: false
   /api/v1/token:
     get:
       operationId: core.token.get
@@ -2243,6 +2246,7 @@ paths:
       x-api-v1-lifecycle: exposed
       x-api-v1-scopes: &a4 []
       x-required-scopes: *a4
+      x-api-v1-batch-eligible: false
   /api/v1/token/check:
     post:
       operationId: core.token.check
@@ -2529,6 +2533,7 @@ paths:
       x-api-v1-lifecycle: exposed
       x-api-v1-scopes: &a5 []
       x-required-scopes: *a5
+      x-api-v1-batch-eligible: false
   /api/v1/capabilities:
     get:
       operationId: core.capabilities
@@ -2726,6 +2731,7 @@ paths:
       x-api-v1-lifecycle: exposed
       x-api-v1-scopes: &a6 []
       x-required-scopes: *a6
+      x-api-v1-batch-eligible: false
   /api/v1/team:
     get:
       operationId: core.team.get
@@ -2917,6 +2923,7 @@ paths:
       x-api-v1-lifecycle: exposed
       x-api-v1-scopes: &a7 []
       x-required-scopes: *a7
+      x-api-v1-batch-eligible: false
   /api/v1/team/usage:
     get:
       operationId: core.team.usage
@@ -3092,6 +3099,7 @@ paths:
       x-api-v1-lifecycle: exposed
       x-api-v1-scopes: &a8 []
       x-required-scopes: *a8
+      x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/analytics/comparison/overview:
     post:
       operationId: site.analytics.comparisonOverview
@@ -4317,6 +4325,7 @@ paths:
       x-api-v1-scopes: &a9
         - analytics:read
       x-required-scopes: *a9
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -5525,6 +5534,7 @@ paths:
       x-api-v1-scopes: &a10
         - analytics:read
       x-required-scopes: *a10
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: a.filter.type=saved|b.filter.type=saved
           scopes:
@@ -6701,6 +6711,7 @@ paths:
       x-api-v1-scopes: &a12
         - analytics:read
       x-required-scopes: *a12
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: a.filter.type=saved|b.filter.type=saved
           scopes:
@@ -7739,6 +7750,7 @@ paths:
       x-api-v1-scopes: &a13
         - analytics:read
       x-required-scopes: *a13
+      x-api-v1-batch-eligible: true
   /api/v1/team/analytics/comparison/timeseries:
     post:
       operationId: team.analytics.comparisonTimeseries
@@ -8846,6 +8858,7 @@ paths:
       x-api-v1-scopes: &a14
         - analytics:read
       x-required-scopes: *a14
+      x-api-v1-batch-eligible: true
   /api/v1/team/analytics/comparison/breakdowns/{dimension}:
     post:
       operationId: team.analytics.comparisonBreakdown
@@ -9922,6 +9935,7 @@ paths:
       x-api-v1-scopes: &a16
         - analytics:read
       x-required-scopes: *a16
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/schema:
     get:
       operationId: site.analytics.schema
@@ -10486,6 +10500,7 @@ paths:
       x-api-v1-scopes: &a17
         - analytics:read
       x-required-scopes: *a17
+      x-api-v1-batch-eligible: true
       parameters:
         - $ref: "#/components/parameters/SiteIdPathParam"
   /api/v1/team/analytics/schema:
@@ -11052,6 +11067,7 @@ paths:
       x-api-v1-scopes: &a18
         - analytics:read
       x-required-scopes: *a18
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/timeseries:
     post:
       operationId: site.analytics.timeseries
@@ -11974,6 +11990,7 @@ paths:
       x-api-v1-scopes: &a19
         - analytics:read
       x-required-scopes: *a19
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -12816,6 +12833,7 @@ paths:
       x-api-v1-scopes: &a20
         - analytics:read
       x-required-scopes: *a20
+      x-api-v1-batch-eligible: true
   /api/v1/team/analytics/sites:
     post:
       operationId: team.analytics.sites
@@ -13732,6 +13750,7 @@ paths:
       x-api-v1-scopes: &a21
         - analytics:read
       x-required-scopes: *a21
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/breakdowns/{dimension}:
     post:
       operationId: site.analytics.breakdown
@@ -14580,6 +14599,7 @@ paths:
       x-api-v1-scopes: &a22
         - analytics:read
       x-required-scopes: *a22
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -15412,6 +15432,7 @@ paths:
       x-api-v1-scopes: &a23
         - analytics:read
       x-required-scopes: *a23
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/cross-breakdowns:
     post:
       operationId: site.analytics.crossBreakdown
@@ -16329,6 +16350,7 @@ paths:
       x-api-v1-scopes: &a24
         - analytics:read
       x-required-scopes: *a24
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -17171,6 +17193,7 @@ paths:
       x-api-v1-scopes: &a25
         - analytics:read
       x-required-scopes: *a25
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -18012,6 +18035,7 @@ paths:
       x-api-v1-scopes: &a26
         - analytics:read
       x-required-scopes: *a26
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -18890,6 +18914,7 @@ paths:
       x-api-v1-scopes: &a28
         - analytics:read
       x-required-scopes: *a28
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -19757,6 +19782,7 @@ paths:
       x-api-v1-scopes: &a29
         - analytics:read
       x-required-scopes: *a29
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -20730,6 +20756,7 @@ paths:
       x-api-v1-scopes: &a30
         - analytics:read
       x-required-scopes: *a30
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -21727,6 +21754,7 @@ paths:
       x-api-v1-scopes: &a31
         - analytics:read
       x-required-scopes: *a31
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -22784,6 +22812,7 @@ paths:
       x-api-v1-scopes: &a32
         - analytics:read
       x-required-scopes: *a32
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -22793,8 +22822,8 @@ paths:
     post:
       operationId: site.analytics.performanceBreakdown
       summary: API v1 site analytics performanceBreakdown operation
-      description: Typed API v1 operation. Authenticate with an API key through the
-        BearerAuth security scheme.
+      description: Breaks down Core Web Vitals by page.path or geo.country. Other
+        dimensions are not supported and return validation_failed.
       tags:
         - Performance
       security:
@@ -22812,7 +22841,9 @@ paths:
           required: true
           schema:
             type: string
-            minLength: 1
+            enum:
+              - page.path
+              - geo.country
           description: dimension path parameter.
       requestBody:
         required: true
@@ -23680,6 +23711,7 @@ paths:
       x-api-v1-scopes: &a33
         - analytics:read
       x-required-scopes: *a33
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -24633,6 +24665,7 @@ paths:
       x-api-v1-scopes: &a34
         - analytics:read
       x-required-scopes: *a34
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -24642,8 +24675,10 @@ paths:
     post:
       operationId: site.analytics.eventsTimeseries
       summary: API v1 site analytics eventsTimeseries operation
-      description: Typed API v1 operation. Authenticate with an API key through the
-        BearerAuth security scheme.
+      description: Returns event counts at time points. series contains top-N
+        event-type aggregates for the whole window; points contains the time
+        buckets. The request limit controls top-N event types, not the number of
+        points.
       tags:
         - Events
       security:
@@ -24940,7 +24975,7 @@ paths:
                             - sessions
                             - visitors
                           additionalProperties: false
-                      data:
+                      points:
                         type: array
                         items:
                           type: object
@@ -24970,7 +25005,7 @@ paths:
                     required:
                       - interval
                       - series
-                      - data
+                      - points
                     additionalProperties: false
                   meta:
                     type: object
@@ -25036,7 +25071,7 @@ paths:
                       sessions: 0
                       visitors: 0
                       isOther: false
-                  data:
+                  points:
                     - bucket: 0
                       timestamp: 2026-01-01T00:00:00Z
                       totalEvents: 0
@@ -25534,6 +25569,7 @@ paths:
       x-api-v1-scopes: &a35
         - analytics:read
       x-required-scopes: *a35
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -25543,8 +25579,9 @@ paths:
     post:
       operationId: site.analytics.eventsSearch
       summary: API v1 site analytics eventsSearch operation
-      description: Typed API v1 operation. Authenticate with an API key through the
-        BearerAuth security scheme.
+      description: Searches event records. Use page.limit for page size; it supports
+        values from 1 through 200 and is independent of the events timeseries
+        top-N limit.
       tags:
         - Events
       security:
@@ -26509,6 +26546,7 @@ paths:
       x-api-v1-scopes: &a38
         - analytics:read
       x-required-scopes: *a38
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -27332,6 +27370,7 @@ paths:
       x-api-v1-scopes: &a39
         - analytics:read
       x-required-scopes: *a39
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/event-types:
     post:
       operationId: site.analytics.eventTypes
@@ -28194,6 +28233,7 @@ paths:
       x-api-v1-scopes: &a41
         - analytics:read
       x-required-scopes: *a41
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -29776,6 +29816,7 @@ paths:
       x-api-v1-scopes: &a42
         - analytics:read
       x-required-scopes: *a42
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -30667,6 +30708,7 @@ paths:
       x-api-v1-scopes: &a44
         - analytics:read
       x-required-scopes: *a44
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -31579,6 +31621,7 @@ paths:
       x-api-v1-scopes: &a46
         - analytics:read
       x-required-scopes: *a46
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -32939,6 +32982,7 @@ paths:
       x-api-v1-scopes: &a47
         - analytics:read
       x-required-scopes: *a47
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/sessions/detail:
     post:
       operationId: site.analytics.sessionDetail
@@ -34170,6 +34214,7 @@ paths:
       x-api-v1-scopes: &a48
         - analytics:read
       x-required-scopes: *a48
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/visitors/search:
     post:
       operationId: site.analytics.visitorsSearch
@@ -35136,6 +35181,7 @@ paths:
       x-api-v1-scopes: &a51
         - analytics:read
       x-required-scopes: *a51
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -36171,6 +36217,7 @@ paths:
       x-api-v1-scopes: &a54
         - analytics:read
       x-required-scopes: *a54
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -37140,6 +37187,7 @@ paths:
       x-api-v1-scopes: &a55
         - analytics:read
       x-required-scopes: *a55
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -38116,6 +38164,7 @@ paths:
       x-api-v1-scopes: &a56
         - analytics:read
       x-required-scopes: *a56
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -39085,6 +39134,7 @@ paths:
       x-api-v1-scopes: &a57
         - analytics:read
       x-required-scopes: *a57
+      x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
           scopes:
@@ -39984,6 +40034,7 @@ paths:
       x-api-v1-scopes: &a58
         - analytics:read
       x-required-scopes: *a58
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/active-visitors:
     post:
       operationId: site.analytics.realtimeActiveVisitors
@@ -40641,6 +40692,7 @@ paths:
       x-api-v1-scopes: &a59
         - analytics:read
       x-required-scopes: *a59
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/events:
     post:
       operationId: site.analytics.realtimeEvents
@@ -41416,6 +41468,7 @@ paths:
       x-api-v1-scopes: &a60
         - analytics:read
       x-required-scopes: *a60
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/sessions:
     post:
       operationId: site.analytics.realtimeSessions
@@ -42187,6 +42240,7 @@ paths:
       x-api-v1-scopes: &a61
         - analytics:read
       x-required-scopes: *a61
+      x-api-v1-batch-eligible: true
   /api/v1/sites:
     get:
       operationId: sites.list
@@ -42455,6 +42509,7 @@ paths:
       x-api-v1-scopes: &a62
         - site:read
       x-required-scopes: *a62
+      x-api-v1-batch-eligible: false
     post:
       operationId: sites.create
       summary: API v1 sites create operation
@@ -43051,6 +43106,7 @@ paths:
       x-api-v1-scopes: &a63
         - site:write
       x-required-scopes: *a63
+      x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}:
     get:
       operationId: sites.get
@@ -43386,6 +43442,7 @@ paths:
       x-api-v1-scopes: &a64
         - site:read
       x-required-scopes: *a64
+      x-api-v1-batch-eligible: false
     patch:
       operationId: sites.update
       summary: API v1 sites update operation
@@ -44046,6 +44103,7 @@ paths:
       x-api-v1-scopes: &a65
         - site:write
       x-required-scopes: *a65
+      x-api-v1-batch-eligible: false
     delete:
       operationId: sites.delete
       summary: API v1 sites delete operation
@@ -44311,6 +44369,7 @@ paths:
       x-api-v1-scopes: &a66
         - site:write
       x-required-scopes: *a66
+      x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/tracking:
     get:
       operationId: settings.tracking.get
@@ -44644,6 +44703,7 @@ paths:
       x-api-v1-scopes: &a67
         - site_config:read
       x-required-scopes: *a67
+      x-api-v1-batch-eligible: false
     patch:
       operationId: settings.tracking.update
       summary: API v1 settings tracking update operation
@@ -45256,6 +45316,7 @@ paths:
       x-api-v1-scopes: &a68
         - site_config:write
       x-required-scopes: *a68
+      x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/privacy:
     get:
       operationId: settings.privacy.get
@@ -45559,6 +45620,7 @@ paths:
       x-api-v1-scopes: &a69
         - site_config:read
       x-required-scopes: *a69
+      x-api-v1-batch-eligible: false
     patch:
       operationId: settings.privacy.update
       summary: API v1 settings privacy update operation
@@ -46116,6 +46178,7 @@ paths:
       x-api-v1-scopes: &a70
         - site_config:write
       x-required-scopes: *a70
+      x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/sharing:
     get:
       operationId: settings.sharing.get
@@ -46406,6 +46469,7 @@ paths:
       x-api-v1-scopes: &a71
         - site_config:read
       x-required-scopes: *a71
+      x-api-v1-batch-eligible: false
     patch:
       operationId: settings.sharing.update
       summary: API v1 settings sharing update operation
@@ -47012,6 +47076,7 @@ paths:
       x-api-v1-scopes: &a72
         - site_config:write
       x-required-scopes: *a72
+      x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/tracking-script:
     get:
       operationId: settings.trackingScript.get
@@ -47307,6 +47372,7 @@ paths:
       x-api-v1-scopes: &a73
         - site_config:read
       x-required-scopes: *a73
+      x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/funnels:
     get:
       operationId: funnels.list
@@ -47652,6 +47718,7 @@ paths:
       x-api-v1-scopes: &a74
         - analysis:read
       x-required-scopes: *a74
+      x-api-v1-batch-eligible: false
     post:
       operationId: funnels.create
       summary: API v1 funnels create operation
@@ -48277,6 +48344,7 @@ paths:
       x-api-v1-scopes: &a75
         - analysis:write
       x-required-scopes: *a75
+      x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/funnels/{funnelId}:
     get:
       operationId: funnels.get
@@ -48628,6 +48696,7 @@ paths:
       x-api-v1-scopes: &a76
         - analysis:read
       x-required-scopes: *a76
+      x-api-v1-batch-eligible: false
     patch:
       operationId: funnels.update
       summary: API v1 funnels update operation
@@ -49258,6 +49327,7 @@ paths:
       x-api-v1-scopes: &a77
         - analysis:write
       x-required-scopes: *a77
+      x-api-v1-batch-eligible: false
     delete:
       operationId: funnels.delete
       summary: API v1 funnels delete operation
@@ -49531,6 +49601,7 @@ paths:
       x-api-v1-scopes: &a78
         - analysis:write
       x-required-scopes: *a78
+      x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/saved-filters:
     get:
       operationId: savedFilters.list
@@ -50069,6 +50140,7 @@ paths:
       x-api-v1-scopes: &a79
         - analysis:read
       x-required-scopes: *a79
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/saved-filters/{savedFilterId}:
     get:
       operationId: savedFilters.get
@@ -50566,6 +50638,7 @@ paths:
       x-api-v1-scopes: &a80
         - analysis:read
       x-required-scopes: *a80
+      x-api-v1-batch-eligible: true
   /api/v1/batch:
     post:
       operationId: batch
@@ -50585,7 +50658,7 @@ paths:
               properties:
                 requests:
                   minItems: 1
-                  maxItems: 20
+                  maxItems: 50
                   type: array
                   items:
                     type: object
@@ -51114,6 +51187,7 @@ paths:
       x-api-v1-scopes: &a81
         - analytics:read
       x-required-scopes: *a81
+      x-api-v1-batch-eligible: false
   /collect:
     post:
       operationId: collect.ingest

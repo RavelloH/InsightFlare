@@ -11,7 +11,7 @@ export const TypedBatchItemSchema = z
 
 export const TypedBatchRequestSchema = z
   .object({
-    requests: z.array(TypedBatchItemSchema).min(1).max(20),
+    requests: z.array(TypedBatchItemSchema).min(1).max(50),
     deadlineMs: z.number().int().min(1).max(30_000).optional(),
   })
   .strict()

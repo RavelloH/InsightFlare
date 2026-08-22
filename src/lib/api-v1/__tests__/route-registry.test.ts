@@ -31,11 +31,13 @@ import {
   apiV1AnalyticsTimeseriesRouteRegistry,
   apiV1ApplicationRouteById,
   apiV1ApplicationRouteRegistry,
+  apiV1BatchEligibleRouteIds,
   apiV1BatchRouteById,
   apiV1NonBatchRouteRegistry,
   apiV1RouteById,
   apiV1RouteRegistry,
   apiV1RouteVariantIds,
+  isApiV1BatchEligible,
   isApiV1RouteVariantId,
 } from "@/lib/api-v1/route-registry";
 import {
@@ -44,6 +46,22 @@ import {
 } from "@/lib/edge/analytics/operation-registry";
 
 describe("target API v1 route registry", () => {
+  it("keeps the batch allow-list explicit and read-only", () => {
+    expect(apiV1BatchEligibleRouteIds).toContain("site.analytics.eventsSearch");
+    expect(apiV1BatchEligibleRouteIds).toContain("site.saved-filters.list");
+    expect(apiV1BatchEligibleRouteIds).not.toContain("batch");
+    expect(apiV1BatchEligibleRouteIds).not.toContain("sites.create");
+    for (const routeId of apiV1BatchEligibleRouteIds) {
+      expect(apiV1RouteRegistry.some((route) => route.id === routeId)).toBe(
+        true,
+      );
+    }
+    expect(
+      apiV1RouteRegistry
+        .filter((route) => isApiV1BatchEligible(route.id))
+        .every((route) => route.method === "GET" || route.method === "POST"),
+    ).toBe(true);
+  });
   it("revalidates saved-filter documents through the canonical filter registry", () => {
     expect(() =>
       assertSavedFilterDocument({ version: 1, root: null }),

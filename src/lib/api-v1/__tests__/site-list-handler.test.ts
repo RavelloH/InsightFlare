@@ -265,7 +265,7 @@ describe("planned site list analytics adapters", () => {
       .mockResolvedValue({
         interval: "day",
         series: [],
-        data: [],
+        points: [],
       });
     const eventsSummaryResponse = await handlePlannedSiteEventsSummary(
       request("events/summary", { timeRange }),

@@ -1238,6 +1238,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -2536,7 +2537,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1": {
@@ -2843,7 +2845,8 @@
         },
         "x-api-v1-lifecycle": "exposed",
         "x-api-v1-scopes": [],
-        "x-required-scopes": []
+        "x-required-scopes": [],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/token": {
@@ -3293,7 +3296,8 @@
         },
         "x-api-v1-lifecycle": "exposed",
         "x-api-v1-scopes": [],
-        "x-required-scopes": []
+        "x-required-scopes": [],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/token/check": {
@@ -3716,7 +3720,8 @@
         },
         "x-api-v1-lifecycle": "exposed",
         "x-api-v1-scopes": [],
-        "x-required-scopes": []
+        "x-required-scopes": [],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/capabilities": {
@@ -4004,7 +4009,8 @@
         },
         "x-api-v1-lifecycle": "exposed",
         "x-api-v1-scopes": [],
-        "x-required-scopes": []
+        "x-required-scopes": [],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/team": {
@@ -4287,7 +4293,8 @@
         },
         "x-api-v1-lifecycle": "exposed",
         "x-api-v1-scopes": [],
-        "x-required-scopes": []
+        "x-required-scopes": [],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/team/usage": {
@@ -4544,7 +4551,8 @@
         },
         "x-api-v1-lifecycle": "exposed",
         "x-api-v1-scopes": [],
-        "x-required-scopes": []
+        "x-required-scopes": [],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/sites/{siteId}/analytics/comparison/overview": {
@@ -6339,6 +6347,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -8107,6 +8116,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "a.filter.type=saved|b.filter.type=saved",
@@ -9830,6 +9840,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "a.filter.type=saved|b.filter.type=saved",
@@ -11349,7 +11360,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/team/analytics/comparison/timeseries": {
@@ -12962,7 +12974,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/team/analytics/comparison/breakdowns/{dimension}": {
@@ -14532,7 +14545,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/analytics/schema": {
@@ -15347,6 +15361,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "parameters": [
           {
             "$ref": "#/components/parameters/SiteIdPathParam"
@@ -16165,7 +16180,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/analytics/timeseries": {
@@ -17512,6 +17528,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -18743,7 +18760,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/team/analytics/sites": {
@@ -20080,7 +20098,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/analytics/breakdowns/{dimension}": {
@@ -21322,6 +21341,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -22538,7 +22558,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/analytics/cross-breakdowns": {
@@ -23873,6 +23894,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -25113,6 +25135,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -26348,6 +26371,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -27633,6 +27657,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -28903,6 +28928,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -30312,6 +30338,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -31838,6 +31865,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -33448,6 +33476,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -33463,7 +33492,7 @@
       "post": {
         "operationId": "site.analytics.performanceBreakdown",
         "summary": "API v1 site analytics performanceBreakdown operation",
-        "description": "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+        "description": "Breaks down Core Web Vitals by page.path or geo.country. Other dimensions are not supported and return validation_failed.",
         "tags": [
           "Performance"
         ],
@@ -33489,7 +33518,10 @@
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1
+              "enum": [
+                "page.path",
+                "geo.country"
+              ]
             },
             "description": "dimension path parameter."
           }
@@ -34768,6 +34800,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -36166,6 +36199,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -36181,7 +36215,7 @@
       "post": {
         "operationId": "site.analytics.eventsTimeseries",
         "summary": "API v1 site analytics eventsTimeseries operation",
-        "description": "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+        "description": "Returns event counts at time points. series contains top-N event-type aggregates for the whole window; points contains the time buckets. The request limit controls top-N event types, not the number of points.",
         "tags": [
           "Events"
         ],
@@ -36613,7 +36647,7 @@
                             "additionalProperties": false
                           }
                         },
-                        "data": {
+                        "points": {
                           "type": "array",
                           "items": {
                             "type": "object",
@@ -36654,7 +36688,7 @@
                       "required": [
                         "interval",
                         "series",
-                        "data"
+                        "points"
                       ],
                       "additionalProperties": false
                     },
@@ -36743,7 +36777,7 @@
                         "isOther": false
                       }
                     ],
-                    "data": [
+                    "points": [
                       {
                         "bucket": 0,
                         "timestamp": "2026-01-01T00:00:00Z",
@@ -37479,6 +37513,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -37494,7 +37529,7 @@
       "post": {
         "operationId": "site.analytics.eventsSearch",
         "summary": "API v1 site analytics eventsSearch operation",
-        "description": "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+        "description": "Searches event records. Use page.limit for page size; it supports values from 1 through 200 and is independent of the events timeseries top-N limit.",
         "tags": [
           "Events"
         ],
@@ -38900,6 +38935,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -40066,7 +40102,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/analytics/event-types": {
@@ -41330,6 +41367,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -43628,6 +43666,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -44937,6 +44976,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -46271,6 +46311,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -48318,7 +48359,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/analytics/sessions/detail": {
@@ -50186,7 +50228,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/analytics/visitors/search": {
@@ -51603,6 +51646,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -53142,6 +53186,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -54569,6 +54614,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -56014,6 +56060,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -57441,6 +57488,7 @@
         "x-required-scopes": [
           "analytics:read"
         ],
+        "x-api-v1-batch-eligible": true,
         "x-api-v1-conditional-scopes": [
           {
             "when": "filter.type=saved",
@@ -58724,7 +58772,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/analytics/realtime/active-visitors": {
@@ -59676,7 +59725,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/analytics/realtime/events": {
@@ -60789,7 +60839,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/analytics/realtime/sessions": {
@@ -61897,7 +61948,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites": {
@@ -62290,7 +62342,8 @@
         ],
         "x-required-scopes": [
           "site:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       },
       "post": {
         "operationId": "sites.create",
@@ -63158,7 +63211,8 @@
         ],
         "x-required-scopes": [
           "site:write"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/sites/{siteId}": {
@@ -63647,7 +63701,8 @@
         ],
         "x-required-scopes": [
           "site:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       },
       "patch": {
         "operationId": "sites.update",
@@ -64610,7 +64665,8 @@
         ],
         "x-required-scopes": [
           "site:write"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       },
       "delete": {
         "operationId": "sites.delete",
@@ -65000,7 +65056,8 @@
         ],
         "x-required-scopes": [
           "site:write"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/sites/{siteId}/settings/tracking": {
@@ -65483,7 +65540,8 @@
         ],
         "x-required-scopes": [
           "site_config:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       },
       "patch": {
         "operationId": "settings.tracking.update",
@@ -66374,7 +66432,8 @@
         ],
         "x-required-scopes": [
           "site_config:write"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/sites/{siteId}/settings/privacy": {
@@ -66817,7 +66876,8 @@
         ],
         "x-required-scopes": [
           "site_config:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       },
       "patch": {
         "operationId": "settings.privacy.update",
@@ -67633,7 +67693,8 @@
         ],
         "x-required-scopes": [
           "site_config:write"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/sites/{siteId}/settings/sharing": {
@@ -68065,7 +68126,8 @@
         ],
         "x-required-scopes": [
           "site_config:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       },
       "patch": {
         "operationId": "settings.sharing.update",
@@ -68965,7 +69027,8 @@
         ],
         "x-required-scopes": [
           "site_config:write"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/sites/{siteId}/settings/tracking-script": {
@@ -69398,7 +69461,8 @@
         ],
         "x-required-scopes": [
           "site_config:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/sites/{siteId}/funnels": {
@@ -69901,7 +69965,8 @@
         ],
         "x-required-scopes": [
           "analysis:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       },
       "post": {
         "operationId": "funnels.create",
@@ -70812,7 +70877,8 @@
         ],
         "x-required-scopes": [
           "analysis:write"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/sites/{siteId}/funnels/{funnelId}": {
@@ -71321,7 +71387,8 @@
         ],
         "x-required-scopes": [
           "analysis:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       },
       "patch": {
         "operationId": "funnels.update",
@@ -72239,7 +72306,8 @@
         ],
         "x-required-scopes": [
           "analysis:write"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       },
       "delete": {
         "operationId": "funnels.delete",
@@ -72640,7 +72708,8 @@
         ],
         "x-required-scopes": [
           "analysis:write"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/api/v1/sites/{siteId}/saved-filters": {
@@ -73446,7 +73515,8 @@
         ],
         "x-required-scopes": [
           "analysis:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/sites/{siteId}/saved-filters/{savedFilterId}": {
@@ -74184,7 +74254,8 @@
         ],
         "x-required-scopes": [
           "analysis:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": true
       }
     },
     "/api/v1/batch": {
@@ -74209,7 +74280,7 @@
                 "properties": {
                   "requests": {
                     "minItems": 1,
-                    "maxItems": 20,
+                    "maxItems": 50,
                     "type": "array",
                     "items": {
                       "type": "object",
@@ -74987,7 +75058,8 @@
         ],
         "x-required-scopes": [
           "analytics:read"
-        ]
+        ],
+        "x-api-v1-batch-eligible": false
       }
     },
     "/collect": {

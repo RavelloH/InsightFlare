@@ -1,7 +1,7 @@
 import { jsonResponse } from "@/lib/response";
 
 export const API_V1_VERSION = import.meta.env?.VITE_APP_VERSION || "1.0.0";
-export const BATCH_MAX_REQUESTS = 20;
+export const BATCH_MAX_REQUESTS = 50;
 
 const apiV1RequestIds = new WeakMap<Request, string>();
 

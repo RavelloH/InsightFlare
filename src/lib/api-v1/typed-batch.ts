@@ -9,7 +9,10 @@ import {
   API_V1_BATCH_ITEM_BODY_MAX_BYTES,
   readBoundedBody,
 } from "@/lib/api-v1/request-budget";
-import { apiV1NonBatchRouteRegistry } from "@/lib/api-v1/route-registry";
+import {
+  apiV1NonBatchRouteRegistry,
+  isApiV1BatchEligible,
+} from "@/lib/api-v1/route-registry";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 
 export type { TypedBatchItem, TypedBatchRequest } from "@/lib/api-v1/dto/batch";
@@ -47,22 +50,19 @@ export interface TypedBatchResult {
 const MAX_ITEM_OUTPUT_BYTES = API_V1_BATCH_ITEM_BODY_MAX_BYTES;
 const MAX_TOTAL_OUTPUT_BYTES = API_V1_BATCH_BODY_MAX_BYTES;
 
-// Derive the child allow-list from the canonical non-batch graph. The batch
+// Derive the child allow-list from explicit registry metadata. The batch
 // descriptor itself is intentionally appended to the public graph separately
 // and can never become a child through an accidental registry cycle.
 const descriptorPaths = apiV1NonBatchRouteRegistry.filter(
   (route) =>
     route.lifecycle === "exposed" &&
     route.method === "POST" &&
-    (route.id.startsWith("site.analytics.") ||
-      route.id.startsWith("team.analytics.")),
+    isApiV1BatchEligible(route.id),
 );
 const descriptorGets = apiV1NonBatchRouteRegistry.filter(
   (route) =>
     route.lifecycle === "exposed" &&
-    (route.id.startsWith("site.analytics.") ||
-      route.id.startsWith("team.analytics.") ||
-      route.id.startsWith("site.saved-filters.")) &&
+    isApiV1BatchEligible(route.id) &&
     route.method === "GET",
 );
 

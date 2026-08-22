@@ -594,7 +594,7 @@ export const AnalyticsEventsTimeseriesDataSchema = z
   .object({
     interval: z.enum(["minute", "hour", "day", "week", "month"]),
     series: z.array(AnalyticsEventsTimeseriesSeriesSchema),
-    data: z.array(
+    points: z.array(
       z
         .object({
           bucket: z.number().int().nonnegative(),

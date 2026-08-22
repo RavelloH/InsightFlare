@@ -355,6 +355,13 @@ export const SiteFunnelAnalysisQueryDtoSchema =
 
 export const SitePerformanceSummaryQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema;
+export const SitePerformanceBreakdownDimensionSchema = z.enum([
+  "page.path",
+  "geo.country",
+]);
+export type SitePerformanceBreakdownDimension = z.infer<
+  typeof SitePerformanceBreakdownDimensionSchema
+>;
 export const SitePerformanceTimeseriesQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
     interval: z.enum(["minute", "hour", "day", "week", "month"]),

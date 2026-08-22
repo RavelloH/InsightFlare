@@ -32,6 +32,23 @@ const input = {
 };
 
 describe("executeTypedBatch", () => {
+  it("accepts the expanded 50-item request contract", async () => {
+    const { TypedBatchRequestSchema } = await import("@/lib/api-v1/dto/batch");
+    const requests = Array.from({ length: 50 }, (_, index) => ({
+      id: `item-${index}`,
+      method: "POST" as const,
+      path: "/api/v1/sites/site-1/analytics/overview",
+      body: {},
+    }));
+
+    expect(TypedBatchRequestSchema.safeParse({ requests }).success).toBe(true);
+    expect(
+      TypedBatchRequestSchema.safeParse({
+        requests: [...requests, { ...requests[0], id: "item-50" }],
+      }).success,
+    ).toBe(false);
+  });
+
   it("dispatches registry-backed POST children once, in input order, with partial failures", async () => {
     const dispatch = vi.fn(
       async (item: TypedBatchItem, _context: TypedBatchDispatchContext) =>

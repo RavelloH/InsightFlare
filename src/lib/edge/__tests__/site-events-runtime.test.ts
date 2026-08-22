@@ -79,7 +79,7 @@ describe("site events runtime", () => {
       readSiteEventsTimeseries({ ...input, interval: "day", limit: 8 }),
     ).resolves.toMatchObject({
       interval: "day",
-      data: [{ timestamp: "1970-01-01T00:00:00.000Z" }],
+      points: [{ timestamp: "1970-01-01T00:00:00.000Z" }],
     });
     expect(queryEventsTrendFromD1).toHaveBeenCalledWith(
       input.env,

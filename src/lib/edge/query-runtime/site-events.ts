@@ -141,7 +141,7 @@ export async function readSiteEventsTimeseries(
   return {
     interval: input.interval,
     series: result.data.series,
-    data: result.data.data.map((point) => ({
+    points: result.data.data.map((point) => ({
       bucket: point.bucket,
       timestamp: new Date(point.timestampMs).toISOString(),
       totalEvents: point.totalEvents,

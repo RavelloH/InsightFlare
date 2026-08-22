@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { type ApiV1ErrorCode, apiV1ErrorRegistry } from "@/lib/api-v1/errors";
-import { apiV1RouteRegistry } from "@/lib/api-v1/route-registry";
+import {
+  apiV1RouteRegistry,
+  isApiV1BatchEligible,
+} from "@/lib/api-v1/route-registry";
 import { ApiV1ErrorEnvelopeSchema } from "@/lib/api-v1/wire";
 
 type JsonSchema = Record<string, unknown>;
@@ -19,6 +22,7 @@ export type ApiV1OpenApiOperation = {
   "x-api-v1-lifecycle": "exposed";
   "x-api-v1-scopes": string[];
   "x-required-scopes": string[];
+  "x-api-v1-batch-eligible": boolean;
   "x-api-v1-conditional-scopes"?: unknown;
 };
 
@@ -88,13 +92,18 @@ function requiredProperties(schema: JsonSchema): Set<string> {
 function pathParameters(
   path: string,
   schema: JsonSchema,
+  pathParameterSchemas?: Readonly<Record<string, z.ZodType>>,
 ): Array<Record<string, unknown>> {
   const properties = objectProperties(schema);
   return pathParameterNames(path).map((name) => ({
     name,
     in: "path",
     required: true,
-    schema: clone(properties[name] ?? { type: "string", minLength: 1 }),
+    schema: clone(
+      pathParameterSchemas?.[name]
+        ? jsonSchema(pathParameterSchemas[name])
+        : (properties[name] ?? { type: "string", minLength: 1 }),
+    ),
     description: `${name} path parameter.`,
   }));
 }
@@ -171,6 +180,19 @@ function tagForOperation(operationId: string): string {
 
 function summaryForOperation(operationId: string): string {
   return `API v1 ${operationId.replaceAll(".", " ")} operation`;
+}
+
+function descriptionForOperation(routeId: string): string {
+  if (routeId === "site.analytics.performanceBreakdown") {
+    return "Breaks down Core Web Vitals by page.path or geo.country. Other dimensions are not supported and return validation_failed.";
+  }
+  if (routeId === "site.analytics.eventsTimeseries") {
+    return "Returns event counts at time points. series contains top-N event-type aggregates for the whole window; points contains the time buckets. The request limit controls top-N event types, not the number of points.";
+  }
+  if (routeId === "site.analytics.eventsSearch") {
+    return "Searches event records. Use page.limit for page size; it supports values from 1 through 200 and is independent of the events timeseries top-N limit.";
+  }
+  return "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.";
 }
 
 function successStatus(method: string, operationId: string): string {
@@ -254,11 +276,27 @@ export function buildApiV1OpenApiPaths(): ApiV1OpenApiPaths {
     const parameters =
       route.method === "GET" && requestSchema
         ? [
-            ...pathParameters(route.path, requestSchema),
+            ...pathParameters(
+              route.path,
+              requestSchema,
+              "pathParameterSchemas" in route
+                ? (route.pathParameterSchemas as Readonly<
+                    Record<string, z.ZodType>
+                  >)
+                : undefined,
+            ),
             ...queryParameters(route.path, requestSchema),
           ]
         : requestSchema
-          ? pathParameters(route.path, requestSchema)
+          ? pathParameters(
+              route.path,
+              requestSchema,
+              "pathParameterSchemas" in route
+                ? (route.pathParameterSchemas as Readonly<
+                    Record<string, z.ZodType>
+                  >)
+                : undefined,
+            )
           : [];
     const bodySchema = requestSchema
       ? schemaWithoutPathParameters(route.path, requestSchema)
@@ -266,8 +304,7 @@ export function buildApiV1OpenApiPaths(): ApiV1OpenApiPaths {
     const operation: ApiV1OpenApiOperation = {
       operationId,
       summary: summaryForOperation(operationId),
-      description:
-        "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+      description: descriptionForOperation(route.id),
       tags: [tagForOperation(operationId)],
       security: [{ BearerAuth: [] }],
       ...(parameters.length > 0 ? { parameters } : {}),
@@ -300,6 +337,7 @@ export function buildApiV1OpenApiPaths(): ApiV1OpenApiPaths {
       "x-api-v1-lifecycle": "exposed",
       "x-api-v1-scopes": [...route.scopes],
       "x-required-scopes": [...route.scopes],
+      "x-api-v1-batch-eligible": isApiV1BatchEligible(route.id),
       ...("conditionalScopes" in route && route.conditionalScopes
         ? { "x-api-v1-conditional-scopes": route.conditionalScopes }
         : {}),

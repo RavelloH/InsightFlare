@@ -19,6 +19,8 @@ type JsonContent = {
 
 type OperationObject = {
   operationId?: string;
+  description?: string;
+  "x-api-v1-batch-eligible"?: boolean;
   security?: Array<Record<string, unknown>>;
   tags?: string[];
   "x-api-v1-lifecycle"?: string;
@@ -318,6 +320,37 @@ describe("api v1 public docs", () => {
         }),
       }),
     );
+  });
+
+  it("documents batch eligibility and the supported performance dimensions", () => {
+    const spec = readJson<OpenApiSpec>("docs/openapi.json");
+    const performanceBreakdown =
+      spec.paths[
+        "/api/v1/sites/{siteId}/analytics/performance/breakdowns/{dimension}"
+      ]?.post;
+    const eventsSearch =
+      spec.paths["/api/v1/sites/{siteId}/analytics/events/search"]?.post;
+    const eventsTimeseries =
+      spec.paths["/api/v1/sites/{siteId}/analytics/events/timeseries"]?.post;
+
+    expect(performanceBreakdown?.["x-api-v1-batch-eligible"]).toBe(true);
+    expect(
+      performanceBreakdown?.parameters?.find(
+        (parameter) =>
+          typeof parameter === "object" &&
+          parameter !== null &&
+          "name" in parameter &&
+          parameter.name === "dimension",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        schema: expect.objectContaining({
+          enum: ["page.path", "geo.country"],
+        }),
+      }),
+    );
+    expect(eventsSearch?.description).toContain("1 through 200");
+    expect(eventsTimeseries?.description).toContain("points");
   });
 
   it("documents typed filters, saved filters, and response envelopes", () => {

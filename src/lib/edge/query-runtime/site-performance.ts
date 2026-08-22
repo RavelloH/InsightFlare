@@ -1,5 +1,6 @@
 import "@tanstack/react-start/server-only";
 
+import { SitePerformanceBreakdownDimensionSchema } from "@/lib/api-v1/dto/analytics";
 import type { QueryWindow } from "@/lib/edge/query/core";
 import type {
   PerformanceMetricKey,
@@ -152,15 +153,16 @@ export async function readSitePerformanceBreakdown(
     readonly samples: number;
   }[];
 }> {
-  if (input.dimension !== "page.path" && input.dimension !== "geo.country") {
-    throw new Error("unsupported-dimension");
-  }
+  const dimension = SitePerformanceBreakdownDimensionSchema.safeParse(
+    input.dimension,
+  );
+  if (!dimension.success) throw new Error("unsupported-dimension");
   const result = await executeQueryOperation(
     "performance",
     inputBase(input),
     async () => ({
       value:
-        input.dimension === "page.path"
+        dimension.data === "page.path"
           ? await queryPerformanceRoutesFromD1(
               input.env,
               input.siteId,
@@ -178,7 +180,7 @@ export async function readSitePerformanceBreakdown(
   );
   if (!result.ok) throw new Error(result.error.kind);
   return {
-    dimension: input.dimension,
+    dimension: dimension.data,
     metric: input.metric,
     items: result.data.map((row) => ({
       key: "pathname" in row ? row.pathname : row.country,

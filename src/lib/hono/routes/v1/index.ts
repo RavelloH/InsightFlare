@@ -11,6 +11,7 @@ import { handleSiteComparisonBreakdown } from "@/lib/api-v1/comparison-breakdown
 import { handleSiteOverviewComparison } from "@/lib/api-v1/comparison-handler";
 import { handleSiteTimeseriesComparison } from "@/lib/api-v1/comparison-timeseries-handler";
 import { dispatchApiV1CoreRoute } from "@/lib/api-v1/core-dispatcher";
+import { SitePerformanceBreakdownDimensionSchema } from "@/lib/api-v1/dto/analytics";
 import { TypedBatchRequestSchema } from "@/lib/api-v1/dto/batch";
 import { handlePlannedSiteFunnelAnalysis } from "@/lib/api-v1/funnel-analysis-handler";
 import { handlePlannedSiteOverview } from "@/lib/api-v1/overview-handler";
@@ -875,6 +876,20 @@ v1Routes.post(
     const siteId = c.req.param("siteId");
     const dimension = c.req.param("dimension");
     if (!siteId || !dimension) return resourceNotFound(c);
+    const parsedDimension =
+      SitePerformanceBreakdownDimensionSchema.safeParse(dimension);
+    if (!parsedDimension.success) {
+      return jsonError(
+        "validation_failed",
+        "Unsupported performance breakdown dimension.",
+        400,
+        {
+          dimension,
+          supportedDimensions: SitePerformanceBreakdownDimensionSchema.options,
+        },
+        c.req.raw,
+      );
+    }
     return handlePlannedSitePerformanceBreakdown(
       c.req.raw,
       principal(c),
@@ -883,7 +898,7 @@ v1Routes.post(
         readSitePerformanceBreakdown({
           env: c.env,
           siteId: input.siteId,
-          dimension,
+          dimension: parsedDimension.data,
           metric: input.metric,
           limit: input.limit,
           window: {

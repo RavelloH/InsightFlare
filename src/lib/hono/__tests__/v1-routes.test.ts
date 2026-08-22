@@ -283,6 +283,22 @@ describe("Hono API v1 routes", () => {
     });
   });
 
+  it("returns a typed validation error for an unsupported performance dimension", async () => {
+    const response = await createApp().fetch(
+      request(
+        "/api/v1/sites/site-1/analytics/performance/breakdowns/geo.region",
+        { method: "POST" },
+      ),
+      env as never,
+      ctx,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "validation_failed" },
+    });
+  });
+
   it.each([
     "/api/v1/sites/site-1/analytics/comparison/overview",
     "/api/v1/sites/site-1/analytics/comparison/timeseries",

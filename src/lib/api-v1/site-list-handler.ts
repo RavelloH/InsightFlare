@@ -140,7 +140,7 @@ export type SiteEventsTimeseriesReader = SiteListReader<
   {
     readonly interval: string;
     readonly series: readonly unknown[];
-    readonly data: readonly unknown[];
+    readonly points: readonly unknown[];
   }
 >;
 export type SiteEventsSearchReader = SiteListReader<

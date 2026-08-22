@@ -44,6 +44,7 @@ import {
   SiteOverviewComparisonQueryDtoSchema,
   SiteOverviewQueryDtoSchema,
   SitePagesQueryDtoSchema,
+  SitePerformanceBreakdownDimensionSchema,
   SitePerformanceBreakdownQueryDtoSchema,
   SitePerformanceSummaryQueryDtoSchema,
   SitePerformanceTimeseriesQueryDtoSchema,
@@ -320,6 +321,7 @@ export interface ApiV1AnalyticsPerformanceRouteDescriptor<Id extends string> {
     | "site.analytics.performanceBreakdown";
   readonly scopes: readonly string[];
   readonly conditionalScopes?: ApiV1AnalyticsRouteDescriptor<string>["conditionalScopes"];
+  readonly pathParameterSchemas?: Readonly<Record<string, z.ZodType>>;
   readonly requestSchema:
     | typeof SitePerformanceSummaryQueryDtoSchema
     | typeof SitePerformanceTimeseriesQueryDtoSchema
@@ -1106,6 +1108,9 @@ export const apiV1AnalyticsPerformanceRouteRegistry = [
     method: "POST",
     path: "/api/v1/sites/{siteId}/analytics/performance/breakdowns/{dimension}",
     operationId: "site.analytics.performanceBreakdown",
+    pathParameterSchemas: {
+      dimension: SitePerformanceBreakdownDimensionSchema,
+    },
     scopes: ["analytics:read"],
     conditionalScopes: [
       {
@@ -1910,6 +1915,67 @@ export const apiV1BatchRouteRegistry = [
     ],
   },
 ] as const satisfies readonly ApiV1BatchRouteDescriptor[];
+
+/**
+ * Explicit allow-list for typed batch children. Keep this list independent of
+ * route naming conventions so the runtime and generated OpenAPI contract
+ * cannot silently disagree when a new route is added.
+ */
+export const apiV1BatchEligibleRouteIds = [
+  "site.analytics.overview",
+  "team.analytics.overview",
+  "site.analytics.comparisonOverview",
+  "site.analytics.comparisonTimeseries",
+  "site.analytics.comparisonBreakdown",
+  "team.analytics.comparisonOverview",
+  "team.analytics.comparisonTimeseries",
+  "team.analytics.comparisonBreakdown",
+  "site.analytics.schema",
+  "team.analytics.schema",
+  "site.analytics.timeseries",
+  "team.analytics.timeseries",
+  "team.analytics.sites",
+  "site.analytics.breakdown",
+  "team.analytics.breakdown",
+  "site.analytics.crossBreakdown",
+  "site.analytics.pages",
+  "site.analytics.referrers",
+  "site.analytics.filterValues",
+  "site.analytics.retentionCohorts",
+  "site.analytics.funnelAnalysis",
+  "site.analytics.performanceSummary",
+  "site.analytics.performanceTimeseries",
+  "site.analytics.performanceBreakdown",
+  "site.analytics.eventsSummary",
+  "site.analytics.eventsTimeseries",
+  "site.analytics.eventsSearch",
+  "site.analytics.eventDetail",
+  "site.analytics.eventTypes",
+  "site.analytics.eventTypeDetail",
+  "site.analytics.eventFields",
+  "site.analytics.eventFieldValues",
+  "site.analytics.visitorDetail",
+  "site.analytics.sessionDetail",
+  "site.analytics.visitorsSearch",
+  "site.analytics.sessionsSearch",
+  "site.analytics.visitorEvents",
+  "site.analytics.visitorSessions",
+  "site.analytics.sessionEvents",
+  "site.analytics.realtimeSnapshot",
+  "site.analytics.realtimeActiveVisitors",
+  "site.analytics.realtimeEvents",
+  "site.analytics.realtimeSessions",
+  "site.saved-filters.list",
+  "site.saved-filters.get",
+] as const;
+
+const apiV1BatchEligibleRouteIdSet = new Set<string>(
+  apiV1BatchEligibleRouteIds,
+);
+
+export function isApiV1BatchEligible(routeId: string): boolean {
+  return apiV1BatchEligibleRouteIdSet.has(routeId);
+}
 
 export const apiV1RouteRegistry = [
   ...apiV1AnalyticsRouteRegistry,
