@@ -44,7 +44,7 @@ export interface RealtimeSnapshotRecord {
   visitorId: string;
   userId?: string;
   userName?: string;
-  isEU?: boolean | number;
+  isEU?: boolean | number | null;
   country: string;
   region: string;
   regionCode: string;
@@ -115,7 +115,7 @@ export interface RealtimeVisitPayloadInput {
   utmCampaign?: string;
   utmTerm?: string;
   utmContent?: string;
-  isEU?: boolean | number;
+  isEU?: boolean | number | null;
   postalCode?: string;
   metroCode?: string;
   uaRaw?: string;
@@ -274,7 +274,7 @@ export function toRealtimePayload(
     eventName:
       record.eventName ??
       (eventKind === "custom_event" ? record.eventType : ""),
-    eventData: parseRealtimeJsonValue(record.eventDataJson),
+    eventData: parseRealtimeJsonValue(record.eventDataJson) ?? {},
     visitId: record.visitId,
     sessionId: record.sessionId,
     startedAt: record.startedAt ?? null,
@@ -295,7 +295,10 @@ export function toRealtimePayload(
     visitorId: record.visitorId,
     userId: record.userId ?? "",
     userName: record.userName ?? "",
-    isEU: Boolean(record.isEU),
+    isEU:
+      record.isEU === undefined || record.isEU === null
+        ? undefined
+        : Boolean(record.isEU),
     country: record.country,
     region: record.region,
     regionCode: record.regionCode,
@@ -366,7 +369,10 @@ export function toRealtimeVisitPayload(
     utmCampaign: visit.utmCampaign ?? "",
     utmTerm: visit.utmTerm ?? "",
     utmContent: visit.utmContent ?? "",
-    isEU: Boolean(visit.isEU),
+    isEU:
+      visit.isEU === undefined || visit.isEU === null
+        ? undefined
+        : Boolean(visit.isEU),
     postalCode: visit.postalCode ?? "",
     metroCode: visit.metroCode ?? "",
     uaRaw: visit.uaRaw ?? "",

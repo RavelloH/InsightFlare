@@ -561,19 +561,20 @@ export function generateDemoEventRecordDetail(
     ) ?? createDemoCustomEventFacts(dataset.visits)[0];
   if (!event) return { ok: true, data: null };
   const record = demoEventRecordFromFact(event);
-  const queryString = [
-    event.visit.utmSource
-      ? `utm_source=${encodeURIComponent(event.visit.utmSource)}`
-      : "",
-    event.visit.utmMedium
-      ? `utm_medium=${encodeURIComponent(event.visit.utmMedium)}`
-      : "",
-    event.visit.utmCampaign
-      ? `utm_campaign=${encodeURIComponent(event.visit.utmCampaign)}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("&") || "ref=direct";
+  const queryString =
+    [
+      event.visit.utmSource
+        ? `utm_source=${encodeURIComponent(event.visit.utmSource)}`
+        : "",
+      event.visit.utmMedium
+        ? `utm_medium=${encodeURIComponent(event.visit.utmMedium)}`
+        : "",
+      event.visit.utmCampaign
+        ? `utm_campaign=${encodeURIComponent(event.visit.utmCampaign)}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("&") || "ref=direct";
   const [screenWidth, screenHeight] = event.visit.screenSize
     .split("x")
     .map((value) => Number(value));

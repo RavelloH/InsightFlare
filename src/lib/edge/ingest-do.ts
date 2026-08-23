@@ -590,6 +590,7 @@ export class IngestDurableObject extends DurableObject {
       screenHeight: record.screenHeight,
       language: record.language,
       status: "open",
+      visibilityState: "visible",
       latitude: record.latitude,
       longitude: record.longitude,
     });
@@ -678,6 +679,7 @@ export class IngestDurableObject extends DurableObject {
         screenHeight: record.screenHeight,
         language: record.language,
         status: "open",
+        visibilityState: "visible",
         latitude: record.latitude,
         longitude: record.longitude,
       });
@@ -1125,6 +1127,8 @@ export class IngestDurableObject extends DurableObject {
       screenWidth: record.screenWidth,
       screenHeight: record.screenHeight,
       language: record.language,
+      status: "open",
+      visibilityState: "visible",
       latitude: record.latitude,
       longitude: record.longitude,
     });

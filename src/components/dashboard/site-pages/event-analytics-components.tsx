@@ -34,9 +34,9 @@ import {
   BrowserMeta,
   CountryRegionMeta,
   DeviceMeta,
+  formatDuration,
   formatPath,
   formatRelativeTime,
-  formatDuration,
   formatScreen,
   formatShortDateTime,
   OsMeta,
@@ -1323,6 +1323,18 @@ function formatEventDetailDateTime(
     : unknownLabel;
 }
 
+function formatEventDetailDateTimeOrAbsent(
+  locale: Locale,
+  value: number | null | undefined,
+  hasValue: boolean,
+  unknownLabel: string,
+  absentLabel: string,
+): string {
+  return hasValue
+    ? formatEventDetailDateTime(locale, value, unknownLabel)
+    : absentLabel;
+}
+
 function formatEventDetailBoolean(
   value: boolean | undefined,
   messages: AppMessages,
@@ -1341,7 +1353,10 @@ function formatEventDetailStatus(
     : messages.common.unknown;
 }
 
-function formatEventDetailText(value: string | null | undefined, unknownLabel: string) {
+function formatEventDetailText(
+  value: string | null | undefined,
+  unknownLabel: string,
+) {
   const normalized = value?.trim() || "";
   return normalized || unknownLabel;
 }
@@ -1562,7 +1577,8 @@ export function EventRecordDetailDrawer({
                       value={
                         <span className="text-[11px]">
                           {numberFormat(locale, detail.event.nodeCount)}{" "}
-                          {labels.nodes} / {numberFormat(locale, detail.event.valueCount)}{" "}
+                          {labels.nodes} /{" "}
+                          {numberFormat(locale, detail.event.valueCount)}{" "}
                           {labels.values}
                         </span>
                       }
@@ -1574,7 +1590,10 @@ export function EventRecordDetailDrawer({
 
                 <section className="space-y-3">
                   <h3 className="text-sm font-medium">{labels.payload}</h3>
-                  <JsonTreePanel value={detail.eventData} labels={labels} />
+                  <JsonTreePanel
+                    value={detail.eventData ?? {}}
+                    labels={labels}
+                  />
                 </section>
 
                 <Separator />
@@ -1616,7 +1635,7 @@ export function EventRecordDetailDrawer({
                         <span className="break-all font-mono text-[11px]">
                           {formatEventDetailText(
                             detail.context.queryString,
-                            messages.common.unknown,
+                            messages.pages.noQuery,
                           )}
                         </span>
                       }
@@ -1652,16 +1671,13 @@ export function EventRecordDetailDrawer({
                         </span>
                       }
                     />
-                    {detail.context.userName?.trim() ? (
-                      <DetailItem
-                        label={messages.realtime.userName}
-                        value={
-                          <span className="break-words text-[11px]">
-                            {detail.context.userName}
-                          </span>
-                        }
-                      />
-                    ) : null}
+                    <DetailItem
+                      label={messages.realtime.userName}
+                      value={formatEventDetailText(
+                        detail.context.userName,
+                        messages.campaigns.notSet,
+                      )}
+                    />
                     {detail.context.userId?.trim() ? (
                       <DetailItem
                         label={messages.realtime.userId}
@@ -1716,7 +1732,10 @@ export function EventRecordDetailDrawer({
                     />
                     <DetailItem
                       label={messages.realtime.isEU}
-                      value={formatEventDetailBoolean(detail.context.isEU, messages)}
+                      value={formatEventDetailBoolean(
+                        detail.context.isEU,
+                        messages,
+                      )}
                     />
                     <DetailItem
                       label={messages.common.screenSize}
@@ -1730,6 +1749,14 @@ export function EventRecordDetailDrawer({
                       label={messages.common.language}
                       value={formatEventDetailText(
                         detail.context.language,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.common.organization}
+                      wide
+                      value={formatEventDetailText(
+                        detail.context.organization,
                         messages.common.unknown,
                       )}
                     />
@@ -1775,7 +1802,10 @@ export function EventRecordDetailDrawer({
                     />
                     <DetailItem
                       label={messages.realtime.status}
-                      value={formatEventDetailStatus(detail.context.status, messages)}
+                      value={formatEventDetailStatus(
+                        detail.context.status,
+                        messages,
+                      )}
                     />
                     <DetailItem
                       label={messages.realtime.startedAt}
@@ -1787,10 +1817,12 @@ export function EventRecordDetailDrawer({
                     />
                     <DetailItem
                       label={messages.realtime.previousVisitStartedAt}
-                      value={formatEventDetailDateTime(
+                      value={formatEventDetailDateTimeOrAbsent(
                         locale,
                         detail.context.previousVisitStartedAt,
+                        Boolean(detail.context.previousVisitId?.trim()),
                         messages.common.unknown,
+                        messages.campaigns.notSet,
                       )}
                     />
                     <DetailItem
@@ -1821,14 +1853,6 @@ export function EventRecordDetailDrawer({
                       label={messages.realtime.exitReason}
                       value={formatEventDetailText(
                         detail.context.exitReason,
-                        messages.common.unknown,
-                      )}
-                    />
-                    <DetailItem
-                      label={messages.common.organization}
-                      wide
-                      value={formatEventDetailText(
-                        detail.context.organization,
                         messages.common.unknown,
                       )}
                     />
@@ -1961,35 +1985,35 @@ export function EventRecordDetailDrawer({
                       label={messages.realtime.utmSource}
                       value={formatEventDetailText(
                         detail.context.utmSource,
-                        messages.common.unknown,
+                        messages.campaigns.notSet,
                       )}
                     />
                     <DetailItem
                       label={messages.realtime.utmMedium}
                       value={formatEventDetailText(
                         detail.context.utmMedium,
-                        messages.common.unknown,
+                        messages.campaigns.notSet,
                       )}
                     />
                     <DetailItem
                       label={messages.realtime.utmCampaign}
                       value={formatEventDetailText(
                         detail.context.utmCampaign,
-                        messages.common.unknown,
+                        messages.campaigns.notSet,
                       )}
                     />
                     <DetailItem
                       label={messages.realtime.utmTerm}
                       value={formatEventDetailText(
                         detail.context.utmTerm,
-                        messages.common.unknown,
+                        messages.campaigns.notSet,
                       )}
                     />
                     <DetailItem
                       label={messages.realtime.utmContent}
                       value={formatEventDetailText(
                         detail.context.utmContent,
-                        messages.common.unknown,
+                        messages.campaigns.notSet,
                       )}
                     />
                   </dl>

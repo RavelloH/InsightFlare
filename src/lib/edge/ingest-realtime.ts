@@ -131,8 +131,27 @@ export function readRecentRealtimeEvents(
           visit_id AS visitId,
           session_id AS sessionId,
           started_at AS startedAt,
-          '' AS previousVisitId,
-          NULL AS previousVisitStartedAt,
+          COALESCE(
+            (
+              SELECT previous.visit_id
+              FROM buffered_visits previous
+              WHERE previous.site_id = v.site_id
+                AND previous.session_id = v.session_id
+                AND previous.started_at < v.started_at
+              ORDER BY previous.started_at DESC, previous.visit_id DESC
+              LIMIT 1
+            ),
+            ''
+          ) AS previousVisitId,
+          (
+            SELECT previous.started_at
+            FROM buffered_visits previous
+            WHERE previous.site_id = v.site_id
+              AND previous.session_id = v.session_id
+              AND previous.started_at < v.started_at
+            ORDER BY previous.started_at DESC, previous.visit_id DESC
+            LIMIT 1
+          ) AS previousVisitStartedAt,
           pathname,
           query_string AS queryString,
           hash_fragment AS hash,
@@ -188,10 +207,14 @@ export function readRecentRealtimeEvents(
               'inp', perf_inp_ms
             )
           END AS performance,
-          '' AS visibilityState,
+          CASE
+            WHEN status = 'hidden_pending' THEN 'hidden'
+            WHEN status = 'open' THEN 'visible'
+            ELSE ''
+          END AS visibilityState,
           latitude,
           longitude
-        FROM buffered_visits
+        FROM buffered_visits v
         WHERE started_at BETWEEN ? AND ?
         UNION ALL
         SELECT
@@ -208,8 +231,27 @@ export function readRecentRealtimeEvents(
           COALESCE(v.visit_id, '') AS visitId,
           COALESCE(v.session_id, '') AS sessionId,
           v.started_at AS startedAt,
-          '' AS previousVisitId,
-          NULL AS previousVisitStartedAt,
+          COALESCE(
+            (
+              SELECT previous.visit_id
+              FROM buffered_visits previous
+              WHERE previous.site_id = v.site_id
+                AND previous.session_id = v.session_id
+                AND previous.started_at < v.started_at
+              ORDER BY previous.started_at DESC, previous.visit_id DESC
+              LIMIT 1
+            ),
+            ''
+          ) AS previousVisitId,
+          (
+            SELECT previous.started_at
+            FROM buffered_visits previous
+            WHERE previous.site_id = v.site_id
+              AND previous.session_id = v.session_id
+              AND previous.started_at < v.started_at
+            ORDER BY previous.started_at DESC, previous.visit_id DESC
+            LIMIT 1
+          ) AS previousVisitStartedAt,
           COALESCE(v.pathname, '') AS pathname,
           COALESCE(v.query_string, '') AS queryString,
           COALESCE(v.hash_fragment, '') AS hash,
@@ -225,7 +267,7 @@ export function readRecentRealtimeEvents(
           COALESCE(v.visitor_id, '') AS visitorId,
           COALESCE(NULLIF(e.user_id, ''), v.user_id, '') AS userId,
           COALESCE(v.user_name, '') AS userName,
-          COALESCE(v.is_eu, 0) AS isEU,
+          v.is_eu AS isEU,
           COALESCE(v.country, '') AS country,
           COALESCE(v.region, '') AS region,
           COALESCE(v.region_code, '') AS regionCode,
@@ -265,7 +307,11 @@ export function readRecentRealtimeEvents(
               'inp', v.perf_inp_ms
             )
           END AS performance,
-          '' AS visibilityState,
+          CASE
+            WHEN v.status = 'hidden_pending' THEN 'hidden'
+            WHEN v.status = 'open' THEN 'visible'
+            ELSE ''
+          END AS visibilityState,
           v.latitude AS latitude,
           v.longitude AS longitude
         FROM buffered_custom_events e
@@ -288,8 +334,27 @@ export function readRecentRealtimeEvents(
           visit_id AS visitId,
           session_id AS sessionId,
           started_at AS startedAt,
-          '' AS previousVisitId,
-          NULL AS previousVisitStartedAt,
+          COALESCE(
+            (
+              SELECT previous.visit_id
+              FROM buffered_visits previous
+              WHERE previous.site_id = v.site_id
+                AND previous.session_id = v.session_id
+                AND previous.started_at < v.started_at
+              ORDER BY previous.started_at DESC, previous.visit_id DESC
+              LIMIT 1
+            ),
+            ''
+          ) AS previousVisitId,
+          (
+            SELECT previous.started_at
+            FROM buffered_visits previous
+            WHERE previous.site_id = v.site_id
+              AND previous.session_id = v.session_id
+              AND previous.started_at < v.started_at
+            ORDER BY previous.started_at DESC, previous.visit_id DESC
+            LIMIT 1
+          ) AS previousVisitStartedAt,
           pathname,
           query_string AS queryString,
           hash_fragment AS hash,
@@ -348,7 +413,7 @@ export function readRecentRealtimeEvents(
           '' AS visibilityState,
           latitude,
           longitude
-        FROM buffered_visits
+        FROM buffered_visits v
         WHERE status NOT IN ('open', 'hidden_pending')
           AND ended_at IS NOT NULL
           AND ended_at BETWEEN ? AND ?

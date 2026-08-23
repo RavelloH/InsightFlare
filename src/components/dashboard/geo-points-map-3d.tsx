@@ -224,7 +224,7 @@ const DeckOverlay = memo(function DeckOverlay(props: MapboxOverlayProps) {
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const globeView = useMemo(() => new _GlobeView({ id: "mapbox" }), []);
   const overlayProps = useMemo(
-    () => ({ ...props, views: [globeView] }),
+    () => ({ ...props, views: [globeView] }) as unknown as MapboxOverlayProps,
     [globeView, props],
   );
   const overlay = useControl<MapboxOverlay>(

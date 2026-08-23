@@ -29,9 +29,9 @@ import {
   createTrafficPairChartConfig,
   createTrafficPairChartData,
   createTrafficPairCountFormatter,
-  TrafficPairTooltip,
   type TrafficPairDataPoint,
   type TrafficPairRange,
+  TrafficPairTooltip,
 } from "./traffic-pair-chart";
 
 export interface TrafficPairAreaChartProps {

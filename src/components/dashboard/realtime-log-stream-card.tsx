@@ -1282,10 +1282,70 @@ function RealtimeLogEventDetailsDrawer({
     messages.realtime.visibilityStateLabels,
     unknownLabel,
   );
+  const eventNameLabel =
+    event.eventName?.trim() ||
+    (event.eventKind === "custom_event"
+      ? unknownLabel
+      : messages.campaigns.notSet);
+  const visibilityStateLabel = event.visibilityState?.trim()
+    ? localizedVisibilityState
+    : messages.campaigns.notSet;
+  const previousVisitStartedLabel = event.previousVisitId?.trim()
+    ? formatOptionalDetailDateTime(
+        locale,
+        event.previousVisitStartedAt,
+        timeZone,
+        unknownLabel,
+      )
+    : messages.campaigns.notSet;
   const detailRows = [
     {
       section: "event",
+      priority: 1,
+      label: messages.common.id,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.id.trim() || unknownLabel}
+          mono
+        />
+      ),
+    },
+    {
+      section: "event",
+      priority: 2,
+      label: messages.realtime.eventName,
+      value: <RealtimeEventDetailValue value={eventNameLabel} />,
+    },
+    {
+      section: "event",
       priority: 3,
+      label: messages.realtime.eventTime,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatDetailDateTime(locale, event.eventAt, timeZone)}
+          mono
+        />
+      ),
+    },
+    {
+      section: "event",
+      priority: 4,
+      label: messages.realtime.receivedAt,
+      value: (
+        <RealtimeEventDetailValue
+          value={formatOptionalDetailDateTime(
+            locale,
+            event.receivedAt,
+            timeZone,
+            unknownLabel,
+          )}
+          mono
+        />
+      ),
+    },
+    {
+      section: "event",
+      priority: 5,
       label: messages.realtime.eventKind,
       value: (
         <RealtimeEventDetailValue
@@ -1296,33 +1356,12 @@ function RealtimeLogEventDetailsDrawer({
     },
     {
       section: "event",
-      priority: 2,
+      priority: 6,
       label: messages.realtime.traceId,
       value: (
         <RealtimeEventDetailValue
           value={event.traceId?.trim() || unknownLabel}
           mono
-        />
-      ),
-    },
-    {
-      section: "event",
-      priority: 1,
-      label: messages.common.id,
-      value: (
-        <RealtimeEventDetailValue
-          value={event.id.trim() || messages.common.unknown}
-          mono
-        />
-      ),
-    },
-    {
-      section: "event",
-      priority: 4,
-      label: messages.realtime.eventName,
-      value: (
-        <RealtimeEventDetailValue
-          value={event.eventName?.trim() || unknownLabel}
         />
       ),
     },
@@ -1352,6 +1391,18 @@ function RealtimeLogEventDetailsDrawer({
     },
     {
       section: "session",
+      priority: 2,
+      wide: true,
+      label: messages.realtime.visitId,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.visitId.trim() || messages.common.unknown}
+          mono
+        />
+      ),
+    },
+    {
+      section: "session",
       priority: 5,
       label: messages.realtime.startedAt,
       value: (
@@ -1371,42 +1422,7 @@ function RealtimeLogEventDetailsDrawer({
       priority: 6,
       label: messages.realtime.previousVisitStartedAt,
       value: (
-        <RealtimeEventDetailValue
-          value={formatOptionalDetailDateTime(
-            locale,
-            event.previousVisitStartedAt,
-            timeZone,
-            unknownLabel,
-          )}
-          mono
-        />
-      ),
-    },
-    {
-      section: "event",
-      priority: 5,
-      label: messages.realtime.eventTime,
-      value: (
-        <RealtimeEventDetailValue
-          value={formatDetailDateTime(locale, event.eventAt, timeZone)}
-          mono
-        />
-      ),
-    },
-    {
-      section: "event",
-      priority: 6,
-      label: messages.realtime.receivedAt,
-      value: (
-        <RealtimeEventDetailValue
-          value={formatOptionalDetailDateTime(
-            locale,
-            event.receivedAt,
-            timeZone,
-            unknownLabel,
-          )}
-          mono
-        />
+        <RealtimeEventDetailValue value={previousVisitStartedLabel} mono />
       ),
     },
     {
@@ -1426,13 +1442,13 @@ function RealtimeLogEventDetailsDrawer({
       label: messages.realtime.userName,
       value: (
         <RealtimeEventDetailValue
-          value={event.userName?.trim() || unknownLabel}
+          value={event.userName?.trim() || messages.campaigns.notSet}
         />
       ),
     },
     {
       section: "visitor",
-      priority: 9,
+      priority: 10,
       label: messages.realtime.isEU,
       value: (
         <RealtimeEventDetailValue
@@ -1457,6 +1473,17 @@ function RealtimeLogEventDetailsDrawer({
     },
     {
       section: "browsing",
+      priority: 2,
+      label: messages.common.hostname,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.hostname.trim() || messages.common.unknown}
+          mono
+        />
+      ),
+    },
+    {
+      section: "browsing",
       priority: 3,
       wide: true,
       label: messages.common.path,
@@ -1474,18 +1501,7 @@ function RealtimeLogEventDetailsDrawer({
       label: messages.realtime.queryString,
       value: (
         <RealtimeEventDetailValue
-          value={event.queryString?.trim() || unknownLabel}
-          mono
-        />
-      ),
-    },
-    {
-      section: "browsing",
-      priority: 2,
-      label: messages.common.hostname,
-      value: (
-        <RealtimeEventDetailValue
-          value={event.hostname.trim() || messages.common.unknown}
+          value={event.queryString?.trim() || messages.pages.noQuery}
           mono
         />
       ),
@@ -1558,6 +1574,18 @@ function RealtimeLogEventDetailsDrawer({
       ),
     },
     {
+      section: "visitor",
+      priority: 9,
+      wide: true,
+      label: messages.realtime.userAgent,
+      value: (
+        <RealtimeEventDetailValue
+          value={event.uaRaw?.trim() || unknownLabel}
+          mono
+        />
+      ),
+    },
+    {
       section: "geography",
       priority: 1,
       label: messages.common.country,
@@ -1609,7 +1637,7 @@ function RealtimeLogEventDetailsDrawer({
     },
     {
       section: "geography",
-      priority: 4,
+      priority: 7,
       label: messages.realtime.postalCode,
       value: (
         <RealtimeEventDetailValue
@@ -1620,7 +1648,7 @@ function RealtimeLogEventDetailsDrawer({
     },
     {
       section: "geography",
-      priority: 5,
+      priority: 8,
       label: messages.realtime.metroCode,
       value: (
         <RealtimeEventDetailValue
@@ -1631,7 +1659,7 @@ function RealtimeLogEventDetailsDrawer({
     },
     {
       section: "geography",
-      priority: 6,
+      priority: 4,
       label: messages.common.city,
       value: (
         <RealtimeEventDetailValue
@@ -1645,7 +1673,7 @@ function RealtimeLogEventDetailsDrawer({
     },
     {
       section: "geography",
-      priority: 7,
+      priority: 5,
       label: messages.common.continent,
       value: (
         <RealtimeEventDetailValue
@@ -1659,7 +1687,7 @@ function RealtimeLogEventDetailsDrawer({
     },
     {
       section: "geography",
-      priority: 8,
+      priority: 6,
       label: messages.common.timezone,
       value: (
         <RealtimeEventDetailValue
@@ -1702,7 +1730,7 @@ function RealtimeLogEventDetailsDrawer({
       label: messages.realtime.utmSource,
       value: (
         <RealtimeEventDetailValue
-          value={event.utmSource?.trim() || unknownLabel}
+          value={event.utmSource?.trim() || messages.campaigns.notSet}
         />
       ),
     },
@@ -1712,7 +1740,7 @@ function RealtimeLogEventDetailsDrawer({
       label: messages.realtime.utmMedium,
       value: (
         <RealtimeEventDetailValue
-          value={event.utmMedium?.trim() || unknownLabel}
+          value={event.utmMedium?.trim() || messages.campaigns.notSet}
         />
       ),
     },
@@ -1722,7 +1750,7 @@ function RealtimeLogEventDetailsDrawer({
       label: messages.realtime.utmCampaign,
       value: (
         <RealtimeEventDetailValue
-          value={event.utmCampaign?.trim() || unknownLabel}
+          value={event.utmCampaign?.trim() || messages.campaigns.notSet}
         />
       ),
     },
@@ -1732,7 +1760,7 @@ function RealtimeLogEventDetailsDrawer({
       label: messages.realtime.utmTerm,
       value: (
         <RealtimeEventDetailValue
-          value={event.utmTerm?.trim() || unknownLabel}
+          value={event.utmTerm?.trim() || messages.campaigns.notSet}
         />
       ),
     },
@@ -1742,13 +1770,13 @@ function RealtimeLogEventDetailsDrawer({
       label: messages.realtime.utmContent,
       value: (
         <RealtimeEventDetailValue
-          value={event.utmContent?.trim() || unknownLabel}
+          value={event.utmContent?.trim() || messages.campaigns.notSet}
         />
       ),
     },
     {
       section: "visitor",
-      priority: 10,
+      priority: 11,
       label: messages.common.screenSize,
       value: (
         <RealtimeEventDetailValue
@@ -1759,13 +1787,13 @@ function RealtimeLogEventDetailsDrawer({
     },
     {
       section: "visitor",
-      priority: 11,
+      priority: 12,
       label: messages.common.language,
       value: <RealtimeEventDetailValue value={languageLabel} mono />,
     },
     {
-      section: "session",
-      priority: 2,
+      section: "visitor",
+      priority: 13,
       wide: true,
       label: messages.common.organization,
       value: (
@@ -1784,7 +1812,7 @@ function RealtimeLogEventDetailsDrawer({
       section: "session",
       priority: 3,
       label: messages.realtime.visibilityState,
-      value: <RealtimeEventDetailValue value={localizedVisibilityState} />,
+      value: <RealtimeEventDetailValue value={visibilityStateLabel} />,
     },
     {
       section: "session",
@@ -1803,7 +1831,7 @@ function RealtimeLogEventDetailsDrawer({
       label: messages.realtime.durationSource,
       value: (
         <RealtimeEventDetailValue
-          value={event.durationSource?.trim() || unknownLabel}
+          value={event.durationSource?.trim() || messages.campaigns.notSet}
         />
       ),
     },
@@ -1813,7 +1841,7 @@ function RealtimeLogEventDetailsDrawer({
       label: messages.realtime.exitReason,
       value: (
         <RealtimeEventDetailValue
-          value={event.exitReason?.trim() || unknownLabel}
+          value={event.exitReason?.trim() || messages.campaigns.notSet}
         />
       ),
     },
@@ -1992,8 +2020,9 @@ function RealtimeLogEventDetailsDrawer({
             <Separator />
 
             <section className="space-y-3">
+              <h3 className="text-sm font-medium">{messages.events.payload}</h3>
               <JsonTreePanel
-                value={event.eventData ?? null}
+                value={event.eventData ?? {}}
                 labels={messages.events}
               />
             </section>
@@ -2124,7 +2153,7 @@ function RealtimeLogEventDetailsDrawer({
 
             <section className="space-y-3">
               <h3 className="text-sm font-medium">
-                {messages.navigation.performance}
+                {messages.sessionDetail.performanceTitle}
               </h3>
               <dl className="grid gap-3 sm:grid-cols-2">
                 {performanceDetailRows.map((row, index) => (

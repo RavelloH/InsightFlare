@@ -39227,6 +39227,10 @@
                               "eventName": {
                                 "type": "string"
                               },
+                              "eventKind": {
+                                "type": "string",
+                                "const": "custom_event"
+                              },
                               "occurredAt": {
                                 "type": "number"
                               },
@@ -39424,6 +39428,7 @@
                       {
                         "eventId": "example",
                         "eventName": "example",
+                        "eventKind": "custom_event",
                         "occurredAt": 0,
                         "receivedAt": 0,
                         "sequence": 0,
@@ -40343,6 +40348,10 @@
                             "eventName": {
                               "type": "string"
                             },
+                            "eventKind": {
+                              "type": "string",
+                              "const": "custom_event"
+                            },
                             "occurredAt": {
                               "type": "number"
                             },
@@ -40438,7 +40447,19 @@
                             "visitorId": {
                               "type": "string"
                             },
+                            "userId": {
+                              "type": "string"
+                            },
+                            "userName": {
+                              "type": "string"
+                            },
                             "pathname": {
+                              "type": "string"
+                            },
+                            "queryString": {
+                              "type": "string"
+                            },
+                            "hash": {
                               "type": "string"
                             },
                             "title": {
@@ -40447,7 +40468,25 @@
                             "hostname": {
                               "type": "string"
                             },
+                            "referrerUrl": {
+                              "type": "string"
+                            },
                             "referrerHost": {
+                              "type": "string"
+                            },
+                            "utmSource": {
+                              "type": "string"
+                            },
+                            "utmMedium": {
+                              "type": "string"
+                            },
+                            "utmCampaign": {
+                              "type": "string"
+                            },
+                            "utmTerm": {
+                              "type": "string"
+                            },
+                            "utmContent": {
                               "type": "string"
                             },
                             "country": {
@@ -40455,6 +40494,50 @@
                             },
                             "region": {
                               "type": "string"
+                            },
+                            "regionCode": {
+                              "type": "string"
+                            },
+                            "city": {
+                              "type": "string"
+                            },
+                            "continent": {
+                              "type": "string"
+                            },
+                            "latitude": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "longitude": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "postalCode": {
+                              "type": "string"
+                            },
+                            "metroCode": {
+                              "type": "string"
+                            },
+                            "timezone": {
+                              "type": "string"
+                            },
+                            "organization": {
+                              "type": "string"
+                            },
+                            "isEU": {
+                              "type": "boolean"
                             },
                             "browser": {
                               "type": "string"
@@ -40470,6 +40553,153 @@
                             },
                             "deviceType": {
                               "type": "string"
+                            },
+                            "userAgent": {
+                              "type": "string"
+                            },
+                            "language": {
+                              "type": "string"
+                            },
+                            "screenWidth": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "screenHeight": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "startedAt": {
+                              "type": "number"
+                            },
+                            "previousVisitId": {
+                              "type": "string"
+                            },
+                            "previousVisitStartedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "lastActivityAt": {
+                              "type": "number"
+                            },
+                            "endedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "finalizedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "durationMs": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "durationSource": {
+                              "type": "string"
+                            },
+                            "exitReason": {
+                              "type": "string"
+                            },
+                            "performance": {
+                              "type": "object",
+                              "properties": {
+                                "ttfb": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "fcp": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "lcp": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "cls": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "inp": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "ttfb",
+                                "fcp",
+                                "lcp",
+                                "cls",
+                                "inp"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -40581,6 +40811,7 @@
                     "event": {
                       "eventId": "example",
                       "eventName": "example",
+                      "eventKind": "custom_event",
                       "occurredAt": 0,
                       "receivedAt": 0,
                       "sequence": 0,
@@ -40605,17 +40836,58 @@
                       "visitId": "example",
                       "sessionId": "example",
                       "visitorId": "example",
+                      "userId": "example",
+                      "userName": "example",
                       "pathname": "example",
+                      "queryString": "example",
+                      "hash": "example",
                       "title": "example",
                       "hostname": "example",
+                      "referrerUrl": "example",
                       "referrerHost": "example",
+                      "utmSource": "example",
+                      "utmMedium": "example",
+                      "utmCampaign": "example",
+                      "utmTerm": "example",
+                      "utmContent": "example",
                       "country": "example",
                       "region": "example",
+                      "regionCode": "example",
+                      "city": "example",
+                      "continent": "example",
+                      "latitude": 0,
+                      "longitude": 0,
+                      "postalCode": "example",
+                      "metroCode": "example",
+                      "timezone": "example",
+                      "organization": "example",
+                      "isEU": false,
                       "browser": "example",
                       "browserVersion": "example",
                       "os": "example",
                       "osVersion": "example",
-                      "deviceType": "example"
+                      "deviceType": "example",
+                      "userAgent": "example",
+                      "language": "example",
+                      "screenWidth": 0,
+                      "screenHeight": 0,
+                      "status": "example",
+                      "startedAt": 0,
+                      "previousVisitId": "example",
+                      "previousVisitStartedAt": 0,
+                      "lastActivityAt": 0,
+                      "endedAt": 0,
+                      "finalizedAt": 0,
+                      "durationMs": 0,
+                      "durationSource": "example",
+                      "exitReason": "example",
+                      "performance": {
+                        "ttfb": 0,
+                        "fcp": 0,
+                        "lcp": 0,
+                        "cls": 0,
+                        "inp": 0
+                      }
                     },
                     "eventData": {}
                   },

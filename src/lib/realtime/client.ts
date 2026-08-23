@@ -781,7 +781,7 @@ function normalizeRealtimeEvent(payload: unknown): RealtimeEvent | null {
         record.event_name ??
         (eventKind === "custom_event" ? eventType : ""),
     ),
-    eventData: record.eventData ?? record.event_data ?? null,
+    eventData: record.eventData ?? record.event_data ?? {},
     visitId: String(record.visitId ?? record.visit_id ?? ""),
     sessionId: String(record.sessionId ?? record.session_id ?? ""),
     startedAt: normalizeNullableNumber(record.startedAt ?? record.started_at),
@@ -889,11 +889,17 @@ function normalizeNullableNumber(value: unknown): number | null {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function normalizeBoolean(value: unknown): boolean {
+function normalizeBoolean(value: unknown): boolean | undefined {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
   if (value === true || value === 1 || value === "1" || value === "true") {
     return true;
   }
-  return false;
+  if (value === false || value === 0 || value === "0" || value === "false") {
+    return false;
+  }
+  return undefined;
 }
 
 function normalizeScreenSize(

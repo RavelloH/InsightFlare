@@ -1,7 +1,6 @@
 import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
 import type { Env } from "@/lib/edge/types";
 
-import { mapVisitPerformanceMetrics } from "./core-performance";
 import type {
   EventRecordRow,
   EventRecordSortKey,
@@ -19,6 +18,7 @@ import {
   queryD1All,
   visitSourceBindings,
 } from "./core";
+import { mapVisitPerformanceMetrics } from "./core-performance";
 
 const EVENT_RECORD_CURSOR_MAX_LENGTH = 12_288;
 
@@ -568,10 +568,7 @@ LIMIT 1
       utmCampaign: record.utmCampaign,
       utmTerm: record.utmTerm,
       utmContent: record.utmContent,
-      isEU:
-        record.isEU === true ||
-        record.isEU === 1 ||
-        record.isEU === "1",
+      isEU: record.isEU === true || record.isEU === 1 || record.isEU === "1",
       country: record.country,
       region: record.region,
       regionCode: record.regionCode,
