@@ -465,6 +465,7 @@ export interface AppMessages {
     externalLabel: string;
     nextSources: string;
     longTail: string;
+    channelLongTail: string;
   };
   campaigns: {
     title: string;
@@ -2851,6 +2852,7 @@ const enMessages = {
     externalLabel: "External",
     nextSources: "Next 4 Sources",
     longTail: "Long Tail",
+    channelLongTail: "Other channels",
   },
   campaigns: {
     title: "Campaigns",
@@ -5391,6 +5393,7 @@ const zhMessages = {
     externalLabel: "外部来源",
     nextSources: "后续 4 个来源",
     longTail: "长尾来源",
+    channelLongTail: "其他渠道",
   },
   campaigns: {
     title: "推广活动",
@@ -7871,6 +7874,7 @@ const jaMessages = {
     externalLabel: "外部",
     nextSources: "次の 4 ソース",
     longTail: "ロングテール",
+    channelLongTail: "その他のチャネル",
   },
   campaigns: {
     title: "キャンペーン",

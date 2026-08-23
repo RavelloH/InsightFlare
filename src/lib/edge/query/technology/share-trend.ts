@@ -1,3 +1,4 @@
+import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
 import type {
   BrowserTrendBucketRow,
   BrowserTrendPointRow,
@@ -6,6 +7,7 @@ import type {
   FilterDocument,
   Interval,
   QueryWindow,
+  TimeBucket,
   UtmDimensionKey,
 } from "@/lib/edge/query/core";
 import {
@@ -26,141 +28,23 @@ import {
 } from "@/lib/edge/query/core";
 import type { Env } from "@/lib/edge/types";
 
-export async function queryShareTrendFromD1(
-  env: Env,
-  siteId: string,
-  window: QueryWindow,
-  interval: Interval,
-  filters: FilterDocument,
-  limit: number,
-  labelExpr: string,
-  fallbackKeyBase: string,
-): Promise<{
+export interface ShareTrendResult {
   series: BrowserTrendSeriesRow[];
   data: BrowserTrendPointRow[];
-}> {
-  const filter = buildVisitFilterSql(filters);
-  const buckets = buildTimeBuckets(window, interval);
-  const bucket = timeBucketCase(buckets, "started_at");
-  const normalizedLimit = Math.min(Math.max(1, limit), 12);
-  const sql = `
-WITH
-${buildVisitSourceCte()},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    ${bucket.sql} AS bucket,
-    visit_id AS visitId,
-    started_at AS startedAt,
-    ${labelExpr} AS labelValue,
-    visitor_id AS visitorId,
-    session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
-),
-ranked_visits AS MATERIALIZED (
-  SELECT
-    bucket,
-    visitId,
-    visitorId,
-    sessionId,
-    FIRST_VALUE(labelValue) OVER (
-      PARTITION BY visitorId
-      ORDER BY startedAt DESC, visitId DESC
-    ) AS globalLabel,
-    FIRST_VALUE(labelValue) OVER (
-      PARTITION BY bucket, visitorId
-      ORDER BY startedAt DESC, visitId DESC
-    ) AS bucketLabel
-  FROM filtered_visits
-  WHERE visitorId != ''
-),
-top_aggregate AS (
-  SELECT
-    globalLabel AS label,
-    count(*) AS views,
-    count(DISTINCT visitorId) AS visitors,
-    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-  FROM ranked_visits
-  WHERE label != ''
-  GROUP BY label
-),
-top_rows AS (
-  SELECT
-    label,
-    views,
-    visitors,
-    sessions,
-    ROW_NUMBER() OVER (
-      ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
-    ) AS rowOrder
-  FROM top_aggregate
-  ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
-  LIMIT ?
-),
-series_rows AS (
-  SELECT
-    COALESCE(top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
-    count(*) AS views,
-    count(DISTINCT ranked_visits.visitorId) AS visitors,
-    count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
-  FROM ranked_visits
-  LEFT JOIN top_rows
-    ON top_rows.label = ranked_visits.globalLabel
-  GROUP BY label
-),
-bucket_rows AS (
-  SELECT
-    ranked_visits.bucket AS bucket,
-    COALESCE(top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
-    count(*) AS views,
-    count(DISTINCT ranked_visits.visitorId) AS visitors,
-    count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
-  FROM ranked_visits
-  LEFT JOIN top_rows
-    ON top_rows.label = ranked_visits.bucketLabel
-  GROUP BY ranked_visits.bucket, label
-),
-tagged_rows AS (
-  SELECT
-    'top' AS rowType,
-    NULL AS bucket,
-    label,
-    views,
-    visitors,
-    sessions,
-    rowOrder
-  FROM top_rows
-  UNION ALL
-  SELECT
-    'series' AS rowType,
-    NULL AS bucket,
-    label,
-    views,
-    visitors,
-    sessions,
-    0 AS rowOrder
-  FROM series_rows
-  UNION ALL
-  SELECT
-    'bucket' AS rowType,
-    bucket,
-    label,
-    views,
-    visitors,
-    sessions,
-    0 AS rowOrder
-  FROM bucket_rows
-)
-SELECT rowType, bucket, label, views, visitors, sessions
-FROM tagged_rows
-ORDER BY rowType ASC, rowOrder ASC, bucket ASC, label ASC
-`;
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...visitSourceBindings(siteId, window),
-    ...bucket.bindings,
-    ...filter.bindings,
-    normalizedLimit,
-  ]);
+}
+
+export interface ReferrerAndChannelTrendResult {
+  source: ShareTrendResult;
+  channel: ShareTrendResult;
+}
+
+type ShareTrendQueryRow = Record<string, unknown>;
+
+function mapShareTrendRows(
+  rows: ShareTrendQueryRow[],
+  buckets: TimeBucket[],
+  fallbackKeyBase: string,
+): ShareTrendResult {
   const topRows = rows
     .filter((row) => String(row.rowType ?? "") === "top")
     .map((row) => ({
@@ -283,6 +167,385 @@ ORDER BY rowType ASC, rowOrder ASC, bucket ASC, label ASC
   return {
     series,
     data,
+  };
+}
+
+export async function queryShareTrendFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: FilterDocument,
+  limit: number,
+  labelExpr: string,
+  fallbackKeyBase: string,
+): Promise<ShareTrendResult> {
+  const filter = buildVisitFilterSql(filters);
+  const buckets = buildTimeBuckets(window, interval);
+  const bucket = timeBucketCase(buckets, "started_at");
+  const normalizedLimit = Math.min(Math.max(1, limit), 12);
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS MATERIALIZED (
+  SELECT
+    ${bucket.sql} AS bucket,
+    visit_id AS visitId,
+    started_at AS startedAt,
+    ${labelExpr} AS labelValue,
+    visitor_id AS visitorId,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+),
+ranked_visits AS MATERIALIZED (
+  SELECT
+    bucket,
+    visitId,
+    visitorId,
+    sessionId,
+    FIRST_VALUE(labelValue) OVER (
+      PARTITION BY visitorId
+      ORDER BY startedAt DESC, visitId DESC
+    ) AS globalLabel,
+    FIRST_VALUE(labelValue) OVER (
+      PARTITION BY bucket, visitorId
+      ORDER BY startedAt DESC, visitId DESC
+    ) AS bucketLabel
+  FROM filtered_visits
+  WHERE visitorId != ''
+),
+top_aggregate AS (
+  SELECT
+    globalLabel AS label,
+    count(*) AS views,
+    count(DISTINCT visitorId) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
+  WHERE label != ''
+  GROUP BY label
+),
+top_rows AS (
+  SELECT
+    label,
+    views,
+    visitors,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
+    ) AS rowOrder
+  FROM top_aggregate
+  ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
+  LIMIT ?
+),
+series_rows AS (
+  SELECT
+    COALESCE(top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    count(*) AS views,
+    count(DISTINCT ranked_visits.visitorId) AS visitors,
+    count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
+  LEFT JOIN top_rows
+    ON top_rows.label = ranked_visits.globalLabel
+  GROUP BY label
+),
+bucket_rows AS (
+  SELECT
+    ranked_visits.bucket AS bucket,
+    COALESCE(top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    count(*) AS views,
+    count(DISTINCT ranked_visits.visitorId) AS visitors,
+    count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
+  LEFT JOIN top_rows
+    ON top_rows.label = ranked_visits.bucketLabel
+  GROUP BY ranked_visits.bucket, label
+),
+tagged_rows AS (
+  SELECT
+    'top' AS rowType,
+    NULL AS bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    rowOrder
+  FROM top_rows
+  UNION ALL
+  SELECT
+    'series' AS rowType,
+    NULL AS bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    0 AS rowOrder
+  FROM series_rows
+  UNION ALL
+  SELECT
+    'bucket' AS rowType,
+    bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    0 AS rowOrder
+  FROM bucket_rows
+)
+SELECT rowType, bucket, label, views, visitors, sessions
+FROM tagged_rows
+ORDER BY rowType ASC, rowOrder ASC, bucket ASC, label ASC
+`;
+  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...bucket.bindings,
+    ...filter.bindings,
+    normalizedLimit,
+  ]);
+  return mapShareTrendRows(rows, buckets, fallbackKeyBase);
+}
+
+/**
+ * Reads the visit window once and produces the source-domain and traffic-
+ * channel share trends independently. The two dimensions intentionally use
+ * separate top/series/bucket CTEs instead of joining their bucket rows.
+ */
+export async function queryReferrerAndChannelTrendFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: FilterDocument,
+  limit: number,
+): Promise<ReferrerAndChannelTrendResult> {
+  const filter = buildVisitFilterSql(filters);
+  const buckets = buildTimeBuckets(window, interval);
+  const bucket = timeBucketCase(buckets, "started_at");
+  const normalizedLimit = Math.min(Math.max(1, limit), 12);
+  const sourceDefinition = referrerDomainDimensionDefinition();
+  const channelExpression = buildTrafficChannelSqlExpression();
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS MATERIALIZED (
+  SELECT
+    ${bucket.sql} AS bucket,
+    visit_id AS visitId,
+    started_at AS startedAt,
+    ${sourceDefinition.labelExpr} AS sourceLabelValue,
+    ${channelExpression} AS channelLabelValue,
+    visitor_id AS visitorId,
+    session_id AS sessionId
+  FROM visit_source
+  ${filter.clause}
+),
+ranked_visits AS MATERIALIZED (
+  SELECT
+    bucket,
+    visitId,
+    visitorId,
+    sessionId,
+    FIRST_VALUE(sourceLabelValue) OVER (
+      PARTITION BY visitorId
+      ORDER BY startedAt DESC, visitId DESC
+    ) AS sourceGlobalLabel,
+    FIRST_VALUE(sourceLabelValue) OVER (
+      PARTITION BY bucket, visitorId
+      ORDER BY startedAt DESC, visitId DESC
+    ) AS sourceBucketLabel,
+    FIRST_VALUE(channelLabelValue) OVER (
+      PARTITION BY visitorId
+      ORDER BY startedAt DESC, visitId DESC
+    ) AS channelGlobalLabel,
+    FIRST_VALUE(channelLabelValue) OVER (
+      PARTITION BY bucket, visitorId
+      ORDER BY startedAt DESC, visitId DESC
+    ) AS channelBucketLabel
+  FROM filtered_visits
+  WHERE visitorId != ''
+),
+source_top_aggregate AS (
+  SELECT
+    sourceGlobalLabel AS label,
+    count(*) AS views,
+    count(DISTINCT visitorId) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
+  WHERE sourceGlobalLabel != ''
+  GROUP BY sourceGlobalLabel
+),
+source_top_rows AS (
+  SELECT
+    label,
+    views,
+    visitors,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
+    ) AS rowOrder
+  FROM source_top_aggregate
+  ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
+  LIMIT ?
+),
+source_series_rows AS (
+  SELECT
+    COALESCE(source_top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    count(*) AS views,
+    count(DISTINCT ranked_visits.visitorId) AS visitors,
+    count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
+  LEFT JOIN source_top_rows
+    ON source_top_rows.label = ranked_visits.sourceGlobalLabel
+  GROUP BY label
+),
+source_bucket_rows AS (
+  SELECT
+    ranked_visits.bucket AS bucket,
+    COALESCE(source_top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    count(*) AS views,
+    count(DISTINCT ranked_visits.visitorId) AS visitors,
+    count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
+  LEFT JOIN source_top_rows
+    ON source_top_rows.label = ranked_visits.sourceBucketLabel
+  GROUP BY ranked_visits.bucket, label
+),
+channel_top_aggregate AS (
+  SELECT
+    channelGlobalLabel AS label,
+    count(*) AS views,
+    count(DISTINCT visitorId) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
+  WHERE channelGlobalLabel != ''
+  GROUP BY channelGlobalLabel
+),
+channel_top_rows AS (
+  SELECT
+    label,
+    views,
+    visitors,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
+    ) AS rowOrder
+  FROM channel_top_aggregate
+  ORDER BY visitors DESC, views DESC, sessions DESC, label ASC
+  LIMIT ?
+),
+channel_series_rows AS (
+  SELECT
+    COALESCE(channel_top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    count(*) AS views,
+    count(DISTINCT ranked_visits.visitorId) AS visitors,
+    count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
+  LEFT JOIN channel_top_rows
+    ON channel_top_rows.label = ranked_visits.channelGlobalLabel
+  GROUP BY label
+),
+channel_bucket_rows AS (
+  SELECT
+    ranked_visits.bucket AS bucket,
+    COALESCE(channel_top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    count(*) AS views,
+    count(DISTINCT ranked_visits.visitorId) AS visitors,
+    count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
+  FROM ranked_visits
+  LEFT JOIN channel_top_rows
+    ON channel_top_rows.label = ranked_visits.channelBucketLabel
+  GROUP BY ranked_visits.bucket, label
+),
+tagged_rows AS (
+  SELECT
+    'source' AS trendType,
+    'top' AS rowType,
+    NULL AS bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    rowOrder
+  FROM source_top_rows
+  UNION ALL
+  SELECT
+    'source' AS trendType,
+    'series' AS rowType,
+    NULL AS bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    0 AS rowOrder
+  FROM source_series_rows
+  UNION ALL
+  SELECT
+    'source' AS trendType,
+    'bucket' AS rowType,
+    bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    0 AS rowOrder
+  FROM source_bucket_rows
+  UNION ALL
+  SELECT
+    'channel' AS trendType,
+    'top' AS rowType,
+    NULL AS bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    rowOrder
+  FROM channel_top_rows
+  UNION ALL
+  SELECT
+    'channel' AS trendType,
+    'series' AS rowType,
+    NULL AS bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    0 AS rowOrder
+  FROM channel_series_rows
+  UNION ALL
+  SELECT
+    'channel' AS trendType,
+    'bucket' AS rowType,
+    bucket,
+    label,
+    views,
+    visitors,
+    sessions,
+    0 AS rowOrder
+  FROM channel_bucket_rows
+)
+SELECT trendType, rowType, bucket, label, views, visitors, sessions
+FROM tagged_rows
+ORDER BY trendType ASC, rowType ASC, rowOrder ASC, bucket ASC, label ASC
+`;
+  const rows = await queryD1All<ShareTrendQueryRow>(env, sql, [
+    ...visitSourceBindings(siteId, window),
+    ...bucket.bindings,
+    ...filter.bindings,
+    normalizedLimit,
+    normalizedLimit,
+  ]);
+
+  return {
+    source: mapShareTrendRows(
+      rows.filter((row) => String(row.trendType ?? "") === "source"),
+      buckets,
+      sourceDefinition.fallbackKeyBase,
+    ),
+    channel: mapShareTrendRows(
+      rows.filter((row) => String(row.trendType ?? "") === "channel"),
+      buckets,
+      "channel",
+    ),
   };
 }
 

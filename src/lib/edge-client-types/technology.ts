@@ -29,6 +29,18 @@ export interface BrowserTrendData {
   data: BrowserTrendPoint[];
 }
 
+export interface ShareTrendDimensionData {
+  series: BrowserTrendSeries[];
+  data: BrowserTrendPoint[];
+}
+
+export interface ReferrerChannelTrendData {
+  ok: boolean;
+  interval: BrowserTrendData["interval"];
+  source: ShareTrendDimensionData;
+  channel: ShareTrendDimensionData;
+}
+
 export interface BrowserVersionSlice {
   key: string;
   label: string;

@@ -42,6 +42,7 @@ export const QueryNameSchema = z
     "browser-radar",
     "referrer-radar",
     "referrer-dimension-trend",
+    "referrer-channel-dimension-trend",
     "client-dimension-trend",
     "utm-dimension-trend",
     "client-cross-breakdown",

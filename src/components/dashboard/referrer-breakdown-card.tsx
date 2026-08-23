@@ -5,6 +5,7 @@ import {
   RiShareForwardLine,
 } from "@remixicon/react";
 
+import { InlineMeta } from "@/components/dashboard/journey-display";
 import {
   LabelWithOptionalIcon,
   REFERRER_FILTER_CONTROL_BY_TAB,
@@ -17,6 +18,7 @@ import {
   type TabbedDataTableColumn,
   type TabbedDataTableTab,
 } from "@/components/dashboard/tabbed-data-table-card";
+import { TrafficChannelIcon } from "@/components/dashboard/traffic-channel-icon";
 import { Clickable } from "@/components/ui/clickable";
 import {
   replaceUrlWithoutNavigation,
@@ -175,6 +177,14 @@ export function ReferrerBreakdownCard({
       { tab: activeTab }: { tab: ReferrerTab },
     ) => {
       const displayLabel = row.displayLabel ?? row.label;
+      if (activeTab === "channel" && row.channelId) {
+        return (
+          <InlineMeta
+            icon={<TrafficChannelIcon channel={row.channelId} />}
+            label={displayLabel}
+          />
+        );
+      }
       return (
         <span
           className={cn(

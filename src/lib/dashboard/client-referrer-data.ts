@@ -3,6 +3,7 @@ import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   BrowserTrendData,
   DimensionData,
+  ReferrerChannelTrendData,
   ReferrerRadarData,
   ReferrersData,
 } from "@/lib/edge-client";
@@ -114,6 +115,32 @@ export async function fetchReferrerTrend(
 ): Promise<BrowserTrendData> {
   return fetchPrivateJson<BrowserTrendData>(
     "/api/private/referrer-dimension-trend",
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        timeZone: window.timeZone,
+        interval: window.interval,
+        limit: options?.limit ?? 5,
+      },
+      filters,
+    ),
+    { signal: options?.signal },
+  );
+}
+
+export async function fetchReferrerAndChannelTrend(
+  siteId: string,
+  window: TimeWindow,
+  filters?: FilterDocument,
+  options?: {
+    limit?: number;
+    signal?: AbortSignal;
+  },
+): Promise<ReferrerChannelTrendData> {
+  return fetchPrivateJson<ReferrerChannelTrendData>(
+    "/api/private/referrer-channel-dimension-trend",
     withFilters(
       {
         siteId,

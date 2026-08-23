@@ -8,20 +8,11 @@ import {
 } from "react";
 import { Icon } from "@iconify/react";
 import {
-  RiAdvertisementLine,
   RiArrowDownLine,
   RiArrowRightUpLine,
   RiArrowUpLine,
-  RiCursorLine,
   RiLineChartLine,
-  RiLinksLine,
-  RiMailLine,
-  RiMegaphoneLine,
-  RiMoneyDollarCircleLine,
-  RiPriceTag3Line,
-  RiQuestionLine,
   RiSearchLine,
-  RiShareForwardLine,
 } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
@@ -47,6 +38,7 @@ import {
   type TabbedDataTableColumn,
   type TabbedDataTableTab,
 } from "@/components/dashboard/tabbed-data-table-card";
+import { TrafficChannelIcon } from "@/components/dashboard/traffic-channel-icon";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1278,33 +1270,6 @@ function LabelWithLeadingIcon({
       <span className="break-words">{label}</span>
     </span>
   );
-}
-
-function ChannelIcon({ channel }: { channel: TrafficChannelId }) {
-  const className = "size-4 text-muted-foreground";
-  switch (channel) {
-    case "organic_search":
-      return <RiSearchLine className={className} />;
-    case "social":
-      return <RiShareForwardLine className={className} />;
-    case "paid_search":
-      return <RiMoneyDollarCircleLine className={className} />;
-    case "paid_social":
-      return <RiMegaphoneLine className={className} />;
-    case "display":
-      return <RiAdvertisementLine className={className} />;
-    case "email":
-      return <RiMailLine className={className} />;
-    case "affiliate":
-    case "referral":
-      return <RiLinksLine className={className} />;
-    case "campaign":
-      return <RiPriceTag3Line className={className} />;
-    case "direct":
-      return <RiCursorLine className={className} />;
-    case "other":
-      return <RiQuestionLine className={className} />;
-  }
 }
 
 function normalizeDimensionLabel(
@@ -3241,7 +3206,7 @@ export function OverviewPagesSection({
                   if (tab === "channel" && row.channelId) {
                     return (
                       <InlineMeta
-                        icon={<ChannelIcon channel={row.channelId} />}
+                        icon={<TrafficChannelIcon channel={row.channelId} />}
                         label={displayLabel}
                       />
                     );

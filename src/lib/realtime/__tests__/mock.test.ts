@@ -647,6 +647,7 @@ describe("mock — handleDemoRequest", () => {
       "/api/private/browser-radar",
       "/api/private/referrer-radar",
       "/api/private/referrer-dimension-trend",
+      "/api/private/referrer-channel-dimension-trend",
       "/api/private/browser-trend",
       "/api/private/browser-engine-trend",
       "/api/private/client-dimension-trend",
@@ -1606,6 +1607,7 @@ describe("mock — handleDemoRequest", () => {
       "browser-radar",
       "referrer-radar",
       "referrer-dimension-trend",
+      "referrer-channel-dimension-trend",
       "client-dimension-trend",
       "client-cross-breakdown",
     ])("dispatches public %s routes", (subPath) => {

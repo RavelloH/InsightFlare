@@ -139,68 +139,35 @@ function seriesDisplayLabel(
   return formatSeriesLabel ? formatSeriesLabel(series) : series.label;
 }
 
-export function ShareTrendCard({
+export interface ShareTrendChartCardProps {
+  locale: Locale;
+  messages: AppMessages;
+  title: string;
+  trendData: BrowserTrendData;
+  dataWindow: Pick<TimeWindow, "from" | "to" | "interval" | "timeZone">;
+  loading: boolean;
+  hydrated: boolean;
+  otherLabel?: string;
+  headerBelow?: ReactNode;
+  formatSeriesLabel?: (series: BrowserTrendSeries) => string;
+  resolveSeriesIcon?: (
+    series: BrowserTrendSeries,
+  ) => ComponentType<{ className?: string }> | undefined;
+}
+
+export function ShareTrendChartCard({
   locale,
   messages,
-  siteId,
-  window,
-  filters,
-  queryKey,
   title,
-  fetchTrend,
-  limit = 5,
+  trendData,
+  dataWindow,
+  loading,
+  hydrated,
   otherLabel = messages.browsers.otherLabel,
   headerBelow,
   formatSeriesLabel,
   resolveSeriesIcon,
-}: ShareTrendCardProps) {
-  const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
-  const currentDataWindow = useMemo(
-    () => ({
-      from: window.from,
-      to: window.to,
-      interval: window.interval,
-      timeZone: window.timeZone,
-    }),
-    [window.from, window.interval, window.timeZone, window.to],
-  );
-  const {
-    data: trendQueryData,
-    isFetching,
-    isPending,
-  } = useQuery({
-    queryKey: [
-      "dashboard",
-      "share-trend",
-      ...queryKey,
-      siteId,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
-      filtersKey,
-      limit,
-    ],
-    queryFn: async ({ signal }) => ({
-      trendData: await fetchTrend(siteId, window, filters, {
-        limit,
-        signal,
-      }).catch((error) =>
-        fallbackUnlessAborted(error, () => emptyTrendData(window.interval)),
-      ),
-      dataWindow: currentDataWindow,
-    }),
-    enabled: typeof window !== "undefined",
-    placeholderData: keepPreviousData,
-  });
-  const loading = isPending || isFetching;
-  const fallbackTrendData = useMemo(
-    () => emptyTrendData(window.interval),
-    [window.interval],
-  );
-  const trendData = trendQueryData?.trendData ?? fallbackTrendData;
-  const dataWindow = trendQueryData?.dataWindow ?? currentDataWindow;
-  const hydrated = Boolean(trendQueryData);
+}: ShareTrendChartCardProps) {
   const chartSeries = useMemo(
     (): ShareTrendAreaSeries[] =>
       trendData.series.map((series, index) => ({
@@ -271,5 +238,85 @@ export function ShareTrendCard({
         </ContentSwitch>
       </CardContent>
     </Card>
+  );
+}
+
+export function ShareTrendCard({
+  locale,
+  messages,
+  siteId,
+  window,
+  filters,
+  queryKey,
+  title,
+  fetchTrend,
+  limit = 5,
+  otherLabel = messages.browsers.otherLabel,
+  headerBelow,
+  formatSeriesLabel,
+  resolveSeriesIcon,
+}: ShareTrendCardProps) {
+  const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
+  const currentDataWindow = useMemo(
+    () => ({
+      from: window.from,
+      to: window.to,
+      interval: window.interval,
+      timeZone: window.timeZone,
+    }),
+    [window.from, window.interval, window.timeZone, window.to],
+  );
+  const {
+    data: trendQueryData,
+    isFetching,
+    isPending,
+  } = useQuery({
+    queryKey: [
+      "dashboard",
+      "share-trend",
+      ...queryKey,
+      siteId,
+      window.from,
+      window.to,
+      window.interval,
+      window.timeZone,
+      filtersKey,
+      limit,
+    ],
+    queryFn: async ({ signal }) => ({
+      trendData: await fetchTrend(siteId, window, filters, {
+        limit,
+        signal,
+      }).catch((error) =>
+        fallbackUnlessAborted(error, () => emptyTrendData(window.interval)),
+      ),
+      dataWindow: currentDataWindow,
+    }),
+    enabled: typeof window !== "undefined",
+    placeholderData: keepPreviousData,
+  });
+  const loading = isPending || isFetching;
+  const fallbackTrendData = useMemo(
+    () => emptyTrendData(window.interval),
+    [window.interval],
+  );
+  const trendData = trendQueryData?.trendData ?? fallbackTrendData;
+  const dataWindow = trendQueryData?.dataWindow ?? currentDataWindow;
+  const hydrated = Boolean(trendQueryData);
+
+  return (
+    <ShareTrendChartCard
+      locale={locale}
+      messages={messages}
+      title={title}
+      trendData={trendData}
+      dataWindow={dataWindow}
+      loading={loading}
+      hydrated={hydrated}
+      otherLabel={otherLabel}
+      headerBelow={headerBelow}
+      formatSeriesLabel={formatSeriesLabel}
+      resolveSeriesIcon={resolveSeriesIcon}
+    />
   );
 }

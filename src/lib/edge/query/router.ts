@@ -39,6 +39,7 @@ export const PUBLIC_QUERY_PATHS = [
   "browser-radar",
   "referrer-radar",
   "referrer-dimension-trend",
+  "referrer-channel-dimension-trend",
   "client-dimension-trend",
   "utm-dimension-trend",
   "utm-source",

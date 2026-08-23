@@ -77,6 +77,7 @@ import {
   generateDemoEventTypeDetail,
   generateDemoEventTypeFieldValues,
 } from "@/lib/realtime/mock/events";
+import { parseDemoInterval } from "@/lib/realtime/mock/filters";
 import {
   createDemoFunnel,
   deleteDemoFunnel,
@@ -93,6 +94,7 @@ import { handleDemoSavedFilters } from "@/lib/realtime/mock/saved-filters";
 import {
   generateDemoBrowserEngineTrend,
   generateDemoBrowserTrend,
+  generateDemoChannelTrend,
   generateDemoClientDimensionTrend,
   generateDemoReferrerTrend,
 } from "@/lib/realtime/mock/share-trends";
@@ -1138,6 +1140,14 @@ function handleDemoRequestInner(options: {
   if (path.includes("/referrer-radar")) {
     return generateDemoReferrerRadar(siteId, params);
   }
+  if (path.includes("/referrer-channel-dimension-trend")) {
+    return {
+      ok: true,
+      interval: parseDemoInterval(params.interval),
+      source: generateDemoReferrerTrend(siteId, params),
+      channel: generateDemoChannelTrend(siteId, params),
+    };
+  }
   if (path.includes("/referrer-dimension-trend")) {
     return generateDemoReferrerTrend(siteId, params);
   }
@@ -1267,6 +1277,13 @@ function handleDemoRequestInner(options: {
       return generateDemoBrowserRadar(siteId, params);
     if (subPath === "referrer-radar")
       return generateDemoReferrerRadar(siteId, params);
+    if (subPath === "referrer-channel-dimension-trend")
+      return {
+        ok: true,
+        interval: parseDemoInterval(params.interval),
+        source: generateDemoReferrerTrend(siteId, params),
+        channel: generateDemoChannelTrend(siteId, params),
+      };
     if (subPath === "referrer-dimension-trend")
       return generateDemoReferrerTrend(siteId, params);
     if (subPath === "client-dimension-trend")

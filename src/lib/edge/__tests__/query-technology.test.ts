@@ -15,6 +15,7 @@ import {
   queryBrowserCrossDimensionFromD1,
   queryBrowserRadarFromD1,
   queryBrowserVersionBreakdownFromD1,
+  queryReferrerAndChannelTrendFromD1,
   queryReferrerRadarFromD1,
   queryShareTrendFromD1,
 } from "@/lib/edge/query/technology";
@@ -353,6 +354,137 @@ describe("edge query technology D1 mapping", () => {
       expect(d1.calls[0].sql).not.toContain("visitor_latest AS");
       expect(d1.calls[0].sql).not.toContain("assigned_visits AS");
       expect(d1.calls[0].sql).not.toContain("bucket_visitor_latest AS");
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("executes source and channel trends from one SQLite visit scan", async () => {
+    const { env, d1 } = createSqliteTrendEnv();
+    const window = queryWindow();
+    const insert = d1.database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, started_at,
+        referrer_host
+      ) VALUES (?, 'site-1', ?, ?, ?, ?)
+    `);
+    const at = (minute: number) => Date.UTC(2026, 0, 1, 0, minute);
+
+    insert.run(
+      "google-first",
+      "google-visitor",
+      "google-session",
+      at(15),
+      "www.google.com",
+    );
+    insert.run(
+      "google-last",
+      "google-visitor",
+      "google-session",
+      at(65),
+      "www.google.com",
+    );
+    insert.run(
+      "referral",
+      "referral-visitor",
+      "referral-session",
+      at(20),
+      "news.example.com",
+    );
+
+    try {
+      await expect(
+        queryReferrerAndChannelTrendFromD1(
+          env,
+          "site-1",
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          1,
+        ),
+      ).resolves.toEqual({
+        source: {
+          series: [
+            {
+              key: "www-google-com",
+              label: "www.google.com",
+              views: 2,
+              visitors: 1,
+              sessions: 1,
+            },
+            {
+              key: "other",
+              label: SHARE_TREND_OTHER_LABEL,
+              views: 1,
+              visitors: 1,
+              sessions: 1,
+              isOther: true,
+            },
+          ],
+          data: [
+            {
+              bucket: 0,
+              timestampMs: Date.UTC(2026, 0, 1, 0),
+              totalVisitors: 2,
+              visitorsBySeries: { "www-google-com": 1, other: 1 },
+            },
+            {
+              bucket: 1,
+              timestampMs: Date.UTC(2026, 0, 1, 1),
+              totalVisitors: 1,
+              visitorsBySeries: { "www-google-com": 1, other: 0 },
+            },
+          ],
+        },
+        channel: {
+          series: [
+            {
+              key: "organic-search",
+              label: "organic_search",
+              views: 2,
+              visitors: 1,
+              sessions: 1,
+            },
+            {
+              key: "other",
+              label: SHARE_TREND_OTHER_LABEL,
+              views: 1,
+              visitors: 1,
+              sessions: 1,
+              isOther: true,
+            },
+          ],
+          data: [
+            {
+              bucket: 0,
+              timestampMs: Date.UTC(2026, 0, 1, 0),
+              totalVisitors: 2,
+              visitorsBySeries: { "organic-search": 1, other: 1 },
+            },
+            {
+              bucket: 1,
+              timestampMs: Date.UTC(2026, 0, 1, 1),
+              totalVisitors: 1,
+              visitorsBySeries: { "organic-search": 1, other: 0 },
+            },
+          ],
+        },
+      });
+
+      expect(d1.calls).toHaveLength(1);
+      expect(d1.calls[0].bindings).toEqual([
+        "site-1",
+        window.startMs,
+        window.endExclusiveMs,
+        1,
+        1,
+      ]);
+      const plan = d1.database
+        .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)
+        .all(...d1.calls[0].bindings) as Array<{ detail: string }>;
+      expect(
+        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+      ).toHaveLength(1);
     } finally {
       d1.close();
     }

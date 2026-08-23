@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
 import type { QueryWindow } from "@/lib/edge/query/core";
 import {
   BROWSER_CROSS_OTHER_BROWSER_TOKEN,
@@ -28,6 +29,7 @@ import {
 } from "@/lib/edge/query/technology/radar";
 import {
   queryClientDimensionTrendFromD1,
+  queryReferrerAndChannelTrendFromD1,
   queryReferrerTrendFromD1,
   queryShareTrendFromD1,
   queryUtmDimensionTrendFromD1,
@@ -107,6 +109,30 @@ function createD1Env(resultSets: D1Row[][]): {
           return { results: taggedShareResults };
         }
         return { results: pendingResults.shift() ?? [] };
+      }),
+    })),
+  }));
+
+  return {
+    env: {
+      DB: { prepare },
+      DAILY_SALT_SECRET: "test-secret",
+      INGEST_DO: {},
+    } as unknown as Env,
+    calls,
+  };
+}
+
+function createCombinedShareTrendEnv(rows: D1Row[]): {
+  env: Env;
+  calls: QueryCall[];
+} {
+  const calls: QueryCall[] = [];
+  const prepare = vi.fn((sql: string) => ({
+    bind: vi.fn((...bindings: Array<string | number | null>) => ({
+      all: vi.fn(async () => {
+        calls.push({ sql, bindings });
+        return { results: rows };
       }),
     })),
   }));
@@ -959,6 +985,178 @@ describe("edge technology query coverage", () => {
     expect(calls[0].bindings.at(-1)).toBe(12);
     expect(calls[0].sql).toContain("tagged_rows");
     expect(calls[0].bindings).toEqual([...visitBindings(), 12]);
+  });
+
+  it("maps source and channel trends from one independent tagged query", async () => {
+    const { env, calls } = createCombinedShareTrendEnv([
+      {
+        trendType: "source",
+        rowType: "top",
+        label: "google.com",
+        views: 4,
+        visitors: 2,
+        sessions: 2,
+      },
+      {
+        trendType: "source",
+        rowType: "series",
+        label: "google.com",
+        views: 4,
+        visitors: 2,
+        sessions: 2,
+      },
+      {
+        trendType: "source",
+        rowType: "series",
+        label: SHARE_TREND_OTHER_TOKEN,
+        views: 3,
+        visitors: 1,
+        sessions: 1,
+      },
+      {
+        trendType: "source",
+        rowType: "bucket",
+        bucket: 0,
+        label: "google.com",
+        views: 2,
+        visitors: 1,
+        sessions: 1,
+      },
+      {
+        trendType: "source",
+        rowType: "bucket",
+        bucket: 1,
+        label: SHARE_TREND_OTHER_TOKEN,
+        views: 2,
+        visitors: 1,
+        sessions: 1,
+      },
+      {
+        trendType: "channel",
+        rowType: "top",
+        label: "organic_search",
+        views: 4,
+        visitors: 2,
+        sessions: 2,
+      },
+      {
+        trendType: "channel",
+        rowType: "series",
+        label: "organic_search",
+        views: 4,
+        visitors: 2,
+        sessions: 2,
+      },
+      {
+        trendType: "channel",
+        rowType: "series",
+        label: SHARE_TREND_OTHER_TOKEN,
+        views: 3,
+        visitors: 1,
+        sessions: 1,
+      },
+      {
+        trendType: "channel",
+        rowType: "bucket",
+        bucket: 0,
+        label: "organic_search",
+        views: 2,
+        visitors: 1,
+        sessions: 1,
+      },
+      {
+        trendType: "channel",
+        rowType: "bucket",
+        bucket: 1,
+        label: SHARE_TREND_OTHER_TOKEN,
+        views: 2,
+        visitors: 1,
+        sessions: 1,
+      },
+    ]);
+
+    const result = await queryReferrerAndChannelTrendFromD1(
+      env,
+      siteId,
+      window,
+      "hour",
+      EMPTY_FILTER_DOCUMENT,
+      5,
+    );
+
+    expect(result.source.series).toEqual([
+      {
+        key: "google-com",
+        label: "google.com",
+        views: 4,
+        visitors: 2,
+        sessions: 2,
+      },
+      {
+        key: SHARE_TREND_OTHER_KEY,
+        label: SHARE_TREND_OTHER_LABEL,
+        views: 3,
+        visitors: 1,
+        sessions: 1,
+        isOther: true,
+      },
+    ]);
+    expect(result.source.data.map((point) => point.visitorsBySeries)).toEqual([
+      { "google-com": 1, other: 0 },
+      { "google-com": 0, other: 1 },
+    ]);
+    expect(result.channel.series).toEqual([
+      {
+        key: "organic-search",
+        label: "organic_search",
+        views: 4,
+        visitors: 2,
+        sessions: 2,
+      },
+      {
+        key: SHARE_TREND_OTHER_KEY,
+        label: SHARE_TREND_OTHER_LABEL,
+        views: 3,
+        visitors: 1,
+        sessions: 1,
+        isOther: true,
+      },
+    ]);
+    expect(result.channel.data.map((point) => point.visitorsBySeries)).toEqual([
+      { "organic-search": 1, other: 0 },
+      { "organic-search": 0, other: 1 },
+    ]);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].bindings).toEqual([...visitBindings(), 5, 5]);
+    expect(calls[0].sql).toContain("sourceGlobalLabel");
+    expect(calls[0].sql).toContain("channelGlobalLabel");
+    expect(calls[0].sql).toContain("sourceBucketLabel");
+    expect(calls[0].sql).toContain("channelBucketLabel");
+    expect(calls[0].sql).toContain("source_top_rows");
+    expect(calls[0].sql).toContain("channel_top_rows");
+    expect(calls[0].sql).toContain(buildTrafficChannelSqlExpression());
+    expect(calls[0].sql).not.toContain("CROSS JOIN source_bucket_rows");
+  });
+
+  it("returns independent empty source and channel results", async () => {
+    const { env, calls } = createCombinedShareTrendEnv([]);
+
+    await expect(
+      queryReferrerAndChannelTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        5,
+      ),
+    ).resolves.toEqual({
+      source: { series: [], data: [] },
+      channel: { series: [], data: [] },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].bindings).toEqual([...visitBindings(), 5, 5]);
   });
 
   it("returns no share trend data when selected top labels have no series rows", async () => {

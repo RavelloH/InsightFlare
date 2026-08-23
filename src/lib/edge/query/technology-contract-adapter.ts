@@ -27,6 +27,7 @@ import {
 } from "./technology/radar";
 import {
   queryClientDimensionTrendFromD1,
+  queryReferrerAndChannelTrendFromD1,
   queryReferrerTrendFromD1,
   queryUtmDimensionTrendFromD1,
 } from "./technology/share-trend";
@@ -368,6 +369,38 @@ export function handleReferrerDimensionTrendContract(
         parseLimit(url, 5, 8),
       ),
     (trend) => ({ interval, series: trend.series, data: trend.data }),
+  );
+}
+
+export function handleReferrerChannelTrendContract(
+  env: Env,
+  siteId: string,
+  url: URL,
+  ctx?: ResponseContext,
+  queryContext = siteQueryContext(siteId, "private-dashboard"),
+) {
+  const interval = parseInterval(url);
+  return executeTechnology(
+    "share-trend",
+    env,
+    siteId,
+    url,
+    ctx,
+    queryContext,
+    (window, filters) =>
+      queryReferrerAndChannelTrendFromD1(
+        env,
+        siteId,
+        window,
+        interval,
+        filters,
+        parseLimit(url, 5, 12),
+      ),
+    (trend) => ({
+      interval,
+      source: trend.source,
+      channel: trend.channel,
+    }),
   );
 }
 

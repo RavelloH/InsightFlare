@@ -1,3 +1,4 @@
+import { classifyTrafficChannel } from "@/lib/analytics/traffic-channel-rules";
 import { browserEngineLabel } from "@/lib/browser-engine";
 import {
   addZonedInterval,
@@ -477,10 +478,25 @@ export function generateDemoReferrerTrend(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const interval = parseDemoInterval(params.interval);
   return generateDemoShareTrend(siteId, params, {
     fallbackKeyBase: "referrer-domain",
     getLabel: (visit) =>
       visit.referrerHost.trim() || DEMO_DIRECT_REFERRER_FILTER_VALUE,
+  });
+}
+
+export function generateDemoChannelTrend(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  return generateDemoShareTrend(siteId, params, {
+    fallbackKeyBase: "traffic-channel",
+    getLabel: (visit) =>
+      classifyTrafficChannel({
+        referrerHost: visit.referrerHost,
+        utmSource: visit.utmSource,
+        utmMedium: visit.utmMedium,
+        utmCampaign: visit.utmCampaign,
+      }),
   });
 }

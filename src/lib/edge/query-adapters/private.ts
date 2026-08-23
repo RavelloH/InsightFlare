@@ -65,6 +65,7 @@ type TechnologyHandlerName =
   | "handleBrowserRadarContract"
   | "handleReferrerRadarContract"
   | "handleReferrerDimensionTrendContract"
+  | "handleReferrerChannelTrendContract"
   | "handleClientDimensionTrendContract"
   | "handleUtmDimensionTrendContract"
   | "handleCrossBreakdownContract";
@@ -77,6 +78,7 @@ const TECHNOLOGY_HANDLERS: Readonly<Record<string, TechnologyHandlerName>> = {
   "browser-radar": "handleBrowserRadarContract",
   "referrer-radar": "handleReferrerRadarContract",
   "referrer-dimension-trend": "handleReferrerDimensionTrendContract",
+  "referrer-channel-dimension-trend": "handleReferrerChannelTrendContract",
   "client-dimension-trend": "handleClientDimensionTrendContract",
   "utm-dimension-trend": "handleUtmDimensionTrendContract",
   "client-cross-breakdown": "handleCrossBreakdownContract",

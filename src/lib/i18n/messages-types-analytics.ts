@@ -88,6 +88,7 @@ export interface AppAnalyticsMessages {
     externalLabel: string;
     nextSources: string;
     longTail: string;
+    channelLongTail: string;
   };
   campaigns: {
     title: string;

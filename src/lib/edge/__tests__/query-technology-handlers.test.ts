@@ -13,6 +13,7 @@ import {
   handleBrowserVersionBreakdownContract as handleBrowserVersionBreakdown,
   handleClientDimensionTrendContract as handleClientDimensionTrend,
   handleCrossBreakdownContract as handleCrossBreakdown,
+  handleReferrerChannelTrendContract as handleReferrerChannelTrend,
   handleReferrerDimensionTrendContract as handleReferrerDimensionTrend,
   handleReferrerRadarContract as handleReferrerRadar,
   handleUtmDimensionTrendContract as handleUtmDimensionTrend,
@@ -29,6 +30,7 @@ const queryMocks = vi.hoisted(() => ({
   queryBrowserVersionBreakdownFromD1: vi.fn(),
   queryCrossDimensionFromD1: vi.fn(),
   queryClientDimensionTrendFromD1: vi.fn(),
+  queryReferrerAndChannelTrendFromD1: vi.fn(),
   queryReferrerRadarFromD1: vi.fn(),
   queryReferrerTrendFromD1: vi.fn(),
   queryUtmDimensionTrendFromD1: vi.fn(),
@@ -53,6 +55,8 @@ vi.mock("@/lib/edge/query/technology/radar", () => ({
 
 vi.mock("@/lib/edge/query/technology/share-trend", () => ({
   queryClientDimensionTrendFromD1: queryMocks.queryClientDimensionTrendFromD1,
+  queryReferrerAndChannelTrendFromD1:
+    queryMocks.queryReferrerAndChannelTrendFromD1,
   queryReferrerTrendFromD1: queryMocks.queryReferrerTrendFromD1,
   queryUtmDimensionTrendFromD1: queryMocks.queryUtmDimensionTrendFromD1,
 }));
@@ -99,6 +103,7 @@ function expectNoQueryCalls() {
   expect(queryMocks.queryBrowserVersionBreakdownFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryCrossDimensionFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryClientDimensionTrendFromD1).not.toHaveBeenCalled();
+  expect(queryMocks.queryReferrerAndChannelTrendFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryReferrerRadarFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryReferrerTrendFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryUtmDimensionTrendFromD1).not.toHaveBeenCalled();
@@ -134,6 +139,7 @@ describe("edge query technology handlers", () => {
     ["browser cross breakdown", handleBrowserCrossBreakdown, {}],
     ["browser radar", handleBrowserRadar, {}],
     ["referrer radar", handleReferrerRadar, {}],
+    ["referrer and channel trend", handleReferrerChannelTrend, {}],
     [
       "client dimension trend",
       handleClientDimensionTrend,
@@ -537,6 +543,34 @@ describe("edge query technology handlers", () => {
       "month",
       expect.any(Object),
       8,
+    );
+  });
+
+  it("passes parsed combined referrer and channel trend arguments", async () => {
+    const combinedResult = { source: trendResult, channel: trendResult };
+    queryMocks.queryReferrerAndChannelTrendFromD1.mockResolvedValue(
+      combinedResult,
+    );
+
+    const response = await handleReferrerChannelTrend(
+      env,
+      siteId,
+      testUrl({ interval: "month", limit: "99" }),
+    );
+
+    expect(await responseJson(response)).toEqual({
+      ok: true,
+      interval: "month",
+      source: trendResult,
+      channel: trendResult,
+    });
+    expect(queryMocks.queryReferrerAndChannelTrendFromD1).toHaveBeenCalledWith(
+      env,
+      siteId,
+      parsedWindow(),
+      "month",
+      expect.any(Object),
+      12,
     );
   });
 
