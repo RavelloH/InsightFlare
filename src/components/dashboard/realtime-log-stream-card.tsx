@@ -64,6 +64,7 @@ import {
 } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { formatI18nTemplate } from "@/lib/i18n/template";
 import type { RealtimeEvent, RealtimeVisit } from "@/lib/realtime/types";
 import { cn } from "@/lib/utils";
 
@@ -79,6 +80,7 @@ interface RealtimeLogStreamCardProps {
 
 const PRESENCE_LEAVE_EVENT = "__presence_leave";
 const RELATIVE_TIME_REFRESH_MS = 1_000;
+const EVENT_INTEGRATION_WINDOW_MS = 60_000;
 const INITIAL_VISIBLE_EVENTS = 24;
 const LOAD_MORE_STEP = 24;
 const LOAD_MORE_THRESHOLD_PX = 160;
@@ -108,7 +110,7 @@ const PANEL_SCROLLBAR_OPTIONS = {
   },
 } satisfies PartialOptions;
 
-type RealtimeLogEventKind = "enter" | "exit" | "view" | "custom";
+type RealtimeLogEventKind = "enter" | "exit" | "view" | "visibility" | "custom";
 type RealtimeEventDisplayData = {
   kind: RealtimeLogEventKind;
   title: string;
@@ -154,7 +156,16 @@ function hasValidCoordinate(
   return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
 }
 
-function classifyRealtimeLogEvent(eventType: string): RealtimeLogEventKind {
+function classifyRealtimeLogEvent(
+  event: Pick<RealtimeEvent, "eventType" | "eventKind">,
+): RealtimeLogEventKind {
+  if (
+    event.eventKind === "visibility" ||
+    event.eventType.trim() === "visibility"
+  ) {
+    return "visibility";
+  }
+  const eventType = event.eventType.trim();
   if (eventType === "visit") return "enter";
   if (eventType === PRESENCE_LEAVE_EVENT) return "exit";
   if (eventType === "pageview") return "view";
@@ -177,6 +188,18 @@ function formatLogTitle(
   kind: RealtimeLogEventKind,
 ): string {
   const separator = messages.realtime.logTitleSeparator;
+  if (kind === "visibility") {
+    const visibilityTitle =
+      event.visibilityState?.trim() === "visible"
+        ? messages.realtime.visibilityVisible
+        : event.visibilityState?.trim() === "hidden"
+          ? messages.realtime.visibilityHidden
+          : messages.realtime.visibilityChange;
+    const path = event.pathname.trim()
+      ? formatPathWithHash(event.pathname, event.hash)
+      : messages.common.unknown;
+    return `${visibilityTitle}${separator}${path}`;
+  }
   const prefix = eventTitlePrefix(messages, kind);
   const content =
     kind === "custom"
@@ -686,6 +709,19 @@ function formatDetailDuration(
     : unknownLabel;
 }
 
+function getRealtimeEventIntegrationRemainingSeconds(
+  event: Pick<RealtimeEvent, "eventAt" | "receivedAt">,
+  now: number,
+): number {
+  const sentAt = event.receivedAt ?? event.eventAt;
+  if (!Number.isFinite(sentAt)) return 0;
+
+  const elapsedMs = Math.max(0, now - sentAt);
+  if (elapsedMs >= EVENT_INTEGRATION_WINDOW_MS) return 0;
+
+  return Math.ceil((EVENT_INTEGRATION_WINDOW_MS - elapsedMs) / 1_000);
+}
+
 function normalizeDetailLabel(value: string, unknownLabel: string): string {
   const normalized = value.trim();
   return normalized || unknownLabel;
@@ -721,7 +757,7 @@ function resolveRealtimeEventDisplayData(
   messages: AppMessages,
   event: RealtimeEvent,
 ): RealtimeEventDisplayData {
-  const kind = classifyRealtimeLogEvent(event.eventType.trim());
+  const kind = classifyRealtimeLogEvent(event);
   const { label: countryLabel, code: countryCode } = resolveCountryLabel(
     event.country,
     locale,
@@ -761,7 +797,9 @@ function areRealtimeLogStreamItemPropsEqual(
     previousProps.timeZone === nextProps.timeZone &&
     previousProps.event.id === nextProps.event.id &&
     previousProps.event.eventType === nextProps.event.eventType &&
+    previousProps.event.eventKind === nextProps.event.eventKind &&
     previousProps.event.eventAt === nextProps.event.eventAt &&
+    previousProps.event.visibilityState === nextProps.event.visibilityState &&
     previousProps.event.pathname === nextProps.event.pathname &&
     previousProps.event.hash === nextProps.event.hash &&
     previousProps.event.visitorId === nextProps.event.visitorId &&
@@ -956,7 +994,7 @@ const RealtimeLogStreamItem = memo(function RealtimeLogStreamItem({
   const title = formatLogTitle(
     messages,
     event,
-    classifyRealtimeLogEvent(event.eventType.trim()),
+    classifyRealtimeLogEvent(event),
   );
 
   return (
@@ -1064,17 +1102,13 @@ function RealtimeVisitorHistorySection({
             <div className="space-y-0">
               {timelineEvents.map((timelineEvent, index) => {
                 const isCurrentEvent = timelineEvent.id === event.id;
-                const isCurrentConnector =
-                  index < timelineEvents.length - 1 &&
-                  (isCurrentEvent ||
-                    timelineEvents[index + 1]?.id === event.id);
                 const timelineEventTitle = formatLogTitle(
                   messages,
                   timelineEvent,
-                  classifyRealtimeLogEvent(timelineEvent.eventType.trim()),
+                  classifyRealtimeLogEvent(timelineEvent),
                 );
                 const timelineEventRowClassName =
-                  "!grid !w-full grid-cols-[4.5rem_1.25rem_minmax(0,1fr)] items-start gap-3 pb-4 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring last:pb-0 sm:grid-cols-[5.5rem_1.25rem_minmax(0,1fr)]";
+                  "!grid !w-full grid-cols-[4.5rem_1.25rem_minmax(0,1fr)] items-stretch gap-3 pb-4 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring last:pb-0 sm:grid-cols-[5.5rem_1.25rem_minmax(0,1fr)]";
                 const timelineEventContent = (
                   <>
                     <div className="min-w-0 pt-0.5 text-right">
@@ -1089,16 +1123,9 @@ function RealtimeVisitorHistorySection({
                         {formatRelativeTime(locale, timelineEvent.eventAt, now)}
                       </p>
                     </div>
-                    <div className="relative flex justify-center">
+                    <div className="relative flex h-full justify-center">
                       {index < timelineEvents.length - 1 ? (
-                        <span
-                          className={cn(
-                            "absolute left-1/2 top-5 bottom-0 w-px -translate-x-1/2",
-                            isCurrentConnector
-                              ? "bg-primary/70"
-                              : "bg-foreground/30",
-                          )}
-                        />
+                        <span className="pointer-events-none absolute left-1/2 top-5 -bottom-4 w-px -translate-x-1/2 bg-foreground/30" />
                       ) : null}
                       <span
                         className={cn(
@@ -1241,6 +1268,14 @@ function RealtimeLogEventDetailsDrawer({
   });
 
   if (!event || !displayData) return null;
+
+  const integrationRemainingSeconds =
+    getRealtimeEventIntegrationRemainingSeconds(event, now);
+  const isIntegratingEvent = integrationRemainingSeconds > 0;
+  const integratingEventLabel = formatI18nTemplate(
+    messages.events.integratingEvent,
+    { seconds: integrationRemainingSeconds },
+  );
 
   const {
     browserIconKey,
@@ -2067,11 +2102,27 @@ function RealtimeLogEventDetailsDrawer({
                     type="button"
                     variant="outline"
                     className="w-full"
-                    disabled={!event.visitorId.trim()}
+                    disabled={isIntegratingEvent || !event.visitorId.trim()}
                     onClick={() => onOpenVisitor(event.visitorId)}
                   >
-                    <RiExternalLinkLine data-icon="inline-start" />
-                    {messages.events.openVisitor}
+                    <AutoTransition
+                      as="span"
+                      initial={false}
+                      className="inline-flex items-center gap-2"
+                      duration={0.16}
+                      transitionKey={
+                        isIntegratingEvent ? "integrating" : "open"
+                      }
+                    >
+                      {isIntegratingEvent ? (
+                        integratingEventLabel
+                      ) : (
+                        <>
+                          <RiExternalLinkLine data-icon="inline-start" />
+                          {messages.events.openVisitor}
+                        </>
+                      )}
+                    </AutoTransition>
                   </Button>
                 </div>
               ) : null}
@@ -2099,11 +2150,27 @@ function RealtimeLogEventDetailsDrawer({
                     type="button"
                     variant="outline"
                     className="w-full"
-                    disabled={!event.sessionId.trim()}
+                    disabled={isIntegratingEvent || !event.sessionId.trim()}
                     onClick={() => onOpenSession(event.sessionId)}
                   >
-                    <RiExternalLinkLine data-icon="inline-start" />
-                    {messages.events.openSession}
+                    <AutoTransition
+                      as="span"
+                      initial={false}
+                      className="inline-flex items-center gap-2"
+                      duration={0.16}
+                      transitionKey={
+                        isIntegratingEvent ? "integrating" : "open"
+                      }
+                    >
+                      {isIntegratingEvent ? (
+                        integratingEventLabel
+                      ) : (
+                        <>
+                          <RiExternalLinkLine data-icon="inline-start" />
+                          {messages.events.openSession}
+                        </>
+                      )}
+                    </AutoTransition>
                   </Button>
                 </div>
               ) : null}

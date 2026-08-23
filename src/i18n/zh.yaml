@@ -372,6 +372,9 @@ realtime:
   visibilityStateLabels:
     visible: 可见
     hidden: 隐藏
+  visibilityVisible: 页面变为可见
+  visibilityHidden: 页面变为不可见
+  visibilityChange: 页面可见性变化
   visitorHistorySection: 访客记录
   visitorHistorySubtitle: 查看该访客在当前实时窗口内的全部访问记录。
   visitorHistoryRange: 浏览时间
@@ -613,6 +616,7 @@ events:
   occurrences: 出现次数
   openVisitor: 打开访客
   openSession: 打开会话
+  integratingEvent: 正在整合事件 ({seconds}s)
   copyJson: 复制 JSON
   copiedJson: JSON 已复制。
   copyJsonFailed: 无法复制 JSON。

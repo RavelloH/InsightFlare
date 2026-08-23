@@ -372,6 +372,9 @@ realtime:
   visibilityStateLabels:
     visible: 表示
     hidden: 非表示
+  visibilityVisible: ページが表示可能になりました
+  visibilityHidden: ページが非表示になりました
+  visibilityChange: ページの表示状態が変わりました
   visitorHistorySection: 訪問者アクティビティ
   visitorHistorySubtitle: 現在のリアルタイム範囲における、この訪問者のすべての記録です。
   visitorHistoryRange: 閲覧期間
@@ -615,6 +618,7 @@ events:
   occurrences: 出現回数
   openVisitor: 訪問者を開く
   openSession: セッションを開く
+  integratingEvent: イベントを統合中 ({seconds}s)
   copyJson: JSON をコピー
   copiedJson: JSON をコピーしました。
   copyJsonFailed: JSON をコピーできません。

@@ -18,7 +18,7 @@ export interface AutoTransitionProps extends Omit<
   "children" | "className"
 > {
   children: React.ReactNode;
-  as?: "div" | "g" | "tbody";
+  as?: "div" | "span" | "g" | "tbody";
   className?: string;
   duration?: number;
   type?: TransitionType;
@@ -118,7 +118,13 @@ export function AutoTransition({
   const selectedVariants = customVariants || transitionVariants[type];
   const shouldAnimate = initial || hasRendered;
   const MotionComponent = (
-    as === "g" ? motion.g : as === "tbody" ? motion.tbody : motion.div
+    as === "g"
+      ? motion.g
+      : as === "tbody"
+        ? motion.tbody
+        : as === "span"
+          ? motion.span
+          : motion.div
   ) as React.ElementType;
 
   return (

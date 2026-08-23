@@ -372,6 +372,9 @@ realtime:
   visibilityStateLabels:
     visible: Visible
     hidden: Hidden
+  visibilityVisible: Page became visible
+  visibilityHidden: Page became hidden
+  visibilityChange: Page visibility changed
   visitorHistorySection: Visitor activity
   visitorHistorySubtitle: All records for this visitor in the current realtime window.
   visitorHistoryRange: Activity range
@@ -619,6 +622,7 @@ events:
   occurrences: Occurrences
   openVisitor: Open Visitor
   openSession: Open Session
+  integratingEvent: Integrating event ({seconds}s)
   copyJson: Copy JSON
   copiedJson: JSON copied.
   copyJsonFailed: Unable to copy JSON.

@@ -342,6 +342,9 @@ export interface AppMessages {
       visible: string;
       hidden: string;
     };
+    visibilityVisible: string;
+    visibilityHidden: string;
+    visibilityChange: string;
     visitorHistorySection: string;
     visitorHistorySubtitle: string;
     visitorHistoryRange: string;
@@ -591,6 +594,7 @@ export interface AppMessages {
     occurrences: string;
     openVisitor: string;
     openSession: string;
+    integratingEvent: string;
     copyJson: string;
     copiedJson: string;
     copyJsonFailed: string;
@@ -2719,6 +2723,9 @@ const enMessages = {
       visible: "Visible",
       hidden: "Hidden",
     },
+    visibilityVisible: "Page became visible",
+    visibilityHidden: "Page became hidden",
+    visibilityChange: "Page visibility changed",
     visitorHistorySection: "Visitor activity",
     visitorHistorySubtitle:
       "All records for this visitor in the current realtime window.",
@@ -2978,6 +2985,7 @@ const enMessages = {
     occurrences: "Occurrences",
     openVisitor: "Open Visitor",
     openSession: "Open Session",
+    integratingEvent: "Integrating event ({seconds}s)",
     copyJson: "Copy JSON",
     copiedJson: "JSON copied.",
     copyJsonFailed: "Unable to copy JSON.",
@@ -5258,6 +5266,9 @@ const zhMessages = {
       visible: "可见",
       hidden: "隐藏",
     },
+    visibilityVisible: "页面变为可见",
+    visibilityHidden: "页面变为不可见",
+    visibilityChange: "页面可见性变化",
     visitorHistorySection: "访客记录",
     visitorHistorySubtitle: "查看该访客在当前实时窗口内的全部访问记录。",
     visitorHistoryRange: "浏览时间",
@@ -5509,6 +5520,7 @@ const zhMessages = {
     occurrences: "出现次数",
     openVisitor: "打开访客",
     openSession: "打开会话",
+    integratingEvent: "正在整合事件 ({seconds}s)",
     copyJson: "复制 JSON",
     copiedJson: "JSON 已复制。",
     copyJsonFailed: "无法复制 JSON。",
@@ -7730,6 +7742,9 @@ const jaMessages = {
       visible: "表示",
       hidden: "非表示",
     },
+    visibilityVisible: "ページが表示可能になりました",
+    visibilityHidden: "ページが非表示になりました",
+    visibilityChange: "ページの表示状態が変わりました",
     visitorHistorySection: "訪問者アクティビティ",
     visitorHistorySubtitle:
       "現在のリアルタイム範囲における、この訪問者のすべての記録です。",
@@ -7989,6 +8004,7 @@ const jaMessages = {
     occurrences: "出現回数",
     openVisitor: "訪問者を開く",
     openSession: "セッションを開く",
+    integratingEvent: "イベントを統合中 ({seconds}s)",
     copyJson: "JSON をコピー",
     copiedJson: "JSON をコピーしました。",
     copyJsonFailed: "JSON をコピーできません。",
