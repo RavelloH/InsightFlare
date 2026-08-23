@@ -88,7 +88,8 @@ function visitExpression(
     return;
   }
   if (expression.kind === "not") {
-    visitExpression(expression.child, visit);
+    // A negated condition is a query constraint, not a single selected value
+    // that can be represented by a dashboard card's row highlight/filter.
     return;
   }
   expression.children.forEach((child) => visitExpression(child, visit));

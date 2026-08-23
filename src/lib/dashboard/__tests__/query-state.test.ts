@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   dashboardFilterDocumentFromPresentation,
   dashboardFilterPresentation,
+  dashboardFilterValue,
   serializeDashboardSearchParams,
   withDashboardFilterSearchParams,
 } from "@/lib/dashboard/filter-state";
@@ -347,6 +348,18 @@ describe("dashboard query-state helpers", () => {
       expect(next.get("geoCountry")).toBeNull();
       expect(next.get("filter[geo.country]")).toBeNull();
       expect(next.get("filter[referrer.domain]")).toBe("google.com");
+    });
+  });
+
+  describe("dashboardFilterValue", () => {
+    it("does not treat a negated row condition as an active card selection", () => {
+      const filters = parseFilterDocumentFromSearchParams(
+        new URLSearchParams({
+          "filter[referrer.domain][not]": "__direct__",
+        }),
+      );
+
+      expect(dashboardFilterValue(filters, "sourceDomain")).toBeUndefined();
     });
   });
 
