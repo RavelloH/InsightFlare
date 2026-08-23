@@ -48,8 +48,6 @@ CREATE TABLE analysis_definitions (
 
 CREATE INDEX idx_analysis_definitions_site_archived
   ON analysis_definitions(site_id, archived_at);
-CREATE INDEX idx_analysis_definitions_site_id
-  ON analysis_definitions(site_id);
 CREATE INDEX idx_analysis_definitions_site_kind
   ON analysis_definitions(site_id, kind);
 
@@ -93,8 +91,6 @@ CREATE TABLE archive_objects (
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
-CREATE INDEX idx_archive_objects_created_at
-  ON archive_objects(created_at);
 CREATE INDEX idx_archive_objects_site_hour
   ON archive_objects(site_id, start_hour, end_hour);
 
@@ -104,8 +100,6 @@ CREATE TABLE configs (
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
-
-CREATE INDEX idx_configs_updated_at ON configs(updated_at);
 
 CREATE TABLE custom_event_json_keys (
   id INTEGER PRIMARY KEY,
@@ -202,15 +196,12 @@ CREATE TABLE custom_events (
   FOREIGN KEY(event_name_id) REFERENCES custom_event_names(id)
 );
 
-CREATE INDEX idx_custom_events_ae_synced_at
-  ON custom_events(ae_synced_at);
 CREATE INDEX idx_custom_events_created_at_system_performance
   ON custom_events(created_at, site_id, occurred_at);
 CREATE INDEX idx_custom_events_site_name_time
   ON custom_events(site_id, event_name_id, occurred_at, event_pk);
 CREATE INDEX idx_custom_events_site_time
   ON custom_events(site_id, occurred_at, event_pk);
-CREATE INDEX idx_custom_events_site_user_id ON custom_events(site_id, user_id);
 CREATE INDEX idx_custom_events_site_visit_time
   ON custom_events(site_id, visit_id, occurred_at, event_pk);
 
@@ -537,7 +528,6 @@ CREATE INDEX idx_visits_site_session_started_at
   ON visits(site_id, session_id, started_at);
 CREATE INDEX idx_visits_site_started_at
   ON visits(site_id, started_at);
-CREATE INDEX idx_visits_site_user_id ON visits(site_id, user_id);
 CREATE INDEX idx_visits_site_visitor_last_activity
   ON visits(site_id, visitor_id, last_activity_at);
 CREATE INDEX idx_visits_site_visitor_started_at
