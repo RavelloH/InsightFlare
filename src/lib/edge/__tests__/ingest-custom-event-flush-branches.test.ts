@@ -90,6 +90,7 @@ function createFlushContext(options: {
       } as unknown as D1Database,
     },
     dictionaryIds,
+    sitePks: new Map([["site-1", 1]]),
     sqlAll: vi.fn(() => []),
     sqlOne: vi.fn(() => null),
     sqlRun,
@@ -170,13 +171,13 @@ describe("custom event individual flush branch coverage", () => {
       expect.arrayContaining([
         expect.objectContaining({ bindings: ["site-1", "visit-1"] }),
         expect.objectContaining({
-          bindings: ["site-1", "Signup", createdAt, createdAt],
+          bindings: ["site-1", 1, "Signup", createdAt, createdAt],
         }),
         expect.objectContaining({
-          bindings: ["site-1", "plan", createdAt, createdAt],
+          bindings: ["site-1", 1, "plan", createdAt, createdAt],
         }),
         expect.objectContaining({
-          bindings: ["site-1", "/", createdAt, createdAt],
+          bindings: ["site-1", 1, "/", createdAt, createdAt],
         }),
         expect.objectContaining({ bindings: ["event-1"] }),
       ]),

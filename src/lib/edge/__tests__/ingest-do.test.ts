@@ -193,9 +193,14 @@ class FakeD1Database {
 
   constructor() {
     this.db.exec(`
+      CREATE TABLE site_identities (
+        site_pk INTEGER PRIMARY KEY,
+        site_id TEXT NOT NULL UNIQUE
+      );
       CREATE TABLE visits (
         visit_id TEXT PRIMARY KEY,
         site_id TEXT NOT NULL,
+        site_pk INTEGER,
         visitor_id TEXT NOT NULL,
         session_id TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -253,6 +258,7 @@ class FakeD1Database {
       CREATE TABLE custom_event_names (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         site_id TEXT NOT NULL,
+        site_pk INTEGER,
         name TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         last_seen_at INTEGER NOT NULL,
@@ -261,6 +267,7 @@ class FakeD1Database {
       CREATE TABLE custom_event_json_keys (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         site_id TEXT NOT NULL,
+        site_pk INTEGER,
         "key" TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         last_seen_at INTEGER NOT NULL,
@@ -269,6 +276,7 @@ class FakeD1Database {
       CREATE TABLE custom_event_json_paths (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         site_id TEXT NOT NULL,
+        site_pk INTEGER,
         path TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         last_seen_at INTEGER NOT NULL,
@@ -278,6 +286,7 @@ class FakeD1Database {
         event_pk INTEGER PRIMARY KEY AUTOINCREMENT,
         event_id TEXT NOT NULL UNIQUE,
         site_id TEXT NOT NULL,
+        site_pk INTEGER,
         visit_id TEXT NOT NULL,
         event_name_id INTEGER NOT NULL,
         occurred_at INTEGER NOT NULL,
@@ -305,6 +314,7 @@ class FakeD1Database {
         event_pk INTEGER NOT NULL,
         node_id INTEGER NOT NULL,
         site_id TEXT NOT NULL,
+        site_pk INTEGER,
         event_name_id INTEGER NOT NULL,
         path_id INTEGER NOT NULL,
         occurred_at INTEGER NOT NULL,

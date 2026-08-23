@@ -184,6 +184,7 @@ function flushContext(
       } as unknown as D1Database,
     },
     dictionaryIds: new Map(),
+    sitePks: new Map([["site-1", 1]]),
     sqlAll: vi
       .fn()
       .mockReturnValueOnce(visitRows)

@@ -9,6 +9,7 @@ import type { Env } from "./types";
 export interface IngestFlushContext extends SqlWriter {
   env: Pick<Env, "DB">;
   dictionaryIds: Map<string, number>;
+  sitePks: Map<string, number>;
   readPersistedVisitRow(
     siteId: string,
     visitId: string,
@@ -24,6 +25,52 @@ export interface IngestFlushContext extends SqlWriter {
     InvocationLogger,
     "increment" | "info" | "warn" | "error"
   >;
+}
+
+/**
+ * Resolve the durable internal site key once per DO lifetime.  The first
+ * lookup keeps the common path read-only; INSERT OR IGNORE handles a site
+ * whose identity was not present when migration 0039 ran, and the final
+ * lookup obtains the winner if concurrent writers raced to create it.
+ */
+export async function resolveSitePk(
+  context: IngestFlushContext,
+  siteId: string,
+): Promise<number> {
+  const cached = context.sitePks.get(siteId);
+  if (cached !== undefined) return cached;
+
+  recordFlushCounter(context, "d1Statements");
+  const existing = await context.env.DB.prepare(
+    `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
+  )
+    .bind(siteId)
+    .first<{ sitePk: number }>();
+  const existingPk = Number(existing?.sitePk ?? 0);
+  if (Number.isSafeInteger(existingPk) && existingPk > 0) {
+    context.sitePks.set(siteId, existingPk);
+    return existingPk;
+  }
+
+  recordFlushCounter(context, "d1Statements");
+  await context.env.DB.prepare(
+    `INSERT OR IGNORE INTO site_identities (site_id) VALUES (?)`,
+  )
+    .bind(siteId)
+    .run();
+
+  recordFlushCounter(context, "d1Statements");
+  const created = await context.env.DB.prepare(
+    `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
+  )
+    .bind(siteId)
+    .first<{ sitePk: number }>();
+  const sitePk = Number(created?.sitePk ?? 0);
+  if (!Number.isSafeInteger(sitePk) || sitePk <= 0) {
+    throw new Error(`Failed to resolve site identity for ${siteId}`);
+  }
+  context.sitePks.set(siteId, sitePk);
+  return sitePk;
 }
 
 export function recordFlushCounter(

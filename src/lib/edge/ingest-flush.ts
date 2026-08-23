@@ -13,6 +13,7 @@ import { flushCustomEventRowIndividually } from "./ingest-custom-event-flush";
 import {
   type IngestFlushContext,
   recordFlushCounter,
+  resolveSitePk,
 } from "./ingest-flush-types";
 import { visitBindings, visitUpsertSql } from "./ingest-sql";
 import { toUnixSeconds } from "./ingest-time";
@@ -231,10 +232,19 @@ export async function flushPendingToD1(
 
     if (visitRows.length > 0) {
       try {
+        const sitePkById = new Map<string, number>();
+        for (const siteId of new Set(visitRows.map((row) => row.siteId))) {
+          sitePkById.set(siteId, await resolveSitePk(context, siteId));
+        }
         recordFlushCounter(context, "d1Statements", visitRows.length);
-        await context.env.DB.batch(
-          visitRows.map((row) => prepareVisitStatement(context, row)),
-        );
+        const preparedVisits = visitRows.map((row) => {
+          const sitePk = sitePkById.get(row.siteId);
+          if (sitePk === undefined) {
+            throw new Error(`Missing site identity for ${row.siteId}`);
+          }
+          return prepareVisitStatement(context, row, sitePk);
+        });
+        await context.env.DB.batch(preparedVisits);
         recordFlushCounter(context, "flushedVisits", visitRows.length);
         markVisitRowsFlushed(context, visitRows);
       } catch (error) {
@@ -554,9 +564,10 @@ function markVisitRowsFailed(
 function prepareVisitStatement(
   context: IngestFlushContext,
   row: BufferedVisitRow,
+  sitePk: number,
 ): D1PreparedStatement {
   return context.env.DB.prepare(visitUpsertSql(row.status)).bind(
-    ...visitBindings(row),
+    ...visitBindings(row, sitePk),
   );
 }
 
@@ -623,7 +634,8 @@ async function flushVisitRowIndividually(
 ): Promise<void> {
   try {
     recordFlushCounter(context, "d1Statements");
-    await context.env.DB.batch([prepareVisitStatement(context, row)]);
+    const sitePk = await resolveSitePk(context, row.siteId);
+    await context.env.DB.batch([prepareVisitStatement(context, row, sitePk)]);
     recordFlushCounter(context, "flushedVisits");
     markVisitRowsFlushed(context, [row]);
   } catch (error) {

@@ -63,6 +63,11 @@ class FakeD1Database {
 function createEnv() {
   const d1 = new FakeD1Database();
   d1.db.exec(`
+    CREATE TABLE site_identities (
+      site_pk INTEGER PRIMARY KEY,
+      site_id TEXT NOT NULL UNIQUE
+    );
+
     CREATE TABLE sites (
       id TEXT PRIMARY KEY
     );
@@ -88,6 +93,7 @@ function createEnv() {
 
     CREATE TABLE visit_hourly_rollups (
       site_id TEXT NOT NULL,
+      site_pk INTEGER,
       hour_bucket INTEGER NOT NULL,
       views INTEGER NOT NULL DEFAULT 0,
       sessions INTEGER NOT NULL DEFAULT 0,
@@ -115,6 +121,7 @@ function createEnv() {
 
     CREATE TABLE visit_hourly_aggregation_state (
       site_id TEXT PRIMARY KEY,
+      site_pk INTEGER,
       aggregated_until_hour INTEGER NOT NULL DEFAULT 0,
       lag_hours INTEGER NOT NULL DEFAULT 12,
       last_run_at INTEGER,
@@ -128,6 +135,7 @@ function createEnv() {
       ON visits(site_id, started_at)
       WHERE status = 'open';
 
+    INSERT INTO site_identities (site_pk, site_id) VALUES (1, 'site-1');
     INSERT INTO sites (id) VALUES ('site-1');
   `);
   return {
@@ -217,6 +225,7 @@ describe("hourly visit rollups", () => {
     expect(rollups).toHaveLength(2);
     expect(rollups[0]).toMatchObject({
       site_id: "site-1",
+      site_pk: 1,
       hour_bucket: oldHour,
       views: 2,
       sessions: 1,
@@ -261,6 +270,7 @@ describe("hourly visit rollups", () => {
     const state = d1.db
       .prepare("SELECT * FROM visit_hourly_aggregation_state")
       .get() as Row;
+    expect(state.site_pk).toBe(1);
     expect(state.aggregated_until_hour).toBe(firstHour + 7 * 24 - 1);
     const rollups = d1.db
       .prepare("SELECT hour_bucket AS hourBucket FROM visit_hourly_rollups")
@@ -684,6 +694,11 @@ describe("hourly visit rollups", () => {
     });
 
     // Insert a second site
+    d1.db
+      .prepare(
+        "INSERT INTO site_identities (site_pk, site_id) VALUES (2, 'site-2')",
+      )
+      .run();
     d1.db.prepare("INSERT INTO sites (id) VALUES ('site-2')").run();
     insertVisit(d1, {
       visitId: "visit-2",

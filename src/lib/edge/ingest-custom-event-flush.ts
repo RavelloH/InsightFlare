@@ -6,6 +6,7 @@ import { FLUSHED_BUFFER_RETENTION_MS } from "./ingest-constants";
 import {
   type IngestFlushContext,
   recordFlushCounter,
+  resolveSitePk,
 } from "./ingest-flush-types";
 import type { BufferedCustomEventRow, DictionaryKind } from "./ingest-types";
 import { clampString } from "./utils";
@@ -20,6 +21,7 @@ export async function flushCustomEventRowIndividually(
       markCustomEventRowsFailed(context, [row], "waiting_for_visit");
       return false;
     }
+    const sitePk = await resolveSitePk(context, row.siteId);
     const expanded = expandCustomEventDataJson(row.eventDataJson);
     if (!expanded.ok) {
       throw new Error(expanded.error);
@@ -28,12 +30,14 @@ export async function flushCustomEventRowIndividually(
       context,
       row,
       expanded.data,
+      sitePk,
     );
     const statements = prepareCustomEventStatements(
       context,
       row,
       expanded.data,
       ids,
+      sitePk,
     );
     recordFlushCounter(context, "d1Statements", statements.length);
     await context.env.DB.batch(statements);
@@ -104,6 +108,7 @@ async function resolveDictionaryId(
   context: IngestFlushContext,
   kind: DictionaryKind,
   siteId: string,
+  sitePk: number,
   value: string,
   seenAt: number,
 ): Promise<number> {
@@ -115,13 +120,13 @@ async function resolveDictionaryId(
   recordFlushCounter(context, "d1Statements");
   await context.env.DB.prepare(
     `
-      INSERT INTO ${spec.table} (site_id, ${spec.column}, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO ${spec.table} (site_id, site_pk, ${spec.column}, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(site_id, ${spec.column}) DO UPDATE SET
         last_seen_at = excluded.last_seen_at
     `,
   )
-    .bind(siteId, value, seenAt, seenAt)
+    .bind(siteId, sitePk, value, seenAt, seenAt)
     .run();
 
   recordFlushCounter(context, "d1Statements");
@@ -147,6 +152,7 @@ async function resolveCustomEventDictionaryIds(
   context: IngestFlushContext,
   row: BufferedCustomEventRow,
   expanded: ExpandedCustomEventData,
+  sitePk: number,
 ): Promise<{
   eventNameId: number;
   keyIds: Map<string, number>;
@@ -157,6 +163,7 @@ async function resolveCustomEventDictionaryIds(
     context,
     "name",
     row.siteId,
+    sitePk,
     row.eventName,
     seenAt,
   );
@@ -164,14 +171,28 @@ async function resolveCustomEventDictionaryIds(
   for (const key of expanded.keys) {
     keyIds.set(
       key,
-      await resolveDictionaryId(context, "key", row.siteId, key, seenAt),
+      await resolveDictionaryId(
+        context,
+        "key",
+        row.siteId,
+        sitePk,
+        key,
+        seenAt,
+      ),
     );
   }
   const pathIds = new Map<string, number>();
   for (const path of expanded.paths) {
     pathIds.set(
       path,
-      await resolveDictionaryId(context, "path", row.siteId, path, seenAt),
+      await resolveDictionaryId(
+        context,
+        "path",
+        row.siteId,
+        sitePk,
+        path,
+        seenAt,
+      ),
     );
   }
   return { eventNameId, keyIds, pathIds };
@@ -222,14 +243,15 @@ function prepareCustomEventStatements(
     keyIds: Map<string, number>;
     pathIds: Map<string, number>;
   },
+  sitePk: number,
 ): D1PreparedStatement[] {
   const eventStatement = context.env.DB.prepare(
     `
       INSERT OR IGNORE INTO custom_events (
-        event_id, site_id, visit_id, event_name_id, occurred_at, received_at,
+        event_id, site_id, site_pk, visit_id, event_name_id, occurred_at, received_at,
         sequence, node_count, value_count, user_id, ae_synced_at, created_at
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?
       FROM visits
       WHERE site_id = ? AND visit_id = ?
       LIMIT 1
@@ -237,6 +259,7 @@ function prepareCustomEventStatements(
   ).bind(
     row.eventId,
     row.siteId,
+    sitePk,
     row.visitId,
     ids.eventNameId,
     row.occurredAt,
@@ -290,17 +313,18 @@ function prepareCustomEventStatements(
     return context.env.DB.prepare(
       `
         INSERT OR IGNORE INTO custom_event_json_values (
-          event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+          event_pk, node_id, site_id, site_pk, event_name_id, path_id, occurred_at,
           scope_node_id, value_type, string_value, string_hash, number_value,
           boolean_value
         )
-        SELECT event_pk, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        SELECT event_pk, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         FROM custom_events
         WHERE event_id = ?
       `,
     ).bind(
       value.nodeId,
       row.siteId,
+      sitePk,
       ids.eventNameId,
       pathId,
       row.occurredAt,

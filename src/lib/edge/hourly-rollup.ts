@@ -49,6 +49,7 @@ interface HourlyAggregationSummary {
 
 interface AggregationCandidateRow {
   siteId: string;
+  sitePk: number;
   aggregatedUntilHour: number | null;
 }
 
@@ -1082,8 +1083,11 @@ async function listAggregationCandidates(
     `
       SELECT
         s.id AS siteId,
+        si.site_pk AS sitePk,
         st.aggregated_until_hour AS aggregatedUntilHour
       FROM sites s
+      INNER JOIN site_identities si
+        ON si.site_id = s.id
       LEFT JOIN visit_hourly_aggregation_state st
         ON st.site_id = s.id
       WHERE st.site_id IS NOT NULL
@@ -1101,6 +1105,7 @@ async function listAggregationCandidates(
     .all<AggregationCandidateRow>();
   return result.results.map((row) => ({
     siteId: String(row.siteId ?? ""),
+    sitePk: Number(row.sitePk),
     aggregatedUntilHour:
       row.aggregatedUntilHour === null || row.aggregatedUntilHour === undefined
         ? null
@@ -1186,6 +1191,7 @@ async function finalizeStaleOpenVisits(
 async function aggregateSiteHours(
   env: Env,
   siteId: string,
+  sitePk: number,
   startHour: number,
   endHour: number,
   inputCutoffMs: number,
@@ -1320,14 +1326,15 @@ async function aggregateSiteHours(
       env.DB.prepare(
         `
           INSERT INTO visit_hourly_rollups (
-            site_id, hour_bucket, views, sessions, visitors, bounces,
+            site_id, site_pk, hour_bucket, views, sessions, visitors, bounces,
             duration_ms_sum, duration_ms_count, visitor_set_json,
             session_counts_json, perf_ttfb_sum, perf_ttfb_count,
             perf_fcp_sum, perf_fcp_count, perf_lcp_sum, perf_lcp_count,
             perf_cls_sum, perf_cls_count, perf_inp_sum, perf_inp_count,
             input_cutoff_ms, aggregated_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)
           ON CONFLICT(site_id, hour_bucket) DO UPDATE SET
+            site_pk = excluded.site_pk,
             views = excluded.views,
             sessions = excluded.sessions,
             visitors = excluded.visitors,
@@ -1352,6 +1359,7 @@ async function aggregateSiteHours(
         `,
       ).bind(
         siteId,
+        sitePk,
         hour,
         rollup.views,
         sessionCounts.length,
@@ -1381,17 +1389,18 @@ async function aggregateSiteHours(
     env.DB.prepare(
       `
         INSERT INTO visit_hourly_aggregation_state (
-          site_id, aggregated_until_hour, lag_hours, last_run_at,
+          site_id, site_pk, aggregated_until_hour, lag_hours, last_run_at,
           last_success_at, last_error
-        ) VALUES (?, ?, ?, unixepoch(), unixepoch(), NULL)
+        ) VALUES (?, ?, ?, ?, unixepoch(), unixepoch(), NULL)
         ON CONFLICT(site_id) DO UPDATE SET
+          site_pk = excluded.site_pk,
           aggregated_until_hour = excluded.aggregated_until_hour,
           lag_hours = excluded.lag_hours,
           last_run_at = excluded.last_run_at,
           last_success_at = excluded.last_success_at,
           last_error = NULL
       `,
-    ).bind(siteId, endHour, ROLLUP_LAG_HOURS),
+    ).bind(siteId, sitePk, endHour, ROLLUP_LAG_HOURS),
   );
 
   await env.DB.batch(statements);
@@ -1401,6 +1410,7 @@ async function aggregateSiteHours(
 async function markAggregationFailed(
   env: Env,
   siteId: string,
+  sitePk: number,
   error: unknown,
 ): Promise<void> {
   const message = String(error instanceof Error ? error.message : error).slice(
@@ -1410,14 +1420,15 @@ async function markAggregationFailed(
   await env.DB.prepare(
     `
       INSERT INTO visit_hourly_aggregation_state (
-        site_id, aggregated_until_hour, lag_hours, last_run_at, last_error
-      ) VALUES (?, 0, ?, unixepoch(), ?)
+        site_id, site_pk, aggregated_until_hour, lag_hours, last_run_at, last_error
+      ) VALUES (?, ?, 0, ?, unixepoch(), ?)
       ON CONFLICT(site_id) DO UPDATE SET
+        site_pk = excluded.site_pk,
         last_run_at = excluded.last_run_at,
         last_error = excluded.last_error
     `,
   )
-    .bind(siteId, ROLLUP_LAG_HOURS, message)
+    .bind(siteId, sitePk, ROLLUP_LAG_HOURS, message)
     .run();
 }
 
@@ -1513,6 +1524,7 @@ export async function runHourlyAggregation(
       const rollupRowsWritten = await aggregateSiteHours(
         env,
         site.siteId,
+        site.sitePk,
         startHour,
         safeEndHour,
         cutoffMs,
@@ -1532,7 +1544,7 @@ export async function runHourlyAggregation(
           error: error instanceof Error ? error.message : String(error),
         },
       );
-      await markAggregationFailed(env, site.siteId, error);
+      await markAggregationFailed(env, site.siteId, site.sitePk, error);
     }
   }
   const status =

@@ -65,6 +65,7 @@ export class IngestDurableObject extends DurableObject {
   private readonly doEnv: Env;
   private readonly schemaReady: Promise<void>;
   private readonly dictionaryIds = new Map<string, number>();
+  private readonly sitePks = new Map<string, number>();
   private sockets = new Set<WebSocket>();
 
   constructor(state: DurableObjectState, env: Env) {
@@ -1413,6 +1414,7 @@ export class IngestDurableObject extends DurableObject {
     return {
       env,
       dictionaryIds: this.dictionaryIds,
+      sitePks: this.sitePks,
       sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
         this.measuredSqlAll<T>(logger, query, ...bindings),
       sqlOne: <T>(query: string, ...bindings: SqlBinding[]) =>

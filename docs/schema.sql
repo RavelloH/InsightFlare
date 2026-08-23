@@ -84,7 +84,8 @@ CREATE TABLE archive_objects (
   row_count INTEGER NOT NULL DEFAULT 0,
   size_bytes INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  site_pk INTEGER REFERENCES site_identities(site_pk)
 );
 
 CREATE INDEX idx_archive_objects_site_hour
@@ -103,6 +104,7 @@ CREATE TABLE custom_event_json_keys (
   key TEXT NOT NULL,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   last_seen_at INTEGER NOT NULL,
+  site_pk INTEGER REFERENCES site_identities(site_pk),
   UNIQUE(site_id, key)
 );
 
@@ -131,6 +133,7 @@ CREATE TABLE custom_event_json_paths (
   path TEXT NOT NULL,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   last_seen_at INTEGER NOT NULL,
+  site_pk INTEGER REFERENCES site_identities(site_pk),
   UNIQUE(site_id, path)
 );
 
@@ -147,6 +150,7 @@ CREATE TABLE custom_event_json_values (
   string_hash TEXT,
   number_value REAL,
   boolean_value INTEGER,
+  site_pk INTEGER REFERENCES site_identities(site_pk),
   PRIMARY KEY(event_pk, node_id),
   FOREIGN KEY(event_pk, node_id) REFERENCES custom_event_json_nodes(event_pk, node_id) ON DELETE CASCADE,
   FOREIGN KEY(event_name_id) REFERENCES custom_event_names(id),
@@ -171,6 +175,7 @@ CREATE TABLE custom_event_names (
   name TEXT NOT NULL,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   last_seen_at INTEGER NOT NULL,
+  site_pk INTEGER REFERENCES site_identities(site_pk),
   UNIQUE(site_id, name)
 );
 
@@ -188,6 +193,7 @@ CREATE TABLE custom_events (
   ae_synced_at INTEGER,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   user_id TEXT,
+  site_pk INTEGER REFERENCES site_identities(site_pk),
   FOREIGN KEY(visit_id) REFERENCES visits(visit_id) ON DELETE CASCADE,
   FOREIGN KEY(event_name_id) REFERENCES custom_event_names(id)
 );
@@ -358,6 +364,11 @@ CREATE INDEX idx_scheduled_task_runs_status_started
 CREATE INDEX idx_scheduled_task_runs_task_started
   ON scheduled_task_runs(task_key, started_at_ms);
 
+CREATE TABLE site_identities (
+  site_pk INTEGER PRIMARY KEY,
+  site_id TEXT NOT NULL UNIQUE
+);
+
 CREATE TABLE sites (
   id TEXT PRIMARY KEY,
   team_id TEXT NOT NULL,
@@ -421,7 +432,8 @@ CREATE TABLE visit_hourly_aggregation_state (
   lag_hours INTEGER NOT NULL DEFAULT 12,
   last_run_at INTEGER,
   last_success_at INTEGER,
-  last_error TEXT
+  last_error TEXT,
+  site_pk INTEGER REFERENCES site_identities(site_pk)
 );
 
 CREATE TABLE visit_hourly_rollups (
@@ -448,6 +460,7 @@ CREATE TABLE visit_hourly_rollups (
   input_cutoff_ms INTEGER NOT NULL,
   aggregated_at INTEGER NOT NULL DEFAULT (unixepoch()),
   schema_version INTEGER NOT NULL DEFAULT 1,
+  site_pk INTEGER REFERENCES site_identities(site_pk),
   PRIMARY KEY (site_id, hour_bucket)
 );
 
@@ -506,7 +519,8 @@ CREATE TABLE visits (
   perf_cls REAL,
   perf_inp_ms REAL,
   user_id TEXT,
-  user_name TEXT
+  user_name TEXT,
+  site_pk INTEGER REFERENCES site_identities(site_pk)
 );
 
 CREATE INDEX idx_visits_created_at_system_performance
@@ -537,3 +551,183 @@ CREATE TABLE widgets (
 );
 
 CREATE INDEX idx_widgets_site_type ON widgets(site_id, type);
+
+CREATE TRIGGER trg_archive_objects_site_pk_insert
+AFTER INSERT ON archive_objects
+WHEN NEW.site_id IS NOT NULL AND NEW.site_pk IS NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE archive_objects
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE archive_key = NEW.archive_key AND site_pk IS NULL;
+END;
+
+CREATE TRIGGER trg_archive_objects_site_pk_update
+AFTER UPDATE OF site_id ON archive_objects
+WHEN NEW.site_id IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE archive_objects
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE archive_key = NEW.archive_key;
+END;
+
+CREATE TRIGGER trg_custom_event_json_keys_site_pk_insert
+AFTER INSERT ON custom_event_json_keys
+WHEN NEW.site_id IS NOT NULL AND NEW.site_pk IS NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE custom_event_json_keys
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE id = NEW.id AND site_pk IS NULL;
+END;
+
+CREATE TRIGGER trg_custom_event_json_keys_site_pk_update
+AFTER UPDATE OF site_id ON custom_event_json_keys
+WHEN NEW.site_id IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE custom_event_json_keys
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER trg_custom_event_json_paths_site_pk_insert
+AFTER INSERT ON custom_event_json_paths
+WHEN NEW.site_id IS NOT NULL AND NEW.site_pk IS NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE custom_event_json_paths
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE id = NEW.id AND site_pk IS NULL;
+END;
+
+CREATE TRIGGER trg_custom_event_json_paths_site_pk_update
+AFTER UPDATE OF site_id ON custom_event_json_paths
+WHEN NEW.site_id IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE custom_event_json_paths
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER trg_custom_event_json_values_site_pk_insert
+AFTER INSERT ON custom_event_json_values
+WHEN NEW.site_id IS NOT NULL AND NEW.site_pk IS NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE custom_event_json_values
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE event_pk = NEW.event_pk AND node_id = NEW.node_id AND site_pk IS NULL;
+END;
+
+CREATE TRIGGER trg_custom_event_json_values_site_pk_update
+AFTER UPDATE OF site_id ON custom_event_json_values
+WHEN NEW.site_id IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE custom_event_json_values
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE event_pk = NEW.event_pk AND node_id = NEW.node_id;
+END;
+
+CREATE TRIGGER trg_custom_event_names_site_pk_insert
+AFTER INSERT ON custom_event_names
+WHEN NEW.site_id IS NOT NULL AND NEW.site_pk IS NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE custom_event_names
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE id = NEW.id AND site_pk IS NULL;
+END;
+
+CREATE TRIGGER trg_custom_event_names_site_pk_update
+AFTER UPDATE OF site_id ON custom_event_names
+WHEN NEW.site_id IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE custom_event_names
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER trg_custom_events_site_pk_insert
+AFTER INSERT ON custom_events
+WHEN NEW.site_id IS NOT NULL AND NEW.site_pk IS NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE custom_events
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE event_pk = NEW.event_pk AND site_pk IS NULL;
+END;
+
+CREATE TRIGGER trg_custom_events_site_pk_update
+AFTER UPDATE OF site_id ON custom_events
+WHEN NEW.site_id IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE custom_events
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE event_pk = NEW.event_pk;
+END;
+
+CREATE TRIGGER trg_visit_hourly_aggregation_state_site_pk_insert
+AFTER INSERT ON visit_hourly_aggregation_state
+WHEN NEW.site_id IS NOT NULL AND NEW.site_pk IS NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE visit_hourly_aggregation_state
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE site_id = NEW.site_id AND site_pk IS NULL;
+END;
+
+CREATE TRIGGER trg_visit_hourly_aggregation_state_site_pk_update
+AFTER UPDATE OF site_id ON visit_hourly_aggregation_state
+WHEN NEW.site_id IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE visit_hourly_aggregation_state
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE site_id = NEW.site_id;
+END;
+
+CREATE TRIGGER trg_visit_hourly_rollups_site_pk_insert
+AFTER INSERT ON visit_hourly_rollups
+WHEN NEW.site_id IS NOT NULL AND NEW.site_pk IS NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE visit_hourly_rollups
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE site_id = NEW.site_id AND hour_bucket = NEW.hour_bucket AND site_pk IS NULL;
+END;
+
+CREATE TRIGGER trg_visit_hourly_rollups_site_pk_update
+AFTER UPDATE OF site_id ON visit_hourly_rollups
+WHEN NEW.site_id IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE visit_hourly_rollups
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE site_id = NEW.site_id AND hour_bucket = NEW.hour_bucket;
+END;
+
+CREATE TRIGGER trg_visits_site_pk_insert
+AFTER INSERT ON visits
+WHEN NEW.site_id IS NOT NULL AND NEW.site_pk IS NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE visits
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE visit_id = NEW.visit_id AND site_pk IS NULL;
+END;
+
+CREATE TRIGGER trg_visits_site_pk_update
+AFTER UPDATE OF site_id ON visits
+WHEN NEW.site_id IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+  UPDATE visits
+  SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+  WHERE visit_id = NEW.visit_id;
+END;

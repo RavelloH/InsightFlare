@@ -60,6 +60,7 @@ export interface VisitBindingRow {
 export const VISIT_D1_COLUMNS = [
   "visit_id",
   "site_id",
+  "site_pk",
   "visitor_id",
   "session_id",
   "status",
@@ -211,10 +212,14 @@ export const CREATE_BUFFERED_CUSTOM_EVENTS_SQL = `
   )
 `;
 
-export function visitBindings(row: VisitBindingRow): SqlBinding[] {
+export function visitBindings(
+  row: VisitBindingRow,
+  sitePk: number | null = null,
+): SqlBinding[] {
   return [
     row.visitId,
     row.siteId,
+    sitePk,
     row.visitorId,
     row.sessionId,
     row.status,
