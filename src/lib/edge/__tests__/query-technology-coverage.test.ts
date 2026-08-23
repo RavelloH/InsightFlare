@@ -128,11 +128,37 @@ function createCombinedShareTrendEnv(rows: D1Row[]): {
   calls: QueryCall[];
 } {
   const calls: QueryCall[] = [];
+  const trendJson = (trendType: "source" | "channel") =>
+    JSON.stringify({
+      top: rows
+        .filter((row) => row.trendType === trendType && row.rowType === "top")
+        .map(({ trendType: _trendType, rowType: _rowType, ...row }) => row),
+      series: rows
+        .filter(
+          (row) => row.trendType === trendType && row.rowType === "series",
+        )
+        .map(({ trendType: _trendType, rowType: _rowType, ...row }) => row),
+      buckets: rows
+        .filter(
+          (row) => row.trendType === trendType && row.rowType === "bucket",
+        )
+        .map(({ trendType: _trendType, rowType: _rowType, ...row }) => row),
+    });
   const prepare = vi.fn((sql: string) => ({
     bind: vi.fn((...bindings: Array<string | number | null>) => ({
       all: vi.fn(async () => {
         calls.push({ sql, bindings });
-        return { results: rows };
+        return {
+          results:
+            rows.length === 0
+              ? []
+              : [
+                  {
+                    source: trendJson("source"),
+                    channel: trendJson("channel"),
+                  },
+                ],
+        };
       }),
     })),
   }));
@@ -987,7 +1013,7 @@ describe("edge technology query coverage", () => {
     expect(calls[0].bindings).toEqual([...visitBindings(), 12]);
   });
 
-  it("maps source and channel trends from one independent tagged query", async () => {
+  it("maps source and channel trends from one JSON-aggregated query", async () => {
     const { env, calls } = createCombinedShareTrendEnv([
       {
         trendType: "source",
@@ -1137,6 +1163,8 @@ describe("edge technology query coverage", () => {
     expect(calls[0].sql).toContain("channel_top_rows");
     expect(calls[0].sql).toContain(buildTrafficChannelSqlExpression());
     expect(calls[0].sql).not.toContain("CROSS JOIN source_bucket_rows");
+    expect(calls[0].sql).toContain("json_group_array");
+    expect(calls[0].sql).not.toContain("UNION ALL");
   });
 
   it("returns independent empty source and channel results", async () => {

@@ -40,6 +40,37 @@ export interface ReferrerAndChannelTrendResult {
 
 type ShareTrendQueryRow = Record<string, unknown>;
 
+function combinedShareTrendRows(value: unknown): ShareTrendQueryRow[] {
+  if (typeof value !== "string") return [];
+
+  try {
+    const parsed = JSON.parse(value) as {
+      top?: unknown;
+      series?: unknown;
+      buckets?: unknown;
+    };
+    const taggedRows: ShareTrendQueryRow[] = [];
+    const appendRows = (
+      rows: unknown,
+      rowType: "top" | "series" | "bucket",
+    ) => {
+      if (!Array.isArray(rows)) return;
+      for (const row of rows) {
+        if (row && typeof row === "object" && !Array.isArray(row)) {
+          taggedRows.push({ ...row, rowType });
+        }
+      }
+    };
+
+    appendRows(parsed.top, "top");
+    appendRows(parsed.series, "series");
+    appendRows(parsed.buckets, "bucket");
+    return taggedRows;
+  } catch {
+    return [];
+  }
+}
+
 function mapShareTrendRows(
   rows: ShareTrendQueryRow[],
   buckets: TimeBucket[],
@@ -455,77 +486,76 @@ channel_bucket_rows AS (
   LEFT JOIN channel_top_rows
     ON channel_top_rows.label = ranked_visits.channelBucketLabel
   GROUP BY ranked_visits.bucket, label
-),
-tagged_rows AS (
-  SELECT
-    'source' AS trendType,
-    'top' AS rowType,
-    NULL AS bucket,
-    label,
-    views,
-    visitors,
-    sessions,
-    rowOrder
-  FROM source_top_rows
-  UNION ALL
-  SELECT
-    'source' AS trendType,
-    'series' AS rowType,
-    NULL AS bucket,
-    label,
-    views,
-    visitors,
-    sessions,
-    0 AS rowOrder
-  FROM source_series_rows
-  UNION ALL
-  SELECT
-    'source' AS trendType,
-    'bucket' AS rowType,
-    bucket,
-    label,
-    views,
-    visitors,
-    sessions,
-    0 AS rowOrder
-  FROM source_bucket_rows
-  UNION ALL
-  SELECT
-    'channel' AS trendType,
-    'top' AS rowType,
-    NULL AS bucket,
-    label,
-    views,
-    visitors,
-    sessions,
-    rowOrder
-  FROM channel_top_rows
-  UNION ALL
-  SELECT
-    'channel' AS trendType,
-    'series' AS rowType,
-    NULL AS bucket,
-    label,
-    views,
-    visitors,
-    sessions,
-    0 AS rowOrder
-  FROM channel_series_rows
-  UNION ALL
-  SELECT
-    'channel' AS trendType,
-    'bucket' AS rowType,
-    bucket,
-    label,
-    views,
-    visitors,
-    sessions,
-    0 AS rowOrder
-  FROM channel_bucket_rows
 )
-SELECT trendType, rowType, bucket, label, views, visitors, sessions
-FROM tagged_rows
-ORDER BY trendType ASC, rowType ASC, rowOrder ASC, bucket ASC, label ASC
+SELECT
+  json_object(
+    'top', (
+      SELECT json_group_array(json_object(
+        'label', label,
+        'views', views,
+        'visitors', visitors,
+        'sessions', sessions
+      ))
+      FROM (
+        SELECT label, views, visitors, sessions
+        FROM source_top_rows
+        ORDER BY rowOrder ASC
+      )
+    ),
+    'series', (
+      SELECT json_group_array(json_object(
+        'label', label,
+        'views', views,
+        'visitors', visitors,
+        'sessions', sessions
+      ))
+      FROM source_series_rows
+    ),
+    'buckets', (
+      SELECT json_group_array(json_object(
+        'bucket', bucket,
+        'label', label,
+        'views', views,
+        'visitors', visitors,
+        'sessions', sessions
+      ))
+      FROM source_bucket_rows
+    )
+  ) AS source,
+  json_object(
+    'top', (
+      SELECT json_group_array(json_object(
+        'label', label,
+        'views', views,
+        'visitors', visitors,
+        'sessions', sessions
+      ))
+      FROM (
+        SELECT label, views, visitors, sessions
+        FROM channel_top_rows
+        ORDER BY rowOrder ASC
+      )
+    ),
+    'series', (
+      SELECT json_group_array(json_object(
+        'label', label,
+        'views', views,
+        'visitors', visitors,
+        'sessions', sessions
+      ))
+      FROM channel_series_rows
+    ),
+    'buckets', (
+      SELECT json_group_array(json_object(
+        'bucket', bucket,
+        'label', label,
+        'views', views,
+        'visitors', visitors,
+        'sessions', sessions
+      ))
+      FROM channel_bucket_rows
+    )
+  ) AS channel
 `;
   const rows = await queryD1All<ShareTrendQueryRow>(env, sql, [
     ...visitSourceBindings(siteId, window),
@@ -535,14 +565,15 @@ ORDER BY trendType ASC, rowType ASC, rowOrder ASC, bucket ASC, label ASC
     normalizedLimit,
   ]);
 
+  const row = rows[0];
   return {
     source: mapShareTrendRows(
-      rows.filter((row) => String(row.trendType ?? "") === "source"),
+      combinedShareTrendRows(row?.source),
       buckets,
       sourceDefinition.fallbackKeyBase,
     ),
     channel: mapShareTrendRows(
-      rows.filter((row) => String(row.trendType ?? "") === "channel"),
+      combinedShareTrendRows(row?.channel),
       buckets,
       "channel",
     ),
