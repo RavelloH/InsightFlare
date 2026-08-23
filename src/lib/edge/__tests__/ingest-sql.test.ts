@@ -6,9 +6,11 @@ import type { VisitBindingRow } from "@/lib/edge/ingest-sql";
 import {
   CREATE_BUFFERED_CUSTOM_EVENTS_SQL,
   INSERT_VISIT_SQL,
-  UPSERT_VISIT_SQL,
+  UPSERT_ACTIVE_VISIT_SQL,
+  UPSERT_FINALIZED_VISIT_SQL,
   VISIT_D1_COLUMNS,
   visitBindings,
+  visitUpsertSql,
 } from "@/lib/edge/ingest-sql";
 
 function visitRow(overrides: Partial<VisitBindingRow> = {}): VisitBindingRow {
@@ -122,27 +124,58 @@ describe("ingest visit SQL bindings", () => {
     expect(values.user_name).toBeNull();
   });
 
-  it("keeps visit SQL columns and upsert assignments in sync", () => {
+  it("keeps visit SQL columns and split upsert assignments in sync", () => {
     expect(INSERT_VISIT_SQL).toContain("INSERT OR IGNORE INTO visits");
     for (const column of VISIT_D1_COLUMNS) {
       expect(INSERT_VISIT_SQL).toContain(column);
     }
-    expect(UPSERT_VISIT_SQL).toContain("ON CONFLICT(visit_id) DO UPDATE SET");
-    expect(UPSERT_VISIT_SQL).toContain("perf_ttfb_ms = excluded.perf_ttfb_ms");
-    expect(UPSERT_VISIT_SQL).toContain("perf_fcp_ms = excluded.perf_fcp_ms");
-    expect(UPSERT_VISIT_SQL).toContain("perf_lcp_ms = excluded.perf_lcp_ms");
-    expect(UPSERT_VISIT_SQL).toContain("perf_cls = excluded.perf_cls");
-    expect(UPSERT_VISIT_SQL).toContain("perf_inp_ms = excluded.perf_inp_ms");
-    expect(UPSERT_VISIT_SQL).not.toContain(
+    expect(UPSERT_ACTIVE_VISIT_SQL).toContain(
+      "ON CONFLICT(visit_id) DO UPDATE SET",
+    );
+    expect(UPSERT_ACTIVE_VISIT_SQL).toContain(
+      "visits.status IN ('open', 'hidden_pending')",
+    );
+    expect(UPSERT_ACTIVE_VISIT_SQL).not.toContain(
+      "ended_at = excluded.ended_at",
+    );
+    expect(UPSERT_FINALIZED_VISIT_SQL).toContain(
+      "ended_at = excluded.ended_at",
+    );
+    expect(UPSERT_FINALIZED_VISIT_SQL).toContain(
+      "duration_ms = excluded.duration_ms",
+    );
+    expect(UPSERT_FINALIZED_VISIT_SQL).toContain(
+      "perf_ttfb_ms = excluded.perf_ttfb_ms",
+    );
+    expect(UPSERT_FINALIZED_VISIT_SQL).toContain(
+      "perf_fcp_ms = excluded.perf_fcp_ms",
+    );
+    expect(UPSERT_FINALIZED_VISIT_SQL).toContain(
+      "perf_lcp_ms = excluded.perf_lcp_ms",
+    );
+    expect(UPSERT_FINALIZED_VISIT_SQL).toContain(
+      "perf_cls = excluded.perf_cls",
+    );
+    expect(UPSERT_FINALIZED_VISIT_SQL).toContain(
+      "perf_inp_ms = excluded.perf_inp_ms",
+    );
+    expect(UPSERT_FINALIZED_VISIT_SQL).not.toContain(
+      "site_id = excluded.site_id",
+    );
+    expect(UPSERT_FINALIZED_VISIT_SQL).not.toContain(
       "ae_synced_at = excluded.ae_synced_at",
     );
-    expect(UPSERT_VISIT_SQL).toContain("WHERE");
-    expect(UPSERT_VISIT_SQL).toContain(
+    expect(UPSERT_FINALIZED_VISIT_SQL).toContain("WHERE");
+    expect(UPSERT_FINALIZED_VISIT_SQL).toContain(
       "visits.perf_lcp_ms IS NOT excluded.perf_lcp_ms",
     );
+    expect(visitUpsertSql("open")).toBe(UPSERT_ACTIVE_VISIT_SQL);
+    expect(visitUpsertSql("hidden_pending")).toBe(UPSERT_ACTIVE_VISIT_SQL);
+    expect(visitUpsertSql("complete")).toBe(UPSERT_FINALIZED_VISIT_SQL);
+    expect(visitUpsertSql("timeout")).toBe(UPSERT_FINALIZED_VISIT_SQL);
   });
 
-  it("skips unchanged retries while retaining late metrics and archive state", () => {
+  it("updates only lifecycle fields while retaining immutable and archive state", () => {
     const db = new DatabaseSync(":memory:");
     db.exec(`
       CREATE TABLE visits (
@@ -153,35 +186,55 @@ describe("ingest visit SQL bindings", () => {
         ).join(",\n")}
       )
     `);
-    const statement = db.prepare(UPSERT_VISIT_SQL);
+    const activeStatement = db.prepare(UPSERT_ACTIVE_VISIT_SQL);
+    const finalizedStatement = db.prepare(UPSERT_FINALIZED_VISIT_SQL);
 
     try {
-      const initial = visitRow({ perfLcpMs: null, updatedAt: 20 });
-      expect(statement.run(...visitBindings(initial)).changes).toBe(1);
+      const initial = visitRow({
+        status: "open",
+        endedAt: null,
+        finalizedAt: null,
+        durationMs: null,
+        durationSource: "",
+        exitReason: "",
+        perfLcpMs: null,
+        updatedAt: 20,
+      });
+      expect(activeStatement.run(...visitBindings(initial)).changes).toBe(1);
 
       db.prepare("UPDATE visits SET ae_synced_at = ? WHERE visit_id = ?").run(
         123,
         initial.visitId,
       );
       expect(
-        statement.run(
+        activeStatement.run(
           ...visitBindings({ ...initial, updatedAt: initial.updatedAt + 1 }),
         ).changes,
       ).toBe(0);
 
       expect(
-        statement.run(
+        activeStatement.run(
           ...visitBindings({
             ...initial,
+            siteId: "site-should-not-change",
+            pathname: "/should-not-change",
+            lastActivityAt: initial.lastActivityAt + 1,
             perfLcpMs: 2500,
             updatedAt: initial.updatedAt + 2,
           }),
         ).changes,
       ).toBe(1);
       expect(
-        statement.run(
+        finalizedStatement.run(
           ...visitBindings({
             ...initial,
+            status: "complete",
+            lastActivityAt: 3,
+            endedAt: 3,
+            finalizedAt: 4,
+            durationMs: 2,
+            durationSource: "server",
+            exitReason: "pagehide",
             perfLcpMs: 2500,
             userId: "user-late",
             userName: "Ada",
@@ -192,15 +245,48 @@ describe("ingest visit SQL bindings", () => {
       expect(
         db
           .prepare(
-            "SELECT perf_lcp_ms AS perfLcpMs, user_id AS userId, user_name AS userName, ae_synced_at AS aeSyncedAt FROM visits WHERE visit_id = ?",
+            "SELECT site_id AS siteId, pathname, status, ended_at AS endedAt, duration_ms AS durationMs, perf_lcp_ms AS perfLcpMs, user_id AS userId, user_name AS userName, ae_synced_at AS aeSyncedAt FROM visits WHERE visit_id = ?",
           )
           .get(initial.visitId),
       ).toEqual({
+        siteId: "site-1",
+        pathname: "/docs",
+        status: "complete",
+        endedAt: 3,
+        durationMs: 2,
         perfLcpMs: 2500,
         userId: "user-late",
         userName: "Ada",
         aeSyncedAt: 123,
       });
+
+      expect(
+        activeStatement.run(
+          ...visitBindings({
+            ...initial,
+            lastActivityAt: 10,
+            updatedAt: initial.updatedAt + 4,
+          }),
+        ).changes,
+      ).toBe(0);
+      expect(
+        finalizedStatement.run(
+          ...visitBindings({
+            ...initial,
+            status: "complete",
+            lastActivityAt: 3,
+            endedAt: 3,
+            finalizedAt: 4,
+            durationMs: 2,
+            durationSource: "server",
+            exitReason: "pagehide",
+            perfLcpMs: 2500,
+            userId: "user-late",
+            userName: "Ada",
+            updatedAt: initial.updatedAt + 5,
+          }),
+        ).changes,
+      ).toBe(0);
     } finally {
       db.close();
     }

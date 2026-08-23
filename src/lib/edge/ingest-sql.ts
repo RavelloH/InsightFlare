@@ -117,31 +117,81 @@ export const VISIT_D1_COLUMNS = [
 
 const VISIT_D1_COLUMN_SQL = VISIT_D1_COLUMNS.join(", ");
 const VISIT_D1_PLACEHOLDER_SQL = VISIT_D1_COLUMNS.map(() => "?").join(", ");
-const VISIT_UPSERT_COLUMNS = VISIT_D1_COLUMNS.filter(
-  (column) =>
-    !["visit_id", "ae_synced_at", "created_at", "updated_at"].includes(column),
-);
-const VISIT_UPSERT_ASSIGNMENTS = VISIT_UPSERT_COLUMNS.map(
-  (column) => `    ${column} = excluded.${column}`,
-).join(",\n");
-const VISIT_UPSERT_CHANGES = VISIT_UPSERT_COLUMNS.map(
-  (column) => `    visits.${column} IS NOT excluded.${column}`,
-).join("\n    OR ");
+type VisitD1Column = (typeof VISIT_D1_COLUMNS)[number];
+
+const ACTIVE_VISIT_UPDATE_COLUMNS = [
+  "status",
+  "last_activity_at",
+  "user_id",
+  "user_name",
+  "perf_ttfb_ms",
+  "perf_fcp_ms",
+  "perf_lcp_ms",
+  "perf_cls",
+  "perf_inp_ms",
+] as const satisfies readonly VisitD1Column[];
+
+const FINALIZED_VISIT_UPDATE_COLUMNS = [
+  "status",
+  "last_activity_at",
+  "ended_at",
+  "finalized_at",
+  "duration_ms",
+  "duration_source",
+  "exit_reason",
+  "user_id",
+  "user_name",
+  "perf_ttfb_ms",
+  "perf_fcp_ms",
+  "perf_lcp_ms",
+  "perf_cls",
+  "perf_inp_ms",
+] as const satisfies readonly VisitD1Column[];
+
+function buildVisitUpsertSql(
+  updateColumns: readonly VisitD1Column[],
+  conflictGuard?: string,
+): string {
+  const assignments = updateColumns
+    .map((column) => `    ${column} = excluded.${column}`)
+    .join(",\n");
+  const changes = updateColumns
+    .map((column) => `      visits.${column} IS NOT excluded.${column}`)
+    .join("\n      OR ");
+  const where = conflictGuard
+    ? `    ${conflictGuard}\n    AND (\n${changes}\n    )`
+    : changes;
+
+  return `
+  INSERT INTO visits (${VISIT_D1_COLUMN_SQL})
+  VALUES (${VISIT_D1_PLACEHOLDER_SQL})
+  ON CONFLICT(visit_id) DO UPDATE SET
+${assignments},
+    updated_at = excluded.updated_at
+  WHERE
+${where}
+`;
+}
 
 export const INSERT_VISIT_SQL = `
   INSERT OR IGNORE INTO visits (${VISIT_D1_COLUMN_SQL})
   VALUES (${VISIT_D1_PLACEHOLDER_SQL})
 `;
 
-export const UPSERT_VISIT_SQL = `
-  INSERT INTO visits (${VISIT_D1_COLUMN_SQL})
-  VALUES (${VISIT_D1_PLACEHOLDER_SQL})
-  ON CONFLICT(visit_id) DO UPDATE SET
-${VISIT_UPSERT_ASSIGNMENTS},
-    updated_at = excluded.updated_at
-  WHERE
-${VISIT_UPSERT_CHANGES}
-`;
+export const UPSERT_ACTIVE_VISIT_SQL = buildVisitUpsertSql(
+  ACTIVE_VISIT_UPDATE_COLUMNS,
+  "visits.status IN ('open', 'hidden_pending')",
+);
+
+export const UPSERT_FINALIZED_VISIT_SQL = buildVisitUpsertSql(
+  FINALIZED_VISIT_UPDATE_COLUMNS,
+);
+
+export function visitUpsertSql(status: string): string {
+  return status === "open" || status === "hidden_pending"
+    ? UPSERT_ACTIVE_VISIT_SQL
+    : UPSERT_FINALIZED_VISIT_SQL;
+}
 
 export const CREATE_BUFFERED_CUSTOM_EVENTS_SQL = `
   CREATE TABLE IF NOT EXISTS buffered_custom_events (

@@ -26,8 +26,6 @@ CREATE INDEX idx_account_action_tokens_email
   ON account_action_tokens(email, type, created_at DESC);
 CREATE INDEX idx_account_action_tokens_expires
   ON account_action_tokens(expires_at);
-CREATE INDEX idx_account_action_tokens_hash
-  ON account_action_tokens(token_hash);
 CREATE INDEX idx_account_action_tokens_team
   ON account_action_tokens(team_id, type, created_at DESC);
 CREATE INDEX idx_account_action_tokens_user
@@ -75,8 +73,6 @@ CREATE TABLE api_keys (
 
 CREATE INDEX idx_api_keys_active
   ON api_keys(team_id, revoked_at, expires_at);
-CREATE INDEX idx_api_keys_hash ON api_keys(key_hash);
-CREATE INDEX idx_api_keys_team ON api_keys(team_id);
 
 CREATE TABLE archive_objects (
   archive_key TEXT PRIMARY KEY,
@@ -455,9 +451,6 @@ CREATE TABLE visit_hourly_rollups (
   PRIMARY KEY (site_id, hour_bucket)
 );
 
-CREATE INDEX idx_visit_hourly_rollups_hour
-  ON visit_hourly_rollups(hour_bucket);
-
 CREATE TABLE visits (
   visit_id TEXT PRIMARY KEY,
   site_id TEXT NOT NULL,
@@ -543,5 +536,4 @@ CREATE TABLE widgets (
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
-CREATE INDEX idx_widgets_site_id ON widgets(site_id);
 CREATE INDEX idx_widgets_site_type ON widgets(site_id, type);

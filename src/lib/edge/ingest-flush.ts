@@ -14,7 +14,7 @@ import {
   type IngestFlushContext,
   recordFlushCounter,
 } from "./ingest-flush-types";
-import { UPSERT_VISIT_SQL, visitBindings } from "./ingest-sql";
+import { visitBindings, visitUpsertSql } from "./ingest-sql";
 import { toUnixSeconds } from "./ingest-time";
 import type { BufferedCustomEventRow, BufferedVisitRow } from "./ingest-types";
 import { clampString } from "./utils";
@@ -555,7 +555,9 @@ function prepareVisitStatement(
   context: IngestFlushContext,
   row: BufferedVisitRow,
 ): D1PreparedStatement {
-  return context.env.DB.prepare(UPSERT_VISIT_SQL).bind(...visitBindings(row));
+  return context.env.DB.prepare(visitUpsertSql(row.status)).bind(
+    ...visitBindings(row),
+  );
 }
 
 function deleteFlushedVisitRows(
