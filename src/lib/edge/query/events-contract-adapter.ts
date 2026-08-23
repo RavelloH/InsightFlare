@@ -505,7 +505,7 @@ export async function handleEventRecordDetailContract(
       filters: { version: 1, root: null },
     },
     async () => ({
-      value: await queryEventRecordDetailFromD1(env, siteId, eventId),
+      value: await queryEventRecordDetailFromD1(env, siteId, eventId, window),
     }),
   );
   if (!result.ok) return badRequest(result.error.kind);

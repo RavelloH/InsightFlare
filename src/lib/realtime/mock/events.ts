@@ -561,25 +561,112 @@ export function generateDemoEventRecordDetail(
     ) ?? createDemoCustomEventFacts(dataset.visits)[0];
   if (!event) return { ok: true, data: null };
   const record = demoEventRecordFromFact(event);
+  const queryString = [
+    event.visit.utmSource
+      ? `utm_source=${encodeURIComponent(event.visit.utmSource)}`
+      : "",
+    event.visit.utmMedium
+      ? `utm_medium=${encodeURIComponent(event.visit.utmMedium)}`
+      : "",
+    event.visit.utmCampaign
+      ? `utm_campaign=${encodeURIComponent(event.visit.utmCampaign)}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("&") || "ref=direct";
+  const [screenWidth, screenHeight] = event.visit.screenSize
+    .split("x")
+    .map((value) => Number(value));
+  const endedAt = event.visit.startedAt + event.visit.durationMs;
+  const performance = {
+    ttfb: Math.max(45, Math.round(80 + event.visit.durationMs * 0.02)),
+    fcp: Math.max(120, Math.round(260 + event.visit.durationMs * 0.03)),
+    lcp: Math.max(280, Math.round(620 + event.visit.durationMs * 0.05)),
+    cls: Number((0.02 + (event.visit.durationMs % 17) / 1000).toFixed(3)),
+    inp: Math.max(35, Math.round(110 + event.visit.durationMs * 0.01)),
+  };
   return {
     ok: true,
     data: {
-      event: record,
+      event: { ...record, eventKind: "custom_event" },
       context: {
         visitId: record.visitId,
         sessionId: record.sessionId,
         visitorId: record.visitorId,
+        userId: `demo-user-${event.visit.visitorId}`,
+        userName: `Demo visitor ${event.visit.visitorId.slice(-6).toUpperCase()}`,
         pathname: record.pathname,
+        queryString,
+        hash: "",
         title: record.title,
         hostname: record.hostname,
+        referrerUrl: event.visit.referrerUrl,
         referrerHost: record.referrerHost,
+        utmSource: event.visit.utmSource ?? "",
+        utmMedium: event.visit.utmMedium ?? "",
+        utmCampaign: event.visit.utmCampaign ?? "",
+        utmTerm: "",
+        utmContent: "",
+        isEU: new Set([
+          "AT",
+          "BE",
+          "BG",
+          "HR",
+          "CY",
+          "CZ",
+          "DE",
+          "DK",
+          "EE",
+          "ES",
+          "FI",
+          "FR",
+          "GR",
+          "HU",
+          "IE",
+          "IT",
+          "LT",
+          "LU",
+          "LV",
+          "MT",
+          "NL",
+          "PL",
+          "PT",
+          "RO",
+          "SE",
+          "SI",
+          "SK",
+        ]).has(event.visit.country.trim().toUpperCase()),
         country: record.country,
         region: record.region,
+        regionCode: event.visit.regionCode,
+        city: event.visit.city,
+        continent: event.visit.continent,
+        latitude: event.visit.latitude,
+        longitude: event.visit.longitude,
+        postalCode: `${event.visit.country}-${event.visit.regionCode || "global"}`,
+        metroCode: `${event.visit.country}-${event.visit.regionCode || "global"}`,
+        timezone: event.visit.timezone,
+        organization: event.visit.organization,
         browser: record.browser,
         browserVersion: record.browserVersion,
         os: record.os,
         osVersion: record.osVersion,
         deviceType: record.deviceType,
+        userAgent: `Mozilla/5.0 (${record.os}; ${record.deviceType}) AppleWebKit/537.36 ${record.browser}/${record.browserVersion}`,
+        language: event.visit.language,
+        screenWidth: Number.isFinite(screenWidth) ? screenWidth : null,
+        screenHeight: Number.isFinite(screenHeight) ? screenHeight : null,
+        status: "completed",
+        startedAt: event.visit.startedAt,
+        previousVisitId: "",
+        previousVisitStartedAt: null,
+        lastActivityAt: event.visit.startedAt + event.visit.durationMs,
+        endedAt: event.visit.startedAt + event.visit.durationMs,
+        finalizedAt: endedAt + 80,
+        durationMs: event.visit.durationMs,
+        durationSource: "mock",
+        exitReason: "navigation",
+        performance,
       },
       eventData: demoEventRecordPayload(event),
     },

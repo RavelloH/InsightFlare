@@ -36,6 +36,8 @@ import {
   DeviceMeta,
   formatPath,
   formatRelativeTime,
+  formatDuration,
+  formatScreen,
   formatShortDateTime,
   OsMeta,
   ReferrerMeta,
@@ -1311,6 +1313,61 @@ function isInsideDetailDrawer(target: EventTarget | null) {
   );
 }
 
+function formatEventDetailDateTime(
+  locale: Locale,
+  value: number | null | undefined,
+  unknownLabel: string,
+): string {
+  return typeof value === "number" && value > 0
+    ? formatShortDateTime(locale, value, undefined)
+    : unknownLabel;
+}
+
+function formatEventDetailBoolean(
+  value: boolean | undefined,
+  messages: AppMessages,
+): string {
+  if (value === undefined) return messages.common.unknown;
+  return value ? messages.sessionDetail.yes : messages.sessionDetail.no;
+}
+
+function formatEventDetailStatus(
+  value: string | undefined,
+  messages: AppMessages,
+): string {
+  const key = value?.trim() as keyof AppMessages["realtime"]["statusLabels"];
+  return key && messages.realtime.statusLabels[key]
+    ? messages.realtime.statusLabels[key]
+    : messages.common.unknown;
+}
+
+function formatEventDetailText(value: string | null | undefined, unknownLabel: string) {
+  const normalized = value?.trim() || "";
+  return normalized || unknownLabel;
+}
+
+function formatEventDetailScreen(
+  width: number | null | undefined,
+  height: number | null | undefined,
+  unknownLabel: string,
+): string {
+  const screen = formatScreen(width, height);
+  return screen === "/" ? unknownLabel : screen;
+}
+
+function formatEventDetailPerformance(
+  locale: Locale,
+  value: number | null | undefined,
+  metric: "ttfb" | "fcp" | "lcp" | "cls" | "inp",
+  unknownLabel: string,
+): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return unknownLabel;
+  }
+  const formatted = numberFormat(locale, value);
+  return metric === "cls" ? formatted : `${formatted} ms`;
+}
+
 type EventRecordNestedDetail = {
   kind: "visitor" | "session";
   id: string;
@@ -1552,6 +1609,30 @@ export function EventRecordDetailDrawer({
                         </span>
                       }
                     />
+                    <DetailItem
+                      label={messages.realtime.queryString}
+                      wide
+                      value={
+                        <span className="break-all font-mono text-[11px]">
+                          {formatEventDetailText(
+                            detail.context.queryString,
+                            messages.common.unknown,
+                          )}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      label={messages.pages.hashTab}
+                      wide
+                      value={
+                        <span className="break-all font-mono text-[11px]">
+                          {formatEventDetailText(
+                            detail.context.hash,
+                            messages.common.unknown,
+                          )}
+                        </span>
+                      }
+                    />
                   </dl>
                 </section>
 
@@ -1571,6 +1652,26 @@ export function EventRecordDetailDrawer({
                         </span>
                       }
                     />
+                    {detail.context.userName?.trim() ? (
+                      <DetailItem
+                        label={messages.realtime.userName}
+                        value={
+                          <span className="break-words text-[11px]">
+                            {detail.context.userName}
+                          </span>
+                        }
+                      />
+                    ) : null}
+                    {detail.context.userId?.trim() ? (
+                      <DetailItem
+                        label={messages.realtime.userId}
+                        value={
+                          <span className="break-all font-mono text-[11px]">
+                            {detail.context.userId}
+                          </span>
+                        }
+                      />
+                    ) : null}
                     <DetailItem
                       label={labels.browser}
                       value={
@@ -1600,6 +1701,37 @@ export function EventRecordDetailDrawer({
                           unknownLabel={messages.common.unknown}
                         />
                       }
+                    />
+                    <DetailItem
+                      label={messages.realtime.userAgent}
+                      wide
+                      value={
+                        <span className="break-all font-mono text-[11px]">
+                          {formatEventDetailText(
+                            detail.context.userAgent,
+                            messages.common.unknown,
+                          )}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      label={messages.realtime.isEU}
+                      value={formatEventDetailBoolean(detail.context.isEU, messages)}
+                    />
+                    <DetailItem
+                      label={messages.common.screenSize}
+                      value={formatEventDetailScreen(
+                        detail.context.screenWidth,
+                        detail.context.screenHeight,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.common.language}
+                      value={formatEventDetailText(
+                        detail.context.language,
+                        messages.common.unknown,
+                      )}
                     />
                   </dl>
                   <div className="flex flex-wrap gap-2">
@@ -1641,6 +1773,65 @@ export function EventRecordDetailDrawer({
                         </span>
                       }
                     />
+                    <DetailItem
+                      label={messages.realtime.status}
+                      value={formatEventDetailStatus(detail.context.status, messages)}
+                    />
+                    <DetailItem
+                      label={messages.realtime.startedAt}
+                      value={formatEventDetailDateTime(
+                        locale,
+                        detail.context.startedAt,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.realtime.previousVisitStartedAt}
+                      value={formatEventDetailDateTime(
+                        locale,
+                        detail.context.previousVisitStartedAt,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.realtime.endedAt}
+                      value={formatEventDetailDateTime(
+                        locale,
+                        detail.context.endedAt,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.realtime.duration}
+                      value={
+                        detail.context.durationMs === null ||
+                        detail.context.durationMs === undefined
+                          ? messages.common.unknown
+                          : formatDuration(locale, detail.context.durationMs)
+                      }
+                    />
+                    <DetailItem
+                      label={messages.realtime.durationSource}
+                      value={formatEventDetailText(
+                        detail.context.durationSource,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.realtime.exitReason}
+                      value={formatEventDetailText(
+                        detail.context.exitReason,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.common.organization}
+                      wide
+                      value={formatEventDetailText(
+                        detail.context.organization,
+                        messages.common.unknown,
+                      )}
+                    />
                   </dl>
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -1674,6 +1865,66 @@ export function EventRecordDetailDrawer({
                         />
                       }
                     />
+                    <DetailItem
+                      label={messages.common.regionCode}
+                      value={formatEventDetailText(
+                        detail.context.regionCode,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.common.city}
+                      value={formatEventDetailText(
+                        detail.context.city,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.common.continent}
+                      value={formatEventDetailText(
+                        detail.context.continent,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.common.timezone}
+                      value={formatEventDetailText(
+                        detail.context.timezone,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.realtime.postalCode}
+                      value={formatEventDetailText(
+                        detail.context.postalCode,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.realtime.metroCode}
+                      value={formatEventDetailText(
+                        detail.context.metroCode,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.common.latitude}
+                      value={
+                        detail.context.latitude === null ||
+                        detail.context.latitude === undefined
+                          ? messages.common.unknown
+                          : numberFormat(locale, detail.context.latitude)
+                      }
+                    />
+                    <DetailItem
+                      label={messages.common.longitude}
+                      value={
+                        detail.context.longitude === null ||
+                        detail.context.longitude === undefined
+                          ? messages.common.unknown
+                          : numberFormat(locale, detail.context.longitude)
+                      }
+                    />
                   </dl>
                 </section>
 
@@ -1689,9 +1940,112 @@ export function EventRecordDetailDrawer({
                       value={
                         <ReferrerMeta
                           referrerHost={detail.context.referrerHost || ""}
+                          referrerUrl={detail.context.referrerUrl}
                           directLabel={messages.overview.direct}
                         />
                       }
+                    />
+                    <DetailItem
+                      label={messages.sessionDetail.referrerUrl}
+                      wide
+                      value={
+                        <span className="break-all font-mono text-[11px]">
+                          {formatEventDetailText(
+                            detail.context.referrerUrl,
+                            messages.common.unknown,
+                          )}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      label={messages.realtime.utmSource}
+                      value={formatEventDetailText(
+                        detail.context.utmSource,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.realtime.utmMedium}
+                      value={formatEventDetailText(
+                        detail.context.utmMedium,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.realtime.utmCampaign}
+                      value={formatEventDetailText(
+                        detail.context.utmCampaign,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.realtime.utmTerm}
+                      value={formatEventDetailText(
+                        detail.context.utmTerm,
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.realtime.utmContent}
+                      value={formatEventDetailText(
+                        detail.context.utmContent,
+                        messages.common.unknown,
+                      )}
+                    />
+                  </dl>
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">
+                    {messages.sessionDetail.performanceTitle}
+                  </h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      label={messages.performance.ttfb}
+                      value={formatEventDetailPerformance(
+                        locale,
+                        detail.context.performance?.ttfb,
+                        "ttfb",
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.performance.fcp}
+                      value={formatEventDetailPerformance(
+                        locale,
+                        detail.context.performance?.fcp,
+                        "fcp",
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.performance.lcp}
+                      value={formatEventDetailPerformance(
+                        locale,
+                        detail.context.performance?.lcp,
+                        "lcp",
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.performance.cls}
+                      value={formatEventDetailPerformance(
+                        locale,
+                        detail.context.performance?.cls,
+                        "cls",
+                        messages.common.unknown,
+                      )}
+                    />
+                    <DetailItem
+                      label={messages.performance.inp}
+                      value={formatEventDetailPerformance(
+                        locale,
+                        detail.context.performance?.inp,
+                        "inp",
+                        messages.common.unknown,
+                      )}
                     />
                   </dl>
                 </section>
