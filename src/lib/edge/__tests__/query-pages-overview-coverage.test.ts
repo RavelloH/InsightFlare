@@ -33,6 +33,7 @@ import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
+import { installVisitSiteIdentityFixture } from "./site-identity-fixture";
 
 type D1Row = Record<string, unknown>;
 type QueryBinding = string | number | null;
@@ -277,6 +278,7 @@ describe("edge pages D1 queries", () => {
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
+    installVisitSiteIdentityFixture(database);
     const calls: QueryCall[] = [];
     const env = {
       DB: {
@@ -390,7 +392,9 @@ describe("edge pages D1 queries", () => {
         plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
       ).toHaveLength(1);
       expect(
-        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+        plan.some((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
       ).toBe(true);
     } finally {
       database.close();
@@ -999,6 +1003,7 @@ describe("edge overview D1 queries and handlers", () => {
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
+    installVisitSiteIdentityFixture(database);
     const calls: QueryCall[] = [];
     const env = {
       DB: {
@@ -1100,7 +1105,9 @@ describe("edge overview D1 queries and handlers", () => {
         plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
       ).toHaveLength(1);
       expect(
-        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+        plan.some((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
       ).toBe(true);
     } finally {
       database.close();
@@ -1115,6 +1122,7 @@ describe("edge overview D1 queries and handlers", () => {
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
+    installVisitSiteIdentityFixture(database);
     const calls: QueryCall[] = [];
     const env = {
       DB: {
@@ -1282,6 +1290,7 @@ describe("edge overview D1 queries and handlers", () => {
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
+    installVisitSiteIdentityFixture(database);
     const calls: QueryCall[] = [];
     const env = {
       DB: {
@@ -1391,7 +1400,9 @@ describe("edge overview D1 queries and handlers", () => {
         plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
       ).toHaveLength(1);
       expect(
-        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+        plan.some((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
       ).toBe(true);
     } finally {
       database.close();

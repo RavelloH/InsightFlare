@@ -1,4 +1,5 @@
 import { CUSTOM_EVENT_JSON_TYPE } from "./custom-event-json";
+import { SITE_PK_FROM_SITE_ID_SQL } from "./site-identity-sql";
 import type { Env } from "./types";
 
 interface CustomEventRow {
@@ -63,7 +64,7 @@ export async function readCustomEventsForVisit(
       FROM custom_events ce
       INNER JOIN custom_event_names cen
         ON cen.id = ce.event_name_id
-      WHERE ce.site_id = ? AND ce.visit_id = ?
+      WHERE ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND ce.visit_id = ?
       ORDER BY ce.occurred_at ASC, ce.sequence ASC, ce.event_pk ASC
       LIMIT ?
     `,
@@ -92,7 +93,7 @@ export async function readCustomEventVisitId(
     `
       SELECT visit_id AS visitId
       FROM custom_events
-      WHERE site_id = ? AND event_id = ?
+      WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND event_id = ?
       LIMIT 1
     `,
   )
@@ -122,7 +123,7 @@ export async function readCustomEventDetail(
       FROM custom_events ce
       INNER JOIN custom_event_names cen
         ON cen.id = ce.event_name_id
-      WHERE ce.site_id = ? AND ce.event_id = ?
+      WHERE ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND ce.event_id = ?
       LIMIT 1
     `,
   )

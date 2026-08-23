@@ -49,6 +49,7 @@ import {
   type InvocationLogger,
   runWithInvocationLogger,
 } from "./observability-logger";
+import { SITE_PK_FROM_SITE_ID_SQL } from "./site-identity-sql";
 import type {
   Env,
   IngestEnvelopePayload,
@@ -1200,7 +1201,7 @@ export class IngestDurableObject extends DurableObject {
           `
             SELECT session_id AS sessionId
             FROM visits
-            WHERE visit_id = ? AND site_id = ?
+            WHERE visit_id = ? AND site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
             LIMIT 1
           `,
         )
@@ -1213,7 +1214,7 @@ export class IngestDurableObject extends DurableObject {
         `
           UPDATE visits
           SET user_id = ?, user_name = ?
-          WHERE visit_id = ? AND site_id = ?
+          WHERE visit_id = ? AND site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
         `,
       )
         .bind(

@@ -406,7 +406,7 @@ function payloadComparison(
   const valueAlias = `filter_payload_value_${compiler.payloadIndex}`;
   const pathAlias = `filter_payload_path_${compiler.payloadIndex}`;
   compiler.payloadIndex += 1;
-  const base = `${valueAlias}.event_pk = ${compiler.eventAlias}.event_pk AND ${valueAlias}.site_id = ${compiler.eventAlias}.site_id AND ${pathAlias}.path = ${push(compiler, condition.target.path)}`;
+  const base = `${valueAlias}.event_pk = ${compiler.eventAlias}.event_pk AND ${valueAlias}.site_pk = ${compiler.eventAlias}.site_pk AND ${pathAlias}.site_pk = ${compiler.eventAlias}.site_pk AND ${pathAlias}.path = ${push(compiler, condition.target.path)}`;
   const exists = (extra = "") =>
     `EXISTS (SELECT 1 FROM custom_event_json_values ${valueAlias} INNER JOIN custom_event_json_paths ${pathAlias} ON ${pathAlias}.id = ${valueAlias}.path_id WHERE ${base}${extra})`;
   if (condition.operator === "exists") return exists();

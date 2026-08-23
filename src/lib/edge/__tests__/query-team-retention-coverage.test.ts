@@ -40,6 +40,32 @@ vi.mock("@/lib/edge/session-auth", () => ({
 type D1Row = Record<string, unknown>;
 type QueryBinding = string | number | null;
 
+function addSiteIdentityFixture(
+  database: DatabaseSync,
+  siteIds: readonly string[],
+): void {
+  database.exec(`
+    CREATE TABLE site_identities (
+      site_pk INTEGER PRIMARY KEY,
+      site_id TEXT NOT NULL UNIQUE
+    );
+    ALTER TABLE visits ADD COLUMN site_pk INTEGER;
+    CREATE INDEX idx_visits_site_pk_started_at
+      ON visits(site_pk, started_at);
+    CREATE TRIGGER test_visits_site_pk
+    AFTER INSERT ON visits
+    BEGIN
+      UPDATE visits
+      SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+      WHERE visit_id = NEW.visit_id;
+    END;
+  `);
+  const insertIdentity = database.prepare(
+    "INSERT INTO site_identities (site_pk, site_id) VALUES (?, ?)",
+  );
+  siteIds.forEach((siteId, index) => insertIdentity.run(index + 1, siteId));
+}
+
 interface QueryCall {
   kind: "all" | "first";
   sql: string;
@@ -249,7 +275,9 @@ describe("edge team query coverage", () => {
       visitBindingsForSites(siteIds),
       visitBindingsForSites(siteIds),
     ]);
-    expect(calls[0].sql).toContain("WHERE site_id IN (?, ?)");
+    expect(calls[0].sql).toContain(
+      "WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (?, ?))",
+    );
     expect(calls[1].sql).toContain("ORDER BY bucket ASC, siteId ASC");
   });
 
@@ -261,6 +289,7 @@ describe("edge team query coverage", () => {
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
+    addSiteIdentityFixture(database, ["site-a", "site-b"]);
     const calls: Array<{ sql: string; bindings: QueryBinding[] }> = [];
     const env = {
       DB: {
@@ -363,7 +392,9 @@ describe("edge team query coverage", () => {
         plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
       ).toHaveLength(1);
       expect(
-        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+        plan.some((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
       ).toBe(true);
     } finally {
       database.close();
@@ -733,6 +764,7 @@ describe("edge journey retention coverage", () => {
     database.exec(
       readFileSync("migrations/0013_add_visit_performance_metrics.sql", "utf8"),
     );
+    addSiteIdentityFixture(database, [siteId]);
     const calls: Array<{ sql: string; bindings: QueryBinding[] }> = [];
     const env = {
       DB: {
@@ -827,7 +859,9 @@ describe("edge journey retention coverage", () => {
         plan.filter((row) => row.detail.includes("SEARCH visits USING")),
       ).toHaveLength(1);
       expect(
-        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+        plan.some((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
       ).toBe(true);
     } finally {
       database.close();

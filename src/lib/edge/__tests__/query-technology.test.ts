@@ -25,6 +25,7 @@ import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
+import { installVisitSiteIdentityFixture } from "./site-identity-fixture";
 
 type D1Row = Record<string, unknown>;
 
@@ -180,6 +181,7 @@ function createSqliteTrendEnv(): { env: Env; d1: SqliteD1Database } {
     CREATE INDEX idx_visits_site_started_at
       ON visits(site_id, started_at);
   `);
+  installVisitSiteIdentityFixture(d1.database);
   return {
     env: {
       DB: d1 as unknown as D1Database,
@@ -344,7 +346,9 @@ describe("edge query technology D1 mapping", () => {
         .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)
         .all(...d1.calls[0].bindings) as Array<{ detail: string }>;
       expect(
-        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+        plan.some((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
       ).toBe(true);
       expect(
         plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),

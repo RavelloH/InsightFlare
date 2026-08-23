@@ -16,12 +16,12 @@ export async function flushCustomEventRowIndividually(
   row: BufferedCustomEventRow,
 ): Promise<boolean> {
   try {
-    if (!(await hasPersistedVisit(context, row))) {
+    const sitePk = await resolveSitePk(context, row.siteId);
+    if (!(await hasPersistedVisit(context, sitePk, row.visitId))) {
       context.observability?.warn("do.flush.custom_event_waiting_for_visit");
       markCustomEventRowsFailed(context, [row], "waiting_for_visit");
       return false;
     }
-    const sitePk = await resolveSitePk(context, row.siteId);
     const expanded = expandCustomEventDataJson(row.eventDataJson);
     if (!expanded.ok) {
       throw new Error(expanded.error);
@@ -134,11 +134,11 @@ async function resolveDictionaryId(
     `
       SELECT id
       FROM ${spec.table}
-      WHERE site_id = ? AND ${spec.column} = ?
+      WHERE site_pk = ? AND ${spec.column} = ?
       LIMIT 1
     `,
   )
-    .bind(siteId, value)
+    .bind(sitePk, value)
     .first<{ id: number }>();
   const id = Number(row?.id ?? 0);
   if (!Number.isFinite(id) || id <= 0) {
@@ -200,18 +200,19 @@ async function resolveCustomEventDictionaryIds(
 
 async function hasPersistedVisit(
   context: IngestFlushContext,
-  row: Pick<BufferedCustomEventRow, "siteId" | "visitId">,
+  sitePk: number,
+  visitId: string,
 ): Promise<boolean> {
   recordFlushCounter(context, "d1Statements");
   const persisted = await context.env.DB.prepare(
     `
       SELECT 1 AS ok
       FROM visits
-      WHERE site_id = ? AND visit_id = ?
+      WHERE site_pk = ? AND visit_id = ?
       LIMIT 1
     `,
   )
-    .bind(row.siteId, row.visitId)
+    .bind(sitePk, visitId)
     .first<{ ok: number }>();
   return persisted !== null;
 }
@@ -253,7 +254,7 @@ function prepareCustomEventStatements(
       )
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?
       FROM visits
-      WHERE site_id = ? AND visit_id = ?
+      WHERE site_pk = ? AND visit_id = ?
       LIMIT 1
     `,
   ).bind(
@@ -269,7 +270,7 @@ function prepareCustomEventStatements(
     expanded.values.length,
     row.userId || null,
     row.createdAt,
-    row.siteId,
+    sitePk,
     row.visitId,
   );
 

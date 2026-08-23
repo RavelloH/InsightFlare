@@ -2,6 +2,7 @@ import {
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollupsPartial,
 } from "@/lib/edge/hourly-rollup";
+import { sitePksFromSiteIdsSql } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -44,12 +45,12 @@ function siteIdChunks(siteIds: string[]): string[][] {
 }
 
 function buildTeamOverviewSourceCte(siteCount: number): string {
-  const placeholders = Array.from({ length: siteCount }, () => "?").join(", ");
   return `
 visit_source AS MATERIALIZED (
   SELECT site_id, visitor_id, session_id, duration_ms
   FROM visits
-  WHERE site_id IN (${placeholders}) AND started_at >= ? AND started_at < ?
+  WHERE site_pk IN ${sitePksFromSiteIdsSql(siteCount)}
+    AND started_at >= ? AND started_at < ?
 )`;
 }
 

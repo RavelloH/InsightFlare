@@ -1,4 +1,5 @@
 import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -407,7 +408,7 @@ WITH
       (
         SELECT pv.visit_id
         FROM visits pv
-        WHERE pv.site_id = v.site_id
+        WHERE pv.site_pk = v.site_pk
           AND pv.session_id = v.session_id
           AND pv.started_at < v.started_at
         ORDER BY pv.started_at DESC, pv.visit_id DESC
@@ -418,7 +419,7 @@ WITH
     (
       SELECT pv.started_at
       FROM visits pv
-      WHERE pv.site_id = v.site_id
+      WHERE pv.site_pk = v.site_pk
         AND pv.session_id = v.session_id
         AND pv.started_at < v.started_at
       ORDER BY pv.started_at DESC, pv.visit_id DESC
@@ -472,9 +473,9 @@ WITH
   INNER JOIN custom_event_names cen
     ON cen.id = ce.event_name_id
   INNER JOIN visits v
-    ON v.site_id = ce.site_id
+    ON v.site_pk = ce.site_pk
    AND v.visit_id = ce.visit_id
-  WHERE ce.site_id = ? AND ce.event_id = ?
+  WHERE ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND ce.event_id = ?
   ${window ? "AND ce.occurred_at >= ? AND ce.occurred_at < ?" : ""}
 )
 SELECT

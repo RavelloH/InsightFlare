@@ -99,6 +99,40 @@ function createSqliteDetailEnv(): {
   ]) {
     database.exec(readFileSync(migration, "utf8"));
   }
+  database.exec(`
+    CREATE TABLE site_identities (
+      site_pk INTEGER PRIMARY KEY,
+      site_id TEXT NOT NULL UNIQUE
+    );
+    INSERT INTO site_identities (site_pk, site_id) VALUES (1, '${siteId}');
+
+    ALTER TABLE visits ADD COLUMN site_pk INTEGER;
+    ALTER TABLE custom_event_names ADD COLUMN site_pk INTEGER;
+    ALTER TABLE custom_events ADD COLUMN site_pk INTEGER;
+
+    CREATE TRIGGER test_visits_site_pk
+    AFTER INSERT ON visits
+    BEGIN
+      UPDATE visits SET site_pk = 1 WHERE visit_id = NEW.visit_id;
+    END;
+    CREATE TRIGGER test_custom_event_names_site_pk
+    AFTER INSERT ON custom_event_names
+    BEGIN
+      UPDATE custom_event_names SET site_pk = 1 WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER test_custom_events_site_pk
+    AFTER INSERT ON custom_events
+    BEGIN
+      UPDATE custom_events SET site_pk = 1 WHERE event_pk = NEW.event_pk;
+    END;
+
+    CREATE INDEX idx_visits_site_pk_visitor_started_at
+      ON visits(site_pk, visitor_id, started_at);
+    CREATE INDEX idx_visits_site_pk_session_started_at
+      ON visits(site_pk, session_id, started_at);
+    CREATE INDEX idx_custom_events_site_pk_visit_time
+      ON custom_events(site_pk, visit_id, occurred_at, event_pk);
+  `);
   const calls: QueryCall[] = [];
   const env = {
     DB: {
@@ -527,12 +561,12 @@ describe("edge journey detail D1 queries", () => {
       const plan = sqlite.explain(sqlite.calls[0]!);
       expect(
         plan.some((detail) =>
-          detail.includes("idx_visits_site_visitor_started_at"),
+          detail.includes("idx_visits_site_pk_visitor_started_at"),
         ),
       ).toBe(true);
       expect(
         plan.some((detail) =>
-          detail.includes("idx_custom_events_site_visit_time"),
+          detail.includes("idx_custom_events_site_pk_visit_time"),
         ),
       ).toBe(true);
       expect(plan.some((detail) => /SCAN ce(?:\s|$)/.test(detail))).toBe(false);
@@ -552,12 +586,12 @@ describe("edge journey detail D1 queries", () => {
       const plan = sqlite.explain(sqlite.calls[0]!);
       expect(
         plan.some((detail) =>
-          detail.includes("idx_visits_site_session_started_at"),
+          detail.includes("idx_visits_site_pk_session_started_at"),
         ),
       ).toBe(true);
       expect(
         plan.some((detail) =>
-          detail.includes("idx_custom_events_site_visit_time"),
+          detail.includes("idx_custom_events_site_pk_visit_time"),
         ),
       ).toBe(true);
     } finally {

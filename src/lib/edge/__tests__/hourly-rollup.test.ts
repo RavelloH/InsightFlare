@@ -75,6 +75,7 @@ function createEnv() {
     CREATE TABLE visits (
       visit_id TEXT PRIMARY KEY,
       site_id TEXT NOT NULL,
+      site_pk INTEGER,
       visitor_id TEXT NOT NULL DEFAULT '',
       session_id TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL,
@@ -93,7 +94,7 @@ function createEnv() {
 
     CREATE TABLE visit_hourly_rollups (
       site_id TEXT NOT NULL,
-      site_pk INTEGER,
+      site_pk INTEGER NOT NULL DEFAULT 1,
       hour_bucket INTEGER NOT NULL,
       views INTEGER NOT NULL DEFAULT 0,
       sessions INTEGER NOT NULL DEFAULT 0,
@@ -121,7 +122,7 @@ function createEnv() {
 
     CREATE TABLE visit_hourly_aggregation_state (
       site_id TEXT PRIMARY KEY,
-      site_pk INTEGER,
+      site_pk INTEGER NOT NULL DEFAULT 1,
       aggregated_until_hour INTEGER NOT NULL DEFAULT 0,
       lag_hours INTEGER NOT NULL DEFAULT 12,
       last_run_at INTEGER,
@@ -129,11 +130,23 @@ function createEnv() {
       last_error TEXT
     );
 
-    CREATE INDEX idx_visits_site_started_at
-      ON visits(site_id, started_at);
-    CREATE INDEX idx_visits_open_site_started_at
-      ON visits(site_id, started_at)
+    CREATE INDEX idx_visits_site_pk_started_at
+      ON visits(site_pk, started_at);
+    CREATE INDEX idx_visits_open_site_pk_started_at
+      ON visits(site_pk, started_at)
       WHERE status = 'open';
+    CREATE INDEX idx_visit_hourly_rollups_site_pk_hour
+      ON visit_hourly_rollups(site_pk, hour_bucket);
+    CREATE INDEX idx_visit_hourly_aggregation_state_site_pk
+      ON visit_hourly_aggregation_state(site_pk);
+
+    CREATE TRIGGER test_visits_site_pk
+    AFTER INSERT ON visits
+    BEGIN
+      UPDATE visits
+      SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+      WHERE visit_id = NEW.visit_id;
+    END;
 
     INSERT INTO site_identities (site_pk, site_id) VALUES (1, 'site-1');
     INSERT INTO sites (id) VALUES ('site-1');

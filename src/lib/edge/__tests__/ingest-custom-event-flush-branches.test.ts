@@ -169,7 +169,7 @@ describe("custom event individual flush branch coverage", () => {
     const createdAt = Math.floor(NOW / 1000);
     expect(context.calls).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ bindings: ["site-1", "visit-1"] }),
+        expect.objectContaining({ bindings: [1, "visit-1"] }),
         expect.objectContaining({
           bindings: ["site-1", 1, "Signup", createdAt, createdAt],
         }),

@@ -11,6 +11,7 @@ import type {
   ScheduledTaskLogger,
   ScheduledTaskOutcome,
 } from "./scheduled-task-runner";
+import { sitePksFromSiteIdsSql } from "./site-identity-sql";
 import type { Env } from "./types";
 import { ONE_HOUR_MS } from "./utils";
 
@@ -422,12 +423,11 @@ async function queryAggregationStates(
   const states = new Map<string, number>();
   const requested = new Set(siteIds);
   for (const chunk of siteIdChunks(siteIds)) {
-    const placeholders = chunk.map(() => "?").join(", ");
     const result = await env.DB.prepare(
       `
       SELECT site_id AS siteId, aggregated_until_hour AS aggregatedUntilHour
       FROM visit_hourly_aggregation_state
-      WHERE site_id IN (${placeholders})
+      WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
     `,
     )
       .bind(...chunk)
@@ -485,7 +485,6 @@ async function queryDetailAccumulatorsForSites(
   }
   const accumulators = new Map<string, MetricAccumulator>();
   for (const chunk of siteIdChunks(siteIds, 2)) {
-    const placeholders = chunk.map(() => "?").join(", ");
     const result = await env.DB.prepare(
       `
       SELECT
@@ -500,7 +499,7 @@ async function queryDetailAccumulatorsForSites(
         perf_cls AS perfCls,
         perf_inp_ms AS perfInpMs
       FROM visits
-      WHERE site_id IN (${placeholders})
+      WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
         AND started_at >= ? AND started_at < ?
     `,
     )
@@ -528,7 +527,6 @@ async function queryStoredRollupsForSites(
   if (siteIds.length === 0 || endExclusiveHour <= startHour) return [];
   const rollups: StoredRollupRow[] = [];
   for (const chunk of siteIdChunks(siteIds, 2)) {
-    const placeholders = chunk.map(() => "?").join(", ");
     const result = await env.DB.prepare(
       `
       SELECT
@@ -553,7 +551,7 @@ async function queryStoredRollupsForSites(
         perf_inp_sum AS perfInpSum,
         perf_inp_count AS perfInpCount
       FROM visit_hourly_rollups
-      WHERE site_id IN (${placeholders})
+      WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
         AND hour_bucket >= ? AND hour_bucket < ?
       ORDER BY hour_bucket ASC
     `,
@@ -821,7 +819,6 @@ async function queryDetailVisitsForSites(
   }
   const visits: DetailVisitRow[] = [];
   for (const chunk of siteIdChunks(siteIds, 2)) {
-    const placeholders = chunk.map(() => "?").join(", ");
     const result = await env.DB.prepare(
       `
       SELECT
@@ -836,7 +833,7 @@ async function queryDetailVisitsForSites(
         perf_cls AS perfCls,
         perf_inp_ms AS perfInpMs
       FROM visits
-      WHERE site_id IN (${placeholders})
+      WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
         AND started_at >= ? AND started_at < ?
       ORDER BY started_at ASC
     `,
@@ -1089,12 +1086,12 @@ async function listAggregationCandidates(
       INNER JOIN site_identities si
         ON si.site_id = s.id
       LEFT JOIN visit_hourly_aggregation_state st
-        ON st.site_id = s.id
-      WHERE st.site_id IS NOT NULL
+        ON st.site_pk = si.site_pk
+      WHERE st.site_pk IS NOT NULL
          OR EXISTS (
            SELECT 1
            FROM visits v
-           WHERE v.site_id = s.id
+           WHERE v.site_pk = si.site_pk
              AND v.started_at < ?
            LIMIT 1
          )
@@ -1115,7 +1112,7 @@ async function listAggregationCandidates(
 
 async function readFirstClosedHour(
   env: Env,
-  siteId: string,
+  sitePk: number,
   endHour: number,
 ): Promise<number | null> {
   const endExclusiveMs = (endHour + 1) * ONE_HOUR_MS;
@@ -1123,14 +1120,14 @@ async function readFirstClosedHour(
     `
       SELECT CAST(started_at / ? AS INTEGER) AS hourBucket
       FROM visits
-      WHERE site_id = ?
+      WHERE site_pk = ?
         AND started_at < ?
         AND status != 'open'
       ORDER BY started_at ASC
       LIMIT 1
     `,
   )
-    .bind(ONE_HOUR_MS, siteId, endExclusiveMs)
+    .bind(ONE_HOUR_MS, sitePk, endExclusiveMs)
     .first<HourBucketRow>();
   if (!row || row.hourBucket === null || row.hourBucket === undefined) {
     return null;
@@ -1141,7 +1138,7 @@ async function readFirstClosedHour(
 
 async function readFirstOpenHour(
   env: Env,
-  siteId: string,
+  sitePk: number,
   endHour: number,
 ): Promise<number | null> {
   const endExclusiveMs = (endHour + 1) * ONE_HOUR_MS;
@@ -1149,14 +1146,14 @@ async function readFirstOpenHour(
     `
       SELECT CAST(started_at / ? AS INTEGER) AS hourBucket
       FROM visits
-      WHERE site_id = ?
+      WHERE site_pk = ?
         AND status = 'open'
         AND started_at < ?
       ORDER BY started_at ASC
       LIMIT 1
     `,
   )
-    .bind(ONE_HOUR_MS, siteId, endExclusiveMs)
+    .bind(ONE_HOUR_MS, sitePk, endExclusiveMs)
     .first<HourBucketRow>();
   if (!row || row.hourBucket === null || row.hourBucket === undefined) {
     return null;
@@ -1218,15 +1215,15 @@ async function aggregateSiteHours(
         COALESCE(SUM(CASE WHEN perf_inp_ms IS NOT NULL THEN perf_inp_ms ELSE 0 END), 0) AS perfInpSum,
         COALESCE(SUM(CASE WHEN perf_inp_ms IS NOT NULL THEN 1 ELSE 0 END), 0) AS perfInpCount
       FROM visits
-      WHERE site_id = ?
+      WHERE site_pk = ?
         AND started_at >= ?
         AND started_at < ?
         AND status != 'open'
-      GROUP BY site_id, hourBucket
+      GROUP BY site_pk, hourBucket
       ORDER BY hourBucket ASC
     `,
   )
-    .bind(ONE_HOUR_MS, siteId, startMs, endExclusiveMs)
+    .bind(ONE_HOUR_MS, sitePk, startMs, endExclusiveMs)
     .all<BasicRollupRow>();
   const byHour = new Map<number, StoredRollupRow>();
   for (const row of basic.results) {
@@ -1262,16 +1259,16 @@ async function aggregateSiteHours(
         CAST(started_at / ? AS INTEGER) AS hourBucket,
         visitor_id AS visitorId
       FROM visits
-      WHERE site_id = ?
+      WHERE site_pk = ?
         AND started_at >= ?
         AND started_at < ?
         AND status != 'open'
         AND TRIM(COALESCE(visitor_id, '')) != ''
-      GROUP BY site_id, hourBucket, visitor_id
+      GROUP BY site_pk, hourBucket, visitor_id
       ORDER BY hourBucket ASC, visitor_id ASC
     `,
   )
-    .bind(ONE_HOUR_MS, siteId, startMs, endExclusiveMs)
+    .bind(ONE_HOUR_MS, sitePk, startMs, endExclusiveMs)
     .all<DistinctVisitorRow>();
   const visitorsByHour = new Map<number, string[]>();
   for (const row of visitors.results) {
@@ -1289,16 +1286,16 @@ async function aggregateSiteHours(
         session_id AS sessionId,
         COUNT(*) AS visitCount
       FROM visits
-      WHERE site_id = ?
+      WHERE site_pk = ?
         AND started_at >= ?
         AND started_at < ?
         AND status != 'open'
         AND TRIM(COALESCE(session_id, '')) != ''
-      GROUP BY site_id, hourBucket, session_id
+      GROUP BY site_pk, hourBucket, session_id
       ORDER BY hourBucket ASC, session_id ASC
     `,
   )
-    .bind(ONE_HOUR_MS, siteId, startMs, endExclusiveMs)
+    .bind(ONE_HOUR_MS, sitePk, startMs, endExclusiveMs)
     .all<SessionCountRow>();
   const sessionsByHour = new Map<number, Array<[string, number]>>();
   for (const row of sessions.results) {
@@ -1492,7 +1489,7 @@ export async function runHourlyAggregation(
     if (!site.siteId) continue;
     const firstClosedHour = await readFirstClosedHour(
       env,
-      site.siteId,
+      site.sitePk,
       endHour,
     );
     if (firstClosedHour === null) {
@@ -1511,7 +1508,7 @@ export async function runHourlyAggregation(
       endHour,
       startHour + ROLLUP_MAX_HOURS_PER_SITE - 1,
     );
-    const minOpenHour = await readFirstOpenHour(env, site.siteId, batchEndHour);
+    const minOpenHour = await readFirstOpenHour(env, site.sitePk, batchEndHour);
     const safeEndHour =
       minOpenHour !== null && minOpenHour <= batchEndHour
         ? minOpenHour - 1

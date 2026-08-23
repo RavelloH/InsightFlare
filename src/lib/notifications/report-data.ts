@@ -5,6 +5,7 @@ import {
   queryReferrerAggregate,
 } from "@/lib/edge/query/pages";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import {
@@ -656,7 +657,7 @@ async function loadSiteLastSeenAtUncached(
   const row = await env.DB.prepare(
     `SELECT MAX(last_activity_at) AS lastSeenAt
      FROM visits
-     WHERE site_id = ?`,
+     WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}`,
   )
     .bind(siteId)
     .first<{ lastSeenAt: number | null }>();

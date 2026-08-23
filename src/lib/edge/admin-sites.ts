@@ -20,6 +20,7 @@ import {
   nf,
   parseJson,
 } from "./admin-response";
+import { SITE_PK_FROM_SITE_ID_SQL } from "./site-identity-sql";
 import {
   deleteSiteScriptSettings,
   readSiteScriptSettings,
@@ -103,32 +104,48 @@ export async function deleteSiteData(env: Env, siteId: string): Promise<void> {
   await env.DB.prepare("DELETE FROM configs WHERE config_key=?")
     .bind(`site:${siteId}`)
     .run();
-  await env.DB.prepare("DELETE FROM custom_event_json_values WHERE site_id=?")
-    .bind(siteId)
-    .run();
   await env.DB.prepare(
-    "DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_id=?)",
+    `DELETE FROM custom_event_json_values WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
   )
     .bind(siteId)
     .run();
-  await env.DB.prepare("DELETE FROM custom_events WHERE site_id=?")
-    .bind(siteId)
-    .run();
-  await env.DB.prepare("DELETE FROM custom_event_names WHERE site_id=?")
-    .bind(siteId)
-    .run();
-  await env.DB.prepare("DELETE FROM custom_event_json_keys WHERE site_id=?")
-    .bind(siteId)
-    .run();
-  await env.DB.prepare("DELETE FROM custom_event_json_paths WHERE site_id=?")
-    .bind(siteId)
-    .run();
-  await env.DB.prepare("DELETE FROM visits WHERE site_id=?").bind(siteId).run();
-  await env.DB.prepare("DELETE FROM visit_hourly_rollups WHERE site_id=?")
+  await env.DB.prepare(
+    `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL})`,
+  )
     .bind(siteId)
     .run();
   await env.DB.prepare(
-    "DELETE FROM visit_hourly_aggregation_state WHERE site_id=?",
+    `DELETE FROM custom_events WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+  )
+    .bind(siteId)
+    .run();
+  await env.DB.prepare(
+    `DELETE FROM custom_event_names WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+  )
+    .bind(siteId)
+    .run();
+  await env.DB.prepare(
+    `DELETE FROM custom_event_json_keys WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+  )
+    .bind(siteId)
+    .run();
+  await env.DB.prepare(
+    `DELETE FROM custom_event_json_paths WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+  )
+    .bind(siteId)
+    .run();
+  await env.DB.prepare(
+    `DELETE FROM visits WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+  )
+    .bind(siteId)
+    .run();
+  await env.DB.prepare(
+    `DELETE FROM visit_hourly_rollups WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+  )
+    .bind(siteId)
+    .run();
+  await env.DB.prepare(
+    `DELETE FROM visit_hourly_aggregation_state WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
   )
     .bind(siteId)
     .run();

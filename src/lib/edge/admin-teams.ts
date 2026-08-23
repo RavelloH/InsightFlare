@@ -189,55 +189,55 @@ export async function handleTeamsAdmin(
           env,
           siteIds,
           (placeholders) =>
-            `DELETE FROM custom_event_json_values WHERE site_id IN (${placeholders})`,
+            `DELETE FROM custom_event_json_values WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
         );
         await deleteForSiteIds(
           env,
           siteIds,
           (placeholders) =>
-            `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_id IN (${placeholders}))`,
+            `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders})))`,
         );
         await deleteForSiteIds(
           env,
           siteIds,
           (placeholders) =>
-            `DELETE FROM custom_events WHERE site_id IN (${placeholders})`,
+            `DELETE FROM custom_events WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
         );
         await deleteForSiteIds(
           env,
           siteIds,
           (placeholders) =>
-            `DELETE FROM custom_event_names WHERE site_id IN (${placeholders})`,
+            `DELETE FROM custom_event_names WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
         );
         await deleteForSiteIds(
           env,
           siteIds,
           (placeholders) =>
-            `DELETE FROM custom_event_json_keys WHERE site_id IN (${placeholders})`,
+            `DELETE FROM custom_event_json_keys WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
         );
         await deleteForSiteIds(
           env,
           siteIds,
           (placeholders) =>
-            `DELETE FROM custom_event_json_paths WHERE site_id IN (${placeholders})`,
+            `DELETE FROM custom_event_json_paths WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
         );
         await deleteForSiteIds(
           env,
           siteIds,
           (placeholders) =>
-            `DELETE FROM visits WHERE site_id IN (${placeholders})`,
+            `DELETE FROM visits WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
         );
         await deleteForSiteIds(
           env,
           siteIds,
           (placeholders) =>
-            `DELETE FROM visit_hourly_rollups WHERE site_id IN (${placeholders})`,
+            `DELETE FROM visit_hourly_rollups WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
         );
         await deleteForSiteIds(
           env,
           siteIds,
           (placeholders) =>
-            `DELETE FROM visit_hourly_aggregation_state WHERE site_id IN (${placeholders})`,
+            `DELETE FROM visit_hourly_aggregation_state WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
         );
         const configKeys = siteIds.map((id) => `site:${id}`);
         await deleteForSiteIds(

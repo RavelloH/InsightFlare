@@ -44,6 +44,7 @@ import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
+import { installVisitSiteIdentityFixture } from "./site-identity-fixture";
 
 vi.mock("@/lib/edge/custom-event-read", () => ({
   readCustomEventDetail: vi.fn(),
@@ -245,6 +246,7 @@ describe("edge query dimensions low-level coverage", () => {
       CREATE INDEX idx_visits_site_started_at
         ON visits(site_id, started_at);
     `);
+    installVisitSiteIdentityFixture(database);
     const insert = database.prepare(`
       INSERT INTO visits (visit_id, site_id, visitor_id, session_id, started_at, pathname)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -312,7 +314,7 @@ describe("edge query dimensions low-level coverage", () => {
         .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
       const planDetails = plan.map((row) => row.detail).join("\n");
       expect(planDetails).toContain("MATERIALIZE filtered_visits");
-      expect(planDetails).toContain("idx_visits_site_started_at");
+      expect(planDetails).toContain("idx_visits_site_pk_started_at");
       expect(planDetails).not.toContain("CORRELATED SCALAR SUBQUERY");
     } finally {
       database.close();
@@ -390,6 +392,7 @@ describe("edge query dimensions low-level coverage", () => {
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
+    installVisitSiteIdentityFixture(database);
     const calls: Array<{ sql: string; bindings: QueryBinding[] }> = [];
     const env = {
       DB: {
@@ -488,7 +491,9 @@ describe("edge query dimensions low-level coverage", () => {
         plan.filter((row) => row.detail.includes("SEARCH visits USING")),
       ).toHaveLength(1);
       expect(
-        plan.some((row) => row.detail.includes("idx_visits_site_started_at")),
+        plan.some((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
       ).toBe(true);
     } finally {
       database.close();

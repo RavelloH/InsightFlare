@@ -1,3 +1,4 @@
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -273,7 +274,7 @@ session_visit_edges AS (
     ) AS latest_rank
   FROM event_sessions es
   INNER JOIN visits v
-   ON v.site_id = ?
+   ON v.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
    AND v.session_id = es.session_id
    AND v.started_at >= ?
    AND v.started_at < ?

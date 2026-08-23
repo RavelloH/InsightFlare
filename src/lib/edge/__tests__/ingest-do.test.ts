@@ -326,6 +326,18 @@ class FakeD1Database {
         boolean_value INTEGER,
         UNIQUE(event_pk, node_id, path_id)
       );
+
+      CREATE TRIGGER test_visits_site_pk_insert
+      AFTER INSERT ON visits
+      WHEN NEW.site_pk IS NULL
+      BEGIN
+        INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
+        UPDATE visits
+        SET site_pk = (
+          SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id
+        )
+        WHERE visit_id = NEW.visit_id;
+      END;
     `);
   }
 

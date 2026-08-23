@@ -101,7 +101,9 @@ describe("site identity migration", () => {
 
   it("uses compatibility triggers for a writer that omits site_pk", () => {
     db = new DatabaseSync(":memory:");
-    for (const sql of migrationSqlThrough("0039_site_identity_keys.sql")) {
+    for (const sql of migrationSqlThrough(
+      "0040_switch_site_identity_indexes.sql",
+    )) {
       db.exec(sql);
     }
 
@@ -135,5 +137,40 @@ describe("site identity migration", () => {
         )
         .get(),
     ).toEqual({ siteId: "site-moved" });
+
+    const indexNames = (
+      db
+        .prepare(
+          "SELECT name FROM sqlite_schema WHERE type = 'index' AND name LIKE '%site_pk%'",
+        )
+        .all() as Array<{ name: string }>
+    ).map((row) => row.name);
+    expect(indexNames).toHaveLength(19);
+    expect(indexNames).toEqual(
+      expect.arrayContaining([
+        "idx_visits_site_pk_started_at",
+        "idx_custom_events_site_pk_time",
+        "idx_visit_hourly_rollups_site_pk_hour",
+        "idx_archive_objects_site_pk_hour",
+      ]),
+    );
+
+    const plan = db
+      .prepare(
+        `
+          EXPLAIN QUERY PLAN
+          SELECT visit_id
+          FROM visits
+          WHERE site_pk = (
+            SELECT site_pk FROM site_identities WHERE site_id = ?
+          )
+            AND started_at >= ? AND started_at < ?
+        `,
+      )
+      .all("site-moved", 0, 2) as Array<{ detail: string }>;
+    expect(
+      plan.some((row) => row.detail.includes("idx_visits_site_pk_started_at")),
+    ).toBe(true);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 });

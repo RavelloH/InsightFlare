@@ -55,7 +55,7 @@ event_with_context AS (
     COALESCE(vs.screen_height, 0) AS screen_height
   FROM event_source e
   LEFT JOIN visit_source vs
-    ON vs.site_id = e.site_id
+    ON vs.site_pk = e.site_pk
    AND vs.visit_id = e.visit_id
 ),
 filtered_events AS (

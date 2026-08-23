@@ -7,6 +7,7 @@ import type {
   StoredOpenVisit,
   VisitRow,
 } from "./ingest-types";
+import { SITE_PK_FROM_SITE_ID_SQL } from "./site-identity-sql";
 import type {
   Env,
   NormalizedCustomEvent,
@@ -226,7 +227,7 @@ export async function findRecentVisitorSession(
         started_at AS startedAt,
         last_activity_at AS lastActivityAt
       FROM visits
-      WHERE site_id = ?
+      WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
         AND visitor_id = ?
         AND visit_id != ?
         AND session_id != ''
@@ -389,7 +390,7 @@ export async function readPersistedVisitRow(
         created_at AS createdAt,
         updated_at AS updatedAt
       FROM visits
-      WHERE site_id = ? AND visit_id = ?
+      WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND visit_id = ?
       LIMIT 1
     `,
   )

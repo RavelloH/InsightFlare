@@ -1,3 +1,4 @@
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -47,7 +48,8 @@ scoped_summary AS (
 scoped_summary AS (
   SELECT count(*) AS events
   FROM custom_events
-  WHERE site_id = ? AND occurred_at >= ? AND occurred_at < ?
+  WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+    AND occurred_at >= ? AND occurred_at < ?
 )`;
   const baseCte = `
 WITH

@@ -1,3 +1,4 @@
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -80,7 +81,8 @@ export async function queryJourneyTargetExistsFromD1(
     `
 SELECT 1 AS present
 FROM visits
-WHERE site_id = ? AND ${column} = ? AND started_at >= ? AND started_at < ?
+WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+  AND ${column} = ? AND started_at >= ? AND started_at < ?
 LIMIT 1
 `,
     [siteId, target.value, window.startMs, window.endExclusiveMs],

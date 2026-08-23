@@ -2,6 +2,10 @@ import {
   currentD1Operation,
   currentInvocationLogger,
 } from "@/lib/edge/observability-logger";
+import {
+  SITE_PK_FROM_SITE_ID_SQL,
+  sitePksFromSiteIdsSql,
+} from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import { buildEventFilterSql, usesSessionBoundaryFilter } from "./core-filters";
@@ -9,7 +13,7 @@ import type { FilterDocument, QueryWindow } from "./core-types";
 import { type D1ReadDiagnostics, recordD1RowsRead } from "./diagnostics";
 
 export const VISIT_SOURCE_COLUMNS = `
-    visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at,
+    visit_id, site_id, site_pk, visitor_id, session_id, status, started_at, last_activity_at,
     ended_at, finalized_at, duration_ms, duration_source, exit_reason,
     pathname, query_string, hash_fragment, hostname, title, referrer_url, referrer_host,
     utm_source, utm_medium, utm_campaign, utm_term, utm_content,
@@ -25,7 +29,8 @@ export function buildVisitSourceCte(): string {
 visit_source AS (
   SELECT ${VISIT_SOURCE_COLUMNS}
   FROM visits
-  WHERE site_id = ? AND started_at >= ? AND started_at < ?
+  WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+    AND started_at >= ? AND started_at < ?
 )`;
 }
 
@@ -35,6 +40,7 @@ event_source AS (
   SELECT
     ce.event_id,
     ce.site_id,
+    ce.site_pk,
     ce.visit_id,
     v.visitor_id,
     v.session_id,
@@ -64,9 +70,10 @@ event_source AS (
   INNER JOIN custom_event_names cen
     ON cen.id = ce.event_name_id
   INNER JOIN visits v
-    ON v.site_id = ce.site_id
+    ON v.site_pk = ce.site_pk
    AND v.visit_id = ce.visit_id
-  WHERE ce.site_id = ? AND ce.occurred_at >= ? AND ce.occurred_at < ?
+  WHERE ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+    AND ce.occurred_at >= ? AND ce.occurred_at < ?
 )`;
 }
 
@@ -78,7 +85,7 @@ export function buildTargetVisitSourceCte(
 visit_source AS (
   SELECT ${VISIT_SOURCE_COLUMNS}
   FROM visits
-  WHERE site_id = ? AND ${targetColumn} = ?
+  WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND ${targetColumn} = ?
   ${options?.withinWindow ? "AND started_at >= ? AND started_at < ?" : ""}
 )`;
 }
@@ -89,7 +96,7 @@ export function buildDetailCustomEventSourceCte(options?: {
   return `
 event_source${options?.materialize ? " AS MATERIALIZED" : " AS"} (
   SELECT
-    ce.event_id, ce.site_id, ce.visit_id, fv.visitor_id, fv.session_id,
+    ce.event_id, ce.site_id, ce.site_pk, ce.visit_id, fv.visitor_id, fv.session_id,
     ce.occurred_at, cen.name AS event_name, '{}' AS event_data_json,
     fv.pathname, fv.query_string,
     fv.hash_fragment,
@@ -103,8 +110,8 @@ event_source${options?.materialize ? " AS MATERIALIZED" : " AS"} (
   CROSS JOIN custom_events ce
   INNER JOIN custom_event_names cen
     ON cen.id = ce.event_name_id
-  WHERE ce.site_id = ?
-    AND ce.site_id = fv.site_id
+  WHERE ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+    AND ce.site_pk = fv.site_pk
     AND ce.visit_id = fv.visit_id
 )`;
 }
@@ -117,27 +124,24 @@ export function buildEventAnalyticsSourceCte(options?: {
   const cteName = options?.cteName ?? "event_source";
   const eventNameSource = options?.eventName
     ? `
-target_event_name AS (
+target_event_name AS MATERIALIZED (
   SELECT id
   FROM custom_event_names
-  WHERE site_id = ? AND name = ?
+  WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND name = ?
 ),`
     : options?.eventNames?.length
       ? `
-target_event_names AS (
+target_event_names AS MATERIALIZED (
   SELECT id
   FROM custom_event_names
-  WHERE site_id = ? AND name IN (${options.eventNames.map(() => "?").join(", ")})
+  WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+    AND name IN (${options.eventNames.map(() => "?").join(", ")})
 ),`
       : "";
-  const eventNameJoin = options?.eventName
-    ? `
-  INNER JOIN target_event_name ten
-    ON ten.id = ce.event_name_id`
+  const eventNamePredicate = options?.eventName
+    ? "ce.event_name_id = (SELECT id FROM target_event_name) AND"
     : options?.eventNames?.length
-      ? `
-  INNER JOIN target_event_names ten
-    ON ten.id = ce.event_name_id`
+      ? "ce.event_name_id IN (SELECT id FROM target_event_names) AND"
       : "";
   return `
 ${eventNameSource}
@@ -146,6 +150,7 @@ ${cteName} AS (
     ce.event_pk,
     ce.event_id,
     ce.site_id,
+    ce.site_pk,
     ce.visit_id,
     cen.name AS event_name,
     ce.occurred_at,
@@ -180,11 +185,11 @@ ${cteName} AS (
   FROM custom_events ce
   INNER JOIN custom_event_names cen
     ON cen.id = ce.event_name_id
-${eventNameJoin}
   INNER JOIN visits v
-    ON v.site_id = ce.site_id
+    ON v.site_pk = ce.site_pk
    AND v.visit_id = ce.visit_id
-  WHERE ce.site_id = ? AND ce.occurred_at >= ? AND ce.occurred_at < ?
+  WHERE ${eventNamePredicate} ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+    AND ce.occurred_at >= ? AND ce.occurred_at < ?
 )`;
 }
 
@@ -261,12 +266,12 @@ export function detailCustomEventSourceBindings(
 }
 
 export function buildVisitSourceCteForSites(siteCount: number): string {
-  const placeholders = Array.from({ length: siteCount }, () => "?").join(", ");
   return `
 visit_source AS (
   SELECT ${VISIT_SOURCE_COLUMNS}
   FROM visits
-  WHERE site_id IN (${placeholders}) AND started_at >= ? AND started_at < ?
+  WHERE site_pk IN ${sitePksFromSiteIdsSql(siteCount)}
+    AND started_at >= ? AND started_at < ?
 )`;
 }
 

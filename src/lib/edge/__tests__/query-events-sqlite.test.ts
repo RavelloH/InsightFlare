@@ -79,8 +79,16 @@ const window: QueryWindow = {
 function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
   const d1 = new SqliteD1Database();
   d1.database.exec(`
+    CREATE TABLE site_identities (
+      site_pk INTEGER PRIMARY KEY,
+      site_id TEXT NOT NULL UNIQUE
+    );
+    INSERT INTO site_identities (site_pk, site_id)
+      VALUES (1, '${siteId}');
+
     CREATE TABLE visits (
       visit_id TEXT PRIMARY KEY, site_id TEXT NOT NULL,
+      site_pk INTEGER GENERATED ALWAYS AS (1) STORED,
       visitor_id TEXT NOT NULL DEFAULT '', session_id TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'closed', started_at INTEGER NOT NULL,
       last_activity_at INTEGER NOT NULL DEFAULT 0, ended_at INTEGER, finalized_at INTEGER,
@@ -106,26 +114,35 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
     CREATE TABLE custom_event_names (
       id INTEGER PRIMARY KEY,
       site_id TEXT NOT NULL,
+      site_pk INTEGER GENERATED ALWAYS AS (1) STORED,
       name TEXT NOT NULL,
       UNIQUE(site_id, name)
     );
     CREATE TABLE custom_events (
       event_pk INTEGER PRIMARY KEY, event_id TEXT NOT NULL, site_id TEXT NOT NULL,
+      site_pk INTEGER GENERATED ALWAYS AS (1) STORED,
       visit_id TEXT NOT NULL, event_name_id INTEGER NOT NULL, occurred_at INTEGER NOT NULL,
       received_at INTEGER NOT NULL, sequence INTEGER NOT NULL, node_count INTEGER NOT NULL,
       value_count INTEGER NOT NULL, ae_synced_at INTEGER
     );
-    CREATE TABLE custom_event_json_paths (id INTEGER PRIMARY KEY, path TEXT NOT NULL);
+    CREATE TABLE custom_event_json_paths (
+      id INTEGER PRIMARY KEY,
+      path TEXT NOT NULL,
+      site_pk INTEGER GENERATED ALWAYS AS (1) STORED
+    );
     CREATE TABLE custom_event_json_values (
       event_pk INTEGER NOT NULL, path_id INTEGER NOT NULL, value_type INTEGER NOT NULL,
-      occurred_at INTEGER NOT NULL, string_value TEXT, number_value REAL, boolean_value INTEGER
+      occurred_at INTEGER NOT NULL, string_value TEXT, number_value REAL, boolean_value INTEGER,
+      site_pk INTEGER GENERATED ALWAYS AS (1) STORED
     );
-    CREATE INDEX idx_custom_events_site_name_time
-      ON custom_events(site_id, event_name_id, occurred_at, event_pk);
-    CREATE INDEX idx_custom_events_site_time
-      ON custom_events(site_id, occurred_at, event_pk);
-    CREATE INDEX idx_visits_site_session_started_at
-      ON visits(site_id, session_id, started_at, visit_id);
+    CREATE INDEX idx_custom_events_site_pk_name_time
+      ON custom_events(site_pk, event_name_id, occurred_at, event_pk);
+    CREATE INDEX idx_custom_events_site_pk_time
+      ON custom_events(site_pk, occurred_at, event_pk);
+    CREATE INDEX idx_visits_site_pk_session_started_at
+      ON visits(site_pk, session_id, started_at, visit_id);
+    CREATE INDEX idx_visits_site_pk_started_at
+      ON visits(site_pk, started_at);
   `);
   d1.database
     .prepare(
@@ -273,7 +290,7 @@ describe("event detail D1 SQL", () => {
       expect(query?.sql).toContain("target_event_name AS");
       expect(query?.sql).not.toContain("TRIM(COALESCE(es.event_name");
       expect(plan.map((row) => row.detail).join("\n")).toContain(
-        "idx_custom_events_site_name_time",
+        "idx_custom_events_site_pk_name_time",
       );
     } finally {
       d1.close();
@@ -398,8 +415,8 @@ describe("event detail D1 SQL", () => {
         .all(...(overviewQuery?.bindings ?? [])) as Array<{ detail: string }>;
       const planDetails = plan.map((row) => row.detail).join("\n");
       expect(planDetails).toContain("MATERIALIZE filtered_events");
-      expect(planDetails).toContain("idx_custom_events_site_name_time");
-      expect(planDetails).toContain("idx_custom_events_site_time");
+      expect(planDetails).toContain("idx_custom_events_site_pk_name_time");
+      expect(planDetails).toContain("idx_custom_events_site_pk_time");
       expect(planDetails.match(/SEARCH v /g) ?? []).toHaveLength(1);
       expect(overviewQuery?.sql).not.toContain("scoped_event_source AS");
 
@@ -407,7 +424,7 @@ describe("event detail D1 SQL", () => {
         .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
         .all(...cardQuery.bindings) as Array<{ detail: string }>;
       expect(entryExitPlan.map((row) => row.detail).join("\n")).toContain(
-        "idx_visits_site_session_started_at",
+        "idx_visits_site_pk_session_started_at",
       );
     } finally {
       d1.close();
@@ -539,7 +556,7 @@ describe("event detail D1 SQL", () => {
       const planDetails = plan.map((row) => row.detail).join("\n");
       expect(query?.sql).toContain("target_event_name AS");
       expect(query?.sql).not.toContain("TRIM(COALESCE(es.event_name");
-      expect(planDetails).toContain("idx_custom_events_site_name_time");
+      expect(planDetails).toContain("idx_custom_events_site_pk_name_time");
     } finally {
       d1.close();
     }
@@ -566,7 +583,7 @@ describe("event detail D1 SQL", () => {
         .prepare(`EXPLAIN QUERY PLAN ${query?.sql ?? "SELECT 1"}`)
         .all(...(query?.bindings ?? [])) as Array<{ detail: string }>;
       expect(plan.map((row) => row.detail).join("\n")).toContain(
-        "idx_custom_events_site_name_time",
+        "idx_custom_events_site_pk_name_time",
       );
     } finally {
       d1.close();

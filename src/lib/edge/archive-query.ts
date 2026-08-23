@@ -11,6 +11,7 @@ import {
   parseMemberSiteIdsJson,
 } from "./member-site-access";
 import { requireSession } from "./session-auth";
+import { SITE_PK_FROM_SITE_ID_SQL } from "./site-identity-sql";
 import type { Env } from "./types";
 import { coerceNumber, ONE_HOUR_MS } from "./utils";
 
@@ -147,7 +148,7 @@ export async function handlePrivateArchiveManifest(
         size_bytes AS sizeBytes,
         created_at AS createdAt
       FROM archive_objects
-      WHERE site_id = ?
+      WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
         AND end_hour >= ?
         AND start_hour <= ?
       ORDER BY start_hour ASC

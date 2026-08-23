@@ -16,6 +16,7 @@ import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
+import { installVisitSiteIdentityFixture } from "./site-identity-fixture";
 
 interface PreparedQuery {
   sql: string;
@@ -106,6 +107,7 @@ function createSqlitePerformanceEnv(): { env: Env; d1: SqliteD1Database } {
     CREATE INDEX idx_visits_site_started_at
       ON visits(site_id, started_at);
   `);
+  installVisitSiteIdentityFixture(d1.database);
   return {
     env: {
       DB: d1 as unknown as D1Database,
