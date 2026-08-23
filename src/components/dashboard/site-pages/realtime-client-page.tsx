@@ -26,6 +26,7 @@ interface RealtimeClientPageProps {
   messages: AppMessages;
   siteId: string;
   siteDomain: string;
+  pathname: string;
 }
 
 type EffectiveMapTheme = "light" | "dark";
@@ -76,6 +77,7 @@ export function RealtimeClientPage({
   messages,
   siteId,
   siteDomain,
+  pathname,
 }: RealtimeClientPageProps) {
   const searchParams = useLiveSearchParams();
   const realtime = useRealtimeChannelSelector(
@@ -225,6 +227,8 @@ export function RealtimeClientPage({
             hasConnected={realtime.hasConnected}
             events={realtime.events}
             visits={realtime.visits}
+            siteId={siteId}
+            pathname={pathname}
           />
           <RealtimeSummaryCardsSection
             locale={locale}

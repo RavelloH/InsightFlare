@@ -1287,9 +1287,17 @@ function EventRecordsTable({
   );
 }
 
-function DetailItem({ label, value }: { label: string; value: ReactNode }) {
+function DetailItem({
+  label,
+  value,
+  wide = false,
+}: {
+  label: string;
+  value: ReactNode;
+  wide?: boolean;
+}) {
   return (
-    <div className="space-y-1">
+    <div className={cn("space-y-1", wide && "sm:col-span-2")}>
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0">{value}</dd>
     </div>
@@ -1458,13 +1466,24 @@ export function EventRecordDetailDrawer({
             ) : (
               <div className="space-y-5">
                 <section className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{detail.event.eventName}</Badge>
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {detail.event.eventId}
-                    </span>
-                  </div>
+                  <h3 className="text-sm font-medium">{labels.detailTitle}</h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      label={labels.eventId}
+                      value={
+                        <span className="break-all font-mono text-[11px]">
+                          {detail.event.eventId}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      label={labels.eventName}
+                      value={
+                        <span className="break-words text-[11px]">
+                          {detail.event.eventName || messages.common.unknown}
+                        </span>
+                      }
+                    />
                     <DetailItem
                       label={labels.occurredAt}
                       value={formatShortDateTime(
@@ -1482,16 +1501,14 @@ export function EventRecordDetailDrawer({
                       )}
                     />
                     <DetailItem
-                      label={labels.visit}
+                      label={labels.payloadFields}
                       value={
-                        <span className="font-mono">
-                          {shortId(detail.context.visitId)}
+                        <span className="text-[11px]">
+                          {numberFormat(locale, detail.event.nodeCount)}{" "}
+                          {labels.nodes} / {numberFormat(locale, detail.event.valueCount)}{" "}
+                          {labels.values}
                         </span>
                       }
-                    />
-                    <DetailItem
-                      label={labels.payloadFields}
-                      value={`${numberFormat(locale, detail.event.nodeCount)} ${labels.nodes} / ${numberFormat(locale, detail.event.valueCount)} ${labels.values}`}
                     />
                   </dl>
                 </section>
@@ -1499,41 +1516,59 @@ export function EventRecordDetailDrawer({
                 <Separator />
 
                 <section className="space-y-3">
-                  <h3 className="text-sm font-medium">{labels.context}</h3>
+                  <h3 className="text-sm font-medium">{labels.payload}</h3>
+                  <JsonTreePanel value={detail.eventData} labels={labels} />
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">
+                    {messages.realtime.browsingSection}
+                  </h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
-                      label={labels.page}
+                      label={messages.common.title}
                       value={
-                        <div className="min-w-0">
-                          <div className="truncate font-mono">
-                            {formatPath(detail.context.pathname)}
-                          </div>
-                          {detail.context.title ? (
-                            <div className="truncate text-muted-foreground">
-                              {detail.context.title}
-                            </div>
-                          ) : null}
-                        </div>
+                        <span className="break-words text-[11px]">
+                          {detail.context.title || messages.common.unknown}
+                        </span>
                       }
                     />
                     <DetailItem
-                      label={labels.referrer}
+                      label={messages.common.hostname}
                       value={
-                        <ReferrerMeta
-                          referrerHost={detail.context.referrerHost || ""}
-                          directLabel={messages.overview.direct}
-                        />
+                        <span className="break-all font-mono text-[11px]">
+                          {detail.context.hostname || messages.common.unknown}
+                        </span>
                       }
                     />
                     <DetailItem
-                      label={labels.location}
+                      label={messages.common.path}
+                      wide
                       value={
-                        <CountryRegionMeta
-                          locale={locale}
-                          messages={messages}
-                          country={detail.context.country || ""}
-                          region={detail.context.region}
-                        />
+                        <span className="break-all font-mono text-[11px]">
+                          {formatPath(detail.context.pathname)}
+                        </span>
+                      }
+                    />
+                  </dl>
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">
+                    {messages.navigation.visitors}
+                  </h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      label={messages.realtime.visitorId}
+                      wide
+                      value={
+                        <span className="break-all font-mono text-[11px]">
+                          {visitorId || messages.common.unknown}
+                        </span>
                       }
                     />
                     <DetailItem
@@ -1571,17 +1606,47 @@ export function EventRecordDetailDrawer({
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
+                      className="w-full"
                       disabled={!visitorId}
                       onClick={() => openVisitorDetail(visitorId)}
                     >
                       <RiExternalLinkLine data-icon="inline-start" />
                       {labels.openVisitor}
                     </Button>
+                  </div>
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">
+                    {messages.navigation.sessions}
+                  </h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      label={messages.realtime.sessionId}
+                      wide
+                      value={
+                        <span className="break-all font-mono text-[11px]">
+                          {sessionId || messages.common.unknown}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      label={messages.realtime.visitId}
+                      wide
+                      value={
+                        <span className="break-all font-mono text-[11px]">
+                          {detail.context.visitId || messages.common.unknown}
+                        </span>
+                      }
+                    />
+                  </dl>
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
+                      className="w-full"
                       disabled={!sessionId}
                       onClick={() => openSessionDetail(sessionId)}
                     >
@@ -1594,8 +1659,41 @@ export function EventRecordDetailDrawer({
                 <Separator />
 
                 <section className="space-y-3">
-                  <h3 className="text-sm font-medium">{labels.payload}</h3>
-                  <JsonTreePanel value={detail.eventData} labels={labels} />
+                  <h3 className="text-sm font-medium">
+                    {messages.realtime.geographySection}
+                  </h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      label={labels.location}
+                      value={
+                        <CountryRegionMeta
+                          locale={locale}
+                          messages={messages}
+                          country={detail.context.country || ""}
+                          region={detail.context.region}
+                        />
+                      }
+                    />
+                  </dl>
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">
+                    {messages.realtime.sourceSection}
+                  </h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      label={labels.referrer}
+                      value={
+                        <ReferrerMeta
+                          referrerHost={detail.context.referrerHost || ""}
+                          directLabel={messages.overview.direct}
+                        />
+                      }
+                    />
+                  </dl>
                 </section>
               </div>
             )}

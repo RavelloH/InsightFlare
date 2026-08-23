@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Clickable } from "@/components/ui/clickable";
+import { OverlayScrollbar } from "@/components/ui/overlay-scrollbar";
 import {
   Tooltip,
   TooltipContent,
@@ -242,11 +243,11 @@ export function JsonTreePanel({
   return (
     <div
       className={cn(
-        "relative min-w-0 max-w-full overflow-x-auto border bg-muted/20 p-3 pr-10 font-mono text-xs leading-relaxed",
+        "relative min-w-0 max-w-full border bg-muted/20 p-3 pr-10 font-mono text-xs leading-relaxed",
         className,
       )}
     >
-      <div className="sticky top-0 right-0 float-right -mr-7 ml-2">
+      <div className="absolute top-2 right-2 z-10">
         <Tooltip>
           <TooltipTrigger asChild>
             <Clickable
@@ -262,7 +263,9 @@ export function JsonTreePanel({
           <TooltipContent>{labels.copyJson}</TooltipContent>
         </Tooltip>
       </div>
-      <JsonTree value={value} labels={labels} />
+      <OverlayScrollbar axis="horizontal" className="min-w-0 max-w-full">
+        <JsonTree value={value} labels={labels} />
+      </OverlayScrollbar>
     </div>
   );
 }

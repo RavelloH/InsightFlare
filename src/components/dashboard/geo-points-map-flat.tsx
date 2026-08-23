@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { type MapRef, useControl } from "react-map-gl/maplibre";
-import type { MapViewState } from "@deck.gl/core";
+import { MapView, type MapViewState } from "@deck.gl/core";
 import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
 import type { Feature, GeoJSON, Geometry } from "geojson";
@@ -158,8 +158,27 @@ const MAP_VIEWPORT_RENDER_ISOLATION_STYLE = {
 } as const;
 
 const DeckOverlay = memo(function DeckOverlay(props: MapboxOverlayProps) {
-  const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay(props));
-  overlay.setProps(props);
+  const overlayRef = useRef<MapboxOverlay | null>(null);
+  const mapboxView = useMemo(() => new MapView({ id: "mapbox" }), []);
+  const overlayProps = useMemo(
+    () => ({ ...props, views: [mapboxView] }),
+    [mapboxView, props],
+  );
+  const overlay = useControl<MapboxOverlay>(
+    () => {
+      const nextOverlay = new MapboxOverlay(overlayProps);
+      overlayRef.current = nextOverlay;
+      return nextOverlay;
+    },
+    (context) => {
+      const overlayInstance = overlayRef.current;
+      if (overlayInstance && !context.map.hasControl(overlayInstance)) {
+        overlayInstance.onRemove();
+      }
+      overlayRef.current = null;
+    },
+  );
+  overlay.setProps(overlayProps);
   return null;
 });
 

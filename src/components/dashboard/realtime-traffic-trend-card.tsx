@@ -4,11 +4,9 @@ import { RiPulseLine } from "@remixicon/react";
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
 import {
   RealtimeRollingTrendChartIsland,
-  type RealtimeRollingTrendPoint,
+  type TrafficPairDataPoint,
 } from "@/components/dashboard/realtime-rolling-trend-chart-island";
-import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type { RealtimeEvent } from "@/lib/realtime/types";
@@ -31,13 +29,13 @@ function floorToMinute(timestampMs: number): number {
 function buildRealtimeTrendData(
   events: RealtimeEvent[],
   now: number,
-): RealtimeRollingTrendPoint[] {
+): TrafficPairDataPoint[] {
   const rangeEnd = floorToMinute(now);
   const rangeStart = rangeEnd - (TREND_WINDOW_MINUTES - 1) * MINUTE_MS;
   const points = Array.from({ length: TREND_WINDOW_MINUTES }, (_, index) => ({
     timestampMs: rangeStart + index * MINUTE_MS,
     views: 0,
-    sessions: 0,
+    visitors: 0,
   }));
   const pointIndexByTimestamp = new Map(
     points.map((point, index) => [point.timestampMs, index] as const),
@@ -66,7 +64,7 @@ function buildRealtimeTrendData(
 
   return points.map((point, index) => ({
     ...point,
-    sessions: bucketVisitors[index]?.size ?? 0,
+    visitors: bucketVisitors[index]?.size ?? 0,
   }));
 }
 
@@ -118,29 +116,13 @@ export function RealtimeTrafficTrendCard({
             locale={locale}
             data={trendData}
             viewsLabel={messages.common.views}
-            sessionsLabel={messages.common.visitors}
+            visitorsLabel={messages.common.visitors}
             timeZone={timeZone}
+            interval="minute"
+            axisDateFormat="time"
+            loading={isInitialLoading}
+            dataIsComplete
           />
-          <AutoTransition
-            type="fade"
-            duration={0.22}
-            className="pointer-events-none absolute right-2 top-2"
-          >
-            {isInitialLoading ? (
-              <span
-                key="realtime-trend-loading"
-                className="inline-flex items-center gap-2 rounded-none border border-border/50 bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm"
-              >
-                <Spinner className="size-3.5" />
-                {messages.common.loading}
-              </span>
-            ) : (
-              <div
-                key="realtime-trend-idle"
-                className="h-0 w-0 overflow-hidden"
-              />
-            )}
-          </AutoTransition>
         </div>
       </CardContent>
     </Card>

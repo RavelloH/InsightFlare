@@ -1,22 +1,13 @@
 import { memo, useCallback, useMemo, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  type TooltipProps,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import { AutoTransition } from "@/components/ui/auto-transition";
 import {
   calculateChartYAxisWidth,
-  type ChartConfig,
   ChartContainer,
   ChartLegend,
   ChartLegendContent,
   ChartTooltip,
-  ChartTooltipIndicator,
   createChartNumberFormatter,
 } from "@/components/ui/chart";
 import { Spinner } from "@/components/ui/spinner";
@@ -31,20 +22,20 @@ import {
 } from "@/lib/dashboard/chart-time";
 import { intlLocale } from "@/lib/dashboard/format";
 import type { DashboardInterval } from "@/lib/dashboard/query-state";
-import {
-  downsampleTrafficData,
-  fillMissingTrafficData,
-  safeChartCount,
-} from "@/lib/dashboard/traffic-chart-data";
 import type { Locale } from "@/lib/i18n/config";
 import { cn } from "@/lib/utils";
 
+import {
+  createTrafficPairChartConfig,
+  createTrafficPairChartData,
+  createTrafficPairCountFormatter,
+  TrafficPairTooltip,
+  type TrafficPairDataPoint,
+  type TrafficPairRange,
+} from "./traffic-pair-chart";
+
 export interface TrafficPairBarChartProps {
-  data: Array<{
-    timestampMs: number;
-    views: number;
-    visitors: number;
-  }>;
+  data: ReadonlyArray<TrafficPairDataPoint>;
   locale: Locale;
   timeZone: string;
   interval: DashboardInterval;
@@ -57,108 +48,10 @@ export interface TrafficPairBarChartProps {
   maxPoints?: number;
   loading?: boolean;
   className?: string;
-  range?: {
-    from: number;
-    to: number;
-  };
+  range?: TrafficPairRange;
 }
-
-interface TrafficPairChartPoint {
-  timestampMs: number;
-  views: number;
-  visitors: number;
-  nonVisitorViews: number;
-}
-
-const TRAFFIC_PAIR_CHART_CONFIG = {
-  visitors: {
-    label: "visitors",
-    color: "var(--color-chart-3)",
-  },
-  nonVisitorViews: {
-    label: "views",
-    color: "var(--color-chart-1)",
-  },
-} satisfies ChartConfig;
 
 const COMPACT_CHART_ANIMATION_DURATION = 220;
-
-function createTrafficPairChartData(
-  data: TrafficPairBarChartProps["data"],
-  interval: DashboardInterval,
-  timeZone: string,
-  maxPoints?: number,
-  range?: TrafficPairBarChartProps["range"],
-  dataIsComplete = false,
-): TrafficPairChartPoint[] {
-  const completed = dataIsComplete
-    ? data
-    : fillMissingTrafficData(data, interval, timeZone, range);
-  const normalized = downsampleTrafficData(
-    completed,
-    maxPoints ?? completed.length,
-  );
-
-  return normalized.map((point) => {
-    const views = safeChartCount(point.views);
-    const visitors = Math.min(safeChartCount(point.visitors), views);
-    return {
-      timestampMs: point.timestampMs,
-      views,
-      visitors,
-      nonVisitorViews: Math.max(0, views - visitors),
-    };
-  });
-}
-
-function TrafficPairTooltip({
-  active,
-  payload,
-  label,
-  viewsLabel,
-  visitorsLabel,
-  tooltipFormatter,
-  countFormatter,
-}: TooltipProps<number, string> & {
-  viewsLabel: string;
-  visitorsLabel: string;
-  tooltipFormatter: Intl.DateTimeFormat;
-  countFormatter: Intl.NumberFormat;
-}) {
-  if (!active || !payload?.length) return null;
-  const point = payload[0]?.payload as Partial<TrafficPairChartPoint> | null;
-  const timestamp = Number(point?.timestampMs ?? label ?? 0);
-  const views = safeChartCount(Number(point?.views ?? 0));
-  const visitors = safeChartCount(Number(point?.visitors ?? 0));
-
-  return (
-    <div className="grid min-w-32 items-start gap-1.5 rounded-none border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-      <div className="font-medium">
-        {tooltipFormatter.format(new Date(timestamp))}
-      </div>
-      <div className="grid gap-1.5">
-        <div className="flex w-full items-center gap-2">
-          <ChartTooltipIndicator color="var(--color-nonVisitorViews)" />
-          <div className="flex flex-1 items-center justify-between gap-3 leading-none">
-            <span className="text-muted-foreground">{viewsLabel}</span>
-            <span className="font-mono font-medium tabular-nums text-foreground">
-              {countFormatter.format(views)}
-            </span>
-          </div>
-        </div>
-        <div className="flex w-full items-center gap-2">
-          <ChartTooltipIndicator color="var(--color-visitors)" />
-          <div className="flex flex-1 items-center justify-between gap-3 leading-none">
-            <span className="text-muted-foreground">{visitorsLabel}</span>
-            <span className="font-mono font-medium tabular-nums text-foreground">
-              {countFormatter.format(visitors)}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 const TrafficPairRegularBarChart = memo(function TrafficPairRegularBarChart({
   data,
@@ -194,16 +87,7 @@ const TrafficPairRegularBarChart = memo(function TrafficPairRegularBarChart({
     );
   }, [data, interval, timeZone, maxPoints, compact, range, dataIsComplete]);
   const config = useMemo(
-    () => ({
-      visitors: {
-        ...TRAFFIC_PAIR_CHART_CONFIG.visitors,
-        label: visitorsLabel,
-      },
-      nonVisitorViews: {
-        ...TRAFFIC_PAIR_CHART_CONFIG.nonVisitorViews,
-        label: viewsLabel,
-      },
-    }),
+    () => createTrafficPairChartConfig(viewsLabel, visitorsLabel),
     [viewsLabel, visitorsLabel],
   );
   const tickFormatter = useMemo(
@@ -216,7 +100,7 @@ const TrafficPairRegularBarChart = memo(function TrafficPairRegularBarChart({
     [locale, interval, timeZone],
   );
   const countFormatter = useMemo(
-    () => new Intl.NumberFormat(intlLocale(locale)),
+    () => createTrafficPairCountFormatter(locale),
     [locale],
   );
   const pairChartDataKey = useMemo(() => {
@@ -336,7 +220,10 @@ const TrafficPairRegularBarChart = memo(function TrafficPairRegularBarChart({
         <AutoTransition
           initial={false}
           aria-hidden={!loading && hasChartSize}
-          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-muted-foreground"
+          className={cn(
+            "pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center text-muted-foreground",
+            showLegend ? "bottom-8" : "bottom-0",
+          )}
           transitionKey={loading || !hasChartSize ? "loading" : "ready"}
           duration={0.2}
           presenceMode="sync"

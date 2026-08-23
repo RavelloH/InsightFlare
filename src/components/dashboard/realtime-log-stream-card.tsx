@@ -9,7 +9,11 @@ import {
   useState,
 } from "react";
 import { Icon } from "@iconify/react";
-import { RiGlobalLine, RiPulseLine } from "@remixicon/react";
+import {
+  RiExternalLinkLine,
+  RiGlobalLine,
+  RiPulseLine,
+} from "@remixicon/react";
 import Avatar from "boring-avatars";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { PartialOptions } from "overlayscrollbars";
@@ -26,8 +30,12 @@ import {
 } from "@/components/dashboard/journey-display";
 import { JsonTreePanel } from "@/components/dashboard/json-tree";
 import { useGeoStateTranslationBundle } from "@/components/dashboard/lazy-geo-location-label";
+import { DetailDrawer } from "@/components/dashboard/site-pages/detail-drawer";
+import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
+import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitor-detail-client-page";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clickable } from "@/components/ui/clickable";
 import {
@@ -65,6 +73,8 @@ interface RealtimeLogStreamCardProps {
   hasConnected: boolean;
   events: RealtimeEvent[];
   visits: RealtimeVisit[];
+  siteId?: string;
+  pathname?: string;
 }
 
 const PRESENCE_LEAVE_EVENT = "__presence_leave";
@@ -111,6 +121,18 @@ type RealtimeEventDisplayData = {
   countryFlagCode: string | null;
   sourceLabel: string;
 };
+type RealtimeNestedJourneyDetail = {
+  kind: "visitor" | "session";
+  id: string;
+  stackKey: string;
+  open: boolean;
+};
+type RealtimeNestedEventDetail = {
+  event: RealtimeEvent;
+  stackKey: string;
+  open: boolean;
+};
+const NESTED_DRAWER_EXIT_DURATION_MS = 420;
 const LOG_STREAM_ITEM_LAYOUT_TRANSITION = {
   layout: {
     duration: 0.34,
@@ -575,6 +597,21 @@ function formatDetailDateTime(
   }).format(date);
 }
 
+function formatTimelineTime(
+  locale: Locale,
+  value: number,
+  timeZone: string,
+): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "--";
+  return new Intl.DateTimeFormat(intlLocale(locale), {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
+}
+
 function formatCoordinateValue(value: number | null): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
   return value.toFixed(4);
@@ -961,6 +998,7 @@ function RealtimeVisitorHistorySection({
   timeZone,
   event,
   events,
+  onSelect,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -968,6 +1006,7 @@ function RealtimeVisitorHistorySection({
   timeZone: string;
   event: RealtimeEvent;
   events: RealtimeEvent[];
+  onSelect: (event: RealtimeEvent) => void;
 }) {
   const timelineEvents = useMemo(() => {
     const visitorId = event.visitorId.trim();
@@ -1029,15 +1068,22 @@ function RealtimeVisitorHistorySection({
                   index < timelineEvents.length - 1 &&
                   (isCurrentEvent ||
                     timelineEvents[index + 1]?.id === event.id);
-
-                return (
-                  <div
-                    key={timelineEvent.id}
-                    className="grid grid-cols-[4.5rem_1.25rem_minmax(0,1fr)] gap-3 pb-4 last:pb-0 sm:grid-cols-[5.5rem_1.25rem_minmax(0,1fr)]"
-                  >
+                const timelineEventTitle = formatLogTitle(
+                  messages,
+                  timelineEvent,
+                  classifyRealtimeLogEvent(timelineEvent.eventType.trim()),
+                );
+                const timelineEventRowClassName =
+                  "!grid !w-full grid-cols-[4.5rem_1.25rem_minmax(0,1fr)] items-start gap-3 pb-4 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring last:pb-0 sm:grid-cols-[5.5rem_1.25rem_minmax(0,1fr)]";
+                const timelineEventContent = (
+                  <>
                     <div className="min-w-0 pt-0.5 text-right">
                       <p className="font-mono text-[10px] text-foreground">
-                        {shortDateTime(locale, timelineEvent.eventAt, timeZone)}
+                        {formatTimelineTime(
+                          locale,
+                          timelineEvent.eventAt,
+                          timeZone,
+                        )}
                       </p>
                       <p className="font-mono text-[10px] text-muted-foreground">
                         {formatRelativeTime(locale, timelineEvent.eventAt, now)}
@@ -1065,27 +1111,47 @@ function RealtimeVisitorHistorySection({
                         {index + 1}
                       </span>
                     </div>
-                    <div className="min-w-0 border-b border-foreground/15 pb-3 last:border-b-0">
+                    <div className="min-w-0 w-full border-b border-foreground/15 pb-3 last:border-b-0">
                       <p className="truncate text-sm font-medium text-foreground">
-                        {formatLogTitle(
-                          messages,
-                          timelineEvent,
-                          classifyRealtimeLogEvent(
-                            timelineEvent.eventType.trim(),
-                          ),
-                        )}
+                        {timelineEventTitle}
                       </p>
                       <p className="truncate text-[11px] text-muted-foreground">
-                        {formatPathWithHash(
-                          timelineEvent.pathname,
-                          timelineEvent.hash,
+                        {formatDetailDuration(
+                          timelineEvent.durationMs,
+                          messages.common.unknown,
                         )}
-                        {timelineEvent.hostname.trim()
-                          ? " · " + timelineEvent.hostname.trim()
-                          : ""}
+                        {" · "}
+                        {timelineEvent.title.trim() || messages.common.unknown}
                       </p>
                     </div>
-                  </div>
+                  </>
+                );
+
+                if (isCurrentEvent) {
+                  return (
+                    <div
+                      key={timelineEvent.id}
+                      className={timelineEventRowClassName}
+                    >
+                      {timelineEventContent}
+                    </div>
+                  );
+                }
+
+                return (
+                  <Clickable
+                    key={timelineEvent.id}
+                    className={timelineEventRowClassName}
+                    onClick={() => onSelect(timelineEvent)}
+                    enableHoverScale
+                    hoverScale={1.01}
+                    tapScale={0.985}
+                    duration={0.14}
+                    aria-label={timelineEventTitle}
+                    title={timelineEventTitle}
+                  >
+                    {timelineEventContent}
+                  </Clickable>
                 );
               })}
             </div>
@@ -1141,6 +1207,9 @@ function RealtimeLogEventDetailsDrawer({
   open,
   onOpenChange,
   events,
+  onSelect,
+  onOpenVisitor,
+  onOpenSession,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -1150,6 +1219,9 @@ function RealtimeLogEventDetailsDrawer({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   events: RealtimeEvent[];
+  onSelect: (event: RealtimeEvent) => void;
+  onOpenVisitor?: (visitorId: string) => void;
+  onOpenSession?: (sessionId: string) => void;
 }) {
   const displayData = event
     ? resolveRealtimeEventDisplayData(locale, messages, event)
@@ -1960,6 +2032,20 @@ function RealtimeLogEventDetailsDrawer({
                   />
                 ))}
               </dl>
+              {onOpenVisitor ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    disabled={!event.visitorId.trim()}
+                    onClick={() => onOpenVisitor(event.visitorId)}
+                  >
+                    <RiExternalLinkLine data-icon="inline-start" />
+                    {messages.events.openVisitor}
+                  </Button>
+                </div>
+              ) : null}
             </section>
 
             <Separator />
@@ -1978,6 +2064,20 @@ function RealtimeLogEventDetailsDrawer({
                   />
                 ))}
               </dl>
+              {onOpenSession ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    disabled={!event.sessionId.trim()}
+                    onClick={() => onOpenSession(event.sessionId)}
+                  >
+                    <RiExternalLinkLine data-icon="inline-start" />
+                    {messages.events.openSession}
+                  </Button>
+                </div>
+              ) : null}
             </section>
 
             <Separator />
@@ -2045,6 +2145,7 @@ function RealtimeLogEventDetailsDrawer({
               now={now}
               event={event}
               events={events}
+              onSelect={onSelect}
               timeZone={timeZone}
             />
           </div>
@@ -2059,6 +2160,8 @@ export function RealtimeLogStreamCard({
   messages,
   hasConnected,
   events,
+  siteId,
+  pathname,
 }: RealtimeLogStreamCardProps) {
   const { timeZone } = useDashboardQueryControls();
   const reduceLogItemMotion = useReducedMotion() ?? false;
@@ -2067,6 +2170,18 @@ export function RealtimeLogStreamCard({
   const [selectedEvent, setSelectedEvent] = useState<RealtimeEvent | null>(
     null,
   );
+  const [isEventDetailsOpen, setIsEventDetailsOpen] = useState(false);
+  const [nestedEventDetails, setNestedEventDetails] = useState<
+    RealtimeNestedEventDetail[]
+  >([]);
+  const [nestedJourneyDetails, setNestedJourneyDetails] = useState<
+    RealtimeNestedJourneyDetail[]
+  >([]);
+  const nestedEventDetailKeyRef = useRef(0);
+  const nestedJourneyDetailKeyRef = useRef(0);
+  const nestedEventDetailCloseTimersRef = useRef(new Map<string, number>());
+  const nestedEventDetailsClearTimerRef = useRef<number | null>(null);
+  const nestedJourneyDetailsClearTimerRef = useRef<number | null>(null);
 
   const visibleEvents = useMemo(
     () => events.slice(0, visibleCount),
@@ -2106,11 +2221,126 @@ export function RealtimeLogStreamCard({
       Math.min(events.length, previous + LOAD_MORE_STEP),
     );
   }, [events.length, hasMoreEvents]);
+  const handleEventSelect = useCallback((event: RealtimeEvent) => {
+    setSelectedEvent(event);
+    setIsEventDetailsOpen(true);
+  }, []);
+  const openNestedEventDetail = useCallback((event: RealtimeEvent) => {
+    nestedEventDetailKeyRef.current += 1;
+    setNestedEventDetails((current) => [
+      ...current,
+      {
+        event,
+        open: true,
+        stackKey: `event:${event.id}:${nestedEventDetailKeyRef.current}`,
+      },
+    ]);
+  }, []);
+  const closeNestedEventDetail = useCallback((stackKey: string) => {
+    setNestedEventDetails((current) => {
+      const index = current.findIndex((item) => item.stackKey === stackKey);
+      if (index < 0) return current;
+
+      return current.map((item, itemIndex) =>
+        itemIndex >= index ? { ...item, open: false } : item,
+      );
+    });
+
+    if (nestedEventDetailCloseTimersRef.current.has(stackKey)) return;
+    const timerId = window.setTimeout(() => {
+      nestedEventDetailCloseTimersRef.current.delete(stackKey);
+      setNestedEventDetails((current) => {
+        const index = current.findIndex((item) => item.stackKey === stackKey);
+        return index < 0 ? current : current.slice(0, index);
+      });
+    }, NESTED_DRAWER_EXIT_DURATION_MS);
+    nestedEventDetailCloseTimersRef.current.set(stackKey, timerId);
+  }, []);
+  const openNestedJourneyDetail = useCallback(
+    (kind: RealtimeNestedJourneyDetail["kind"], id: string) => {
+      const normalizedId = id.trim();
+      if (!normalizedId) return;
+
+      setNestedJourneyDetails((current) => {
+        const topDetail = current.at(-1);
+        if (topDetail?.kind === kind && topDetail.id === normalizedId) {
+          return current;
+        }
+
+        nestedJourneyDetailKeyRef.current += 1;
+        return [
+          ...current,
+          {
+            kind,
+            id: normalizedId,
+            open: true,
+            stackKey: `${kind}:${normalizedId}:${nestedJourneyDetailKeyRef.current}`,
+          },
+        ];
+      });
+    },
+    [],
+  );
+  const closeNestedJourneyDetail = useCallback((stackKey: string) => {
+    setNestedJourneyDetails((current) => {
+      const index = current.findIndex((item) => item.stackKey === stackKey);
+      return index < 0 ? current : current.slice(0, index);
+    });
+  }, []);
   const handleEventDetailsOpenChange = useCallback((open: boolean) => {
+    setIsEventDetailsOpen(open);
     if (!open) {
-      setSelectedEvent(null);
+      setNestedEventDetails((current) =>
+        current.map((item) => ({ ...item, open: false })),
+      );
+      if (nestedEventDetailsClearTimerRef.current !== null) {
+        window.clearTimeout(nestedEventDetailsClearTimerRef.current);
+      }
+      nestedEventDetailsClearTimerRef.current = window.setTimeout(() => {
+        nestedEventDetailsClearTimerRef.current = null;
+        setNestedEventDetails([]);
+      }, NESTED_DRAWER_EXIT_DURATION_MS);
+      setNestedJourneyDetails((current) =>
+        current.map((item) => ({ ...item, open: false })),
+      );
+      if (nestedJourneyDetailsClearTimerRef.current !== null) {
+        window.clearTimeout(nestedJourneyDetailsClearTimerRef.current);
+      }
+      nestedJourneyDetailsClearTimerRef.current = window.setTimeout(() => {
+        nestedJourneyDetailsClearTimerRef.current = null;
+        setNestedJourneyDetails([]);
+      }, NESTED_DRAWER_EXIT_DURATION_MS);
     }
   }, []);
+
+  useEffect(() => {
+    return () => {
+      nestedEventDetailCloseTimersRef.current.forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+      nestedEventDetailCloseTimersRef.current.clear();
+      if (nestedEventDetailsClearTimerRef.current !== null) {
+        window.clearTimeout(nestedEventDetailsClearTimerRef.current);
+      }
+      if (nestedJourneyDetailsClearTimerRef.current !== null) {
+        window.clearTimeout(nestedJourneyDetailsClearTimerRef.current);
+      }
+    };
+  }, []);
+  const journeyDetailContext =
+    siteId && pathname
+      ? {
+          siteId,
+          visitorsPathname: pathname.replace(
+            /\/realtime(?:\/detail)?$/,
+            "/visitors",
+          ),
+          sessionsPathname: pathname.replace(
+            /\/realtime(?:\/detail)?$/,
+            "/sessions",
+          ),
+        }
+      : null;
 
   return (
     <>
@@ -2157,7 +2387,7 @@ export function RealtimeLogStreamCard({
                             messages={messages}
                             now={now}
                             timeZone={timeZone}
-                            onSelect={setSelectedEvent}
+                            onSelect={handleEventSelect}
                             reduceMotion={reduceLogItemMotion}
                           />
                         ))}
@@ -2177,9 +2407,87 @@ export function RealtimeLogStreamCard({
         now={now}
         timeZone={timeZone}
         events={events}
-        open={selectedEvent !== null}
+        onSelect={openNestedEventDetail}
+        onOpenVisitor={
+          journeyDetailContext
+            ? (visitorId) => openNestedJourneyDetail("visitor", visitorId)
+            : undefined
+        }
+        onOpenSession={
+          journeyDetailContext
+            ? (sessionId) => openNestedJourneyDetail("session", sessionId)
+            : undefined
+        }
+        open={isEventDetailsOpen}
         onOpenChange={handleEventDetailsOpenChange}
       />
+      {nestedEventDetails.map((nestedDetail) => (
+        <RealtimeLogEventDetailsDrawer
+          key={nestedDetail.stackKey}
+          event={nestedDetail.event}
+          locale={locale}
+          messages={messages}
+          now={now}
+          timeZone={timeZone}
+          events={events}
+          onSelect={openNestedEventDetail}
+          onOpenVisitor={
+            journeyDetailContext
+              ? (visitorId) => openNestedJourneyDetail("visitor", visitorId)
+              : undefined
+          }
+          onOpenSession={
+            journeyDetailContext
+              ? (sessionId) => openNestedJourneyDetail("session", sessionId)
+              : undefined
+          }
+          open={nestedDetail.open}
+          onOpenChange={(open) => {
+            if (!open) closeNestedEventDetail(nestedDetail.stackKey);
+          }}
+        />
+      ))}
+      {journeyDetailContext
+        ? nestedJourneyDetails.map((nestedDetail) => (
+            <DetailDrawer
+              key={nestedDetail.stackKey}
+              ariaLabel={
+                nestedDetail.kind === "visitor"
+                  ? messages.visitors.title
+                  : messages.sessionDetail.visitDetailsTitle
+              }
+              drawerKey={nestedDetail.stackKey}
+              open={nestedDetail.open}
+              onOpenChange={(nextOpen) => {
+                if (!nextOpen) closeNestedJourneyDetail(nestedDetail.stackKey);
+              }}
+            >
+              {nestedDetail.kind === "visitor" ? (
+                <VisitorDetailClientPage
+                  locale={locale}
+                  messages={messages}
+                  siteId={journeyDetailContext.siteId}
+                  pathname={journeyDetailContext.visitorsPathname}
+                  visitorId={nestedDetail.id}
+                  onOpenSession={(sessionId) =>
+                    openNestedJourneyDetail("session", sessionId)
+                  }
+                />
+              ) : (
+                <SessionDetailClientPage
+                  locale={locale}
+                  messages={messages}
+                  siteId={journeyDetailContext.siteId}
+                  pathname={journeyDetailContext.sessionsPathname}
+                  sessionId={nestedDetail.id}
+                  onOpenVisitor={(visitorId) =>
+                    openNestedJourneyDetail("visitor", visitorId)
+                  }
+                />
+              )}
+            </DetailDrawer>
+          ))
+        : null}
     </>
   );
 }
