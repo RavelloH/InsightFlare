@@ -491,6 +491,7 @@ referrers:
   externalLabel: 外部
   nextSources: 次の 4 ソース
   longTail: ロングテール
+  channelLongTail: その他のチャネル
 campaigns:
   title: キャンペーン
   subtitle: UTM キャンペーンのパフォーマンスとトラフィック属性を確認します。

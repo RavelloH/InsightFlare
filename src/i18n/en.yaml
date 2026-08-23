@@ -491,6 +491,7 @@ referrers:
   externalLabel: External
   nextSources: Next 4 Sources
   longTail: Long Tail
+  channelLongTail: Other channels
 campaigns:
   title: Campaigns
   subtitle: UTM campaign performance and traffic attribution.

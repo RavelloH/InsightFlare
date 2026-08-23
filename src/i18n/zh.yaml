@@ -491,6 +491,7 @@ referrers:
   externalLabel: 外部来源
   nextSources: 后续 4 个来源
   longTail: 长尾来源
+  channelLongTail: 其他渠道
 campaigns:
   title: 推广活动
   subtitle: UTM 推广活动表现与流量归因。
