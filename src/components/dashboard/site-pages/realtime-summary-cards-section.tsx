@@ -318,45 +318,24 @@ function filterRealtimeVisits(
   });
 }
 
-function aggregateVisitRows(
-  visits: RealtimeVisit[],
-  getValue: (visit: RealtimeVisit) => string,
-  options: {
-    emptyLabel: string;
-    emptyKey?: string;
-    resolveLabel?: (value: string) => string;
-  },
+interface VisitDimensionSpec {
+  key: string;
+  getValue: (visit: RealtimeVisit) => string;
+  emptyLabel: string;
+  emptyKey?: string;
+  resolveLabel?: (value: string) => string;
+}
+
+interface VisitDimensionBucket {
+  label: string;
+  views: number;
+  sessionIds: Set<string>;
+  visitorIds: Set<string>;
+}
+
+function finalizeVisitDimensionBuckets(
+  buckets: Map<string, VisitDimensionBucket>,
 ): OverviewTabRows {
-  const buckets = new Map<
-    string,
-    {
-      label: string;
-      views: number;
-      sessionIds: Set<string>;
-      visitorIds: Set<string>;
-    }
-  >();
-
-  for (const visit of visits) {
-    const value = getValue(visit).trim();
-    const key = value || options.emptyKey || "__empty__";
-    const bucket = buckets.get(key) ?? {
-      label: value,
-      views: 0,
-      sessionIds: new Set<string>(),
-      visitorIds: new Set<string>(),
-    };
-
-    bucket.label = options.resolveLabel
-      ? options.resolveLabel(value)
-      : value || options.emptyLabel;
-    bucket.views += 1;
-    bucket.sessionIds.add(sessionKeyOf(visit));
-    const visitorId = visit.visitorId.trim();
-    if (visitorId) bucket.visitorIds.add(visitorId);
-    buckets.set(key, bucket);
-  }
-
   return Array.from(buckets.entries())
     .map(([key, bucket]) => ({
       label: bucket.label || key,
@@ -370,6 +349,54 @@ function aggregateVisitRows(
         return right.sessions - left.sessions;
       return left.label.localeCompare(right.label);
     });
+}
+
+function aggregateVisitDimensions(
+  visits: RealtimeVisit[],
+  specs: readonly VisitDimensionSpec[],
+): Record<string, OverviewTabRows> {
+  const bucketsByDimension = new Map<
+    string,
+    Map<string, VisitDimensionBucket>
+  >();
+  for (const spec of specs) {
+    bucketsByDimension.set(spec.key, new Map());
+  }
+
+  for (const visit of visits) {
+    const sessionKey = sessionKeyOf(visit);
+    const visitorId = visit.visitorId.trim();
+
+    for (const spec of specs) {
+      const value = spec.getValue(visit).trim();
+      const key = value || spec.emptyKey || "__empty__";
+      const buckets = bucketsByDimension.get(spec.key);
+      if (!buckets) continue;
+
+      const bucket = buckets.get(key) ?? {
+        label: value,
+        views: 0,
+        sessionIds: new Set<string>(),
+        visitorIds: new Set<string>(),
+      };
+      bucket.label = spec.resolveLabel
+        ? spec.resolveLabel(value)
+        : value || spec.emptyLabel;
+      bucket.views += 1;
+      bucket.sessionIds.add(sessionKey);
+      if (visitorId) bucket.visitorIds.add(visitorId);
+      buckets.set(key, bucket);
+    }
+  }
+
+  return Object.fromEntries(
+    specs.map((spec) => [
+      spec.key,
+      finalizeVisitDimensionBuckets(
+        bucketsByDimension.get(spec.key) ?? new Map(),
+      ),
+    ]),
+  );
 }
 
 function aggregateSessionBoundaryRows(
@@ -438,20 +465,100 @@ function buildCardData(
   const filteredSessionKeys = new Set(
     visits.map((visit) => sessionKeyOf(visit)),
   );
+  const aggregated = aggregateVisitDimensions(visits, [
+    {
+      key: "path",
+      getValue: (visit) => visit.pathname,
+      emptyLabel: "/",
+      resolveLabel: (value) => value || "/",
+    },
+    {
+      key: "title",
+      getValue: (visit) => visit.title,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "hostname",
+      getValue: (visit) => visit.hostname,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "domain",
+      getValue: (visit) => visit.referrerHost,
+      emptyLabel: messages.overview.direct,
+      emptyKey: DIRECT_REFERRER_FILTER_VALUE,
+      resolveLabel: (value) => value || messages.overview.direct,
+    },
+    {
+      key: "link",
+      getValue: (visit) => visit.referrerUrl,
+      emptyLabel: messages.overview.direct,
+      emptyKey: DIRECT_REFERRER_FILTER_VALUE,
+      resolveLabel: (value) => value || messages.overview.direct,
+    },
+    {
+      key: "browser",
+      getValue: (visit) => visit.browser,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "osVersion",
+      getValue: (visit) => visit.osVersion,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "deviceType",
+      getValue: (visit) => visit.deviceType,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "language",
+      getValue: (visit) => visit.language,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "screenSize",
+      getValue: (visit) => visit.screenSize,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "country",
+      getValue: (visit) => visit.country,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "region",
+      getValue: resolveVisitRegionValue,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "city",
+      getValue: resolveVisitCityValue,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "continent",
+      getValue: (visit) => visit.continent,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "timezone",
+      getValue: (visit) => visit.timezone,
+      emptyLabel: messages.common.unknown,
+    },
+    {
+      key: "organization",
+      getValue: (visit) => visit.organization,
+      emptyLabel: messages.common.unknown,
+    },
+  ]);
 
   return {
     page: {
-      path: aggregateVisitRows(visits, (visit) => visit.pathname, {
-        emptyLabel: "/",
-        resolveLabel: (value) => value || "/",
-      }),
+      path: aggregated.path,
       query: [],
-      title: aggregateVisitRows(visits, (visit) => visit.title, {
-        emptyLabel: messages.common.unknown,
-      }),
-      hostname: aggregateVisitRows(visits, (visit) => visit.hostname, {
-        emptyLabel: messages.common.unknown,
-      }),
+      title: aggregated.title,
+      hostname: aggregated.hostname,
       entry: aggregateSessionBoundaryRows(
         filteredSessionKeys,
         sessionBoundaries,
@@ -472,61 +579,23 @@ function buildCardData(
       ),
     },
     source: {
-      domain: aggregateVisitRows(visits, (visit) => visit.referrerHost, {
-        emptyLabel: messages.overview.direct,
-        emptyKey: DIRECT_REFERRER_FILTER_VALUE,
-        resolveLabel: (value) => value || messages.overview.direct,
-      }),
-      link: aggregateVisitRows(visits, (visit) => visit.referrerUrl, {
-        emptyLabel: messages.overview.direct,
-        emptyKey: DIRECT_REFERRER_FILTER_VALUE,
-        resolveLabel: (value) => value || messages.overview.direct,
-      }),
+      domain: aggregated.domain,
+      link: aggregated.link,
     },
     client: {
-      browser: aggregateVisitRows(visits, (visit) => visit.browser, {
-        emptyLabel: messages.common.unknown,
-      }),
-      osVersion: aggregateVisitRows(visits, (visit) => visit.osVersion, {
-        emptyLabel: messages.common.unknown,
-      }),
-      deviceType: aggregateVisitRows(visits, (visit) => visit.deviceType, {
-        emptyLabel: messages.common.unknown,
-      }),
-      language: aggregateVisitRows(visits, (visit) => visit.language, {
-        emptyLabel: messages.common.unknown,
-      }),
-      screenSize: aggregateVisitRows(visits, (visit) => visit.screenSize, {
-        emptyLabel: messages.common.unknown,
-      }),
+      browser: aggregated.browser,
+      osVersion: aggregated.osVersion,
+      deviceType: aggregated.deviceType,
+      language: aggregated.language,
+      screenSize: aggregated.screenSize,
     },
     geo: {
-      country: aggregateVisitRows(visits, (visit) => visit.country, {
-        emptyLabel: messages.common.unknown,
-      }),
-      region: aggregateVisitRows(
-        visits,
-        (visit) => resolveVisitRegionValue(visit),
-        {
-          emptyLabel: messages.common.unknown,
-        },
-      ),
-      city: aggregateVisitRows(
-        visits,
-        (visit) => resolveVisitCityValue(visit),
-        {
-          emptyLabel: messages.common.unknown,
-        },
-      ),
-      continent: aggregateVisitRows(visits, (visit) => visit.continent, {
-        emptyLabel: messages.common.unknown,
-      }),
-      timezone: aggregateVisitRows(visits, (visit) => visit.timezone, {
-        emptyLabel: messages.common.unknown,
-      }),
-      organization: aggregateVisitRows(visits, (visit) => visit.organization, {
-        emptyLabel: messages.common.unknown,
-      }),
+      country: aggregated.country,
+      region: aggregated.region,
+      city: aggregated.city,
+      continent: aggregated.continent,
+      timezone: aggregated.timezone,
+      organization: aggregated.organization,
     },
   };
 }

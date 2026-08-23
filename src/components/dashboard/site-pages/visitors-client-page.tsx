@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   RiArrowDownSLine,
   RiArrowUpSLine,
@@ -247,6 +247,108 @@ function SessionIdValue({ value }: { value?: string }) {
   return <span className="font-mono font-medium">{shortId(normalized)}</span>;
 }
 
+const VisitorTableRow = memo(function VisitorTableRow({
+  locale,
+  messages,
+  labels,
+  row,
+  now,
+  onOpenDetail,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  labels: AppMessages["visitors"];
+  row: VisitorRow;
+  now: number;
+  onOpenDetail: (visitorId: string) => void;
+}) {
+  const openDetail = () => onOpenDetail(row.visitorId);
+
+  return (
+    <TableRow className="group cursor-pointer">
+      <ClickableTableCell
+        onClick={openDetail}
+        className="w-32"
+        buttonClassName="pl-4"
+        focusable
+        ariaLabel={`${labels.visitor}: ${row.visitorId}`}
+      >
+        <div className="flex w-28 items-center gap-2">
+          <VisitorAvatar seed={row.visitorId} className="size-6" />
+          <span className="truncate">{labels.anonymous}</span>
+        </div>
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openDetail}>
+        <SessionIdValue value={row.sessionId} />
+      </ClickableTableCell>
+      <ClickableTableCell
+        onClick={openDetail}
+        className="font-mono text-muted-foreground"
+      >
+        {formatRelativeTime(locale, row.firstSeenAt, now)}
+      </ClickableTableCell>
+      <ClickableTableCell
+        onClick={openDetail}
+        className="font-mono text-muted-foreground"
+      >
+        {formatRelativeTime(locale, row.lastSeenAt, now)}
+      </ClickableTableCell>
+      <ClickableTableCell
+        onClick={openDetail}
+        className="text-right font-mono tabular-nums"
+      >
+        {numberFormat(locale, row.sessions)}
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openDetail} className="text-center">
+        <span className="font-mono tabular-nums">
+          {numberFormat(locale, row.views)}
+        </span>
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openDetail} className="max-w-48">
+        <ReferrerMeta
+          referrerHost={row.referrerHost || ""}
+          referrerUrl={row.referrerUrl}
+          directLabel={messages.overview.direct}
+        />
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openDetail} className="max-w-52">
+        <CountryRegionMeta
+          locale={locale}
+          messages={messages}
+          country={row.country || ""}
+          region={row.region}
+          regionCode={row.regionCode}
+        />
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openDetail} className="max-w-40">
+        <OsMeta
+          os={row.os || ""}
+          version={row.osVersion}
+          unknownLabel={messages.common.unknown}
+        />
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openDetail} className="max-w-40">
+        <BrowserMeta
+          browser={row.browser || ""}
+          version={row.browserVersion}
+          unknownLabel={messages.common.unknown}
+        />
+      </ClickableTableCell>
+      <ClickableTableCell
+        onClick={openDetail}
+        className="max-w-36"
+        buttonClassName="pr-4"
+      >
+        <DeviceMeta
+          deviceType={row.deviceType || ""}
+          deviceLabels={messages.common.deviceLabels}
+          unknownLabel={messages.common.unknown}
+        />
+      </ClickableTableCell>
+    </TableRow>
+  );
+});
+
 function detailQueryTarget(
   pathname: string,
   searchParams: URLSearchParams,
@@ -351,10 +453,10 @@ export function VisitorsClientPage({
   const appendError = isFetchNextPageError;
   const replacingRows = isPending || (isFetching && !isFetchingNextPage);
   const hasMore = hasNextPage ?? false;
-  const loadNextPage = () => {
+  const loadNextPage = useCallback(() => {
     if (loadingInitial || loadingMore || appendError || !hasMore) return;
     void fetchNextPage();
-  };
+  }, [appendError, fetchNextPage, hasMore, loadingInitial, loadingMore]);
 
   const sentinelRef = useInfiniteTableSentinel({
     enabled:
@@ -382,6 +484,11 @@ export function VisitorsClientPage({
     },
     [pathname, searchParams],
   );
+  const openVisitorDetailRef = useRef(openVisitorDetail);
+  openVisitorDetailRef.current = openVisitorDetail;
+  const stableOpenVisitorDetail = useCallback((visitorId: string) => {
+    openVisitorDetailRef.current(visitorId);
+  }, []);
 
   const closeVisitorDetail = useCallback(() => {
     const params = new URLSearchParams(window.location.search);
@@ -535,113 +642,17 @@ export function VisitorsClientPage({
               </TableRow>
             ) : (
               <>
-                {rows.map((row) => {
-                  const openDetail = () => openVisitorDetail(row.visitorId);
-                  return (
-                    <TableRow
-                      key={row.visitorId}
-                      className="group cursor-pointer"
-                    >
-                      <ClickableTableCell
-                        onClick={openDetail}
-                        className="w-32"
-                        buttonClassName="pl-4"
-                        focusable
-                        ariaLabel={`${labels.visitor}: ${row.visitorId}`}
-                      >
-                        <div className="flex w-28 items-center gap-2">
-                          <VisitorAvatar
-                            seed={row.visitorId}
-                            className="size-6"
-                          />
-                          <span className="truncate">{labels.anonymous}</span>
-                        </div>
-                      </ClickableTableCell>
-                      <ClickableTableCell onClick={openDetail}>
-                        <SessionIdValue value={row.sessionId} />
-                      </ClickableTableCell>
-                      <ClickableTableCell
-                        onClick={openDetail}
-                        className="font-mono text-muted-foreground"
-                      >
-                        {formatRelativeTime(locale, row.firstSeenAt, now)}
-                      </ClickableTableCell>
-                      <ClickableTableCell
-                        onClick={openDetail}
-                        className="font-mono text-muted-foreground"
-                      >
-                        {formatRelativeTime(locale, row.lastSeenAt, now)}
-                      </ClickableTableCell>
-                      <ClickableTableCell
-                        onClick={openDetail}
-                        className="text-right font-mono tabular-nums"
-                      >
-                        {numberFormat(locale, row.sessions)}
-                      </ClickableTableCell>
-                      <ClickableTableCell
-                        onClick={openDetail}
-                        className="text-center"
-                      >
-                        <span className="font-mono tabular-nums">
-                          {numberFormat(locale, row.views)}
-                        </span>
-                      </ClickableTableCell>
-                      <ClickableTableCell
-                        onClick={openDetail}
-                        className="max-w-48"
-                      >
-                        <ReferrerMeta
-                          referrerHost={row.referrerHost || ""}
-                          referrerUrl={row.referrerUrl}
-                          directLabel={messages.overview.direct}
-                        />
-                      </ClickableTableCell>
-                      <ClickableTableCell
-                        onClick={openDetail}
-                        className="max-w-52"
-                      >
-                        <CountryRegionMeta
-                          locale={locale}
-                          messages={messages}
-                          country={row.country || ""}
-                          region={row.region}
-                          regionCode={row.regionCode}
-                        />
-                      </ClickableTableCell>
-                      <ClickableTableCell
-                        onClick={openDetail}
-                        className="max-w-40"
-                      >
-                        <OsMeta
-                          os={row.os || ""}
-                          version={row.osVersion}
-                          unknownLabel={messages.common.unknown}
-                        />
-                      </ClickableTableCell>
-                      <ClickableTableCell
-                        onClick={openDetail}
-                        className="max-w-40"
-                      >
-                        <BrowserMeta
-                          browser={row.browser || ""}
-                          version={row.browserVersion}
-                          unknownLabel={messages.common.unknown}
-                        />
-                      </ClickableTableCell>
-                      <ClickableTableCell
-                        onClick={openDetail}
-                        className="max-w-36"
-                        buttonClassName="pr-4"
-                      >
-                        <DeviceMeta
-                          deviceType={row.deviceType || ""}
-                          deviceLabels={messages.common.deviceLabels}
-                          unknownLabel={messages.common.unknown}
-                        />
-                      </ClickableTableCell>
-                    </TableRow>
-                  );
-                })}
+                {rows.map((row) => (
+                  <VisitorTableRow
+                    key={row.visitorId}
+                    locale={locale}
+                    messages={messages}
+                    labels={labels}
+                    row={row}
+                    now={now}
+                    onOpenDetail={stableOpenVisitorDetail}
+                  />
+                ))}
                 {appendError ? (
                   <TableRow>
                     <TableCell

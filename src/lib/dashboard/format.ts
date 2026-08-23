@@ -35,19 +35,42 @@ const DURATION_UNITS: Record<
   },
 };
 
+const NUMBER_FORMATTERS = new Map<string, Intl.NumberFormat>();
+const PERCENT_FORMATTERS = new Map<string, Intl.NumberFormat>();
+
+function getNumberFormatter(locale: Locale): Intl.NumberFormat {
+  const key = intlLocale(locale);
+  const cached = NUMBER_FORMATTERS.get(key);
+  if (cached) return cached;
+
+  const formatter = new Intl.NumberFormat(key);
+  NUMBER_FORMATTERS.set(key, formatter);
+  return formatter;
+}
+
+function getPercentFormatter(locale: Locale): Intl.NumberFormat {
+  const key = intlLocale(locale);
+  const cached = PERCENT_FORMATTERS.get(key);
+  if (cached) return cached;
+
+  const formatter = new Intl.NumberFormat(key, {
+    style: "percent",
+    maximumFractionDigits: 1,
+  });
+  PERCENT_FORMATTERS.set(key, formatter);
+  return formatter;
+}
+
 export function intlLocale(locale: Locale): string {
   return INTL_LOCALE[locale];
 }
 
 export function numberFormat(locale: Locale, value: number): string {
-  return new Intl.NumberFormat(intlLocale(locale)).format(value);
+  return getNumberFormatter(locale).format(value);
 }
 
 export function percentFormat(locale: Locale, value: number): string {
-  return new Intl.NumberFormat(intlLocale(locale), {
-    style: "percent",
-    maximumFractionDigits: 1,
-  }).format(value);
+  return getPercentFormatter(locale).format(value);
 }
 
 type DateValue = number | string | Date | null | undefined;

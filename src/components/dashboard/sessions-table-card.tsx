@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
 
 import { AnalyticsTableCard } from "@/components/dashboard/analytics-table-card";
@@ -210,6 +210,114 @@ function isSessionActive(row: JourneySession, now: number): boolean {
   return row.endedAt > now - 5 * 60 * 1000;
 }
 
+const SessionTableRow = memo(function SessionTableRow({
+  locale,
+  messages,
+  labels,
+  row,
+  now,
+  onOpenSession,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  labels: SessionsTableLabels;
+  row: JourneySession;
+  now: number;
+  onOpenSession: (sessionId: string) => void;
+}) {
+  const active = isSessionActive(row, now);
+  const openSession = () => onOpenSession(row.sessionId);
+
+  return (
+    <TableRow data-session-row="" className="group cursor-pointer">
+      <ClickableTableCell
+        onClick={openSession}
+        className="w-32"
+        buttonClassName="pl-4"
+        focusable
+        ariaLabel={`${labels.sessionId}: ${row.sessionId}`}
+      >
+        <div className="flex w-28 items-center gap-2">
+          <VisitorAvatar seed={row.visitorId} className="size-6" />
+          <span className="truncate">{labels.anonymous}</span>
+        </div>
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openSession}>
+        <span className="font-mono font-medium">{shortId(row.sessionId)}</span>
+      </ClickableTableCell>
+      <ClickableTableCell
+        onClick={openSession}
+        className={cn(
+          "font-mono",
+          active ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {formatRelativeTime(locale, row.startedAt, now)}
+      </ClickableTableCell>
+      <ClickableTableCell
+        onClick={openSession}
+        className="text-right font-mono tabular-nums"
+      >
+        <SessionDurationValue locale={locale} durationMs={row.durationMs} />
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openSession} className="text-center">
+        <PageViewsValue locale={locale} views={row.views} />
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openSession} className="max-w-48">
+        <ReferrerMeta
+          referrerHost={row.referrerHost}
+          referrerUrl={row.referrerUrl}
+          directLabel={messages.overview.direct}
+        />
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openSession} className="max-w-52">
+        <CountryRegionMeta
+          locale={locale}
+          messages={messages}
+          country={row.country}
+          region={row.region}
+          regionCode={row.regionCode}
+        />
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openSession} className="max-w-40">
+        <OsMeta
+          os={row.os}
+          version={row.osVersion}
+          unknownLabel={messages.common.unknown}
+        />
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openSession} className="max-w-40">
+        <BrowserMeta
+          browser={row.browser}
+          version={row.browserVersion}
+          unknownLabel={messages.common.unknown}
+        />
+      </ClickableTableCell>
+      <ClickableTableCell onClick={openSession} className="max-w-36">
+        <DeviceMeta
+          deviceType={row.deviceType}
+          deviceLabels={messages.common.deviceLabels}
+          unknownLabel={messages.common.unknown}
+        />
+      </ClickableTableCell>
+      <ClickableTableCell
+        onClick={openSession}
+        className="max-w-56 font-mono"
+        buttonClassName="truncate"
+      >
+        {formatPath(row.entryPath)}
+      </ClickableTableCell>
+      <ClickableTableCell
+        onClick={openSession}
+        className="max-w-56 font-mono"
+        buttonClassName="truncate pr-4"
+      >
+        {formatPath(row.exitPath)}
+      </ClickableTableCell>
+    </TableRow>
+  );
+});
+
 export function SessionsTableCard({
   locale,
   messages,
@@ -317,128 +425,17 @@ export function SessionsTableCard({
             </TableRow>
           ) : (
             <>
-              {rows.map((row) => {
-                const active = isSessionActive(row, now);
-                const openSession = () => onOpenSession(row.sessionId);
-                return (
-                  <TableRow
-                    key={row.sessionId}
-                    data-session-row=""
-                    className="group cursor-pointer"
-                  >
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className="w-32"
-                      buttonClassName="pl-4"
-                      focusable
-                      ariaLabel={`${labels.sessionId}: ${row.sessionId}`}
-                    >
-                      <div className="flex w-28 items-center gap-2">
-                        <VisitorAvatar
-                          seed={row.visitorId}
-                          className="size-6"
-                        />
-                        <span className="truncate">{labels.anonymous}</span>
-                      </div>
-                    </ClickableTableCell>
-                    <ClickableTableCell onClick={openSession}>
-                      <span className="font-mono font-medium">
-                        {shortId(row.sessionId)}
-                      </span>
-                    </ClickableTableCell>
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className={cn(
-                        "font-mono",
-                        active ? "text-foreground" : "text-muted-foreground",
-                      )}
-                    >
-                      {formatRelativeTime(locale, row.startedAt, now)}
-                    </ClickableTableCell>
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className="text-right font-mono tabular-nums"
-                    >
-                      <SessionDurationValue
-                        locale={locale}
-                        durationMs={row.durationMs}
-                      />
-                    </ClickableTableCell>
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className="text-center"
-                    >
-                      <PageViewsValue locale={locale} views={row.views} />
-                    </ClickableTableCell>
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className="max-w-48"
-                    >
-                      <ReferrerMeta
-                        referrerHost={row.referrerHost}
-                        referrerUrl={row.referrerUrl}
-                        directLabel={messages.overview.direct}
-                      />
-                    </ClickableTableCell>
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className="max-w-52"
-                    >
-                      <CountryRegionMeta
-                        locale={locale}
-                        messages={messages}
-                        country={row.country}
-                        region={row.region}
-                        regionCode={row.regionCode}
-                      />
-                    </ClickableTableCell>
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className="max-w-40"
-                    >
-                      <OsMeta
-                        os={row.os}
-                        version={row.osVersion}
-                        unknownLabel={messages.common.unknown}
-                      />
-                    </ClickableTableCell>
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className="max-w-40"
-                    >
-                      <BrowserMeta
-                        browser={row.browser}
-                        version={row.browserVersion}
-                        unknownLabel={messages.common.unknown}
-                      />
-                    </ClickableTableCell>
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className="max-w-36"
-                    >
-                      <DeviceMeta
-                        deviceType={row.deviceType}
-                        deviceLabels={messages.common.deviceLabels}
-                        unknownLabel={messages.common.unknown}
-                      />
-                    </ClickableTableCell>
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className="max-w-56 font-mono"
-                      buttonClassName="truncate"
-                    >
-                      {formatPath(row.entryPath)}
-                    </ClickableTableCell>
-                    <ClickableTableCell
-                      onClick={openSession}
-                      className="max-w-56 font-mono"
-                      buttonClassName="truncate pr-4"
-                    >
-                      {formatPath(row.exitPath)}
-                    </ClickableTableCell>
-                  </TableRow>
-                );
-              })}
+              {rows.map((row) => (
+                <SessionTableRow
+                  key={row.sessionId}
+                  locale={locale}
+                  messages={messages}
+                  labels={labels}
+                  row={row}
+                  now={now}
+                  onOpenSession={onOpenSession}
+                />
+              ))}
               {appendError ? (
                 <TableRow>
                   <TableCell

@@ -215,7 +215,7 @@ describe("mock/fact-builder", () => {
       expect(a).toBe(b);
     });
 
-    it("clears oversized cache before storing a generated dataset", () => {
+    it("evicts the oldest entries before storing a generated dataset", () => {
       DEMO_FACT_DATASET_CACHE.clear();
       for (let index = 0; index < 141; index += 1) {
         DEMO_FACT_DATASET_CACHE.set(
@@ -227,7 +227,8 @@ describe("mock/fact-builder", () => {
       const dataset = buildDemoFactDataset(SITE_ID, DAY_MS, 2 * DAY_MS);
 
       expect(dataset.visits.length).toBeGreaterThan(0);
-      expect(DEMO_FACT_DATASET_CACHE.size).toBe(1);
+      expect(DEMO_FACT_DATASET_CACHE.size).toBe(140);
+      expect(DEMO_FACT_DATASET_CACHE.has("stale:0")).toBe(false);
     });
 
     it("handles non-finite endpoints by returning an empty dataset", () => {

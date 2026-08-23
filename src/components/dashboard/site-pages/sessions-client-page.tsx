@@ -184,10 +184,10 @@ export function SessionsClientPage({
   const appendError = isFetchNextPageError;
   const replacingRows = isPending || (isFetching && !isFetchingNextPage);
   const hasMore = hasNextPage ?? false;
-  const loadNextPage = () => {
+  const loadNextPage = useCallback(() => {
     if (loadingInitial || loadingMore || appendError || !hasMore) return;
     void fetchNextPage();
-  };
+  }, [appendError, fetchNextPage, hasMore, loadingInitial, loadingMore]);
 
   const sentinelRef = useInfiniteTableSentinel({
     enabled:
@@ -215,6 +215,11 @@ export function SessionsClientPage({
     },
     [pathname, searchParams],
   );
+  const openSessionDetailRef = useRef(openSessionDetail);
+  openSessionDetailRef.current = openSessionDetail;
+  const stableOpenSessionDetail = useCallback((sessionId: string) => {
+    openSessionDetailRef.current(sessionId);
+  }, []);
 
   const closeSessionDetail = useCallback(() => {
     const params = new URLSearchParams(window.location.search);
@@ -286,7 +291,7 @@ export function SessionsClientPage({
         messages={messages}
         labels={labels}
         rows={rows}
-        onOpenSession={openSessionDetail}
+        onOpenSession={stableOpenSessionDetail}
         sort={sort}
         onSort={toggleSort}
         loadingRows={replacingRows}

@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useCallback, useMemo } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { GeoCountryStatsPanel } from "@/components/dashboard/geo-country-stats-panel";
@@ -1431,24 +1431,36 @@ export function GeoClientPage({
       : geoMessages.cityLabel
     : geoMessages.countryLabel;
 
-  function updateLocation(nextLocation: string | null) {
-    if (typeof globalThis.window === "undefined") return;
-    const nextParams = new URLSearchParams(searchParams.toString());
-    if (nextLocation) {
-      nextParams.set("location", nextLocation);
-    } else {
-      nextParams.delete("location");
-    }
-    const query = serializeDashboardSearchParams(nextParams);
-    const nextTarget = `${globalThis.window.location.pathname}${query ? `?${query}` : ""}${globalThis.window.location.hash}`;
-    pushUrlWithoutNavigation(nextTarget);
-  }
+  const updateLocation = useCallback(
+    (nextLocation: string | null) => {
+      if (typeof globalThis.window === "undefined") return;
+      const nextParams = new URLSearchParams(searchParams.toString());
+      if (nextLocation) {
+        nextParams.set("location", nextLocation);
+      } else {
+        nextParams.delete("location");
+      }
+      const query = serializeDashboardSearchParams(nextParams);
+      const nextTarget = `${globalThis.window.location.pathname}${query ? `?${query}` : ""}${globalThis.window.location.hash}`;
+      pushUrlWithoutNavigation(nextTarget);
+    },
+    [searchParams],
+  );
 
-  const handleBack = activeLocation
-    ? () => updateLocation(parentGeoLocationValue(activeLocation))
-    : undefined;
-  const handleSelectEntry =
-    statsEntries.length > 0 ? (key: string) => updateLocation(key) : undefined;
+  const handleBack = useMemo(
+    () =>
+      activeLocation
+        ? () => updateLocation(parentGeoLocationValue(activeLocation))
+        : undefined,
+    [activeLocation, updateLocation],
+  );
+  const handleSelectEntry = useMemo(
+    () =>
+      statsEntries.length > 0
+        ? (key: string) => updateLocation(key)
+        : undefined,
+    [statsEntries.length, updateLocation],
+  );
 
   const statsPanel = (
     <GeoCountryStatsPanel

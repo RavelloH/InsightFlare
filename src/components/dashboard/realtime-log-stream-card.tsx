@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { Icon } from "@iconify/react";
 import {
@@ -31,8 +32,6 @@ import {
 import { JsonTreePanel } from "@/components/dashboard/json-tree";
 import { useGeoStateTranslationBundle } from "@/components/dashboard/lazy-geo-location-label";
 import { DetailDrawer } from "@/components/dashboard/site-pages/detail-drawer";
-import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
-import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitor-detail-client-page";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
@@ -56,6 +55,7 @@ import {
   formatLocalizedGeoValue,
   resolveLocalizedCityName,
 } from "@/lib/dashboard/geo-translation";
+import dynamic from "@/lib/dynamic";
 import {
   resolveContinentLabel,
   resolveCountryFlagCode,
@@ -98,6 +98,11 @@ const BROWSER_APPLE_ICON_KEYS = new Set(["ios", "ios-webview"]);
 const OS_APPLE_ICON_KEYS = new Set(["ios", "mac-os"]);
 const ABSOLUTE_URL_PATTERN = /^[a-z][a-z\d+\-.]*:\/\//i;
 const PANEL_SCROLLBAR_OPTIONS = {
+  update: {
+    // Realtime list/detail content updates already call instance.update via syncKey.
+    // Avoid scanning every mutation for image load listeners on each refresh.
+    elementEvents: null,
+  },
   overflow: {
     x: "hidden",
     y: "scroll",
@@ -109,6 +114,32 @@ const PANEL_SCROLLBAR_OPTIONS = {
     autoHideSuspend: false,
   },
 } satisfies PartialOptions;
+
+const VisitorDetailClientPage = dynamic(
+  () =>
+    import("@/components/dashboard/site-pages/visitor-detail-client-page").then(
+      (module) => module.VisitorDetailClientPage,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="p-6 text-sm text-muted-foreground">Loading...</div>
+    ),
+  },
+);
+
+const SessionDetailClientPage = dynamic(
+  () =>
+    import("@/components/dashboard/site-pages/session-detail-client-page").then(
+      (module) => module.SessionDetailClientPage,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="p-6 text-sm text-muted-foreground">Loading...</div>
+    ),
+  },
+);
 
 type RealtimeLogEventKind = "enter" | "exit" | "view" | "visibility" | "custom";
 type RealtimeEventDisplayData = {
@@ -498,7 +529,7 @@ function LogStreamScrollbar({
         maybeReachScrollElementEnd(host, onReachEndRef.current);
       };
 
-      host.addEventListener("scroll", handleScroll);
+      host.addEventListener("scroll", handleScroll, { passive: true });
       requestAnimationFrame(() => {
         maybeReachScrollElementEnd(host, onReachEndRef.current);
       });
@@ -591,6 +622,52 @@ function formatRelativeTime(
 
 const relativeTimeFormatterCache = new Map<Locale, Intl.RelativeTimeFormat>();
 
+let realtimeClockNow = Date.now();
+let realtimeClockTimer: number | null = null;
+const realtimeClockSubscribers = new Set<() => void>();
+
+function subscribeRealtimeClock(
+  onStoreChange: () => void,
+  enabled = true,
+): () => void {
+  if (!enabled || typeof window === "undefined") return () => undefined;
+
+  realtimeClockSubscribers.add(onStoreChange);
+  if (realtimeClockTimer === null) {
+    realtimeClockNow = Date.now();
+    realtimeClockTimer = window.setInterval(() => {
+      realtimeClockNow = Date.now();
+      realtimeClockSubscribers.forEach((subscriber) => subscriber());
+    }, RELATIVE_TIME_REFRESH_MS);
+  }
+
+  return () => {
+    realtimeClockSubscribers.delete(onStoreChange);
+    if (realtimeClockSubscribers.size === 0 && realtimeClockTimer !== null) {
+      window.clearInterval(realtimeClockTimer);
+      realtimeClockTimer = null;
+    }
+  };
+}
+
+function getRealtimeClockSnapshot() {
+  return realtimeClockNow;
+}
+
+function useRealtimeClock(enabled = true) {
+  const subscribe = useCallback(
+    (onStoreChange: () => void) =>
+      subscribeRealtimeClock(onStoreChange, enabled),
+    [enabled],
+  );
+
+  return useSyncExternalStore(
+    subscribe,
+    getRealtimeClockSnapshot,
+    getRealtimeClockSnapshot,
+  );
+}
+
 function getRelativeTimeFormatter(locale: Locale): Intl.RelativeTimeFormat {
   const cached = relativeTimeFormatterCache.get(locale);
   if (cached) return cached;
@@ -601,6 +678,17 @@ function getRelativeTimeFormatter(locale: Locale): Intl.RelativeTimeFormat {
   relativeTimeFormatterCache.set(locale, formatter);
   return formatter;
 }
+
+const RealtimeRelativeTime = memo(function RealtimeRelativeTime({
+  locale,
+  timestamp,
+}: {
+  locale: Locale;
+  timestamp: number;
+}) {
+  const now = useRealtimeClock();
+  return formatRelativeTime(locale, timestamp, now);
+});
 
 function formatDetailDateTime(
   locale: Locale,
@@ -782,7 +870,6 @@ interface RealtimeLogStreamItemProps {
   event: RealtimeEvent;
   locale: Locale;
   messages: AppMessages;
-  now: number;
   timeZone: string;
 }
 
@@ -793,7 +880,6 @@ function areRealtimeLogStreamItemPropsEqual(
   return (
     previousProps.locale === nextProps.locale &&
     previousProps.messages === nextProps.messages &&
-    previousProps.now === nextProps.now &&
     previousProps.timeZone === nextProps.timeZone &&
     previousProps.event.id === nextProps.event.id &&
     previousProps.event.eventType === nextProps.event.eventType &&
@@ -859,7 +945,6 @@ const RealtimeLogStreamItemCard = memo(function RealtimeLogStreamItemCard({
   event,
   locale,
   messages,
-  now,
   timeZone,
 }: RealtimeLogStreamItemProps) {
   const displayData = useMemo(
@@ -952,7 +1037,10 @@ const RealtimeLogStreamItemCard = memo(function RealtimeLogStreamItemCard({
             <div className="shrink-0 self-stretch">
               <div className="flex h-full min-w-[7.5rem] flex-col items-end justify-between text-right">
                 <p className="font-mono text-[11px] text-foreground">
-                  {formatRelativeTime(locale, event.eventAt, now)}
+                  <RealtimeRelativeTime
+                    locale={locale}
+                    timestamp={event.eventAt}
+                  />
                 </p>
                 <p className="font-mono text-[11px] text-muted-foreground">
                   {eventDateTime}
@@ -986,7 +1074,6 @@ const RealtimeLogStreamItem = memo(function RealtimeLogStreamItem({
   event,
   locale,
   messages,
-  now,
   timeZone,
   onSelect,
   reduceMotion,
@@ -1021,7 +1108,6 @@ const RealtimeLogStreamItem = memo(function RealtimeLogStreamItem({
           event={event}
           locale={locale}
           messages={messages}
-          now={now}
           timeZone={timeZone}
         />
       </Clickable>
@@ -1228,7 +1314,6 @@ function RealtimeVisitorLocationMapSection({
 function RealtimeLogEventDetailsDrawer({
   locale,
   messages,
-  now,
   timeZone,
   event,
   open,
@@ -1240,7 +1325,6 @@ function RealtimeLogEventDetailsDrawer({
 }: {
   locale: Locale;
   messages: AppMessages;
-  now: number;
   timeZone: string;
   event: RealtimeEvent | null;
   open: boolean;
@@ -1250,6 +1334,7 @@ function RealtimeLogEventDetailsDrawer({
   onOpenVisitor?: (visitorId: string) => void;
   onOpenSession?: (sessionId: string) => void;
 }) {
+  const now = useRealtimeClock(open && Boolean(event));
   const displayData = event
     ? resolveRealtimeEventDisplayData(locale, messages, event)
     : null;
@@ -2261,7 +2346,6 @@ export function RealtimeLogStreamCard({
 }: RealtimeLogStreamCardProps) {
   const { timeZone } = useDashboardQueryControls();
   const reduceLogItemMotion = useReducedMotion() ?? false;
-  const [now, setNow] = useState(() => Date.now());
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_EVENTS);
   const [selectedEvent, setSelectedEvent] = useState<RealtimeEvent | null>(
     null,
@@ -2278,6 +2362,7 @@ export function RealtimeLogStreamCard({
   const nestedEventDetailCloseTimersRef = useRef(new Map<string, number>());
   const nestedEventDetailsClearTimerRef = useRef<number | null>(null);
   const nestedJourneyDetailsClearTimerRef = useRef<number | null>(null);
+  const selectedEventClearTimerRef = useRef<number | null>(null);
 
   const visibleEvents = useMemo(
     () => events.slice(0, visibleCount),
@@ -2290,16 +2375,6 @@ export function RealtimeLogStreamCard({
     : visibleEvents.length === 0
       ? "empty"
       : "events";
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setNow(Date.now());
-    }, RELATIVE_TIME_REFRESH_MS);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, []);
 
   useEffect(() => {
     setVisibleCount((previous) => {
@@ -2317,10 +2392,19 @@ export function RealtimeLogStreamCard({
       Math.min(events.length, previous + LOAD_MORE_STEP),
     );
   }, [events.length, hasMoreEvents]);
-  const handleEventSelect = useCallback((event: RealtimeEvent) => {
-    setSelectedEvent(event);
-    setIsEventDetailsOpen(true);
+  const clearSelectedEventTimer = useCallback(() => {
+    if (selectedEventClearTimerRef.current === null) return;
+    window.clearTimeout(selectedEventClearTimerRef.current);
+    selectedEventClearTimerRef.current = null;
   }, []);
+  const handleEventSelect = useCallback(
+    (event: RealtimeEvent) => {
+      clearSelectedEventTimer();
+      setSelectedEvent(event);
+      setIsEventDetailsOpen(true);
+    },
+    [clearSelectedEventTimer],
+  );
   const openNestedEventDetail = useCallback((event: RealtimeEvent) => {
     nestedEventDetailKeyRef.current += 1;
     setNestedEventDetails((current) => [
@@ -2383,34 +2467,43 @@ export function RealtimeLogStreamCard({
       return index < 0 ? current : current.slice(0, index);
     });
   }, []);
-  const handleEventDetailsOpenChange = useCallback((open: boolean) => {
-    setIsEventDetailsOpen(open);
-    if (!open) {
-      setNestedEventDetails((current) =>
-        current.map((item) => ({ ...item, open: false })),
-      );
-      if (nestedEventDetailsClearTimerRef.current !== null) {
-        window.clearTimeout(nestedEventDetailsClearTimerRef.current);
+  const handleEventDetailsOpenChange = useCallback(
+    (open: boolean) => {
+      clearSelectedEventTimer();
+      setIsEventDetailsOpen(open);
+      if (!open) {
+        selectedEventClearTimerRef.current = window.setTimeout(() => {
+          selectedEventClearTimerRef.current = null;
+          setSelectedEvent(null);
+        }, NESTED_DRAWER_EXIT_DURATION_MS);
+        setNestedEventDetails((current) =>
+          current.map((item) => ({ ...item, open: false })),
+        );
+        if (nestedEventDetailsClearTimerRef.current !== null) {
+          window.clearTimeout(nestedEventDetailsClearTimerRef.current);
+        }
+        nestedEventDetailsClearTimerRef.current = window.setTimeout(() => {
+          nestedEventDetailsClearTimerRef.current = null;
+          setNestedEventDetails([]);
+        }, NESTED_DRAWER_EXIT_DURATION_MS);
+        setNestedJourneyDetails((current) =>
+          current.map((item) => ({ ...item, open: false })),
+        );
+        if (nestedJourneyDetailsClearTimerRef.current !== null) {
+          window.clearTimeout(nestedJourneyDetailsClearTimerRef.current);
+        }
+        nestedJourneyDetailsClearTimerRef.current = window.setTimeout(() => {
+          nestedJourneyDetailsClearTimerRef.current = null;
+          setNestedJourneyDetails([]);
+        }, NESTED_DRAWER_EXIT_DURATION_MS);
       }
-      nestedEventDetailsClearTimerRef.current = window.setTimeout(() => {
-        nestedEventDetailsClearTimerRef.current = null;
-        setNestedEventDetails([]);
-      }, NESTED_DRAWER_EXIT_DURATION_MS);
-      setNestedJourneyDetails((current) =>
-        current.map((item) => ({ ...item, open: false })),
-      );
-      if (nestedJourneyDetailsClearTimerRef.current !== null) {
-        window.clearTimeout(nestedJourneyDetailsClearTimerRef.current);
-      }
-      nestedJourneyDetailsClearTimerRef.current = window.setTimeout(() => {
-        nestedJourneyDetailsClearTimerRef.current = null;
-        setNestedJourneyDetails([]);
-      }, NESTED_DRAWER_EXIT_DURATION_MS);
-    }
-  }, []);
+    },
+    [clearSelectedEventTimer],
+  );
 
   useEffect(() => {
     return () => {
+      clearSelectedEventTimer();
       nestedEventDetailCloseTimersRef.current.forEach((timerId) => {
         window.clearTimeout(timerId);
       });
@@ -2422,7 +2515,7 @@ export function RealtimeLogStreamCard({
         window.clearTimeout(nestedJourneyDetailsClearTimerRef.current);
       }
     };
-  }, []);
+  }, [clearSelectedEventTimer]);
   const journeyDetailContext =
     siteId && pathname
       ? {
@@ -2481,7 +2574,6 @@ export function RealtimeLogStreamCard({
                             event={event}
                             locale={locale}
                             messages={messages}
-                            now={now}
                             timeZone={timeZone}
                             onSelect={handleEventSelect}
                             reduceMotion={reduceLogItemMotion}
@@ -2500,7 +2592,6 @@ export function RealtimeLogStreamCard({
         event={selectedEvent}
         locale={locale}
         messages={messages}
-        now={now}
         timeZone={timeZone}
         events={events}
         onSelect={openNestedEventDetail}
@@ -2523,7 +2614,6 @@ export function RealtimeLogStreamCard({
           event={nestedDetail.event}
           locale={locale}
           messages={messages}
-          now={now}
           timeZone={timeZone}
           events={events}
           onSelect={openNestedEventDetail}

@@ -81,7 +81,7 @@ export function VerticalScrollMask({
 
     if (prepareNativeScrollbarHost(host)) {
       const sync = () => scheduleMaskSync(host);
-      host.addEventListener("scroll", sync);
+      host.addEventListener("scroll", sync, { passive: true });
       const animationFrame = requestAnimationFrame(sync);
 
       return () => {

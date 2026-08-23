@@ -449,7 +449,13 @@ export function buildDemoFactDataset(
     sessions,
     visitors,
   };
-  if (DEMO_FACT_DATASET_CACHE.size > 140) DEMO_FACT_DATASET_CACHE.clear();
   DEMO_FACT_DATASET_CACHE.set(cacheKey, dataset);
+  // Keep hot windows available when navigating between pages/sites. Clearing
+  // the whole cache here makes the next route rebuild every window at once.
+  while (DEMO_FACT_DATASET_CACHE.size > 140) {
+    const oldestKey = DEMO_FACT_DATASET_CACHE.keys().next().value;
+    if (oldestKey === undefined) break;
+    DEMO_FACT_DATASET_CACHE.delete(oldestKey);
+  }
   return dataset;
 }

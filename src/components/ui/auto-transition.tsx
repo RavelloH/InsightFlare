@@ -87,7 +87,7 @@ export function AutoTransition({
   customVariants,
   ...motionProps
 }: AutoTransitionProps) {
-  const [hasRendered, setHasRendered] = useState(false);
+  const [hasRendered, setHasRendered] = useState(initial);
 
   useEffect(() => {
     if (!hasRendered) setHasRendered(true);

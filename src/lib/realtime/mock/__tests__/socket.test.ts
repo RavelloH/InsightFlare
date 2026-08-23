@@ -31,13 +31,70 @@ type EventMessage = {
 
 type SocketMessage = SnapshotMessage | EventMessage;
 
+class FakeWorker {
+  static instances: FakeWorker[] = [];
+
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: (() => void) | null = null;
+  readonly postMessage = vi.fn();
+  readonly terminate = vi.fn();
+
+  constructor() {
+    FakeWorker.instances.push(this);
+  }
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  FakeWorker.instances.length = 0;
   buildDemoFactDatasetMock.mockReset();
 });
 
 describe("mock/socket", () => {
+  it("loads the initial dataset through a worker before opening", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(BASE_TIME);
+    vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.5)
+      .mockReturnValue(1);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("Worker", FakeWorker);
+    buildDemoFactDatasetMock.mockReturnValue(makeDataset([]));
+
+    const socket = createMockRealtimeSocket({ siteId: SITE_ID });
+    const onmessage = vi.fn();
+    socket.onmessage = onmessage;
+
+    const worker = FakeWorker.instances[0];
+    expect(worker).toBeDefined();
+    expect(worker?.postMessage).toHaveBeenCalledWith({
+      type: "build",
+      siteId: SITE_ID,
+      from: expect.any(Number),
+      to: expect.any(Number),
+    });
+
+    await vi.advanceTimersByTimeAsync(120);
+    expect(onmessage).not.toHaveBeenCalled();
+
+    worker?.onmessage?.({
+      data: {
+        type: "ready",
+        dataset: makeDataset([]),
+      },
+    } as MessageEvent);
+
+    expect(worker?.terminate).toHaveBeenCalledTimes(1);
+    expect(messagesFrom(onmessage)).toEqual([
+      expect.objectContaining({ type: "snapshot" }),
+    ]);
+
+    socket.close();
+  });
+
   it("slides an empty future queue and stops when no new visits are available", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(BASE_TIME);

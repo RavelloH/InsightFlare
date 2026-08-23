@@ -86,6 +86,7 @@ export function OverlayScrollbar({
 }: OverlayScrollbarProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const syncSlotBoundsRef = useRef<(() => void) | null>(null);
+  const syncSlotBoundsFrameRef = useRef<number | null>(null);
   const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
     null,
   );
@@ -179,20 +180,35 @@ export function OverlayScrollbar({
       horizontalInstance.update();
       syncSlotBounds();
     };
+    const scheduleSlotBoundsSync = () => {
+      if (syncSlotBoundsFrameRef.current !== null) return;
+
+      syncSlotBoundsFrameRef.current = window.requestAnimationFrame(() => {
+        syncSlotBoundsFrameRef.current = null;
+        syncSlotBounds();
+      });
+    };
 
     syncSlotBoundsRef.current = syncSlotBounds;
     const resizeObserver = new ResizeObserver(updateAndSyncSlotBounds);
 
     resizeObserver.observe(host);
     window.addEventListener("resize", updateAndSyncSlotBounds);
-    window.addEventListener("scroll", syncSlotBounds, true);
+    window.addEventListener("scroll", scheduleSlotBoundsSync, {
+      capture: true,
+      passive: true,
+    });
     horizontalInstance.update();
     syncSlotBounds();
 
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener("resize", updateAndSyncSlotBounds);
-      window.removeEventListener("scroll", syncSlotBounds, true);
+      window.removeEventListener("scroll", scheduleSlotBoundsSync, true);
+      if (syncSlotBoundsFrameRef.current !== null) {
+        window.cancelAnimationFrame(syncSlotBoundsFrameRef.current);
+        syncSlotBoundsFrameRef.current = null;
+      }
       if (!existing) {
         horizontalInstance.destroy();
       }
@@ -208,7 +224,7 @@ export function OverlayScrollbar({
 
   useEffect(() => {
     syncSlotBoundsRef.current?.();
-  });
+  }, [children]);
 
   useEffect(() => {
     scrollbarRef.current?.update();

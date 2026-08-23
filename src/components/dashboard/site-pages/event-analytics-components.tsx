@@ -1,8 +1,10 @@
 import {
   type KeyboardEvent,
+  memo,
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -766,6 +768,115 @@ function appendUniqueEvents(
   return nextRows.length > 0 ? [...current, ...nextRows] : current;
 }
 
+const EventRecordTableRow = memo(function EventRecordTableRow({
+  locale,
+  messages,
+  row,
+  now,
+  onOpenRecord,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  row: EventRecord;
+  now: number;
+  onOpenRecord: (eventId: string) => void;
+}) {
+  const openRecord = () => onOpenRecord(row.eventId);
+  const handleKeyDown = (event: KeyboardEvent<HTMLTableRowElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openRecord();
+  };
+
+  return (
+    <TableRow
+      role="button"
+      tabIndex={0}
+      className="group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+      onClick={openRecord}
+      onKeyDown={handleKeyDown}
+    >
+      <TableCell className="max-w-36 pl-4">
+        <div className="flex w-28 min-w-0 items-center gap-2">
+          <VisitorAvatar
+            seed={row.visitorId || row.eventId}
+            className="size-6"
+          />
+          <span className="min-w-0 truncate font-mono">
+            {shortId(row.visitorId || row.sessionId || row.visitId)}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell className="max-w-48">
+        <span className="block truncate font-medium" title={row.eventName}>
+          {row.eventName}
+        </span>
+      </TableCell>
+      <TableCell className="max-w-32">
+        <span className="block truncate font-mono text-muted-foreground">
+          {shortId(row.eventId)}
+        </span>
+      </TableCell>
+      <TableCell className="max-w-36 font-mono text-muted-foreground">
+        <span className="block truncate">
+          {formatRelativeTime(locale, row.occurredAt, now)}
+        </span>
+      </TableCell>
+      <TableCell className="max-w-64">
+        <span
+          className="block truncate font-mono"
+          title={formatPath(row.pathname)}
+        >
+          {formatPath(row.pathname)}
+        </span>
+      </TableCell>
+      <TableCell className="max-w-44">
+        <ReferrerMeta
+          referrerHost={row.referrerHost || ""}
+          directLabel={messages.overview.direct}
+          className="w-full"
+        />
+      </TableCell>
+      <TableCell className="max-w-52">
+        <CountryRegionMeta
+          locale={locale}
+          messages={messages}
+          country={row.country || ""}
+          region={row.region}
+          className="w-full"
+        />
+      </TableCell>
+      <TableCell className="max-w-40">
+        <OsMeta
+          os={row.os || ""}
+          version={row.osVersion}
+          unknownLabel={messages.common.unknown}
+          className="w-full"
+        />
+      </TableCell>
+      <TableCell className="max-w-40">
+        <BrowserMeta
+          browser={row.browser || ""}
+          version={row.browserVersion}
+          unknownLabel={messages.common.unknown}
+          className="w-full"
+        />
+      </TableCell>
+      <TableCell className="max-w-36">
+        <DeviceMeta
+          deviceType={row.deviceType || ""}
+          deviceLabels={messages.common.deviceLabels}
+          unknownLabel={messages.common.unknown}
+          className="w-full"
+        />
+      </TableCell>
+      <TableCell className="pr-4 text-right font-mono tabular-nums">
+        {numberFormat(locale, row.valueCount)}
+      </TableCell>
+    </TableRow>
+  );
+});
+
 function EventRecordsTable({
   locale,
   messages,
@@ -801,15 +912,6 @@ function EventRecordsTable({
     const interval = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(interval);
   }, []);
-
-  const handleKeyDown = (
-    event: KeyboardEvent<HTMLTableRowElement>,
-    eventId: string,
-  ) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    onOpenRecord(eventId);
-  };
 
   const bodyState = loadingRows
     ? "loading"
@@ -888,95 +990,14 @@ function EventRecordsTable({
           ) : (
             <>
               {rows.map((row) => (
-                <TableRow
+                <EventRecordTableRow
                   key={row.eventId}
-                  role="button"
-                  tabIndex={0}
-                  className="group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
-                  onClick={() => onOpenRecord(row.eventId)}
-                  onKeyDown={(event) => handleKeyDown(event, row.eventId)}
-                >
-                  <TableCell className="max-w-36 pl-4">
-                    <div className="flex w-28 min-w-0 items-center gap-2">
-                      <VisitorAvatar
-                        seed={row.visitorId || row.eventId}
-                        className="size-6"
-                      />
-                      <span className="min-w-0 truncate font-mono">
-                        {shortId(row.visitorId || row.sessionId || row.visitId)}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="max-w-48">
-                    <span
-                      className="block truncate font-medium"
-                      title={row.eventName}
-                    >
-                      {row.eventName}
-                    </span>
-                  </TableCell>
-                  <TableCell className="max-w-32">
-                    <span className="block truncate font-mono text-muted-foreground">
-                      {shortId(row.eventId)}
-                    </span>
-                  </TableCell>
-                  <TableCell className="max-w-36 font-mono text-muted-foreground">
-                    <span className="block truncate">
-                      {formatRelativeTime(locale, row.occurredAt, now)}
-                    </span>
-                  </TableCell>
-                  <TableCell className="max-w-64">
-                    <span
-                      className="block truncate font-mono"
-                      title={formatPath(row.pathname)}
-                    >
-                      {formatPath(row.pathname)}
-                    </span>
-                  </TableCell>
-                  <TableCell className="max-w-44">
-                    <ReferrerMeta
-                      referrerHost={row.referrerHost || ""}
-                      directLabel={messages.overview.direct}
-                      className="w-full"
-                    />
-                  </TableCell>
-                  <TableCell className="max-w-52">
-                    <CountryRegionMeta
-                      locale={locale}
-                      messages={messages}
-                      country={row.country || ""}
-                      region={row.region}
-                      className="w-full"
-                    />
-                  </TableCell>
-                  <TableCell className="max-w-40">
-                    <OsMeta
-                      os={row.os || ""}
-                      version={row.osVersion}
-                      unknownLabel={messages.common.unknown}
-                      className="w-full"
-                    />
-                  </TableCell>
-                  <TableCell className="max-w-40">
-                    <BrowserMeta
-                      browser={row.browser || ""}
-                      version={row.browserVersion}
-                      unknownLabel={messages.common.unknown}
-                      className="w-full"
-                    />
-                  </TableCell>
-                  <TableCell className="max-w-36">
-                    <DeviceMeta
-                      deviceType={row.deviceType || ""}
-                      deviceLabels={messages.common.deviceLabels}
-                      unknownLabel={messages.common.unknown}
-                      className="w-full"
-                    />
-                  </TableCell>
-                  <TableCell className="pr-4 text-right font-mono tabular-nums">
-                    {numberFormat(locale, row.valueCount)}
-                  </TableCell>
-                </TableRow>
+                  locale={locale}
+                  messages={messages}
+                  row={row}
+                  now={now}
+                  onOpenRecord={onOpenRecord}
+                />
               ))}
               {appendError ? (
                 <TableRow>
@@ -1922,10 +1943,10 @@ export function EventRecordsSection({
   const appendError = isFetchNextPageError;
   const replacingRows = isPending || (isFetching && !isFetchingNextPage);
   const hasMore = hasNextPage ?? false;
-  const loadNextPage = () => {
+  const loadNextPage = useCallback(() => {
     if (loadingInitial || loadingMore || appendError || !hasMore) return;
     void fetchNextPage();
-  };
+  }, [appendError, fetchNextPage, hasMore, loadingInitial, loadingMore]);
 
   const sentinelRef = useInfiniteTableSentinel({
     enabled:
@@ -1961,10 +1982,10 @@ export function EventRecordsSection({
     );
   };
 
-  const openRecord = (eventId: string) => {
+  const openRecord = useCallback((eventId: string) => {
     setSelectedEventId(eventId);
     setDrawerOpen(true);
-  };
+  }, []);
 
   return (
     <section className="space-y-3">

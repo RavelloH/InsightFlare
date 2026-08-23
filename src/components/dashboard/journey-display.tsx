@@ -45,6 +45,17 @@ const UNKNOWN_ICON_KEY = "unknown";
 const BROWSER_APPLE_ICON_KEYS = new Set(["ios", "ios-webview"]);
 const OS_APPLE_ICON_KEYS = new Set(["ios", "mac-os"]);
 const ABSOLUTE_URL_PATTERN = /^[a-z][a-z\d+\-.]*:\/\//i;
+const RELATIVE_TIME_FORMATTERS = new Map<string, Intl.RelativeTimeFormat>();
+
+function getRelativeTimeFormatter(locale: Locale): Intl.RelativeTimeFormat {
+  const key = intlLocale(locale);
+  const cached = RELATIVE_TIME_FORMATTERS.get(key);
+  if (cached) return cached;
+
+  const formatter = new Intl.RelativeTimeFormat(key, { numeric: "auto" });
+  RELATIVE_TIME_FORMATTERS.set(key, formatter);
+  return formatter;
+}
 
 export type DeviceTypeIcon = ComponentType<{ className?: string }>;
 
@@ -585,9 +596,7 @@ export function formatRelativeTime(
   timestamp: number,
   now: number,
 ): string {
-  const formatter = new Intl.RelativeTimeFormat(intlLocale(locale), {
-    numeric: "auto",
-  });
+  const formatter = getRelativeTimeFormatter(locale);
   const diffSeconds = Math.round((timestamp - now) / 1000);
   const absoluteSeconds = Math.abs(diffSeconds);
   if (absoluteSeconds < 60) return formatter.format(diffSeconds, "second");

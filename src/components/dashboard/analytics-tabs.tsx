@@ -298,7 +298,7 @@ export function AnalyticsTabs({ items }: AnalyticsTabsProps) {
         host.scrollLeft += delta;
       };
 
-      host.addEventListener("scroll", sync);
+      host.addEventListener("scroll", sync, { passive: true });
       host.addEventListener("wheel", handleWheel, { passive: false });
       const animationFrame = requestAnimationFrame(() => {
         syncIndicatorRef.current();

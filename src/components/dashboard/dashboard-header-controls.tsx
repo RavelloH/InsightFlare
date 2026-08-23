@@ -93,7 +93,10 @@ import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 import { isRealtimeMockEnabled } from "@/lib/realtime/client";
-import type { RealtimeConnectionState } from "@/lib/realtime/types";
+import type {
+  RealtimeChannelState,
+  RealtimeConnectionState,
+} from "@/lib/realtime/types";
 import { usePathname } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -125,6 +128,22 @@ const ROLLING_RANGE_PRESETS = new Set<RangePreset>([
   "12m",
 ]);
 const USE_REALTIME_MOCK = isRealtimeMockEnabled();
+
+const selectRealtimeHeaderState = (state: RealtimeChannelState) => ({
+  activeNow: state.activeNow,
+  status: state.status,
+  hasConnected: state.hasConnected,
+});
+type RealtimeHeaderState = ReturnType<typeof selectRealtimeHeaderState>;
+
+const areRealtimeHeaderStatesEqual = (
+  left: RealtimeHeaderState,
+  right: RealtimeHeaderState,
+) =>
+  left.activeNow === right.activeNow &&
+  left.status === right.status &&
+  left.hasConnected === right.hasConnected;
+
 function rangeLabel(messages: AppMessages, range: RangePreset): string {
   if (range === "30m") return messages.ranges.last30m;
   if (range === "1h") return messages.ranges.last1h;
@@ -439,24 +458,17 @@ export function DashboardHeaderControls({
     showFilterSheet &&
     (Boolean(siteId) || USE_REALTIME_MOCK);
   const realtimeEnabled = showControls && showRealtimeBadge;
-  const activeNow = useRealtimeChannelSelector(
+  const realtimeHeaderState = useRealtimeChannelSelector(
     realtimeSiteId,
-    (state) => state.activeNow,
-    Object.is,
+    selectRealtimeHeaderState,
+    areRealtimeHeaderStatesEqual,
     { enabled: realtimeEnabled },
   );
-  const realtimeStatus = useRealtimeChannelSelector(
-    realtimeSiteId,
-    (state) => state.status,
-    Object.is,
-    { enabled: realtimeEnabled },
-  );
-  const hasRealtimeConnected = useRealtimeChannelSelector(
-    realtimeSiteId,
-    (state) => state.hasConnected,
-    Object.is,
-    { enabled: realtimeEnabled },
-  );
+  const {
+    activeNow,
+    status: realtimeStatus,
+    hasConnected: hasRealtimeConnected,
+  } = realtimeHeaderState;
 
   const orderedAllowedIntervals = INTERVAL_ORDER.filter((value) =>
     allowedIntervals.includes(value),

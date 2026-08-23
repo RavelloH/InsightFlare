@@ -1,6 +1,7 @@
 import { findSiteProfile } from "@/lib/realtime/demo-site-profiles";
 import { buildDemoFactDataset } from "@/lib/realtime/mock/fact-builder";
-import type { DemoVisitFact } from "@/lib/realtime/mock/types";
+import type { DemoFactDatasetWorkerMessage } from "@/lib/realtime/mock/fact-dataset.worker";
+import type { DemoFactDataset, DemoVisitFact } from "@/lib/realtime/mock/types";
 import type { RealtimeEvent, RealtimeVisit } from "@/lib/realtime/types";
 // ---------------------------------------------------------------------------
 //  Realtime mock socket
@@ -235,6 +236,10 @@ function randomInt(min: number, max: number): number {
 const FUTURE_PRELOAD_MS = 30 * 60 * 1000;
 const MIN_INTER_EVENT_MS = 220;
 
+function canUseDemoFactDatasetWorker(): boolean {
+  return typeof window !== "undefined" && typeof Worker !== "undefined";
+}
+
 class MockRealtimeSocket implements RealtimeSocketLike {
   readyState: WebSocket["readyState"] = READY_STATE.CONNECTING;
   onopen: WebSocket["onopen"] = null;
@@ -254,6 +259,10 @@ class MockRealtimeSocket implements RealtimeSocketLike {
   private recentEvents: RealtimeEvent[] = [];
   private sequence = 0;
   private lastEmitAt = 0;
+  private datasetReady = false;
+  private handshakeReady = false;
+  private shouldFailHandshake = false;
+  private datasetWorker: Worker | null = null;
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
   private nextEmitTimer: ReturnType<typeof setTimeout> | null = null;
   private dropTimer: ReturnType<typeof setTimeout> | null = null;
@@ -267,7 +276,12 @@ class MockRealtimeSocket implements RealtimeSocketLike {
     const now = Date.now();
     this.windowStart = now - RECENT_RECORD_WINDOW_MS;
     this.windowEnd = now + FUTURE_PRELOAD_MS;
-    this.loadWindowSlice(now);
+    if (canUseDemoFactDatasetWorker()) {
+      this.loadWindowSliceInWorker(now);
+    } else {
+      this.loadWindowSlice(now);
+      this.datasetReady = true;
+    }
     this.beginHandshake();
   }
 
@@ -285,21 +299,28 @@ class MockRealtimeSocket implements RealtimeSocketLike {
 
   private beginHandshake(): void {
     const handshakeDelayMs = randomInt(120, 780);
-    const shouldFailHandshake = Math.random() < 0.2;
+    this.shouldFailHandshake = Math.random() < 0.2;
     this.handshakeTimer = setTimeout(() => {
       this.handshakeTimer = null;
       if (this.readyState !== READY_STATE.CONNECTING) return;
-      if (shouldFailHandshake) {
-        this.emitError();
-        return;
-      }
-
-      this.readyState = READY_STATE.OPEN;
-      this.emitOpen();
-      this.emitSnapshot();
-      this.scheduleNextEmit();
-      this.scheduleDisconnect();
+      this.handshakeReady = true;
+      this.tryCompleteHandshake();
     }, handshakeDelayMs);
+  }
+
+  private tryCompleteHandshake(): void {
+    if (!this.handshakeReady || !this.datasetReady) return;
+    if (this.readyState !== READY_STATE.CONNECTING) return;
+    if (this.shouldFailHandshake) {
+      this.emitError();
+      return;
+    }
+
+    this.readyState = READY_STATE.OPEN;
+    this.emitOpen();
+    this.emitSnapshot();
+    this.scheduleNextEmit();
+    this.scheduleDisconnect();
   }
 
   /**
@@ -313,6 +334,51 @@ class MockRealtimeSocket implements RealtimeSocketLike {
       this.windowStart,
       this.windowEnd,
     );
+    this.applyWindowSlice(dataset, now);
+  }
+
+  private loadWindowSliceInWorker(now: number): void {
+    try {
+      const worker = new Worker(
+        new URL("./fact-dataset.worker.ts", import.meta.url),
+        { type: "module" },
+      );
+      this.datasetWorker = worker;
+      worker.onmessage = (
+        event: MessageEvent<DemoFactDatasetWorkerMessage>,
+      ) => {
+        if (this.readyState === READY_STATE.CLOSED) return;
+        this.datasetWorker = null;
+        worker.terminate();
+        if (event.data.type === "error") {
+          this.loadWindowSlice(now);
+        } else {
+          this.applyWindowSlice(event.data.dataset, now);
+        }
+        this.datasetReady = true;
+        this.tryCompleteHandshake();
+      };
+      worker.onerror = () => {
+        if (this.readyState === READY_STATE.CLOSED) return;
+        this.datasetWorker = null;
+        worker.terminate();
+        this.loadWindowSlice(now);
+        this.datasetReady = true;
+        this.tryCompleteHandshake();
+      };
+      worker.postMessage({
+        type: "build",
+        siteId: this.siteId,
+        from: this.windowStart,
+        to: this.windowEnd,
+      });
+    } catch {
+      this.loadWindowSlice(now);
+      this.datasetReady = true;
+    }
+  }
+
+  private applyWindowSlice(dataset: DemoFactDataset, now: number): void {
     const past: DemoVisitFact[] = [];
     const future: DemoVisitFact[] = [];
     for (const visit of dataset.visits) {
@@ -591,6 +657,10 @@ class MockRealtimeSocket implements RealtimeSocketLike {
   }
 
   private clearTimers(): void {
+    if (this.datasetWorker) {
+      this.datasetWorker.terminate();
+      this.datasetWorker = null;
+    }
     if (this.handshakeTimer) {
       clearTimeout(this.handshakeTimer);
       this.handshakeTimer = null;

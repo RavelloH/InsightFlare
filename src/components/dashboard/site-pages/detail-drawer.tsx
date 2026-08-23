@@ -363,7 +363,13 @@ export function DetailDrawer({
   }, [handleClose, isCloseInteractionDisabled, layerZIndex, rendered]);
 
   useEffect(() => {
-    if (!rendered || isCloseInteractionDisabled) return;
+    if (
+      !rendered ||
+      isCloseInteractionDisabled ||
+      hasHigherFloatingLayer(layerZIndex)
+    ) {
+      return;
+    }
 
     let shouldSuppressClick = false;
     let clickSuppressTimer: number | null = null;
@@ -419,7 +425,13 @@ export function DetailDrawer({
         window.clearTimeout(clickSuppressTimer);
       }
     };
-  }, [handleClose, isCloseInteractionDisabled, layerZIndex, rendered]);
+  }, [
+    detailDrawerLayers,
+    handleClose,
+    isCloseInteractionDisabled,
+    layerZIndex,
+    rendered,
+  ]);
 
   useEffect(() => {
     if (!mounted || !rendered) return;

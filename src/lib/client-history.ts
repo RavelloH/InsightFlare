@@ -2,21 +2,32 @@ import { useMemo, useSyncExternalStore } from "react";
 
 const URL_STATE_CHANGE_EVENT = "insightflare:url-state-change";
 
+const urlStateSubscribers = new Set<() => void>();
+let urlStateListenersAttached = false;
+
+function handleUrlStateChange() {
+  urlStateSubscribers.forEach((subscriber) => subscriber());
+}
+
 function subscribeToUrlState(onStoreChange: () => void): () => void {
   if (typeof window === "undefined") {
     return () => undefined;
   }
 
-  const handleStoreChange = () => {
-    onStoreChange();
-  };
-
-  window.addEventListener("popstate", handleStoreChange);
-  window.addEventListener(URL_STATE_CHANGE_EVENT, handleStoreChange);
+  urlStateSubscribers.add(onStoreChange);
+  if (!urlStateListenersAttached) {
+    window.addEventListener("popstate", handleUrlStateChange);
+    window.addEventListener(URL_STATE_CHANGE_EVENT, handleUrlStateChange);
+    urlStateListenersAttached = true;
+  }
 
   return () => {
-    window.removeEventListener("popstate", handleStoreChange);
-    window.removeEventListener(URL_STATE_CHANGE_EVENT, handleStoreChange);
+    urlStateSubscribers.delete(onStoreChange);
+    if (urlStateSubscribers.size === 0 && urlStateListenersAttached) {
+      window.removeEventListener("popstate", handleUrlStateChange);
+      window.removeEventListener(URL_STATE_CHANGE_EVENT, handleUrlStateChange);
+      urlStateListenersAttached = false;
+    }
   };
 }
 

@@ -161,4 +161,38 @@ describe("client history URL helpers", () => {
 
     expect(container.textContent).toBe("three:");
   });
+
+  it("shares one pair of global listeners across live search subscribers", () => {
+    function Probe() {
+      useLiveSearchParams();
+      return null;
+    }
+
+    const addEventListener = vi.spyOn(window, "addEventListener");
+    const removeEventListener = vi.spyOn(window, "removeEventListener");
+
+    act(() => {
+      root.render(
+        createElement("div", null, createElement(Probe), createElement(Probe)),
+      );
+    });
+
+    expect(
+      addEventListener.mock.calls.filter((call) => {
+        const type = String(call[0]);
+        return type === "popstate" || type === "insightflare:url-state-change";
+      }),
+    ).toHaveLength(2);
+
+    act(() => {
+      root.render(null);
+    });
+
+    expect(
+      removeEventListener.mock.calls.filter((call) => {
+        const type = String(call[0]);
+        return type === "popstate" || type === "insightflare:url-state-change";
+      }),
+    ).toHaveLength(2);
+  });
 });

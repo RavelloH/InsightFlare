@@ -55,6 +55,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
 type NonEmptyArray<T> = readonly [T, ...T[]];
+const EMPTY_ROWS_BY_TAB = {};
 
 export type TabbedDataTableSortDirection = "asc" | "desc";
 
@@ -449,7 +450,7 @@ function TabbedDataTableCardImpl<
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const latestTabsRef = useRef(tabs);
   const latestColumnsRef = useRef(columns);
-  const externalRowsByTab = (rowsByTab ?? {}) as Partial<
+  const externalRowsByTab = (rowsByTab ?? EMPTY_ROWS_BY_TAB) as Partial<
     Record<TTab, readonly TRow[] | null>
   >;
   const activeExternalRows = externalRowsByTab[activeTab];
