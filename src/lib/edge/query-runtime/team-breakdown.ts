@@ -53,7 +53,7 @@ function mergeBreakdownItems(
         (left, right) =>
           right.views - left.views || left.key.localeCompare(right.key),
       )
-      .slice(0, limit),
+      .slice(0, limit > 0 ? limit : undefined),
   };
 }
 
@@ -84,7 +84,10 @@ export async function readTeamBreakdown(
   const sites = (await listTeamSites(input.env, input.teamId)).filter(
     (site) => !allowed || allowed.has(site.id),
   );
-  const perSiteLimit = 200;
+  // A non-positive limit is the internal exact-aggregate mode used by the
+  // comparison engine. It intentionally omits the historical per-site top
+  // candidate cut; applying a limit before the merge is not exact.
+  const perSiteLimit = 0;
   const results = await Promise.all(
     sites.map((site) =>
       readSiteBreakdown({

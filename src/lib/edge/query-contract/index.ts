@@ -1,4 +1,6 @@
 export * from "./channels";
+export * from "./comparison";
+export * from "./comparison-metrics";
 export * from "./filter-adapters";
 export * from "./filter-codec";
 export * from "./filter-compiler";

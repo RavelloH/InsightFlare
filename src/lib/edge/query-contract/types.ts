@@ -52,6 +52,8 @@ export type QuerySubject =
 export type QueryOperation =
   | "overview"
   | "trend"
+  | "comparison"
+  | "comparison-breakdown"
   | "dimension"
   | "cross-dimension"
   | "share-trend"
@@ -191,6 +193,8 @@ export type AnalyticsDomainError =
       readonly kind: "range-not-supported";
       readonly reason: "too-wide" | "too-many-buckets";
     }
+  | { readonly kind: "comparison-alignment-mismatch" }
+  | { readonly kind: "dimension-not-supported"; readonly dimension: string }
   | { readonly kind: "data-unavailable"; readonly retryable: boolean }
   | { readonly kind: "internal"; readonly operation: QueryOperation };
 
@@ -204,6 +208,143 @@ export interface BaseQuery {
   readonly context: QueryContext;
   readonly time: QueryTime;
   readonly filters?: FilterDocument;
+}
+
+export const COMPARISON_METRIC_KEYS = [
+  "views",
+  "sessions",
+  "visitors",
+  "bounces",
+  "totalDurationMs",
+  "durationViews",
+  "avgDurationMs",
+  "bounceRate",
+  "viewsPerSession",
+  "events",
+] as const;
+
+export type ComparisonMetricKey = (typeof COMPARISON_METRIC_KEYS)[number];
+
+export interface ComparisonDatasetQuery {
+  readonly time: QueryTime;
+  readonly filters?: FilterDocument;
+}
+
+export interface ComparisonQuery {
+  readonly context: QueryContext;
+  readonly current: ComparisonDatasetQuery;
+  readonly reference: ComparisonDatasetQuery;
+  readonly metrics: readonly ComparisonMetricKey[];
+}
+
+export interface ComparisonTrendQuery extends ComparisonQuery {
+  readonly interval: CalendarGranularity;
+  readonly trendMetrics: readonly ComparisonMetricKey[];
+}
+
+export type ComparisonBreakdownSortBy =
+  | "current.views"
+  | "current.sessions"
+  | "current.visitors"
+  | "reference.views"
+  | "reference.sessions"
+  | "reference.visitors"
+  | "change.views.absolute"
+  | "change.views.relative"
+  | "change.sessions.absolute"
+  | "change.sessions.relative"
+  | "change.visitors.absolute"
+  | "change.visitors.relative"
+  | "key";
+
+export interface ComparisonBreakdownQuery extends ComparisonQuery {
+  readonly dimension: AnalyticsDimension;
+  readonly limit: number;
+  readonly sort: {
+    readonly by: ComparisonBreakdownSortBy;
+    readonly direction: SortDirection;
+  };
+}
+
+export type ComparisonMetricValue = number | null;
+
+export interface ComparisonMetricDelta {
+  readonly absolute: ComparisonMetricValue;
+  readonly relative: ComparisonMetricValue;
+}
+
+export type ComparisonMetricProjection = Readonly<
+  Partial<Record<ComparisonMetricKey, ComparisonMetricValue>>
+>;
+
+export type ComparisonDelta = Readonly<
+  Partial<Record<ComparisonMetricKey, ComparisonMetricDelta>>
+>;
+
+export interface ComparisonRawMetrics extends OverviewMetrics {
+  readonly events: number;
+}
+
+export interface ComparisonRawTrendPoint extends ComparisonRawMetrics {
+  readonly bucket: number;
+  readonly timestampMs: EpochMs;
+  readonly fromMs: EpochMs;
+  readonly toMs: EpochMs;
+}
+
+export interface ComparisonRawTrendResult {
+  readonly interval: CalendarGranularity;
+  readonly points: readonly ComparisonRawTrendPoint[];
+}
+
+export interface ComparisonRawBreakdownItem extends ComparisonRawMetrics {
+  readonly key: string;
+  readonly label: string;
+}
+
+export interface ComparisonRawBreakdownResult {
+  readonly items: readonly ComparisonRawBreakdownItem[];
+  readonly complete: boolean;
+}
+
+export interface ComparisonResult {
+  readonly current: ComparisonMetricProjection;
+  readonly reference: ComparisonMetricProjection;
+  readonly change: ComparisonDelta;
+}
+
+export interface ComparisonTrendPoint {
+  readonly index: number;
+  readonly current: {
+    readonly fromMs: EpochMs;
+    readonly toMs: EpochMs;
+    readonly metrics: ComparisonMetricProjection;
+  };
+  readonly reference: {
+    readonly fromMs: EpochMs;
+    readonly toMs: EpochMs;
+    readonly metrics: ComparisonMetricProjection;
+  };
+  readonly change: ComparisonDelta;
+}
+
+export interface ComparisonTrendResult {
+  readonly interval: CalendarGranularity;
+  readonly points: readonly ComparisonTrendPoint[];
+}
+
+export interface ComparisonBreakdownItem {
+  readonly key: string;
+  readonly label: string;
+  readonly current: ComparisonMetricProjection;
+  readonly reference: ComparisonMetricProjection;
+  readonly change: ComparisonDelta;
+}
+
+export interface ComparisonBreakdownResult {
+  readonly items: readonly ComparisonBreakdownItem[];
+  readonly complete: boolean;
+  readonly dimension?: AnalyticsDimension;
 }
 
 export interface DimensionQuery extends BaseQuery {

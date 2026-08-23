@@ -29,8 +29,8 @@ import { apiV1CoreRouteRegistry } from "@/lib/api-v1/core-registry";
 import {
   SiteBreakdownQueryDtoSchema,
   SiteChannelsQueryDtoSchema,
-  SiteComparisonBreakdownQueryDtoSchema,
-  SiteComparisonTimeseriesQueryDtoSchema,
+  SiteComparisonBreakdownV2QueryDtoSchema,
+  SiteComparisonQueryDtoSchema,
   SiteCrossBreakdownQueryDtoSchema,
   SiteEventDetailQueryDtoSchema,
   SiteEventFieldsQueryDtoSchema,
@@ -42,7 +42,6 @@ import {
   SiteEventTypesQueryDtoSchema,
   SiteFilterValuesQueryDtoSchema,
   SiteFunnelAnalysisQueryDtoSchema,
-  SiteOverviewComparisonQueryDtoSchema,
   SiteOverviewQueryDtoSchema,
   SitePagesQueryDtoSchema,
   SitePerformanceBreakdownDimensionSchema,
@@ -64,9 +63,8 @@ import {
   SiteVisitorSessionsQueryDtoSchema,
   SiteVisitorsSearchQueryDtoSchema,
   TeamBreakdownQueryDtoSchema,
-  TeamComparisonBreakdownQueryDtoSchema,
-  TeamComparisonOverviewQueryDtoSchema,
-  TeamComparisonTimeseriesQueryDtoSchema,
+  TeamComparisonBreakdownV2QueryDtoSchema,
+  TeamComparisonQueryDtoSchema,
   TeamOverviewQueryDtoSchema,
   TeamSitesQueryDtoSchema,
   TeamTimeseriesQueryDtoSchema,
@@ -76,9 +74,8 @@ import type { ApiV1ErrorCode } from "@/lib/api-v1/errors";
 import {
   AnalyticsBreakdownResponseSchema,
   AnalyticsChannelsResponseSchema,
-  AnalyticsComparisonBreakdownResponseSchema,
-  AnalyticsComparisonOverviewResponseSchema,
-  AnalyticsComparisonTimeseriesResponseSchema,
+  AnalyticsComparisonBreakdownV2ResponseSchema,
+  AnalyticsComparisonResponseSchema,
   AnalyticsCrossBreakdownResponseSchema,
   AnalyticsEventDetailResponseSchema,
   AnalyticsEventFieldsResponseSchema,
@@ -117,6 +114,12 @@ import {
   type AnalyticsOperationId,
 } from "@/lib/edge/analytics/operation-registry";
 
+export type ApiV1ComparisonOperationId =
+  | "site.analytics.comparison"
+  | "site.analytics.comparisonBreakdown"
+  | "team.analytics.comparison"
+  | "team.analytics.comparisonBreakdown";
+
 export type ApiV1RouteLifecycle = "planned" | "exposed";
 export type ApiV1HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -125,12 +128,13 @@ export interface ApiV1AnalyticsRouteDescriptor<Id extends string> {
   readonly lifecycle: ApiV1RouteLifecycle;
   readonly method: ApiV1HttpMethod;
   readonly path: string;
-  readonly operationId: AnalyticsOperationId;
+  readonly operationId: AnalyticsOperationId | ApiV1ComparisonOperationId;
   readonly scopes: readonly string[];
   readonly conditionalScopes?: readonly {
     readonly when:
       | "filter.type=saved"
-      | "a.filter.type=saved|b.filter.type=saved";
+      | "a.filter.type=saved|b.filter.type=saved"
+      | "current.filter.type=saved|reference.filter.type=saved";
     readonly scopes: readonly string[];
   }[];
   readonly requestSchema:
@@ -162,28 +166,20 @@ export interface ApiV1AnalyticsComparisonRouteDescriptor<Id extends string> {
   readonly method: "POST";
   readonly path: string;
   readonly operationId:
-    | "site.analytics.comparisonOverview"
-    | "site.analytics.comparisonTimeseries"
+    | "site.analytics.comparison"
     | "site.analytics.comparisonBreakdown"
-    | "team.analytics.comparisonOverview"
-    | "team.analytics.comparisonTimeseries"
+    | "team.analytics.comparison"
     | "team.analytics.comparisonBreakdown";
-  readonly variants:
-    | readonly ["previous-period", "explicit"]
-    | readonly ["explicit"];
   readonly scopes: readonly string[];
   readonly conditionalScopes?: ApiV1AnalyticsRouteDescriptor<string>["conditionalScopes"];
   readonly requestSchema:
-    | typeof SiteOverviewComparisonQueryDtoSchema
-    | typeof SiteComparisonTimeseriesQueryDtoSchema
-    | typeof SiteComparisonBreakdownQueryDtoSchema
-    | typeof TeamComparisonOverviewQueryDtoSchema
-    | typeof TeamComparisonTimeseriesQueryDtoSchema
-    | typeof TeamComparisonBreakdownQueryDtoSchema;
+    | typeof SiteComparisonQueryDtoSchema
+    | typeof SiteComparisonBreakdownV2QueryDtoSchema
+    | typeof TeamComparisonQueryDtoSchema
+    | typeof TeamComparisonBreakdownV2QueryDtoSchema;
   readonly responseSchema:
-    | typeof AnalyticsComparisonOverviewResponseSchema
-    | typeof AnalyticsComparisonTimeseriesResponseSchema
-    | typeof AnalyticsComparisonBreakdownResponseSchema;
+    | typeof AnalyticsComparisonResponseSchema
+    | typeof AnalyticsComparisonBreakdownV2ResponseSchema;
   readonly declaredErrors: readonly ApiV1ErrorCode[];
 }
 
@@ -518,8 +514,22 @@ export interface ApiV1BatchRouteDescriptor {
 
 function analyticsRoute<Id extends string>(
   descriptor: ApiV1AnalyticsRouteDescriptor<Id>,
-): ApiV1AnalyticsRouteDescriptor<Id> {
-  if (!analyticsOperationById(descriptor.operationId)) {
+): ApiV1AnalyticsRouteDescriptor<Id>;
+function analyticsRoute<Id extends string>(
+  descriptor: ApiV1AnalyticsComparisonRouteDescriptor<Id>,
+): ApiV1AnalyticsComparisonRouteDescriptor<Id>;
+function analyticsRoute<Id extends string>(
+  descriptor:
+    | ApiV1AnalyticsRouteDescriptor<Id>
+    | ApiV1AnalyticsComparisonRouteDescriptor<Id>,
+) {
+  const comparison = [
+    "site.analytics.comparison",
+    "site.analytics.comparisonBreakdown",
+    "team.analytics.comparison",
+    "team.analytics.comparisonBreakdown",
+  ].includes(descriptor.operationId);
+  if (!comparison && !analyticsOperationById(descriptor.operationId)) {
     throw new Error(`Unknown analytics operation: ${descriptor.operationId}`);
   }
   return descriptor;
@@ -578,153 +588,114 @@ export const apiV1AnalyticsRouteRegistry = [
 ] as const;
 
 export const apiV1AnalyticsComparisonRouteRegistry = [
-  {
-    id: "site.analytics.comparisonOverview",
+  analyticsRoute({
+    id: "site.analytics.comparison",
     lifecycle: "exposed",
     method: "POST",
-    path: "/api/v1/sites/{siteId}/analytics/comparison/overview",
-    operationId: "site.analytics.comparisonOverview",
-    variants: ["previous-period", "explicit"],
+    path: "/api/v1/sites/{siteId}/analytics/comparison",
+    operationId: "site.analytics.comparison",
     scopes: ["analytics:read"],
     conditionalScopes: [
       {
-        when: "filter.type=saved",
+        when: "current.filter.type=saved|reference.filter.type=saved",
         scopes: ["analytics:read", "analysis:read"],
       },
     ],
-    requestSchema: SiteOverviewComparisonQueryDtoSchema,
-    responseSchema: AnalyticsComparisonOverviewResponseSchema,
+    requestSchema: SiteComparisonQueryDtoSchema,
+    responseSchema: AnalyticsComparisonResponseSchema,
     declaredErrors: [
       "validation_failed",
       "missing_scope",
       "resource_not_found",
-      "unsupported_query",
+      "query_too_expensive",
+      "range_too_wide",
+      "too_many_buckets",
+      "comparison_alignment_mismatch",
       "deadline_exceeded",
       "internal_error",
       "method_not_allowed",
       "not_acceptable",
       "unsupported_media_type",
     ],
-  },
-  {
-    id: "site.analytics.comparisonTimeseries",
-    lifecycle: "exposed",
-    method: "POST",
-    path: "/api/v1/sites/{siteId}/analytics/comparison/timeseries",
-    operationId: "site.analytics.comparisonTimeseries",
-    variants: ["explicit"],
-    scopes: ["analytics:read"],
-    conditionalScopes: [
-      {
-        when: "a.filter.type=saved|b.filter.type=saved",
-        scopes: ["analytics:read", "analysis:read"],
-      },
-    ],
-    requestSchema: SiteComparisonTimeseriesQueryDtoSchema,
-    responseSchema: AnalyticsComparisonTimeseriesResponseSchema,
-    declaredErrors: [
-      "validation_failed",
-      "missing_scope",
-      "resource_not_found",
-      "unsupported_query",
-      "deadline_exceeded",
-      "internal_error",
-      "method_not_allowed",
-      "not_acceptable",
-      "unsupported_media_type",
-    ],
-  },
-  {
+  }),
+  analyticsRoute({
     id: "site.analytics.comparisonBreakdown",
     lifecycle: "exposed",
     method: "POST",
     path: "/api/v1/sites/{siteId}/analytics/comparison/breakdowns/{dimension}",
     operationId: "site.analytics.comparisonBreakdown",
-    variants: ["explicit"],
     scopes: ["analytics:read"],
     conditionalScopes: [
       {
-        when: "a.filter.type=saved|b.filter.type=saved",
+        when: "current.filter.type=saved|reference.filter.type=saved",
         scopes: ["analytics:read", "analysis:read"],
       },
     ],
-    requestSchema: SiteComparisonBreakdownQueryDtoSchema,
-    responseSchema: AnalyticsComparisonBreakdownResponseSchema,
+    requestSchema: SiteComparisonBreakdownV2QueryDtoSchema,
+    responseSchema: AnalyticsComparisonBreakdownV2ResponseSchema,
     declaredErrors: [
       "validation_failed",
       "missing_scope",
       "resource_not_found",
-      "unsupported_query",
+      "query_too_expensive",
+      "range_too_wide",
+      "too_many_buckets",
+      "comparison_alignment_mismatch",
+      "dimension_not_supported",
       "deadline_exceeded",
       "internal_error",
       "method_not_allowed",
       "not_acceptable",
       "unsupported_media_type",
     ],
-  },
-  {
-    id: "team.analytics.comparisonOverview",
+  }),
+  analyticsRoute({
+    id: "team.analytics.comparison",
     lifecycle: "exposed",
     method: "POST",
-    path: "/api/v1/team/analytics/comparison/overview",
-    operationId: "team.analytics.comparisonOverview",
-    variants: ["explicit"],
+    path: "/api/v1/team/analytics/comparison",
+    operationId: "team.analytics.comparison",
     scopes: ["analytics:read"],
-    requestSchema: TeamComparisonOverviewQueryDtoSchema,
-    responseSchema: AnalyticsComparisonOverviewResponseSchema,
+    requestSchema: TeamComparisonQueryDtoSchema,
+    responseSchema: AnalyticsComparisonResponseSchema,
     declaredErrors: [
       "validation_failed",
       "missing_scope",
-      "unsupported_query",
+      "query_too_expensive",
+      "range_too_wide",
+      "too_many_buckets",
+      "comparison_alignment_mismatch",
       "deadline_exceeded",
       "internal_error",
       "method_not_allowed",
       "not_acceptable",
       "unsupported_media_type",
     ],
-  },
-  {
-    id: "team.analytics.comparisonTimeseries",
-    lifecycle: "exposed",
-    method: "POST",
-    path: "/api/v1/team/analytics/comparison/timeseries",
-    operationId: "team.analytics.comparisonTimeseries",
-    variants: ["explicit"],
-    scopes: ["analytics:read"],
-    requestSchema: TeamComparisonTimeseriesQueryDtoSchema,
-    responseSchema: AnalyticsComparisonTimeseriesResponseSchema,
-    declaredErrors: [
-      "validation_failed",
-      "missing_scope",
-      "unsupported_query",
-      "deadline_exceeded",
-      "internal_error",
-      "method_not_allowed",
-      "not_acceptable",
-      "unsupported_media_type",
-    ],
-  },
-  {
+  }),
+  analyticsRoute({
     id: "team.analytics.comparisonBreakdown",
     lifecycle: "exposed",
     method: "POST",
     path: "/api/v1/team/analytics/comparison/breakdowns/{dimension}",
     operationId: "team.analytics.comparisonBreakdown",
-    variants: ["explicit"],
     scopes: ["analytics:read"],
-    requestSchema: TeamComparisonBreakdownQueryDtoSchema,
-    responseSchema: AnalyticsComparisonBreakdownResponseSchema,
+    requestSchema: TeamComparisonBreakdownV2QueryDtoSchema,
+    responseSchema: AnalyticsComparisonBreakdownV2ResponseSchema,
     declaredErrors: [
       "validation_failed",
       "missing_scope",
-      "unsupported_query",
+      "query_too_expensive",
+      "range_too_wide",
+      "too_many_buckets",
+      "comparison_alignment_mismatch",
+      "dimension_not_supported",
       "deadline_exceeded",
       "internal_error",
       "method_not_allowed",
       "not_acceptable",
       "unsupported_media_type",
     ],
-  },
+  }),
 ] as const satisfies readonly ApiV1AnalyticsComparisonRouteDescriptor<string>[];
 
 export const apiV1AnalyticsSchemaRouteRegistry = [
@@ -1957,11 +1928,9 @@ export const apiV1BatchRouteRegistry = [
 export const apiV1BatchEligibleRouteIds = [
   "site.analytics.overview",
   "team.analytics.overview",
-  "site.analytics.comparisonOverview",
-  "site.analytics.comparisonTimeseries",
+  "site.analytics.comparison",
   "site.analytics.comparisonBreakdown",
-  "team.analytics.comparisonOverview",
-  "team.analytics.comparisonTimeseries",
+  "team.analytics.comparison",
   "team.analytics.comparisonBreakdown",
   "site.analytics.schema",
   "team.analytics.schema",

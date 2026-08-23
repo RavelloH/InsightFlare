@@ -62,6 +62,7 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { requestAdminService } from "@/lib/admin-service-client";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -783,104 +784,100 @@ export function DashboardShell({
             </Link>
           </SidebarHeader>
 
-          <SidebarContent className="min-h-0 overflow-y-auto">
-            <SidebarMenuStage mode={sidebarContextMode}>
-              {routeState.mode === "root" ? (
-                <>
-                  <SidebarGroup>
-                    <SidebarGroupLabel>
-                      {messages.common.team}
-                    </SidebarGroupLabel>
-                    <SidebarGroupContent>
-                      <SidebarMenu>
-                        {teams.map((team) => {
-                          const RoleIcon = getTeamRoleIcon(team.membershipRole);
-                          const roleLabel = getTeamRoleLabel(
-                            messages,
-                            team.membershipRole,
-                          );
-                          return (
-                            <SidebarMenuItem key={team.id}>
-                              <SidebarMenuButton asChild>
-                                <Link href={`/${locale}/app/${team.slug}`}>
-                                  <span
-                                    aria-label={roleLabel}
-                                    title={roleLabel}
-                                    className={
-                                      team.membershipRole === "owner"
-                                        ? "text-primary"
-                                        : undefined
-                                    }
-                                  >
-                                    <RoleIcon aria-hidden="true" />
-                                  </span>
-                                  <span>{team.name}</span>
-                                </Link>
-                              </SidebarMenuButton>
-                            </SidebarMenuItem>
-                          );
-                        })}
-                      </SidebarMenu>
-                    </SidebarGroupContent>
-                  </SidebarGroup>
+          <div className="shrink-0">
+            {teamSelector}
 
-                  {hasManagementSections ? (
-                    <>
-                      <SidebarSeparator
-                        className={SIDEBAR_COLLAPSE_SEPARATOR_CLASS}
-                      />
-                      <SidebarGroup>
-                        <SidebarGroupLabel>
-                          {messages.common.management}
-                        </SidebarGroupLabel>
-                        <SidebarGroupContent>
-                          <SidebarMenu>
-                            {managementSections?.map((item) => {
-                              const isActive =
-                                routeState.activeManagementSectionKey ===
-                                item.key;
-                              const SectionIcon = getManagementSectionIcon(
-                                item.key,
-                              );
-                              return (
-                                <SidebarMenuItem key={item.key}>
-                                  <SidebarMenuButton
-                                    asChild
-                                    isActive={isActive}
-                                  >
-                                    <Link href={item.href}>
-                                      <SectionIcon />
-                                      <span>{item.label}</span>
-                                    </Link>
-                                  </SidebarMenuButton>
-                                </SidebarMenuItem>
-                              );
-                            })}
-                          </SidebarMenu>
-                        </SidebarGroupContent>
-                      </SidebarGroup>
-                    </>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  {teamSelector}
-                  <SidebarMenuStage
-                    mode={routeState.mode}
-                    storageKey="insightflare-sidebar-team-mode"
-                  >
-                    {routeState.mode === "team" ? (
+            {routeState.mode === "site" ? (
+              <>
+                <SidebarGroup>
+                  <SidebarGroupContent>
+                    <SidebarMenu
+                      className={`mb-2 ${SIDEBAR_COLLAPSE_MARGIN_CLASS}`}
+                    >
+                      <SidebarMenuItem>
+                        <SidebarMenuButton asChild>
+                          <Link href={teamRootHref}>
+                            <RiArrowLeftLine />
+                            <span>{backToTeamLabel}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+
+                <SidebarSeparator
+                  className={`!mx-2 !w-auto ${SIDEBAR_COLLAPSE_SEPARATOR_CLASS}`}
+                />
+              </>
+            ) : null}
+          </div>
+
+          <VerticalScrollMask
+            className="min-h-0 flex-1"
+            contentClassName="flex min-h-0 flex-col"
+            maskClassName="from-sidebar via-sidebar/80 to-transparent"
+            syncKey={`${routeState.mode}:${liveActiveTeamSlug ?? "root"}:${resolvedSites.length}`}
+          >
+            <SidebarContent className="overflow-hidden">
+              <SidebarMenuStage mode={sidebarContextMode}>
+                {routeState.mode === "root" ? (
+                  <>
+                    <SidebarGroup>
+                      <SidebarGroupLabel>
+                        {messages.common.team}
+                      </SidebarGroupLabel>
+                      <SidebarGroupContent>
+                        <SidebarMenu>
+                          {teams.map((team) => {
+                            const RoleIcon = getTeamRoleIcon(
+                              team.membershipRole,
+                            );
+                            const roleLabel = getTeamRoleLabel(
+                              messages,
+                              team.membershipRole,
+                            );
+                            return (
+                              <SidebarMenuItem key={team.id}>
+                                <SidebarMenuButton asChild>
+                                  <Link href={`/${locale}/app/${team.slug}`}>
+                                    <span
+                                      aria-label={roleLabel}
+                                      title={roleLabel}
+                                      className={
+                                        team.membershipRole === "owner"
+                                          ? "text-primary"
+                                          : undefined
+                                      }
+                                    >
+                                      <RoleIcon aria-hidden="true" />
+                                    </span>
+                                    <span>{team.name}</span>
+                                  </Link>
+                                </SidebarMenuButton>
+                              </SidebarMenuItem>
+                            );
+                          })}
+                        </SidebarMenu>
+                      </SidebarGroupContent>
+                    </SidebarGroup>
+
+                    {hasManagementSections ? (
                       <>
+                        <SidebarSeparator
+                          className={SIDEBAR_COLLAPSE_SEPARATOR_CLASS}
+                        />
                         <SidebarGroup>
                           <SidebarGroupLabel>
-                            {messages.common.team}
+                            {messages.common.management}
                           </SidebarGroupLabel>
                           <SidebarGroupContent>
                             <SidebarMenu>
-                              {resolvedTeamSections?.map((item) => {
+                              {managementSections?.map((item) => {
                                 const isActive =
-                                  routeState.activeTeamSectionKey === item.key;
-                                const SectionIcon = getTeamSectionIcon(
+                                  routeState.activeManagementSectionKey ===
+                                  item.key;
+                                const SectionIcon = getManagementSectionIcon(
                                   item.key,
                                 );
                                 return (
@@ -900,99 +897,120 @@ export function DashboardShell({
                             </SidebarMenu>
                           </SidebarGroupContent>
                         </SidebarGroup>
-
-                        {hasManagementSections ? (
-                          <>
-                            <SidebarSeparator
-                              className={SIDEBAR_COLLAPSE_SEPARATOR_CLASS}
-                            />
-                            <SidebarGroup>
-                              <SidebarGroupLabel>
-                                {messages.common.management}
-                              </SidebarGroupLabel>
-                              <SidebarGroupContent>
-                                <SidebarMenu>
-                                  {managementSections?.map((item) => {
-                                    const isActive =
-                                      routeState.activeManagementSectionKey ===
-                                      item.key;
-                                    const SectionIcon =
-                                      getManagementSectionIcon(item.key);
-                                    return (
-                                      <SidebarMenuItem key={item.key}>
-                                        <SidebarMenuButton
-                                          asChild
-                                          isActive={isActive}
-                                        >
-                                          <Link href={item.href}>
-                                            <SectionIcon />
-                                            <span>{item.label}</span>
-                                          </Link>
-                                        </SidebarMenuButton>
-                                      </SidebarMenuItem>
-                                    );
-                                  })}
-                                </SidebarMenu>
-                              </SidebarGroupContent>
-                            </SidebarGroup>
-                          </>
-                        ) : null}
                       </>
-                    ) : (
-                      <>
-                        <SidebarGroup>
-                          <SidebarGroupContent>
-                            <SidebarMenu
-                              className={`mb-2 ${SIDEBAR_COLLAPSE_MARGIN_CLASS}`}
-                            >
-                              <SidebarMenuItem>
-                                <SidebarMenuButton asChild>
-                                  <Link href={teamRootHref}>
-                                    <RiArrowLeftLine />
-                                    <span>{backToTeamLabel}</span>
-                                  </Link>
-                                </SidebarMenuButton>
-                              </SidebarMenuItem>
-                            </SidebarMenu>
-                          </SidebarGroupContent>
-                        </SidebarGroup>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <SidebarMenuStage
+                      mode={routeState.mode}
+                      storageKey="insightflare-sidebar-team-mode"
+                    >
+                      {routeState.mode === "team" ? (
+                        <>
+                          <SidebarGroup>
+                            <SidebarGroupLabel>
+                              {messages.common.team}
+                            </SidebarGroupLabel>
+                            <SidebarGroupContent>
+                              <SidebarMenu>
+                                {resolvedTeamSections?.map((item) => {
+                                  const isActive =
+                                    routeState.activeTeamSectionKey ===
+                                    item.key;
+                                  const SectionIcon = getTeamSectionIcon(
+                                    item.key,
+                                  );
+                                  return (
+                                    <SidebarMenuItem key={item.key}>
+                                      <SidebarMenuButton
+                                        asChild
+                                        isActive={isActive}
+                                      >
+                                        <Link href={item.href}>
+                                          <SectionIcon />
+                                          <span>{item.label}</span>
+                                        </Link>
+                                      </SidebarMenuButton>
+                                    </SidebarMenuItem>
+                                  );
+                                })}
+                              </SidebarMenu>
+                            </SidebarGroupContent>
+                          </SidebarGroup>
 
-                        <SidebarSeparator
-                          className={SIDEBAR_COLLAPSE_SEPARATOR_CLASS}
-                        />
-
-                        <SidebarGroup>
-                          <SidebarGroupLabel>
-                            {messages.common.site}
-                          </SidebarGroupLabel>
-                          <SidebarGroupContent>
-                            <SidebarSiteDetails
-                              locale={locale}
-                              teamId={activeTeamId}
-                              teamSlug={liveActiveTeamSlug || ""}
-                              activeSiteSlug={resolvedActiveSiteSlug}
-                              currentSection={currentAnalyticsSection}
-                              sites={resolvedSites.map((site) => ({
-                                id: site.id,
-                                slug: site.slug,
-                                name: site.name,
-                                domain: site.domain,
-                                iconPath: site.iconPath,
-                              }))}
-                              labels={{
-                                views: messages.common.views,
-                                visitors: messages.common.visitors,
-                              }}
-                            />
-                          </SidebarGroupContent>
-                        </SidebarGroup>
-                      </>
-                    )}
-                  </SidebarMenuStage>
-                </>
-              )}
-            </SidebarMenuStage>
-          </SidebarContent>
+                          {hasManagementSections ? (
+                            <>
+                              <SidebarSeparator
+                                className={SIDEBAR_COLLAPSE_SEPARATOR_CLASS}
+                              />
+                              <SidebarGroup>
+                                <SidebarGroupLabel>
+                                  {messages.common.management}
+                                </SidebarGroupLabel>
+                                <SidebarGroupContent>
+                                  <SidebarMenu>
+                                    {managementSections?.map((item) => {
+                                      const isActive =
+                                        routeState.activeManagementSectionKey ===
+                                        item.key;
+                                      const SectionIcon =
+                                        getManagementSectionIcon(item.key);
+                                      return (
+                                        <SidebarMenuItem key={item.key}>
+                                          <SidebarMenuButton
+                                            asChild
+                                            isActive={isActive}
+                                          >
+                                            <Link href={item.href}>
+                                              <SectionIcon />
+                                              <span>{item.label}</span>
+                                            </Link>
+                                          </SidebarMenuButton>
+                                        </SidebarMenuItem>
+                                      );
+                                    })}
+                                  </SidebarMenu>
+                                </SidebarGroupContent>
+                              </SidebarGroup>
+                            </>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <SidebarGroup>
+                            <SidebarGroupLabel>
+                              {messages.common.site}
+                            </SidebarGroupLabel>
+                            <SidebarGroupContent>
+                              <SidebarSiteDetails
+                                locale={locale}
+                                teamId={activeTeamId}
+                                teamSlug={liveActiveTeamSlug || ""}
+                                activeSiteSlug={resolvedActiveSiteSlug}
+                                currentSection={currentAnalyticsSection}
+                                sites={resolvedSites.map((site) => ({
+                                  id: site.id,
+                                  slug: site.slug,
+                                  name: site.name,
+                                  domain: site.domain,
+                                  iconPath: site.iconPath,
+                                }))}
+                                labels={{
+                                  views: messages.common.views,
+                                  visitors: messages.common.visitors,
+                                }}
+                              />
+                            </SidebarGroupContent>
+                          </SidebarGroup>
+                        </>
+                      )}
+                    </SidebarMenuStage>
+                  </>
+                )}
+              </SidebarMenuStage>
+            </SidebarContent>
+          </VerticalScrollMask>
 
           <SidebarFooter className="!m-0 !gap-0 !p-0">
             <SidebarFooterMenus

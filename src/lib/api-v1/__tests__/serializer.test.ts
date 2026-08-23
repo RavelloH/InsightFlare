@@ -30,7 +30,7 @@ describe("API v1 wire serializer", () => {
     ["capability-denied", "missing_scope"],
     ["not-found", "resource_not_found"],
     ["unsupported-operation", "unsupported_query"],
-    ["range-not-supported", "range_unavailable"],
+    ["range-not-supported", "range_too_wide"],
     ["data-unavailable", "data_unavailable"],
     ["internal", "internal_error"],
   ] as const)("maps %s domain failures to %s", (kind, code) => {

@@ -1,8 +1,12 @@
 export interface QueryCostInput {
   readonly rangeMs: number;
+  readonly sideCount?: number;
   readonly siteCount?: number;
   readonly metricCount?: number;
+  readonly bucketCount?: number;
   readonly dimensionCardinality?: number;
+  readonly filterComplexity?: number;
+  readonly breakdownLimit?: number;
   readonly projectionFields?: number;
   readonly pageLimit?: number;
   readonly provider?: "d1" | "rollup" | "realtime" | "mixed";
@@ -34,9 +38,13 @@ export function calculateQueryCost(
 ): number {
   const values = [
     input.rangeMs,
+    input.sideCount ?? 1,
     input.siteCount ?? 1,
     input.metricCount ?? 1,
+    input.bucketCount ?? 1,
     input.dimensionCardinality ?? 1,
+    input.filterComplexity ?? 1,
+    input.breakdownLimit ?? 1,
     input.projectionFields ?? 1,
     input.pageLimit ?? 1,
     input.batchFanout ?? 1,
@@ -50,11 +58,14 @@ export function calculateQueryCost(
     : 1;
   const cost =
     rangeFactor *
+    Math.max(1, input.sideCount ?? 1) *
     Math.max(1, input.siteCount ?? 1) *
     Math.max(1, input.metricCount ?? 1) *
+    Math.max(1, input.bucketCount ?? 1) ** 0.5 *
     Math.max(1, input.dimensionCardinality ?? 1) ** 0.5 *
+    Math.max(1, input.filterComplexity ?? 1) ** 0.25 *
     Math.max(1, input.projectionFields ?? 1) ** 0.25 *
-    Math.max(1, input.pageLimit ?? 1) ** 0.25 *
+    Math.max(1, input.breakdownLimit ?? input.pageLimit ?? 1) ** 0.25 *
     providerFactor *
     Math.max(1, input.batchFanout ?? 1);
   return Math.min(policy.maxCost, Math.max(1, Math.ceil(cost)));

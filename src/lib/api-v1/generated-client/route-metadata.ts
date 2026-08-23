@@ -57,18 +57,11 @@ export const apiV1GeneratedRouteMetadata = {
     path: "/api/v1/team/usage",
     lifecycle: "exposed",
   },
-  "site.analytics.comparisonOverview": {
-    id: "site.analytics.comparisonOverview",
-    operationId: "site.analytics.comparisonOverview",
+  "site.analytics.comparison": {
+    id: "site.analytics.comparison",
+    operationId: "site.analytics.comparison",
     method: "POST",
-    path: "/api/v1/sites/{siteId}/analytics/comparison/overview",
-    lifecycle: "exposed",
-  },
-  "site.analytics.comparisonTimeseries": {
-    id: "site.analytics.comparisonTimeseries",
-    operationId: "site.analytics.comparisonTimeseries",
-    method: "POST",
-    path: "/api/v1/sites/{siteId}/analytics/comparison/timeseries",
+    path: "/api/v1/sites/{siteId}/analytics/comparison",
     lifecycle: "exposed",
   },
   "site.analytics.comparisonBreakdown": {
@@ -78,18 +71,11 @@ export const apiV1GeneratedRouteMetadata = {
     path: "/api/v1/sites/{siteId}/analytics/comparison/breakdowns/{dimension}",
     lifecycle: "exposed",
   },
-  "team.analytics.comparisonOverview": {
-    id: "team.analytics.comparisonOverview",
-    operationId: "team.analytics.comparisonOverview",
+  "team.analytics.comparison": {
+    id: "team.analytics.comparison",
+    operationId: "team.analytics.comparison",
     method: "POST",
-    path: "/api/v1/team/analytics/comparison/overview",
-    lifecycle: "exposed",
-  },
-  "team.analytics.comparisonTimeseries": {
-    id: "team.analytics.comparisonTimeseries",
-    operationId: "team.analytics.comparisonTimeseries",
-    method: "POST",
-    path: "/api/v1/team/analytics/comparison/timeseries",
+    path: "/api/v1/team/analytics/comparison",
     lifecycle: "exposed",
   },
   "team.analytics.comparisonBreakdown": {

@@ -14,6 +14,11 @@ export type ApiV1ErrorCode =
   | "conflict"
   | "unsupported_query"
   | "range_unavailable"
+  | "query_too_expensive"
+  | "range_too_wide"
+  | "too_many_buckets"
+  | "comparison_alignment_mismatch"
+  | "dimension_not_supported"
   | "data_unavailable"
   | "request_cancelled"
   | "deadline_exceeded"
@@ -92,6 +97,31 @@ export const apiV1ErrorRegistry: Readonly<
     status: 422,
     retryable: false,
     message: "The requested time range is unavailable.",
+  },
+  query_too_expensive: {
+    status: 422,
+    retryable: false,
+    message: "The requested analytics query is too expensive.",
+  },
+  range_too_wide: {
+    status: 422,
+    retryable: false,
+    message: "The requested comparison range is too wide.",
+  },
+  too_many_buckets: {
+    status: 422,
+    retryable: false,
+    message: "The requested trend contains too many buckets.",
+  },
+  comparison_alignment_mismatch: {
+    status: 422,
+    retryable: false,
+    message: "The comparison datasets cannot be aligned.",
+  },
+  dimension_not_supported: {
+    status: 422,
+    retryable: false,
+    message: "The requested analytics dimension is not supported.",
   },
   data_unavailable: {
     status: 503,
@@ -180,8 +210,25 @@ export function fromAnalyticsDomainError(
   }
   if (error.kind === "range-not-supported") {
     return {
-      code: "range_unavailable",
-      message: apiV1ErrorRegistry.range_unavailable.message,
+      code: error.reason === "too-wide" ? "range_too_wide" : "too_many_buckets",
+      message:
+        error.reason === "too-wide"
+          ? apiV1ErrorRegistry.range_too_wide.message
+          : apiV1ErrorRegistry.too_many_buckets.message,
+      retryable: false,
+    };
+  }
+  if (error.kind === "comparison-alignment-mismatch") {
+    return {
+      code: "comparison_alignment_mismatch",
+      message: apiV1ErrorRegistry.comparison_alignment_mismatch.message,
+      retryable: false,
+    };
+  }
+  if (error.kind === "dimension-not-supported") {
+    return {
+      code: "dimension_not_supported",
+      message: apiV1ErrorRegistry.dimension_not_supported.message,
       retryable: false,
     };
   }

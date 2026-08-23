@@ -90,9 +90,9 @@ describe("planned analytics schema HTTP adapter", () => {
           path: "/api/v1/team/analytics/overview",
         },
         {
-          id: "team.analytics.comparisonOverview",
+          id: "team.analytics.comparison",
           method: "POST",
-          path: "/api/v1/team/analytics/comparison/overview",
+          path: "/api/v1/team/analytics/comparison",
         },
         {
           id: "team.analytics.sites",

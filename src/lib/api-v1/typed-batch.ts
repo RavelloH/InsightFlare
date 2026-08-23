@@ -83,15 +83,31 @@ function isAllowed(item: TypedBatchItem): boolean {
 }
 
 function weightFor(item: TypedBatchItem, now: number): number {
-  const body = item.body;
-  const range = body && typeof body === "object" ? body.timeRange : undefined;
+  const body =
+    item.body && typeof item.body === "object"
+      ? (item.body as Record<string, unknown>)
+      : {};
+  const isComparison = item.path.includes("/analytics/comparison");
+  const ranges = isComparison
+    ? [body.current, body.reference]
+    : [body.timeRange];
+  const parsedRanges = ranges.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const range = value as Record<string, unknown>;
+    const timeRange = "timeRange" in range ? range.timeRange : range;
+    if (!timeRange || typeof timeRange !== "object") return [];
+    const candidate = timeRange as Record<string, unknown>;
+    const from = "from" in candidate ? Date.parse(String(candidate.from)) : NaN;
+    const to = "to" in candidate ? Date.parse(String(candidate.to)) : NaN;
+    return Number.isFinite(from) && Number.isFinite(to) ? [{ from, to }] : [];
+  });
   const from =
-    range && typeof range === "object" && range !== null && "from" in range
-      ? Date.parse(String(range.from))
+    parsedRanges.length > 0
+      ? Math.min(...parsedRanges.map((range) => range.from))
       : now - 7 * 24 * 60 * 60 * 1000;
   const to =
-    range && typeof range === "object" && range !== null && "to" in range
-      ? Date.parse(String(range.to))
+    parsedRanges.length > 0
+      ? Math.max(...parsedRanges.map((range) => range.to))
       : now;
   const days =
     Number.isFinite(from) && Number.isFinite(to)
@@ -99,14 +115,27 @@ function weightFor(item: TypedBatchItem, now: number): number {
       : 365;
   return calculateQueryCost({
     rangeMs: days * 24 * 60 * 60 * 1000,
+    sideCount: isComparison ? 2 : 1,
     siteCount: item.path.includes("/sites/") ? 1 : 2,
     metricCount:
-      body &&
-      typeof body === "object" &&
-      "metrics" in body &&
-      Array.isArray(body.metrics)
-        ? body.metrics.length
+      isComparison &&
+      body.select &&
+      typeof body.select === "object" &&
+      Array.isArray((body.select as Record<string, unknown>).metrics)
+        ? ((body.select as Record<string, unknown>).metrics as unknown[]).length
+        : Array.isArray(body.metrics)
+          ? body.metrics.length
+          : 1,
+    bucketCount:
+      isComparison &&
+      body.select &&
+      typeof body.select === "object" &&
+      (body.select as Record<string, unknown>).trend
+        ? Math.max(1, days)
         : 1,
+    filterComplexity: isComparison ? 2 : 1,
+    breakdownLimit:
+      isComparison && "limit" in body ? Number(body.limit) : undefined,
     pageLimit:
       body &&
       typeof body === "object" &&

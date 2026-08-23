@@ -287,6 +287,119 @@ export type AnalyticsComparisonBreakdownData = z.infer<
   typeof AnalyticsComparisonBreakdownDataSchema
 >;
 
+const ComparisonMetricValuesV2Schema = z
+  .object({
+    views: z.number().nullable().optional(),
+    sessions: z.number().nullable().optional(),
+    visitors: z.number().nullable().optional(),
+    bounces: z.number().nullable().optional(),
+    totalDurationMs: z.number().nullable().optional(),
+    durationViews: z.number().nullable().optional(),
+    bounceRate: z.number().nullable().optional(),
+    avgDurationMs: z.number().nullable().optional(),
+    viewsPerSession: z.number().nullable().optional(),
+    events: z.number().nullable().optional(),
+  })
+  .strict();
+const ComparisonMetricChangeV2Schema = z
+  .object({ absolute: z.number().nullable(), relative: z.number().nullable() })
+  .strict();
+const ComparisonChangesV2Schema = z
+  .object({
+    views: ComparisonMetricChangeV2Schema.optional(),
+    sessions: ComparisonMetricChangeV2Schema.optional(),
+    visitors: ComparisonMetricChangeV2Schema.optional(),
+    bounces: ComparisonMetricChangeV2Schema.optional(),
+    totalDurationMs: ComparisonMetricChangeV2Schema.optional(),
+    durationViews: ComparisonMetricChangeV2Schema.optional(),
+    bounceRate: ComparisonMetricChangeV2Schema.optional(),
+    avgDurationMs: ComparisonMetricChangeV2Schema.optional(),
+    viewsPerSession: ComparisonMetricChangeV2Schema.optional(),
+    events: ComparisonMetricChangeV2Schema.optional(),
+  })
+  .strict();
+const ComparisonTrendSideV2Schema = z
+  .object({
+    from: z.string().datetime({ offset: true }),
+    to: z.string().datetime({ offset: true }),
+    metrics: ComparisonMetricValuesV2Schema,
+  })
+  .strict();
+const ComparisonTrendV2Schema = z
+  .object({
+    interval: z.enum(["minute", "hour", "day", "week", "month"]),
+    alignment: z.literal("period_index"),
+    points: z.array(
+      z
+        .object({
+          index: z.number().int().nonnegative(),
+          current: ComparisonTrendSideV2Schema,
+          reference: ComparisonTrendSideV2Schema,
+          change: ComparisonChangesV2Schema,
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export const AnalyticsComparisonDataSchema = z
+  .object({
+    current: z.object({ metrics: ComparisonMetricValuesV2Schema }).strict(),
+    reference: z.object({ metrics: ComparisonMetricValuesV2Schema }).strict(),
+    change: ComparisonChangesV2Schema,
+    trend: ComparisonTrendV2Schema.optional(),
+  })
+  .strict();
+const ComparisonSideMetaV2Schema = z
+  .object({
+    range: ApiV1AnalyticsResponseMetaSchema.shape.timeRange,
+    source: z.enum(["raw", "rollup", "realtime", "mixed", "mock"]),
+    accuracy: z.enum(["exact", "approximate"]),
+  })
+  .strict();
+export const ApiV1ComparisonResponseMetaSchema = ApiV1ResponseMetaSchema.extend(
+  {
+    generatedAt: z.string().datetime({ offset: true }),
+    current: ComparisonSideMetaV2Schema,
+    reference: ComparisonSideMetaV2Schema,
+  },
+);
+export const AnalyticsComparisonResponseSchema = apiV1SuccessEnvelopeSchema(
+  AnalyticsComparisonDataSchema,
+  ApiV1ComparisonResponseMetaSchema,
+);
+export type AnalyticsComparisonData = z.infer<
+  typeof AnalyticsComparisonDataSchema
+>;
+const ComparisonBreakdownItemV2Schema = z
+  .object({
+    key: z.string(),
+    label: z.string(),
+    current: ComparisonMetricValuesV2Schema,
+    reference: ComparisonMetricValuesV2Schema,
+    change: ComparisonChangesV2Schema,
+  })
+  .strict();
+export const AnalyticsComparisonBreakdownDataV2Schema = z
+  .object({
+    dimension: z.string().min(1),
+    items: z.array(ComparisonBreakdownItemV2Schema),
+    coverage: z
+      .object({
+        complete: z.boolean(),
+        strategy: z.literal("full_comparison_aggregate"),
+      })
+      .strict(),
+  })
+  .strict();
+export const AnalyticsComparisonBreakdownV2ResponseSchema =
+  apiV1SuccessEnvelopeSchema(
+    AnalyticsComparisonBreakdownDataV2Schema,
+    ApiV1ComparisonResponseMetaSchema,
+  );
+export type AnalyticsComparisonBreakdownDataV2 = z.infer<
+  typeof AnalyticsComparisonBreakdownDataV2Schema
+>;
+
 export const AnalyticsCrossBreakdownRowSchema =
   AnalyticsBreakdownItemSchema.extend({
     cells: z.array(AnalyticsBreakdownItemSchema),

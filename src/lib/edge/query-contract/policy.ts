@@ -25,6 +25,8 @@ const DEFAULT_LIMITS: QueryLimits = {
 const ALL_OPERATIONS: readonly QueryOperation[] = [
   "overview",
   "trend",
+  "comparison",
+  "comparison-breakdown",
   "dimension",
   "cross-dimension",
   "share-trend",

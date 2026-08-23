@@ -55,10 +55,25 @@ describe("API v1 generated client", () => {
       fetch: fetcher,
     });
     const comparison = {
-      mode: "explicit" as const,
+      version: 2 as const,
       timeZone: "UTC",
-      a: { timeRange: overviewInput.timeRange },
-      b: { timeRange: overviewInput.timeRange },
+      current: { timeRange: overviewInput.timeRange, filter: null },
+      reference: {
+        timeRange: { kind: "previous_period" as const },
+        filter: null,
+      },
+      select: {
+        metrics: ["views" as const],
+        trend: { interval: "day" as const, metrics: ["views" as const] },
+      },
+    };
+    const breakdown = {
+      version: 2 as const,
+      timeZone: "UTC",
+      current: comparison.current,
+      reference: comparison.reference,
+      limit: 20,
+      sort: { by: "current.views" as const, direction: "desc" as const },
     };
     await Promise.all([
       client.getRoot(),
@@ -68,33 +83,16 @@ describe("API v1 generated client", () => {
       client.getTeam(),
       client.getTeamUsage(),
       client.listSites(),
-      client.siteAnalyticsComparisonOverview("site-1", {
-        ...comparison,
-        query: {},
-      }),
-      client.siteAnalyticsComparisonTimeseries("site-1", {
-        ...comparison,
-        query: { interval: "day" },
-      }),
-      client.siteAnalyticsComparisonBreakdown("site-1", "page.path", {
-        ...comparison,
-        query: {},
-      }),
-      client.teamAnalyticsComparisonOverview({ ...comparison, query: {} }),
-      client.teamAnalyticsComparisonTimeseries({
-        ...comparison,
-        query: { interval: "day" },
-      }),
-      client.teamAnalyticsComparisonBreakdown("page.path", {
-        ...comparison,
-        query: {},
-      }),
+      client.siteAnalyticsComparison("site-1", comparison),
+      client.siteAnalyticsComparisonBreakdown("site-1", "page.path", breakdown),
+      client.teamAnalyticsComparison(comparison),
+      client.teamAnalyticsComparisonBreakdown("page.path", breakdown),
       client.teamAnalyticsBreakdown("page.path", {
         ...overviewInput,
         limit: 20,
       }),
     ]);
-    expect(fetcher).toHaveBeenCalledTimes(14);
+    expect(fetcher).toHaveBeenCalledTimes(12);
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual(
       expect.arrayContaining([
         "https://api.test/api/v1",
@@ -104,11 +102,9 @@ describe("API v1 generated client", () => {
         "https://api.test/api/v1/team",
         "https://api.test/api/v1/team/usage",
         "https://api.test/api/v1/sites",
-        "https://api.test/api/v1/sites/site-1/analytics/comparison/overview",
-        "https://api.test/api/v1/sites/site-1/analytics/comparison/timeseries",
+        "https://api.test/api/v1/sites/site-1/analytics/comparison",
         "https://api.test/api/v1/sites/site-1/analytics/comparison/breakdowns/page.path",
-        "https://api.test/api/v1/team/analytics/comparison/overview",
-        "https://api.test/api/v1/team/analytics/comparison/timeseries",
+        "https://api.test/api/v1/team/analytics/comparison",
         "https://api.test/api/v1/team/analytics/comparison/breakdowns/page.path",
         "https://api.test/api/v1/team/analytics/breakdowns/page.path",
       ]),

@@ -59,75 +59,38 @@ export const analyticsOperationRegistry = [
     result: (_result: AnalyticsResult<OverviewResult>) => undefined,
   }),
   operation({
-    id: "site.analytics.comparisonOverview",
+    id: "site.analytics.comparison",
     subjectKinds: ["site"],
     audiences: ["api-v1", "private-dashboard"],
     cache: "aggregate",
-    operationRevision: "1",
-    schema: {
-      metrics: ANALYTICS_METRICS,
-      dimensions: ANALYTICS_DIMENSIONS,
-    },
-    result: (
-      _result: AnalyticsResult<{
-        a: OverviewResult;
-        b: OverviewResult;
-      }>,
-    ) => undefined,
-  }),
-  operation({
-    id: "site.analytics.comparisonTimeseries",
-    subjectKinds: ["site"],
-    audiences: ["api-v1", "private-dashboard"],
-    cache: "aggregate",
-    operationRevision: "1",
-    schema: {
-      metrics: ANALYTICS_METRICS,
-      dimensions: ANALYTICS_DIMENSIONS,
-    },
-    result: (
-      _result: AnalyticsResult<{
-        a: TrendResult;
-        b: TrendResult;
-      }>,
-    ) => undefined,
+    operationRevision: "2",
+    schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
+    result: (_result: AnalyticsResult<unknown>) => undefined,
   }),
   operation({
     id: "site.analytics.comparisonBreakdown",
     subjectKinds: ["site"],
     audiences: ["api-v1", "private-dashboard"],
     cache: "aggregate",
-    operationRevision: "1",
+    operationRevision: "2",
     schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
     result: (_result: AnalyticsResult<BreakdownResult>) => undefined,
   }),
   operation({
-    id: "team.analytics.comparisonOverview",
+    id: "team.analytics.comparison",
     subjectKinds: ["team"],
     audiences: ["api-v1", "private-dashboard"],
     cache: "aggregate",
-    operationRevision: "1",
+    operationRevision: "2",
     schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
-    result: (
-      _result: AnalyticsResult<{ a: OverviewResult; b: OverviewResult }>,
-    ) => undefined,
-  }),
-  operation({
-    id: "team.analytics.comparisonTimeseries",
-    subjectKinds: ["team"],
-    audiences: ["api-v1", "private-dashboard"],
-    cache: "aggregate",
-    operationRevision: "1",
-    schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
-    result: (_result: AnalyticsResult<{ a: TrendResult; b: TrendResult }>) =>
-      undefined,
+    result: (_result: AnalyticsResult<unknown>) => undefined,
   }),
   operation({
     id: "team.analytics.comparisonBreakdown",
     subjectKinds: ["team"],
     audiences: ["api-v1", "private-dashboard"],
     cache: "aggregate",
-    operationRevision: "1",
+    operationRevision: "2",
     schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
     result: (_result: AnalyticsResult<BreakdownResult>) => undefined,
   }),

@@ -26,6 +26,7 @@ async function queryCustomEventNamesFromD1(
   search?: string,
 ): Promise<DimensionRow[]> {
   const filter = buildVisitFilterSql(filters, "vc");
+  const limitClause = limit > 0 ? "\nLIMIT ?" : "";
   const sql = `
 WITH
 ${buildVisitSourceCte()},
@@ -76,7 +77,7 @@ FROM event_rollup
 WHERE TRIM(value) != ''
 ${search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
 ORDER BY views DESC, sessions DESC, value ASC
-LIMIT ?
+${limitClause}
 `;
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
@@ -93,7 +94,7 @@ LIMIT ?
               .replaceAll("_", "\\_")}%`,
           ]
         : []),
-      limit,
+      ...(limit > 0 ? [limit] : []),
     ])
   ).map((row) => ({
     value: String(row.value ?? ""),

@@ -48,10 +48,10 @@ import {
   SiteBreakdownQueryDtoSchema,
   type SiteChannelsQueryDtoInput,
   SiteChannelsQueryDtoSchema,
-  type SiteComparisonBreakdownQueryDtoInput,
-  SiteComparisonBreakdownQueryDtoSchema,
-  type SiteComparisonTimeseriesQueryDtoInput,
-  SiteComparisonTimeseriesQueryDtoSchema,
+  type SiteComparisonBreakdownV2QueryDtoInput,
+  SiteComparisonBreakdownV2QueryDtoSchema,
+  type SiteComparisonQueryDtoInput,
+  SiteComparisonQueryDtoSchema,
   type SiteCrossBreakdownQueryDtoInput,
   SiteCrossBreakdownQueryDtoSchema,
   type SiteEventDetailQueryDtoInput,
@@ -74,8 +74,6 @@ import {
   SiteFilterValuesQueryDtoSchema,
   type SiteFunnelAnalysisQueryDtoInput,
   SiteFunnelAnalysisQueryDtoSchema,
-  type SiteOverviewComparisonQueryDtoInput,
-  SiteOverviewComparisonQueryDtoSchema,
   type SiteOverviewQueryDto,
   SiteOverviewQueryDtoSchema,
   type SitePagesQueryDtoInput,
@@ -116,12 +114,10 @@ import {
   SiteVisitorsSearchQueryDtoSchema,
   type TeamBreakdownQueryDto,
   TeamBreakdownQueryDtoSchema,
-  type TeamComparisonBreakdownQueryDtoInput,
-  TeamComparisonBreakdownQueryDtoSchema,
-  type TeamComparisonOverviewQueryDtoInput,
-  TeamComparisonOverviewQueryDtoSchema,
-  type TeamComparisonTimeseriesQueryDtoInput,
-  TeamComparisonTimeseriesQueryDtoSchema,
+  type TeamComparisonBreakdownV2QueryDtoInput,
+  TeamComparisonBreakdownV2QueryDtoSchema,
+  type TeamComparisonQueryDtoInput,
+  TeamComparisonQueryDtoSchema,
   type TeamOverviewQueryDto,
   TeamOverviewQueryDtoSchema,
   type TeamSitesQueryDto,
@@ -142,12 +138,10 @@ import {
   AnalyticsBreakdownResponseSchema,
   type AnalyticsChannelsData,
   AnalyticsChannelsResponseSchema,
-  type AnalyticsComparisonBreakdownData,
-  AnalyticsComparisonBreakdownResponseSchema,
-  type AnalyticsComparisonOverviewData,
-  AnalyticsComparisonOverviewResponseSchema,
-  type AnalyticsComparisonTimeseriesData,
-  AnalyticsComparisonTimeseriesResponseSchema,
+  type AnalyticsComparisonBreakdownDataV2,
+  AnalyticsComparisonBreakdownV2ResponseSchema,
+  type AnalyticsComparisonData,
+  AnalyticsComparisonResponseSchema,
   type AnalyticsCrossBreakdownData,
   AnalyticsCrossBreakdownResponseSchema,
   type AnalyticsEventDetailData,
@@ -533,40 +527,31 @@ export interface ApiV1GeneratedClient {
     input: SiteOverviewQueryDto,
     options?: ApiV1GeneratedRequestOptions,
   ): Promise<ApiV1GeneratedResult<AnalyticsOverviewData>>;
-  siteAnalyticsComparisonOverview(
+  siteAnalyticsComparison(
     siteId: string,
-    input: SiteOverviewComparisonQueryDtoInput,
+    input: SiteComparisonQueryDtoInput,
     options?: ApiV1GeneratedRequestOptions,
-  ): Promise<ApiV1GeneratedResult<AnalyticsComparisonOverviewData>>;
-  siteAnalyticsComparisonTimeseries(
-    siteId: string,
-    input: SiteComparisonTimeseriesQueryDtoInput,
-    options?: ApiV1GeneratedRequestOptions,
-  ): Promise<ApiV1GeneratedResult<AnalyticsComparisonTimeseriesData>>;
+  ): Promise<ApiV1GeneratedResult<AnalyticsComparisonData>>;
   siteAnalyticsComparisonBreakdown(
     siteId: string,
     dimension: string,
-    input: SiteComparisonBreakdownQueryDtoInput,
+    input: SiteComparisonBreakdownV2QueryDtoInput,
     options?: ApiV1GeneratedRequestOptions,
-  ): Promise<ApiV1GeneratedResult<AnalyticsComparisonBreakdownData>>;
+  ): Promise<ApiV1GeneratedResult<AnalyticsComparisonBreakdownDataV2>>;
   siteAnalyticsTimeseries(
     siteId: string,
     input: SiteTimeseriesQueryDto,
     options?: ApiV1GeneratedRequestOptions,
   ): Promise<ApiV1GeneratedResult<AnalyticsTimeseriesData>>;
-  teamAnalyticsComparisonOverview(
-    input: TeamComparisonOverviewQueryDtoInput,
+  teamAnalyticsComparison(
+    input: TeamComparisonQueryDtoInput,
     options?: ApiV1GeneratedRequestOptions,
-  ): Promise<ApiV1GeneratedResult<AnalyticsComparisonOverviewData>>;
-  teamAnalyticsComparisonTimeseries(
-    input: TeamComparisonTimeseriesQueryDtoInput,
-    options?: ApiV1GeneratedRequestOptions,
-  ): Promise<ApiV1GeneratedResult<AnalyticsComparisonTimeseriesData>>;
+  ): Promise<ApiV1GeneratedResult<AnalyticsComparisonData>>;
   teamAnalyticsComparisonBreakdown(
     dimension: string,
-    input: TeamComparisonBreakdownQueryDtoInput,
+    input: TeamComparisonBreakdownV2QueryDtoInput,
     options?: ApiV1GeneratedRequestOptions,
-  ): Promise<ApiV1GeneratedResult<AnalyticsComparisonBreakdownData>>;
+  ): Promise<ApiV1GeneratedResult<AnalyticsComparisonBreakdownDataV2>>;
   siteAnalyticsBreakdown(
     siteId: string,
     dimension: string,
@@ -1015,34 +1000,20 @@ export function createApiV1GeneratedClient(
         signal: options?.signal,
       });
     },
-    siteAnalyticsComparisonOverview(siteId, input, options) {
-      const parsed = SiteOverviewComparisonQueryDtoSchema.parse(input);
+    siteAnalyticsComparison(siteId, input, options) {
+      const parsed = SiteComparisonQueryDtoSchema.parse(input);
       return request(transport, {
-        path: apiV1GeneratedRoutePath("site.analytics.comparisonOverview", {
+        path: apiV1GeneratedRoutePath("site.analytics.comparison", {
           siteId: siteId,
         }),
-        method: apiV1GeneratedRouteMethod("site.analytics.comparisonOverview"),
+        method: apiV1GeneratedRouteMethod("site.analytics.comparison"),
         body: parsed,
-        responseSchema: AnalyticsComparisonOverviewResponseSchema,
-        signal: options?.signal,
-      });
-    },
-    siteAnalyticsComparisonTimeseries(siteId, input, options) {
-      const parsed = SiteComparisonTimeseriesQueryDtoSchema.parse(input);
-      return request(transport, {
-        path: apiV1GeneratedRoutePath("site.analytics.comparisonTimeseries", {
-          siteId: siteId,
-        }),
-        method: apiV1GeneratedRouteMethod(
-          "site.analytics.comparisonTimeseries",
-        ),
-        body: parsed,
-        responseSchema: AnalyticsComparisonTimeseriesResponseSchema,
+        responseSchema: AnalyticsComparisonResponseSchema,
         signal: options?.signal,
       });
     },
     siteAnalyticsComparisonBreakdown(siteId, dimension, input, options) {
-      const parsed = SiteComparisonBreakdownQueryDtoSchema.parse(input);
+      const parsed = SiteComparisonBreakdownV2QueryDtoSchema.parse(input);
       return request(transport, {
         path: apiV1GeneratedRoutePath("site.analytics.comparisonBreakdown", {
           siteId,
@@ -1050,7 +1021,7 @@ export function createApiV1GeneratedClient(
         }),
         method: apiV1GeneratedRouteMethod("site.analytics.comparisonBreakdown"),
         body: parsed,
-        responseSchema: AnalyticsComparisonBreakdownResponseSchema,
+        responseSchema: AnalyticsComparisonBreakdownV2ResponseSchema,
         signal: options?.signal,
       });
     },
@@ -1066,37 +1037,25 @@ export function createApiV1GeneratedClient(
         signal: options?.signal,
       });
     },
-    teamAnalyticsComparisonOverview(input, options) {
-      const parsed = TeamComparisonOverviewQueryDtoSchema.parse(input);
+    teamAnalyticsComparison(input, options) {
+      const parsed = TeamComparisonQueryDtoSchema.parse(input);
       return request(transport, {
-        path: apiV1GeneratedRoutePath("team.analytics.comparisonOverview"),
-        method: apiV1GeneratedRouteMethod("team.analytics.comparisonOverview"),
+        path: apiV1GeneratedRoutePath("team.analytics.comparison"),
+        method: apiV1GeneratedRouteMethod("team.analytics.comparison"),
         body: parsed,
-        responseSchema: AnalyticsComparisonOverviewResponseSchema,
-        signal: options?.signal,
-      });
-    },
-    teamAnalyticsComparisonTimeseries(input, options) {
-      const parsed = TeamComparisonTimeseriesQueryDtoSchema.parse(input);
-      return request(transport, {
-        path: apiV1GeneratedRoutePath("team.analytics.comparisonTimeseries"),
-        method: apiV1GeneratedRouteMethod(
-          "team.analytics.comparisonTimeseries",
-        ),
-        body: parsed,
-        responseSchema: AnalyticsComparisonTimeseriesResponseSchema,
+        responseSchema: AnalyticsComparisonResponseSchema,
         signal: options?.signal,
       });
     },
     teamAnalyticsComparisonBreakdown(dimension, input, options) {
-      const parsed = TeamComparisonBreakdownQueryDtoSchema.parse(input);
+      const parsed = TeamComparisonBreakdownV2QueryDtoSchema.parse(input);
       return request(transport, {
         path: apiV1GeneratedRoutePath("team.analytics.comparisonBreakdown", {
           dimension,
         }),
         method: apiV1GeneratedRouteMethod("team.analytics.comparisonBreakdown"),
         body: parsed,
-        responseSchema: AnalyticsComparisonBreakdownResponseSchema,
+        responseSchema: AnalyticsComparisonBreakdownV2ResponseSchema,
         signal: options?.signal,
       });
     },

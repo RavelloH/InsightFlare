@@ -10,13 +10,12 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import type {
-  TeamDashboardWindow,
-  TeamTrafficPoint,
-} from "@/lib/dashboard/team-dashboard-query";
+import { numberFormat } from "@/lib/dashboard/format";
 import {
   buildTeamSiteTrends,
   teamDashboardQueryOptions,
+  type TeamDashboardWindow,
+  type TeamTrafficPoint,
 } from "@/lib/dashboard/team-dashboard-query";
 import type { Locale } from "@/lib/i18n/config";
 import Link from "@/lib/router";
@@ -69,6 +68,12 @@ interface SidebarSiteRowProps {
   viewsLabel: string;
   visitorsLabel: string;
   shouldRenderCharts: boolean;
+  metrics?: {
+    views: number;
+    visitors: number;
+  };
+  sidebarState: "expanded" | "collapsed";
+  isMobile: boolean;
 }
 
 const SidebarSiteRow = memo(function SidebarSiteRow({
@@ -82,18 +87,43 @@ const SidebarSiteRow = memo(function SidebarSiteRow({
   viewsLabel,
   visitorsLabel,
   shouldRenderCharts,
+  metrics,
+  sidebarState,
+  isMobile,
 }: SidebarSiteRowProps) {
   const isActive = Boolean(
     activeSiteSlug &&
     (site.slug === activeSiteSlug || site.id === activeSiteSlug),
   );
+  const tooltip = {
+    hidden: isMobile,
+    children:
+      sidebarState === "collapsed" ? (
+        site.name
+      ) : (
+        <div className="grid min-w-24 gap-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-background/70">{viewsLabel}</span>
+            <span className="font-mono font-medium tabular-nums">
+              {metrics ? numberFormat(locale, metrics.views) : "—"}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-background/70">{visitorsLabel}</span>
+            <span className="font-mono font-medium tabular-nums">
+              {metrics ? numberFormat(locale, metrics.visitors) : "—"}
+            </span>
+          </div>
+        </div>
+      ),
+  };
 
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
         asChild
         isActive={isActive}
-        tooltip={site.name}
+        tooltip={tooltip}
         className="h-8 rounded-none"
       >
         <Link href={buildSitePath(locale, teamSlug, site.slug, currentSection)}>
@@ -184,6 +214,20 @@ export function SidebarSiteDetails({
     );
   }, [dashboardSnapshot?.data.trend, dashboardWindow, sites]);
 
+  const siteMetricsById = useMemo(
+    () =>
+      new Map(
+        (dashboardSnapshot?.data.sites ?? []).map((site) => [
+          site.id,
+          {
+            views: site.overview.views,
+            visitors: site.overview.visitors,
+          },
+        ]),
+      ),
+    [dashboardSnapshot?.data.sites],
+  );
+
   const cards = useMemo(
     () =>
       sites.map((site) => ({
@@ -209,6 +253,9 @@ export function SidebarSiteDetails({
             viewsLabel={labels.views}
             visitorsLabel={labels.visitors}
             shouldRenderCharts={shouldRenderCharts}
+            metrics={siteMetricsById.get(site.id)}
+            sidebarState={sidebarState}
+            isMobile={isMobile}
           />
         );
       })}

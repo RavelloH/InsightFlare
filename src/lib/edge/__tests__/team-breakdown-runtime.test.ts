@@ -82,7 +82,7 @@ describe("team breakdown runtime", () => {
     });
     expect(readSiteBreakdown).toHaveBeenCalledTimes(2);
     expect(readSiteBreakdown).toHaveBeenCalledWith(
-      expect.objectContaining({ siteId: "site-1", limit: 200 }),
+      expect.objectContaining({ siteId: "site-1", limit: 0 }),
     );
   });
 

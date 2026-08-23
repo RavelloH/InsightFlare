@@ -31,6 +31,7 @@ export async function queryDimensionFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
   const filter = buildVisitFilterSql(filters);
+  const limitClause = limit > 0 ? "\nLIMIT ?" : "";
   const sql = `
 WITH
 ${buildVisitSourceCte()},
@@ -53,7 +54,7 @@ FROM dimension_rollup
 ${options?.excludeEmpty ? "WHERE TRIM(value) != ''" : ""}
 ${options?.search ? `${options?.excludeEmpty ? "AND" : "WHERE"} LOWER(value) LIKE ? ESCAPE '\\'` : ""}
 ORDER BY views DESC, sessions DESC, value ASC
-LIMIT ?
+${limitClause}
 `;
   return (
     await queryD1All<Record<string, unknown>>(
@@ -72,7 +73,7 @@ LIMIT ?
                 .replaceAll("_", "\\_")}%`,
             ]
           : []),
-        limit,
+        ...(limit > 0 ? [limit] : []),
       ],
       diagnostics,
     )
@@ -95,6 +96,7 @@ export async function querySessionPathDimensionFromD1(
   search?: string,
 ): Promise<DimensionRow[]> {
   const filter = buildVisitFilterSql(filters);
+  const limitClause = limit > 0 ? "\nLIMIT ?" : "";
   const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
   const sql = `
 WITH
@@ -143,7 +145,7 @@ WHERE TRIM(value) != ''
 ${search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
 GROUP BY value
 ORDER BY views DESC, value ASC
-LIMIT ?
+${limitClause}
 `;
   return (
     await queryD1All<Record<string, unknown>>(
@@ -162,7 +164,7 @@ LIMIT ?
                 .replaceAll("_", "\\_")}%`,
             ]
           : []),
-        limit,
+        ...(limit > 0 ? [limit] : []),
       ],
       diagnostics,
     )

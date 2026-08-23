@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  SiteComparisonBreakdownQueryDtoSchema,
-  SiteComparisonTimeseriesQueryDtoSchema,
+  SiteComparisonBreakdownV2QueryDtoSchema,
+  SiteComparisonQueryDtoSchema,
   SiteEventFieldsQueryDtoSchema,
   SiteEventFieldValuesQueryDtoSchema,
   SiteEventTypeDetailQueryDtoSchema,
   SiteEventTypesQueryDtoSchema,
-  SiteOverviewComparisonQueryDtoSchema,
   SiteOverviewQueryDtoSchema,
   SiteRealtimeActiveVisitorsQueryDtoSchema,
   SiteRealtimeEventsQueryDtoSchema,
@@ -21,7 +20,7 @@ import {
   SiteVisitorSessionsQueryDtoSchema,
   SiteVisitorsSearchQueryDtoSchema,
   TeamAnalyticsQueryBaseDtoSchema,
-  TeamComparisonOverviewQueryDtoSchema,
+  TeamComparisonQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
 
 const timeRange = {
@@ -89,72 +88,62 @@ describe("API v1 analytics DTOs", () => {
     ).toBe(false);
   });
 
-  it("uses explicit variants for comparison and keeps the timezone top-level", () => {
+  it("uses current/reference datasets and keeps the timezone top-level", () => {
     const explicit = {
-      mode: "explicit",
+      version: 2,
       timeZone: "Asia/Shanghai",
-      a: { timeRange: { kind: "preset", preset: "last_7_days" } },
-      b: {
-        timeRange: {
-          kind: "absolute",
-          from: "2026-08-01T00:00:00.000Z",
-          to: "2026-08-08T00:00:00.000Z",
-        },
+      current: {
+        timeRange: { kind: "preset", preset: "last_7_days" },
+        filter: null,
       },
-      query: { interval: "day" },
+      reference: {
+        timeRange: {
+          kind: "previous_period",
+        },
+        filter: null,
+      },
+      select: {
+        metrics: ["views", "sessions"],
+        trend: { interval: "day", metrics: ["views"] },
+      },
     };
+    expect(SiteComparisonQueryDtoSchema.safeParse(explicit).success).toBe(true);
     expect(
-      SiteComparisonTimeseriesQueryDtoSchema.safeParse(explicit).success,
-    ).toBe(true);
-    expect(
-      SiteComparisonTimeseriesQueryDtoSchema.safeParse({
+      SiteComparisonQueryDtoSchema.safeParse({
         ...explicit,
-        a: { timeRange: { ...explicit.a.timeRange, timeZone: "UTC" } },
+        current: { ...explicit.current, timeZone: "UTC" },
       }).success,
     ).toBe(false);
     expect(
-      SiteComparisonBreakdownQueryDtoSchema.safeParse({
-        ...explicit,
-        query: { limit: 20 },
+      SiteComparisonBreakdownV2QueryDtoSchema.safeParse({
+        version: explicit.version,
+        timeZone: explicit.timeZone,
+        current: explicit.current,
+        reference: explicit.reference,
+        limit: 20,
+        sort: { by: "change.views.relative", direction: "desc" },
       }).success,
     ).toBe(true);
   });
 
-  it("only allows the previous-period variant for site overview", () => {
+  it("supports previous_period only on reference and rejects the removed shape", () => {
     const previous = {
-      mode: "previous-period",
-      timeRange,
-      query: { metrics: ["views"] },
+      version: 2,
+      timeZone: "UTC",
+      current: { timeRange: { kind: "preset", preset: "today" } },
+      reference: { timeRange: { kind: "previous_period" } },
+      select: { metrics: ["views"] },
     };
+    expect(TeamComparisonQueryDtoSchema.safeParse(previous).success).toBe(true);
     expect(
-      SiteOverviewComparisonQueryDtoSchema.safeParse(previous).success,
-    ).toBe(true);
-    expect(
-      SiteComparisonTimeseriesQueryDtoSchema.safeParse({
+      SiteComparisonQueryDtoSchema.safeParse({
         ...previous,
-        query: { interval: "day" },
+        current: { timeRange: { kind: "previous_period" } },
       }).success,
     ).toBe(false);
     expect(
-      TeamComparisonOverviewQueryDtoSchema.safeParse({
-        mode: "explicit",
-        timeZone: "UTC",
-        a: { timeRange: { kind: "preset", preset: "today" } },
-        b: { timeRange: { kind: "preset", preset: "yesterday" } },
-        query: {},
-      }).success,
-    ).toBe(true);
-    expect(
-      TeamComparisonOverviewQueryDtoSchema.safeParse({
-        mode: "explicit",
-        timeZone: "UTC",
-        a: {
-          timeRange: { kind: "preset", preset: "today" },
-          filter: { type: "saved", id: "filter-1" },
-        },
-        b: { timeRange: { kind: "preset", preset: "yesterday" } },
-        query: {},
-      }).success,
+      SiteComparisonQueryDtoSchema.safeParse({ mode: "explicit", a: {}, b: {} })
+        .success,
     ).toBe(false);
   });
 

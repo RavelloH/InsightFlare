@@ -308,8 +308,7 @@
         "site.analytics.schema"
       ],
       "operations": [
-        "site.analytics.comparisonOverview",
-        "site.analytics.comparisonTimeseries",
+        "site.analytics.comparison",
         "site.analytics.comparisonBreakdown"
       ],
       "decisionBranches": [
@@ -329,8 +328,7 @@
         "team.analytics.schema"
       ],
       "operations": [
-        "team.analytics.comparisonOverview",
-        "team.analytics.comparisonTimeseries",
+        "team.analytics.comparison",
         "team.analytics.comparisonBreakdown"
       ],
       "decisionBranches": [

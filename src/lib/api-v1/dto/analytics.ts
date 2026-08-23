@@ -164,95 +164,142 @@ const overviewMetricsSchema = z
   .max(20)
   .optional();
 
-const comparisonOverviewQuerySchema = z
-  .object({ metrics: overviewMetricsSchema })
-  .strict();
-const comparisonTimeseriesQuerySchema = z
-  .object({ interval: z.enum(["minute", "hour", "day", "week", "month"]) })
-  .strict();
-const comparisonBreakdownQuerySchema = z
+/** Dataset-first comparison transport contract. */
+export const ComparisonVersionDtoSchema = z.literal(2);
+export const ComparisonMetricDtoSchema = z.enum([
+  "views",
+  "sessions",
+  "visitors",
+  "bounces",
+  "totalDurationMs",
+  "durationViews",
+  "bounceRate",
+  "avgDurationMs",
+  "viewsPerSession",
+  "events",
+]);
+export const ComparisonTrendIntervalDtoSchema = z.enum([
+  "minute",
+  "hour",
+  "day",
+  "week",
+  "month",
+]);
+const comparisonDatasetTimeRangeV2 = z.union([
+  ComparisonDatasetTimeRangeDtoSchema,
+  z.object({ kind: z.literal("previous_period") }).strict(),
+]);
+const comparisonDatasetV2 = <
+  Range extends z.ZodTypeAny,
+  Filter extends z.ZodTypeAny,
+>(
+  range: Range,
+  filter: Filter,
+) =>
+  z.object({ timeRange: range, filter: filter.nullable().optional() }).strict();
+const siteCurrentDatasetV2 = comparisonDatasetV2(
+  ComparisonDatasetTimeRangeDtoSchema,
+  SiteQueryFilterDtoSchema,
+);
+const siteReferenceDatasetV2 = comparisonDatasetV2(
+  comparisonDatasetTimeRangeV2,
+  SiteQueryFilterDtoSchema,
+);
+const teamCurrentDatasetV2 = comparisonDatasetV2(
+  ComparisonDatasetTimeRangeDtoSchema,
+  TeamQueryFilterDtoSchema,
+);
+const teamReferenceDatasetV2 = comparisonDatasetV2(
+  comparisonDatasetTimeRangeV2,
+  TeamQueryFilterDtoSchema,
+);
+export const ComparisonTrendSelectionDtoSchema = z.union([
+  z
+    .object({
+      interval: ComparisonTrendIntervalDtoSchema,
+      metrics: z.array(ComparisonMetricDtoSchema).min(1).max(10),
+    })
+    .strict(),
+]);
+const comparisonSelectV2 = z
   .object({
-    limit: z.number().int().min(1).max(200).default(20),
-    sort: z
-      .object({
-        metric: z.enum(["views", "sessions", "visitors"]),
-        side: z.enum(["a", "b"]),
-        direction: z.enum(["asc", "desc"]),
-      })
-      .default({ metric: "views", side: "a", direction: "desc" }),
+    metrics: z.array(ComparisonMetricDtoSchema).min(1).max(10),
+    trend: ComparisonTrendSelectionDtoSchema.optional(),
   })
   .strict();
-
-const SiteComparisonDatasetDtoSchema = z
-  .object({
-    timeRange: ComparisonDatasetTimeRangeDtoSchema,
-    filter: SiteQueryFilterDtoSchema.nullable().optional(),
-  })
-  .strict();
-const TeamComparisonDatasetDtoSchema = z
-  .object({
-    timeRange: ComparisonDatasetTimeRangeDtoSchema,
-    filter: TeamQueryFilterDtoSchema.nullable().optional(),
-  })
-  .strict();
-
-const sitePreviousPeriodComparison = <Query extends z.ZodTypeAny>(
-  query: Query,
+const comparisonRequestV2 = <
+  Current extends z.ZodTypeAny,
+  Reference extends z.ZodTypeAny,
+>(
+  current: Current,
+  reference: Reference,
 ) =>
   z
     .object({
-      mode: z.literal("previous-period"),
-      timeRange: AnalyticsTimeRangeInputDtoSchema,
-      filter: SiteQueryFilterDtoSchema.nullable().optional(),
-      query,
-    })
-    .strict();
-
-const explicitSiteComparison = <Query extends z.ZodTypeAny>(query: Query) =>
-  z
-    .object({
-      mode: z.literal("explicit"),
+      version: ComparisonVersionDtoSchema,
       timeZone,
-      a: SiteComparisonDatasetDtoSchema,
-      b: SiteComparisonDatasetDtoSchema,
-      query,
+      current,
+      reference,
     })
     .strict();
-
-const explicitTeamComparison = <Query extends z.ZodTypeAny>(query: Query) =>
-  z
-    .object({
-      mode: z.literal("explicit"),
-      timeZone,
-      a: TeamComparisonDatasetDtoSchema,
-      b: TeamComparisonDatasetDtoSchema,
-      query,
-    })
-    .strict();
-
-export const SiteOverviewComparisonQueryDtoSchema = z.discriminatedUnion(
-  "mode",
-  [
-    sitePreviousPeriodComparison(comparisonOverviewQuerySchema),
-    explicitSiteComparison(comparisonOverviewQuerySchema),
-  ],
-);
-/** Only overview retains the legacy-compatible previous-period variant. */
-export const SiteComparisonTimeseriesQueryDtoSchema = explicitSiteComparison(
-  comparisonTimeseriesQuerySchema,
-);
-export const SiteComparisonBreakdownQueryDtoSchema = explicitSiteComparison(
-  comparisonBreakdownQuerySchema,
-);
-export const TeamComparisonOverviewQueryDtoSchema = explicitTeamComparison(
-  comparisonOverviewQuerySchema,
-);
-export const TeamComparisonTimeseriesQueryDtoSchema = explicitTeamComparison(
-  comparisonTimeseriesQuerySchema,
-);
-export const TeamComparisonBreakdownQueryDtoSchema = explicitTeamComparison(
-  comparisonBreakdownQuerySchema,
-);
+export const SiteComparisonQueryDtoSchema = comparisonRequestV2(
+  siteCurrentDatasetV2,
+  siteReferenceDatasetV2,
+)
+  .extend({ select: comparisonSelectV2 })
+  .strict();
+export const TeamComparisonQueryDtoSchema = comparisonRequestV2(
+  teamCurrentDatasetV2,
+  teamReferenceDatasetV2,
+)
+  .extend({ select: comparisonSelectV2 })
+  .strict();
+export const ComparisonSortByDtoSchema = z.enum([
+  "current.views",
+  "current.sessions",
+  "current.visitors",
+  "reference.views",
+  "reference.sessions",
+  "reference.visitors",
+  "change.views.absolute",
+  "change.views.relative",
+  "change.sessions.absolute",
+  "change.sessions.relative",
+  "change.visitors.absolute",
+  "change.visitors.relative",
+  "key",
+]);
+const comparisonSortV2 = z
+  .object({
+    by: ComparisonSortByDtoSchema,
+    direction: z.enum(["asc", "desc"]).default("desc"),
+  })
+  .strict()
+  .default({ by: "current.views", direction: "desc" });
+const comparisonBreakdownV2 = z.object({
+  limit: z.number().int().min(1).max(200).default(20),
+  sort: comparisonSortV2,
+});
+export const SiteComparisonBreakdownV2QueryDtoSchema = comparisonRequestV2(
+  siteCurrentDatasetV2,
+  siteReferenceDatasetV2,
+)
+  .extend(comparisonBreakdownV2.shape)
+  .strict();
+export const TeamComparisonBreakdownV2QueryDtoSchema = comparisonRequestV2(
+  teamCurrentDatasetV2,
+  teamReferenceDatasetV2,
+)
+  .extend(comparisonBreakdownV2.shape)
+  .strict();
+export const SiteAnalyticsComparisonQueryDtoSchema =
+  SiteComparisonQueryDtoSchema;
+export const TeamAnalyticsComparisonQueryDtoSchema =
+  TeamComparisonQueryDtoSchema;
+export const SiteAnalyticsComparisonBreakdownQueryDtoSchema =
+  SiteComparisonBreakdownV2QueryDtoSchema;
+export const TeamAnalyticsComparisonBreakdownQueryDtoSchema =
+  TeamComparisonBreakdownV2QueryDtoSchema;
 
 export const SiteAnalyticsQueryBaseDtoSchema = z
   .object({
@@ -548,41 +595,29 @@ export type AnalyticsTimeRangeInputDto = z.infer<
 export type ComparisonDatasetTimeRangeDto = z.infer<
   typeof ComparisonDatasetTimeRangeDtoSchema
 >;
-export type SiteOverviewComparisonQueryDto = z.infer<
-  typeof SiteOverviewComparisonQueryDtoSchema
+export type SiteComparisonQueryDto = z.infer<
+  typeof SiteComparisonQueryDtoSchema
 >;
-export type SiteOverviewComparisonQueryDtoInput = z.input<
-  typeof SiteOverviewComparisonQueryDtoSchema
+export type SiteComparisonQueryDtoInput = z.input<
+  typeof SiteComparisonQueryDtoSchema
 >;
-export type SiteComparisonTimeseriesQueryDto = z.infer<
-  typeof SiteComparisonTimeseriesQueryDtoSchema
+export type TeamComparisonQueryDto = z.infer<
+  typeof TeamComparisonQueryDtoSchema
 >;
-export type SiteComparisonTimeseriesQueryDtoInput = z.input<
-  typeof SiteComparisonTimeseriesQueryDtoSchema
+export type TeamComparisonQueryDtoInput = z.input<
+  typeof TeamComparisonQueryDtoSchema
 >;
-export type SiteComparisonBreakdownQueryDto = z.infer<
-  typeof SiteComparisonBreakdownQueryDtoSchema
+export type SiteComparisonBreakdownV2QueryDto = z.infer<
+  typeof SiteComparisonBreakdownV2QueryDtoSchema
 >;
-export type SiteComparisonBreakdownQueryDtoInput = z.input<
-  typeof SiteComparisonBreakdownQueryDtoSchema
+export type SiteComparisonBreakdownV2QueryDtoInput = z.input<
+  typeof SiteComparisonBreakdownV2QueryDtoSchema
 >;
-export type TeamComparisonOverviewQueryDto = z.infer<
-  typeof TeamComparisonOverviewQueryDtoSchema
+export type TeamComparisonBreakdownV2QueryDto = z.infer<
+  typeof TeamComparisonBreakdownV2QueryDtoSchema
 >;
-export type TeamComparisonOverviewQueryDtoInput = z.input<
-  typeof TeamComparisonOverviewQueryDtoSchema
->;
-export type TeamComparisonTimeseriesQueryDto = z.infer<
-  typeof TeamComparisonTimeseriesQueryDtoSchema
->;
-export type TeamComparisonTimeseriesQueryDtoInput = z.input<
-  typeof TeamComparisonTimeseriesQueryDtoSchema
->;
-export type TeamComparisonBreakdownQueryDto = z.infer<
-  typeof TeamComparisonBreakdownQueryDtoSchema
->;
-export type TeamComparisonBreakdownQueryDtoInput = z.input<
-  typeof TeamComparisonBreakdownQueryDtoSchema
+export type TeamComparisonBreakdownV2QueryDtoInput = z.input<
+  typeof TeamComparisonBreakdownV2QueryDtoSchema
 >;
 export type SiteFunnelAnalysisQueryDto = z.infer<
   typeof SiteFunnelAnalysisQueryDtoSchema

@@ -7,9 +7,12 @@ import {
   handlePlannedTeamAnalyticsSchema,
 } from "@/lib/api-v1/analytics-schema-handler";
 import { requireScope } from "@/lib/api-v1/auth-helpers";
-import { handleSiteComparisonBreakdown } from "@/lib/api-v1/comparison-breakdown-handler";
-import { handleSiteOverviewComparison } from "@/lib/api-v1/comparison-handler";
-import { handleSiteTimeseriesComparison } from "@/lib/api-v1/comparison-timeseries-handler";
+import {
+  handleSiteComparison,
+  handleSiteComparisonBreakdown,
+  handleTeamComparison,
+  handleTeamComparisonBreakdown,
+} from "@/lib/api-v1/comparison-handler";
 import { dispatchApiV1CoreRoute } from "@/lib/api-v1/core-dispatcher";
 import { SitePerformanceBreakdownDimensionSchema } from "@/lib/api-v1/dto/analytics";
 import { TypedBatchRequestSchema } from "@/lib/api-v1/dto/batch";
@@ -56,11 +59,6 @@ import {
   handlePlannedSiteVisitorsSearch,
 } from "@/lib/api-v1/site-list-handler";
 import { handleTeamBreakdown } from "@/lib/api-v1/team-breakdown-handler";
-import {
-  handleTeamComparisonBreakdown,
-  handleTeamComparisonOverview,
-  handleTeamComparisonTimeseries,
-} from "@/lib/api-v1/team-comparison-handler";
 import { handlePlannedTeamOverview } from "@/lib/api-v1/team-overview-handler";
 import { handlePlannedTeamSites } from "@/lib/api-v1/team-sites-handler";
 import { handlePlannedTeamTimeseries } from "@/lib/api-v1/team-timeseries-handler";
@@ -255,75 +253,6 @@ function typedTeamBreakdown(c: Context<AppEnv>): Promise<Response> {
   );
 }
 
-function typedTeamComparisonOverview(c: Context<AppEnv>): Promise<Response> {
-  return handleTeamComparisonOverview(
-    c.req.raw,
-    principal(c),
-    (input) =>
-      readTeamOverview({
-        env: c.env,
-        teamId: input.teamId,
-        allowedSiteIds: input.allowedSiteIds,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
-    { signal: c.req.raw.signal, capturedAtMs: Date.now() },
-  );
-}
-
-function typedTeamComparisonTimeseries(c: Context<AppEnv>): Promise<Response> {
-  return handleTeamComparisonTimeseries(
-    c.req.raw,
-    principal(c),
-    (input) =>
-      readTeamTimeseries({
-        env: c.env,
-        teamId: input.teamId,
-        allowedSiteIds: input.allowedSiteIds,
-        interval: input.interval,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
-    { signal: c.req.raw.signal, capturedAtMs: Date.now() },
-  );
-}
-
-function typedTeamComparisonBreakdown(c: Context<AppEnv>): Promise<Response> {
-  const dimension = c.req.param("dimension");
-  if (!dimension) return Promise.resolve(resourceNotFound(c));
-  return handleTeamComparisonBreakdown(
-    c.req.raw,
-    principal(c),
-    dimension,
-    (input) =>
-      readTeamBreakdown({
-        env: c.env,
-        teamId: input.teamId,
-        allowedSiteIds: input.allowedSiteIds,
-        dimension: input.dimension,
-        limit: input.limit,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
-    { signal: c.req.raw.signal, capturedAtMs: Date.now() },
-  );
-}
-
 v1Routes.get("/", (c) =>
   dispatchApiV1CoreRoute({
     routeId: "core.root",
@@ -382,45 +311,33 @@ v1Routes.all("/team/usage", (c) =>
   }),
 );
 v1Routes.post("/team/analytics/breakdowns/:dimension", typedTeamBreakdown);
-v1Routes.post(
-  "/team/analytics/comparison/overview",
-  typedTeamComparisonOverview,
+v1Routes.post("/team/analytics/comparison", (c) =>
+  handleTeamComparison(c.req.raw, principal(c), c.env),
 );
-v1Routes.post(
-  "/team/analytics/comparison/timeseries",
-  typedTeamComparisonTimeseries,
-);
-v1Routes.post(
-  "/team/analytics/comparison/breakdowns/:dimension",
-  typedTeamComparisonBreakdown,
-);
+v1Routes.post("/team/analytics/comparison/breakdowns/:dimension", (c) => {
+  const dimension = c.req.param("dimension");
+  if (!dimension) return resourceNotFound(c);
+  return handleTeamComparisonBreakdown(
+    c.req.raw,
+    principal(c),
+    c.env,
+    dimension,
+  );
+});
 v1Routes.post("/team/analytics/overview", typedTeamOverview);
 v1Routes.post("/team/analytics/timeseries", typedTeamTimeseries);
 v1Routes.post("/team/analytics/sites", typedTeamSites);
 v1Routes.all("/team/analytics/schema", (c) =>
   handlePlannedTeamAnalyticsSchema(c.req.raw, principal(c)),
 );
-v1Routes.post("/sites/:siteId/analytics/comparison/overview", (c) => {
+v1Routes.post("/sites/:siteId/analytics/comparison", (c) => {
   const siteId = c.req.param("siteId");
   if (!siteId) return resourceNotFound(c);
-  return handleSiteOverviewComparison(
+  return handleSiteComparison(
     c.req.raw,
     principal(c),
+    c.env,
     siteId,
-    createOverviewReader(c.env, siteId),
-    { signal: c.req.raw.signal, capturedAtMs: Date.now() },
-    createAnalysisDefinitionReader(c.env, principal(c)),
-  );
-});
-v1Routes.post("/sites/:siteId/analytics/comparison/timeseries", (c) => {
-  const siteId = c.req.param("siteId");
-  if (!siteId) return resourceNotFound(c);
-  return handleSiteTimeseriesComparison(
-    c.req.raw,
-    principal(c),
-    siteId,
-    createOverviewReader(c.env, siteId),
-    { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
 });
@@ -433,23 +350,9 @@ v1Routes.post(
     return handleSiteComparisonBreakdown(
       c.req.raw,
       principal(c),
+      c.env,
       siteId,
       dimension,
-      (input) =>
-        readSiteBreakdown({
-          env: c.env,
-          siteId: input.siteId,
-          dimension: input.dimension,
-          limit: input.limit,
-          window: {
-            startMs: input.startMs,
-            endExclusiveMs: input.endExclusiveMs,
-            timeZone: input.timeZone,
-            nowMs: Date.now(),
-          },
-          filters: input.filters,
-        }),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, principal(c)),
     );
   },

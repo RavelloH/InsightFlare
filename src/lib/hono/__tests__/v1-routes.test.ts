@@ -98,22 +98,15 @@ vi.mock("@/lib/api-v1/team-breakdown-handler", () => ({
   handleTeamBreakdown: vi.fn(typedReaderMock.invoke),
 }));
 
-vi.mock("@/lib/api-v1/team-comparison-handler", () => ({
+vi.mock("@/lib/api-v1/comparison-handler", () => ({
+  handleSiteComparisonBreakdown: vi.fn(typedReaderMock.invoke),
+  handleSiteComparison: vi.fn(typedReaderMock.invoke),
   handleTeamComparisonBreakdown: vi.fn(typedReaderMock.invoke),
-  handleTeamComparisonOverview: vi.fn(typedReaderMock.invoke),
-  handleTeamComparisonTimeseries: vi.fn(typedReaderMock.invoke),
+  handleTeamComparison: vi.fn(typedReaderMock.invoke),
 }));
 
 vi.mock("@/lib/api-v1/site-cross-breakdown-handler", () => ({
   handlePlannedSiteCrossBreakdown: vi.fn(typedReaderMock.invoke),
-}));
-
-vi.mock("@/lib/api-v1/comparison-handler", () => ({
-  handleSiteOverviewComparison: vi.fn(typedReaderMock.invoke),
-}));
-
-vi.mock("@/lib/api-v1/comparison-timeseries-handler", () => ({
-  handleSiteTimeseriesComparison: vi.fn(typedReaderMock.invoke),
 }));
 
 vi.mock("@/lib/edge/analytics/api-v1-provider", async (importOriginal) => ({
@@ -301,8 +294,7 @@ describe("Hono API v1 routes", () => {
   });
 
   it.each([
-    "/api/v1/sites/site-1/analytics/comparison/overview",
-    "/api/v1/sites/site-1/analytics/comparison/timeseries",
+    "/api/v1/sites/site-1/analytics/comparison",
     "/api/v1/sites/site-1/analytics/comparison/breakdowns/page.path",
     "/api/v1/sites/site-1/analytics/overview",
     "/api/v1/sites/site-1/analytics/timeseries",
@@ -457,23 +449,22 @@ describe("Hono API v1 routes", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            mode: "explicit",
+            version: 2,
             timeZone: "UTC",
-            a: {
+            current: {
               timeRange: {
                 kind: "absolute",
                 from: "2026-08-01T00:00:00.000Z",
                 to: "2026-08-02T00:00:00.000Z",
               },
             },
-            b: {
+            reference: {
               timeRange: {
-                kind: "absolute",
-                from: "2026-08-02T00:00:00.000Z",
-                to: "2026-08-03T00:00:00.000Z",
+                kind: "previous_period",
               },
             },
-            query: { limit: 10 },
+            limit: 10,
+            sort: { by: "current.views", direction: "desc" },
           }),
         },
       ),
@@ -482,9 +473,7 @@ describe("Hono API v1 routes", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      data: { dimension: "page.path", items: [] },
-    });
+    await expect(response.text()).resolves.toBe("typed-reader");
   });
 
   it("enters team typed readers and application item boundaries", async () => {
@@ -501,8 +490,7 @@ describe("Hono API v1 routes", () => {
       "/api/v1/team/analytics/timeseries",
       "/api/v1/team/analytics/sites",
       "/api/v1/team/analytics/breakdowns/page.path",
-      "/api/v1/team/analytics/comparison/overview",
-      "/api/v1/team/analytics/comparison/timeseries",
+      "/api/v1/team/analytics/comparison",
       "/api/v1/team/analytics/comparison/breakdowns/page.path",
     ]) {
       const response = await createApp().fetch(

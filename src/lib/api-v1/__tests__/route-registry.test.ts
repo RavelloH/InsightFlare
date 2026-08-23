@@ -446,7 +446,7 @@ describe("target API v1 route registry", () => {
 
   it("includes planned saved-filter collection and item contracts", () => {
     expect(apiV1ApplicationRouteRegistry).toHaveLength(19);
-    expect(apiV1RouteRegistry).toHaveLength(70);
+    expect(apiV1RouteRegistry).toHaveLength(68);
     expect(
       apiV1ApplicationRouteRegistry
         .filter((route) => route.id.startsWith("site.saved-filters."))
@@ -502,10 +502,8 @@ describe("target API v1 route registry", () => {
     expect(isApiV1RouteVariantId("explicit")).toBe(true);
     expect(isApiV1RouteVariantId("unknown")).toBe(false);
     expect(
-      apiV1RouteVariantIds(
-        apiV1RouteById("site.analytics.comparisonOverview")!,
-      ),
-    ).toEqual(["previous-period", "explicit"]);
+      apiV1RouteVariantIds(apiV1RouteById("site.analytics.comparison")!),
+    ).toEqual(["default"]);
     expect(apiV1RouteVariantIds({})).toEqual(["default"]);
   });
 

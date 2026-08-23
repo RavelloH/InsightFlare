@@ -77,6 +77,11 @@ export interface AnalyticsOperationInvocation<Query, Result> {
   readonly context: QueryContext;
   readonly query: Query;
   readonly provider: AnalyticsOperationProvider<Query, Result>;
+  readonly cache?: {
+    readonly key: string;
+    readonly policy: OperationCachePolicy;
+    readonly isCacheable?: (value: Result) => boolean;
+  };
 }
 
 /** Creates a provider adapter at the composition boundary. */
@@ -229,12 +234,25 @@ export class AnalyticsQueryService {
     }
     let value: Result;
     try {
-      value = await invocation.provider.execute({
-        operation: invocation.operation,
-        context: invocation.context,
-        query: invocation.query,
-        execution: executionContext,
-      });
+      const load = async () =>
+        invocation.provider.execute({
+          operation: invocation.operation,
+          context: invocation.context,
+          query: invocation.query,
+          execution: executionContext,
+        });
+      if (invocation.cache && this.cache) {
+        const cached = await this.cached(invocation.cache, async () => {
+          const loaded = await load();
+          return {
+            ok: invocation.cache?.isCacheable?.(loaded) ?? true,
+            value: loaded,
+          };
+        });
+        value = cached.value;
+      } else {
+        value = await load();
+      }
     } catch (error) {
       emit(executionContext, "failure");
       throw error;
