@@ -21,7 +21,9 @@ function env(response: Response | Error) {
 describe("RealtimeProvider", () => {
   it("encapsulates the snapshot request and applies the requested bounds", async () => {
     const { env: bindings, fetch } = env(
-      new Response(JSON.stringify({ activeNow: 2, data: [] }), { status: 200 }),
+      new Response(JSON.stringify({ activeNow: 2, events: [], visits: [] }), {
+        status: 200,
+      }),
     );
     await expect(
       new RealtimeProvider(bindings).snapshot({
@@ -30,7 +32,7 @@ describe("RealtimeProvider", () => {
         toMs: 20,
         limit: 50,
       }),
-    ).resolves.toEqual({ activeVisitors: 2, events: [], sessions: [] });
+    ).resolves.toEqual({ activeNow: 2, events: [], visits: [] });
     expect(fetch).toHaveBeenCalledWith(
       "https://ingest.internal/snapshot?from=10&to=20&limit=50",
       expect.objectContaining({ method: "GET" }),
@@ -49,7 +51,7 @@ describe("RealtimeProvider", () => {
     ).rejects.toThrow("data-unavailable");
 
     const malformed = env(
-      new Response(JSON.stringify({ activeNow: 1, data: ["not-a-record"] }), {
+      new Response(JSON.stringify({ activeNow: 1, events: ["not-an-event"] }), {
         status: 200,
       }),
     );
@@ -62,7 +64,7 @@ describe("RealtimeProvider", () => {
       }),
     ).rejects.toThrow("data-unavailable");
     const arrayItem = env(
-      new Response(JSON.stringify({ activeNow: 1, data: [[]] }), {
+      new Response(JSON.stringify({ activeNow: 1, events: [[]] }), {
         status: 200,
       }),
     );
@@ -102,25 +104,25 @@ describe("RealtimeProvider", () => {
       new Response(JSON.stringify({ activeNow: 3 }), { status: 200 }),
     );
     await expect(
-      new RealtimeProvider(valid.env).activeVisitors({ siteId: "site-1" }),
+      new RealtimeProvider(valid.env).activeNow({ siteId: "site-1" }),
     ).resolves.toBe(3);
 
     const invalid = env(
       new Response(JSON.stringify({ activeNow: -1 }), { status: 200 }),
     );
     await expect(
-      new RealtimeProvider(invalid.env).activeVisitors({ siteId: "site-1" }),
+      new RealtimeProvider(invalid.env).activeNow({ siteId: "site-1" }),
     ).resolves.toBe(0);
 
     const unavailable = env(new Response("down", { status: 503 }));
     await expect(
-      new RealtimeProvider(unavailable.env).activeVisitors({
+      new RealtimeProvider(unavailable.env).activeNow({
         siteId: "site-1",
       }),
     ).rejects.toThrow("data-unavailable");
     const thrown = env(new Error("network"));
     await expect(
-      new RealtimeProvider(thrown.env).activeVisitors({ siteId: "site-1" }),
+      new RealtimeProvider(thrown.env).activeNow({ siteId: "site-1" }),
     ).rejects.toThrow("data-unavailable");
   });
 });

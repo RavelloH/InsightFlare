@@ -59160,10 +59160,11 @@
                     "data": {
                       "type": "object",
                       "properties": {
-                        "activeVisitors": {
+                        "activeNow": {
                           "type": "integer",
                           "minimum": 0,
-                          "maximum": 9007199254740991
+                          "maximum": 9007199254740991,
+                          "description": "Number of distinct visitors active in the last 5 minutes"
                         },
                         "events": {
                           "type": "array",
@@ -59176,73 +59177,317 @@
                               "eventType": {
                                 "type": "string"
                               },
-                              "eventAt": {
-                                "type": "number"
+                              "eventKind": {
+                                "type": "string",
+                                "enum": [
+                                  "pageview",
+                                  "custom_event",
+                                  "leave",
+                                  "visibility",
+                                  "identify"
+                                ]
                               },
+                              "eventAt": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991,
+                                "description": "Event timestamp (Unix ms)"
+                              },
+                              "siteId": {
+                                "type": "string"
+                              },
+                              "traceId": {
+                                "type": "string"
+                              },
+                              "receivedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "sequence": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "eventId": {
+                                "type": "string"
+                              },
+                              "eventData": {},
                               "visitId": {
                                 "type": "string"
                               },
                               "sessionId": {
+                                "default": "",
                                 "type": "string"
                               },
-                              "pathname": {
+                              "startedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "previousVisitId": {
                                 "type": "string"
                               },
-                              "hash": {
-                                "type": "string"
-                              },
-                              "title": {
-                                "type": "string"
-                              },
-                              "hostname": {
-                                "type": "string"
-                              },
-                              "referrerUrl": {
-                                "type": "string"
-                              },
-                              "referrerHost": {
-                                "type": "string"
+                              "previousVisitStartedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               },
                               "visitorId": {
                                 "type": "string"
                               },
+                              "userId": {
+                                "type": "string"
+                              },
+                              "userName": {
+                                "type": "string"
+                              },
+                              "isEU": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "pathname": {
+                                "default": "/",
+                                "type": "string"
+                              },
+                              "queryString": {
+                                "type": "string"
+                              },
+                              "hash": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "title": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "hostname": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "referrerUrl": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "referrerHost": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "utmSource": {
+                                "type": "string"
+                              },
+                              "utmMedium": {
+                                "type": "string"
+                              },
+                              "utmCampaign": {
+                                "type": "string"
+                              },
+                              "utmTerm": {
+                                "type": "string"
+                              },
+                              "utmContent": {
+                                "type": "string"
+                              },
                               "country": {
+                                "default": "",
                                 "type": "string"
                               },
                               "region": {
+                                "default": "",
                                 "type": "string"
                               },
                               "regionCode": {
+                                "default": "",
                                 "type": "string"
                               },
                               "city": {
+                                "default": "",
                                 "type": "string"
                               },
                               "continent": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "postalCode": {
+                                "type": "string"
+                              },
+                              "metroCode": {
                                 "type": "string"
                               },
                               "timezone": {
+                                "default": "",
                                 "type": "string"
                               },
                               "organization": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "uaRaw": {
                                 "type": "string"
                               },
                               "browser": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "browserVersion": {
+                                "type": "string"
+                              },
+                              "os": {
                                 "type": "string"
                               },
                               "osVersion": {
+                                "default": "",
                                 "type": "string"
                               },
                               "deviceType": {
+                                "default": "",
                                 "type": "string"
                               },
                               "language": {
+                                "default": "",
                                 "type": "string"
                               },
                               "screenSize": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "screenWidth": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "screenHeight": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "hiddenAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "endedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "finalizedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "durationMs": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "durationSource": {
+                                "type": "string"
+                              },
+                              "exitReason": {
+                                "type": "string"
+                              },
+                              "leaveAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "performanceVisitId": {
+                                "type": "string"
+                              },
+                              "performance": {
+                                "anyOf": [
+                                  {},
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "visibilityState": {
                                 "type": "string"
                               },
                               "latitude": {
+                                "default": null,
                                 "anyOf": [
                                   {
                                     "type": "number"
@@ -59253,6 +59498,7 @@
                                 ]
                               },
                               "longitude": {
+                                "default": null,
                                 "anyOf": [
                                   {
                                     "type": "number"
@@ -59261,6 +59507,10 @@
                                     "type": "null"
                                   }
                                 ]
+                              },
+                              "eventName": {
+                                "description": "Present only for custom_event type",
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -59269,13 +59519,13 @@
                               "eventAt",
                               "visitId",
                               "sessionId",
+                              "visitorId",
                               "pathname",
                               "hash",
                               "title",
                               "hostname",
                               "referrerUrl",
                               "referrerHost",
-                              "visitorId",
                               "country",
                               "region",
                               "regionCode",
@@ -59291,10 +59541,11 @@
                               "latitude",
                               "longitude"
                             ],
-                            "additionalProperties": false
+                            "additionalProperties": false,
+                            "description": "Individual real-time event from a visitor"
                           }
                         },
-                        "sessions": {
+                        "visits": {
                           "type": "array",
                           "items": {
                             "type": "object",
@@ -59309,10 +59560,14 @@
                                 "type": "string"
                               },
                               "startedAt": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "lastActivityAt": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "pathname": {
                                 "type": "string"
@@ -59331,6 +59586,40 @@
                               },
                               "referrerHost": {
                                 "type": "string"
+                              },
+                              "queryString": {
+                                "type": "string"
+                              },
+                              "utmSource": {
+                                "type": "string"
+                              },
+                              "utmMedium": {
+                                "type": "string"
+                              },
+                              "utmCampaign": {
+                                "type": "string"
+                              },
+                              "utmTerm": {
+                                "type": "string"
+                              },
+                              "utmContent": {
+                                "type": "string"
+                              },
+                              "userId": {
+                                "type": "string"
+                              },
+                              "userName": {
+                                "type": "string"
+                              },
+                              "isEU": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               },
                               "country": {
                                 "type": "string"
@@ -59353,6 +59642,15 @@
                               "organization": {
                                 "type": "string"
                               },
+                              "uaRaw": {
+                                "type": "string"
+                              },
+                              "browserVersion": {
+                                "type": "string"
+                              },
+                              "os": {
+                                "type": "string"
+                              },
                               "browser": {
                                 "type": "string"
                               },
@@ -59366,9 +59664,103 @@
                                 "type": "string"
                               },
                               "screenSize": {
+                                "default": "",
                                 "type": "string"
                               },
+                              "siteId": {
+                                "type": "string"
+                              },
+                              "postalCode": {
+                                "type": "string"
+                              },
+                              "metroCode": {
+                                "type": "string"
+                              },
+                              "screenWidth": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "screenHeight": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "hiddenAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "endedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "finalizedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "durationMs": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "durationSource": {
+                                "type": "string"
+                              },
+                              "exitReason": {
+                                "type": "string"
+                              },
+                              "performance": {
+                                "anyOf": [
+                                  {},
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
                               "latitude": {
+                                "default": null,
                                 "anyOf": [
                                   {
                                     "type": "number"
@@ -59379,6 +59771,7 @@
                                 ]
                               },
                               "longitude": {
+                                "default": null,
                                 "anyOf": [
                                   {
                                     "type": "number"
@@ -59416,16 +59809,18 @@
                               "latitude",
                               "longitude"
                             ],
-                            "additionalProperties": false
+                            "additionalProperties": false,
+                            "description": "Active real-time visit from a visitor"
                           }
                         }
                       },
                       "required": [
-                        "activeVisitors",
+                        "activeNow",
                         "events",
-                        "sessions"
+                        "visits"
                       ],
-                      "additionalProperties": false
+                      "additionalProperties": false,
+                      "description": "Real-time activity snapshot for a site"
                     },
                     "meta": {
                       "type": "object",
@@ -59500,50 +59895,97 @@
                 },
                 "example": {
                   "data": {
-                    "activeVisitors": 0,
+                    "activeNow": 0,
                     "events": [
                       {
                         "id": "example",
                         "eventType": "example",
-                        "eventAt": 0,
+                        "eventKind": "pageview",
+                        "eventAt": -9007199254740991,
+                        "siteId": "example",
+                        "traceId": "example",
+                        "receivedAt": -9007199254740991,
+                        "sequence": -9007199254740991,
+                        "eventId": "example",
+                        "eventData": "example",
                         "visitId": "example",
-                        "sessionId": "example",
-                        "pathname": "example",
-                        "hash": "example",
-                        "title": "example",
-                        "hostname": "example",
-                        "referrerUrl": "example",
-                        "referrerHost": "example",
+                        "sessionId": "",
+                        "startedAt": -9007199254740991,
+                        "previousVisitId": "example",
+                        "previousVisitStartedAt": -9007199254740991,
                         "visitorId": "example",
-                        "country": "example",
-                        "region": "example",
-                        "regionCode": "example",
-                        "city": "example",
-                        "continent": "example",
-                        "timezone": "example",
-                        "organization": "example",
-                        "browser": "example",
-                        "osVersion": "example",
-                        "deviceType": "example",
-                        "language": "example",
-                        "screenSize": "example",
-                        "latitude": 0,
-                        "longitude": 0
+                        "userId": "example",
+                        "userName": "example",
+                        "isEU": false,
+                        "pathname": "/",
+                        "queryString": "example",
+                        "hash": "",
+                        "title": "",
+                        "hostname": "",
+                        "referrerUrl": "",
+                        "referrerHost": "",
+                        "utmSource": "example",
+                        "utmMedium": "example",
+                        "utmCampaign": "example",
+                        "utmTerm": "example",
+                        "utmContent": "example",
+                        "country": "",
+                        "region": "",
+                        "regionCode": "",
+                        "city": "",
+                        "continent": "",
+                        "postalCode": "example",
+                        "metroCode": "example",
+                        "timezone": "",
+                        "organization": "",
+                        "uaRaw": "example",
+                        "browser": "",
+                        "browserVersion": "example",
+                        "os": "example",
+                        "osVersion": "",
+                        "deviceType": "",
+                        "language": "",
+                        "screenSize": "",
+                        "screenWidth": 0,
+                        "screenHeight": 0,
+                        "status": "example",
+                        "hiddenAt": -9007199254740991,
+                        "endedAt": -9007199254740991,
+                        "finalizedAt": -9007199254740991,
+                        "durationMs": 0,
+                        "durationSource": "example",
+                        "exitReason": "example",
+                        "leaveAt": -9007199254740991,
+                        "performanceVisitId": "example",
+                        "performance": "example",
+                        "visibilityState": "example",
+                        "latitude": null,
+                        "longitude": null,
+                        "eventName": "example"
                       }
                     ],
-                    "sessions": [
+                    "visits": [
                       {
                         "visitId": "example",
                         "visitorId": "example",
                         "sessionId": "example",
-                        "startedAt": 0,
-                        "lastActivityAt": 0,
+                        "startedAt": -9007199254740991,
+                        "lastActivityAt": -9007199254740991,
                         "pathname": "example",
                         "hash": "example",
                         "title": "example",
                         "hostname": "example",
                         "referrerUrl": "example",
                         "referrerHost": "example",
+                        "queryString": "example",
+                        "utmSource": "example",
+                        "utmMedium": "example",
+                        "utmCampaign": "example",
+                        "utmTerm": "example",
+                        "utmContent": "example",
+                        "userId": "example",
+                        "userName": "example",
+                        "isEU": false,
                         "country": "example",
                         "region": "example",
                         "regionCode": "example",
@@ -59551,13 +59993,29 @@
                         "continent": "example",
                         "timezone": "example",
                         "organization": "example",
+                        "uaRaw": "example",
+                        "browserVersion": "example",
+                        "os": "example",
                         "browser": "example",
                         "osVersion": "example",
                         "deviceType": "example",
                         "language": "example",
-                        "screenSize": "example",
-                        "latitude": 0,
-                        "longitude": 0
+                        "screenSize": "",
+                        "siteId": "example",
+                        "postalCode": "example",
+                        "metroCode": "example",
+                        "screenWidth": 0,
+                        "screenHeight": 0,
+                        "status": "example",
+                        "hiddenAt": -9007199254740991,
+                        "endedAt": -9007199254740991,
+                        "finalizedAt": -9007199254740991,
+                        "durationMs": 0,
+                        "durationSource": "example",
+                        "exitReason": "example",
+                        "performance": "example",
+                        "latitude": null,
+                        "longitude": null
                       }
                     ]
                   },
@@ -60428,14 +60886,15 @@
                     "data": {
                       "type": "object",
                       "properties": {
-                        "activeVisitors": {
+                        "activeNow": {
                           "type": "integer",
                           "minimum": 0,
-                          "maximum": 9007199254740991
+                          "maximum": 9007199254740991,
+                          "description": "Number of distinct visitors active in the last 5 minutes"
                         }
                       },
                       "required": [
-                        "activeVisitors"
+                        "activeNow"
                       ],
                       "additionalProperties": false
                     },
@@ -60512,7 +60971,7 @@
                 },
                 "example": {
                   "data": {
-                    "activeVisitors": 0
+                    "activeNow": 0
                   },
                   "meta": {
                     "requestId": "example",
@@ -61400,73 +61859,317 @@
                               "eventType": {
                                 "type": "string"
                               },
-                              "eventAt": {
-                                "type": "number"
+                              "eventKind": {
+                                "type": "string",
+                                "enum": [
+                                  "pageview",
+                                  "custom_event",
+                                  "leave",
+                                  "visibility",
+                                  "identify"
+                                ]
                               },
+                              "eventAt": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991,
+                                "description": "Event timestamp (Unix ms)"
+                              },
+                              "siteId": {
+                                "type": "string"
+                              },
+                              "traceId": {
+                                "type": "string"
+                              },
+                              "receivedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "sequence": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "eventId": {
+                                "type": "string"
+                              },
+                              "eventData": {},
                               "visitId": {
                                 "type": "string"
                               },
                               "sessionId": {
+                                "default": "",
                                 "type": "string"
                               },
-                              "pathname": {
+                              "startedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "previousVisitId": {
                                 "type": "string"
                               },
-                              "hash": {
-                                "type": "string"
-                              },
-                              "title": {
-                                "type": "string"
-                              },
-                              "hostname": {
-                                "type": "string"
-                              },
-                              "referrerUrl": {
-                                "type": "string"
-                              },
-                              "referrerHost": {
-                                "type": "string"
+                              "previousVisitStartedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               },
                               "visitorId": {
                                 "type": "string"
                               },
+                              "userId": {
+                                "type": "string"
+                              },
+                              "userName": {
+                                "type": "string"
+                              },
+                              "isEU": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "pathname": {
+                                "default": "/",
+                                "type": "string"
+                              },
+                              "queryString": {
+                                "type": "string"
+                              },
+                              "hash": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "title": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "hostname": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "referrerUrl": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "referrerHost": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "utmSource": {
+                                "type": "string"
+                              },
+                              "utmMedium": {
+                                "type": "string"
+                              },
+                              "utmCampaign": {
+                                "type": "string"
+                              },
+                              "utmTerm": {
+                                "type": "string"
+                              },
+                              "utmContent": {
+                                "type": "string"
+                              },
                               "country": {
+                                "default": "",
                                 "type": "string"
                               },
                               "region": {
+                                "default": "",
                                 "type": "string"
                               },
                               "regionCode": {
+                                "default": "",
                                 "type": "string"
                               },
                               "city": {
+                                "default": "",
                                 "type": "string"
                               },
                               "continent": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "postalCode": {
+                                "type": "string"
+                              },
+                              "metroCode": {
                                 "type": "string"
                               },
                               "timezone": {
+                                "default": "",
                                 "type": "string"
                               },
                               "organization": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "uaRaw": {
                                 "type": "string"
                               },
                               "browser": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "browserVersion": {
+                                "type": "string"
+                              },
+                              "os": {
                                 "type": "string"
                               },
                               "osVersion": {
+                                "default": "",
                                 "type": "string"
                               },
                               "deviceType": {
+                                "default": "",
                                 "type": "string"
                               },
                               "language": {
+                                "default": "",
                                 "type": "string"
                               },
                               "screenSize": {
+                                "default": "",
+                                "type": "string"
+                              },
+                              "screenWidth": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "screenHeight": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "hiddenAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "endedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "finalizedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "durationMs": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "durationSource": {
+                                "type": "string"
+                              },
+                              "exitReason": {
+                                "type": "string"
+                              },
+                              "leaveAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "performanceVisitId": {
+                                "type": "string"
+                              },
+                              "performance": {
+                                "anyOf": [
+                                  {},
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "visibilityState": {
                                 "type": "string"
                               },
                               "latitude": {
+                                "default": null,
                                 "anyOf": [
                                   {
                                     "type": "number"
@@ -61477,6 +62180,7 @@
                                 ]
                               },
                               "longitude": {
+                                "default": null,
                                 "anyOf": [
                                   {
                                     "type": "number"
@@ -61485,6 +62189,10 @@
                                     "type": "null"
                                   }
                                 ]
+                              },
+                              "eventName": {
+                                "description": "Present only for custom_event type",
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -61493,13 +62201,13 @@
                               "eventAt",
                               "visitId",
                               "sessionId",
+                              "visitorId",
                               "pathname",
                               "hash",
                               "title",
                               "hostname",
                               "referrerUrl",
                               "referrerHost",
-                              "visitorId",
                               "country",
                               "region",
                               "regionCode",
@@ -61515,7 +62223,8 @@
                               "latitude",
                               "longitude"
                             ],
-                            "additionalProperties": false
+                            "additionalProperties": false,
+                            "description": "Individual real-time event from a visitor"
                           }
                         }
                       },
@@ -61601,30 +62310,68 @@
                       {
                         "id": "example",
                         "eventType": "example",
-                        "eventAt": 0,
+                        "eventKind": "pageview",
+                        "eventAt": -9007199254740991,
+                        "siteId": "example",
+                        "traceId": "example",
+                        "receivedAt": -9007199254740991,
+                        "sequence": -9007199254740991,
+                        "eventId": "example",
+                        "eventData": "example",
                         "visitId": "example",
-                        "sessionId": "example",
-                        "pathname": "example",
-                        "hash": "example",
-                        "title": "example",
-                        "hostname": "example",
-                        "referrerUrl": "example",
-                        "referrerHost": "example",
+                        "sessionId": "",
+                        "startedAt": -9007199254740991,
+                        "previousVisitId": "example",
+                        "previousVisitStartedAt": -9007199254740991,
                         "visitorId": "example",
-                        "country": "example",
-                        "region": "example",
-                        "regionCode": "example",
-                        "city": "example",
-                        "continent": "example",
-                        "timezone": "example",
-                        "organization": "example",
-                        "browser": "example",
-                        "osVersion": "example",
-                        "deviceType": "example",
-                        "language": "example",
-                        "screenSize": "example",
-                        "latitude": 0,
-                        "longitude": 0
+                        "userId": "example",
+                        "userName": "example",
+                        "isEU": false,
+                        "pathname": "/",
+                        "queryString": "example",
+                        "hash": "",
+                        "title": "",
+                        "hostname": "",
+                        "referrerUrl": "",
+                        "referrerHost": "",
+                        "utmSource": "example",
+                        "utmMedium": "example",
+                        "utmCampaign": "example",
+                        "utmTerm": "example",
+                        "utmContent": "example",
+                        "country": "",
+                        "region": "",
+                        "regionCode": "",
+                        "city": "",
+                        "continent": "",
+                        "postalCode": "example",
+                        "metroCode": "example",
+                        "timezone": "",
+                        "organization": "",
+                        "uaRaw": "example",
+                        "browser": "",
+                        "browserVersion": "example",
+                        "os": "example",
+                        "osVersion": "",
+                        "deviceType": "",
+                        "language": "",
+                        "screenSize": "",
+                        "screenWidth": 0,
+                        "screenHeight": 0,
+                        "status": "example",
+                        "hiddenAt": -9007199254740991,
+                        "endedAt": -9007199254740991,
+                        "finalizedAt": -9007199254740991,
+                        "durationMs": 0,
+                        "durationSource": "example",
+                        "exitReason": "example",
+                        "leaveAt": -9007199254740991,
+                        "performanceVisitId": "example",
+                        "performance": "example",
+                        "visibilityState": "example",
+                        "latitude": null,
+                        "longitude": null,
+                        "eventName": "example"
                       }
                     ]
                   },
@@ -62518,10 +63265,14 @@
                                 "type": "string"
                               },
                               "startedAt": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "lastActivityAt": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "pathname": {
                                 "type": "string"
@@ -62540,6 +63291,40 @@
                               },
                               "referrerHost": {
                                 "type": "string"
+                              },
+                              "queryString": {
+                                "type": "string"
+                              },
+                              "utmSource": {
+                                "type": "string"
+                              },
+                              "utmMedium": {
+                                "type": "string"
+                              },
+                              "utmCampaign": {
+                                "type": "string"
+                              },
+                              "utmTerm": {
+                                "type": "string"
+                              },
+                              "utmContent": {
+                                "type": "string"
+                              },
+                              "userId": {
+                                "type": "string"
+                              },
+                              "userName": {
+                                "type": "string"
+                              },
+                              "isEU": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               },
                               "country": {
                                 "type": "string"
@@ -62562,6 +63347,15 @@
                               "organization": {
                                 "type": "string"
                               },
+                              "uaRaw": {
+                                "type": "string"
+                              },
+                              "browserVersion": {
+                                "type": "string"
+                              },
+                              "os": {
+                                "type": "string"
+                              },
                               "browser": {
                                 "type": "string"
                               },
@@ -62575,9 +63369,103 @@
                                 "type": "string"
                               },
                               "screenSize": {
+                                "default": "",
                                 "type": "string"
                               },
+                              "siteId": {
+                                "type": "string"
+                              },
+                              "postalCode": {
+                                "type": "string"
+                              },
+                              "metroCode": {
+                                "type": "string"
+                              },
+                              "screenWidth": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "screenHeight": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "hiddenAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "endedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "finalizedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "durationMs": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "durationSource": {
+                                "type": "string"
+                              },
+                              "exitReason": {
+                                "type": "string"
+                              },
+                              "performance": {
+                                "anyOf": [
+                                  {},
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
                               "latitude": {
+                                "default": null,
                                 "anyOf": [
                                   {
                                     "type": "number"
@@ -62588,6 +63476,7 @@
                                 ]
                               },
                               "longitude": {
+                                "default": null,
                                 "anyOf": [
                                   {
                                     "type": "number"
@@ -62625,7 +63514,8 @@
                               "latitude",
                               "longitude"
                             ],
-                            "additionalProperties": false
+                            "additionalProperties": false,
+                            "description": "Active real-time visit from a visitor"
                           }
                         }
                       },
@@ -62712,14 +63602,23 @@
                         "visitId": "example",
                         "visitorId": "example",
                         "sessionId": "example",
-                        "startedAt": 0,
-                        "lastActivityAt": 0,
+                        "startedAt": -9007199254740991,
+                        "lastActivityAt": -9007199254740991,
                         "pathname": "example",
                         "hash": "example",
                         "title": "example",
                         "hostname": "example",
                         "referrerUrl": "example",
                         "referrerHost": "example",
+                        "queryString": "example",
+                        "utmSource": "example",
+                        "utmMedium": "example",
+                        "utmCampaign": "example",
+                        "utmTerm": "example",
+                        "utmContent": "example",
+                        "userId": "example",
+                        "userName": "example",
+                        "isEU": false,
                         "country": "example",
                         "region": "example",
                         "regionCode": "example",
@@ -62727,13 +63626,29 @@
                         "continent": "example",
                         "timezone": "example",
                         "organization": "example",
+                        "uaRaw": "example",
+                        "browserVersion": "example",
+                        "os": "example",
                         "browser": "example",
                         "osVersion": "example",
                         "deviceType": "example",
                         "language": "example",
-                        "screenSize": "example",
-                        "latitude": 0,
-                        "longitude": 0
+                        "screenSize": "",
+                        "siteId": "example",
+                        "postalCode": "example",
+                        "metroCode": "example",
+                        "screenWidth": 0,
+                        "screenHeight": 0,
+                        "status": "example",
+                        "hiddenAt": -9007199254740991,
+                        "endedAt": -9007199254740991,
+                        "finalizedAt": -9007199254740991,
+                        "durationMs": 0,
+                        "durationSource": "example",
+                        "exitReason": "example",
+                        "performance": "example",
+                        "latitude": null,
+                        "longitude": null
                       }
                     ]
                   },

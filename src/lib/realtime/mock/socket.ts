@@ -4,7 +4,6 @@ import type { DemoVisitFact } from "@/lib/realtime/mock/types";
 import type {
   RealtimeEvent,
   RealtimeVisit,
-  RealtimeVisitorPoint,
 } from "@/lib/realtime/types";
 // ---------------------------------------------------------------------------
 //  Realtime mock socket
@@ -16,7 +15,6 @@ type RealtimeSocketMessage =
       data: {
         activeNow: number;
         events: RealtimeEvent[];
-        points: RealtimeVisitorPoint[];
         visits: RealtimeVisit[];
       };
     }
@@ -164,6 +162,38 @@ function demoRealtimeMetadata(
     performanceVisitId: `${visit.visitId}-perf`,
     performance,
     visibilityState: "visible",
+  };
+}
+
+function demoRealtimeVisitMetadata(
+  visit: DemoVisitFact,
+  activityAt: number,
+): Omit<
+  ReturnType<typeof demoRealtimeMetadata>,
+  "leaveAt" | "performanceVisitId" | "visibilityState"
+> {
+  const metadata = demoRealtimeMetadata(visit, activityAt, "active");
+  return {
+    queryString: metadata.queryString,
+    utmSource: metadata.utmSource,
+    utmMedium: metadata.utmMedium,
+    utmCampaign: metadata.utmCampaign,
+    utmTerm: metadata.utmTerm,
+    utmContent: metadata.utmContent,
+    userId: metadata.userId,
+    userName: metadata.userName,
+    isEU: metadata.isEU,
+    postalCode: metadata.postalCode,
+    metroCode: metadata.metroCode,
+    uaRaw: metadata.uaRaw,
+    os: metadata.os,
+    status: metadata.status,
+    endedAt: metadata.endedAt,
+    finalizedAt: metadata.finalizedAt,
+    durationMs: metadata.durationMs,
+    durationSource: metadata.durationSource,
+    exitReason: metadata.exitReason,
+    performance: metadata.performance,
   };
 }
 
@@ -423,7 +453,6 @@ class MockRealtimeSocket implements RealtimeSocketLike {
       data: {
         activeNow,
         events,
-        points: this.buildSnapshotPoints(),
         visits: this.buildSnapshotVisits(),
       },
     });
@@ -523,7 +552,7 @@ class MockRealtimeSocket implements RealtimeSocketLike {
     const [screenWidth, screenHeight] = visit.screenSize
       .split("x")
       .map((value) => Number(value));
-    const metadata = demoRealtimeMetadata(visit, activityAt, "active");
+    const metadata = demoRealtimeVisitMetadata(visit, activityAt);
     return {
       visitId: visit.visitId,
       visitorId: visit.visitorId,
@@ -556,30 +585,6 @@ class MockRealtimeSocket implements RealtimeSocketLike {
       latitude: Number.isFinite(visit.latitude) ? visit.latitude : null,
       longitude: Number.isFinite(visit.longitude) ? visit.longitude : null,
     };
-  }
-
-  private buildSnapshotPoints(): RealtimeVisitorPoint[] {
-    const points: RealtimeVisitorPoint[] = [];
-    for (const visit of Array.from(this.visitorsByVisitorId.values()).sort(
-      (a, b) => b.lastActivityAt - a.lastActivityAt,
-    )) {
-      if (
-        visit.latitude == null ||
-        visit.longitude == null ||
-        !Number.isFinite(visit.latitude) ||
-        !Number.isFinite(visit.longitude)
-      ) {
-        continue;
-      }
-      points.push({
-        visitorId: visit.visitorId,
-        eventAt: visit.lastActivityAt,
-        latitude: Number(visit.latitude),
-        longitude: Number(visit.longitude),
-        country: visit.country,
-      });
-    }
-    return points;
   }
 
   private buildSnapshotVisits(): RealtimeVisit[] {

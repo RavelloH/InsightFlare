@@ -503,9 +503,9 @@ export const analyticsOperationRegistry = [
     schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
     result: (
       _result: AnalyticsResult<{
-        activeVisitors: number;
+        activeNow: number;
         events: readonly unknown[];
-        sessions: readonly unknown[];
+        visits: readonly unknown[];
       }>,
     ) => undefined,
   }),
@@ -516,7 +516,7 @@ export const analyticsOperationRegistry = [
     cache: "bypass",
     operationRevision: "1",
     schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
-    result: (_result: AnalyticsResult<{ activeVisitors: number }>) => undefined,
+    result: (_result: AnalyticsResult<{ activeNow: number }>) => undefined,
   }),
   operation({
     id: "site.analytics.realtimeEvents",

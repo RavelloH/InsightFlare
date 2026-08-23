@@ -241,14 +241,14 @@ export type SiteSessionEventsReader = SiteListReader<
 export type SiteRealtimeSnapshotReader = SiteListReader<
   SiteRealtimeSnapshotQueryDto,
   {
-    readonly activeVisitors: number;
+    readonly activeNow: number;
     readonly events: readonly unknown[];
-    readonly sessions: readonly unknown[];
+    readonly visits: readonly unknown[];
   }
 >;
 export type SiteRealtimeActiveVisitorsReader = SiteListReader<
   SiteRealtimeActiveVisitorsQueryDto,
-  { readonly activeVisitors: number }
+  { readonly activeNow: number }
 >;
 export type SiteRealtimeEventsReader = SiteListReader<
   SiteRealtimeEventsQueryDto,

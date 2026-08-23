@@ -6,6 +6,12 @@ import {
   SavedFilterPageSchema,
 } from "@/lib/api-v1/application-registry";
 import { TypedBatchItemSchema } from "@/lib/api-v1/dto/batch";
+import {
+  ActiveVisitorsSchema,
+  RealtimeEventSchema,
+  RealtimeSnapshotDataSchema,
+  RealtimeVisitSchema,
+} from "@/schemas/realtime";
 
 export const ApiV1ResponseMetaSchema = z
   .object({ requestId: z.string().min(1) })
@@ -1190,72 +1196,7 @@ export const AnalyticsJourneySessionsResponseSchema =
     ApiV1AnalyticsResponseMetaSchema,
   );
 
-const AnalyticsRealtimeEventSchema = z
-  .object({
-    id: z.string(),
-    eventType: z.string(),
-    eventAt: z.number(),
-    visitId: z.string(),
-    sessionId: z.string(),
-    pathname: z.string(),
-    hash: z.string(),
-    title: z.string(),
-    hostname: z.string(),
-    referrerUrl: z.string(),
-    referrerHost: z.string(),
-    visitorId: z.string(),
-    country: z.string(),
-    region: z.string(),
-    regionCode: z.string(),
-    city: z.string(),
-    continent: z.string(),
-    timezone: z.string(),
-    organization: z.string(),
-    browser: z.string(),
-    osVersion: z.string(),
-    deviceType: z.string(),
-    language: z.string(),
-    screenSize: z.string(),
-    latitude: z.number().nullable(),
-    longitude: z.number().nullable(),
-  })
-  .strict();
-const AnalyticsRealtimeSessionSchema = z
-  .object({
-    visitId: z.string(),
-    visitorId: z.string(),
-    sessionId: z.string(),
-    startedAt: z.number(),
-    lastActivityAt: z.number(),
-    pathname: z.string(),
-    hash: z.string(),
-    title: z.string(),
-    hostname: z.string(),
-    referrerUrl: z.string(),
-    referrerHost: z.string(),
-    country: z.string(),
-    region: z.string(),
-    regionCode: z.string(),
-    city: z.string(),
-    continent: z.string(),
-    timezone: z.string(),
-    organization: z.string(),
-    browser: z.string(),
-    osVersion: z.string(),
-    deviceType: z.string(),
-    language: z.string(),
-    screenSize: z.string(),
-    latitude: z.number().nullable(),
-    longitude: z.number().nullable(),
-  })
-  .strict();
-export const AnalyticsRealtimeSnapshotDataSchema = z
-  .object({
-    activeVisitors: z.number().int().nonnegative(),
-    events: z.array(AnalyticsRealtimeEventSchema),
-    sessions: z.array(AnalyticsRealtimeSessionSchema),
-  })
-  .strict();
+export const AnalyticsRealtimeSnapshotDataSchema = RealtimeSnapshotDataSchema;
 export type AnalyticsRealtimeSnapshotData = z.infer<
   typeof AnalyticsRealtimeSnapshotDataSchema
 >;
@@ -1264,9 +1205,7 @@ export const AnalyticsRealtimeSnapshotResponseSchema =
     AnalyticsRealtimeSnapshotDataSchema,
     ApiV1AnalyticsResponseMetaSchema,
   );
-export const AnalyticsRealtimeActiveVisitorsDataSchema = z
-  .object({ activeVisitors: z.number().int().nonnegative() })
-  .strict();
+export const AnalyticsRealtimeActiveVisitorsDataSchema = ActiveVisitorsSchema;
 export type AnalyticsRealtimeActiveVisitorsData = z.infer<
   typeof AnalyticsRealtimeActiveVisitorsDataSchema
 >;
@@ -1276,7 +1215,7 @@ export const AnalyticsRealtimeActiveVisitorsResponseSchema =
     ApiV1AnalyticsResponseMetaSchema,
   );
 export const AnalyticsRealtimeEventsDataSchema = z
-  .object({ items: z.array(AnalyticsRealtimeEventSchema) })
+  .object({ items: z.array(RealtimeEventSchema) })
   .strict();
 export type AnalyticsRealtimeEventsData = z.infer<
   typeof AnalyticsRealtimeEventsDataSchema
@@ -1286,7 +1225,7 @@ export const AnalyticsRealtimeEventsResponseSchema = apiV1SuccessEnvelopeSchema(
   ApiV1AnalyticsResponseMetaSchema,
 );
 export const AnalyticsRealtimeSessionsDataSchema = z
-  .object({ items: z.array(AnalyticsRealtimeSessionSchema) })
+  .object({ items: z.array(RealtimeVisitSchema) })
   .strict();
 export type AnalyticsRealtimeSessionsData = z.infer<
   typeof AnalyticsRealtimeSessionsDataSchema

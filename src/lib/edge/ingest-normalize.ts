@@ -297,7 +297,7 @@ export function toRealtimePayload(
     userName: record.userName ?? "",
     isEU:
       record.isEU === undefined || record.isEU === null
-        ? undefined
+        ? null
         : Boolean(record.isEU),
     country: record.country,
     region: record.region,
@@ -317,6 +317,9 @@ export function toRealtimePayload(
     screenWidth: record.screenWidth ?? null,
     screenHeight: record.screenHeight ?? null,
     language: record.language,
+    screenSize:
+      record.screenSize ??
+      toRealtimeScreenSize(record.screenWidth, record.screenHeight),
     status: record.status ?? "",
     hiddenAt: record.hiddenAt ?? null,
     endedAt: record.endedAt ?? null,
@@ -371,7 +374,7 @@ export function toRealtimeVisitPayload(
     utmContent: visit.utmContent ?? "",
     isEU:
       visit.isEU === undefined || visit.isEU === null
-        ? undefined
+        ? null
         : Boolean(visit.isEU),
     postalCode: visit.postalCode ?? "",
     metroCode: visit.metroCode ?? "",
@@ -380,6 +383,7 @@ export function toRealtimeVisitPayload(
     userName: visit.userName ?? "",
     screenWidth: visit.screenWidth,
     screenHeight: visit.screenHeight,
+    screenSize: toRealtimeScreenSize(visit.screenWidth, visit.screenHeight),
     hiddenAt: visit.hiddenAt ?? null,
     endedAt: visit.endedAt ?? null,
     finalizedAt: visit.finalizedAt ?? null,

@@ -5,7 +5,6 @@ import type { DemoFactDataset, DemoVisitFact } from "@/lib/realtime/mock/types";
 import type {
   RealtimeEvent,
   RealtimeVisit,
-  RealtimeVisitorPoint,
 } from "@/lib/realtime/types";
 
 const { buildDemoFactDatasetMock } = vi.hoisted(() => ({
@@ -24,7 +23,6 @@ type SnapshotMessage = {
   data: {
     activeNow: number;
     events: RealtimeEvent[];
-    points: RealtimeVisitorPoint[];
     visits: RealtimeVisit[];
   };
 };
@@ -103,7 +101,7 @@ describe("mock/socket", () => {
     socket.close();
   });
 
-  it("serializes profile host fallback and omits invalid visitor points", async () => {
+  it("serializes profile host fallback without derived point fields", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(BASE_TIME);
     vi.spyOn(Math, "random")
@@ -136,7 +134,7 @@ describe("mock/socket", () => {
       (message): message is SnapshotMessage => message.type === "snapshot",
     );
     expect(snapshot?.data.activeNow).toBe(1);
-    expect(snapshot?.data.points).toEqual([]);
+    expect(snapshot?.data).not.toHaveProperty("points");
     expect(snapshot?.data.events[0]).toEqual(
       expect.objectContaining({
         hostname: expect.any(String),
@@ -203,7 +201,7 @@ describe("mock/socket", () => {
     expect(repeatVisit?.startedAt).toBeLessThan(
       repeatVisit?.lastActivityAt ?? 0,
     );
-    expect(snapshots[1].data.points).toHaveLength(11);
+    expect(snapshots[1].data).not.toHaveProperty("points");
 
     socket.close();
   });

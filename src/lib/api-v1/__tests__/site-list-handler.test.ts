@@ -780,14 +780,14 @@ describe("planned site list analytics adapters", () => {
 
   it("serves realtime adapters with realtime source metadata", async () => {
     const snapshot = vi.fn<SiteRealtimeSnapshotReader>().mockResolvedValue({
-      activeVisitors: 0,
+      activeNow: 0,
       events: [],
-      sessions: [],
+      visits: [],
     });
     const activeVisitors = vi
       .fn<SiteRealtimeActiveVisitorsReader>()
       .mockResolvedValue({
-        activeVisitors: 2,
+        activeNow: 2,
       });
     const events = vi
       .fn<SiteRealtimeEventsReader>()

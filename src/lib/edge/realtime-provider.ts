@@ -1,23 +1,33 @@
 import "@tanstack/react-start/server-only";
 
 import type { Env } from "@/lib/edge/types";
+import {
+  RealtimeEventSchema,
+  RealtimeVisitSchema,
+  type RealtimeEvent,
+  type RealtimeVisit,
+} from "@/schemas/realtime";
 
 export interface RealtimeSnapshot {
-  readonly activeVisitors: number;
-  readonly events: readonly Record<string, unknown>[];
-  readonly sessions: readonly Record<string, unknown>[];
+  readonly activeNow: number;
+  readonly events: readonly RealtimeEvent[];
+  readonly visits: readonly RealtimeVisit[];
 }
 
-function asRecords(value: unknown): readonly Record<string, unknown>[] {
-  if (
-    !Array.isArray(value) ||
-    value.some(
-      (item) => !item || typeof item !== "object" || Array.isArray(item),
-    )
-  ) {
+function parseEvents(value: unknown): readonly RealtimeEvent[] {
+  const result = RealtimeEventSchema.array().safeParse(value);
+  if (!result.success) {
     throw new Error("data-unavailable");
   }
-  return value as readonly Record<string, unknown>[];
+  return result.data;
+}
+
+function parseVisits(value: unknown): readonly RealtimeVisit[] {
+  const result = RealtimeVisitSchema.array().safeParse(value);
+  if (!result.success) {
+    throw new Error("data-unavailable");
+  }
+  return result.data;
 }
 
 /** Encapsulates the ingest Durable Object transport for typed realtime readers. */
@@ -50,25 +60,26 @@ export class RealtimeProvider {
       if (!response.ok) throw new Error("data-unavailable");
       const value = (await response.json()) as {
         activeNow?: unknown;
-        data?: unknown;
+        events?: unknown;
+        visits?: unknown;
       };
-      const activeVisitors =
+      const activeNow =
         typeof value.activeNow === "number" &&
         Number.isSafeInteger(value.activeNow) &&
         value.activeNow >= 0
           ? value.activeNow
           : 0;
       return {
-        activeVisitors,
-        events: asRecords(value.data ?? []),
-        sessions: [],
+        activeNow,
+        events: parseEvents(value.events ?? []),
+        visits: parseVisits(value.visits ?? []),
       };
     } catch {
       throw new Error("data-unavailable");
     }
   }
 
-  async activeVisitors(input: {
+  async activeNow(input: {
     readonly siteId: string;
     readonly signal?: AbortSignal;
   }): Promise<number> {

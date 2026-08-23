@@ -630,7 +630,7 @@ function formatOptionalDetailDateTime(
 }
 
 function formatDetailBoolean(
-  value: boolean | undefined,
+  value: boolean | null | undefined,
   unknownLabel: string,
   trueLabel: string,
   falseLabel: string,

@@ -27,6 +27,7 @@ import { jsonResponse, type RealtimeSnapshotRecord } from "./ingest-normalize";
 import {
   pushInitialRealtimeSnapshot,
   pushRealtimeRecordToSockets,
+  readActiveRealtimeVisits,
   readRecentRealtimeEvents,
   snapshotQueryParams,
 } from "./ingest-realtime";
@@ -328,11 +329,9 @@ export class IngestDurableObject extends DurableObject {
         )?.count ?? 0,
     );
 
-    return jsonResponse({
-      ok: true,
-      buffered: 0,
-      activeNow,
-      data: await logger.measure("do.snapshot.realtime_events", async () =>
+    const events = await logger.measure(
+      "do.snapshot.realtime_events",
+      async () =>
         readRecentRealtimeEvents(
           {
             sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
@@ -342,7 +341,22 @@ export class IngestDurableObject extends DurableObject {
           toMs,
           limit,
         ),
-      ),
+    );
+    const visits = await logger.measure(
+      "do.snapshot.realtime_visits",
+      async () =>
+        readActiveRealtimeVisits({
+          sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
+            this.measuredSqlAll<T>(logger, query, ...bindings),
+        }, cutoffMs),
+    );
+
+    return jsonResponse({
+      ok: true,
+      buffered: 0,
+      activeNow,
+      events,
+      visits,
     });
   }
 

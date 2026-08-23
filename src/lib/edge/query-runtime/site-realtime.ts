@@ -29,7 +29,7 @@ export function readSiteRealtimeSnapshot(
 
 export async function readSiteRealtimeActiveVisitors(input: RealtimeInput) {
   return {
-    activeVisitors: await new RealtimeProvider(input.env).activeVisitors(input),
+    activeNow: await new RealtimeProvider(input.env).activeNow(input),
   };
 }
 
@@ -42,5 +42,5 @@ export async function readSiteRealtimeEvents(
 export async function readSiteRealtimeSessions(
   input: RealtimeInput & { readonly limit: number },
 ) {
-  return { items: (await snapshot(input)).sessions };
+  return { items: (await snapshot(input)).visits };
 }

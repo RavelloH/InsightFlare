@@ -66,14 +66,22 @@ describe("RealtimeEventSchema", () => {
 describe("RealtimeSnapshotDataSchema", () => {
   it("accepts valid snapshot", () => {
     expect(
-      RealtimeSnapshotDataSchema.safeParse({ activeNow: 5, events: [] })
+      RealtimeSnapshotDataSchema.safeParse({
+        activeNow: 5,
+        events: [],
+        visits: [],
+      })
         .success,
     ).toBe(true);
   });
 
   it("rejects non-integer activeNow", () => {
     expect(
-      RealtimeSnapshotDataSchema.safeParse({ activeNow: 1.5, events: [] })
+      RealtimeSnapshotDataSchema.safeParse({
+        activeNow: 1.5,
+        events: [],
+        visits: [],
+      })
         .success,
     ).toBe(false);
   });
@@ -92,7 +100,7 @@ describe("RealtimeSnapshotResponseSchema", () => {
         ok: true,
         requestId: "r",
         timestamp: "t",
-        data: { activeNow: 3, events: [] },
+        data: { activeNow: 3, events: [], visits: [] },
       }).success,
     ).toBe(true);
   });
