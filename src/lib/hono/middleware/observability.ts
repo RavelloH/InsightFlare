@@ -3,6 +3,7 @@ import type { MiddlewareHandler } from "hono";
 import { instrumentEnv } from "@/lib/edge/observability-bindings";
 import {
   createInvocationLogger,
+  errorLogData,
   type InvocationCacheState,
   type InvocationDataSource,
   runWithInvocationLogger,
@@ -61,7 +62,7 @@ export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
         logger.measure("route.handler", () => next()),
       );
     } catch (error) {
-      logger.error("request.unhandled_error");
+      logger.error("request.unhandled_error", errorLogData(error));
       throw error;
     } finally {
       const response = c.res;

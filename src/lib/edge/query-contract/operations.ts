@@ -76,18 +76,14 @@ export async function executeQueryOperation<T>(
   const filterError = validateQueryFilters(input.context, filters);
   if (filterError) return { ok: false, error: filterError };
 
-  try {
-    const result = await reader();
-    return {
-      ok: true,
-      data: result.value,
-      meta: {
-        time: input.time,
-        source: result.source ?? "raw",
-        approximateVisitors: Boolean(result.approximateVisitors),
-      },
-    };
-  } catch {
-    return { ok: false, error: { kind: "internal", operation } };
-  }
+  const result = await reader();
+  return {
+    ok: true,
+    data: result.value,
+    meta: {
+      time: input.time,
+      source: result.source ?? "raw",
+      approximateVisitors: Boolean(result.approximateVisitors),
+    },
+  };
 }

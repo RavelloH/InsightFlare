@@ -288,10 +288,7 @@ describe("query contract time helpers", () => {
       executeQueryOperation("event-records", { context, time }, async () => {
         throw new Error("D1 unavailable");
       }),
-    ).resolves.toMatchObject({
-      ok: false,
-      error: { kind: "internal", operation: "event-records" },
-    });
+    ).rejects.toThrow("D1 unavailable");
   });
 
   it("combines overview sources and embeds typed trend detail", async () => {

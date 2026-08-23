@@ -46,6 +46,7 @@ import { instrumentEnv } from "./observability-bindings";
 import {
   createInvocationLogger,
   currentInvocationLogger,
+  errorLogData,
   type InvocationLogger,
   runWithInvocationLogger,
 } from "./observability-logger";
@@ -99,7 +100,7 @@ export class IngestDurableObject extends DurableObject {
         return response;
       });
     } catch (error) {
-      logger.error("do.request.unhandled_error");
+      logger.error("do.request.unhandled_error", errorLogData(error));
       logger.setRequest({
         route: url.pathname,
         method: request.method,
@@ -446,7 +447,7 @@ export class IngestDurableObject extends DurableObject {
       span.end({ rowCount: rows.length });
       return rows;
     } catch (error) {
-      span.fail({ errorName: error instanceof Error ? error.name : "Error" });
+      span.fail(errorLogData(error));
       throw error;
     }
   }
@@ -479,7 +480,7 @@ export class IngestDurableObject extends DurableObject {
       span.end({ rowsWritten });
       return rowsWritten;
     } catch (error) {
-      span.fail({ errorName: error instanceof Error ? error.name : "Error" });
+      span.fail(errorLogData(error));
       throw error;
     }
   }

@@ -6,6 +6,7 @@ import {
   createInvocationLogger,
   currentD1Operation,
   currentInvocationLogger,
+  errorLogData,
   MAX_INVOCATION_LOG_EVENTS,
   measureCurrentExternalFetch,
   runWithD1Operation,
@@ -305,7 +306,91 @@ describe("edge observability logger", () => {
       logs: expect.arrayContaining([
         expect.objectContaining({
           message: "external_fetch.failing.failed",
-          data: expect.objectContaining({ errorName: "TypeError" }),
+          data: expect.objectContaining({
+            errorName: "TypeError",
+            errorMessage: "network unavailable",
+          }),
+        }),
+      ]),
+    });
+  });
+
+  it("preserves error details while bounding oversized error fields", () => {
+    const error = Object.assign(new Error("D1 statement failed"), {
+      code: 7_500,
+      cause: new TypeError("too many terms in compound SELECT"),
+    });
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+
+    logger.error("query.failed", errorLogData(error));
+    logger.error("query.long_error", {
+      errorMessage: "x".repeat(5_000),
+    });
+
+    const logs = logger.build().logs;
+    expect(logs[0]).toMatchObject({
+      data: {
+        errorName: "Error",
+        errorMessage: "D1 statement failed",
+        errorCode: "7500",
+        errorCause: "too many terms in compound SELECT",
+      },
+    });
+    expect(String(logs[1]?.data?.errorMessage)).toHaveLength(4_096);
+    expect(String(logs[1]?.data?.errorMessage).endsWith("...[truncated]")).toBe(
+      true,
+    );
+  });
+
+  it("records D1 failure messages alongside operation metadata", async () => {
+    const statement = {
+      bind: vi.fn(),
+      all: vi
+        .fn()
+        .mockRejectedValue(new Error("too many terms in compound SELECT")),
+      first: vi.fn(),
+      run: vi.fn(),
+      raw: vi.fn(),
+    };
+    statement.bind.mockImplementation(() => statement);
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const instrumented = instrumentEnv(
+      {
+        DB: {
+          prepare: () => statement as D1PreparedStatement,
+          batch: vi.fn(),
+          exec: vi.fn(),
+          withSession: vi.fn(),
+          dump: vi.fn(),
+        },
+        INGEST_DO: {} as DurableObjectNamespace,
+      },
+      logger,
+    );
+
+    await expect(
+      instrumented.DB.prepare("WITH source AS (SELECT 1)").bind().all(),
+    ).rejects.toThrow("too many terms in compound SELECT");
+
+    expect(logger.build()).toMatchObject({
+      performance: { d1Statements: 1, failedStatements: 1 },
+      logs: expect.arrayContaining([
+        expect.objectContaining({
+          message: "d1.all.started",
+          data: expect.objectContaining({ statementKind: "with" }),
+        }),
+        expect.objectContaining({
+          message: "d1.all.failed",
+          data: expect.objectContaining({
+            errorName: "Error",
+            errorMessage: "too many terms in compound SELECT",
+          }),
         }),
       ]),
     });

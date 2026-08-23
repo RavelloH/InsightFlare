@@ -2,6 +2,7 @@ import type {
   InvocationLogData,
   InvocationLogger,
 } from "./observability-logger";
+import { errorLogData } from "./observability-logger";
 import type { Env } from "./types";
 
 const INSTRUMENTED_ENV = Symbol("insightflare.instrumented-env");
@@ -28,10 +29,6 @@ function statementKind(sql: string): string {
     .match(/^([a-z]+)/i)?.[1]
     ?.toLowerCase();
   return keyword || "other";
-}
-
-function errorData(error: unknown): InvocationLogData {
-  return { errorName: error instanceof Error ? error.name : "Error" };
 }
 
 function recordD1Result(logger: InvocationLogger, result: unknown): void {
@@ -84,7 +81,7 @@ async function measureD1<T>(
     return result;
   } catch (error) {
     logger.increment("failedStatements", statementCount);
-    span.fail({ statementCount, ...errorData(error) });
+    span.fail({ statementCount, ...errorLogData(error) });
     throw error;
   }
 }
@@ -194,12 +191,12 @@ function wrapAsyncBinding<T extends object>(
               return resolved;
             },
             (error) => {
-              span.fail(errorData(error));
+              span.fail(errorLogData(error));
               throw error;
             },
           );
         } catch (error) {
-          span.fail(errorData(error));
+          span.fail(errorLogData(error));
           throw error;
         }
       };
@@ -236,7 +233,7 @@ function wrapDurableObjectNamespace(
                   return response;
                 },
                 (error: unknown) => {
-                  span.fail(errorData(error));
+                  span.fail(errorLogData(error));
                   throw error;
                 },
               );
@@ -296,7 +293,7 @@ export async function measureExternalFetch(
     return response;
   } catch (error) {
     logger.increment("failedExternalFetches");
-    span.fail(errorData(error));
+    span.fail(errorLogData(error));
     throw error;
   }
 }

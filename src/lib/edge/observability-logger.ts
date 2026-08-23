@@ -4,6 +4,8 @@ export const OBSERVABILITY_LOG_VERSION = 1 as const;
 // One record is emitted for each invocation. Keep this comfortably below the
 // Workers log-size limit while preserving the start/end pair for real work.
 export const MAX_INVOCATION_LOG_EVENTS = 512;
+const MAX_LOG_VALUE_LENGTH = 160;
+const MAX_ERROR_LOG_VALUE_LENGTH = 4_096;
 
 export type InvocationSource = "worker" | "do";
 export type InvocationTrigger = "request" | "alarm";
@@ -73,6 +75,46 @@ export type InvocationPerformanceCounter =
 
 export type InvocationLogValue = string | number | boolean | null;
 export type InvocationLogData = Record<string, InvocationLogValue>;
+
+function errorMessage(value: unknown): string {
+  if (value instanceof Error) {
+    return value.message || value.name || "Error";
+  }
+  if (typeof value === "string") return value || "Error";
+  try {
+    return JSON.stringify(value) || String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * Preserve actionable error details in invocation logs without attaching
+ * query text or request payloads at call sites.
+ */
+export function errorLogData(error: unknown): InvocationLogData {
+  if (!(error instanceof Error)) {
+    return {
+      errorName: "NonError",
+      errorMessage: errorMessage(error),
+    };
+  }
+
+  const data: InvocationLogData = {
+    errorName: error.name || "Error",
+    errorMessage: errorMessage(error),
+  };
+  if (error.stack) data.errorStack = error.stack;
+
+  const details = error as Error & { cause?: unknown; code?: unknown };
+  if (details.cause !== undefined) {
+    data.errorCause = errorMessage(details.cause);
+  }
+  if (typeof details.code === "string" || typeof details.code === "number") {
+    data.errorCode = String(details.code);
+  }
+  return data;
+}
 
 export interface InvocationOperationSummary {
   count: number;
@@ -220,7 +262,7 @@ export async function measureCurrentExternalFetch(
     return response;
   } catch (error) {
     logger.increment("failedExternalFetches");
-    span.fail({ errorName: error instanceof Error ? error.name : "Error" });
+    span.fail(errorLogData(error));
     throw error;
   }
 }
@@ -244,19 +286,25 @@ export function createInvocationLogger(
     data: InvocationLogData | undefined,
   ): InvocationLogData | undefined {
     if (!data) return undefined;
-    const entries = Object.entries(data)
-      .filter(([key, value]) => {
-        return (
-          key.length > 0 &&
-          key.length <= 64 &&
-          (typeof value === "number"
-            ? Number.isFinite(value)
-            : typeof value === "string"
-              ? value.length <= 160
-              : true)
-        );
-      })
-      .slice(0, 12);
+    const entries: Array<[string, InvocationLogValue]> = [];
+    for (const [key, value] of Object.entries(data)) {
+      if (entries.length >= 12) break;
+      if (key.length === 0 || key.length > 64) continue;
+      if (typeof value === "number" && !Number.isFinite(value)) continue;
+      if (typeof value !== "string") {
+        entries.push([key, value]);
+        continue;
+      }
+      const maxLength = key.startsWith("error")
+        ? MAX_ERROR_LOG_VALUE_LENGTH
+        : MAX_LOG_VALUE_LENGTH;
+      entries.push([
+        key,
+        value.length > maxLength
+          ? `${value.slice(0, maxLength - 14)}...[truncated]`
+          : value,
+      ]);
+    }
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;
   }
 
@@ -365,7 +413,7 @@ export function createInvocationLogger(
         span.end();
         return result;
       } catch (error) {
-        span.fail({ errorName: error instanceof Error ? error.name : "Error" });
+        span.fail(errorLogData(error));
         throw error;
       }
     },

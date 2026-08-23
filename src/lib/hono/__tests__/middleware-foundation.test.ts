@@ -214,8 +214,10 @@ describe("Hono middleware foundation", () => {
 
   it("maps Error instances through the error boundary middleware", async () => {
     const middleware = errorBoundaryMiddleware();
+    const logger = { error: vi.fn() };
     const c = {
       req: { raw: request("/api/private/overview") },
+      get: vi.fn(() => logger),
     } as never;
 
     const response = (await middleware(c, async () => {
@@ -226,6 +228,13 @@ describe("Hono middleware foundation", () => {
 
     expect(response.status).toBe(500);
     expect(body.error.message).toBe("middleware boom");
+    expect(logger.error).toHaveBeenCalledWith(
+      "request.unhandled_error",
+      expect.objectContaining({
+        errorName: "Error",
+        errorMessage: "middleware boom",
+      }),
+    );
   });
 
   it("short-circuits unsafe cross-origin requests", async () => {

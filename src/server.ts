@@ -6,6 +6,7 @@ import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/inges
 import { instrumentEnv } from "@/lib/edge/observability-bindings";
 import {
   createInvocationLogger,
+  errorLogData,
   runWithInvocationLogger,
 } from "@/lib/edge/observability-logger";
 import { getScheduledTaskDefinition } from "@/lib/edge/scheduled-task-registry";
@@ -173,7 +174,7 @@ export default {
         return result;
       });
     } catch (error) {
-      logger.error("request.unhandled_error");
+      logger.error("request.unhandled_error", errorLogData(error));
       logger.setRequest({
         route: pageRouteForLog(pathname),
         method: request.method,
