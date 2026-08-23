@@ -8,6 +8,7 @@ import { BrowserShareOverview } from "@/components/dashboard/browser-share-overv
 import { BrowserShareTrendCard } from "@/components/dashboard/browser-share-trend-card";
 import { BrowserVersionBreakdownGrid } from "@/components/dashboard/browser-version-breakdown-grid";
 import { CanIUseCompatCard } from "@/components/dashboard/caniuse-compat-card";
+import { EVENT_TREND_MAX_SERIES } from "@/components/dashboard/charts/event-trend-bar-chart";
 import {
   DashboardQueryProvider,
   useDashboardQuery,
@@ -460,7 +461,10 @@ function EventsEmbedBlock({
     queryFn: async ({ signal }) => {
       const [summary, trend] = await Promise.all([
         fetchEventsSummary(siteId, timeWindow, filters, { signal }),
-        fetchEventsTrend(siteId, timeWindow, filters, { limit: 8, signal }),
+        fetchEventsTrend(siteId, timeWindow, filters, {
+          limit: EVENT_TREND_MAX_SERIES,
+          signal,
+        }),
       ]);
       return { summary, trend };
     },
@@ -492,6 +496,7 @@ function EventsEmbedBlock({
         window={timeWindow}
         title={labels.trendTitle}
         loading={loading}
+        cumulativeLabel={messages.common.cumulativeEvents}
       />
     );
   }

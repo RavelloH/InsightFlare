@@ -17,7 +17,7 @@ export const RealtimeEventSchema = z
     id: z.string(),
     eventType: z.string(),
     eventKind: RealtimeEventKindSchema.optional(),
-    eventAt: z.number().int().describe("Event timestamp (Unix ms)"),
+    eventAt: z.number().int().describe("Event timestamp in milliseconds"),
     siteId: z.string().optional(),
     traceId: z.string().optional(),
     receivedAt: z.number().int().nullable().optional(),

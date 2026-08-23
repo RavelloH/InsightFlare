@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { EVENT_TREND_MAX_SERIES } from "@/components/dashboard/charts/event-trend-bar-chart";
 import {
   DETAIL_QUERY_PARAM,
   DetailModal,
@@ -264,7 +265,10 @@ export function EventsClientPage({
     queryFn: async ({ signal }) => {
       const [summary, trend] = await Promise.all([
         fetchEventsSummary(siteId, timeWindow, filters, { signal }),
-        fetchEventsTrend(siteId, timeWindow, filters, { limit: 8, signal }),
+        fetchEventsTrend(siteId, timeWindow, filters, {
+          limit: EVENT_TREND_MAX_SERIES,
+          signal,
+        }),
       ]);
       return { summary, trend };
     },
@@ -334,6 +338,7 @@ export function EventsClientPage({
         window={timeWindow}
         title={labels.trendTitle}
         loading={loading}
+        cumulativeLabel={messages.common.cumulativeEvents}
         onSelectEvent={openEventType}
       />
 

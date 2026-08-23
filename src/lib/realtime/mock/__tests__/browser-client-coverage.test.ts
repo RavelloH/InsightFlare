@@ -523,9 +523,21 @@ describe("browser-client mock coverage", () => {
       }),
     ]);
 
-    expect(generateDemoReferrerRadar(SITE_ID, {})).toEqual({
+    expect(generateDemoReferrerRadar(SITE_ID, {})).toMatchObject({
       ok: true,
-      data: [],
+      data: [
+        expect.objectContaining({
+          referrer: "",
+          metrics: expect.objectContaining({
+            duration: 1000,
+            engagement: 0,
+            depth: 1,
+            loyalty: 0,
+            frequency: 0.75,
+            traffic: 1,
+          }),
+        }),
+      ],
     });
   });
 

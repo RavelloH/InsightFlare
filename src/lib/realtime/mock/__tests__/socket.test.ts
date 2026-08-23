@@ -2,10 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createMockRealtimeSocket } from "@/lib/realtime/mock/socket";
 import type { DemoFactDataset, DemoVisitFact } from "@/lib/realtime/mock/types";
-import type {
-  RealtimeEvent,
-  RealtimeVisit,
-} from "@/lib/realtime/types";
+import type { RealtimeEvent, RealtimeVisit } from "@/lib/realtime/types";
 
 const { buildDemoFactDatasetMock } = vi.hoisted(() => ({
   buildDemoFactDatasetMock: vi.fn(),

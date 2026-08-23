@@ -2,10 +2,10 @@ import "@tanstack/react-start/server-only";
 
 import type { Env } from "@/lib/edge/types";
 import {
-  RealtimeEventSchema,
-  RealtimeVisitSchema,
   type RealtimeEvent,
+  RealtimeEventSchema,
   type RealtimeVisit,
+  RealtimeVisitSchema,
 } from "@/schemas/realtime";
 
 export interface RealtimeSnapshot {

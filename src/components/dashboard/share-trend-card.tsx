@@ -1,30 +1,22 @@
 import { type ComponentType, type ReactNode, useMemo } from "react";
 import { RiLineChartLine } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
+import {
+  ShareTrendAreaChart,
+  type ShareTrendAreaPoint,
+  type ShareTrendAreaSeries,
+} from "@/components/dashboard/charts/share-trend-area-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
-import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@/components/ui/chart";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
-import {
-  intlLocale,
-  numberFormat,
-  percentFormat,
-} from "@/lib/dashboard/format";
 import type {
   DashboardInterval,
   TimeWindow,
 } from "@/lib/dashboard/query-state";
+import {
+  addZonedInterval,
+  startOfZonedInterval,
+} from "@/lib/dashboard/time-zone";
 import type { BrowserTrendData, BrowserTrendSeries } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
@@ -76,64 +68,66 @@ function emptyTrendData(interval: DashboardInterval): BrowserTrendData {
   };
 }
 
+const MAX_SHARE_TREND_PLACEHOLDER_POINTS = 120;
+
+function shareTrendStepMs(interval: DashboardInterval): number {
+  if (interval === "minute") return 60 * 1000;
+  if (interval === "hour") return 60 * 60 * 1000;
+  if (interval === "day") return 24 * 60 * 60 * 1000;
+  if (interval === "week") return 7 * 24 * 60 * 60 * 1000;
+  return 30 * 24 * 60 * 60 * 1000;
+}
+
+function buildEmptyShareTrendPoints(
+  window: Pick<TimeWindow, "from" | "to" | "interval" | "timeZone">,
+): ShareTrendAreaPoint[] {
+  const timestamps: number[] = [];
+  const end = startOfZonedInterval(window.to, window.interval, window.timeZone);
+  let current = startOfZonedInterval(
+    window.from,
+    window.interval,
+    window.timeZone,
+  );
+
+  for (let index = 0; index < 2000 && current <= end; index += 1) {
+    timestamps.push(current);
+    let next = addZonedInterval(current, window.interval, window.timeZone);
+    if (!Number.isFinite(next) || next <= current) {
+      next = current + shareTrendStepMs(window.interval);
+    }
+    current = next;
+  }
+
+  const stride = Math.max(
+    1,
+    Math.ceil(timestamps.length / MAX_SHARE_TREND_PLACEHOLDER_POINTS),
+  );
+  const points = timestamps
+    .filter((_, index) => index % stride === 0)
+    .map((timestampMs) => ({
+      timestampMs,
+      totalVisitors: 0,
+      values: {},
+    }));
+  const lastTimestampMs = timestamps[timestamps.length - 1] ?? 0;
+
+  if (
+    points.length === 0 ||
+    points[points.length - 1]?.timestampMs !== lastTimestampMs
+  ) {
+    points.push({
+      timestampMs: lastTimestampMs,
+      totalVisitors: 0,
+      values: {},
+    });
+  }
+
+  return points;
+}
+
 function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
   if (error instanceof Error && error.name === "AbortError") throw error;
   return fallback();
-}
-
-function tickDateFormat(
-  localeCode: string,
-  interval: DashboardInterval,
-  timeZone: string,
-): Intl.DateTimeFormat {
-  if (interval === "minute" || interval === "hour") {
-    return new Intl.DateTimeFormat(localeCode, {
-      timeZone,
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  if (interval === "month") {
-    return new Intl.DateTimeFormat(localeCode, {
-      timeZone,
-      year: "numeric",
-      month: "short",
-    });
-  }
-  return new Intl.DateTimeFormat(localeCode, {
-    timeZone,
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function tooltipDateFormat(
-  localeCode: string,
-  interval: DashboardInterval,
-  timeZone: string,
-): Intl.DateTimeFormat {
-  if (interval === "minute" || interval === "hour") {
-    return new Intl.DateTimeFormat(localeCode, {
-      timeZone,
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  if (interval === "month") {
-    return new Intl.DateTimeFormat(localeCode, {
-      timeZone,
-      year: "numeric",
-      month: "long",
-    });
-  }
-  return new Intl.DateTimeFormat(localeCode, {
-    timeZone,
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
 }
 
 function seriesDisplayLabel(
@@ -143,38 +137,6 @@ function seriesDisplayLabel(
 ): string {
   if (series.isOther) return otherLabel;
   return formatSeriesLabel ? formatSeriesLabel(series) : series.label;
-}
-
-function ShareTrendCardSkeleton() {
-  return (
-    <div className="space-y-6 min-h-[360px]">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-        <div className="space-y-2">
-          <Skeleton className="h-4 w-40" />
-          <Skeleton className="h-3 w-56" />
-        </div>
-        <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
-          {Array.from({ length: 4 }, (_, index) => (
-            <Skeleton
-              key={`share-trend-legend-skeleton-${index}`}
-              className="h-5 w-20"
-            />
-          ))}
-        </div>
-      </div>
-      <div className="space-y-4">
-        <Skeleton className="h-[260px] w-full" />
-        <div className="flex flex-wrap justify-center gap-3">
-          {Array.from({ length: 6 }, (_, index) => (
-            <Skeleton
-              key={`share-trend-label-skeleton-${index}`}
-              className="h-4 w-20"
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export function ShareTrendCard({
@@ -232,61 +194,47 @@ export function ShareTrendCard({
     placeholderData: keepPreviousData,
   });
   const loading = isPending || isFetching;
-  const trendData =
-    trendQueryData?.trendData ?? emptyTrendData(window.interval);
+  const fallbackTrendData = useMemo(
+    () => emptyTrendData(window.interval),
+    [window.interval],
+  );
+  const trendData = trendQueryData?.trendData ?? fallbackTrendData;
   const dataWindow = trendQueryData?.dataWindow ?? currentDataWindow;
   const hydrated = Boolean(trendQueryData);
-
-  const localeCode = intlLocale(locale);
-  const axisTickFormatter = useMemo(
-    () => tickDateFormat(localeCode, dataWindow.interval, dataWindow.timeZone),
-    [dataWindow.interval, dataWindow.timeZone, localeCode],
-  );
-  const tooltipFormatter = useMemo(
-    () =>
-      tooltipDateFormat(localeCode, dataWindow.interval, dataWindow.timeZone),
-    [dataWindow.interval, dataWindow.timeZone, localeCode],
-  );
   const chartSeries = useMemo(
-    () =>
+    (): ShareTrendAreaSeries[] =>
       trendData.series.map((series, index) => ({
-        ...series,
-        displayLabel: seriesDisplayLabel(series, otherLabel, formatSeriesLabel),
-        Icon: series.isOther ? undefined : resolveSeriesIcon?.(series),
+        key: series.key,
+        label: seriesDisplayLabel(series, otherLabel, formatSeriesLabel),
+        icon: series.isOther ? undefined : resolveSeriesIcon?.(series),
         color: series.isOther
           ? "var(--muted-foreground)"
           : CHART_COLORS[index % CHART_COLORS.length],
+        isOther: series.isOther,
       })),
     [formatSeriesLabel, otherLabel, resolveSeriesIcon, trendData.series],
   );
-  const chartConfig = useMemo(
+  const initialChartLoading = loading && !hydrated;
+  const chartData = useMemo<ShareTrendAreaPoint[]>(
     () =>
-      chartSeries.reduce((config, series) => {
-        config[series.key] = {
-          label: series.displayLabel,
-          color: series.color,
-          icon: series.Icon,
-        };
-        return config;
-      }, {} as ChartConfig),
-    [chartSeries],
+      hydrated
+        ? trendData.data.map((point) => ({
+            timestampMs: point.timestampMs,
+            totalVisitors: point.totalVisitors,
+            values: point.visitorsBySeries,
+          }))
+        : buildEmptyShareTrendPoints(dataWindow),
+    [
+      dataWindow.from,
+      dataWindow.interval,
+      dataWindow.timeZone,
+      dataWindow.to,
+      hydrated,
+      trendData.data,
+    ],
   );
-  const chartData = useMemo(
-    () =>
-      trendData.data.map((point) => {
-        const row: Record<string, number> = {
-          timestampMs: point.timestampMs,
-          totalVisitors: point.totalVisitors,
-        };
-        for (const series of chartSeries) {
-          row[series.key] = Number(point.visitorsBySeries[series.key] ?? 0);
-        }
-        return row;
-      }),
-    [chartSeries, trendData.data],
-  );
-  const showOverlayLoading = loading && hydrated;
   const hasContent = chartSeries.length > 0 && chartData.length > 0;
+  const shouldRenderChart = hasContent || initialChartLoading;
 
   return (
     <Card className="overflow-visible">
@@ -299,147 +247,27 @@ export function ShareTrendCard({
       </CardHeader>
       <CardContent>
         <ContentSwitch
-          loading={loading && !hydrated}
-          hasContent={hasContent}
+          loading={false}
+          hasContent={shouldRenderChart}
           loadingLabel={messages.common.loading}
-          loadingContent={<ShareTrendCardSkeleton />}
           emptyContent={<p>{messages.common.noData}</p>}
           minHeightClassName="min-h-[360px]"
+          initial={false}
         >
-          <div className="relative">
-            <ChartContainer
-              className="h-[360px] w-full aspect-auto"
-              config={chartConfig}
-            >
-              <AreaChart
-                accessibilityLayer
-                data={chartData}
-                margin={{ left: 12, right: 12, top: 12 }}
-                stackOffset="expand"
-              >
-                <CartesianGrid vertical={false} />
-                <XAxis
-                  dataKey="timestampMs"
-                  tickFormatter={(value) =>
-                    axisTickFormatter.format(new Date(Number(value ?? 0)))
-                  }
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  minTickGap={12}
-                />
-                <YAxis
-                  tickFormatter={(value) =>
-                    percentFormat(locale, Number(value ?? 0))
-                  }
-                  tickLine={false}
-                  axisLine={false}
-                  width={44}
-                />
-                <ChartTooltip
-                  cursor={false}
-                  content={
-                    <ChartTooltipContent
-                      className="min-w-[16rem]"
-                      indicator="line"
-                      labelFormatter={(value, payload) => {
-                        const timestamp = Number(
-                          payload?.[0]?.payload?.timestampMs ?? value ?? 0,
-                        );
-                        return tooltipFormatter.format(new Date(timestamp));
-                      }}
-                      formatter={(value, name, _item, _index, payload) => {
-                        const row = payload as unknown as Record<
-                          string,
-                          number
-                        >;
-                        const seriesKey = String(name ?? "");
-                        const numeric = Math.max(
-                          0,
-                          Number(row[seriesKey] ?? value ?? 0),
-                        );
-                        const totalVisitors = Math.max(
-                          0,
-                          Number(row.totalVisitors ?? 0),
-                        );
-                        const share =
-                          totalVisitors > 0 ? numeric / totalVisitors : 0;
-                        const currentSeries = chartSeries.find(
-                          (item) => item.key === seriesKey,
-                        );
-                        const SeriesIcon = currentSeries?.Icon;
-                        return (
-                          <div className="flex w-full items-center gap-3">
-                            <span className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                              {SeriesIcon ? (
-                                <SeriesIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                              ) : (
-                                <span
-                                  className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
-                                  style={{
-                                    backgroundColor: currentSeries?.color,
-                                  }}
-                                />
-                              )}
-                              <span
-                                className="truncate text-muted-foreground"
-                                title={currentSeries?.displayLabel ?? seriesKey}
-                              >
-                                {currentSeries?.displayLabel ?? seriesKey}
-                              </span>
-                            </span>
-                            <span className="ml-auto min-w-[7.5rem] shrink-0 whitespace-nowrap text-right font-mono text-foreground tabular-nums">
-                              {numberFormat(locale, numeric)} ·{" "}
-                              {percentFormat(locale, share)}
-                            </span>
-                          </div>
-                        );
-                      }}
-                    />
-                  }
-                />
-                <ChartLegend
-                  content={
-                    <ChartLegendContent className="pt-6 flex-wrap justify-center gap-x-4 gap-y-2" />
-                  }
-                />
-                {chartSeries.map((series) => (
-                  <Area
-                    key={series.key}
-                    dataKey={series.key}
-                    type="monotone"
-                    fill={`var(--color-${series.key})`}
-                    fillOpacity={series.isOther ? 0.18 : 0.42}
-                    stroke={`var(--color-${series.key})`}
-                    strokeWidth={1.6}
-                    stackId="share"
-                    isAnimationActive
-                  />
-                ))}
-              </AreaChart>
-            </ChartContainer>
-
-            <AutoTransition
-              type="fade"
-              duration={0.22}
-              className="pointer-events-none absolute top-2 right-2"
-            >
-              {showOverlayLoading ? (
-                <span
-                  key="share-trend-overlay-loading"
-                  className="inline-flex items-center gap-2 rounded-none border border-border/50 bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm"
-                >
-                  <Spinner className="size-3.5" />
-                  {messages.common.loading}
-                </span>
-              ) : (
-                <div
-                  key="share-trend-overlay-idle"
-                  className="h-0 w-0 overflow-hidden"
-                />
-              )}
-            </AutoTransition>
-          </div>
+          <ShareTrendAreaChart
+            data={chartData}
+            series={chartSeries}
+            locale={locale}
+            timeZone={dataWindow.timeZone}
+            interval={dataWindow.interval}
+            axisDateFormat={
+              dataWindow.interval === "minute" || dataWindow.interval === "hour"
+                ? "time"
+                : "regular"
+            }
+            loading={loading}
+            showLegend
+          />
         </ContentSwitch>
       </CardContent>
     </Card>

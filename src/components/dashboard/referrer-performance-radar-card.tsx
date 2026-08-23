@@ -1,29 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { RiShareForwardLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  PolarAngleAxis,
-  PolarGrid,
-  PolarRadiusAxis,
-  Radar,
-  RadarChart,
-} from "recharts";
 
+import {
+  PERFORMANCE_RADAR_METRIC_KEYS,
+  PerformanceRadarChart,
+  type PerformanceRadarMetricKey,
+} from "@/components/dashboard/charts/performance-radar-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
-import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-} from "@/components/ui/chart";
 import { fetchReferrerRadar } from "@/lib/dashboard/client-data";
-import {
-  durationFormat,
-  numberFormat,
-  percentFormat,
-} from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 import type { ReferrerRadarItem } from "@/lib/edge-client";
@@ -37,23 +24,6 @@ const CHART_COLORS = [
   "var(--color-chart-3)",
   "var(--color-chart-4)",
 ] as const;
-
-type RadarMetricKey =
-  | "duration"
-  | "engagement"
-  | "depth"
-  | "loyalty"
-  | "frequency"
-  | "traffic";
-
-const METRIC_KEYS: RadarMetricKey[] = [
-  "duration",
-  "engagement",
-  "depth",
-  "loyalty",
-  "frequency",
-  "traffic",
-];
 
 interface ReferrerMetadata {
   finalUrl?: string;
@@ -76,24 +46,6 @@ const referrerMetadataPromiseCache = new Map<
   string,
   Promise<ReferrerMetadata | null>
 >();
-
-function formatRawMetric(
-  locale: Locale,
-  metricKey: RadarMetricKey,
-  value: number,
-): string {
-  switch (metricKey) {
-    case "duration":
-      return durationFormat(locale, value);
-    case "engagement":
-    case "loyalty":
-    case "traffic":
-      return percentFormat(locale, value);
-    case "depth":
-    case "frequency":
-      return numberFormat(locale, Number(value.toFixed(1)));
-  }
-}
 
 function normalizeReferrerLabel(value: string, directLabel: string): string {
   const raw = value.trim();
@@ -218,92 +170,6 @@ function formatMetadataDate(
   }).format(date);
 }
 
-interface SingleRadarPoint {
-  metric: string;
-  metricKey: RadarMetricKey;
-  value: number;
-}
-
-function buildNormalizedPoints(
-  item: ReferrerRadarItem,
-  maxByMetric: Record<RadarMetricKey, number>,
-  metricLabels: Record<RadarMetricKey, string>,
-): SingleRadarPoint[] {
-  return METRIC_KEYS.map((key) => {
-    const max = maxByMetric[key];
-    return {
-      metric: metricLabels[key],
-      metricKey: key,
-      value: max > 0 ? Math.round((item.metrics[key] / max) * 100) : 0,
-    };
-  });
-}
-
-function SingleReferrerRadar({
-  item,
-  label,
-  points,
-  color,
-  locale,
-  chartConfig,
-}: {
-  item: ReferrerRadarItem;
-  label: string;
-  points: SingleRadarPoint[];
-  color: string;
-  locale: Locale;
-  chartConfig: ChartConfig;
-}) {
-  return (
-    <div className="flex items-center justify-center">
-      <ChartContainer
-        config={chartConfig}
-        className="aspect-square w-full max-w-[220px]"
-      >
-        <RadarChart data={points} cx="50%" cy="50%" outerRadius="70%">
-          <PolarGrid />
-          <PolarAngleAxis dataKey="metric" tick={{ fontSize: 10 }} />
-          <PolarRadiusAxis
-            angle={30}
-            domain={[0, 100]}
-            tick={false}
-            axisLine={false}
-          />
-          <Radar
-            name={label}
-            dataKey="value"
-            stroke={color}
-            fill={color}
-            fillOpacity={0.15}
-          />
-          <ChartTooltip
-            content={({ active, label: activeLabel, payload }) => {
-              if (!active || !payload?.length) return null;
-              const point = points.find(
-                (entry) => entry.metric === activeLabel,
-              );
-              if (!point) return null;
-              const raw = item.metrics[point.metricKey];
-
-              return (
-                <div className="grid min-w-[8rem] gap-0.5 rounded-none border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-                  <div className="font-medium">{activeLabel}</div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">{label}</span>
-                    <span className="font-mono font-medium tabular-nums">
-                      {formatRawMetric(locale, point.metricKey, raw)}
-                    </span>
-                  </div>
-                </div>
-              );
-            }}
-          />
-        </RadarChart>
-      </ChartContainer>
-    </div>
-  );
-}
-
 function ReferrerMetadataPanel({
   label,
   metadata,
@@ -355,15 +221,18 @@ function ReferrerMetadataPanel({
 
   return (
     <AutoTransition
-      className="h-full"
+      className="h-[152px] min-w-0 overflow-hidden sm:h-[220px]"
       initial={false}
       duration={0.2}
       type="fade"
       presenceMode="sync"
     >
-      <div key={transitionKey} className="flex h-full min-w-0 flex-col">
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
+      <div
+        key={transitionKey}
+        className="flex h-full min-w-0 flex-col overflow-hidden"
+      >
+        <div className="min-w-0 space-y-2 sm:space-y-4">
+          <div className="flex h-10 min-w-0 items-center gap-3">
             {metadata?.icon ? (
               <img
                 src={metadata.icon}
@@ -384,23 +253,23 @@ function ReferrerMetadataPanel({
                   href={urlTarget}
                   target="_blank"
                   rel="noreferrer"
-                  className="block break-all text-sm font-semibold tracking-tight transition-colors hover:text-foreground"
+                  className="line-clamp-2 block break-all text-sm font-semibold tracking-tight transition-colors hover:text-foreground"
                 >
                   {displayLabel}
                 </a>
               ) : (
-                <p className="break-all text-sm font-semibold tracking-tight">
+                <p className="line-clamp-2 break-all text-sm font-semibold tracking-tight">
                   {displayLabel}
                 </p>
               )}
             </div>
           </div>
 
-          <div className="space-y-2">
-            <p className="text-sm font-medium leading-snug">
+          <div className="space-y-1.5 sm:space-y-2">
+            <p className="h-5 overflow-hidden text-sm font-medium leading-snug line-clamp-1 sm:h-10 sm:line-clamp-2">
               {loading ? messages.common.loading : title}
             </p>
-            <p className="text-xs/relaxed text-muted-foreground">
+            <p className="h-10 overflow-hidden text-xs/relaxed text-muted-foreground line-clamp-2 sm:h-[3.75rem] sm:line-clamp-3">
               {loading
                 ? messages.common.loading
                 : description || messages.common.noData}
@@ -408,26 +277,26 @@ function ReferrerMetadataPanel({
           </div>
         </div>
 
-        <div className="mt-auto pt-4">
+        <div className="mt-auto h-8 overflow-hidden pt-2 sm:h-10 sm:pt-4">
           {author || language || keywords || publishedLabel ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex h-6 min-w-0 flex-nowrap gap-2 overflow-hidden">
               {author ? (
-                <span className="rounded-[3px] border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                <span className="max-w-32 shrink-0 truncate whitespace-nowrap rounded-[3px] border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                   {author}
                 </span>
               ) : null}
               {language ? (
-                <span className="rounded-[3px] border border-border/60 px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                <span className="max-w-16 shrink-0 truncate whitespace-nowrap rounded-[3px] border border-border/60 px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
                   {language}
                 </span>
               ) : null}
               {keywords ? (
-                <span className="rounded-[3px] border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground break-all">
+                <span className="max-w-36 shrink-0 truncate whitespace-nowrap rounded-[3px] border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                   {keywords}
                 </span>
               ) : null}
               {publishedLabel ? (
-                <span className="rounded-[3px] border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                <span className="max-w-28 shrink-0 truncate whitespace-nowrap rounded-[3px] border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                   {publishedLabel}
                 </span>
               ) : null}
@@ -537,8 +406,8 @@ export function ReferrerPerformanceRadarCard({
   );
 
   const maxByMetric = useMemo(() => {
-    const result = {} as Record<RadarMetricKey, number>;
-    for (const key of METRIC_KEYS) {
+    const result = {} as Record<PerformanceRadarMetricKey, number>;
+    for (const key of PERFORMANCE_RADAR_METRIC_KEYS) {
       result[key] = Math.max(...data.map((item) => item.metrics[key]), 0);
     }
     return result;
@@ -572,14 +441,6 @@ export function ReferrerPerformanceRadarCard({
               item.referrer,
               messages.overview.direct,
             );
-            const points = buildNormalizedPoints(
-              item,
-              maxByMetric,
-              metricLabels,
-            );
-            const config: ChartConfig = {
-              value: { label, color },
-            };
             const metadata = metadataByReferrer[item.referrer];
             const metadataLoading =
               item.referrer.trim().length > 0 && metadata === undefined;
@@ -590,26 +451,27 @@ export function ReferrerPerformanceRadarCard({
                 size="sm"
                 className="h-full"
               >
-                <AutoResizer className="w-full" initial={false} duration={0.22}>
-                  <CardContent className="grid grid-cols-[minmax(0,1fr)_152px] items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
-                    <ReferrerMetadataPanel
-                      label={label}
-                      metadata={metadata}
-                      loading={metadataLoading}
-                      direct={item.referrer.trim().length === 0}
-                      locale={locale}
-                      messages={messages}
-                    />
-                    <SingleReferrerRadar
-                      item={item}
-                      label={label}
-                      points={points}
+                <CardContent className="grid grid-cols-[minmax(0,1fr)_152px] items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
+                  <ReferrerMetadataPanel
+                    label={label}
+                    metadata={metadata}
+                    loading={metadataLoading}
+                    direct={item.referrer.trim().length === 0}
+                    locale={locale}
+                    messages={messages}
+                  />
+                  <div className="flex items-center justify-center">
+                    <PerformanceRadarChart
+                      itemLabel={label}
+                      metrics={item.metrics}
+                      maxByMetric={maxByMetric}
+                      metricLabels={metricLabels}
                       color={color}
                       locale={locale}
-                      chartConfig={config}
+                      className="max-w-[220px]"
                     />
-                  </CardContent>
-                </AutoResizer>
+                  </div>
+                </CardContent>
               </Card>
             );
           })}

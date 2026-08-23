@@ -80,6 +80,7 @@ export function BrowserShareOverview({
             value: item.visitors,
             isOther: item.isOther,
           }))}
+          maxItems={6}
           locale={locale}
           valueLabel={messages.common.visitors}
           loading={showInitialLoading}
@@ -93,6 +94,7 @@ export function BrowserShareOverview({
             value: item.visitors,
             isOther: item.isOther,
           }))}
+          maxItems={6}
           locale={locale}
           valueLabel={messages.common.visitors}
           loading={showInitialLoading}

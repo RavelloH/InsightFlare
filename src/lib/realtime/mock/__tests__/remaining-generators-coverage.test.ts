@@ -259,10 +259,14 @@ describe("mock remaining generator coverage", () => {
     ]);
     expect(
       generateDemoFilterOptions(SITE_ID, { filterKey: "sourceDomain" }).data,
-    ).toEqual([{ value: "Search.Example", label: "Search.Example" }]);
+    ).toEqual([
+      { value: "__direct__", label: "Direct" },
+      { value: "Search.Example", label: "Search.Example" },
+    ]);
     expect(
       generateDemoFilterOptions(SITE_ID, { filterKey: "sourceLink" }).data,
     ).toEqual([
+      { value: "__direct__", label: "Direct" },
       {
         value: "https://search.example/result",
         label: "https://search.example/result",
@@ -600,9 +604,21 @@ describe("mock remaining generator coverage", () => {
         }),
       ],
     });
-    expect(generateDemoReferrerRadar(SITE_ID, {})).toEqual({
+    expect(generateDemoReferrerRadar(SITE_ID, {})).toMatchObject({
       ok: true,
-      data: [],
+      data: [
+        expect.objectContaining({
+          referrer: "",
+          metrics: expect.objectContaining({
+            duration: 500,
+            engagement: 0,
+            depth: 1,
+            loyalty: 1,
+            frequency: 1.5,
+            traffic: 1,
+          }),
+        }),
+      ],
     });
   });
 
@@ -1016,6 +1032,12 @@ describe("mock remaining generator coverage", () => {
       ok: true,
       data: [
         {
+          label: "",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
+        },
+        {
           label: "https://search.example/result",
           views: 1,
           sessions: 1,
@@ -1181,6 +1203,12 @@ describe("mock remaining generator coverage", () => {
     ).toEqual({
       ok: true,
       data: [
+        {
+          label: "",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
+        },
         {
           label: "docs.example.test",
           views: 1,

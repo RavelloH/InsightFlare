@@ -1,10 +1,7 @@
 import { findSiteProfile } from "@/lib/realtime/demo-site-profiles";
 import { buildDemoFactDataset } from "@/lib/realtime/mock/fact-builder";
 import type { DemoVisitFact } from "@/lib/realtime/mock/types";
-import type {
-  RealtimeEvent,
-  RealtimeVisit,
-} from "@/lib/realtime/types";
+import type { RealtimeEvent, RealtimeVisit } from "@/lib/realtime/types";
 // ---------------------------------------------------------------------------
 //  Realtime mock socket
 // ---------------------------------------------------------------------------

@@ -92,6 +92,7 @@ export interface AppMessages {
     close: string;
     sitesFiltered: string;
     cumulativeTraffic: string;
+    cumulativeEvents: string;
   };
   ranges: {
     last30m: string;
@@ -2411,6 +2412,7 @@ const enMessages = {
     close: "Close",
     sitesFiltered: "{active} / {total} sites filtered",
     cumulativeTraffic: "Cumulative traffic",
+    cumulativeEvents: "Cumulative events",
   },
   ranges: {
     last30m: "30m",
@@ -4963,6 +4965,7 @@ const zhMessages = {
     close: "关闭",
     sitesFiltered: "已筛选 {active} / {total} 个站点",
     cumulativeTraffic: "全部周期累计流量",
+    cumulativeEvents: "全部周期累计事件",
   },
   ranges: {
     last30m: "30分钟",
@@ -7429,6 +7432,7 @@ const jaMessages = {
     close: "閉じる",
     sitesFiltered: "{active} / {total} サイトを絞り込み中",
     cumulativeTraffic: "期間累計トラフィック",
+    cumulativeEvents: "期間累計イベント",
   },
   ranges: {
     last30m: "30分",

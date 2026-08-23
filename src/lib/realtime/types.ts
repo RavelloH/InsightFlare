@@ -15,10 +15,7 @@ export type RealtimeEventKind = RealtimeEntityEventKind;
 export type RealtimeEvent = RealtimeEntityEvent;
 export type RealtimeVisit = RealtimeEntityVisit;
 
-export type RealtimeSnapshot = Omit<
-  RealtimeEntitySnapshotData,
-  "activeNow"
-> & {
+export type RealtimeSnapshot = Omit<RealtimeEntitySnapshotData, "activeNow"> & {
   activeNow: number | null;
   points: RealtimeVisitorPoint[];
 };

@@ -345,10 +345,13 @@ export class IngestDurableObject extends DurableObject {
     const visits = await logger.measure(
       "do.snapshot.realtime_visits",
       async () =>
-        readActiveRealtimeVisits({
-          sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
-            this.measuredSqlAll<T>(logger, query, ...bindings),
-        }, cutoffMs),
+        readActiveRealtimeVisits(
+          {
+            sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
+              this.measuredSqlAll<T>(logger, query, ...bindings),
+          },
+          cutoffMs,
+        ),
     );
 
     return jsonResponse({

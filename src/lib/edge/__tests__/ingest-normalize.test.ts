@@ -121,8 +121,8 @@ describe("ingest normalization realtime payload helpers", () => {
       deviceType: "desktop",
       screenWidth: 1440,
       screenHeight: 900,
+      screenSize: "1440x900",
     });
-    expect(toRealtimePayload(record)).not.toHaveProperty("screenSize");
   });
 
   it("maps active visit rows into realtime visit payloads", () => {

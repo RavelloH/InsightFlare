@@ -40283,7 +40283,7 @@ paths:
                               type: integer
                               minimum: -9007199254740991
                               maximum: 9007199254740991
-                              description: Event timestamp (Unix ms)
+                              description: Event timestamp in milliseconds
                             siteId:
                               type: string
                             traceId:
@@ -42126,7 +42126,7 @@ paths:
                               type: integer
                               minimum: -9007199254740991
                               maximum: 9007199254740991
-                              description: Event timestamp (Unix ms)
+                              description: Event timestamp in milliseconds
                             siteId:
                               type: string
                             traceId:

@@ -734,7 +734,7 @@ describe("IngestDurableObject", () => {
     await expect(snapshot.json()).resolves.toMatchObject({
       ok: true,
       buffered: 0,
-      data: [],
+      events: [],
     });
 
     const client = new FakeWebSocket();
@@ -934,7 +934,7 @@ describe("IngestDurableObject", () => {
     await expect(snapshot.json()).resolves.toMatchObject({
       ok: true,
       buffered: 0,
-      data: [
+      events: [
         {
           id: "visit-1",
           eventType: "visit",
@@ -2050,7 +2050,7 @@ describe("IngestDurableObject", () => {
     );
     await expect(snapshot.json()).resolves.toMatchObject({
       ok: true,
-      data: expect.arrayContaining([
+      events: expect.arrayContaining([
         expect.objectContaining({
           id: "leave:socket-visit",
           eventType: "__presence_leave",
@@ -2584,7 +2584,7 @@ describe("IngestDurableObject", () => {
         )
       ).json(),
     ).resolves.toMatchObject({
-      data: expect.not.arrayContaining([
+      events: expect.not.arrayContaining([
         expect.objectContaining({ eventType: "__presence_leave" }),
       ]),
     });

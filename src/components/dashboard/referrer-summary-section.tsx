@@ -40,6 +40,7 @@ export function ReferrerSummarySection({
     [rowsByTab.domain],
   );
   const hasContent = rowsByTab.domain.length > 0 || rowsByTab.link.length > 0;
+  const showInitialLoading = loading && !hasContent;
   const totalViews = useMemo(
     () => rowsByTab.domain.reduce((sum, row) => sum + row.views, 0),
     [rowsByTab.domain],
@@ -183,23 +184,28 @@ export function ReferrerSummarySection({
       )}
 
       <ContentSwitch
-        loading={loading}
-        hasContent={hasContent}
+        loading={false}
+        hasContent={hasContent || showInitialLoading}
         loadingLabel={messages.common.loading}
         emptyContent={<p>{messages.common.noData}</p>}
         minHeightClassName="min-h-[280px]"
+        initial={false}
       >
         <div className="grid gap-4 md:grid-cols-2">
           <ShareRadialCard
             title={messages.referrers.splitTitle}
             items={splitItems}
+            maxItems={2}
             locale={locale}
+            loading={showInitialLoading}
             valueLabel={messages.common.views}
           />
           <ShareRadialCard
             title={messages.referrers.chartTitle}
             items={mixItems}
+            maxItems={3}
             locale={locale}
+            loading={showInitialLoading}
             valueLabel={messages.common.views}
           />
         </div>

@@ -149,7 +149,7 @@ export async function handleEventsTrendContract(
           window,
           interval,
           filters,
-          parseLimit(url, 8, 12),
+          parseLimit(url, 8, 18),
           parseEventName(url),
         )),
       },

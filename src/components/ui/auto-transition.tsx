@@ -11,7 +11,8 @@ export type TransitionType =
   | "slide"
   | "scale"
   | "slideUp"
-  | "slideDown";
+  | "slideDown"
+  | "crossFade";
 
 export interface AutoTransitionProps extends Omit<
   React.HTMLAttributes<HTMLElement>,
@@ -66,6 +67,11 @@ const transitionVariants: Record<
     animate: { opacity: 1, scale: 1 },
     exit: { opacity: 0, scale: 0.95 },
   },
+  crossFade: {
+    initial: { opacity: 0 },
+    animate: { opacity: 1 },
+    exit: { opacity: 0 },
+  },
 };
 
 export function AutoTransition({
@@ -86,6 +92,9 @@ export function AutoTransition({
   useEffect(() => {
     if (!hasRendered) setHasRendered(true);
   }, [hasRendered]);
+
+  const resolvedPresenceMode =
+    type === "crossFade" ? "popLayout" : presenceMode;
 
   const key = useMemo(() => {
     if (transitionKey !== undefined) return String(transitionKey);
@@ -128,7 +137,7 @@ export function AutoTransition({
   ) as React.ElementType;
 
   return (
-    <AnimatePresence mode={presenceMode} custom={custom}>
+    <AnimatePresence mode={resolvedPresenceMode} custom={custom}>
       <MotionComponent
         {...motionProps}
         key={key}

@@ -1359,6 +1359,7 @@ export function RequestObservationClient({
             className="xl:col-span-2"
             title={labels.confidenceShareTitle}
             items={confidenceShareItems}
+            maxItems={4}
             locale={locale}
             valueLabel={labels.requests}
             loading={loading}

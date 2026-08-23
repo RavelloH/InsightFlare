@@ -25,10 +25,14 @@ import {
 } from "@remixicon/react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, useReducedMotion } from "motion/react";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import { AnalyticsTableCard } from "@/components/dashboard/analytics-table-card";
 import { AnimatedDataTableRow } from "@/components/dashboard/animated-data-table-row";
+import {
+  createEventTrendChartData,
+  createEventTrendChartSeries,
+  EventTrendBarChart,
+} from "@/components/dashboard/charts/event-trend-bar-chart";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import {
   BrowserMeta,
@@ -58,12 +62,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@/components/ui/chart";
-import {
   Drawer,
   DrawerContent,
   DrawerDescription,
@@ -92,7 +90,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { buildComplementaryOklchPalette } from "@/lib/dashboard/chart-colors";
 import {
   fetchEventRecordDetail,
   fetchEventsRecords,
@@ -100,11 +97,7 @@ import {
   fetchEventTypeFieldValues,
 } from "@/lib/dashboard/client-data";
 import { appendEventPayloadFilter } from "@/lib/dashboard/filter-state";
-import {
-  intlLocale,
-  numberFormat,
-  percentFormat,
-} from "@/lib/dashboard/format";
+import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
 import type {
@@ -130,7 +123,6 @@ interface EventPayloadFilterRule {
   value: EventPayloadFilterValue;
 }
 const EVENT_SKELETON_ROWS = 8;
-const OTHER_SERIES_KEY = "other";
 const FIELD_TREE_CHILD_TRANSITION = {
   initial: { opacity: 0, y: -6 },
   animate: { opacity: 1, y: 0 },
@@ -491,65 +483,6 @@ function formatEventFieldKeySegment(segment: string): string {
   return segment.replace(/~1/g, "/").replace(/~0/g, "~");
 }
 
-function tickDateFormat(
-  localeCode: string,
-  interval: TimeWindow["interval"],
-  timeZone: string,
-): Intl.DateTimeFormat {
-  if (interval === "minute" || interval === "hour") {
-    return new Intl.DateTimeFormat(localeCode, {
-      timeZone,
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  if (interval === "month") {
-    return new Intl.DateTimeFormat(localeCode, {
-      timeZone,
-      year: "numeric",
-      month: "short",
-    });
-  }
-  return new Intl.DateTimeFormat(localeCode, {
-    timeZone,
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function tooltipDateFormat(
-  localeCode: string,
-  interval: TimeWindow["interval"],
-  timeZone: string,
-): Intl.DateTimeFormat {
-  if (interval === "minute" || interval === "hour") {
-    return new Intl.DateTimeFormat(localeCode, {
-      timeZone,
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  if (interval === "month") {
-    return new Intl.DateTimeFormat(localeCode, {
-      timeZone,
-      year: "numeric",
-      month: "long",
-    });
-  }
-  return new Intl.DateTimeFormat(localeCode, {
-    timeZone,
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function eventSeriesLabel(series: EventTrendSeries, labels: EventPageCopy) {
-  return series.isOther ? labels.other : series.label || series.eventName;
-}
-
 function EventMetricCell({
   icon: Icon,
   label,
@@ -682,6 +615,7 @@ export function EventTrendStackedBarCard({
   window: timeWindow,
   title,
   loading,
+  cumulativeLabel,
   onSelectEvent,
 }: {
   locale: Locale;
@@ -692,75 +626,17 @@ export function EventTrendStackedBarCard({
   window: TimeWindow;
   title: string;
   loading?: boolean;
+  cumulativeLabel: string;
   onSelectEvent?: (eventName: string) => void;
 }) {
-  const localeCode = intlLocale(locale);
-  const axisTickFormatter = useMemo(
-    () => tickDateFormat(localeCode, timeWindow.interval, timeWindow.timeZone),
-    [localeCode, timeWindow.interval, timeWindow.timeZone],
-  );
-  const tooltipFormatter = useMemo(
-    () =>
-      tooltipDateFormat(localeCode, timeWindow.interval, timeWindow.timeZone),
-    [localeCode, timeWindow.interval, timeWindow.timeZone],
-  );
-  const series = useMemo(() => {
-    const palette = buildComplementaryOklchPalette(
-      trend.series.filter((item) => !item.isOther).length,
-    );
-    let paletteIndex = 0;
-
-    return trend.series.map((item) => {
-      if (item.isOther) {
-        return {
-          ...item,
-          displayLabel: eventSeriesLabel(item, labels),
-          color: "var(--muted-foreground)",
-        };
-      }
-
-      const color =
-        palette[paletteIndex] ?? palette[palette.length - 1] ?? "#2dd4bf";
-      paletteIndex += 1;
-
-      return {
-        ...item,
-        displayLabel: eventSeriesLabel(item, labels),
-        color,
-      };
-    });
-  }, [labels, trend.series]);
-  const chartConfig = useMemo(
-    () =>
-      series.reduce((config, item) => {
-        config[item.key] = {
-          label: item.displayLabel,
-          color: item.color,
-        };
-        return config;
-      }, {} as ChartConfig),
-    [series],
+  const series = useMemo(
+    () => createEventTrendChartSeries(trend.series, labels.other),
+    [labels.other, trend.series],
   );
   const chartData = useMemo(
-    () =>
-      trend.data.map((point) => {
-        const row: Record<string, number> = {
-          timestampMs: point.timestampMs,
-          totalEvents: point.totalEvents,
-        };
-        for (const item of series) {
-          row[item.key] = Number(point.eventsBySeries[item.key] ?? 0);
-        }
-        return row;
-      }),
+    () => createEventTrendChartData(trend.data, series),
     [series, trend.data],
   );
-  const hasContent = series.length > 0 && chartData.length > 0;
-
-  const selectSeries = (item: EventTrendSeries) => {
-    if (item.isOther || item.key === OTHER_SERIES_KEY) return;
-    onSelectEvent?.(item.eventName);
-  };
 
   return (
     <Card className="overflow-visible">
@@ -770,184 +646,23 @@ export function EventTrendStackedBarCard({
             <RiPulseLine className="size-4" />
             {title}
           </CardTitle>
-          <div className="flex flex-wrap gap-2">
-            {series.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                disabled={item.isOther || !onSelectEvent}
-                className={cn(
-                  "inline-flex h-6 max-w-48 items-center gap-1.5 border px-2 text-xs transition-colors",
-                  item.isOther || !onSelectEvent
-                    ? "cursor-default text-muted-foreground"
-                    : "hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-                )}
-                title={item.displayLabel}
-                onClick={() => selectSeries(item)}
-              >
-                <span
-                  className="size-2 shrink-0 rounded-[2px]"
-                  style={{ backgroundColor: item.color }}
-                />
-                <span className="truncate">{item.displayLabel}</span>
-              </button>
-            ))}
-          </div>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="relative min-h-[320px]">
-          <AutoResizer initial>
-            <AutoTransition
-              transitionKey={
-                loading && !hasContent
-                  ? "loading"
-                  : hasContent
-                    ? "chart"
-                    : "empty"
-              }
-              initial={false}
-              duration={0.2}
-              type="fade"
-            >
-              {loading && !hasContent ? (
-                <div key="loading" className="space-y-4">
-                  <Skeleton className="h-[280px] w-full" />
-                  <div className="flex flex-wrap justify-center gap-2">
-                    {Array.from({ length: 5 }, (_, index) => (
-                      <Skeleton key={index} className="h-5 w-20" />
-                    ))}
-                  </div>
-                </div>
-              ) : !hasContent ? (
-                <div
-                  key="empty"
-                  className="flex h-[320px] items-center justify-center text-muted-foreground"
-                >
-                  {labels.empty}
-                </div>
-              ) : (
-                <ChartContainer
-                  key="chart"
-                  className="h-[320px] w-full aspect-auto"
-                  config={chartConfig}
-                >
-                  <BarChart
-                    accessibilityLayer
-                    data={chartData}
-                    margin={{ left: 12, right: 12, top: 12 }}
-                  >
-                    <CartesianGrid vertical={false} />
-                    <XAxis
-                      dataKey="timestampMs"
-                      tickFormatter={(value) =>
-                        axisTickFormatter.format(new Date(Number(value ?? 0)))
-                      }
-                      tickLine={false}
-                      axisLine={false}
-                      tickMargin={8}
-                      minTickGap={12}
-                    />
-                    <YAxis
-                      tickFormatter={(value) =>
-                        numberFormat(locale, Number(value ?? 0))
-                      }
-                      tickLine={false}
-                      axisLine={false}
-                      width={48}
-                    />
-                    <ChartTooltip
-                      cursor={false}
-                      content={
-                        <ChartTooltipContent
-                          className="min-w-[16rem]"
-                          indicator="line"
-                          labelFormatter={(value, payload) => {
-                            const timestamp = Number(
-                              payload?.[0]?.payload?.timestampMs ?? value ?? 0,
-                            );
-                            return tooltipFormatter.format(new Date(timestamp));
-                          }}
-                          formatter={(value, name, _item, _index, payload) => {
-                            const row = payload as unknown as Record<
-                              string,
-                              number
-                            >;
-                            const seriesKey = String(name ?? "");
-                            const numeric = Math.max(
-                              0,
-                              Number(row[seriesKey] ?? value ?? 0),
-                            );
-                            const currentSeries = series.find(
-                              (item) => item.key === seriesKey,
-                            );
-                            return (
-                              <div className="flex w-full items-center gap-3">
-                                <span className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                                  <span
-                                    className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
-                                    style={{
-                                      backgroundColor: currentSeries?.color,
-                                    }}
-                                  />
-                                  <span
-                                    className="truncate text-muted-foreground"
-                                    title={
-                                      currentSeries?.displayLabel ?? seriesKey
-                                    }
-                                  >
-                                    {currentSeries?.displayLabel ?? seriesKey}
-                                  </span>
-                                </span>
-                                <span className="ml-auto shrink-0 whitespace-nowrap text-right font-mono text-foreground tabular-nums">
-                                  {numberFormat(locale, numeric)}
-                                </span>
-                              </div>
-                            );
-                          }}
-                        />
-                      }
-                    />
-                    {series.map((item) => (
-                      <Bar
-                        key={item.key}
-                        dataKey={item.key}
-                        stackId="events"
-                        fill={`var(--color-${item.key})`}
-                        radius={0}
-                        isAnimationActive
-                        onClick={() => selectSeries(item)}
-                        className={cn(
-                          item.isOther || !onSelectEvent
-                            ? ""
-                            : "cursor-pointer",
-                        )}
-                      />
-                    ))}
-                  </BarChart>
-                </ChartContainer>
-              )}
-            </AutoTransition>
-          </AutoResizer>
-
-          <AutoTransition
-            type="fade"
-            duration={0.2}
-            className="pointer-events-none absolute right-2 top-2"
-          >
-            {loading && hasContent ? (
-              <span
-                key="event-trend-loading"
-                className="inline-flex items-center gap-2 border border-border/50 bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm"
-              >
-                <Spinner className="size-3.5" />
-                {labels.loading}
-              </span>
-            ) : (
-              <div key="event-trend-idle" className="h-0 w-0 overflow-hidden" />
-            )}
-          </AutoTransition>
-        </div>
+        <EventTrendBarChart
+          data={chartData}
+          series={series}
+          locale={locale}
+          from={timeWindow.from}
+          to={timeWindow.to}
+          interval={timeWindow.interval}
+          timeZone={timeWindow.timeZone}
+          loading={loading}
+          emptyLabel={labels.empty}
+          cumulativeLabel={cumulativeLabel}
+          totalLabel={labels.totalEvents}
+          onSelectEvent={onSelectEvent}
+        />
       </CardContent>
     </Card>
   );

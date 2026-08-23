@@ -100,6 +100,7 @@ common:
   close: 关闭
   sitesFiltered: "已筛选 {active} / {total} 个站点"
   cumulativeTraffic: 全部周期累计流量
+  cumulativeEvents: 全部周期累计事件
 ranges:
   last30m: 30分钟
   last1h: 1小时

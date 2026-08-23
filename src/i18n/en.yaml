@@ -100,6 +100,7 @@ common:
   close: Close
   sitesFiltered: "{active} / {total} sites filtered"
   cumulativeTraffic: Cumulative traffic
+  cumulativeEvents: Cumulative events
 ranges:
   last30m: 30m
   last1h: 1h

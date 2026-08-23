@@ -70,8 +70,7 @@ describe("RealtimeSnapshotDataSchema", () => {
         activeNow: 5,
         events: [],
         visits: [],
-      })
-        .success,
+      }).success,
     ).toBe(true);
   });
 
@@ -81,8 +80,7 @@ describe("RealtimeSnapshotDataSchema", () => {
         activeNow: 1.5,
         events: [],
         visits: [],
-      })
-        .success,
+      }).success,
     ).toBe(false);
   });
 });

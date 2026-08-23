@@ -281,6 +281,10 @@ export function collectReferrerRows(
 }> {
   const includeFullUrl = options?.includeFullUrl ?? false;
   const directValue = options?.directValue ?? "(direct)";
+  // The generic dimension aggregator skips empty labels. Keep a private
+  // bucket key so callers can still request an empty display value for direct
+  // traffic without losing that bucket entirely.
+  const directBucketKey = directValue || "\u0000direct";
   const rows = aggregateDimensionRowsFromVisits(
     dataset,
     filtered.visits,
@@ -289,11 +293,11 @@ export function collectReferrerRows(
       const referrer = includeFullUrl
         ? visit.referrerUrl.trim()
         : visit.referrerHost.trim();
-      return referrer || directValue;
+      return referrer || directBucketKey;
     },
   );
   return rows.map((row) => ({
-    referrer: row.label,
+    referrer: row.label === directBucketKey ? directValue : row.label,
     views: row.views,
     sessions: row.sessions,
     visitors: row.visitors,
