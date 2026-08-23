@@ -11,6 +11,7 @@ import {
   parseBooleanSearchParam,
   parseLimit,
   parseWindow,
+  queryErrorResponse,
   type ResponseContext,
   withoutGeoFilter,
 } from "./core";
@@ -56,6 +57,6 @@ export async function handleOverviewGeoPointsContract(
       };
     },
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }

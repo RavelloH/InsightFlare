@@ -122,7 +122,10 @@ describe("typed contract adapter data branches", () => {
     );
     expect(
       responses.filter((response) => response.status === 400),
-    ).toHaveLength(6);
+    ).toHaveLength(5);
+    expect(
+      responses.filter((response) => response.status === 500),
+    ).toHaveLength(1);
   });
 
   it("rejects definitions without enough funnel steps", async () => {

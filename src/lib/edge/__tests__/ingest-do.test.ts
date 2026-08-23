@@ -788,6 +788,18 @@ describe("IngestDurableObject", () => {
     }
   });
 
+  it("reports active visitors from the active endpoint", async () => {
+    const ctx = createTestDo();
+    await postIngest(ctx.object, envelope({ timestamp: NOW, startedAt: NOW }));
+
+    const response = await ctx.object.fetch(
+      new Request("https://ingest.internal/active"),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, activeNow: 1 });
+  });
+
   it("records direct Durable Object SQL calls in the request invocation", async () => {
     const ctx = createTestDo();
 
@@ -1278,6 +1290,15 @@ describe("IngestDurableObject", () => {
         timestamp: NOW - 10_000,
       }),
     );
+    await postIngest(
+      ctx.object,
+      envelope({
+        kind: "visibility",
+        visitId: "hidden-visit",
+        visibilityState: "hidden",
+        timestamp: NOW - 9_000,
+      }),
+    );
 
     expect(
       localRows<{ status: string; hidden_at: number | null }>(
@@ -1320,6 +1341,31 @@ describe("IngestDurableObject", () => {
       duration_source: "server",
       exit_reason: "pagehide",
     });
+  });
+
+  it("skips visibility broadcasts when the visit context is unavailable", async () => {
+    const ctx = createTestDo();
+    const object = ctx.object as unknown as {
+      pushVisibilityRealtimeRecord(record: {
+        siteId: string;
+        visitId: string;
+        eventAt: number;
+        visibilityState: "hidden" | "visible";
+        traceId: string;
+        receivedAt: number;
+      }): Promise<void>;
+    };
+
+    await expect(
+      object.pushVisibilityRealtimeRecord({
+        siteId: "site-1",
+        visitId: "missing-visit",
+        eventAt: NOW,
+        visibilityState: "hidden",
+        traceId: "trace-missing",
+        receivedAt: NOW,
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it("finalizes stale hidden visits at hidden_at during flush", async () => {
@@ -2042,6 +2088,24 @@ describe("IngestDurableObject", () => {
     await postIngest(
       ctx.object,
       envelope({
+        kind: "visibility",
+        visitId: "socket-visit",
+        visibilityState: "hidden",
+        timestamp: NOW - 500,
+      }),
+    );
+    await postIngest(
+      ctx.object,
+      envelope({
+        kind: "visibility",
+        visitId: "socket-visit",
+        visibilityState: "visible",
+        timestamp: NOW - 250,
+      }),
+    );
+    await postIngest(
+      ctx.object,
+      envelope({
         kind: "leave",
         visitId: "socket-visit",
         timestamp: NOW,
@@ -2054,8 +2118,30 @@ describe("IngestDurableObject", () => {
     expect(eventMessages.map((message) => message.data.eventType)).toEqual([
       "visit",
       "Socket Event",
+      "visibility",
+      "visibility",
       "__presence_leave",
     ]);
+    expect(eventMessages[2]?.data).toMatchObject({
+      eventKind: "visibility",
+      visibilityState: "hidden",
+      visitId: "socket-visit",
+      sessionId: expect.any(String),
+      visitorId: "socket-visitor",
+      pathname: "/socket",
+      hostname: "example.com",
+      title: "Docs",
+      browser: "Chrome",
+      os: "Windows",
+      country: "US",
+    });
+    expect(eventMessages[3]?.data).toMatchObject({
+      eventKind: "visibility",
+      visibilityState: "visible",
+      status: "open",
+      hiddenAt: null,
+      visitId: "socket-visit",
+    });
     expect(staleServer.closed).toBe(true);
 
     healthyServer.emit("close");
@@ -2065,7 +2151,7 @@ describe("IngestDurableObject", () => {
         visitId: "after-close",
       }),
     );
-    expect(healthyServer.sent).toHaveLength(4);
+    expect(healthyServer.sent).toHaveLength(6);
 
     const snapshot = await ctx.object.fetch(
       new Request("https://ingest.internal/snapshot?from=NaN&to=NaN&limit=NaN"),

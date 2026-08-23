@@ -38,6 +38,7 @@ import {
   parseLimit,
   parseQueryLimit,
   parseWindow,
+  queryErrorResponse,
   resolveCrossBreakdownDimension,
   type ResponseContext,
 } from "./core";
@@ -70,7 +71,7 @@ async function executeTechnology<T>(
     },
     async () => ({ value: shape(await reader(window, filters)) }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 

@@ -23,6 +23,7 @@ import {
   parseLimit,
   parseQueryLimit,
   parseWindow,
+  queryErrorResponse,
   type ResponseContext,
 } from "./core";
 import { toQueryTime } from "./overview-contract-adapter";
@@ -112,7 +113,7 @@ export async function handlePagesContract(
     limit,
     includeDetails: parseBooleanFlag(url, "details"),
   });
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   const payload: Record<string, unknown> = {
     ok: true,
     data: mapPages([...result.data.items]),
@@ -135,7 +136,7 @@ export async function handlePagesContract(
         ),
       }),
     );
-    if (!tabsResult.ok) return badRequest(tabsResult.error.kind);
+    if (!tabsResult.ok) return queryErrorResponse(tabsResult.error);
     payload.tabs = {
       path: mapTabs(tabsResult.data.path),
       title: mapTabs(tabsResult.data.title),
@@ -168,7 +169,7 @@ export async function handleReferrersContract(
     limit: parseLimit(url, fallbackLimit, 200),
     includeFullUrl: allowFullUrlParam && parseBooleanFlag(url, "fullUrl"),
   });
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, {
     ok: true,
     data: mapReferrers([...result.data.items]),
@@ -211,6 +212,6 @@ export async function handlePagesDashboardContract(
       }),
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }

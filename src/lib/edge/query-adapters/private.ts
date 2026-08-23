@@ -5,6 +5,7 @@ import {
   parseInterval,
   parseWindow,
   PRIVATE_CACHE_HEADERS,
+  queryErrorResponse,
   type ResponseContext,
 } from "@/lib/edge/query/core";
 import { notFound } from "@/lib/edge/query/core";
@@ -523,7 +524,7 @@ export async function executePrivateTeamDashboard(
     },
   );
   if (!result.ok) {
-    return badRequest(result.error.kind);
+    return queryErrorResponse(result.error);
   }
   return jsonResponseWith(
     teamResponseContext(input)!,

@@ -14,6 +14,7 @@ import {
   parseLimit,
   parseListSearch,
   parseWindow,
+  queryErrorResponse,
   type ResponseContext,
   withoutFilterKey,
 } from "./core";
@@ -70,6 +71,6 @@ export async function handleFilterValuesContract(
       },
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }

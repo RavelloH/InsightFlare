@@ -28,6 +28,7 @@ import {
   parseListSearch,
   parseQueryLimit,
   parseWindow,
+  queryErrorResponse,
   type ResponseContext,
 } from "./core";
 import {
@@ -79,7 +80,7 @@ export async function handleEventTypesContract(
       ),
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
 
@@ -118,7 +119,7 @@ export async function handleEventsSummaryContract(
       };
     },
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 
@@ -155,7 +156,7 @@ export async function handleEventsTrendContract(
       },
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 
@@ -210,7 +211,7 @@ export async function handleEventRecordsContract(
       };
     },
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 
@@ -257,7 +258,7 @@ export async function handleEventFieldValuesContract(
       },
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 
@@ -343,7 +344,7 @@ export async function handleEventTypeFieldsContract(
       },
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 
@@ -387,7 +388,7 @@ export async function handleEventTypeContextContract(
       },
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 
@@ -482,7 +483,7 @@ export async function handleEventTypeDetailContract(
       };
     },
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 
@@ -508,6 +509,6 @@ export async function handleEventRecordDetailContract(
       value: await queryEventRecordDetailFromD1(env, siteId, eventId, window),
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }

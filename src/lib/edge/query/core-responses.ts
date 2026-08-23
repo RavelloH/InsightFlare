@@ -1,4 +1,7 @@
+import type { AnalyticsDomainError } from "@/lib/edge/query-contract";
 import {
+  bad as badRequest,
+  errorResponse,
   jsonResponse as createJsonResponse,
   type ResponseContext,
 } from "@/lib/response";
@@ -21,6 +24,13 @@ export {
   nf as notFound,
   una as unauthorized,
 } from "@/lib/response";
+
+export function queryErrorResponse(error: AnalyticsDomainError): Response {
+  if (error.kind === "internal") {
+    return errorResponse(null, 500, "internal", "Internal Server Error");
+  }
+  return badRequest(error.kind);
+}
 
 export function siteQueryHeaders(
   options: SiteQueryResponseOptions,

@@ -687,7 +687,7 @@ describe("edge team query coverage", () => {
         to: window.endExclusiveMs,
       }),
     );
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
       error: { code: "internal" },

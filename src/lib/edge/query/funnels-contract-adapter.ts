@@ -12,6 +12,7 @@ import {
   jsonResponseWith,
   notFound,
   parseWindow,
+  queryErrorResponse,
   type QueryWindow,
   type ResponseContext,
 } from "./core";
@@ -56,7 +57,7 @@ export async function handleFunnelAnalysisContract(
         value: { funnels: await queryFunnelDefinitions(env, siteId) },
       }),
     );
-    if (!result.ok) return badRequest(result.error.kind);
+    if (!result.ok) return queryErrorResponse(result.error);
     return jsonResponseWith(ctx!, { ok: true, ...result.data });
   }
   const window = parseWindow(url);
@@ -88,7 +89,7 @@ export async function handleFunnelAnalysisContract(
       };
     },
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   if (!result.data.funnel) return notFound();
   if (!result.data.analysis) return badRequest("Funnel has fewer than 2 steps");
   return jsonResponseWith(ctx!, {

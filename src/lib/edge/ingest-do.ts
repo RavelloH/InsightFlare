@@ -972,39 +972,7 @@ export class IngestDurableObject extends DurableObject {
           : "do.ingest.visibility_hidden_ignored",
       );
       if (rowsWritten > 0) {
-        await this.pushRealtimeRecord({
-          id: `visibility:${record.visitId}:${record.eventAt}:${record.visibilityState}`,
-          eventType: "visibility",
-          eventKind: "visibility",
-          eventAt: record.eventAt,
-          siteId: record.siteId,
-          traceId: record.traceId,
-          receivedAt: record.receivedAt,
-          visitId: record.visitId,
-          sessionId: "",
-          pathname: "",
-          hash: "",
-          title: "",
-          hostname: "",
-          referrerUrl: "",
-          referrerHost: "",
-          visitorId: "",
-          country: "",
-          region: "",
-          regionCode: "",
-          city: "",
-          continent: "",
-          timezone: "",
-          organization: "",
-          browser: "",
-          os: "",
-          osVersion: "",
-          deviceType: "",
-          language: "",
-          visibilityState: record.visibilityState,
-          latitude: null,
-          longitude: null,
-        });
+        await this.pushVisibilityRealtimeRecord(record);
       }
       return;
     }
@@ -1036,40 +1004,67 @@ export class IngestDurableObject extends DurableObject {
         : "do.ingest.visibility_visible_ignored",
     );
     if (rowsWritten > 0) {
-      await this.pushRealtimeRecord({
-        id: `visibility:${record.visitId}:${record.eventAt}:${record.visibilityState}`,
-        eventType: "visibility",
-        eventKind: "visibility",
-        eventAt: record.eventAt,
-        siteId: record.siteId,
-        traceId: record.traceId,
-        receivedAt: record.receivedAt,
-        visitId: record.visitId,
-        sessionId: "",
-        pathname: "",
-        hash: "",
-        title: "",
-        hostname: "",
-        referrerUrl: "",
-        referrerHost: "",
-        visitorId: "",
-        country: "",
-        region: "",
-        regionCode: "",
-        city: "",
-        continent: "",
-        timezone: "",
-        organization: "",
-        browser: "",
-        os: "",
-        osVersion: "",
-        deviceType: "",
-        language: "",
-        visibilityState: record.visibilityState,
-        latitude: null,
-        longitude: null,
-      });
+      await this.pushVisibilityRealtimeRecord(record);
     }
+  }
+
+  private async pushVisibilityRealtimeRecord(
+    record: NormalizedVisibility,
+  ): Promise<void> {
+    const visit = await this.getVisitContext(record.siteId, record.visitId);
+    if (!visit) return;
+
+    await this.pushRealtimeRecord({
+      id: `visibility:${record.visitId}:${record.eventAt}:${record.visibilityState}`,
+      eventType: "visibility",
+      eventKind: "visibility",
+      eventAt: record.eventAt,
+      siteId: record.siteId,
+      traceId: record.traceId,
+      receivedAt: record.receivedAt,
+      visitId: visit.visitId,
+      sessionId: visit.sessionId,
+      startedAt: visit.startedAt,
+      pathname: visit.pathname,
+      queryString: visit.queryString,
+      hash: visit.hashFragment,
+      title: visit.title,
+      hostname: visit.hostname,
+      referrerUrl: visit.referrerUrl,
+      referrerHost: visit.referrerHost,
+      utmSource: visit.utmSource,
+      utmMedium: visit.utmMedium,
+      utmCampaign: visit.utmCampaign,
+      utmTerm: visit.utmTerm,
+      utmContent: visit.utmContent,
+      visitorId: visit.visitorId,
+      userId: visit.userId,
+      userName: visit.userName,
+      isEU: visit.isEU,
+      country: visit.country,
+      region: visit.region,
+      regionCode: visit.regionCode,
+      city: visit.city,
+      continent: visit.continent,
+      postalCode: visit.postalCode,
+      metroCode: visit.metroCode,
+      timezone: visit.timezone,
+      organization: visit.asOrganization,
+      uaRaw: visit.uaRaw,
+      browser: visit.browser,
+      browserVersion: visit.browserVersion,
+      os: visit.os,
+      osVersion: visit.osVersion,
+      deviceType: visit.deviceType,
+      screenWidth: visit.screenWidth,
+      screenHeight: visit.screenHeight,
+      language: visit.language,
+      status: record.visibilityState === "hidden" ? "hidden_pending" : "open",
+      hiddenAt: record.visibilityState === "hidden" ? record.eventAt : null,
+      visibilityState: record.visibilityState,
+      latitude: visit.latitude,
+      longitude: visit.longitude,
+    });
   }
 
   private async attachPerformanceToVisit(

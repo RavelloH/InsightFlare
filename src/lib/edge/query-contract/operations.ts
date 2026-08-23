@@ -1,3 +1,8 @@
+import {
+  currentInvocationLogger,
+  errorLogData,
+} from "@/lib/edge/observability-logger";
+
 import { analyticsFilterRegistry } from "./filter-registry";
 import { assertFilterAudience, filterConditionCount } from "./filters";
 import { EMPTY_FILTER_DOCUMENT } from "./helpers";
@@ -76,14 +81,22 @@ export async function executeQueryOperation<T>(
   const filterError = validateQueryFilters(input.context, filters);
   if (filterError) return { ok: false, error: filterError };
 
-  const result = await reader();
-  return {
-    ok: true,
-    data: result.value,
-    meta: {
-      time: input.time,
-      source: result.source ?? "raw",
-      approximateVisitors: Boolean(result.approximateVisitors),
-    },
-  };
+  try {
+    const result = await reader();
+    return {
+      ok: true,
+      data: result.value,
+      meta: {
+        time: input.time,
+        source: result.source ?? "raw",
+        approximateVisitors: Boolean(result.approximateVisitors),
+      },
+    };
+  } catch (error) {
+    currentInvocationLogger()?.error("query.operation.failed", {
+      operation,
+      ...errorLogData(error),
+    });
+    return { ok: false, error: { kind: "internal", operation } };
+  }
 }

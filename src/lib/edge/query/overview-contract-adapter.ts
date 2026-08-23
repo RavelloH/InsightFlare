@@ -25,6 +25,7 @@ import {
   parseWindow,
   percentChange,
   previousComparableWindow,
+  queryErrorResponse,
   type ResponseContext,
 } from "./core";
 import {
@@ -188,7 +189,7 @@ export async function handleOverviewContract(
       detailInterval: includeDetail ? parseInterval(url) : undefined,
     },
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
 
   const current = aggregateMetrics(result.data.current);
   const payload: Record<string, unknown> = { ok: true, data: current };
@@ -240,7 +241,7 @@ export async function handleTrendContract(
       interval: parseInterval(url),
     },
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(
     ctx!,
     {

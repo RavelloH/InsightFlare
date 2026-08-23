@@ -11,6 +11,7 @@ import {
   parseInterval,
   parseLimit,
   parseWindow,
+  queryErrorResponse,
   type ResponseContext,
 } from "./core";
 import {
@@ -50,7 +51,7 @@ export async function handleRetentionContract(
       ),
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 
@@ -82,7 +83,7 @@ export async function handlePerformanceContract(
       ),
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, {
     ok: true,
     interval,

@@ -16,6 +16,7 @@ import {
   parseSessionListSort,
   parseVisitorListSort,
   parseWindow,
+  queryErrorResponse,
   type ResponseContext,
 } from "./core";
 import {
@@ -96,7 +97,7 @@ export async function handleVisitorsContract(
       };
     },
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 
@@ -163,7 +164,7 @@ export async function handleSessionsContract(
       };
     },
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
 
@@ -196,7 +197,7 @@ export async function handleVisitorDetailContract(
       ),
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
 
@@ -222,6 +223,6 @@ export async function handleSessionDetailContract(
       value: await querySessionDetailFromD1(env, siteId, sessionId),
     }),
   );
-  if (!result.ok) return badRequest(result.error.kind);
+  if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
