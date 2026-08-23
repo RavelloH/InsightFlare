@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  TRAFFIC_CHANNEL_IDS,
+  type TrafficChannelId,
+} from "@/lib/analytics/traffic-channel-rules";
 import type { OverviewTabRows } from "@/lib/dashboard/client-data";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 
-export type ReferrerTab = "domain" | "link";
+export type ReferrerTab = "domain" | "link" | "channel";
 
 export interface ReferrerBreakdownRow {
   key: string;
@@ -15,21 +19,24 @@ export interface ReferrerBreakdownRow {
   visitors: number;
   mono: boolean;
   isDirect: boolean;
+  channelId?: TrafficChannelId;
 }
 
 export interface ReferrerRowsByTab {
   domain: ReferrerBreakdownRow[];
   link: ReferrerBreakdownRow[];
+  channel: ReferrerBreakdownRow[];
 }
 
 export const DIRECT_REFERRER_FILTER_VALUE = "__direct__";
 
 export const REFERRER_FILTER_CONTROL_BY_TAB: Record<
   ReferrerTab,
-  "sourceDomain" | "sourceLink"
+  "sourceDomain" | "sourceLink" | "channel"
 > = {
   domain: "sourceDomain",
   link: "sourceLink",
+  channel: "channel",
 };
 
 const ABSOLUTE_URL_PATTERN = /^[a-z][a-z\d+\-.]*:\/\//i;
@@ -183,8 +190,10 @@ export function buildReferrerRowsByTab(
   rowsByTab: {
     domain: OverviewTabRows;
     link: OverviewTabRows;
+    channel: OverviewTabRows;
   },
   directLabel: string,
+  channelLabels: Record<TrafficChannelId, string>,
 ): ReferrerRowsByTab {
   return {
     domain: rowsByTab.domain.map((item, index) => {
@@ -218,6 +227,24 @@ export function buildReferrerRowsByTab(
         visitors: Math.max(0, Number(item.visitors ?? 0)),
         mono: true,
         isDirect: filterValue === DIRECT_REFERRER_FILTER_VALUE,
+      };
+    }),
+    channel: rowsByTab.channel.map((item, index) => {
+      const raw = String(item.label ?? "").trim();
+      const channelId = TRAFFIC_CHANNEL_IDS.includes(raw as TrafficChannelId)
+        ? (raw as TrafficChannelId)
+        : "other";
+      return {
+        key: `channel-${channelId}-${index}`,
+        label: channelLabels[channelId],
+        displayLabel: channelLabels[channelId],
+        filterValue: channelId,
+        targetUrl: null,
+        views: Math.max(0, Number(item.views ?? 0)),
+        visitors: Math.max(0, Number(item.visitors ?? 0)),
+        mono: false,
+        isDirect: channelId === "direct",
+        channelId,
       };
     }),
   };

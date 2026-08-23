@@ -74,6 +74,7 @@ import {
 } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import Image from "@/lib/image";
 import Link from "@/lib/router";
 import { usePathname } from "@/lib/router";
 
@@ -768,18 +769,29 @@ export function DashboardShell({
         initialWindow={initialQueryWindow}
       >
         <Sidebar variant="inset" collapsible="icon">
-          <SidebarHeader className={SIDEBAR_COLLAPSE_SECTION_CLASS}>
+          <SidebarHeader>
             <Link
               href="https://github.com/RavelloH/InsightFlare"
               target="_black"
+              className="block"
             >
-              <div className="py-2">
-                <p className="text-xl text-primary flex gap-2 items-center justify-center md:justify-start">
+              <div className="py-2 group-data-[collapsible=icon]:hidden">
+                <p className="flex items-center justify-center gap-2 text-xl text-primary md:justify-start">
                   <span>{messages.appName}</span>
                   <span className="text-muted-foreground">
                     {import.meta.env.VITE_DEMO_MODE === "1" ? "Demo" : "v1"}
                   </span>
                 </p>
+              </div>
+              <div className="hidden size-8 items-center justify-center group-data-[collapsible=icon]:flex">
+                <Image
+                  src="/android-chrome-192x192.png"
+                  alt={messages.appName}
+                  width={192}
+                  height={192}
+                  className="size-6"
+                  priority
+                />
               </div>
             </Link>
           </SidebarHeader>

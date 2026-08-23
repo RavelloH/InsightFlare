@@ -5,6 +5,7 @@ import { DashboardQueryProvider } from "@/components/dashboard/dashboard-query-p
 import { ShareHeader } from "@/components/dashboard/share-header";
 import { PageTransition } from "@/components/page-transition";
 import { publicDashboardSiteId } from "@/lib/dashboard/client-request";
+import { sharePath } from "@/lib/dashboard/share-path";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { usePathname } from "@/lib/router";
@@ -30,8 +31,7 @@ const SHARE_TABS = [
 ] as const;
 
 function shareTabHref(locale: Locale, slug: string, key: string): string {
-  const base = `/share/${encodeURIComponent(slug)}`;
-  return key === "overview" ? base : `${base}/${key}`;
+  return sharePath(locale, slug, key === "overview" ? undefined : key);
 }
 
 export function ShareDashboardShell({

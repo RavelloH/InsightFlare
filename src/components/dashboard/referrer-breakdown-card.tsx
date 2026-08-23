@@ -45,9 +45,8 @@ interface ReferrerBreakdownCardProps {
   filters: FilterDocument;
   rowsByTab: ReferrerRowsByTab;
   loading: boolean;
+  showSourceLinkTab?: boolean;
 }
-
-const REFERRER_TABS = ["domain", "link"] as const satisfies ReferrerTab[];
 
 export function ReferrerBreakdownCard({
   locale,
@@ -56,6 +55,7 @@ export function ReferrerBreakdownCard({
   filters,
   rowsByTab,
   loading,
+  showSourceLinkTab = true,
 }: ReferrerBreakdownCardProps) {
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
@@ -71,8 +71,15 @@ export function ReferrerBreakdownCard({
         label: messages.overview.sourceLinkTab,
         columnLabel: messages.overview.sourceLinkColumn,
       },
+      channel: {
+        value: "channel",
+        label: messages.overview.channelTab,
+        columnLabel: messages.overview.channelColumn,
+      },
     }),
     [
+      messages.overview.channelColumn,
+      messages.overview.channelTab,
       messages.overview.sourceDomainColumn,
       messages.overview.sourceLinkColumn,
       messages.overview.sourceLinkTab,
@@ -106,6 +113,7 @@ export function ReferrerBreakdownCard({
     () => ({
       domain: loading,
       link: loading,
+      channel: loading,
     }),
     [loading],
   );
@@ -116,6 +124,9 @@ export function ReferrerBreakdownCard({
         null,
       link:
         dashboardFilterValue(filters, REFERRER_FILTER_CONTROL_BY_TAB.link) ??
+        null,
+      channel:
+        dashboardFilterValue(filters, REFERRER_FILTER_CONTROL_BY_TAB.channel) ??
         null,
     }),
     [filters],
@@ -151,6 +162,113 @@ export function ReferrerBreakdownCard({
     globalThis.window.open(url, "_blank", "noopener,noreferrer");
   }
 
+  const sourceTabs = (
+    showSourceLinkTab ? [tabMeta.domain, tabMeta.link] : [tabMeta.domain]
+  ) as [TabbedDataTableTab<ReferrerTab>, ...TabbedDataTableTab<ReferrerTab>[]];
+  const channelTabs = [tabMeta.channel] as [
+    TabbedDataTableTab<ReferrerTab>,
+    ...TabbedDataTableTab<ReferrerTab>[],
+  ];
+  const rowAdapter = {
+    renderLabel: (
+      row: ReferrerBreakdownRow,
+      { tab: activeTab }: { tab: ReferrerTab },
+    ) => {
+      const displayLabel = row.displayLabel ?? row.label;
+      return (
+        <span
+          className={cn(
+            "inline-flex items-center gap-2 break-words",
+            row.mono && "font-mono",
+          )}
+        >
+          <LabelWithOptionalIcon
+            label={displayLabel}
+            iconLabel={row.label}
+            showIcon={activeTab !== "channel"}
+            unknownLabel={messages.overview.direct}
+          />
+          {row.targetUrl ? (
+            <Clickable
+              className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+              onClick={(event) => openTarget(row.targetUrl!, event)}
+              aria-label={displayLabel}
+              title={displayLabel}
+            >
+              {activeTab === "link" ? (
+                <RiArrowRightUpLine size="1.4em" />
+              ) : (
+                <RiSearchLine size="1.2em" />
+              )}
+            </Clickable>
+          ) : null}
+        </span>
+      );
+    },
+    getSearchText: (row: ReferrerBreakdownRow) => row.label,
+    getExportLabel: (row: ReferrerBreakdownRow) => row.label,
+    getActive: (row: ReferrerBreakdownRow, activeTab: ReferrerTab) =>
+      activeFilterValueByTab[activeTab] === row.filterValue,
+    getInteractive: () => true,
+    onClick: (
+      row: ReferrerBreakdownRow,
+      { tab: activeTab }: { tab: ReferrerTab },
+    ) => toggleRowFilter(activeTab, row.filterValue),
+  };
+  const filterRows = (
+    rows: readonly ReferrerBreakdownRow[],
+    activeTab: ReferrerTab,
+  ) => {
+    const activeValue = activeFilterValueByTab[activeTab];
+    return activeValue
+      ? rows.filter((row) => row.filterValue === activeValue)
+      : [...rows];
+  };
+  const compareRows = (
+    left: ReferrerBreakdownRow,
+    right: ReferrerBreakdownRow,
+    { sort }: { sort: { key: ReferrerSortKey; direction: "asc" | "desc" } },
+  ) => {
+    const primary =
+      (left[sort.key] - right[sort.key]) * (sort.direction === "asc" ? 1 : -1);
+    if (primary !== 0) return primary;
+    if (right.views !== left.views) return right.views - left.views;
+    if (right.visitors !== left.visitors) return right.visitors - left.visitors;
+    return (left.displayLabel ?? left.label).localeCompare(
+      right.displayLabel ?? right.label,
+    );
+  };
+  const search = {
+    actionLabel: messages.common.search,
+    placeholder: (activeTab: TabbedDataTableTab<ReferrerTab>) =>
+      formatI18nTemplate(messages.overview.searchInTab, {
+        tab: activeTab.label,
+      }),
+  };
+  const renderTable = (
+    tabs: [
+      TabbedDataTableTab<ReferrerTab>,
+      ...TabbedDataTableTab<ReferrerTab>[],
+    ],
+  ) => (
+    <TabbedDataTableCard<ReferrerTab, ReferrerBreakdownRow, ReferrerSortKey>
+      tabs={tabs}
+      rowsByTab={rowsByTab}
+      loadingByTab={loadingByTab}
+      columns={columns}
+      rowAdapter={rowAdapter}
+      filterRows={filterRows}
+      compareRows={compareRows}
+      loadingLabel={messages.common.loading}
+      emptyLabel={messages.common.noData}
+      className="h-full min-h-[420px]"
+      search={search}
+      export={{
+        labels: messages.common.tableExport,
+      }}
+    />
+  );
+
   return (
     <section className="space-y-3">
       <div className="space-y-1">
@@ -161,93 +279,8 @@ export function ReferrerBreakdownCard({
       </div>
 
       <div className="grid items-stretch gap-6 lg:grid-cols-2">
-        {REFERRER_TABS.map((tab) => (
-          <div key={tab} className="h-full min-w-0">
-            <TabbedDataTableCard<
-              ReferrerTab,
-              ReferrerBreakdownRow,
-              ReferrerSortKey
-            >
-              tabs={[tabMeta[tab]]}
-              rowsByTab={rowsByTab}
-              loadingByTab={loadingByTab}
-              columns={columns}
-              rowAdapter={{
-                renderLabel: (row, { tab: activeTab }) => {
-                  const displayLabel = row.displayLabel ?? row.label;
-                  return (
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-2 break-words",
-                        row.mono && "font-mono",
-                      )}
-                    >
-                      <LabelWithOptionalIcon
-                        label={displayLabel}
-                        iconLabel={row.label}
-                        showIcon
-                        unknownLabel={messages.overview.direct}
-                      />
-                      {row.targetUrl ? (
-                        <Clickable
-                          className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
-                          onClick={(event) => openTarget(row.targetUrl!, event)}
-                          aria-label={displayLabel}
-                          title={displayLabel}
-                        >
-                          {activeTab === "link" ? (
-                            <RiArrowRightUpLine size="1.4em" />
-                          ) : (
-                            <RiSearchLine size="1.2em" />
-                          )}
-                        </Clickable>
-                      ) : null}
-                    </span>
-                  );
-                },
-                getSearchText: (row) => row.label,
-                getExportLabel: (row) => row.label,
-                getActive: (row, activeTab) =>
-                  activeFilterValueByTab[activeTab] === row.filterValue,
-                getInteractive: () => true,
-                onClick: (row, { tab: activeTab }) =>
-                  toggleRowFilter(activeTab, row.filterValue),
-              }}
-              filterRows={(rows, activeTab) => {
-                const activeValue = activeFilterValueByTab[activeTab];
-                return activeValue
-                  ? rows.filter((row) => row.filterValue === activeValue)
-                  : [...rows];
-              }}
-              compareRows={(left, right, { sort }) => {
-                const primary =
-                  (left[sort.key] - right[sort.key]) *
-                  (sort.direction === "asc" ? 1 : -1);
-                if (primary !== 0) return primary;
-                if (right.views !== left.views) return right.views - left.views;
-                if (right.visitors !== left.visitors) {
-                  return right.visitors - left.visitors;
-                }
-                return (left.displayLabel ?? left.label).localeCompare(
-                  right.displayLabel ?? right.label,
-                );
-              }}
-              loadingLabel={messages.common.loading}
-              emptyLabel={messages.common.noData}
-              className="h-full min-h-[420px]"
-              search={{
-                actionLabel: messages.common.search,
-                placeholder: (activeTab) =>
-                  formatI18nTemplate(messages.overview.searchInTab, {
-                    tab: activeTab.label,
-                  }),
-              }}
-              export={{
-                labels: messages.common.tableExport,
-              }}
-            />
-          </div>
-        ))}
+        <div className="h-full min-w-0">{renderTable(sourceTabs)}</div>
+        <div className="h-full min-w-0">{renderTable(channelTabs)}</div>
       </div>
     </section>
   );

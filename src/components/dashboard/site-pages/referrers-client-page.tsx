@@ -22,6 +22,7 @@ interface ReferrersClientPageProps {
   messages: AppMessages;
   siteId: string;
   pathname: string;
+  showSourceLinkTab?: boolean;
 }
 
 const EMPTY_ROWS: OverviewTabRows = [];
@@ -31,6 +32,7 @@ export function ReferrersClientPage({
   messages,
   siteId,
   pathname,
+  showSourceLinkTab = true,
 }: ReferrersClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
     filters: FilterDocument;
@@ -54,6 +56,7 @@ export function ReferrersClientPage({
       "dashboard",
       "referrer-breakdown",
       siteId,
+      showSourceLinkTab,
       window.from,
       window.to,
       window.interval,
@@ -61,7 +64,7 @@ export function ReferrersClientPage({
       filtersKey,
     ],
     queryFn: async ({ signal }) => {
-      const [domain, link] = await Promise.all([
+      const [domain, link, channel] = await Promise.all([
         fetchOverviewSourceCardTab(
           siteId,
           requestWindow,
@@ -69,15 +72,24 @@ export function ReferrersClientPage({
           requestFilters,
           { limit: 100, signal },
         ),
+        showSourceLinkTab
+          ? fetchOverviewSourceCardTab(
+              siteId,
+              requestWindow,
+              "link",
+              requestFilters,
+              { limit: 100, signal },
+            )
+          : Promise.resolve(EMPTY_ROWS),
         fetchOverviewSourceCardTab(
           siteId,
           requestWindow,
-          "link",
+          "channel",
           requestFilters,
           { limit: 100, signal },
         ),
       ]);
-      return { domain, link };
+      return { domain, link, channel };
     },
     placeholderData: keepPreviousData,
     enabled: typeof window !== "undefined",
@@ -85,11 +97,21 @@ export function ReferrersClientPage({
   const resolvedRowsByTab = rowsByTab ?? {
     domain: EMPTY_ROWS,
     link: EMPTY_ROWS,
+    channel: EMPTY_ROWS,
   };
 
   const normalizedRowsByTab = useMemo(
-    () => buildReferrerRowsByTab(resolvedRowsByTab, messages.overview.direct),
-    [messages.overview.direct, resolvedRowsByTab],
+    () =>
+      buildReferrerRowsByTab(
+        resolvedRowsByTab,
+        messages.overview.direct,
+        messages.overview.channelLabels,
+      ),
+    [
+      messages.overview.channelLabels,
+      messages.overview.direct,
+      resolvedRowsByTab,
+    ],
   );
 
   return (
@@ -130,6 +152,7 @@ export function ReferrersClientPage({
         filters={requestFilters}
         rowsByTab={normalizedRowsByTab}
         loading={loading}
+        showSourceLinkTab={showSourceLinkTab}
       />
     </div>
   );

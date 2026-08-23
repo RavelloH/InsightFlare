@@ -14,6 +14,7 @@ function Page() {
       messages={messages}
       siteId={c.publicSiteId}
       pathname={sharePath(locale, slug, "referrers")}
+      showSourceLinkTab={false}
     />
   );
 }
