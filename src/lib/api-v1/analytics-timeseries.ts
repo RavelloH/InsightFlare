@@ -10,7 +10,7 @@ import {
 import { SiteTimeseriesQueryDtoSchema } from "@/lib/api-v1/dto/analytics";
 import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/query-context";
-import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import type {
   AnalyticsServiceResult,
   QueryExecutionContext,
@@ -27,7 +27,7 @@ export async function executeApiV1SiteTimeseries(
   input: unknown,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: TypedApplicationProviderRegistry,
+  providerRegistry: AnalyticsProviderRegistry,
   executionContext: QueryExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<

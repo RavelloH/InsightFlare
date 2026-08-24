@@ -3,7 +3,7 @@ import { type Context, Hono } from "hono";
 import {
   getRequestId,
   resolvePrivateSiteForSession,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
+} from "@/lib/edge/analytics/composition/d1-contract-adapters";
 import { handleSavedFilters } from "@/lib/edge/saved-filters";
 import type { AppEnv } from "@/lib/hono/types";
 import { requestUrl } from "@/lib/hono/utils/context";
@@ -24,7 +24,7 @@ async function savedFiltersRoute(c: Context<AppEnv>) {
   if (site instanceof Response) return site;
   if (isDemoBuild) {
     const { executeDemoQuery } =
-      await import("@/lib/edge/analytics/providers/mock/demo-query");
+      await import("@/lib/edge/analytics/composition/mock-provider");
     return executeDemoQuery({
       request: c.req.raw,
       url: requestUrl(c),

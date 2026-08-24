@@ -7,7 +7,7 @@ import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-applicati
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
 import { exceedsQueryCost } from "@/lib/edge/analytics/application/cost";
-import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
   type FilterDocument,
   isReportingTimeZone,
@@ -115,7 +115,7 @@ function filter(input: TeamTimeseriesQueryDto): FilterDocument | null {
 export async function handlePlannedTeamTimeseries(
   request: Request,
   principal: ApiKeyPrincipal,
-  providerRegistry: TypedApplicationProviderRegistry,
+  providerRegistry: AnalyticsProviderRegistry,
   executionContext: {
     readonly signal?: AbortSignal;
     readonly deadlineMs?: number;

@@ -6,7 +6,7 @@ import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
-import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
   type FilterDocument,
   isReportingTimeZone,
@@ -114,7 +114,7 @@ function filter(input: TeamSitesQueryDto): FilterDocument | null {
 export async function handlePlannedTeamSites(
   request: Request,
   principal: ApiKeyPrincipal,
-  providerRegistry: TypedApplicationProviderRegistry,
+  providerRegistry: AnalyticsProviderRegistry,
   executionContext: {
     readonly signal?: AbortSignal;
     readonly deadlineMs?: number;

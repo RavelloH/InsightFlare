@@ -23,12 +23,9 @@ const mocks = vi.hoisted(() => ({
   readSiteBreakdown: vi.fn(),
 }));
 
-vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
-  () => ({
-    createOverviewReader: mocks.createOverviewReader,
-  }),
-);
+vi.mock("@/lib/edge/analytics/providers/d1/operations/overview-reader", () => ({
+  createOverviewReader: mocks.createOverviewReader,
+}));
 vi.mock("@/lib/edge/analytics/providers/d1/internal/events-summary", () => ({
   queryEventSummaryMetricsFromD1: mocks.queryEventSummaryMetricsFromD1,
 }));

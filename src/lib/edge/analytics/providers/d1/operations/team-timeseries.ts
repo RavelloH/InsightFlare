@@ -1,22 +1,17 @@
 import "@tanstack/react-start/server-only";
 
-import type { QuerySource } from "@/lib/edge/analytics/contract";
-import {
-  assertFilterAudience,
-  assertOperationAllowed,
-  type FilterDocument,
-  teamQueryContext,
-  type TrendPoint,
-  type TrendResult,
-  validateTypedQueryFilters,
+import type {
+  FilterDocument,
+  QuerySource,
+  TrendPoint,
+  TrendResult,
 } from "@/lib/edge/analytics/contract";
-import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
 import {
   createOverviewReader,
   toQueryTime,
-} from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
-import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
+} from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 
 export interface ReadTeamTimeseriesInput {
@@ -64,25 +59,6 @@ function mergePoints(points: readonly TrendPoint[]): readonly TrendPoint[] {
 export async function readTeamTimeseries(
   input: ReadTeamTimeseriesInput,
 ): Promise<TeamTimeseriesQueryResult> {
-  const context = teamQueryContext(
-    input.teamId,
-    "api-v1",
-    input.allowedSiteIds,
-  );
-  const operationError = assertOperationAllowed(context, "trend");
-  if (operationError) throw new Error(operationError.kind);
-  const filterError = validateTypedQueryFilters(context, input.filters);
-  if (filterError) throw new Error(filterError.kind);
-  try {
-    assertFilterAudience(
-      input.filters,
-      analyticsFilterRegistry,
-      context.policy.audience,
-    );
-  } catch {
-    throw new Error("invalid-input");
-  }
-
   const allowed = input.allowedSiteIds ? new Set(input.allowedSiteIds) : null;
   const sites = (await listTeamSites(input.env, input.teamId)).filter(
     (site) => !allowed || allowed.has(site.id),
@@ -91,7 +67,6 @@ export async function readTeamTimeseries(
   const results = await Promise.all(
     sites.map((site) =>
       createOverviewReader(input.env, site.id).readTrend({
-        context,
         time,
         filters: input.filters,
         interval: input.interval,

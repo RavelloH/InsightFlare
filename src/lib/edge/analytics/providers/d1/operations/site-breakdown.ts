@@ -1,15 +1,9 @@
 import "@tanstack/react-start/server-only";
 
 import {
-  assertFilterAudience,
-  assertOperationAllowed,
   type BreakdownResult,
   type FilterDocument,
-  type QueryContext,
-  siteQueryContext,
-  validateTypedQueryFilters,
 } from "@/lib/edge/analytics/contract";
-import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
@@ -26,8 +20,6 @@ export interface ReadSiteBreakdownInput {
   readonly dimension: string;
   readonly limit: number;
   readonly filters: FilterDocument;
-  /** The adapter policy; defaults to the API v1 compatibility policy. */
-  readonly context?: QueryContext;
 }
 
 function unsupportedDimension(dimension: string): never {
@@ -38,21 +30,6 @@ function unsupportedDimension(dimension: string): never {
 export async function readSiteBreakdown(
   input: ReadSiteBreakdownInput,
 ): Promise<BreakdownResult> {
-  const context = input.context ?? siteQueryContext(input.siteId, "api-v1");
-  const operationError = assertOperationAllowed(context, "dimension");
-  if (operationError) throw new Error(operationError.kind);
-  const filterError = validateTypedQueryFilters(context, input.filters);
-  if (filterError) throw new Error(filterError.kind);
-  try {
-    assertFilterAudience(
-      input.filters,
-      analyticsFilterRegistry,
-      context.policy.audience,
-    );
-  } catch {
-    throw new Error("invalid-input");
-  }
-
   const rows =
     input.dimension === "session.entryPath"
       ? await querySessionBoundaryDimensionFromD1(

@@ -3,30 +3,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
   listTeamSites: vi.fn(),
 }));
-vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
-  () => ({
-    createOverviewReader: vi.fn(),
-    toQueryTime: vi.fn(
-      (window: {
-        startMs: number;
-        endExclusiveMs: number;
-        nowMs: number;
-        timeZone: string;
-      }) => ({
-        range: {
-          startMs: window.startMs,
-          endExclusiveMs: window.endExclusiveMs,
-        },
-        reportingTimeZone: window.timeZone,
-        capturedAtMs: window.nowMs,
-      }),
-    ),
-  }),
-);
+vi.mock("@/lib/edge/analytics/providers/d1/operations/overview-reader", () => ({
+  createOverviewReader: vi.fn(),
+  toQueryTime: vi.fn(
+    (window: {
+      startMs: number;
+      endExclusiveMs: number;
+      nowMs: number;
+      timeZone: string;
+    }) => ({
+      range: {
+        startMs: window.startMs,
+        endExclusiveMs: window.endExclusiveMs,
+      },
+      reportingTimeZone: window.timeZone,
+      capturedAtMs: window.nowMs,
+    }),
+  ),
+}));
 
-import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
 import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
+import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import { readTeamTimeseries } from "@/lib/edge/analytics/providers/d1/operations/team-timeseries";
 
 const input = {

@@ -1,10 +1,7 @@
 import type { OperationResultCache } from "@/lib/edge/analytics/application/cache";
 import type { OperationCachePolicy } from "@/lib/edge/analytics/application/cache";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
-import {
-  type AnalyticsOperationProvider,
-  AnalyticsProviderRegistry,
-} from "@/lib/edge/analytics/application/provider-registry";
+import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
 import {
   type AnalyticsServiceResult,
@@ -107,19 +104,6 @@ export async function executeApiV1Query<Query, Result>(
   invocation: ApiV1QueryInvocation<Query, Result>,
   executionContext: QueryExecutionContext,
 ): Promise<AnalyticsServiceResult<Result>> {
-  const provider = invocation.providerRegistry.resolve<Query, Result>(
-    invocation.operation,
-  ) as AnalyticsOperationProvider<Query, Result> | undefined;
-  if (!provider) {
-    return {
-      ok: false,
-      error: {
-        kind: "operation-not-allowed",
-        operation: invocation.operation,
-      },
-    };
-  }
-
   const time = queryTime(invocation.query, executionContext);
   if (!time) {
     return {
@@ -132,29 +116,27 @@ export async function executeApiV1Query<Query, Result>(
   }
 
   const operation = canonicalQueryOperationFor(invocation.operation);
+  if (!invocation.providerRegistry.resolve<Result>(operation)) {
+    return {
+      ok: false,
+      error: {
+        kind: "operation-not-allowed",
+        operation: invocation.operation,
+      },
+    };
+  }
   const query = {
     ...invocation.query,
     context: invocation.context,
     time,
   } as QueryInput;
-  const registry = new AnalyticsProviderRegistry().registerQuery(operation, {
-    execute: async (input) => ({
-      value: await provider.execute({
-        operation: invocation.operation,
-        context: invocation.context,
-        query: input as Query,
-        execution: executionContext,
-      }),
-    }),
-  });
   let providerError: unknown;
   const result = await new TypedQueryApplicationService(cache).execute(
     {
       kind: "typed-query",
       operation,
       query,
-      providerRegistry: registry,
-      resultMode: "value",
+      providerRegistry: invocation.providerRegistry,
       cache: invocation.cache,
     },
     {

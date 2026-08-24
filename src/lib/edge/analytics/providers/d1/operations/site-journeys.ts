@@ -2,15 +2,9 @@ import "@tanstack/react-start/server-only";
 
 import {
   analyticsFilterRegistry,
-  assertFilterAudience,
-  createTypedQueryProviderRegistry,
-  executeTypedApplicationOperation,
   type FilterDocument,
   filterFingerprint,
-  siteQueryContext,
-  validateTypedQueryFilters,
 } from "@/lib/edge/analytics/contract";
-import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { mapVisitors } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
 import {
@@ -38,48 +32,10 @@ interface JourneyDetailInput {
   readonly window: QueryWindow;
 }
 
-function base(input: JourneyDetailInput) {
-  return {
-    context: siteQueryContext(input.siteId, "api-v1"),
-    time: createQueryTime(
-      input.window.startMs,
-      input.window.endExclusiveMs,
-      input.window.timeZone,
-      input.window.nowMs,
-    ),
-    filters: { version: 1 as const, root: null },
-  };
-}
-
 interface JourneySearchInput extends JourneyDetailInput {
   readonly filters: FilterDocument;
   readonly search?: string;
   readonly page: { readonly limit: number; readonly cursor?: string | null };
-}
-
-function searchBase(input: JourneySearchInput) {
-  const context = siteQueryContext(input.siteId, "api-v1");
-  const filterError = validateTypedQueryFilters(context, input.filters);
-  if (filterError) throw new Error(filterError.kind);
-  try {
-    assertFilterAudience(
-      input.filters,
-      analyticsFilterRegistry,
-      context.policy.audience,
-    );
-  } catch {
-    throw new Error("invalid-input");
-  }
-  return {
-    context,
-    time: createQueryTime(
-      input.window.startMs,
-      input.window.endExclusiveMs,
-      input.window.timeZone,
-      input.window.nowMs,
-    ),
-    filters: input.filters,
-  };
 }
 
 function base64Url(value: Uint8Array): string {
@@ -182,46 +138,28 @@ async function encodeCursor(
 export async function readSiteVisitorDetail(
   input: JourneyDetailInput & { readonly visitorId: string },
 ) {
-  const result = await executeTypedApplicationOperation<
-    Awaited<ReturnType<typeof queryVisitorDetailFromD1>>
-  >(
-    "visitor-detail",
-    base(input),
-    createTypedQueryProviderRegistry("visitor-detail", async () => ({
-      value: await queryVisitorDetailFromD1(
-        input.env,
-        input.siteId,
-        input.visitorId,
-        input.window.timeZone,
-        input.window,
-      ),
-    })),
+  const result = await queryVisitorDetailFromD1(
+    input.env,
+    input.siteId,
+    input.visitorId,
+    input.window.timeZone,
+    input.window,
   );
-  if (!result.ok) throw new Error(result.error.kind);
-  if (!result.data) throw new Error("resource-not-found");
-  return result.data;
+  if (!result) throw new Error("resource-not-found");
+  return result;
 }
 
 export async function readSiteSessionDetail(
   input: JourneyDetailInput & { readonly sessionId: string },
 ) {
-  const result = await executeTypedApplicationOperation<
-    Awaited<ReturnType<typeof querySessionDetailFromD1>>
-  >(
-    "session-detail",
-    base(input),
-    createTypedQueryProviderRegistry("session-detail", async () => ({
-      value: await querySessionDetailFromD1(
-        input.env,
-        input.siteId,
-        input.sessionId,
-        input.window,
-      ),
-    })),
+  const result = await querySessionDetailFromD1(
+    input.env,
+    input.siteId,
+    input.sessionId,
+    input.window,
   );
-  if (!result.ok) throw new Error(result.error.kind);
-  if (!result.data) throw new Error("resource-not-found");
-  return result.data;
+  if (!result) throw new Error("resource-not-found");
+  return result;
 }
 
 export async function readSiteVisitors(
@@ -240,45 +178,28 @@ export async function readSiteVisitors(
   const rawCursor = await decodeCursor(input, "visitors", input.sort);
   const cursor = rawCursor ? parseVisitorListCursor(rawCursor, sort) : null;
   if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
-  const result = await executeTypedApplicationOperation<{
-    readonly items: ReturnType<typeof mapVisitors>;
-    readonly page: {
-      readonly limit: number;
-      readonly hasMore: boolean;
-      readonly nextCursor: string | null;
-    };
-  }>(
-    "visitors",
-    searchBase(input),
-    createTypedQueryProviderRegistry("visitors", async () => {
-      const page = await queryVisitorListPageFromD1(
-        input.env,
-        input.siteId,
-        input.window,
-        input.filters,
-        { pageSize: input.page.limit, sort, search: input.search, cursor },
-      );
-      return {
-        value: {
-          items: mapVisitors(page.rows),
-          page: {
-            limit: input.page.limit,
-            hasMore: page.nextCursor !== null,
-            nextCursor: page.nextCursor
-              ? await encodeCursor(
-                  input,
-                  "visitors",
-                  input.sort,
-                  serializeVisitorListCursor(page.nextCursor),
-                )
-              : null,
-          },
-        },
-      };
-    }),
+  const page = await queryVisitorListPageFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    { pageSize: input.page.limit, sort, search: input.search, cursor },
   );
-  if (!result.ok) throw new Error(result.error.kind);
-  return result.data;
+  return {
+    items: mapVisitors(page.rows),
+    page: {
+      limit: input.page.limit,
+      hasMore: page.nextCursor !== null,
+      nextCursor: page.nextCursor
+        ? await encodeCursor(
+            input,
+            "visitors",
+            input.sort,
+            serializeVisitorListCursor(page.nextCursor),
+          )
+        : null,
+    },
+  };
 }
 
 export async function readSiteSessions(
@@ -297,47 +218,28 @@ export async function readSiteSessions(
   const rawCursor = await decodeCursor(input, "sessions", input.sort);
   const cursor = rawCursor ? parseSessionListCursor(rawCursor, sort) : null;
   if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
-  const result = await executeTypedApplicationOperation<{
-    readonly items: Awaited<
-      ReturnType<typeof querySessionListPageFromD1>
-    >["rows"];
-    readonly page: {
-      readonly limit: number;
-      readonly hasMore: boolean;
-      readonly nextCursor: string | null;
-    };
-  }>(
-    "sessions",
-    searchBase(input),
-    createTypedQueryProviderRegistry("sessions", async () => {
-      const page = await querySessionListPageFromD1(
-        input.env,
-        input.siteId,
-        input.window,
-        input.filters,
-        { pageSize: input.page.limit, sort, search: input.search, cursor },
-      );
-      return {
-        value: {
-          items: page.rows,
-          page: {
-            limit: input.page.limit,
-            hasMore: page.nextCursor !== null,
-            nextCursor: page.nextCursor
-              ? await encodeCursor(
-                  input,
-                  "sessions",
-                  input.sort,
-                  serializeSessionListCursor(page.nextCursor),
-                )
-              : null,
-          },
-        },
-      };
-    }),
+  const page = await querySessionListPageFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    { pageSize: input.page.limit, sort, search: input.search, cursor },
   );
-  if (!result.ok) throw new Error(result.error.kind);
-  return result.data;
+  return {
+    items: page.rows,
+    page: {
+      limit: input.page.limit,
+      hasMore: page.nextCursor !== null,
+      nextCursor: page.nextCursor
+        ? await encodeCursor(
+            input,
+            "sessions",
+            input.sort,
+            serializeSessionListCursor(page.nextCursor),
+          )
+        : null,
+    },
+  };
 }
 
 interface JourneyTrajectoryInput extends JourneySearchInput {
@@ -364,28 +266,16 @@ async function readJourneyEvents(
   input: JourneyTrajectoryInput,
   target: { readonly type: "visitor" | "session"; readonly value: string },
 ) {
-  const query = searchBase(input);
   await assertJourneyTargetInWindow(input, target);
-  const result = await executeTypedApplicationOperation<{
-    readonly items: Awaited<ReturnType<typeof queryJourneyEventsFromD1>>;
-  }>(
-    "event-records",
-    query,
-    createTypedQueryProviderRegistry("event-records", async () => ({
-      value: {
-        items: await queryJourneyEventsFromD1(
-          input.env,
-          input.siteId,
-          input.window,
-          input.filters,
-          target,
-          input.limit,
-        ),
-      },
-    })),
+  const items = await queryJourneyEventsFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    target,
+    input.limit,
   );
-  if (!result.ok) throw new Error(result.error.kind);
-  return result.data;
+  return { items };
 }
 
 export function readSiteVisitorEvents(
@@ -404,26 +294,14 @@ export async function readSiteVisitorSessions(
   input: JourneyTrajectoryInput & { readonly visitorId: string },
 ) {
   const target = { type: "visitor" as const, value: input.visitorId };
-  const query = searchBase(input);
   await assertJourneyTargetInWindow(input, target);
-  const result = await executeTypedApplicationOperation<{
-    readonly items: Awaited<ReturnType<typeof querySessionsFromD1>>;
-  }>(
-    "sessions",
-    query,
-    createTypedQueryProviderRegistry("sessions", async () => ({
-      value: {
-        items: await querySessionsFromD1(
-          input.env,
-          input.siteId,
-          input.window,
-          input.filters,
-          input.limit,
-          target,
-        ),
-      },
-    })),
+  const items = await querySessionsFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    input.limit,
+    target,
   );
-  if (!result.ok) throw new Error(result.error.kind);
-  return result.data;
+  return { items };
 }

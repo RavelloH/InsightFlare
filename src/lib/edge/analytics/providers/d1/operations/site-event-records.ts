@@ -2,15 +2,9 @@ import "@tanstack/react-start/server-only";
 
 import {
   analyticsFilterRegistry,
-  assertFilterAudience,
-  createTypedQueryProviderRegistry,
-  executeTypedApplicationOperation,
   type FilterDocument,
   filterFingerprint,
-  siteQueryContext,
-  validateTypedQueryFilters,
 } from "@/lib/edge/analytics/contract";
-import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { mapEventRecord } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
 import {
@@ -137,33 +131,6 @@ async function encodeCursor(
   return `${payload}.${await sign(secret, payload)}`;
 }
 
-function inputBase(
-  input: Pick<ReadSiteEventRecordsInput, "siteId" | "window" | "filters">,
-) {
-  const context = siteQueryContext(input.siteId, "api-v1");
-  const filterError = validateTypedQueryFilters(context, input.filters);
-  if (filterError) throw new Error(filterError.kind);
-  try {
-    assertFilterAudience(
-      input.filters,
-      analyticsFilterRegistry,
-      context.policy.audience,
-    );
-  } catch {
-    throw new Error("invalid-input");
-  }
-  return {
-    context,
-    time: createQueryTime(
-      input.window.startMs,
-      input.window.endExclusiveMs,
-      input.window.timeZone,
-      input.window.nowMs,
-    ),
-    filters: input.filters,
-  };
-}
-
 export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
   const sort = {
     key: input.sort.field,
@@ -173,42 +140,29 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
   const rawCursor = await decodeCursor(input);
   const cursor = rawCursor ? parseEventRecordCursor(rawCursor, sort) : null;
   if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
-  const result = await executeTypedApplicationOperation<EventRecordPageResult>(
-    "event-records",
-    inputBase(input),
-    createTypedQueryProviderRegistry("event-records", async () => {
-      const page = await queryEventRecordPageFromD1(
-        input.env,
-        input.siteId,
-        input.window,
-        input.filters,
-        {
-          pageSize: input.page.limit,
-          sort,
-          search: input.search,
-          eventName: input.eventName,
-          cursor,
-        },
-      );
-      return {
-        value: {
-          items: page.rows.map(mapEventRecord),
-          page: {
-            limit: input.page.limit,
-            hasMore: page.nextCursor !== null,
-            nextCursor: page.nextCursor
-              ? await encodeCursor(
-                  input,
-                  serializeEventRecordCursor(page.nextCursor),
-                )
-              : null,
-          },
-        },
-      };
-    }),
+  const page = await queryEventRecordPageFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    {
+      pageSize: input.page.limit,
+      sort,
+      search: input.search,
+      eventName: input.eventName,
+      cursor,
+    },
   );
-  if (!result.ok) throw new Error(result.error.kind);
-  return result.data;
+  return {
+    items: page.rows.map(mapEventRecord),
+    page: {
+      limit: input.page.limit,
+      hasMore: page.nextCursor !== null,
+      nextCursor: page.nextCursor
+        ? await encodeCursor(input, serializeEventRecordCursor(page.nextCursor))
+        : null,
+    },
+  } satisfies EventRecordPageResult;
 }
 
 export async function readSiteEventDetail(input: {
@@ -217,30 +171,12 @@ export async function readSiteEventDetail(input: {
   readonly window: QueryWindow;
   readonly eventId: string;
 }) {
-  const result = await executeTypedApplicationOperation<
-    Awaited<ReturnType<typeof queryEventRecordDetailFromD1>>
-  >(
-    "event-record-detail",
-    {
-      context: siteQueryContext(input.siteId, "api-v1"),
-      time: createQueryTime(
-        input.window.startMs,
-        input.window.endExclusiveMs,
-        input.window.timeZone,
-        input.window.nowMs,
-      ),
-      filters: { version: 1, root: null },
-    },
-    createTypedQueryProviderRegistry("event-record-detail", async () => ({
-      value: await queryEventRecordDetailFromD1(
-        input.env,
-        input.siteId,
-        input.eventId,
-        input.window,
-      ),
-    })),
+  const result = await queryEventRecordDetailFromD1(
+    input.env,
+    input.siteId,
+    input.eventId,
+    input.window,
   );
-  if (!result.ok) throw new Error(result.error.kind);
-  if (!result.data) throw new Error("resource-not-found");
-  return result.data;
+  if (!result) throw new Error("resource-not-found");
+  return result;
 }

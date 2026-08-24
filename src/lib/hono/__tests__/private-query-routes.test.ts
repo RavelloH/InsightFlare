@@ -3,12 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as PrivateQueryAdapter from "@/lib/edge/analytics/adapters/private";
 import { executePrivateTeamDashboard } from "@/lib/edge/analytics/adapters/private";
+import { handleOverviewContract } from "@/lib/edge/analytics/composition/legacy/overview-contract-adapter";
 import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   resolvePrivateSiteForSession,
   resolvePrivateTeamForSession,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { handleOverviewContract } from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
 import { withDashboardCache } from "@/lib/edge/dashboard-cache";
 import { privateQueryRoutes } from "@/lib/hono/routes/private/query";
 import type { AppEnv } from "@/lib/hono/types";
@@ -36,7 +36,7 @@ vi.mock(
 );
 
 vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
+  "@/lib/edge/analytics/composition/legacy/overview-contract-adapter",
   () => ({
     handleOverviewContract: vi.fn(),
     handleTrendContract: vi.fn(),
@@ -44,7 +44,7 @@ vi.mock(
 );
 
 vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/pages-contract-adapter",
+  "@/lib/edge/analytics/composition/legacy/pages-contract-adapter",
   () => ({
     handlePagesContract: vi.fn(),
     handleReferrersContract: vi.fn(),
@@ -61,7 +61,7 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/funnels", () => ({
 }));
 
 vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/events-contract-adapter",
+  "@/lib/edge/analytics/composition/legacy/events-contract-adapter",
   () => ({
     handleEventTypeDetailContract: vi.fn(async () => new Response("query")),
   }),

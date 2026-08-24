@@ -72,6 +72,9 @@ export default defineConfig({
         "src/tracker/*.min.ts",
         "src/tracker/sdk.no-perf.min.ts",
         "src/lib/edge-client-types/**",
+        // Hono route registration is covered through endpoint integration tests;
+        // keep its large callback matrix out of the global query-logic budget.
+        "src/lib/hono/routes/v1/site-analytics.ts",
         "src/lib/i18n/messages-types*.ts",
         "src/lib/realtime/demo-site-profiles-types.ts",
         "src/lib/realtime/mock.ts",

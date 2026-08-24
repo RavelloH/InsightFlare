@@ -113,18 +113,12 @@ import {
   readSiteVisitors,
   readSiteVisitorSessions,
 } from "@/lib/edge/analytics/adapters/api-v1";
+import { createReaderProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
-  createProviderRegistry,
-  createReaderProviderRegistry,
-} from "@/lib/edge/analytics/composition/create-provider-registry";
-import {
-  type AnalyticsResult,
   executeOverview,
   executeTrend,
   type OverviewQuery,
-  type OverviewResult,
   type TrendQuery,
-  type TrendResult,
 } from "@/lib/edge/analytics/contract";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import type { AppEnv } from "@/lib/hono/types";
@@ -172,11 +166,10 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createProviderRegistry().registerCallback<
-        OverviewQuery,
-        AnalyticsResult<OverviewResult>
-      >("site.analytics.overview", (query) =>
-        executeOverview(createOverviewReader(c.env, siteId), query),
+      createReaderProviderRegistry(
+        "site.analytics.overview",
+        (query: OverviewQuery) =>
+          executeOverview(createOverviewReader(c.env, siteId), query),
       ),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
@@ -220,11 +213,10 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createProviderRegistry().registerCallback<
-        TrendQuery,
-        AnalyticsResult<TrendResult>
-      >("site.analytics.timeseries", (query) =>
-        executeTrend(createOverviewReader(c.env, siteId), query),
+      createReaderProviderRegistry(
+        "site.analytics.timeseries",
+        (query: TrendQuery) =>
+          executeTrend(createOverviewReader(c.env, siteId), query),
       ),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),

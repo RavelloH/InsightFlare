@@ -4,10 +4,7 @@ export type {
 } from "./application";
 export {
   createTypedQueryProviderRegistry,
-  createTypedQueryResultProviderRegistry,
   executeTypedApplicationOperation,
   typedQueryProvider,
-  TypedQueryProviderRegistry,
-  typedQueryResultProvider,
   validateTypedQueryFilters,
 } from "./application";

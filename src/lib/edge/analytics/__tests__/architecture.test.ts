@@ -92,7 +92,7 @@ describe("analytics architecture", () => {
       "(() => Promise<TypedQueryProviderResult",
     );
     expect(typedApplication).not.toContain(
-      "reader: () => Promise<AnalyticsResult",
+      "reader: () => Promise<TypedQueryProviderResult",
     );
     expect(typedApplication).toContain("new TypedQueryApplicationService");
     expect(typedApplication).toContain(".execute(invocation)");
@@ -114,7 +114,7 @@ describe("analytics architecture", () => {
         continue;
       }
       expect(content).toMatch(
-        /create(?:TypedQuery(?:Result)?|SsrTeamDashboard)ProviderRegistry|new TypedQueryProviderRegistry/u,
+        /create(?:TypedQuery(?:Result)?|SsrTeamDashboard)ProviderRegistry|createReaderProviderRegistry|new AnalyticsProviderRegistry/u,
       );
     }
   });
@@ -141,7 +141,7 @@ describe("analytics architecture", () => {
     );
     expect(
       source("src/lib/edge/analytics/composition/create-provider-registry.ts"),
-    ).toContain("registerCallback");
+    ).toContain("canonicalQueryOperationFor");
     expect(source("src/lib/dashboard/route-data.ts")).toContain(
       "createSsrTeamDashboardProviderRegistry",
     );
@@ -164,6 +164,65 @@ describe("analytics architecture", () => {
       /@\/lib\/edge\/(?:query(?:-contract|-runtime|-adapters)?|realtime-provider)(?:["/])/u;
     for (const file of productionFiles("src/lib")) {
       expect(readFileSync(file, "utf8")).not.toMatch(legacyImport);
+    }
+  });
+
+  it("keeps protocol adapters and routes behind composition", () => {
+    for (const file of productionFiles("src/lib/edge/analytics/adapters")) {
+      const content = readFileSync(file, "utf8");
+      expect(content).not.toMatch(
+        /(?:@\/lib\/edge\/analytics\/providers|\.\.\/providers)(?:\/|["'])/u,
+      );
+      expect(content).not.toContain("assertOperationAllowed");
+    }
+    for (const directory of [
+      "src/lib/hono/routes/private",
+      "src/lib/hono/routes/public",
+    ]) {
+      for (const file of productionFiles(directory)) {
+        expect(readFileSync(file, "utf8")).not.toMatch(
+          /@\/lib\/edge\/analytics\/providers(?:\/|["'])/u,
+        );
+      }
+    }
+  });
+
+  it("keeps the provider registry canonical", () => {
+    const registry = source(
+      "src/lib/edge/analytics/application/provider-registry.ts",
+    );
+    for (const legacySymbol of [
+      "TypedApplicationProviderRegistry",
+      "TypedQueryProviderRegistry",
+      "AnalyticsOperationProvider",
+      "registerQuery",
+      "registerResult",
+      "resolveResult",
+      "resultMode",
+      "queryProviders",
+      "resultProviders",
+    ]) {
+      expect(registry).not.toMatch(new RegExp(`\\b${legacySymbol}\\b`, "u"));
+    }
+    expect(registry.match(/new Map/g)).toHaveLength(1);
+    expect(registry).toMatch(/Map<\s*QueryOperation/u);
+  });
+
+  it("keeps the D1 provider free of application policy context", () => {
+    for (const file of productionFiles("src/lib/edge/analytics/providers/d1")) {
+      const content = readFileSync(file, "utf8");
+      for (const forbidden of [
+        "QueryContext",
+        "siteQueryContext",
+        "teamQueryContext",
+        "assertOperationAllowed",
+        "assertFilterAudience",
+        "validateTypedQueryFilters",
+      ]) {
+        expect(content, `${file} contains ${forbidden}`).not.toContain(
+          forbidden,
+        );
+      }
     }
   });
 });

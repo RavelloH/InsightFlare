@@ -4,12 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { handleUsersAdmin } from "@/lib/edge/admin-users";
 import { handleAdminWs } from "@/lib/edge/admin-ws";
+import { handleOverviewContract } from "@/lib/edge/analytics/composition/legacy/overview-contract-adapter";
 import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   fetchPublicSite,
   resolvePrivateSiteForSession,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { handleOverviewContract } from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
 import type * as QueryRouterModule from "@/lib/edge/analytics/providers/d1/internal/router";
 import { authenticateApiKey } from "@/lib/edge/api-key-auth";
 import {
@@ -90,7 +90,7 @@ vi.mock(
 );
 
 vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
+  "@/lib/edge/analytics/composition/legacy/overview-contract-adapter",
   () => ({
     handleOverviewContract: vi.fn(),
     handleTrendContract: vi.fn(),
@@ -98,7 +98,7 @@ vi.mock(
 );
 
 vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/pages-contract-adapter",
+  "@/lib/edge/analytics/composition/legacy/pages-contract-adapter",
   () => ({
     handlePagesContract: vi.fn(),
     handleReferrersContract: vi.fn(),

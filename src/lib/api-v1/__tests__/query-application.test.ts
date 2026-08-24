@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { executeApiV1Query } from "@/lib/api-v1/query-application";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
 import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
@@ -47,8 +48,8 @@ describe("API v1 query application adapter", () => {
 
   it("requires a legacy query to expose a canonical time", async () => {
     const registry = new AnalyticsProviderRegistry().register(
-      "site.analytics.overview",
-      { execute: async () => ({ views: 1 }) },
+      canonicalQueryOperationFor("site.analytics.overview"),
+      { execute: async () => ({ value: { views: 1 } }) },
     );
 
     await expect(
@@ -64,8 +65,8 @@ describe("API v1 query application adapter", () => {
 
   it("translates canonical cost failures back to the API v1 error shape", async () => {
     const registry = new AnalyticsProviderRegistry().register(
-      "site.analytics.overview",
-      { execute: async () => ({ views: 1 }) },
+      canonicalQueryOperationFor("site.analytics.overview"),
+      { execute: async () => ({ value: { views: 1 } }) },
     );
 
     await expect(
@@ -80,8 +81,8 @@ describe("API v1 query application adapter", () => {
 
   it("translates canonical policy failures back to the external operation", async () => {
     const registry = new AnalyticsProviderRegistry().register(
-      "site.analytics.overview",
-      { execute: async () => ({ views: 1 }) },
+      canonicalQueryOperationFor("site.analytics.overview"),
+      { execute: async () => ({ value: { views: 1 } }) },
     );
     const deniedContext = {
       ...context,

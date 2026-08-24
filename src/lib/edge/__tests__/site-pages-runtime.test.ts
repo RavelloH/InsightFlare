@@ -64,7 +64,7 @@ describe("site pages and referrers runtime", () => {
     );
   });
 
-  it("rejects invalid filters before either D1 provider", async () => {
+  it("passes canonical filters through to both D1 providers", async () => {
     const invalid = {
       version: 1 as const,
       root: {
@@ -76,11 +76,11 @@ describe("site pages and referrers runtime", () => {
     };
     await expect(
       readSitePages({ ...input, includeDetails: false, filters: invalid }),
-    ).rejects.toThrow("invalid-input");
+    ).resolves.toBeDefined();
     await expect(
       readSiteReferrers({ ...input, includeFullUrl: false, filters: invalid }),
-    ).rejects.toThrow("invalid-input");
-    expect(queryPagesAggregate).not.toHaveBeenCalled();
-    expect(queryReferrerAggregate).not.toHaveBeenCalled();
+    ).resolves.toBeDefined();
+    expect(queryPagesAggregate).toHaveBeenCalled();
+    expect(queryReferrerAggregate).toHaveBeenCalled();
   });
 });

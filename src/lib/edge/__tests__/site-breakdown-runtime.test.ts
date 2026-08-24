@@ -75,7 +75,7 @@ describe("site breakdown runtime", () => {
     );
   });
 
-  it("fails closed for unsupported dimensions and filters", async () => {
+  it("keeps dimension routing local while leaving filter policy to application", async () => {
     await expect(
       readSiteBreakdown({ ...input, dimension: "not.real" }),
     ).rejects.toThrow("unsupported-dimension:not.real");
@@ -92,7 +92,7 @@ describe("site breakdown runtime", () => {
           },
         },
       }),
-    ).rejects.toThrow("invalid-input");
-    expect(queryDimensionFromD1).not.toHaveBeenCalled();
+    ).resolves.toBeDefined();
+    expect(queryDimensionFromD1).toHaveBeenCalled();
   });
 });

@@ -95,19 +95,19 @@ describe("site journey detail runtime", () => {
     ).rejects.toThrow("resource-not-found");
   });
 
-  it("maps reader failures to the typed internal error", async () => {
+  it("preserves reader failures for the application boundary", async () => {
     vi.mocked(queryVisitorDetailFromD1).mockRejectedValueOnce(
       new Error("down"),
     );
     await expect(
       readSiteVisitorDetail({ ...base, visitorId: "visitor-1" }),
-    ).rejects.toThrow("internal");
+    ).rejects.toThrow("down");
     vi.mocked(querySessionDetailFromD1).mockRejectedValueOnce(
       new Error("down"),
     );
     await expect(
       readSiteSessionDetail({ ...base, sessionId: "session-1" }),
-    ).rejects.toThrow("internal");
+    ).rejects.toThrow("down");
   });
 
   it("signs visitor and session keyset cursors against their typed query", async () => {
@@ -252,7 +252,7 @@ describe("site journey detail runtime", () => {
     ).resolves.toMatchObject({ page: { hasMore: false, nextCursor: null } });
   });
 
-  it("validates trajectory filters before checking the opaque target", async () => {
+  it("checks the opaque target after receiving canonical filters", async () => {
     await expect(
       readSiteVisitorEvents({
         ...base,
@@ -269,8 +269,8 @@ describe("site journey detail runtime", () => {
         },
         page: { limit: 20 },
       }),
-    ).rejects.toThrow("invalid-input");
-    expect(queryJourneyTargetExistsFromD1).not.toHaveBeenCalled();
+    ).rejects.toThrow("resource-not-found");
+    expect(queryJourneyTargetExistsFromD1).toHaveBeenCalled();
   });
 
   it("enforces target presence in the requested half-open window", async () => {

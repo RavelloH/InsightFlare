@@ -1,16 +1,7 @@
 import "@tanstack/react-start/server-only";
 
 import { SitePerformanceBreakdownDimensionSchema } from "@/lib/api-v1/dto/analytics";
-import {
-  analyticsFilterRegistry,
-  assertFilterAudience,
-  createTypedQueryProviderRegistry,
-  executeTypedApplicationOperation,
-  type FilterDocument,
-  siteQueryContext,
-  validateTypedQueryFilters,
-} from "@/lib/edge/analytics/contract";
-import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import { type FilterDocument } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type {
   PerformanceMetricKey,
@@ -54,50 +45,17 @@ export interface ReadSitePerformanceBreakdownInput extends ReadSitePerformanceIn
   readonly limit: number;
 }
 
-function inputBase(input: ReadSitePerformanceInput) {
-  const context = siteQueryContext(input.siteId, "api-v1");
-  const filterError = validateTypedQueryFilters(context, input.filters);
-  if (filterError) throw new Error(filterError.kind);
-  try {
-    assertFilterAudience(
-      input.filters,
-      analyticsFilterRegistry,
-      context.policy.audience,
-    );
-  } catch {
-    throw new Error("invalid-input");
-  }
-  return {
-    context,
-    time: createQueryTime(
-      input.window.startMs,
-      input.window.endExclusiveMs,
-      input.window.timeZone,
-      input.window.nowMs,
-    ),
-    filters: input.filters,
-  };
-}
-
 export async function readSitePerformanceSummary(
   input: ReadSitePerformanceInput,
 ): Promise<{ readonly metrics: PerformanceMetrics }> {
-  const result = await executeTypedApplicationOperation<
-    Awaited<ReturnType<typeof queryPerformanceSummariesFromD1>>
-  >(
-    "performance",
-    inputBase(input),
-    createTypedQueryProviderRegistry("performance", async () => ({
-      value: await queryPerformanceSummariesFromD1(
-        input.env,
-        input.siteId,
-        input.window,
-        input.filters,
-      ),
-    })),
-  );
-  if (!result.ok) throw new Error(result.error.kind);
-  return { metrics: result.data };
+  return {
+    metrics: await queryPerformanceSummariesFromD1(
+      input.env,
+      input.siteId,
+      input.window,
+      input.filters,
+    ),
+  };
 }
 
 function serializePoint(point: PerformanceTrendPointRow) {
@@ -114,30 +72,21 @@ function serializePoint(point: PerformanceTrendPointRow) {
 export async function readSitePerformanceTimeseries(
   input: ReadSitePerformanceTimeseriesInput,
 ): Promise<{ readonly interval: string; readonly series: PerformanceSeries }> {
-  const result = await executeTypedApplicationOperation<
-    Awaited<ReturnType<typeof queryAllPerformanceTrendsFromD1>>
-  >(
-    "performance",
-    inputBase(input),
-    createTypedQueryProviderRegistry("performance", async () => ({
-      value: await queryAllPerformanceTrendsFromD1(
-        input.env,
-        input.siteId,
-        input.window,
-        input.interval,
-        input.filters,
-      ),
-    })),
+  const result = await queryAllPerformanceTrendsFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    input.interval,
+    input.filters,
   );
-  if (!result.ok) throw new Error(result.error.kind);
   return {
     interval: input.interval,
     series: {
-      ttfb: result.data.ttfb.map(serializePoint),
-      fcp: result.data.fcp.map(serializePoint),
-      lcp: result.data.lcp.map(serializePoint),
-      cls: result.data.cls.map(serializePoint),
-      inp: result.data.inp.map(serializePoint),
+      ttfb: result.ttfb.map(serializePoint),
+      fcp: result.fcp.map(serializePoint),
+      lcp: result.lcp.map(serializePoint),
+      cls: result.cls.map(serializePoint),
+      inp: result.inp.map(serializePoint),
     },
   };
 }
@@ -162,35 +111,25 @@ export async function readSitePerformanceBreakdown(
     input.dimension,
   );
   if (!dimension.success) throw new Error("unsupported-dimension");
-  const result = await executeTypedApplicationOperation<
-    | Awaited<ReturnType<typeof queryPerformanceRoutesFromD1>>
-    | Awaited<ReturnType<typeof queryPerformanceCountriesFromD1>>
-  >(
-    "performance",
-    inputBase(input),
-    createTypedQueryProviderRegistry("performance", async () => ({
-      value:
-        dimension.data === "page.path"
-          ? await queryPerformanceRoutesFromD1(
-              input.env,
-              input.siteId,
-              input.window,
-              input.filters,
-              input.limit,
-            )
-          : await queryPerformanceCountriesFromD1(
-              input.env,
-              input.siteId,
-              input.window,
-              input.filters,
-            ),
-    })),
-  );
-  if (!result.ok) throw new Error(result.error.kind);
+  const result =
+    dimension.data === "page.path"
+      ? await queryPerformanceRoutesFromD1(
+          input.env,
+          input.siteId,
+          input.window,
+          input.filters,
+          input.limit,
+        )
+      : await queryPerformanceCountriesFromD1(
+          input.env,
+          input.siteId,
+          input.window,
+          input.filters,
+        );
   return {
     dimension: dimension.data,
     metric: input.metric,
-    items: result.data.map((row) => ({
+    items: result.map((row) => ({
       key: "pathname" in row ? row.pathname : row.country,
       label: "pathname" in row ? row.pathname : row.country,
       views: row.views,

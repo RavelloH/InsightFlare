@@ -1,16 +1,9 @@
 import "@tanstack/react-start/server-only";
 
 import {
-  analyticsFilterDefinition,
-  assertFilterAudience,
-  createTypedQueryProviderRegistry,
-  executeTypedApplicationOperation,
   type FilterDocument,
-  siteQueryContext,
   stripTopLevelFacet,
 } from "@/lib/edge/analytics/contract";
-import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
-import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryFilterValuesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import type { Env } from "@/lib/edge/types";
@@ -43,55 +36,19 @@ export interface SiteFilterValuesResult {
 export async function readSiteFilterValues(
   input: ReadSiteFilterValuesInput,
 ): Promise<SiteFilterValuesResult> {
-  const context = siteQueryContext(input.siteId, "api-v1");
-  const definition = analyticsFilterDefinition(input.field);
-  if (
-    !definition ||
-    definition.source === "payload" ||
-    !definition.audiences.has(context.policy.audience)
-  ) {
-    throw new Error("unsupported-filter-field");
-  }
-  try {
-    assertFilterAudience(
-      input.filters,
-      analyticsFilterRegistry,
-      context.policy.audience,
-    );
-  } catch {
-    throw new Error("invalid-input");
-  }
   const filters = stripTopLevelFacet(input.filters, input.field);
-  const result = await executeTypedApplicationOperation<
-    Awaited<ReturnType<typeof queryFilterValuesFromD1>>
-  >(
-    "filter-values",
-    {
-      context,
-      time: createQueryTime(
-        input.window.startMs,
-        input.window.endExclusiveMs,
-        input.window.timeZone,
-        input.window.nowMs,
-      ),
-      filters,
-    },
-    createTypedQueryProviderRegistry("filter-values", async () => ({
-      value: await queryFilterValuesFromD1(
-        input.env,
-        input.siteId,
-        input.window,
-        filters,
-        input.field,
-        input.limit,
-        input.search,
-      ),
-    })),
+  const rows = await queryFilterValuesFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    filters,
+    input.field,
+    input.limit,
+    input.search,
   );
-  if (!result.ok) throw new Error(result.error.kind);
   return {
     field: input.field,
-    items: result.data.map((row) => ({
+    items: rows.map((row) => ({
       value: row.value,
       label: row.value,
       occurrences: row.occurrences,

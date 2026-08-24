@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   analyticsFilterRegistry,
+  AnalyticsProviderRegistry,
   buildCalendarBucketPlan,
   createQueryTime,
   createTimeRange,
   createTypedQueryProviderRegistry,
-  createTypedQueryResultProviderRegistry,
   EMPTY_FILTER_DOCUMENT,
   exclusiveRangeToInclusive,
   executeOverview,
@@ -14,14 +14,12 @@ import {
   executeReferrers,
   executeTrend,
   executeTypedApplicationOperation,
-  executeTypedApplicationResult,
   hasFilters,
   inclusiveRangeToExclusive,
   normalizeFilterDocument,
   normalizeReportingTimeZone,
   previousComparableRange,
   siteQueryContext,
-  TypedQueryProviderRegistry,
   validateTypedQueryFilters,
 } from "@/lib/edge/analytics/contract/index";
 
@@ -247,24 +245,20 @@ describe("query contract time helpers", () => {
       executeTypedApplicationOperation(
         "event-types",
         input,
-        new TypedQueryProviderRegistry(),
+        new AnalyticsProviderRegistry(),
       ),
     ).resolves.toMatchObject({
       ok: false,
       error: { kind: "internal", operation: "event-types" },
     });
 
-    const composed = await executeTypedApplicationResult(
+    const composed = await executeTypedApplicationOperation(
       "overview",
       input,
-      createTypedQueryResultProviderRegistry("overview", async () => ({
-        ok: true,
-        data: { current: { views: 1 } },
-        meta: {
-          time,
-          source: "mock" as const,
-          approximateVisitors: false,
-        },
+      createTypedQueryProviderRegistry("overview", async () => ({
+        value: { current: { views: 1 } },
+        source: "mock" as const,
+        approximateVisitors: false,
       })),
     );
     expect(composed).toMatchObject({
@@ -272,20 +266,19 @@ describe("query contract time helpers", () => {
       data: { current: { views: 1 } },
     });
     await expect(
-      executeTypedApplicationResult(
+      executeTypedApplicationOperation(
         "comparison",
         input,
-        createTypedQueryResultProviderRegistry(
-          "comparison",
-          async () => composed,
-        ),
+        createTypedQueryProviderRegistry("comparison", async () => ({
+          value: composed,
+        })),
       ),
     ).resolves.toMatchObject({
       ok: false,
       error: { kind: "capability-denied", capability: "comparison" },
     });
     await expect(
-      executeTypedApplicationResult(
+      executeTypedApplicationOperation(
         "overview",
         {
           ...input,
@@ -299,10 +292,9 @@ describe("query contract time helpers", () => {
             },
           },
         },
-        createTypedQueryResultProviderRegistry(
-          "overview",
-          async () => composed,
-        ),
+        createTypedQueryProviderRegistry("overview", async () => ({
+          value: composed,
+        })),
       ),
     ).resolves.toMatchObject({
       ok: false,
@@ -337,7 +329,7 @@ describe("query contract time helpers", () => {
       issues: [{ code: "too_many_filter_clauses" }],
     });
     await expect(
-      executeTypedApplicationResult(
+      executeTypedApplicationOperation(
         "overview",
         {
           context: {
@@ -350,20 +342,19 @@ describe("query contract time helpers", () => {
           time,
           filters: oneClause,
         },
-        createTypedQueryResultProviderRegistry(
-          "overview",
-          async () => composed,
-        ),
+        createTypedQueryProviderRegistry("overview", async () => ({
+          value: composed,
+        })),
       ),
     ).resolves.toMatchObject({
       ok: false,
       error: { kind: "invalid-input" },
     });
     await expect(
-      executeTypedApplicationResult(
+      executeTypedApplicationOperation(
         "overview",
         input,
-        createTypedQueryResultProviderRegistry("overview", async () => {
+        createTypedQueryProviderRegistry("overview", async () => {
           throw new Error("provider failure");
         }),
       ),

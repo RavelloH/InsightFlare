@@ -10,15 +10,14 @@ import {
   type ComparisonRawTrendResult,
   type ComparisonTrendQuery,
   type FilterDocument,
-  type QueryContext,
   type QuerySource,
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryEventSummaryMetricsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import { queryEventsTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
-import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
 import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
+import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import { readSiteBreakdown } from "@/lib/edge/analytics/providers/d1/operations/site-breakdown";
 import type { Env } from "@/lib/edge/types";
 
@@ -74,11 +73,10 @@ async function readSiteMetrics(
   options: ComparisonProviderOptions,
   time: QueryTime,
   filters: FilterDocument,
-  context: QueryContext,
 ) {
   const reader = createOverviewReader(options.env, options.siteId!);
   const [overview, events] = await Promise.all([
-    reader.readOverview({ ...filtersOf(time, filters), context }),
+    reader.readOverview(filtersOf(time, filters)),
     queryEventSummaryMetricsFromD1(
       options.env,
       options.siteId!,
@@ -97,16 +95,14 @@ async function readTeamMetrics(
   options: ComparisonProviderOptions,
   time: QueryTime,
   filters: FilterDocument,
-  context: QueryContext,
 ) {
   const sites = await siteIdsForTeam(options);
   const results = await Promise.all(
     sites.map((site) =>
       Promise.all([
-        createOverviewReader(options.env, site.id).readOverview({
-          ...filtersOf(time, filters),
-          context,
-        }),
+        createOverviewReader(options.env, site.id).readOverview(
+          filtersOf(time, filters),
+        ),
         queryEventSummaryMetricsFromD1(
           options.env,
           site.id,
@@ -185,12 +181,11 @@ async function readSiteTrend(
   time: QueryTime,
   filters: FilterDocument,
   interval: ComparisonTrendQuery["interval"],
-  context: QueryContext,
 ) {
   const reader = createOverviewReader(options.env, options.siteId!);
   const window = windowOf(time);
   const [trend, events] = await Promise.all([
-    reader.readTrend({ ...filtersOf(time, filters), context, interval }),
+    reader.readTrend({ ...filtersOf(time, filters), interval }),
     queryEventsTrendFromD1(
       options.env,
       options.siteId!,
@@ -217,7 +212,6 @@ async function readTeamTrend(
   time: QueryTime,
   filters: FilterDocument,
   interval: ComparisonTrendQuery["interval"],
-  context: QueryContext,
 ) {
   const sites = await siteIdsForTeam(options);
   const results = await Promise.all(
@@ -225,7 +219,7 @@ async function readTeamTrend(
       const reader = createOverviewReader(options.env, site.id);
       const window = windowOf(time);
       const [trend, events] = await Promise.all([
-        reader.readTrend({ ...filtersOf(time, filters), context, interval }),
+        reader.readTrend({ ...filtersOf(time, filters), interval }),
         queryEventsTrendFromD1(
           options.env,
           site.id,
@@ -323,7 +317,6 @@ async function readBreakdownForSites(
   time: QueryTime,
   filters: FilterDocument,
   dimension: string,
-  context: QueryContext,
 ): Promise<ComparisonRawBreakdownResult> {
   const sites = options.siteId
     ? [{ id: options.siteId }]
@@ -337,7 +330,6 @@ async function readBreakdownForSites(
         limit: 0,
         window: windowOf(time),
         filters,
-        context,
       }),
     ),
   );
@@ -371,19 +363,17 @@ export function createComparisonProviders(options: ComparisonProviderOptions) {
   const overview: ComparisonProvider<
     ComparisonRawMetrics,
     ComparisonQuery
-  > = async ({ context, query }) => {
+  > = async ({ query }) => {
     const result = options.siteId
       ? await readSiteMetrics(
           options,
           query.time,
           query.filters ?? EMPTY_FILTER,
-          context,
         )
       : await readTeamMetrics(
           options,
           query.time,
           query.filters ?? EMPTY_FILTER,
-          context,
         );
     return {
       ok: true,
@@ -394,21 +384,19 @@ export function createComparisonProviders(options: ComparisonProviderOptions) {
   const trend: ComparisonProvider<
     ComparisonRawTrendResult,
     ComparisonTrendQuery
-  > = async ({ context, query, comparison }) => {
+  > = async ({ query, comparison }) => {
     const result = options.siteId
       ? await readSiteTrend(
           options,
           query.time,
           query.filters ?? EMPTY_FILTER,
           comparison.interval,
-          context,
         )
       : await readTeamTrend(
           options,
           query.time,
           query.filters ?? EMPTY_FILTER,
           comparison.interval,
-          context,
         );
     return {
       ok: true,
@@ -426,7 +414,6 @@ export function createComparisonProviders(options: ComparisonProviderOptions) {
       query.time,
       query.filters ?? EMPTY_FILTER,
       comparison.dimension,
-      comparison.context,
     ),
     meta: providerMeta(query.time, "raw", false),
   });

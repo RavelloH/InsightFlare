@@ -152,6 +152,6 @@ describe("site event-record runtime", () => {
         sort: { field: "occurredAt", direction: "desc" },
         page: { limit: 20 },
       }),
-    ).rejects.toThrow("internal");
+    ).rejects.toThrow("down");
   });
 });

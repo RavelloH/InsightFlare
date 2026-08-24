@@ -3,34 +3,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
   listTeamSites: vi.fn(),
 }));
-vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
-  () => ({
-    createOverviewReader: vi.fn(),
-    readLatestSiteActivity: vi.fn(),
-    toQueryTime: vi.fn(
-      (window: {
-        startMs: number;
-        endExclusiveMs: number;
-        nowMs: number;
-        timeZone: string;
-      }) => ({
-        range: {
-          startMs: window.startMs,
-          endExclusiveMs: window.endExclusiveMs,
-        },
-        reportingTimeZone: window.timeZone,
-        capturedAtMs: window.nowMs,
-      }),
-    ),
-  }),
-);
+vi.mock("@/lib/edge/analytics/providers/d1/operations/overview-reader", () => ({
+  createOverviewReader: vi.fn(),
+  readLatestSiteActivity: vi.fn(),
+  toQueryTime: vi.fn(
+    (window: {
+      startMs: number;
+      endExclusiveMs: number;
+      nowMs: number;
+      timeZone: string;
+    }) => ({
+      range: {
+        startMs: window.startMs,
+        endExclusiveMs: window.endExclusiveMs,
+      },
+      reportingTimeZone: window.timeZone,
+      capturedAtMs: window.nowMs,
+    }),
+  ),
+}));
 
+import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
 import {
   createOverviewReader,
   readLatestSiteActivity,
-} from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
-import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
+} from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
 
 const input = {
@@ -141,7 +138,7 @@ describe("team sites runtime", () => {
     ).resolves.toMatchObject({ source: "mixed", approximateVisitors: true });
   });
 
-  it("returns no sites without readers and rejects unauthorized filters", async () => {
+  it("returns no sites without readers and passes canonical filters", async () => {
     vi.mocked(listTeamSites).mockResolvedValue([] as never);
     await expect(readTeamSites(input)).resolves.toMatchObject({
       data: { sites: [] },
@@ -161,7 +158,7 @@ describe("team sites runtime", () => {
           },
         },
       }),
-    ).rejects.toThrow("invalid-input");
+    ).resolves.toMatchObject({ data: { sites: [] }, source: "raw" });
   });
 
   it("does not request trends when the composite omitted its optional interval", async () => {

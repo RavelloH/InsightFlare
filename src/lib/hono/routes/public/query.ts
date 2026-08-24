@@ -2,8 +2,10 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 
 import { executePublicQuery } from "@/lib/edge/analytics/adapters/public";
-import { jsonResponse } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { PUBLIC_QUERY_PATHS } from "@/lib/edge/analytics/providers/d1/internal/router";
+import {
+  jsonResponse,
+  PUBLIC_QUERY_PATHS,
+} from "@/lib/edge/analytics/composition/d1-contract-adapters";
 import { PUBLIC_QUERY_CACHE_OPTIONS } from "@/lib/edge/dashboard-cache";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import { requireMethodMiddleware } from "@/lib/hono/middleware/method";

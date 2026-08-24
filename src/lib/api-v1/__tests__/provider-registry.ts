@@ -1,8 +1,6 @@
 import { analyticsOperationRegistry } from "@/lib/edge/analytics/application/operation-registry";
-import {
-  analyticsOperationProvider,
-  TypedApplicationProviderRegistry,
-} from "@/lib/edge/analytics/application/provider-registry";
+import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
 import {
   executeOverview,
   executeTrend,
@@ -20,22 +18,27 @@ type TestReader = ((input: never) => Promise<unknown>) | OverviewReader;
  */
 export function createTestProviderRegistry(
   reader: TestReader,
-): TypedApplicationProviderRegistry {
-  const registry = new TypedApplicationProviderRegistry();
+): AnalyticsProviderRegistry {
+  const registry = new AnalyticsProviderRegistry();
   for (const operation of analyticsOperationRegistry) {
-    registry.register(
-      operation.id,
-      analyticsOperationProvider(async (query: unknown, execution) => {
+    registry.register(canonicalQueryOperationFor(operation.id), {
+      execute: async (query, execution) => {
         const input = {
-          ...(query as Record<string, unknown>),
-          signal: execution.signal,
+          ...(query as unknown as Record<string, unknown>),
+          signal: execution?.signal,
         };
-        if (typeof reader === "function") return reader(input as never);
-        return operation.id.endsWith("timeseries")
-          ? executeTrend(reader, input as unknown as TrendQuery)
-          : executeOverview(reader, input as unknown as OverviewQuery);
-      }),
-    );
+        const value =
+          typeof reader === "function"
+            ? await reader(input as never)
+            : operation.id.endsWith("timeseries")
+              ? await executeTrend(reader, input as unknown as TrendQuery)
+              : await executeOverview(
+                  reader,
+                  input as unknown as OverviewQuery,
+                );
+        return { value };
+      },
+    });
   }
   return registry;
 }

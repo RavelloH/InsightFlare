@@ -17,7 +17,7 @@ import {
   createOperationCacheKey,
   OperationResultCache,
 } from "@/lib/edge/analytics/application/cache";
-import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import type {
   AnalyticsServiceResult,
   QueryExecutionContext,
@@ -222,7 +222,7 @@ export async function executeApiV1SiteOverview(
   input: unknown,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: TypedApplicationProviderRegistry,
+  providerRegistry: AnalyticsProviderRegistry,
   executionContext: QueryExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<

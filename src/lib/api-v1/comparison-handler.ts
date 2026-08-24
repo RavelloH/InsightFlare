@@ -33,6 +33,7 @@ import {
   type QueryCostInput,
 } from "@/lib/edge/analytics/application/cost";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
 import type { QueryExecutionContext } from "@/lib/edge/analytics/application/service";
 import {
   type AnalyticsDomainError,
@@ -532,43 +533,46 @@ async function executeReport(
   };
   const providers = createComparisonProviders({ env, ...subject });
   const service = createApiV1QueryApplicationAdapter(comparisonCache);
-  const providerRegistry = new AnalyticsProviderRegistry().register<
-    ComparisonQuery,
-    ReportDomainResult
-  >(operation, {
-    execute: async ({ query: providerQuery, execution }) => {
-      const report = (await executeComparison(
-        providerQuery,
-        providers.overview,
-        execution.signal,
-      )) as ReportDomainResult;
-      if (!report.ok || !interval) return report;
-      const trendQuery: ComparisonTrendQuery = {
-        ...providerQuery,
-        interval,
-        trendMetrics: selectedTrendMetrics ?? metrics,
-      };
-      const trend = await executeComparisonTrend(
-        trendQuery,
-        providers.trend,
-        execution.signal,
-      );
-      if (!trend.ok) return trend as ReportDomainResult;
-      return {
-        ok: true,
-        data: { ...report.data, trend: trend.data },
-        meta: {
-          ...report.meta,
-          source:
-            report.meta.source === trend.meta.source
-              ? report.meta.source
-              : "mixed",
-          approximateVisitors:
-            report.meta.approximateVisitors || trend.meta.approximateVisitors,
-        },
-      };
+  const providerRegistry = new AnalyticsProviderRegistry().register(
+    canonicalQueryOperationFor(operation),
+    {
+      execute: async (providerQuery, execution) => {
+        const report = (await executeComparison(
+          providerQuery as ComparisonQuery,
+          providers.overview,
+          execution?.signal,
+        )) as ReportDomainResult;
+        if (!report.ok || !interval) return { value: report };
+        const trendQuery: ComparisonTrendQuery = {
+          ...(providerQuery as ComparisonQuery),
+          interval,
+          trendMetrics: selectedTrendMetrics ?? metrics,
+        };
+        const trend = await executeComparisonTrend(
+          trendQuery,
+          providers.trend,
+          execution?.signal,
+        );
+        if (!trend.ok) return { value: trend as ReportDomainResult };
+        return {
+          value: {
+            ok: true,
+            data: { ...report.data, trend: trend.data },
+            meta: {
+              ...report.meta,
+              source:
+                report.meta.source === trend.meta.source
+                  ? report.meta.source
+                  : "mixed",
+              approximateVisitors:
+                report.meta.approximateVisitors ||
+                trend.meta.approximateVisitors,
+            },
+          } as ReportDomainResult,
+        };
+      },
     },
-  });
+  );
   return service.execute<ComparisonQuery, ReportDomainResult>(
     {
       operation,
@@ -613,17 +617,18 @@ async function executeBreakdown(
     sort,
   };
   const providers = createComparisonProviders({ env, ...subject });
-  const providerRegistry = new AnalyticsProviderRegistry().register<
-    ComparisonBreakdownQuery,
-    BreakdownDomainResult
-  >(operation, {
-    execute: ({ query: providerQuery, execution }) =>
-      executeComparisonBreakdown(
-        providerQuery,
-        providers.breakdown,
-        execution.signal,
-      ),
-  });
+  const providerRegistry = new AnalyticsProviderRegistry().register(
+    canonicalQueryOperationFor(operation),
+    {
+      execute: async (providerQuery, execution) => ({
+        value: await executeComparisonBreakdown(
+          providerQuery as ComparisonBreakdownQuery,
+          providers.breakdown,
+          execution?.signal,
+        ),
+      }),
+    },
+  );
   return createApiV1QueryApplicationAdapter(comparisonCache).execute<
     ComparisonBreakdownQuery,
     BreakdownDomainResult

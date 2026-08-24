@@ -47,7 +47,7 @@ describe("site cross-breakdown runtime", () => {
     );
   });
 
-  it("fails closed before the provider for invalid filters and dimension pairs", async () => {
+  it("keeps dimension-pair routing local while leaving filter policy to application", async () => {
     await expect(
       readSiteCrossBreakdown({ ...input, secondaryDimension: "page.path" }),
     ).rejects.toThrow("unsupported-dimension");
@@ -67,7 +67,7 @@ describe("site cross-breakdown runtime", () => {
           },
         },
       }),
-    ).rejects.toThrow("invalid-input");
-    expect(queryCrossDimensionFromD1).not.toHaveBeenCalled();
+    ).resolves.toBeDefined();
+    expect(queryCrossDimensionFromD1).toHaveBeenCalled();
   });
 });

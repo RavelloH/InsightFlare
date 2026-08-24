@@ -7,7 +7,6 @@ import type {
   OverviewMetrics,
   OverviewQuery,
   OverviewResult,
-  QueryContext,
   QuerySource,
   QueryTime,
   TrendPoint,
@@ -16,7 +15,6 @@ import type {
 } from "./types";
 
 export interface OverviewReaderInput {
-  readonly context: QueryContext;
   readonly time: QueryTime;
   readonly filters: FilterDocument;
 }
@@ -59,13 +57,11 @@ export async function executeOverview(
   const filterError = validateTypedQueryFilters(input.context, filters);
   if (filterError) return { ok: false, error: filterError };
   const current = await reader.readOverview({
-    context: input.context,
     time: input.time,
     filters,
   });
   const previous = input.previousTime
     ? await reader.readOverview({
-        context: input.context,
         time: input.previousTime,
         filters,
       })
@@ -111,7 +107,6 @@ export async function executeTrend(
   const filterError = validateTypedQueryFilters(input.context, filters);
   if (filterError) return { ok: false, error: filterError };
   const result = await reader.readTrend({
-    context: input.context,
     time: input.time,
     filters,
     interval: input.interval,

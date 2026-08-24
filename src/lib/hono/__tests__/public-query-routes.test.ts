@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { handleOverviewContract } from "@/lib/edge/analytics/composition/legacy/overview-contract-adapter";
 import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
 import { fetchPublicSite } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { handleOverviewContract } from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
 import type * as DashboardCacheModule from "@/lib/edge/dashboard-cache";
 import {
   PUBLIC_QUERY_CACHE_OPTIONS,
@@ -38,7 +38,7 @@ vi.mock(
 );
 
 vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
+  "@/lib/edge/analytics/composition/legacy/overview-contract-adapter",
   () => ({
     handleOverviewContract: vi.fn(),
     handleTrendContract: vi.fn(),
@@ -46,7 +46,7 @@ vi.mock(
 );
 
 vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/pages-contract-adapter",
+  "@/lib/edge/analytics/composition/legacy/pages-contract-adapter",
   () => ({
     handlePagesContract: vi.fn(),
     handleReferrersContract: vi.fn(),

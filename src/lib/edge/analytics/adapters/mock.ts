@@ -1,21 +1,21 @@
 /* c8 ignore file -- this module bridges mock transport and typed queries. */
 
-import { executeTypedApplicationOperation } from "@/lib/edge/analytics/contract";
 import {
   getRequestId,
   queryErrorResponse,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
+} from "@/lib/edge/analytics/composition/mock-provider";
 import {
   createDemoQueryResponse,
   type DemoQueryPayloadResult,
-} from "@/lib/edge/analytics/providers/mock/demo-query";
+} from "@/lib/edge/analytics/composition/mock-provider";
 import {
   createMockProviderRegistry,
   createMockQuery,
   type MockQueryProviderInput,
-} from "@/lib/edge/analytics/providers/mock/provider";
+} from "@/lib/edge/analytics/composition/mock-provider";
+import { executeTypedApplicationOperation } from "@/lib/edge/analytics/contract";
 
-export type { MockQueryProviderInput } from "@/lib/edge/analytics/providers/mock/provider";
+export type { MockQueryProviderInput } from "@/lib/edge/analytics/composition/mock-provider";
 
 export async function executeMockQuery(
   input: MockQueryProviderInput,

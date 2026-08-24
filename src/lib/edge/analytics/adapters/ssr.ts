@@ -1,9 +1,9 @@
 import { createTypedQueryProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import type { TeamDashboardQueryResult } from "@/lib/edge/analytics/providers/d1/internal/team";
+import type { TeamDashboardQueryResult } from "@/lib/edge/analytics/composition/d1-provider";
 import {
   readTeamDashboard,
   type ReadTeamDashboardInput,
-} from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
+} from "@/lib/edge/analytics/composition/d1-provider";
 
 export type SsrTeamDashboardData = TeamDashboardQueryResult["data"];
 

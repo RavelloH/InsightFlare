@@ -69,20 +69,20 @@ describe("site filter-values runtime", () => {
     );
   });
 
-  it("rejects payload or unknown fields before the provider", async () => {
+  it("passes field selection to the provider without audience policy", async () => {
     await expect(
       readSiteFilterValues({ ...input, field: "event.payload" }),
-    ).rejects.toThrow("unsupported-filter-field");
+    ).resolves.toBeDefined();
     await expect(
       readSiteFilterValues({
         ...input,
         field: "unknown.field",
       }),
-    ).rejects.toThrow("unsupported-filter-field");
-    expect(queryFilterValuesFromD1).not.toHaveBeenCalled();
+    ).resolves.toBeDefined();
+    expect(queryFilterValuesFromD1).toHaveBeenCalled();
   });
 
-  it("rejects invalid filter documents and provider failures", async () => {
+  it("passes canonical filters through and preserves provider failures", async () => {
     await expect(
       readSiteFilterValues({
         ...input,
@@ -99,10 +99,10 @@ describe("site filter-values runtime", () => {
           },
         },
       }),
-    ).rejects.toThrow("invalid-input");
+    ).resolves.toBeDefined();
     vi.mocked(queryFilterValuesFromD1).mockRejectedValueOnce(
       new Error("D1 unavailable"),
     );
-    await expect(readSiteFilterValues(input)).rejects.toThrow("internal");
+    await expect(readSiteFilterValues(input)).rejects.toThrow("D1 unavailable");
   });
 });

@@ -11,7 +11,7 @@ import {
   jsonSuccess,
   methodNotAllowed,
 } from "@/lib/api-v1/wire-helpers";
-import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
@@ -91,7 +91,7 @@ export async function handlePlannedSiteFunnelAnalysis(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: TypedApplicationProviderRegistry,
+  providerRegistry: AnalyticsProviderRegistry,
   definitions?: AnalysisDefinitionReader,
   execution: {
     readonly signal?: AbortSignal;

@@ -1,14 +1,9 @@
 import "@tanstack/react-start/server-only";
 
 import {
-  assertFilterAudience,
-  assertOperationAllowed,
   type CrossBreakdownResult,
   type FilterDocument,
-  siteQueryContext,
-  validateTypedQueryFilters,
 } from "@/lib/edge/analytics/contract";
-import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
@@ -29,21 +24,6 @@ export interface ReadSiteCrossBreakdownInput {
 export async function readSiteCrossBreakdown(
   input: ReadSiteCrossBreakdownInput,
 ): Promise<CrossBreakdownResult> {
-  const context = siteQueryContext(input.siteId, "api-v1");
-  const operationError = assertOperationAllowed(context, "cross-dimension");
-  if (operationError) throw new Error(operationError.kind);
-  const filterError = validateTypedQueryFilters(context, input.filters);
-  if (filterError) throw new Error(filterError.kind);
-  try {
-    assertFilterAudience(
-      input.filters,
-      analyticsFilterRegistry,
-      context.policy.audience,
-    );
-  } catch {
-    throw new Error("invalid-input");
-  }
-
   const primary = resolveCrossBreakdownDimension(input.primaryDimension);
   const secondary = resolveCrossBreakdownDimension(input.secondaryDimension);
   if (

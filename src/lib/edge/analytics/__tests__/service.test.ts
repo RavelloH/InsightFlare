@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { OperationResultCache } from "@/lib/edge/analytics/application/cache";
-import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import {
+  AnalyticsProviderRegistry,
+  createTypedQueryProviderRegistry,
+  typedQueryProvider,
+} from "@/lib/edge/analytics/application/provider-registry";
 import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
+import { createReaderProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import { createQueryService } from "@/lib/edge/analytics/composition/create-query-service";
 import {
   createQueryTime,
@@ -55,13 +60,9 @@ function overviewInvocation(
     kind: "typed-query" as const,
     operation: "overview" as const,
     query,
-    providerRegistry: new AnalyticsProviderRegistry().registerQuery(
-      "overview",
-      {
-        execute: (input) => overviewReader.readOverview(input as never),
-      },
-    ),
-    resultMode: "value" as const,
+    providerRegistry: new AnalyticsProviderRegistry().register("overview", {
+      execute: (input) => overviewReader.readOverview(input as never),
+    }),
     ...(options.cache ? { cache: options.cache } : {}),
   };
 }
@@ -78,10 +79,9 @@ function trendInvocation(overviewReader: OverviewReader) {
     kind: "typed-query" as const,
     operation: "trend" as const,
     query,
-    providerRegistry: new AnalyticsProviderRegistry().registerQuery("trend", {
+    providerRegistry: new AnalyticsProviderRegistry().register("trend", {
       execute: (input) => overviewReader.readTrend(input as typeof query),
     }),
-    resultMode: "value" as const,
   };
 }
 
@@ -94,16 +94,48 @@ function invocation<T>(
     kind: "typed-query" as const,
     operation,
     query: { context, time, filters: EMPTY_FILTER_DOCUMENT },
-    providerRegistry: new AnalyticsProviderRegistry().registerQuery(operation, {
+    providerRegistry: new AnalyticsProviderRegistry().register(operation, {
       execute: async () => ({ value: await run() }),
     }),
-    resultMode: "value" as const,
   };
 }
 
 describe("TypedQueryApplicationService", () => {
+  it("keeps one canonical provider map and resolves only registered operations", async () => {
+    const provider = typedQueryProvider(async () => ({ value: { views: 1 } }));
+    const registry = new AnalyticsProviderRegistry().register(
+      "overview",
+      provider,
+    );
+    expect(registry.resolve("overview")).toBe(provider);
+    expect(registry.resolve("trend")).toBeUndefined();
+
+    const factoryRegistry = createTypedQueryProviderRegistry(
+      "overview",
+      async () => ({ value: { views: 2 } }),
+    );
+    await expect(
+      factoryRegistry.resolve("overview")?.execute({} as never),
+    ).resolves.toEqual({ value: { views: 2 } });
+  });
+
   it("creates the application service from the composition boundary", () => {
     expect(createQueryService()).toBeInstanceOf(TypedQueryApplicationService);
+  });
+
+  it("canonicalizes protocol operation ids before invoking a reader", async () => {
+    const signal = new AbortController().signal;
+    const registry = createReaderProviderRegistry(
+      "site.analytics.overview",
+      async (input: { readonly signal?: AbortSignal }) => ({
+        signal: input.signal,
+      }),
+    );
+    const provider = registry.resolve("overview");
+    expect(provider).toBeDefined();
+    await expect(provider?.execute({} as never, { signal })).resolves.toEqual({
+      value: { signal },
+    });
   });
 
   it("executes a canonical typed query through the registry", async () => {
@@ -114,7 +146,7 @@ describe("TypedQueryApplicationService", () => {
       source: "rollup",
       approximateVisitors: true,
     });
-    const providerRegistry = new AnalyticsProviderRegistry().registerQuery(
+    const providerRegistry = new AnalyticsProviderRegistry().register(
       "overview",
       { execute: run },
     );
@@ -129,7 +161,6 @@ describe("TypedQueryApplicationService", () => {
           filters: EMPTY_FILTER_DOCUMENT,
         } as OverviewQuery,
         providerRegistry,
-        resultMode: "value",
       }),
     ).resolves.toEqual({
       ok: true,
@@ -154,7 +185,6 @@ describe("TypedQueryApplicationService", () => {
           filters: EMPTY_FILTER_DOCUMENT,
         } as OverviewQuery,
         providerRegistry: new AnalyticsProviderRegistry(),
-        resultMode: "result",
       }),
     ).resolves.toEqual({
       ok: false,
@@ -168,9 +198,15 @@ describe("TypedQueryApplicationService", () => {
       data: { views: 9 },
       meta: { time, source: "raw" as const, approximateVisitors: false },
     };
-    const providerRegistry = new AnalyticsProviderRegistry().registerResult(
+    const providerRegistry = new AnalyticsProviderRegistry().register(
       "overview",
-      { execute: async () => result },
+      {
+        execute: async () => ({
+          value: result.data,
+          source: result.meta.source,
+          approximateVisitors: result.meta.approximateVisitors,
+        }),
+      },
     );
 
     await expect(
@@ -182,20 +218,19 @@ describe("TypedQueryApplicationService", () => {
           time,
         } as OverviewQuery,
         providerRegistry,
-        resultMode: "result",
       }),
     ).resolves.toEqual(result);
   });
 
   it("checks the deadline after an enveloped provider finishes", async () => {
     const now = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(1);
-    const providerRegistry = new AnalyticsProviderRegistry().registerResult(
+    const providerRegistry = new AnalyticsProviderRegistry().register(
       "overview",
       {
         execute: async () => ({
-          ok: true as const,
-          data: { views: 1 },
-          meta: { time, source: "raw" as const, approximateVisitors: false },
+          value: { views: 1 },
+          source: "raw" as const,
+          approximateVisitors: false,
         }),
       },
     );
@@ -210,7 +245,6 @@ describe("TypedQueryApplicationService", () => {
             time,
           } as OverviewQuery,
           providerRegistry,
-          resultMode: "result",
         },
         { deadlineMs: 1, now },
       ),
@@ -221,10 +255,9 @@ describe("TypedQueryApplicationService", () => {
   });
 
   it("requires a canonical time before producing a value envelope", async () => {
-    const providerRegistry = new AnalyticsProviderRegistry().registerQuery(
-      "pages",
-      { execute: async () => ({ value: { items: [] } }) },
-    );
+    const providerRegistry = new AnalyticsProviderRegistry().register("pages", {
+      execute: async () => ({ value: { items: [] } }),
+    });
 
     await expect(
       new TypedQueryApplicationService().execute({
@@ -232,7 +265,6 @@ describe("TypedQueryApplicationService", () => {
         operation: "pages",
         query: { context: siteQueryContext("site-1", "private-dashboard") },
         providerRegistry,
-        resultMode: "value",
       }),
     ).resolves.toEqual({
       ok: false,

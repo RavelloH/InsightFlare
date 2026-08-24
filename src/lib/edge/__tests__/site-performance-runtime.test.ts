@@ -80,7 +80,7 @@ describe("site performance runtime", () => {
     });
   });
 
-  it("fails closed before a provider for invalid filters", async () => {
+  it("passes canonical filters through without audience policy", async () => {
     await expect(
       readSitePerformanceSummary({
         ...input,
@@ -94,8 +94,8 @@ describe("site performance runtime", () => {
           },
         },
       }),
-    ).rejects.toThrow("invalid-input");
-    expect(queryPerformanceSummariesFromD1).not.toHaveBeenCalled();
+    ).resolves.toBeDefined();
+    expect(queryPerformanceSummariesFromD1).toHaveBeenCalled();
   });
 
   it("limits performance breakdowns to supported typed dimensions", async () => {
@@ -135,16 +135,16 @@ describe("site performance runtime", () => {
     ).resolves.toMatchObject({ items: [{ key: "US", label: "US" }] });
   });
 
-  it("maps provider failures to typed internal errors", async () => {
+  it("preserves provider failures for the application boundary", async () => {
     vi.mocked(queryPerformanceSummariesFromD1).mockRejectedValueOnce(
       new Error("down"),
     );
-    await expect(readSitePerformanceSummary(input)).rejects.toThrow("internal");
+    await expect(readSitePerformanceSummary(input)).rejects.toThrow("down");
     vi.mocked(queryAllPerformanceTrendsFromD1).mockRejectedValueOnce(
       new Error("down"),
     );
     await expect(
       readSitePerformanceTimeseries({ ...input, interval: "day" }),
-    ).rejects.toThrow("internal");
+    ).rejects.toThrow("down");
   });
 });

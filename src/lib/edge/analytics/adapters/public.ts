@@ -1,18 +1,15 @@
-import {
-  assertOperationAllowed,
-  siteQueryContext,
-} from "@/lib/edge/analytics/contract";
+import type { SimpleDimensionKey } from "@/lib/edge/analytics/composition/d1-contract-adapters";
+import type { OverviewTab } from "@/lib/edge/analytics/composition/d1-contract-adapters";
 import {
   getRequestId,
   notFound,
   type ResponseContext,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
-import type { SimpleDimensionKey } from "@/lib/edge/analytics/providers/d1/internal/dimensions-contract-adapter";
-import type { OverviewTab } from "@/lib/edge/analytics/providers/d1/internal/overview-tabs-contract-adapter";
+} from "@/lib/edge/analytics/composition/d1-contract-adapters";
 import {
   applyPublicQueryPolicy,
   operationForQueryRoute,
-} from "@/lib/edge/analytics/providers/d1/internal/router";
+} from "@/lib/edge/analytics/composition/d1-contract-adapters";
+import { siteQueryContext } from "@/lib/edge/analytics/contract";
 import type { Env } from "@/lib/edge/types";
 
 const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
@@ -117,11 +114,6 @@ export function executePublicQuery(
   const url = policy.url;
   const ctx = responseContext(input);
   const queryContext = siteQueryContext(input.siteId, "public-share");
-  if (
-    assertOperationAllowed(queryContext, operationForQueryRoute(input.pathname))
-  ) {
-    return Promise.resolve(notFound());
-  }
   if (isDemoBuild) {
     const operation = operationForQueryRoute(input.pathname);
     return import("@/lib/edge/analytics/adapters/mock").then(
@@ -138,19 +130,19 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "overview") {
-    return import("../providers/d1/internal/overview-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handleOverviewContract }) =>
         handleOverviewContract(input.env, input.siteId, url, ctx, queryContext),
     );
   }
   if (input.pathname === "trend") {
-    return import("../providers/d1/internal/overview-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handleTrendContract }) =>
         handleTrendContract(input.env, input.siteId, url, ctx, queryContext),
     );
   }
   if (input.pathname === "pages") {
-    return import("../providers/d1/internal/pages-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handlePagesContract }) =>
         handlePagesContract(
           input.env,
@@ -163,7 +155,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "referrers") {
-    return import("../providers/d1/internal/pages-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handleReferrersContract }) =>
         handleReferrersContract(
           input.env,
@@ -177,7 +169,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "pages-dashboard") {
-    return import("../providers/d1/internal/pages-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handlePagesDashboardContract }) =>
         handlePagesDashboardContract(
           input.env,
@@ -189,7 +181,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "retention") {
-    return import("../providers/d1/internal/analysis-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handleRetentionContract }) =>
         handleRetentionContract(
           input.env,
@@ -201,7 +193,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "performance") {
-    return import("../providers/d1/internal/analysis-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handlePerformanceContract }) =>
         handlePerformanceContract(
           input.env,
@@ -213,7 +205,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "event-types") {
-    return import("../providers/d1/internal/events-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handleEventTypesContract }) =>
         handleEventTypesContract(
           input.env,
@@ -225,7 +217,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "filter-values") {
-    return import("../providers/d1/internal/filter-values-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handleFilterValuesContract }) =>
         handleFilterValuesContract(
           input.env,
@@ -237,7 +229,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "overview-geo-points") {
-    return import("../providers/d1/internal/overview-extras-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handleOverviewGeoPointsContract }) =>
         handleOverviewGeoPointsContract(
           input.env,
@@ -250,7 +242,7 @@ export function executePublicQuery(
   }
   const dimension = SIMPLE_DIMENSIONS[input.pathname];
   if (dimension) {
-    return import("../providers/d1/internal/dimensions-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handleSimpleDimensionContract }) =>
         handleSimpleDimensionContract(
           input.env,
@@ -264,20 +256,19 @@ export function executePublicQuery(
   }
   const technologyHandler = TECHNOLOGY_HANDLERS[input.pathname];
   if (technologyHandler) {
-    return import("../providers/d1/internal/technology-contract-adapter").then(
-      (module) =>
-        module[technologyHandler](
-          input.env,
-          input.siteId,
-          url,
-          ctx,
-          queryContext,
-        ),
+    return import("../composition/d1-contract-adapters").then((module) =>
+      module[technologyHandler](
+        input.env,
+        input.siteId,
+        url,
+        ctx,
+        queryContext,
+      ),
     );
   }
   const overviewTab = OVERVIEW_TABS[input.pathname];
   if (overviewTab) {
-    return import("../providers/d1/internal/overview-tabs-contract-adapter").then(
+    return import("../composition/d1-contract-adapters").then(
       ({ handleOverviewTabContract }) =>
         handleOverviewTabContract(
           input.env,

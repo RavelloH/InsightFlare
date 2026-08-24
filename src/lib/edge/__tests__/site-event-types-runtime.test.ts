@@ -184,7 +184,7 @@ describe("site event-types runtime", () => {
     );
   });
 
-  it("fails closed before providers for an invalid filter", async () => {
+  it("passes canonical filters through without audience policy", async () => {
     await expect(
       readSiteEventTypes({
         ...base,
@@ -199,20 +199,20 @@ describe("site event-types runtime", () => {
           },
         },
       }),
-    ).rejects.toThrow("invalid-input");
-    expect(queryEventTypeAggregate).not.toHaveBeenCalled();
+    ).resolves.toBeDefined();
+    expect(queryEventTypeAggregate).toHaveBeenCalled();
   });
 
-  it("maps each event-type provider failure to the typed internal error", async () => {
+  it("preserves provider failures for the application boundary", async () => {
     vi.mocked(queryEventTypeAggregate).mockRejectedValueOnce(new Error("down"));
     await expect(readSiteEventTypes({ ...base, limit: 20 })).rejects.toThrow(
-      "internal",
+      "down",
     );
 
     vi.mocked(queryEventFieldsFromD1).mockRejectedValueOnce(new Error("down"));
     await expect(
       readSiteEventFields({ ...base, eventName: "signup", limit: 100 }),
-    ).rejects.toThrow("internal");
+    ).rejects.toThrow("down");
 
     vi.mocked(queryEventFieldValuesFromD1).mockRejectedValueOnce(
       new Error("down"),
@@ -225,7 +225,7 @@ describe("site event-types runtime", () => {
         fieldValueType: "string",
         limit: 25,
       }),
-    ).rejects.toThrow("internal");
+    ).rejects.toThrow("down");
 
     vi.mocked(queryEventTypeOverviewFromD1).mockRejectedValueOnce(
       new Error("down"),
@@ -236,6 +236,6 @@ describe("site event-types runtime", () => {
         eventName: "signup",
         interval: "day",
       }),
-    ).rejects.toThrow("internal");
+    ).rejects.toThrow("down");
   });
 });

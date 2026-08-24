@@ -3,30 +3,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
   listTeamSites: vi.fn(),
 }));
-vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
-  () => ({
-    createOverviewReader: vi.fn(),
-    toQueryTime: vi.fn(
-      (window: {
-        startMs: number;
-        endExclusiveMs: number;
-        nowMs: number;
-        timeZone: string;
-      }) => ({
-        range: {
-          startMs: window.startMs,
-          endExclusiveMs: window.endExclusiveMs,
-        },
-        reportingTimeZone: window.timeZone,
-        capturedAtMs: window.nowMs,
-      }),
-    ),
-  }),
-);
+vi.mock("@/lib/edge/analytics/providers/d1/operations/overview-reader", () => ({
+  createOverviewReader: vi.fn(),
+  toQueryTime: vi.fn(
+    (window: {
+      startMs: number;
+      endExclusiveMs: number;
+      nowMs: number;
+      timeZone: string;
+    }) => ({
+      range: {
+        startMs: window.startMs,
+        endExclusiveMs: window.endExclusiveMs,
+      },
+      reportingTimeZone: window.timeZone,
+      capturedAtMs: window.nowMs,
+    }),
+  ),
+}));
 
-import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
 import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
+import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import { readTeamOverview } from "@/lib/edge/analytics/providers/d1/operations/team-overview";
 
 const env = {} as never;
@@ -94,7 +91,7 @@ describe("team overview runtime", () => {
     expect(listTeamSites).toHaveBeenCalledTimes(1);
   });
 
-  it("reports mixed provenance and fails closed for unauthorized filter fields", async () => {
+  it("reports mixed provenance and passes canonical filters", async () => {
     vi.mocked(listTeamSites).mockResolvedValue([
       { id: "site-1" },
       { id: "site-2" },
@@ -131,6 +128,6 @@ describe("team overview runtime", () => {
           },
         },
       }),
-    ).rejects.toThrow("invalid-input");
+    ).resolves.toMatchObject({ data: { views: 1 } });
   });
 });

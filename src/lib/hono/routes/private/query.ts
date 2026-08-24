@@ -5,9 +5,11 @@ import {
   executePrivateQuery,
   executePrivateTeamDashboard,
 } from "@/lib/edge/analytics/adapters/private";
-import { notAllowed } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { DASHBOARD_QUERY_PATHS } from "@/lib/edge/analytics/providers/d1/internal/router";
-import { resolveTeamDashboardScope } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
+import {
+  DASHBOARD_QUERY_PATHS,
+  notAllowed,
+} from "@/lib/edge/analytics/composition/d1-contract-adapters";
+import { resolveTeamDashboardScope } from "@/lib/edge/analytics/composition/d1-provider";
 import { withDashboardCache } from "@/lib/edge/dashboard-cache";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import {

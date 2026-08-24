@@ -61,7 +61,7 @@ describe("site retention runtime", () => {
     );
   });
 
-  it("rejects unauthorized filters and provider failures", async () => {
+  it("passes canonical filters through and preserves provider failures", async () => {
     await expect(
       readSiteRetention({
         ...input,
@@ -75,8 +75,8 @@ describe("site retention runtime", () => {
           },
         },
       }),
-    ).rejects.toThrow("invalid-input");
+    ).resolves.toBeDefined();
     vi.mocked(queryRetentionFromD1).mockRejectedValueOnce(new Error("down"));
-    await expect(readSiteRetention(input)).rejects.toThrow("internal");
+    await expect(readSiteRetention(input)).rejects.toThrow("down");
   });
 });

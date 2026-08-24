@@ -91,7 +91,7 @@ describe("site events runtime", () => {
     );
   });
 
-  it("fails closed before a provider for invalid filters", async () => {
+  it("passes canonical filters through without audience policy", async () => {
     await expect(
       readSiteEventsSummary({
         ...input,
@@ -105,8 +105,8 @@ describe("site events runtime", () => {
           },
         },
       }),
-    ).rejects.toThrow("invalid-input");
-    expect(queryEventsSummaryFromD1).not.toHaveBeenCalled();
+    ).resolves.toBeDefined();
+    expect(queryEventsSummaryFromD1).toHaveBeenCalled();
   });
 
   it("normalizes sparse provider summaries without dividing by zero", async () => {
@@ -128,14 +128,14 @@ describe("site events runtime", () => {
     });
   });
 
-  it("maps provider failures to typed internal errors", async () => {
+  it("preserves provider failures for the application boundary", async () => {
     vi.mocked(queryEventsSummaryFromD1).mockRejectedValueOnce(
       new Error("down"),
     );
-    await expect(readSiteEventsSummary(input)).rejects.toThrow("internal");
+    await expect(readSiteEventsSummary(input)).rejects.toThrow("down");
     vi.mocked(queryEventsTrendFromD1).mockRejectedValueOnce(new Error("down"));
     await expect(
       readSiteEventsTimeseries({ ...input, interval: "day", limit: 8 }),
-    ).rejects.toThrow("internal");
+    ).rejects.toThrow("down");
   });
 });

@@ -22,11 +22,7 @@ import type { TypedQueryProviderResult } from "./provider-registry";
 import { validateTypedQueryInput } from "./query-validation";
 
 export type { AnalyticsServiceError, AnalyticsServiceResult } from "./errors";
-export type { AnalyticsOperationProvider } from "./provider-registry";
-export {
-  analyticsOperationProvider,
-  AnalyticsProviderRegistry,
-} from "./provider-registry";
+export { AnalyticsProviderRegistry } from "./provider-registry";
 
 export interface QueryExecutionContext {
   readonly signal?: AbortSignal;
@@ -64,7 +60,6 @@ export interface TypedQueryOperationInvocation<Result> {
   readonly operation: QueryOperation;
   readonly query: QueryInput;
   readonly providerRegistry: AnalyticsProviderRegistry;
-  readonly resultMode: "value" | "result";
   readonly cache?: {
     readonly key: string;
     readonly policy: OperationCachePolicy;
@@ -171,30 +166,6 @@ export class TypedQueryApplicationService {
     }
 
     try {
-      if (invocation.resultMode === "result") {
-        const provider = invocation.providerRegistry.resolveResult<Result>(
-          invocation.operation,
-        );
-        if (!provider) {
-          emit(executionContext, "failure");
-          return {
-            ok: false,
-            error: { kind: "internal", operation: invocation.operation },
-          };
-        }
-        const result = await provider.execute(invocation.query);
-        const after = executionDomainError(executionContext);
-        if (after) {
-          emit(
-            executionContext,
-            after.error.kind === "deadline-exceeded" ? "deadline" : "cancelled",
-          );
-          return after;
-        }
-        emit(executionContext, result.ok ? "success" : "failure");
-        return result;
-      }
-
       const provider = invocation.providerRegistry.resolve<Result>(
         invocation.operation,
       );
@@ -206,7 +177,7 @@ export class TypedQueryApplicationService {
         };
       }
       const load = async (): Promise<TypedQueryProviderResult<Result>> =>
-        provider.execute(invocation.query);
+        provider.execute(invocation.query, executionContext);
       let result: TypedQueryProviderResult<Result>;
       if (!invocation.cache || !this.cache) {
         result = await load();
