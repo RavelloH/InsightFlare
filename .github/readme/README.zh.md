@@ -355,28 +355,29 @@ InsightFlare 的前端 SDK 支持以手动调用的方式上报自定义事件�
 
 ## 常用命令
 
-| 命令                                          | 用途                                                                 |
-| --------------------------------------------- | -------------------------------------------------------------------- |
-| `npm run dev`                                 | Vite + Cloudflare Workers 本地开发（使用 `http://localhost:3000`）   |
-| `npm run dev:ui`                              | 以 Demo 模式启动 Vite 仪表板开发服务器                               |
-| `npm run preview:local`                       | 使用本地资源构建并启动 Wrangler 预览                                 |
-| `npm run build`                               | Cloudflare 托管构建入口                                              |
-| `npm run build:local`                         | 本地预检 + 本地 D1 迁移 + 构建                                       |
-| `npm run build:demo`                          | 无资源绑定的 Demo 构建                                               |
-| `npm run deploy`                              | Cloudflare 托管部署入口                                              |
-| `npm run publish`                             | 在允许的 Cloudflare 环境中构建并主动发布                             |
-| `npm run publish:demo`                        | 构建并发布 Demo Worker                                               |
-| `npm run check`                               | 一键执行 build + typecheck + lint + format + i18n + test + spec 校验 |
-| `npm run typecheck`                           | TypeScript 类型检查                                                  |
-| `npm run lint` / `lint:fix`                   | ESLint                                                               |
-| `npm run format` / `format:check`             | Prettier                                                             |
-| `npm run check:i18n`                          | 校验翻译键的完整性                                                   |
-| `npm run db:migrate:local`                    | 本地 D1 迁移                                                         |
-| `npm run db:migrate:cf`                       | Cloudflare D1 迁移                                                   |
-| `npm run db:migration:create`                 | 新建迁移文件                                                         |
-| `npm run ops:secret:main`                     | 设置 `MAIN_SECRET` Worker Secret                                     |
-| `npm run ops:secret:bootstrap-admin-password` | 设置初始化管理员密码 Secret                                          |
-| `npm run ops:tail`                            | 查看线上 Worker 日志                                                 |
+| 命令                                          | 用途                                                                    |
+| --------------------------------------------- | ----------------------------------------------------------------------- |
+| `npm run dev`                                 | Vite + Cloudflare Workers 本地开发（使用 `http://localhost:3000`）      |
+| `npm run dev:ui`                              | 以 Demo 模式启动 Vite 仪表板开发服务器                                  |
+| `npm run preview:local`                       | 使用本地资源构建并启动 Wrangler 预览                                    |
+| `npm run build`                               | Cloudflare 托管构建入口                                                 |
+| `npm run build:local`                         | 本地预检 + 本地 D1 迁移 + 构建                                          |
+| `npm run build:demo`                          | 无资源绑定的 Demo 构建                                                  |
+| `npm run deploy`                              | Cloudflare 托管部署入口                                                 |
+| `npm run publish`                             | 在允许的 Cloudflare 环境中构建并主动发布                                |
+| `npm run publish:demo`                        | 构建并发布 Demo Worker                                                  |
+| `npm run check`                               | 自动修复格式和 lint，并执行 build + typecheck + i18n + test + spec 检查 |
+| `npm run check:verify`                        | 严格执行完整检查，不自动修复                                            |
+| `npm run typecheck`                           | TypeScript 类型检查                                                     |
+| `npm run lint` / `lint:fix`                   | ESLint                                                                  |
+| `npm run format` / `format:check`             | Prettier                                                                |
+| `npm run check:i18n`                          | 校验翻译键的完整性                                                      |
+| `npm run db:migrate:local`                    | 本地 D1 迁移                                                            |
+| `npm run db:migrate:cf`                       | Cloudflare D1 迁移                                                      |
+| `npm run db:migration:create`                 | 新建迁移文件                                                            |
+| `npm run ops:secret:main`                     | 设置 `MAIN_SECRET` Worker Secret                                        |
+| `npm run ops:secret:bootstrap-admin-password` | 设置初始化管理员密码 Secret                                             |
+| `npm run ops:tail`                            | 查看线上 Worker 日志                                                    |
 
 ---
 

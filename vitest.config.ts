@@ -1,6 +1,10 @@
+import { cpus as osCpus } from "node:os";
+
 import path from "path";
 import { defineConfig } from "vitest/config";
 import { parse } from "yaml";
+
+const VITEST_MAX_WORKERS = Math.max(1, osCpus().length);
 
 export default defineConfig({
   plugins: [
@@ -25,6 +29,8 @@ export default defineConfig({
   test: {
     environment: "happy-dom",
     globals: true,
+    pool: "threads",
+    maxWorkers: VITEST_MAX_WORKERS,
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "cloudflare:workers": path.resolve(

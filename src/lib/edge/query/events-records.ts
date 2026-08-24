@@ -84,8 +84,9 @@ function eventRecordSourceColumns(filters: FilterDocument): string {
     if (!expression) return;
     if (expression.kind === "condition") {
       if (expression.target.kind === "field") {
-        for (const column of
-          EVENT_RECORD_FILTER_SOURCE_COLUMNS[expression.target.field] ?? []) {
+        for (const column of EVENT_RECORD_FILTER_SOURCE_COLUMNS[
+          expression.target.field
+        ] ?? []) {
           columns.add(column);
         }
       }

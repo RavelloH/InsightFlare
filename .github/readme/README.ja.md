@@ -357,7 +357,8 @@ InsightFlare のフロントエンド SDK は、手動呼び出しと DOM 属性
 | `npm run build:demo` | リソースバインドなしのデモビルド |
 | `npm run deploy` | Cloudflare 管理デプロイのエントリポイント |
 | `npm run publish` | 許可された Cloudflare 環境からビルドして公開 |
-| `npm run check` | build、型、lint、format、i18n、テスト、仕様チェックを実行 |
+| `npm run check` | format と lint を自動修正してから、build、型、i18n、テスト、仕様をチェック |
+| `npm run check:verify` | 自動修正なしで完全なチェックを実行 |
 | `npm run typecheck` | TypeScript の型チェック |
 | `npm run lint` / `lint:fix` | ESLint |
 | `npm run format` / `format:check` | Prettier |

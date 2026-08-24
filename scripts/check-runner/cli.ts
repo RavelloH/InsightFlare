@@ -1,7 +1,8 @@
-import { spawn } from "node:child_process";
 import process from "node:process";
 
 import { createScriptLogger } from "../shared/logger";
+import { runCapturedProcess } from "./process";
+import { CheckProgress } from "./progress";
 
 interface CheckStep {
   name: string;
@@ -11,7 +12,8 @@ interface CheckStep {
 interface CheckTask {
   name: string;
   steps: CheckStep[];
-  exclusive?: boolean;
+  dependsOn?: string[];
+  parallelSteps?: boolean;
 }
 
 interface StepResult {
@@ -19,6 +21,7 @@ interface StepResult {
   output: string;
   code?: number | null;
   signal?: NodeJS.Signals | null;
+  durationMs: number;
 }
 
 interface TaskResult extends StepResult {
@@ -27,6 +30,7 @@ interface TaskResult extends StepResult {
 }
 
 interface CheckOptions {
+  fix: boolean;
   verbose: boolean;
 }
 
@@ -34,80 +38,113 @@ export const rlog = createScriptLogger({
   silent: true,
 });
 
-const tasks: CheckTask[] = [
-  {
-    name: "Format",
-    steps: [
-      {
-        name: "Format",
-        args: ["run", "format:check"],
-      },
-    ],
-  },
-  {
-    name: "Lint",
-    steps: [
-      {
-        name: "Lint",
-        args: ["run", "lint"],
-      },
-    ],
-  },
-  {
-    name: "Translations",
-    steps: [
-      {
-        name: "Translations",
-        args: ["run", "check:i18n"],
-      },
-    ],
-  },
-  {
-    name: "Typecheck",
-    steps: [
-      {
-        name: "Typecheck",
-        args: ["run", "typecheck"],
-      },
-    ],
-  },
-  {
-    name: "Coverage",
-    exclusive: true,
-    steps: [
-      {
-        name: "Coverage",
-        args: ["run", "test:coverage"],
-      },
-    ],
-  },
-  {
-    name: "Spec",
-    steps: [
-      {
-        name: "OpenAPI spec",
-        args: ["run", "check:openapi"],
-      },
-      {
-        name: "Skills spec",
-        args: ["run", "check:skills"],
-      },
-      {
-        name: "Schema spec",
-        args: ["run", "check:schema"],
-      },
-    ],
-  },
-  {
-    name: "Build",
-    steps: [
-      {
-        name: "Build",
-        args: ["run", "build:demo"],
-      },
-    ],
-  },
-];
+function createTasks(fix: boolean): CheckTask[] {
+  const formatSteps: CheckStep[] = fix
+    ? [
+        {
+          name: "Format",
+          args: ["run", "format"],
+        },
+      ]
+    : [
+        {
+          name: "Format",
+          args: ["run", "format:check"],
+        },
+      ];
+  const lintSteps: CheckStep[] = fix
+    ? [
+        {
+          name: "Lint fix",
+          args: ["run", "lint:fix"],
+        },
+      ]
+    : [
+        {
+          name: "Lint",
+          args: ["run", "lint"],
+        },
+      ];
+
+  return [
+    {
+      name: "Tracker SDK",
+      steps: [
+        {
+          name: "Tracker SDK",
+          args: ["run", "build:tracker-sdk"],
+        },
+      ],
+    },
+    {
+      name: "Format",
+      dependsOn: ["Tracker SDK"],
+      steps: formatSteps,
+    },
+    {
+      name: "Lint",
+      dependsOn: fix ? ["Format"] : undefined,
+      steps: lintSteps,
+    },
+    {
+      name: "Translations",
+      dependsOn: fix ? ["Lint"] : undefined,
+      steps: [
+        {
+          name: "Translations",
+          args: ["run", "check:i18n"],
+        },
+      ],
+    },
+    {
+      name: "Typecheck",
+      dependsOn: fix ? ["Lint"] : undefined,
+      steps: [
+        {
+          name: "Typecheck",
+          args: ["run", "typecheck"],
+        },
+      ],
+    },
+    {
+      name: "Coverage",
+      dependsOn: fix ? ["Lint"] : undefined,
+      steps: [
+        {
+          name: "Coverage",
+          args: ["run", "test:coverage:check"],
+        },
+      ],
+    },
+    {
+      name: "Spec",
+      dependsOn: fix ? ["Lint"] : undefined,
+      parallelSteps: true,
+      steps: [
+        {
+          name: "OpenAPI spec",
+          args: ["run", fix ? "check:openapi:fix" : "check:openapi"],
+        },
+        {
+          name: "Schema spec",
+          args: ["run", fix ? "check:schema:fix" : "check:schema"],
+        },
+      ],
+    },
+    {
+      name: "Build",
+      dependsOn: fix
+        ? ["Spec", "Lint", "Tracker SDK"]
+        : ["Spec", "Tracker SDK"],
+      steps: [
+        {
+          name: "Build",
+          args: ["run", "build:demo", "--", "--skip-sdk"],
+        },
+      ],
+    },
+  ];
+}
 
 function npmSpawnCommand(args: string[]): { command: string; args: string[] } {
   if (process.platform !== "win32") {
@@ -123,111 +160,173 @@ function npmSpawnCommand(args: string[]): { command: string; args: string[] } {
   };
 }
 
-function runStep(step: CheckStep, verbose: boolean): Promise<StepResult> {
-  return new Promise((resolve) => {
-    const command = npmSpawnCommand(step.args);
-    const child = spawn(command.command, command.args, {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: verbose ? "inherit" : ["ignore", "pipe", "pipe"],
-    });
-
-    let output = "";
-
-    if (!verbose) {
-      child.stdout?.on("data", (chunk: Buffer) => {
-        output += chunk.toString();
-      });
-      child.stderr?.on("data", (chunk: Buffer) => {
-        output += chunk.toString();
-      });
-    }
-
-    child.on("error", (error: Error) => {
-      resolve({
-        ok: false,
-        output: error.stack || error.message,
-      });
-    });
-
-    child.on("close", (code, signal) => {
-      resolve({
-        ok: code === 0,
-        output,
-        code,
-        signal,
-      });
-    });
+async function runStep(
+  taskName: string,
+  step: CheckStep,
+  verbose: boolean,
+): Promise<StepResult> {
+  const command = npmSpawnCommand(step.args);
+  const result = await runCapturedProcess({
+    command: command.command,
+    args: command.args,
+    cwd: process.cwd(),
+    env: process.env,
+    logger: rlog.child({ checkTask: taskName, checkStep: step.name }),
+    verbose,
   });
+
+  return result;
 }
 
-async function runTask(task: CheckTask, verbose: boolean): Promise<TaskResult> {
-  rlog.info(`Running ${task.name}`);
+async function runTask(
+  task: CheckTask,
+  verbose: boolean,
+  progress: CheckProgress,
+): Promise<TaskResult> {
+  const taskLogger = rlog.child({ checkTask: task.name });
+  const startedAt = Date.now();
+  progress.startTask(task.name);
+  taskLogger.text.info(`Running ${task.name}`);
 
-  for (const step of task.steps) {
+  const runStepWithProgress = async (
+    step: CheckStep,
+  ): Promise<{ step: CheckStep; result: StepResult }> => {
+    progress.startStep(task.name, step.name);
     if (verbose && task.steps.length > 1) {
-      rlog.info(`Running ${task.name} / ${step.name}`);
+      taskLogger.text.info(`Running ${task.name} / ${step.name}`);
     }
 
-    const result = await runStep(step, verbose);
-    if (!result.ok) {
-      return {
-        ...result,
-        name: task.name,
-        failedStep: step.name,
-      };
+    const result = await runStep(task.name, step, verbose);
+    if (result.ok) {
+      progress.completeStep(task.name, step.name, result.durationMs);
+    } else {
+      progress.failStep(task.name, step.name, result.durationMs);
     }
+    return { step, result };
+  };
+
+  const stepResults: Array<{ step: CheckStep; result: StepResult }> =
+    task.parallelSteps
+      ? await Promise.all(task.steps.map((step) => runStepWithProgress(step)))
+      : await (async () => {
+          const results: Array<{ step: CheckStep; result: StepResult }> = [];
+          for (const step of task.steps) {
+            const stepResult = await runStepWithProgress(step);
+            results.push(stepResult);
+            if (!stepResult.result.ok) break;
+          }
+          return results;
+        })();
+
+  const failedStep = stepResults.find(({ result }) => !result.ok);
+  if (failedStep) {
+    progress.failTask(task.name, Date.now() - startedAt);
+    return {
+      ...failedStep.result,
+      name: task.name,
+      failedStep: failedStep.step.name,
+      durationMs: Date.now() - startedAt,
+    };
   }
 
-  rlog.success(`Passed ${task.name}`);
+  progress.completeTask(task.name, Date.now() - startedAt);
+  taskLogger.text.success(
+    `Passed ${task.name} in ${((Date.now() - startedAt) / 1000).toFixed(2)}s`,
+  );
   return {
     ok: true,
     output: "",
     code: 0,
     name: task.name,
+    durationMs: Date.now() - startedAt,
   };
 }
 
+function scheduleTasks(
+  tasks: CheckTask[],
+  verbose: boolean,
+  progress: CheckProgress,
+): Promise<TaskResult[]> {
+  const taskByName = new Map(tasks.map((task) => [task.name, task]));
+  const scheduled = new Map<string, Promise<TaskResult>>();
+
+  const schedule = (task: CheckTask): Promise<TaskResult> => {
+    const existing = scheduled.get(task.name);
+    if (existing) return existing;
+
+    const dependencies = (task.dependsOn ?? []).map((dependencyName) => {
+      const dependency = taskByName.get(dependencyName);
+      if (!dependency) {
+        throw new Error(
+          `Unknown check dependency ${dependencyName} for ${task.name}`,
+        );
+      }
+      return schedule(dependency);
+    });
+
+    const result = Promise.all(dependencies).then(() =>
+      runTask(task, verbose, progress),
+    );
+    scheduled.set(task.name, result);
+    return result;
+  };
+
+  return Promise.all(tasks.map((task) => schedule(task)));
+}
+
 function parseArgs(argv: string[]): CheckOptions {
-  const knownArgs = new Set(["--verbose", "--help", "-h"]);
+  const knownArgs = new Set(["--fix", "--help", "--verify", "--verbose", "-h"]);
   const unknownArgs = argv.filter((arg) => !knownArgs.has(arg));
 
   if (argv.includes("--help") || argv.includes("-h")) {
-    rlog.info("Usage: tsx scripts/check.ts [--verbose]");
+    rlog.info("Usage: tsx scripts/check.ts [--verify] [--verbose]");
     rlog.info(
-      "Runs the same quality, coverage, spec, and build checks used by CI.",
+      "Runs quality, coverage, spec, and build checks with automatic fixes.",
     );
+    rlog.info("Use --verify to run the strict, non-fixing mode.");
     process.exit(0);
+  }
+
+  if (argv.includes("--fix") && argv.includes("--verify")) {
+    rlog.error("The --fix and --verify options cannot be used together.");
+    process.exit(1);
   }
 
   if (unknownArgs.length > 0) {
     rlog.error(`Unknown option: ${unknownArgs.join(", ")}`);
-    rlog.info("Usage: tsx scripts/check.ts [--verbose]");
+    rlog.info("Usage: tsx scripts/check.ts [--verify] [--verbose]");
     process.exit(1);
   }
 
   return {
+    fix: !argv.includes("--verify"),
     verbose: argv.includes("--verbose"),
   };
 }
 
 export async function runCli(argv = process.argv.slice(2)): Promise<void> {
-  const { verbose } = parseArgs(argv);
-  const parallelTasks = tasks.filter((task) => !task.exclusive);
-  const exclusiveTasks = tasks.filter((task) => task.exclusive);
-  const results = await Promise.all(
-    parallelTasks.map((task) => runTask(task, verbose)),
-  );
-  for (const task of exclusiveTasks) {
-    results.push(await runTask(task, verbose));
+  const { fix, verbose } = parseArgs(argv);
+  const tasks = createTasks(fix);
+  const progress = new CheckProgress(tasks, {
+    interactive: !verbose,
+  });
+  let results: TaskResult[];
+
+  try {
+    results = await scheduleTasks(tasks, verbose, progress);
+  } finally {
+    progress.finish();
   }
+
   const failures = results.filter((result) => !result.ok);
 
   for (const result of failures) {
     const name = result.failedStep
       ? `${result.name} / ${result.failedStep}`
       : result.name;
-    rlog.error(`Failed ${name}`);
+    rlog.error(
+      `Failed ${name} after ${(result.durationMs / 1000).toFixed(2)}s`,
+    );
     if (result.signal) {
       rlog.error(`Signal: ${result.signal}`);
     } else if (typeof result.code === "number") {
@@ -243,8 +342,11 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
   }
 
   if (failures.length > 0) {
-    process.exit(1);
+    process.exitCode = 1;
+    await rlog.flush();
+    return;
   }
 
   rlog.success("All checks passed");
+  await rlog.flush();
 }
