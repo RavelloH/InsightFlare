@@ -21,10 +21,10 @@ import { queryEventTypeTrendFromD1 } from "@/lib/edge/query/events-trend";
 import {
   analyticsFilterRegistry,
   assertFilterAudience,
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   type FilterDocument,
   siteQueryContext,
-  validateQueryFilters,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract";
 import { createQueryTime } from "@/lib/edge/query-contract/helpers";
 import type { Env } from "@/lib/edge/types";
@@ -66,7 +66,7 @@ export interface ReadSiteEventFieldValuesInput extends ReadSiteEventsInput {
 
 function inputBase(input: ReadSiteEventsInput) {
   const context = siteQueryContext(input.siteId, "api-v1");
-  const filterError = validateQueryFilters(context, input.filters);
+  const filterError = validateTypedQueryFilters(context, input.filters);
   if (filterError) throw new Error(filterError.kind);
   try {
     assertFilterAudience(
@@ -90,7 +90,7 @@ function inputBase(input: ReadSiteEventsInput) {
 }
 
 export async function readSiteEventsSummary(input: ReadSiteEventsInput) {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-summary",
     inputBase(input),
     async () => {
@@ -123,7 +123,7 @@ export async function readSiteEventsSummary(input: ReadSiteEventsInput) {
 export async function readSiteEventsTimeseries(
   input: ReadSiteEventsTimeseriesInput,
 ) {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-trend",
     inputBase(input),
     async () => ({
@@ -151,7 +151,7 @@ export async function readSiteEventsTimeseries(
 }
 
 export async function readSiteEventTypes(input: ReadSiteEventTypesInput) {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-types",
     inputBase(input),
     async () => ({
@@ -181,7 +181,7 @@ export async function readSiteEventTypes(input: ReadSiteEventTypesInput) {
 }
 
 export async function readSiteEventFields(input: ReadSiteEventFieldsInput) {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-fields",
     inputBase(input),
     async () => ({
@@ -208,7 +208,7 @@ export async function readSiteEventFields(input: ReadSiteEventFieldsInput) {
 export async function readSiteEventFieldValues(
   input: ReadSiteEventFieldValuesInput,
 ) {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-field-values",
     inputBase(input),
     async () => ({
@@ -240,7 +240,7 @@ export async function readSiteEventFieldValues(
 export async function readSiteEventTypeDetail(
   input: ReadSiteEventTypeDetailInput,
 ) {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-type-detail",
     inputBase(input),
     async () => {

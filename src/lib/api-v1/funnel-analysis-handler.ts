@@ -10,7 +10,7 @@ import {
   jsonSuccess,
   methodNotAllowed,
 } from "@/lib/api-v1/wire-helpers";
-import { AnalyticsQueryService } from "@/lib/edge/analytics/service";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import { canAccessSiteId } from "@/lib/edge/api-key-auth";
 import {
@@ -240,7 +240,7 @@ export async function handlePlannedSiteFunnelAnalysis(
   }
 
   try {
-    const serviceResult = await new AnalyticsQueryService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute(
       {
         operation: "site.analytics.funnelAnalysis",
         context: siteQueryContext(siteId, "api-v1"),

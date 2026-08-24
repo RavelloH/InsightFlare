@@ -12,8 +12,9 @@ import {
   assertOperationAllowed,
   type BreakdownResult,
   type FilterDocument,
+  type QueryContext,
   siteQueryContext,
-  validateQueryFilters,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract";
 import { analyticsFilterRegistry } from "@/lib/edge/query-contract/filter-registry";
 import type { Env } from "@/lib/edge/types";
@@ -25,6 +26,8 @@ export interface ReadSiteBreakdownInput {
   readonly dimension: string;
   readonly limit: number;
   readonly filters: FilterDocument;
+  /** The adapter policy; defaults to the API v1 compatibility policy. */
+  readonly context?: QueryContext;
 }
 
 function unsupportedDimension(dimension: string): never {
@@ -35,10 +38,10 @@ function unsupportedDimension(dimension: string): never {
 export async function readSiteBreakdown(
   input: ReadSiteBreakdownInput,
 ): Promise<BreakdownResult> {
-  const context = siteQueryContext(input.siteId, "api-v1");
+  const context = input.context ?? siteQueryContext(input.siteId, "api-v1");
   const operationError = assertOperationAllowed(context, "dimension");
   if (operationError) throw new Error(operationError.kind);
-  const filterError = validateQueryFilters(context, input.filters);
+  const filterError = validateTypedQueryFilters(context, input.filters);
   if (filterError) throw new Error(filterError.kind);
   try {
     assertFilterAudience(

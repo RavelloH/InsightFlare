@@ -9,15 +9,19 @@ import {
   exclusiveRangeToInclusive,
   executeOverview,
   executePages,
-  executeQueryOperation,
   executeReferrers,
   executeTrend,
+  executeTypedApplicationOperation,
+  executeTypedApplicationResult,
   hasFilters,
   inclusiveRangeToExclusive,
   normalizeFilterDocument,
   normalizeReportingTimeZone,
   previousComparableRange,
   siteQueryContext,
+  typedQueryProvider,
+  TypedQueryProviderRegistry,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract/index";
 
 describe("query contract time helpers", () => {
@@ -197,7 +201,7 @@ describe("query contract time helpers", () => {
       capturedAtMs: 200 as never,
     };
     const reader = vi.fn(async () => ({ value: { rows: [] } }));
-    const result = await executeQueryOperation(
+    const result = await executeTypedApplicationOperation(
       "event-records",
       {
         context: siteQueryContext("site-1", "public-share"),
@@ -212,10 +216,149 @@ describe("query contract time helpers", () => {
     expect(reader).not.toHaveBeenCalled();
   });
 
+  it("supports direct and registered providers at the application boundary", async () => {
+    const time = createQueryTime(100, 200, "UTC", 200);
+    const context = siteQueryContext("site-1", "public-share");
+    const input = { context, time };
+    const direct = await executeTypedApplicationOperation(
+      "event-types",
+      input,
+      typedQueryProvider(async () => ({
+        value: { source: "direct" },
+        source: "rollup",
+        approximateVisitors: true,
+      })),
+    );
+    expect(direct).toMatchObject({
+      ok: true,
+      data: { source: "direct" },
+      meta: { source: "rollup", approximateVisitors: true },
+    });
+
+    const registry = new TypedQueryProviderRegistry().register(
+      "event-types",
+      typedQueryProvider(async () => ({ value: { source: "registry" } })),
+    );
+    await expect(
+      executeTypedApplicationOperation("event-types", input, registry),
+    ).resolves.toMatchObject({ ok: true, data: { source: "registry" } });
+    await expect(
+      executeTypedApplicationOperation(
+        "event-types",
+        input,
+        new TypedQueryProviderRegistry(),
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { kind: "internal", operation: "event-types" },
+    });
+
+    const composed = await executeTypedApplicationResult(
+      "overview",
+      input,
+      async () => ({
+        ok: true,
+        data: { current: { views: 1 } },
+        meta: {
+          time,
+          source: "mock" as const,
+          approximateVisitors: false,
+        },
+      }),
+    );
+    expect(composed).toMatchObject({
+      ok: true,
+      data: { current: { views: 1 } },
+    });
+    await expect(
+      executeTypedApplicationResult("comparison", input, async () => composed),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { kind: "capability-denied", capability: "comparison" },
+    });
+    await expect(
+      executeTypedApplicationResult(
+        "overview",
+        {
+          ...input,
+          filters: {
+            version: 1,
+            root: {
+              kind: "condition",
+              target: { kind: "field", field: "forbidden.field" as never },
+              operator: "eq",
+              value: "x",
+            },
+          },
+        },
+        async () => composed,
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { kind: "invalid-input" },
+    });
+    const privateContext = siteQueryContext("site-1", "private-dashboard");
+    const oneClause = {
+      version: 1 as const,
+      root: {
+        kind: "condition" as const,
+        target: {
+          kind: "field" as const,
+          field: "page.path" as never,
+        },
+        operator: "eq" as const,
+        value: "/",
+      },
+    };
+    expect(
+      validateTypedQueryFilters(
+        {
+          ...privateContext,
+          policy: {
+            ...privateContext.policy,
+            limits: { maxFilterClauses: 0 },
+          },
+        },
+        oneClause,
+      ),
+    ).toMatchObject({
+      kind: "invalid-input",
+      issues: [{ code: "too_many_filter_clauses" }],
+    });
+    await expect(
+      executeTypedApplicationResult(
+        "overview",
+        {
+          context: {
+            ...privateContext,
+            policy: {
+              ...privateContext.policy,
+              limits: { maxFilterClauses: 0 },
+            },
+          },
+          time,
+          filters: oneClause,
+        },
+        async () => composed,
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { kind: "invalid-input" },
+    });
+    await expect(
+      executeTypedApplicationResult("overview", input, async () => {
+        throw new Error("provider failure");
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { kind: "internal", operation: "overview" },
+    });
+  });
+
   it("validates typed filters and maps reader failures to domain errors", async () => {
     const time = createQueryTime(100, 200, "UTC", 200);
     const context = siteQueryContext("site-1", "private-dashboard");
-    const tooMany = await executeQueryOperation(
+    const tooMany = await executeTypedApplicationOperation(
       "event-records",
       {
         context: {
@@ -261,7 +404,7 @@ describe("query contract time helpers", () => {
       },
       analyticsFilterRegistry,
     );
-    const limited = await executeQueryOperation(
+    const limited = await executeTypedApplicationOperation(
       "event-records",
       {
         context: {
@@ -285,9 +428,13 @@ describe("query contract time helpers", () => {
     });
 
     await expect(
-      executeQueryOperation("event-records", { context, time }, async () => {
-        throw new Error("D1 unavailable");
-      }),
+      executeTypedApplicationOperation(
+        "event-records",
+        { context, time },
+        async () => {
+          throw new Error("D1 unavailable");
+        },
+      ),
     ).resolves.toMatchObject({
       ok: false,
       error: { kind: "internal", operation: "event-records" },

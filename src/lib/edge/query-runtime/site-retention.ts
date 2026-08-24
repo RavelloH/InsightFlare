@@ -9,10 +9,10 @@ import {
 import {
   analyticsFilterRegistry,
   assertFilterAudience,
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   type FilterDocument,
   siteQueryContext,
-  validateQueryFilters,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract";
 import { createQueryTime } from "@/lib/edge/query-contract/helpers";
 import type { Env } from "@/lib/edge/types";
@@ -42,7 +42,7 @@ export async function readSiteRetention(
   input: ReadSiteRetentionInput,
 ): Promise<SiteRetentionResult> {
   const context = siteQueryContext(input.siteId, "api-v1");
-  const filterError = validateQueryFilters(context, input.filters);
+  const filterError = validateTypedQueryFilters(context, input.filters);
   if (filterError) throw new Error(filterError.kind);
   try {
     assertFilterAudience(
@@ -53,7 +53,7 @@ export async function readSiteRetention(
   } catch {
     throw new Error("invalid-input");
   }
-  const result = await executeQueryOperation<RetentionResult>(
+  const result = await executeTypedApplicationOperation<RetentionResult>(
     "retention",
     {
       context,

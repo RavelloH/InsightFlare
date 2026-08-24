@@ -10,9 +10,9 @@ import {
 import { SiteTimeseriesQueryDtoSchema } from "@/lib/api-v1/dto/analytics";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/query-context";
 import {
-  AnalyticsQueryService,
   type AnalyticsServiceResult,
   type QueryExecutionContext,
+  TypedQueryApplicationService,
 } from "@/lib/edge/analytics/service";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import type {
@@ -71,7 +71,7 @@ export async function executeApiV1SiteTimeseries(
   if (!filter.ok) return filter;
   return {
     ok: true,
-    value: await new AnalyticsQueryService(aggregateCache).trend(
+    value: await new TypedQueryApplicationService(aggregateCache).trend(
       reader,
       {
         context: context.context,

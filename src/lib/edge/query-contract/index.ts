@@ -1,3 +1,4 @@
+export * from "./application";
 export * from "./channels";
 export * from "./comparison";
 export * from "./comparison-metrics";

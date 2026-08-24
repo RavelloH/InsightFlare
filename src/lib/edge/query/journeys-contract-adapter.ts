@@ -1,7 +1,7 @@
 import { resolveReportingTimeZone } from "@/lib/dashboard/time-zone";
 import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   siteQueryContext,
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
@@ -54,7 +54,7 @@ export async function handleVisitorsContract(
   const cursor = rawCursor ? parseVisitorListCursor(rawCursor, sort) : null;
   if (rawCursor && !cursor) return badRequest("Invalid cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "visitors",
     {
       context: queryContext,
@@ -120,7 +120,7 @@ export async function handleSessionsContract(
   const cursor = rawCursor ? parseSessionListCursor(rawCursor, sort) : null;
   if (rawCursor && !cursor) return badRequest("Invalid cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "sessions",
     {
       context: queryContext,
@@ -181,7 +181,7 @@ export async function handleVisitorDetailContract(
   // dashboard window; the window is only contract metadata and policy input.
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "visitor-detail",
     {
       context: queryContext,
@@ -212,7 +212,7 @@ export async function handleSessionDetailContract(
   if (!sessionId) return badRequest("Missing sessionId");
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "session-detail",
     {
       context: queryContext,

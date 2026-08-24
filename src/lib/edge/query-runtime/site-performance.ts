@@ -16,10 +16,10 @@ import {
 import {
   analyticsFilterRegistry,
   assertFilterAudience,
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   type FilterDocument,
   siteQueryContext,
-  validateQueryFilters,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract";
 import { createQueryTime } from "@/lib/edge/query-contract/helpers";
 import type { Env } from "@/lib/edge/types";
@@ -55,7 +55,7 @@ export interface ReadSitePerformanceBreakdownInput extends ReadSitePerformanceIn
 
 function inputBase(input: ReadSitePerformanceInput) {
   const context = siteQueryContext(input.siteId, "api-v1");
-  const filterError = validateQueryFilters(context, input.filters);
+  const filterError = validateTypedQueryFilters(context, input.filters);
   if (filterError) throw new Error(filterError.kind);
   try {
     assertFilterAudience(
@@ -81,7 +81,7 @@ function inputBase(input: ReadSitePerformanceInput) {
 export async function readSitePerformanceSummary(
   input: ReadSitePerformanceInput,
 ): Promise<{ readonly metrics: PerformanceMetrics }> {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "performance",
     inputBase(input),
     async () => ({
@@ -111,7 +111,7 @@ function serializePoint(point: PerformanceTrendPointRow) {
 export async function readSitePerformanceTimeseries(
   input: ReadSitePerformanceTimeseriesInput,
 ): Promise<{ readonly interval: string; readonly series: PerformanceSeries }> {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "performance",
     inputBase(input),
     async () => ({
@@ -157,7 +157,7 @@ export async function readSitePerformanceBreakdown(
     input.dimension,
   );
   if (!dimension.success) throw new Error("unsupported-dimension");
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "performance",
     inputBase(input),
     async () => ({

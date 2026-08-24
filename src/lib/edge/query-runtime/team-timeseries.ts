@@ -14,7 +14,7 @@ import {
   teamQueryContext,
   type TrendPoint,
   type TrendResult,
-  validateQueryFilters,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract";
 import { analyticsFilterRegistry } from "@/lib/edge/query-contract/filter-registry";
 import type { Env } from "@/lib/edge/types";
@@ -71,7 +71,7 @@ export async function readTeamTimeseries(
   );
   const operationError = assertOperationAllowed(context, "trend");
   if (operationError) throw new Error(operationError.kind);
-  const filterError = validateQueryFilters(context, input.filters);
+  const filterError = validateTypedQueryFilters(context, input.filters);
   if (filterError) throw new Error(filterError.kind);
   try {
     assertFilterAudience(

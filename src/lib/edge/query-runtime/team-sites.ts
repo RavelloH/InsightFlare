@@ -15,7 +15,7 @@ import {
   type OverviewMetrics,
   teamQueryContext,
   type TrendResult,
-  validateQueryFilters,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract";
 import { analyticsFilterRegistry } from "@/lib/edge/query-contract/filter-registry";
 import type { Env } from "@/lib/edge/types";
@@ -68,7 +68,7 @@ export async function readTeamSites(
   );
   const operationError = assertOperationAllowed(context, "overview");
   if (operationError) throw new Error(operationError.kind);
-  const filterError = validateQueryFilters(context, input.filters);
+  const filterError = validateTypedQueryFilters(context, input.filters);
   if (filterError) throw new Error(filterError.kind);
   try {
     assertFilterAudience(

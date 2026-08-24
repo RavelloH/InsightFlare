@@ -66,7 +66,7 @@ import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/operation-registry";
-import { AnalyticsQueryService } from "@/lib/edge/analytics/service";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
 import { type ApiKeyPrincipal, canAccessSiteId } from "@/lib/edge/api-key-auth";
 import {
   type FilterDocument,
@@ -475,7 +475,7 @@ async function handlePlannedSiteList<
       timeZone,
       filters,
     };
-    const serviceResult = await new AnalyticsQueryService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute(
       {
         operation,
         context: siteQueryContext(siteId, "api-v1"),

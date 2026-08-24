@@ -9,7 +9,7 @@ import {
   type BreakdownResult,
   type FilterDocument,
   teamQueryContext,
-  validateQueryFilters,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract";
 import { analyticsFilterRegistry } from "@/lib/edge/query-contract/filter-registry";
 import type { Env } from "@/lib/edge/types";
@@ -68,7 +68,7 @@ export async function readTeamBreakdown(
   );
   const operationError = assertOperationAllowed(context, "dimension");
   if (operationError) throw new Error(operationError.kind);
-  const filterError = validateQueryFilters(context, input.filters);
+  const filterError = validateTypedQueryFilters(context, input.filters);
   if (filterError) throw new Error(filterError.kind);
   try {
     assertFilterAudience(
@@ -97,6 +97,7 @@ export async function readTeamBreakdown(
         dimension: input.dimension,
         limit: perSiteLimit,
         filters: input.filters,
+        context,
       }),
     ),
   );

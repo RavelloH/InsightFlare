@@ -6,7 +6,7 @@ import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
 import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/catalog";
-import { AnalyticsQueryService } from "@/lib/edge/analytics/service";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import {
   type BreakdownResult,
@@ -184,7 +184,7 @@ export async function handleTeamBreakdown(
       limit: input.limit,
       filters,
     };
-    const serviceResult = await new AnalyticsQueryService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute(
       {
         operation: "team.analytics.breakdown",
         context: teamQueryContext(

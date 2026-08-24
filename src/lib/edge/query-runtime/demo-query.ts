@@ -10,6 +10,7 @@ import {
   PUBLIC_CACHE_HEADERS,
 } from "@/lib/edge/query/core-types";
 import { analyticsDiagnosticHeaders } from "@/lib/edge/query/diagnostics";
+import type { QueryOperation } from "@/lib/edge/query-contract";
 import {
   demoBadRequest,
   demoErr,
@@ -22,6 +23,8 @@ export interface DemoQueryRuntimeInput {
   readonly siteId: string;
   readonly publicQuery?: boolean;
   readonly context?: ResponseContext;
+  /** Selected by the protocol adapter before the mock provider is invoked. */
+  readonly operation?: QueryOperation;
 }
 
 const EMPTY_D1_DIAGNOSTICS = {

@@ -1,7 +1,7 @@
 import type { FilterValuesResult } from "@/lib/edge/query-contract";
 import {
   analyticsFilterDefinition,
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   parseFilterUrlForAudience,
   siteQueryContext,
 } from "@/lib/edge/query-contract";
@@ -43,7 +43,7 @@ export async function handleFilterValuesContract(
     parseFilterUrlForAudience(queryContext.policy.audience, url),
     field,
   );
-  const result = await executeQueryOperation<FilterValuesResult>(
+  const result = await executeTypedApplicationOperation<FilterValuesResult>(
     "filter-values",
     {
       context: queryContext,

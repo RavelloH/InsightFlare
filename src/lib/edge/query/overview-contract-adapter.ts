@@ -5,6 +5,7 @@ import {
 import {
   executeOverview,
   executeTrend,
+  executeTypedApplicationResult,
   type OverviewMetrics,
   type OverviewReader,
   type OverviewReaderInput,
@@ -179,15 +180,17 @@ export async function handleOverviewContract(
     ? toQueryTime(previousComparableWindow(window))
     : undefined;
   const includeDetail = parseBooleanFlag(url, "includeDetail");
-  const result = await executeOverview(
-    createOverviewReader(env, siteId, diagnostics),
-    {
-      context: queryContext,
-      time: currentTime,
-      filters,
-      previousTime,
-      detailInterval: includeDetail ? parseInterval(url) : undefined,
-    },
+  const result = await executeTypedApplicationResult(
+    "overview",
+    { context: queryContext, time: currentTime, filters },
+    () =>
+      executeOverview(createOverviewReader(env, siteId, diagnostics), {
+        context: queryContext,
+        time: currentTime,
+        filters,
+        previousTime,
+        detailInterval: includeDetail ? parseInterval(url) : undefined,
+      }),
   );
   if (!result.ok) return queryErrorResponse(result.error);
 
@@ -232,14 +235,18 @@ export async function handleTrendContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const diagnostics = createD1ReadDiagnostics();
-  const result = await executeTrend(
-    createOverviewReader(env, siteId, diagnostics),
-    {
-      context: queryContext,
-      time: toQueryTime(window),
-      filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
-      interval: parseInterval(url),
-    },
+  const time = toQueryTime(window);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
+  const result = await executeTypedApplicationResult(
+    "trend",
+    { context: queryContext, time, filters },
+    () =>
+      executeTrend(createOverviewReader(env, siteId, diagnostics), {
+        context: queryContext,
+        time,
+        filters,
+        interval: parseInterval(url),
+      }),
   );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(

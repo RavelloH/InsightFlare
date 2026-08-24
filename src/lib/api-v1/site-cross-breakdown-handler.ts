@@ -10,7 +10,7 @@ import {
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
-import { AnalyticsQueryService } from "@/lib/edge/analytics/service";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
 import { type ApiKeyPrincipal, canAccessSiteId } from "@/lib/edge/api-key-auth";
 import {
   type CrossBreakdownResult,
@@ -235,7 +235,7 @@ export async function handlePlannedSiteCrossBreakdown(
       secondaryLimit: input.secondaryLimit,
       filters,
     };
-    const serviceResult = await new AnalyticsQueryService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute(
       {
         operation: "site.analytics.crossBreakdown",
         context: siteQueryContext(siteId, "api-v1"),

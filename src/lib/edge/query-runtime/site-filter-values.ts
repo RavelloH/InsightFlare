@@ -5,7 +5,7 @@ import { queryFilterValuesFromD1 } from "@/lib/edge/query/filter-values";
 import {
   analyticsFilterDefinition,
   assertFilterAudience,
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   type FilterDocument,
   siteQueryContext,
   stripTopLevelFacet,
@@ -61,7 +61,7 @@ export async function readSiteFilterValues(
     throw new Error("invalid-input");
   }
   const filters = stripTopLevelFacet(input.filters, input.field);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "filter-values",
     {
       context,

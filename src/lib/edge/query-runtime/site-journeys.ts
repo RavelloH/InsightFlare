@@ -20,11 +20,11 @@ import {
 import {
   analyticsFilterRegistry,
   assertFilterAudience,
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   type FilterDocument,
   filterFingerprint,
   siteQueryContext,
-  validateQueryFilters,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract";
 import { createQueryTime } from "@/lib/edge/query-contract/helpers";
 import type { Env } from "@/lib/edge/types";
@@ -58,7 +58,7 @@ interface JourneySearchInput extends JourneyDetailInput {
 
 function searchBase(input: JourneySearchInput) {
   const context = siteQueryContext(input.siteId, "api-v1");
-  const filterError = validateQueryFilters(context, input.filters);
+  const filterError = validateTypedQueryFilters(context, input.filters);
   if (filterError) throw new Error(filterError.kind);
   try {
     assertFilterAudience(
@@ -181,7 +181,7 @@ async function encodeCursor(
 export async function readSiteVisitorDetail(
   input: JourneyDetailInput & { readonly visitorId: string },
 ) {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "visitor-detail",
     base(input),
     async () => ({
@@ -202,7 +202,7 @@ export async function readSiteVisitorDetail(
 export async function readSiteSessionDetail(
   input: JourneyDetailInput & { readonly sessionId: string },
 ) {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "session-detail",
     base(input),
     async () => ({
@@ -235,7 +235,7 @@ export async function readSiteVisitors(
   const rawCursor = await decodeCursor(input, "visitors", input.sort);
   const cursor = rawCursor ? parseVisitorListCursor(rawCursor, sort) : null;
   if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "visitors",
     searchBase(input),
     async () => {
@@ -285,7 +285,7 @@ export async function readSiteSessions(
   const rawCursor = await decodeCursor(input, "sessions", input.sort);
   const cursor = rawCursor ? parseSessionListCursor(rawCursor, sort) : null;
   if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "sessions",
     searchBase(input),
     async () => {
@@ -345,7 +345,7 @@ async function readJourneyEvents(
 ) {
   const query = searchBase(input);
   await assertJourneyTargetInWindow(input, target);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-records",
     query,
     async () => ({
@@ -383,18 +383,22 @@ export async function readSiteVisitorSessions(
   const target = { type: "visitor" as const, value: input.visitorId };
   const query = searchBase(input);
   await assertJourneyTargetInWindow(input, target);
-  const result = await executeQueryOperation("sessions", query, async () => ({
-    value: {
-      items: await querySessionsFromD1(
-        input.env,
-        input.siteId,
-        input.window,
-        input.filters,
-        input.limit,
-        target,
-      ),
-    },
-  }));
+  const result = await executeTypedApplicationOperation(
+    "sessions",
+    query,
+    async () => ({
+      value: {
+        items: await querySessionsFromD1(
+          input.env,
+          input.siteId,
+          input.window,
+          input.filters,
+          input.limit,
+          target,
+        ),
+      },
+    }),
+  );
   if (!result.ok) throw new Error(result.error.kind);
   return result.data;
 }

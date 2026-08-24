@@ -1,6 +1,6 @@
 import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   siteQueryContext,
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
@@ -31,7 +31,7 @@ export async function handleRetentionContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await executeQueryOperation<RetentionResult>(
+  const result = await executeTypedApplicationOperation<RetentionResult>(
     "retention",
     {
       context: queryContext,
@@ -65,7 +65,7 @@ export async function handlePerformanceContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const interval = parseInterval(url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "performance",
     {
       context: queryContext,

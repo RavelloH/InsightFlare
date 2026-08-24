@@ -72,11 +72,43 @@ export interface AnalyticsOperationProvider<Query, Result> {
   }): Promise<Result>;
 }
 
+/**
+ * Request-scoped provider registry. The application operation service resolves
+ * providers by operation id, so protocol adapters no longer need to select a
+ * data source by reaching into query/runtime modules directly.
+ */
+export class TypedApplicationProviderRegistry {
+  private readonly providers = new Map<
+    AnalyticsOperationId,
+    AnalyticsOperationProvider<unknown, unknown>
+  >();
+
+  register<Query, Result>(
+    operation: AnalyticsOperationId,
+    provider: AnalyticsOperationProvider<Query, Result>,
+  ): this {
+    this.providers.set(
+      operation,
+      provider as AnalyticsOperationProvider<unknown, unknown>,
+    );
+    return this;
+  }
+
+  resolve<Query, Result>(
+    operation: AnalyticsOperationId,
+  ): AnalyticsOperationProvider<Query, Result> | undefined {
+    return this.providers.get(operation) as
+      | AnalyticsOperationProvider<Query, Result>
+      | undefined;
+  }
+}
+
 export interface AnalyticsOperationInvocation<Query, Result> {
   readonly operation: AnalyticsOperationId;
   readonly context: QueryContext;
   readonly query: Query;
-  readonly provider: AnalyticsOperationProvider<Query, Result>;
+  readonly provider?: AnalyticsOperationProvider<Query, Result>;
+  readonly providerRegistry?: TypedApplicationProviderRegistry;
   readonly cache?: {
     readonly key: string;
     readonly policy: OperationCachePolicy;
@@ -149,7 +181,7 @@ class UncacheableResult extends Error {
  * HTTP-free boundary for typed analytics queries. Authentication and DTO
  * parsing happen before this class; providers only receive canonical query data.
  */
-export class AnalyticsQueryService {
+export class TypedQueryApplicationService {
   constructor(
     private readonly cache?: OperationResultCache,
     private readonly costPolicy: QueryCostPolicy = defaultQueryCostPolicy,
@@ -232,10 +264,23 @@ export class AnalyticsQueryService {
       );
       return { ok: false, error: costError };
     }
+    const provider =
+      invocation.provider ??
+      invocation.providerRegistry?.resolve<Query, Result>(invocation.operation);
+    if (!provider) {
+      emit(executionContext, "failure");
+      return {
+        ok: false,
+        error: {
+          kind: "operation-not-allowed",
+          operation: invocation.operation,
+        },
+      };
+    }
     let value: Result;
     try {
       const load = async () =>
-        invocation.provider.execute({
+        provider.execute({
           operation: invocation.operation,
           context: invocation.context,
           query: invocation.query,

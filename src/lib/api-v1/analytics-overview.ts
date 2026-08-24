@@ -17,9 +17,9 @@ import {
   OperationResultCache,
 } from "@/lib/edge/analytics/operation-cache";
 import {
-  AnalyticsQueryService,
   type AnalyticsServiceResult,
   type QueryExecutionContext,
+  TypedQueryApplicationService,
 } from "@/lib/edge/analytics/service";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import {
@@ -267,7 +267,7 @@ export async function executeApiV1SiteOverview(
 
   return {
     ok: true,
-    value: await new AnalyticsQueryService(aggregateCache).overview(
+    value: await new TypedQueryApplicationService(aggregateCache).overview(
       reader,
       {
         context: context.context,

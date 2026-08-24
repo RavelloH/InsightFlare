@@ -222,6 +222,43 @@ describe("API v1 comparison v2 handler", () => {
     expect(second.status).toBe(200);
     expect(providerCalls.overview).toBe(2);
     expect(providerCalls.trend).toBe(2);
+
+    mocks.createComparisonProviders.mockImplementationOnce(() => ({
+      overview: vi.fn(async ({ query }) => ({
+        ok: true as const,
+        data: rawMetrics(100),
+        meta: {
+          time: query.time,
+          source: "raw" as const,
+          approximateVisitors: false,
+        },
+      })),
+      trend: vi.fn(async ({ query }) => ({
+        ok: false as const,
+        error: { kind: "comparison-alignment-mismatch" as const },
+        meta: {
+          time: query.time,
+          source: "raw" as const,
+          approximateVisitors: false,
+        },
+      })),
+      breakdown: vi.fn(),
+    }));
+    const trendError = await handleSiteComparison(
+      request({
+        ...baseBody,
+        select: {
+          ...baseBody.select,
+          trend: { interval: "day", metrics: ["sessions"] },
+        },
+      }),
+      principal,
+      env,
+      "site-1",
+    );
+    expect((await json(trendError)).error?.code).toBe(
+      "comparison_alignment_mismatch",
+    );
   });
 
   it("executes team reports with the authorized site count and exact breakdowns", async () => {

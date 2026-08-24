@@ -1,6 +1,6 @@
 import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   siteQueryContext,
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
@@ -32,7 +32,7 @@ export async function handleOverviewGeoPointsContract(
     : withoutGeoFilter(
         parseFilterUrlForAudience(queryContext.policy.audience, url),
       );
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "geo-points",
     {
       context: queryContext,

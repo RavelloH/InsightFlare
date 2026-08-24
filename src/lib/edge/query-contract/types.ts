@@ -538,7 +538,7 @@ export interface TeamQueryOperations {
   dashboard(input: TeamQuery): Promise<AnalyticsResult<CanonicalObject>>;
 }
 
-export interface AnalyticsQueryService {
+export interface TypedQueryOperations {
   readonly overview: {
     get(input: OverviewQuery): Promise<AnalyticsResult<OverviewResult>>;
     trend(input: TrendQuery): Promise<AnalyticsResult<TrendResult>>;

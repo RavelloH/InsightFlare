@@ -1,8 +1,9 @@
 import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
   executePages,
-  executeQueryOperation,
   executeReferrers,
+  executeTypedApplicationOperation,
+  executeTypedApplicationResult,
   type PageItem,
   type PagesReader,
   type ReferrerItem,
@@ -106,20 +107,27 @@ export async function handlePagesContract(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const limit = parseLimit(url, 20, 200);
-  const result = await executePages(createReader(env, siteId), {
-    context: queryContext,
-    time: toQueryTime(window),
-    filters,
-    limit,
-    includeDetails: parseBooleanFlag(url, "details"),
-  });
+  const time = toQueryTime(window);
+  const includeDetails = parseBooleanFlag(url, "details");
+  const result = await executeTypedApplicationResult(
+    "pages",
+    { context: queryContext, time, filters },
+    () =>
+      executePages(createReader(env, siteId), {
+        context: queryContext,
+        time,
+        filters,
+        limit,
+        includeDetails,
+      }),
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   const payload: Record<string, unknown> = {
     ok: true,
     data: mapPages([...result.data.items]),
   };
   if (includeTabs) {
-    const tabsResult = await executeQueryOperation(
+    const tabsResult = await executeTypedApplicationOperation(
       "pages",
       {
         context: queryContext,
@@ -162,13 +170,22 @@ export async function handleReferrersContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await executeReferrers(createReader(env, siteId), {
-    context: queryContext,
-    time: toQueryTime(window),
-    filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
-    limit: parseLimit(url, fallbackLimit, 200),
-    includeFullUrl: allowFullUrlParam && parseBooleanFlag(url, "fullUrl"),
-  });
+  const time = toQueryTime(window);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
+  const limit = parseLimit(url, fallbackLimit, 200);
+  const includeFullUrl = allowFullUrlParam && parseBooleanFlag(url, "fullUrl");
+  const result = await executeTypedApplicationResult(
+    "referrers",
+    { context: queryContext, time, filters },
+    () =>
+      executeReferrers(createReader(env, siteId), {
+        context: queryContext,
+        time,
+        filters,
+        limit,
+        includeFullUrl,
+      }),
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, {
     ok: true,
@@ -194,7 +211,7 @@ export async function handlePagesDashboardContract(
     );
   }
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "pages-dashboard",
     {
       context: queryContext,

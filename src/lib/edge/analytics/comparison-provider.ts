@@ -323,6 +323,7 @@ async function readBreakdownForSites(
   time: QueryTime,
   filters: FilterDocument,
   dimension: string,
+  context: QueryContext,
 ): Promise<ComparisonRawBreakdownResult> {
   const sites = options.siteId
     ? [{ id: options.siteId }]
@@ -336,6 +337,7 @@ async function readBreakdownForSites(
         limit: 0,
         window: windowOf(time),
         filters,
+        context,
       }),
     ),
   );
@@ -424,6 +426,7 @@ export function createComparisonProviders(options: ComparisonProviderOptions) {
       query.time,
       query.filters ?? EMPTY_FILTER,
       comparison.dimension,
+      comparison.context,
     ),
     meta: providerMeta(query.time, "raw", false),
   });

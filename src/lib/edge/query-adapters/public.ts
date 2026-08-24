@@ -123,14 +123,17 @@ export function executePublicQuery(
     return Promise.resolve(notFound());
   }
   if (isDemoBuild) {
-    return import("../query-runtime/demo-query").then(({ executeDemoQuery }) =>
-      executeDemoQuery({
-        request: input.request ?? new Request(url, { method: "GET" }),
-        url,
-        siteId: input.siteId,
-        publicQuery: true,
-        context: ctx,
-      }),
+    const operation = operationForQueryRoute(input.pathname);
+    return import("../query-runtime/mock-provider").then(
+      ({ executeMockQuery }) =>
+        executeMockQuery({
+          operation,
+          request: input.request ?? new Request(url, { method: "GET" }),
+          url,
+          siteId: input.siteId,
+          publicQuery: true,
+          context: ctx,
+        }),
     );
   }
   if (input.pathname === "overview") {

@@ -19,7 +19,7 @@ import { operationForQueryRoute } from "@/lib/edge/query/router";
 import {
   assertOperationAllowed,
   createQueryTime,
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   siteQueryContext,
   teamQueryContext,
 } from "@/lib/edge/query-contract";
@@ -131,13 +131,16 @@ export function executePrivateQuery(
     return Promise.resolve(notFound());
   }
   if (isDemoBuild) {
-    return import("../query-runtime/demo-query").then(({ executeDemoQuery }) =>
-      executeDemoQuery({
-        request: input.request ?? new Request(input.url, { method: "GET" }),
-        url: input.url,
-        siteId: input.siteId,
-        context: ctx,
-      }),
+    const operation = operationForQueryRoute(input.pathname);
+    return import("../query-runtime/mock-provider").then(
+      ({ executeMockQuery }) =>
+        executeMockQuery({
+          operation,
+          request: input.request ?? new Request(input.url, { method: "GET" }),
+          url: input.url,
+          siteId: input.siteId,
+          context: ctx,
+        }),
     );
   }
   if (input.pathname === "overview") {
@@ -496,7 +499,7 @@ export async function executePrivateTeamDashboard(
   const window = parseWindow(input.url);
   if (!window) return badRequest("Invalid time window");
   const diagnostics = createD1ReadDiagnostics();
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "team-dashboard",
     {
       context: teamQueryContext(

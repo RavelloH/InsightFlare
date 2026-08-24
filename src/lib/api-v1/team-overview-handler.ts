@@ -6,7 +6,7 @@ import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { exceedsQueryCost } from "@/lib/api-v1/query-cost";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
-import { AnalyticsQueryService } from "@/lib/edge/analytics/service";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import type { FilterDocument } from "@/lib/edge/query-contract";
 import {
@@ -195,7 +195,7 @@ export async function handlePlannedTeamOverview(
       timeZone,
       filters,
     };
-    const serviceResult = await new AnalyticsQueryService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute(
       {
         operation: "team.analytics.overview",
         context: teamQueryContext(

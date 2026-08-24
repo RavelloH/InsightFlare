@@ -11,11 +11,11 @@ import {
 import {
   analyticsFilterRegistry,
   assertFilterAudience,
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   type FilterDocument,
   filterFingerprint,
   siteQueryContext,
-  validateQueryFilters,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract";
 import { createQueryTime } from "@/lib/edge/query-contract/helpers";
 import type { Env } from "@/lib/edge/types";
@@ -131,7 +131,7 @@ function inputBase(
   input: Pick<ReadSiteEventRecordsInput, "siteId" | "window" | "filters">,
 ) {
   const context = siteQueryContext(input.siteId, "api-v1");
-  const filterError = validateQueryFilters(context, input.filters);
+  const filterError = validateTypedQueryFilters(context, input.filters);
   if (filterError) throw new Error(filterError.kind);
   try {
     assertFilterAudience(
@@ -163,7 +163,7 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
   const rawCursor = await decodeCursor(input);
   const cursor = rawCursor ? parseEventRecordCursor(rawCursor, sort) : null;
   if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-records",
     inputBase(input),
     async () => {
@@ -207,7 +207,7 @@ export async function readSiteEventDetail(input: {
   readonly window: QueryWindow;
   readonly eventId: string;
 }) {
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-record-detail",
     {
       context: siteQueryContext(input.siteId, "api-v1"),

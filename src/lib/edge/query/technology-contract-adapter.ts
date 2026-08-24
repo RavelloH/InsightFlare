@@ -3,9 +3,11 @@ import {
   parseFilterUrlForAudience,
 } from "@/lib/edge/query-contract";
 import {
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   type QueryContext,
   siteQueryContext,
+  typedQueryProvider,
+  TypedQueryProviderRegistry,
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 import { coerceNumber } from "@/lib/edge/utils";
@@ -62,14 +64,22 @@ async function executeTechnology<T>(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const providerRegistry = new TypedQueryProviderRegistry().register(
+    operation,
+    typedQueryProvider(async () => ({
+      value: shape(await reader(window, filters)),
+    })),
+  );
+  const result = await executeTypedApplicationOperation<
+    Record<string, unknown>
+  >(
     operation,
     {
       context: queryContext,
       time: toQueryTime(window),
       filters: filters,
     },
-    async () => ({ value: shape(await reader(window, filters)) }),
+    providerRegistry,
   );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });

@@ -1,7 +1,7 @@
 import { appNow } from "@/lib/edge/e2e-clock";
 import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   siteQueryContext,
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
@@ -44,7 +44,7 @@ export async function handleFunnelAnalysisContract(
       nowMs,
       timeZone: "UTC",
     };
-    const result = await executeQueryOperation(
+    const result = await executeTypedApplicationOperation(
       "funnel-analysis",
       {
         context: queryContext,
@@ -63,7 +63,7 @@ export async function handleFunnelAnalysisContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "funnel-analysis",
     {
       context: queryContext,

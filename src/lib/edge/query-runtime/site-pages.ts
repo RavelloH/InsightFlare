@@ -13,7 +13,7 @@ import {
   type PagesResult,
   type ReferrersResult,
   siteQueryContext,
-  validateQueryFilters,
+  validateTypedQueryFilters,
 } from "@/lib/edge/query-contract";
 import { analyticsFilterRegistry } from "@/lib/edge/query-contract/filter-registry";
 import { createQueryTime } from "@/lib/edge/query-contract/helpers";
@@ -48,7 +48,7 @@ function queryTime(window: QueryWindow) {
 
 function assertApiV1Filters(siteId: string, filters: FilterDocument): void {
   const context = siteQueryContext(siteId, "api-v1");
-  const error = validateQueryFilters(context, filters);
+  const error = validateTypedQueryFilters(context, filters);
   if (error) throw new Error(error.kind);
   try {
     assertFilterAudience(

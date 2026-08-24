@@ -4,7 +4,7 @@ import {
 } from "@/lib/edge/observability-logger";
 import { parseFilterUrlForAudience } from "@/lib/edge/query-contract";
 import {
-  executeQueryOperation,
+  executeTypedApplicationOperation,
   siteQueryContext,
 } from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
@@ -61,7 +61,7 @@ export async function handleEventTypesContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-types",
     {
       context: queryContext,
@@ -94,7 +94,7 @@ export async function handleEventsSummaryContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-summary",
     {
       context: queryContext,
@@ -134,7 +134,7 @@ export async function handleEventsTrendContract(
   if (!window) return badRequest("Invalid time window");
   const interval = parseInterval(url);
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-trend",
     {
       context: queryContext,
@@ -175,7 +175,7 @@ export async function handleEventRecordsContract(
   const cursor = rawCursor ? parseEventRecordCursor(rawCursor, sort) : null;
   if (rawCursor && !cursor) return badRequest("Invalid cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-records",
     {
       context: queryContext,
@@ -231,7 +231,7 @@ export async function handleEventFieldValuesContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-field-values",
     {
       context: queryContext,
@@ -319,7 +319,7 @@ export async function handleEventTypeFieldsContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-fields",
     {
       context: queryContext,
@@ -362,7 +362,7 @@ export async function handleEventTypeContextContract(
   const selectedKeys = parseEventContextCardKeys(url);
   if (!selectedKeys) return badRequest("Valid context cards are required");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-context",
     {
       context: queryContext,
@@ -412,7 +412,7 @@ export async function handleEventTypeDetailContract(
   const includeContext = options?.includeContext ?? true;
   const includeBreakdowns = options?.includeBreakdowns ?? true;
   const includeFields = options?.includeFields ?? true;
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-type-detail",
     {
       context: queryContext,
@@ -498,7 +498,7 @@ export async function handleEventRecordDetailContract(
   if (!eventId) return badRequest("eventId is required");
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await executeQueryOperation(
+  const result = await executeTypedApplicationOperation(
     "event-record-detail",
     {
       context: queryContext,

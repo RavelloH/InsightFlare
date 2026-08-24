@@ -31,8 +31,9 @@ import {
 import { createComparisonProviders } from "@/lib/edge/analytics/comparison-provider";
 import { OperationResultCache } from "@/lib/edge/analytics/operation-cache";
 import {
-  AnalyticsQueryService,
   type QueryExecutionContext,
+  TypedApplicationProviderRegistry,
+  TypedQueryApplicationService,
 } from "@/lib/edge/analytics/service";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import { listTeamSites } from "@/lib/edge/query/team";
@@ -529,7 +530,44 @@ async function executeReport(
     metrics,
   };
   const providers = createComparisonProviders({ env, ...subject });
-  const service = new AnalyticsQueryService(comparisonCache);
+  const service = new TypedQueryApplicationService(comparisonCache);
+  const providerRegistry = new TypedApplicationProviderRegistry().register<
+    ComparisonQuery,
+    ReportDomainResult
+  >(operation, {
+    execute: async ({ query: providerQuery, execution }) => {
+      const report = (await executeComparison(
+        providerQuery,
+        providers.overview,
+        execution.signal,
+      )) as ReportDomainResult;
+      if (!report.ok || !interval) return report;
+      const trendQuery: ComparisonTrendQuery = {
+        ...providerQuery,
+        interval,
+        trendMetrics: selectedTrendMetrics ?? metrics,
+      };
+      const trend = await executeComparisonTrend(
+        trendQuery,
+        providers.trend,
+        execution.signal,
+      );
+      if (!trend.ok) return trend as ReportDomainResult;
+      return {
+        ok: true,
+        data: { ...report.data, trend: trend.data },
+        meta: {
+          ...report.meta,
+          source:
+            report.meta.source === trend.meta.source
+              ? report.meta.source
+              : "mixed",
+          approximateVisitors:
+            report.meta.approximateVisitors || trend.meta.approximateVisitors,
+        },
+      };
+    },
+  });
   return service.execute<ComparisonQuery, ReportDomainResult>(
     {
       operation,
@@ -540,41 +578,7 @@ async function executeReport(
         policy: comparisonCachePolicy,
         isCacheable: (value) => value.ok,
       },
-      provider: {
-        execute: async ({ query: providerQuery, execution }) => {
-          const report = (await executeComparison(
-            providerQuery,
-            providers.overview,
-            execution.signal,
-          )) as ReportDomainResult;
-          if (!report.ok || !interval) return report;
-          const trendQuery: ComparisonTrendQuery = {
-            ...providerQuery,
-            interval,
-            trendMetrics: selectedTrendMetrics ?? metrics,
-          };
-          const trend = await executeComparisonTrend(
-            trendQuery,
-            providers.trend,
-            execution.signal,
-          );
-          if (!trend.ok) return trend as ReportDomainResult;
-          return {
-            ok: true,
-            data: { ...report.data, trend: trend.data },
-            meta: {
-              ...report.meta,
-              source:
-                report.meta.source === trend.meta.source
-                  ? report.meta.source
-                  : "mixed",
-              approximateVisitors:
-                report.meta.approximateVisitors ||
-                trend.meta.approximateVisitors,
-            },
-          };
-        },
-      },
+      providerRegistry,
     },
     executionContext,
   );
@@ -608,7 +612,18 @@ async function executeBreakdown(
     sort,
   };
   const providers = createComparisonProviders({ env, ...subject });
-  return new AnalyticsQueryService(comparisonCache).execute<
+  const providerRegistry = new TypedApplicationProviderRegistry().register<
+    ComparisonBreakdownQuery,
+    BreakdownDomainResult
+  >(operation, {
+    execute: ({ query: providerQuery, execution }) =>
+      executeComparisonBreakdown(
+        providerQuery,
+        providers.breakdown,
+        execution.signal,
+      ),
+  });
+  return new TypedQueryApplicationService(comparisonCache).execute<
     ComparisonBreakdownQuery,
     BreakdownDomainResult
   >(
@@ -621,14 +636,7 @@ async function executeBreakdown(
         policy: comparisonCachePolicy,
         isCacheable: (value) => value.ok,
       },
-      provider: {
-        execute: ({ query: providerQuery, execution }) =>
-          executeComparisonBreakdown(
-            providerQuery,
-            providers.breakdown,
-            execution.signal,
-          ),
-      },
+      providerRegistry,
     },
     executionContext,
   );
