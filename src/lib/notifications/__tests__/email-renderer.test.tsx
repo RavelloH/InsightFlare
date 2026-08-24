@@ -128,10 +128,10 @@ describe("renderNotificationEmail", () => {
 
     expect(rendered.html).toContain("流量变化提醒");
     expect(rendered.html).toContain("警告");
-    expect(rendered.html).toContain("上一值");
+    expect(rendered.html).toContain("上期值");
     expect(rendered.html).toContain("变化");
     expect(rendered.text).toContain("变化了");
-    expect(rendered.text).toContain("上一值：920");
+    expect(rendered.text).toContain("上期值：920");
     expect(rendered.text).toContain("当前值：1,860");
     expect(rendered.text).toContain("变化：102%");
   });
