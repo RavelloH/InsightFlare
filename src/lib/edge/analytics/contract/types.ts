@@ -52,6 +52,7 @@ export type QuerySubject =
 export type QueryOperation =
   | "overview"
   | "trend"
+  | "team-sites"
   | "comparison"
   | "comparison-breakdown"
   | "dimension"
@@ -66,6 +67,7 @@ export type QueryOperation =
   | "retention"
   | "geo-points"
   | "performance"
+  | "realtime"
   | "event-summary"
   | "event-trend"
   | "event-types"
@@ -124,6 +126,12 @@ export interface QueryContext {
   readonly policy: QueryPolicy;
 }
 
+/** Minimum shape required by the application service for every query. */
+export interface QueryInput {
+  readonly context: QueryContext;
+  readonly filters?: FilterDocument;
+}
+
 export type SortDirection = "asc" | "desc";
 
 export interface Sort<Key extends string = string> {
@@ -178,6 +186,9 @@ export interface InputIssue {
 }
 
 export type AnalyticsDomainError =
+  | { readonly kind: "request-cancelled" }
+  | { readonly kind: "deadline-exceeded" }
+  | { readonly kind: "query-cost-exceeded"; readonly cost: number }
   | { readonly kind: "invalid-input"; readonly issues: readonly InputIssue[] }
   | { readonly kind: "invalid-cursor"; readonly cursorKind: string }
   | {
@@ -204,10 +215,8 @@ export type AnalyticsResult<T> =
 
 export type CanonicalObject = Readonly<Record<string, unknown>>;
 
-export interface BaseQuery {
-  readonly context: QueryContext;
+export interface BaseQuery extends QueryInput {
   readonly time: QueryTime;
-  readonly filters?: FilterDocument;
 }
 
 export const COMPARISON_METRIC_KEYS = [

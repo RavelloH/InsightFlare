@@ -16,6 +16,7 @@ import {
   TeamComparisonQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
 import { type ApiV1ErrorCode, apiV1ErrorRegistry } from "@/lib/api-v1/errors";
+import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/query-context";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import {
@@ -31,11 +32,8 @@ import {
   exceedsQueryCost,
   type QueryCostInput,
 } from "@/lib/edge/analytics/application/cost";
-import { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import {
-  type QueryExecutionContext,
-  TypedQueryApplicationService,
-} from "@/lib/edge/analytics/application/service";
+import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { QueryExecutionContext } from "@/lib/edge/analytics/application/service";
 import {
   type AnalyticsDomainError,
   type AnalyticsResult,
@@ -533,8 +531,8 @@ async function executeReport(
     metrics,
   };
   const providers = createComparisonProviders({ env, ...subject });
-  const service = new TypedQueryApplicationService(comparisonCache);
-  const providerRegistry = new TypedApplicationProviderRegistry().register<
+  const service = createApiV1QueryApplicationAdapter(comparisonCache);
+  const providerRegistry = new AnalyticsProviderRegistry().register<
     ComparisonQuery,
     ReportDomainResult
   >(operation, {
@@ -615,7 +613,7 @@ async function executeBreakdown(
     sort,
   };
   const providers = createComparisonProviders({ env, ...subject });
-  const providerRegistry = new TypedApplicationProviderRegistry().register<
+  const providerRegistry = new AnalyticsProviderRegistry().register<
     ComparisonBreakdownQuery,
     BreakdownDomainResult
   >(operation, {
@@ -626,7 +624,7 @@ async function executeBreakdown(
         execution.signal,
       ),
   });
-  return new TypedQueryApplicationService(comparisonCache).execute<
+  return createApiV1QueryApplicationAdapter(comparisonCache).execute<
     ComparisonBreakdownQuery,
     BreakdownDomainResult
   >(

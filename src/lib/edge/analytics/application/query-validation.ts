@@ -4,17 +4,18 @@ import {
   filterConditionCount,
 } from "@/lib/edge/analytics/contract/filters";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract/helpers";
-import { assertOperationAllowed } from "@/lib/edge/analytics/contract/policy";
 import type {
   AnalyticsDomainError,
-  BaseQuery,
   QueryContext,
+  QueryInput,
   QueryOperation,
 } from "@/lib/edge/analytics/contract/types";
 
+import { planQueryOperation } from "./planner";
+
 export function validateTypedQueryFilters(
   context: QueryContext,
-  filters: BaseQuery["filters"],
+  filters: QueryInput["filters"],
 ): AnalyticsDomainError | null {
   const max = context.policy.limits.maxFilterClauses;
   if (
@@ -29,7 +30,7 @@ export function validateTypedQueryFilters(
   return null;
 }
 
-function invalidFilterError(input: BaseQuery): AnalyticsDomainError | null {
+function invalidFilterError(input: QueryInput): AnalyticsDomainError | null {
   const filters = input.filters ?? EMPTY_FILTER_DOCUMENT;
   try {
     assertFilterAudience(
@@ -53,9 +54,9 @@ function invalidFilterError(input: BaseQuery): AnalyticsDomainError | null {
 
 export function validateTypedQueryInput(
   operation: QueryOperation,
-  input: BaseQuery,
+  input: QueryInput,
 ): AnalyticsDomainError | null {
-  const operationError = assertOperationAllowed(input.context, operation);
+  const operationError = planQueryOperation(operation, input.context);
   if (operationError) return operationError;
 
   const filterAudienceError = invalidFilterError(input);

@@ -10,6 +10,7 @@ import {
   type SiteOverviewQueryDto,
   SiteOverviewQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
+import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/query-context";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
 import {
@@ -17,10 +18,9 @@ import {
   OperationResultCache,
 } from "@/lib/edge/analytics/application/cache";
 import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import {
-  type AnalyticsServiceResult,
-  type QueryExecutionContext,
-  TypedQueryApplicationService,
+import type {
+  AnalyticsServiceResult,
+  QueryExecutionContext,
 } from "@/lib/edge/analytics/application/service";
 import {
   type AnalyticsResult,
@@ -268,7 +268,7 @@ export async function executeApiV1SiteOverview(
 
   return {
     ok: true,
-    value: await new TypedQueryApplicationService(aggregateCache).execute<
+    value: await createApiV1QueryApplicationAdapter(aggregateCache).execute<
       OverviewQuery,
       AnalyticsResult<OverviewResult>
     >(

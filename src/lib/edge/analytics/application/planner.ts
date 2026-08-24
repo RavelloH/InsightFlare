@@ -1,29 +1,14 @@
-import type { QueryContext } from "@/lib/edge/analytics/contract";
-
-import type { AnalyticsServiceError } from "./errors";
 import {
-  analyticsOperationById,
-  type AnalyticsOperationId,
-} from "./operation-registry";
+  type AnalyticsDomainError,
+  assertOperationAllowed,
+  type QueryContext,
+  type QueryOperation,
+} from "@/lib/edge/analytics/contract";
 
-export type AnalyticsOperationPlan =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly error: AnalyticsServiceError };
-
-export function planAnalyticsOperation(
-  operation: AnalyticsOperationId,
+/** Plans a canonical operation against the trusted request policy. */
+export function planQueryOperation(
+  operation: QueryOperation,
   context: QueryContext,
-): AnalyticsOperationPlan {
-  const descriptor = analyticsOperationById(operation);
-  if (
-    !descriptor ||
-    !descriptor.subjectKinds.includes(context.subject.kind) ||
-    !descriptor.audiences.includes(context.policy.audience)
-  ) {
-    return {
-      ok: false,
-      error: { kind: "operation-not-allowed", operation },
-    };
-  }
-  return { ok: true };
+): AnalyticsDomainError | null {
+  return assertOperationAllowed(context, operation);
 }

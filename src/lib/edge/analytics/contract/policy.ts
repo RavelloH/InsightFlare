@@ -25,6 +25,7 @@ const DEFAULT_LIMITS: QueryLimits = {
 const ALL_OPERATIONS: readonly QueryOperation[] = [
   "overview",
   "trend",
+  "team-sites",
   "comparison",
   "comparison-breakdown",
   "dimension",
@@ -39,6 +40,7 @@ const ALL_OPERATIONS: readonly QueryOperation[] = [
   "geo-points",
   "retention",
   "performance",
+  "realtime",
   "event-summary",
   "event-trend",
   "event-types",

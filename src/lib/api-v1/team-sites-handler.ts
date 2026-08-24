@@ -3,10 +3,10 @@ import {
   TeamSitesQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
+import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
 import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
 import {
   type FilterDocument,
   isReportingTimeZone,
@@ -183,7 +183,7 @@ export async function handlePlannedTeamSites(
       interval: input.interval,
       filters,
     };
-    const serviceResult = await new TypedQueryApplicationService().execute<
+    const serviceResult = await createApiV1QueryApplicationAdapter().execute<
       TeamSitesReaderInput,
       TeamSitesQueryResult
     >(

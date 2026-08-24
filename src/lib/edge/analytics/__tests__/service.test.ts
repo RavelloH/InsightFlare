@@ -1,22 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { OperationResultCache } from "@/lib/edge/analytics/application/cache";
-import {
-  analyticsOperationProvider,
-  TypedApplicationProviderRegistry,
-  TypedQueryProviderRegistry,
-} from "@/lib/edge/analytics/application/provider-registry";
+import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
+import { createQueryService } from "@/lib/edge/analytics/composition/create-query-service";
 import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
+  type OverviewQuery,
   type OverviewReader,
   type QueryContext,
   type QueryOperation,
   siteQueryContext,
-  teamQueryContext,
 } from "@/lib/edge/analytics/contract";
-import { createOverviewProviderRegistry } from "@/lib/edge/analytics/providers/d1/operations/overview";
 
 const time = createQueryTime(1_000, 2_000, "UTC", 2_000);
 
@@ -48,40 +44,69 @@ function overviewInvocation(
     };
   } = {},
 ) {
-  const context = options.context ?? siteQueryContext("site-1", "api-v1");
-  return {
-    operation: "site.analytics.overview" as const,
+  const context =
+    options.context ?? siteQueryContext("site-1", "private-dashboard");
+  const query: OverviewQuery = {
     context,
-    query: {
-      context,
-      time,
-      filters: EMPTY_FILTER_DOCUMENT,
-    },
-    providerRegistry: createOverviewProviderRegistry(overviewReader),
+    time,
+    filters: EMPTY_FILTER_DOCUMENT,
+  };
+  return {
+    kind: "typed-query" as const,
+    operation: "overview" as const,
+    query,
+    providerRegistry: new AnalyticsProviderRegistry().registerQuery(
+      "overview",
+      {
+        execute: (input) => overviewReader.readOverview(input as never),
+      },
+    ),
+    resultMode: "value" as const,
     ...(options.cache ? { cache: options.cache } : {}),
   };
 }
 
-function trendInvocation(
-  overviewReader: OverviewReader,
-  interval: "minute" | "hour" | "day" | "week" | "month" = "hour",
-) {
-  const context = siteQueryContext("site-1", "api-v1");
-  return {
-    operation: "site.analytics.timeseries" as const,
+function trendInvocation(overviewReader: OverviewReader) {
+  const context = siteQueryContext("site-1", "private-dashboard");
+  const query = {
     context,
-    query: {
-      context,
-      time,
-      filters: EMPTY_FILTER_DOCUMENT,
-      interval,
-    },
-    providerRegistry: createOverviewProviderRegistry(overviewReader),
+    time,
+    filters: EMPTY_FILTER_DOCUMENT,
+    interval: "hour" as const,
+  };
+  return {
+    kind: "typed-query" as const,
+    operation: "trend" as const,
+    query,
+    providerRegistry: new AnalyticsProviderRegistry().registerQuery("trend", {
+      execute: (input) => overviewReader.readTrend(input as typeof query),
+    }),
+    resultMode: "value" as const,
+  };
+}
+
+function invocation<T>(
+  operation: QueryOperation,
+  run: () => Promise<T>,
+  context = siteQueryContext("site-1", "private-dashboard"),
+) {
+  return {
+    kind: "typed-query" as const,
+    operation,
+    query: { context, time, filters: EMPTY_FILTER_DOCUMENT },
+    providerRegistry: new AnalyticsProviderRegistry().registerQuery(operation, {
+      execute: async () => ({ value: await run() }),
+    }),
+    resultMode: "value" as const,
   };
 }
 
 describe("TypedQueryApplicationService", () => {
-  it("runs the canonical typed-query contract through the same service entry", async () => {
+  it("creates the application service from the composition boundary", () => {
+    expect(createQueryService()).toBeInstanceOf(TypedQueryApplicationService);
+  });
+
+  it("executes a canonical typed query through the registry", async () => {
     const service = new TypedQueryApplicationService();
     const context = siteQueryContext("site-1", "private-dashboard");
     const run = vi.fn().mockResolvedValue({
@@ -89,7 +114,7 @@ describe("TypedQueryApplicationService", () => {
       source: "rollup",
       approximateVisitors: true,
     });
-    const providerRegistry = new TypedQueryProviderRegistry().register(
+    const providerRegistry = new AnalyticsProviderRegistry().registerQuery(
       "overview",
       { execute: run },
     );
@@ -98,7 +123,11 @@ describe("TypedQueryApplicationService", () => {
       service.execute({
         kind: "typed-query",
         operation: "overview",
-        query: { context, time, filters: EMPTY_FILTER_DOCUMENT },
+        query: {
+          context,
+          time,
+          filters: EMPTY_FILTER_DOCUMENT,
+        } as OverviewQuery,
         providerRegistry,
         resultMode: "value",
       }),
@@ -114,7 +143,7 @@ describe("TypedQueryApplicationService", () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
-  it("returns an internal error when a typed result provider is missing", async () => {
+  it("returns an internal error when a result provider is missing", async () => {
     await expect(
       new TypedQueryApplicationService().execute({
         kind: "typed-query",
@@ -123,8 +152,8 @@ describe("TypedQueryApplicationService", () => {
           context: siteQueryContext("site-1", "private-dashboard"),
           time,
           filters: EMPTY_FILTER_DOCUMENT,
-        },
-        providerRegistry: new TypedQueryProviderRegistry(),
+        } as OverviewQuery,
+        providerRegistry: new AnalyticsProviderRegistry(),
         resultMode: "result",
       }),
     ).resolves.toEqual({
@@ -133,109 +162,120 @@ describe("TypedQueryApplicationService", () => {
     });
   });
 
-  it("rejects cache loader failures instead of converting them to cache values", async () => {
-    const service = new TypedQueryApplicationService(
-      new OperationResultCache(),
+  it("executes an already-enveloped result provider", async () => {
+    const result = {
+      ok: true as const,
+      data: { views: 9 },
+      meta: { time, source: "raw" as const, approximateVisitors: false },
+    };
+    const providerRegistry = new AnalyticsProviderRegistry().registerResult(
+      "overview",
+      { execute: async () => result },
     );
+
     await expect(
-      service.execute(
-        {
-          ...overviewInvocation(reader()),
-          providerRegistry: new TypedApplicationProviderRegistry().register(
-            "site.analytics.overview",
-            analyticsOperationProvider(async () => {
-              throw new Error("cache load failed");
-            }),
-          ),
-          cache: {
-            key: "__query_cache/v1/site.analytics.overview/failure",
-            policy: { ttlMs: 1_000, maxEntries: 4 },
-          },
-        },
-        {},
-      ),
-    ).rejects.toThrow();
+      new TypedQueryApplicationService().execute({
+        kind: "typed-query",
+        operation: "overview",
+        query: {
+          context: siteQueryContext("site-1", "private-dashboard"),
+          time,
+        } as OverviewQuery,
+        providerRegistry,
+        resultMode: "result",
+      }),
+    ).resolves.toEqual(result);
   });
 
-  it("returns operation-not-allowed when the application registry has no provider", async () => {
+  it("checks the deadline after an enveloped provider finishes", async () => {
+    const now = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(1);
+    const providerRegistry = new AnalyticsProviderRegistry().registerResult(
+      "overview",
+      {
+        execute: async () => ({
+          ok: true as const,
+          data: { views: 1 },
+          meta: { time, source: "raw" as const, approximateVisitors: false },
+        }),
+      },
+    );
+
     await expect(
       new TypedQueryApplicationService().execute(
         {
-          ...overviewInvocation(reader()),
-          providerRegistry: new TypedApplicationProviderRegistry(),
+          kind: "typed-query",
+          operation: "overview",
+          query: {
+            context: siteQueryContext("site-1", "private-dashboard"),
+            time,
+          } as OverviewQuery,
+          providerRegistry,
+          resultMode: "result",
         },
+        { deadlineMs: 1, now },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      error: { kind: "deadline-exceeded" },
+    });
+  });
+
+  it("requires a canonical time before producing a value envelope", async () => {
+    const providerRegistry = new AnalyticsProviderRegistry().registerQuery(
+      "pages",
+      { execute: async () => ({ value: { items: [] } }) },
+    );
+
+    await expect(
+      new TypedQueryApplicationService().execute({
+        kind: "typed-query",
+        operation: "pages",
+        query: { context: siteQueryContext("site-1", "private-dashboard") },
+        providerRegistry,
+        resultMode: "value",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: { kind: "internal", operation: "pages" },
+    });
+  });
+
+  it("keeps provider failures inside the AnalyticsResult envelope", async () => {
+    const failure = new Error("provider-down");
+    await expect(
+      new TypedQueryApplicationService().execute(
+        invocation("pages", () => Promise.reject(failure)),
         {},
       ),
     ).resolves.toEqual({
       ok: false,
-      error: {
-        kind: "operation-not-allowed",
-        operation: "site.analytics.overview",
-      },
+      error: { kind: "internal", operation: "pages" },
     });
   });
 
-  function invocation<Result>(run: () => Promise<Result>) {
-    return {
-      operation: "site.analytics.pages" as const,
-      context: siteQueryContext("site-1", "api-v1"),
-      query: { siteId: "site-1" },
-      providerRegistry: new TypedApplicationProviderRegistry().register(
-        "site.analytics.pages",
-        analyticsOperationProvider(() => run()),
-      ),
-    };
-  }
-
-  it("runs registered typed operations through the same guards", async () => {
-    const service = new TypedQueryApplicationService();
-    const run = vi.fn().mockResolvedValue({ items: [{ id: "one" }] });
-    await expect(
-      service.execute(invocation(run), { capturedAtMs: 1, now: () => 1 }),
-    ).resolves.toEqual({ ok: true, value: { items: [{ id: "one" }] } });
-    expect(run).toHaveBeenCalledOnce();
-  });
-
-  it("rejects an operation whose registered subject does not match the trusted context", async () => {
-    const service = new TypedQueryApplicationService();
+  it("rejects policy-denied operations before provider execution", async () => {
     const run = vi.fn().mockResolvedValue("unreachable");
+    const context = {
+      ...siteQueryContext("site-1", "private-dashboard"),
+      policy: {
+        ...siteQueryContext("site-1", "private-dashboard").policy,
+        allowedOperations: new Set<QueryOperation>(),
+      },
+    };
 
     await expect(
-      service.execute(
-        {
-          ...invocation(run),
-          context: teamQueryContext("team-1", "api-v1"),
-        },
+      new TypedQueryApplicationService().execute(
+        invocation("pages", run, context),
         {},
       ),
     ).resolves.toEqual({
       ok: false,
-      error: {
-        kind: "operation-not-allowed",
-        operation: "site.analytics.pages",
-      },
+      error: { kind: "capability-denied", capability: "pages" },
     });
-
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("emits only low-cardinality lifecycle events", async () => {
-    const events: unknown[] = [];
-    const service = new TypedQueryApplicationService();
-    await service.execute(
-      invocation(async () => ({ value: 1 })),
-      {
-        operation: "site.analytics.pages",
-        onEvent: (event) => events.push(event),
-      },
-    );
-    expect(events).toEqual([
-      { operation: "site.analytics.pages", phase: "start" },
-      { operation: "site.analytics.pages", phase: "success" },
-    ]);
-  });
-
-  it("rejects generic work before the provider for abort, deadline and cost", async () => {
+  it("rejects abort, deadline, and cost before provider execution", async () => {
     const service = new TypedQueryApplicationService(undefined, {
       rangeUnitMs: 1,
       maxCost: 2,
@@ -244,20 +284,24 @@ describe("TypedQueryApplicationService", () => {
     const run = vi.fn().mockResolvedValue("unreachable");
     const controller = new AbortController();
     controller.abort();
+
     await expect(
-      service.execute(invocation(run), { signal: controller.signal }),
+      service.execute(invocation("pages", run), { signal: controller.signal }),
     ).resolves.toEqual({
       ok: false,
       error: { kind: "request-cancelled" },
     });
     await expect(
-      service.execute(invocation(run), { deadlineMs: 10, now: () => 10 }),
+      service.execute(invocation("pages", run), {
+        deadlineMs: 10,
+        now: () => 10,
+      }),
     ).resolves.toEqual({
       ok: false,
       error: { kind: "deadline-exceeded" },
     });
     await expect(
-      service.execute(invocation(run), {
+      service.execute(invocation("pages", run), {
         cost: { rangeMs: 2, provider: "d1" },
       }),
     ).resolves.toEqual({
@@ -267,77 +311,27 @@ describe("TypedQueryApplicationService", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("records cancellation, deadline, cost and provider failure without throwing from the hook", async () => {
+  it("records lifecycle events without allowing telemetry to alter results", async () => {
     const events: Array<{ phase: string; operation: string }> = [];
-    const service = new TypedQueryApplicationService(undefined, {
-      rangeUnitMs: 1,
-      maxCost: 2,
-      providerWeights: { d1: 1, rollup: 1, realtime: 1, mixed: 1 },
-    });
-    const controller = new AbortController();
-    controller.abort();
+    const service = new TypedQueryApplicationService();
     await service.execute(
-      invocation(() => Promise.resolve(1)),
+      invocation("pages", () => Promise.resolve(1)),
       {
-        operation: "cancelled",
-        signal: controller.signal,
+        operation: "pages",
         onEvent: (event) => {
           events.push(event);
           throw new Error("telemetry failure");
         },
       },
     );
-    await service.execute(
-      invocation(() => Promise.resolve(1)),
-      {
-        operation: "costed",
-        cost: { rangeMs: 2 },
-        onEvent: (event) => events.push(event),
-      },
-    );
-    await expect(
-      service.execute(
-        invocation(() => Promise.reject(new Error("down"))),
-        {
-          operation: "failed",
-          onEvent: (event) => events.push(event),
-        },
-      ),
-    ).rejects.toThrow("down");
+
     expect(events.map((event) => `${event.operation}:${event.phase}`)).toEqual([
-      "cancelled:start",
-      "cancelled:cancelled",
-      "costed:start",
-      "costed:cost",
-      "failed:start",
-      "failed:failure",
+      "pages:start",
+      "pages:success",
     ]);
   });
 
-  it("does not swallow provider failures", async () => {
-    const service = new TypedQueryApplicationService();
-    const failure = new Error("provider-down");
-    await expect(
-      service.execute(
-        invocation(() => Promise.reject(failure)),
-        {},
-      ),
-    ).rejects.toBe(failure);
-  });
-
-  it("executes canonical overview input without HTTP dependencies", async () => {
-    const service = new TypedQueryApplicationService();
-    const overviewReader = reader();
-    const result = await service.execute(
-      overviewInvocation(overviewReader),
-      {},
-    );
-
-    expect(result).toMatchObject({ ok: true, value: { ok: true } });
-    expect(overviewReader.readOverview).toHaveBeenCalledOnce();
-  });
-
-  it("executes trend through the same cache and lifecycle guards", async () => {
+  it("executes overview and timeseries through ordinary registry entries", async () => {
     const overviewReader = reader();
     vi.mocked(overviewReader.readTrend).mockResolvedValue({
       value: [],
@@ -345,115 +339,19 @@ describe("TypedQueryApplicationService", () => {
       approximateVisitors: false,
     });
     const service = new TypedQueryApplicationService();
-    const result = await service.execute(trendInvocation(overviewReader), {
-      operation: "site.analytics.timeseries",
-    });
-    expect(result).toMatchObject({ ok: true, value: { ok: true } });
+
+    const overview = await service.execute(overviewInvocation(overviewReader));
+    const trend = await service.execute(trendInvocation(overviewReader));
+
+    expect(overview).toMatchObject({ ok: true, data: { views: 1 } });
+    expect(trend).toMatchObject({ ok: true, data: [] });
+    expect(overviewReader.readOverview).toHaveBeenCalledOnce();
     expect(overviewReader.readTrend).toHaveBeenCalledOnce();
   });
 
-  it("does not call a provider after cancellation or deadline expiry", async () => {
+  it("returns cancellation and deadline after provider completion", async () => {
     const service = new TypedQueryApplicationService();
     const overviewReader = reader();
-    const controller = new AbortController();
-    controller.abort();
-
-    const cancelled = await service.execute(
-      overviewInvocation(overviewReader),
-      {
-        signal: controller.signal,
-      },
-    );
-    const expired = await service.execute(overviewInvocation(overviewReader), {
-      deadlineMs: 10,
-      now: () => 10,
-    });
-
-    expect(cancelled).toEqual({
-      ok: false,
-      error: { kind: "request-cancelled" },
-    });
-    expect(expired).toEqual({
-      ok: false,
-      error: { kind: "deadline-exceeded" },
-    });
-    expect(overviewReader.readOverview).not.toHaveBeenCalled();
-  });
-
-  it("keeps policy denial ahead of provider execution", async () => {
-    const service = new TypedQueryApplicationService();
-    const overviewReader = reader();
-    const context = siteQueryContext("site-1", "api-v1");
-    const deniedContext = {
-      ...context,
-      policy: {
-        ...context.policy,
-        allowedOperations: new Set<QueryOperation>(),
-      },
-    };
-
-    const result = await service.execute(
-      overviewInvocation(overviewReader, { context: deniedContext }),
-      {},
-    );
-
-    expect(result).toMatchObject({
-      ok: true,
-      value: { ok: false, error: { kind: "capability-denied" } },
-    });
-    expect(overviewReader.readOverview).not.toHaveBeenCalled();
-  });
-
-  it("caches only successful aggregate results behind an opaque key", async () => {
-    const overviewReader = reader();
-    const service = new TypedQueryApplicationService(
-      new OperationResultCache(),
-    );
-    const cache = {
-      key: "__query_cache/v1/site.analytics.overview/opaque",
-      policy: { ttlMs: 1_000, maxEntries: 4 },
-    } as const;
-
-    await service.execute(overviewInvocation(overviewReader, { cache }), {});
-    await service.execute(overviewInvocation(overviewReader, { cache }), {});
-
-    expect(overviewReader.readOverview).toHaveBeenCalledOnce();
-  });
-
-  it("does not cache policy-denied aggregate results", async () => {
-    const overviewReader = reader();
-    const service = new TypedQueryApplicationService(
-      new OperationResultCache(),
-    );
-    const deniedContext = {
-      ...siteQueryContext("site-1", "api-v1"),
-      policy: {
-        ...siteQueryContext("site-1", "api-v1").policy,
-        allowedOperations: new Set<QueryOperation>(),
-      },
-    } as const;
-
-    const result = await service.execute(
-      overviewInvocation(overviewReader, {
-        context: deniedContext,
-        cache: {
-          key: "__query_cache/v1/site.analytics.overview/denied",
-          policy: { ttlMs: 1_000, maxEntries: 4 },
-        },
-      }),
-      {},
-    );
-
-    expect(result).toMatchObject({
-      ok: true,
-      value: { ok: false, error: { kind: "capability-denied" } },
-    });
-    expect(overviewReader.readOverview).not.toHaveBeenCalled();
-  });
-
-  it("returns cancellation/deadline after provider completion", async () => {
-    const overviewReader = reader();
-    const service = new TypedQueryApplicationService();
     const cancelled = new AbortController();
     overviewReader.readOverview = vi.fn(async () => {
       cancelled.abort();
@@ -470,23 +368,73 @@ describe("TypedQueryApplicationService", () => {
         approximateVisitors: false,
       };
     });
+
     await expect(
       service.execute(overviewInvocation(overviewReader), {
         signal: cancelled.signal,
       }),
-    ).resolves.toEqual({ ok: false, error: { kind: "request-cancelled" } });
-
-    const afterDeadline = await service.execute(overviewInvocation(reader()), {
-      deadlineMs: 2,
-      now: () => 3,
+    ).resolves.toEqual({
+      ok: false,
+      error: { kind: "request-cancelled" },
     });
-    expect(afterDeadline).toEqual({
+    await expect(
+      service.execute(overviewInvocation(reader()), {
+        deadlineMs: 2,
+        now: () => 3,
+      }),
+    ).resolves.toEqual({
       ok: false,
       error: { kind: "deadline-exceeded" },
     });
   });
 
-  it("rejects a query whose shared weighted cost reaches the policy ceiling before provider execution", async () => {
+  it("caches successful provider values behind an opaque key", async () => {
+    const overviewReader = reader();
+    const service = new TypedQueryApplicationService(
+      new OperationResultCache(),
+    );
+    const cache = {
+      key: "__query_cache/v1/overview/opaque",
+      policy: { ttlMs: 1_000, maxEntries: 4 },
+    } as const;
+
+    await service.execute(overviewInvocation(overviewReader, { cache }));
+    await service.execute(overviewInvocation(overviewReader, { cache }));
+
+    expect(overviewReader.readOverview).toHaveBeenCalledOnce();
+  });
+
+  it("does not cache policy-denied results", async () => {
+    const overviewReader = reader();
+    const service = new TypedQueryApplicationService(
+      new OperationResultCache(),
+    );
+    const context = {
+      ...siteQueryContext("site-1", "private-dashboard"),
+      policy: {
+        ...siteQueryContext("site-1", "private-dashboard").policy,
+        allowedOperations: new Set<QueryOperation>(),
+      },
+    } as const;
+
+    const result = await service.execute(
+      overviewInvocation(overviewReader, {
+        context,
+        cache: {
+          key: "__query_cache/v1/overview/denied",
+          policy: { ttlMs: 1_000, maxEntries: 4 },
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { kind: "capability-denied", capability: "overview" },
+    });
+    expect(overviewReader.readOverview).not.toHaveBeenCalled();
+  });
+
+  it("rejects a weighted cost at the policy ceiling", async () => {
     const overviewReader = reader();
     const service = new TypedQueryApplicationService(undefined, {
       rangeUnitMs: 1,
@@ -496,6 +444,7 @@ describe("TypedQueryApplicationService", () => {
     const result = await service.execute(overviewInvocation(overviewReader), {
       cost: { rangeMs: 10, provider: "d1" },
     });
+
     expect(result).toEqual({
       ok: false,
       error: { kind: "query-cost-exceeded", cost: 10 },

@@ -8,12 +8,12 @@ import {
   toApiV1QueryTime,
 } from "@/lib/api-v1/analytics-overview";
 import { SiteTimeseriesQueryDtoSchema } from "@/lib/api-v1/dto/analytics";
+import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/query-context";
 import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import {
-  type AnalyticsServiceResult,
-  type QueryExecutionContext,
-  TypedQueryApplicationService,
+import type {
+  AnalyticsServiceResult,
+  QueryExecutionContext,
 } from "@/lib/edge/analytics/application/service";
 import type {
   AnalyticsResult,
@@ -72,7 +72,7 @@ export async function executeApiV1SiteTimeseries(
   if (!filter.ok) return filter;
   return {
     ok: true,
-    value: await new TypedQueryApplicationService(aggregateCache).execute<
+    value: await createApiV1QueryApplicationAdapter(aggregateCache).execute<
       TrendQuery,
       AnalyticsResult<TrendResult>
     >(

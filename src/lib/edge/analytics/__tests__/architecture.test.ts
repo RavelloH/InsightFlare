@@ -3,6 +3,12 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { analyticsOperationRegistry } from "@/lib/edge/analytics/application/operation-registry";
+import {
+  API_V1_QUERY_OPERATION_MAP,
+  canonicalQueryOperationFor,
+} from "@/lib/edge/analytics/application/query-operation-map";
+
 const projectRoot = process.cwd();
 const srcRoot = path.join(projectRoot, "src");
 const edgeRoot = path.join(srcRoot, "lib", "edge");
@@ -70,12 +76,17 @@ describe("analytics architecture", () => {
 
   it("makes registries the only provider entry point", () => {
     const service = source("src/lib/edge/analytics/application/service.ts");
+    const registry = source(
+      "src/lib/edge/analytics/application/provider-registry.ts",
+    );
     const typedApplication = source(
       "src/lib/edge/analytics/contract/application.ts",
     );
 
+    expect(registry).toContain("class AnalyticsProviderRegistry");
     expect(service).toContain("readonly providerRegistry:");
-    expect(service).not.toContain("readonly provider?:");
+    expect(service).toContain('kind: "typed-query"');
+    expect(service).not.toContain("AnalyticsOperationInvocation");
     expect(service).not.toMatch(/async\s+(overview|trend)\s*\(/u);
     expect(typedApplication).not.toContain(
       "(() => Promise<TypedQueryProviderResult",
@@ -110,10 +121,11 @@ describe("analytics architecture", () => {
 
   it("keeps service consumers on the registry boundary", () => {
     for (const file of productionFiles("src/lib/api-v1")) {
+      if (file.endsWith(`${path.sep}query-application.ts`)) continue;
       const content = readFileSync(file, "utf8");
       if (!content.includes("new TypedQueryApplicationService")) continue;
       expect(content).toMatch(
-        /providerRegistry|TypedApplicationProviderRegistry/u,
+        /providerRegistry|createApiV1QueryApplicationAdapter/u,
       );
     }
     for (const file of productionFiles("src/lib/api-v1")) {
@@ -122,14 +134,29 @@ describe("analytics architecture", () => {
       );
     }
     expect(source("src/lib/hono/routes/v1/index.ts")).toContain(
-      "createCallbackProviderRegistry",
+      "registerV1SiteAnalyticsRoutes",
     );
+    expect(source("src/lib/hono/routes/v1/index.ts")).toContain(
+      "registerV1TeamAnalyticsRoutes",
+    );
+    expect(
+      source("src/lib/edge/analytics/composition/create-provider-registry.ts"),
+    ).toContain("registerCallback");
     expect(source("src/lib/dashboard/route-data.ts")).toContain(
       "createSsrTeamDashboardProviderRegistry",
     );
     expect(source("src/lib/edge/analytics/adapters/mock.ts")).toContain(
       "createMockProviderRegistry",
     );
+  });
+
+  it("maps every public API v1 operation to the canonical query vocabulary", () => {
+    for (const descriptor of analyticsOperationRegistry) {
+      expect(API_V1_QUERY_OPERATION_MAP[descriptor.id]).toBeDefined();
+      expect(canonicalQueryOperationFor(descriptor.id)).toBe(
+        API_V1_QUERY_OPERATION_MAP[descriptor.id],
+      );
+    }
   });
 
   it("does not allow legacy query module imports", () => {
