@@ -478,6 +478,19 @@ describe("event detail D1 SQL", () => {
           );
       }
 
+      const legacyOffsetRows = await queryEventRecordsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        {
+          limit: 2,
+          offset: 1,
+          sort: { key: "occurredAt", direction: "desc" },
+        },
+      );
+      expect(legacyOffsetRows).toHaveLength(2);
+
       for (const sort of [
         { key: "occurredAt", direction: "asc" },
         { key: "occurredAt", direction: "desc" },
@@ -522,6 +535,9 @@ describe("event detail D1 SQL", () => {
 
       const cursorQuery = d1.calls.at(-1);
       expect(cursorQuery?.sql).not.toContain("OFFSET");
+      expect(cursorQuery?.sql).not.toContain("SELECT *");
+      expect(cursorQuery?.sql).not.toContain("filtered_events AS");
+      expect(cursorQuery?.sql).toContain("FROM event_source es");
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${cursorQuery?.sql ?? "SELECT 1"}`)
         .all(...(cursorQuery?.bindings ?? []));
@@ -539,7 +555,15 @@ describe("event detail D1 SQL", () => {
         env,
         siteId,
         window,
-        EMPTY_FILTER_DOCUMENT,
+        filterFixture({
+          query: "",
+          sourceLink: "https://www.google.com/",
+          clientLanguage: "zh-CN",
+          clientScreenSize: "1920x1080",
+          geoContinent: "Asia",
+          geoTimezone: "Asia/Shanghai",
+          geoOrganization: "Example Networks",
+        }),
         {
           limit: 25,
           offset: 0,
@@ -557,6 +581,10 @@ describe("event detail D1 SQL", () => {
       expect(query?.sql).toContain("target_event_name AS");
       expect(query?.sql).not.toContain("TRIM(COALESCE(es.event_name");
       expect(planDetails).toContain("idx_custom_events_site_pk_name_time");
+      expect(query?.sql).toContain("v.query_string");
+      expect(query?.sql).toContain("v.referrer_url");
+      expect(query?.sql).toContain("v.screen_width");
+      expect(query?.sql).toContain("v.as_organization");
     } finally {
       d1.close();
     }

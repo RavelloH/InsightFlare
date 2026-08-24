@@ -23,6 +23,84 @@ import { mapVisitPerformanceMetrics } from "./core-performance";
 
 const EVENT_RECORD_CURSOR_MAX_LENGTH = 12_288;
 
+// Event-record lists only need this projection for their output, filters, and
+// cursor predicates. Keeping it explicit prevents the shared analytics source
+// from carrying unrelated visit columns through every page query.
+const EVENT_RECORD_BASE_SOURCE_COLUMNS = [
+  "ce.event_pk",
+  "ce.event_id",
+  "ce.site_pk",
+  "ce.visit_id",
+  "cen.name AS event_name",
+  "ce.occurred_at",
+  "ce.received_at",
+  "ce.sequence",
+  "ce.node_count",
+  "ce.value_count",
+  "v.visitor_id",
+  "v.session_id",
+  "v.pathname",
+  "v.hostname",
+  "v.title",
+  "v.referrer_host",
+  "v.country",
+  "v.region",
+  "v.browser",
+  "v.browser_version",
+  "v.os",
+  "v.os_version",
+  "v.device_type",
+] as const;
+
+const EVENT_RECORD_FILTER_SOURCE_COLUMNS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  "page.query": ["v.query_string"],
+  "page.hash": ["v.hash_fragment"],
+  "referrer.url": ["v.referrer_url"],
+  "utm.source": ["v.utm_source"],
+  "utm.medium": ["v.utm_medium"],
+  "utm.campaign": ["v.utm_campaign"],
+  "utm.term": ["v.utm_term"],
+  "utm.content": ["v.utm_content"],
+  "traffic.channel": [
+    "v.utm_source",
+    "v.utm_medium",
+    "v.utm_campaign",
+    "v.utm_term",
+    "v.utm_content",
+  ],
+  "client.language": ["v.language"],
+  "client.screenSize": ["v.screen_width", "v.screen_height"],
+  "geo.city": ["v.city"],
+  "geo.continent": ["v.continent"],
+  "geo.timeZone": ["v.timezone"],
+  "geo.organization": ["v.as_organization"],
+};
+
+function eventRecordSourceColumns(filters: FilterDocument): string {
+  const columns = new Set<string>(EVENT_RECORD_BASE_SOURCE_COLUMNS);
+  const collect = (expression: FilterDocument["root"]): void => {
+    if (!expression) return;
+    if (expression.kind === "condition") {
+      if (expression.target.kind === "field") {
+        for (const column of
+          EVENT_RECORD_FILTER_SOURCE_COLUMNS[expression.target.field] ?? []) {
+          columns.add(column);
+        }
+      }
+      return;
+    }
+    if (expression.kind === "not") {
+      collect(expression.child);
+      return;
+    }
+    for (const child of expression.children) collect(child);
+  };
+  collect(filters.root);
+  return [...columns].join(",\n    ");
+}
+
 export interface EventRecordCursor {
   sortKey: EventRecordSortKey;
   sortDirection: "asc" | "desc";
@@ -245,18 +323,16 @@ function eventRecordsSql(
   filterClause: string,
   cursorClause: string,
   sort: ListSort<EventRecordSortKey>,
-  paginationClause: string,
+  sourceColumns: string,
   eventName?: string,
 ): string {
   return `
 WITH
 ${buildVisitSourceCte()},
-${buildEventAnalyticsSourceCte({ eventName })},
-filtered_events AS (
-  SELECT *
-  FROM event_source es
-  ${filterClause}
-)
+${buildEventAnalyticsSourceCte({
+  eventName,
+  selectColumns: sourceColumns,
+})}
 SELECT
   event_pk AS eventPk,
   event_id AS eventId,
@@ -280,11 +356,11 @@ SELECT
   device_type AS deviceType,
   node_count AS nodeCount,
   value_count AS valueCount
-FROM filtered_events
-WHERE 1 = 1
+FROM event_source es
+${filterClause || "WHERE 1 = 1"}
 ${cursorClause}
 ORDER BY ${eventRecordOrderBy(sort)}
-${paginationClause}
+LIMIT ?
 `;
 }
 
@@ -318,7 +394,7 @@ export async function queryEventRecordPageFromD1(
       filter.clause,
       cursor.clause,
       options.sort,
-      "LIMIT ?",
+      eventRecordSourceColumns(filters),
       options.eventName,
     ),
     [
@@ -341,6 +417,10 @@ export async function queryEventRecordPageFromD1(
   };
 }
 
+/**
+ * @deprecated Use queryEventRecordPageFromD1 so callers can carry a keyset
+ * cursor instead of asking D1 to scan and discard OFFSET rows.
+ */
 export async function queryEventRecordsFromD1(
   env: Env,
   siteId: string,
@@ -354,27 +434,37 @@ export async function queryEventRecordsFromD1(
     eventName?: string;
   },
 ): Promise<EventRecordRow[]> {
-  const filter = buildEventFilterSql(filters, "es", {
-    search: options.search,
-  });
-  const rows = await queryD1All<EventRecordCursorRow>(
-    env,
-    eventRecordsSql(
-      filter.clause,
-      "",
-      options.sort,
-      "LIMIT ?\nOFFSET ?",
-      options.eventName,
-    ),
-    [
-      ...visitSourceBindings(siteId, window),
-      ...eventSourceBindings(siteId, window, options.eventName),
-      ...filter.bindings,
-      options.limit,
-      options.offset,
-    ],
-  );
-  return rows.map(withoutEventPk);
+  const limit = Math.max(0, Math.trunc(options.limit));
+  if (limit === 0) return [];
+
+  let remainingOffset = Math.max(0, Math.trunc(options.offset));
+  let cursor: EventRecordCursor | null = null;
+  const rows: EventRecordRow[] = [];
+  const pageSize = Math.max(1, Math.min(200, limit));
+
+  while (rows.length < limit) {
+    const page = await queryEventRecordPageFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      {
+        pageSize,
+        sort: options.sort,
+        search: options.search,
+        eventName: options.eventName,
+        cursor,
+      },
+    );
+    const pageRows =
+      remainingOffset > 0 ? page.rows.slice(remainingOffset) : page.rows;
+    remainingOffset = Math.max(0, remainingOffset - page.rows.length);
+    rows.push(...pageRows.slice(0, limit - rows.length));
+    if (rows.length >= limit || !page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+
+  return rows;
 }
 
 export async function queryEventRecordDetailFromD1(

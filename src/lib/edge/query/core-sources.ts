@@ -120,33 +120,12 @@ export function buildEventAnalyticsSourceCte(options?: {
   eventName?: string;
   eventNames?: string[];
   cteName?: string;
+  selectColumns?: string;
 }): string {
   const cteName = options?.cteName ?? "event_source";
-  const eventNameSource = options?.eventName
-    ? `
-target_event_name AS MATERIALIZED (
-  SELECT id
-  FROM custom_event_names
-  WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND name = ?
-),`
-    : options?.eventNames?.length
-      ? `
-target_event_names AS MATERIALIZED (
-  SELECT id
-  FROM custom_event_names
-  WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
-    AND name IN (${options.eventNames.map(() => "?").join(", ")})
-),`
-      : "";
-  const eventNamePredicate = options?.eventName
-    ? "ce.event_name_id = (SELECT id FROM target_event_name) AND"
-    : options?.eventNames?.length
-      ? "ce.event_name_id IN (SELECT id FROM target_event_names) AND"
-      : "";
-  return `
-${eventNameSource}
-${cteName} AS (
-  SELECT
+  const selectColumns =
+    options?.selectColumns ??
+    `
     ce.event_pk,
     ce.event_id,
     ce.site_id,
@@ -181,7 +160,32 @@ ${cteName} AS (
     v.timezone,
     v.screen_width,
     v.screen_height,
-    v.as_organization
+    v.as_organization`;
+  const eventNameSource = options?.eventName
+    ? `
+target_event_name AS MATERIALIZED (
+  SELECT id
+  FROM custom_event_names
+  WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND name = ?
+),`
+    : options?.eventNames?.length
+      ? `
+target_event_names AS MATERIALIZED (
+  SELECT id
+  FROM custom_event_names
+  WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+    AND name IN (${options.eventNames.map(() => "?").join(", ")})
+),`
+      : "";
+  const eventNamePredicate = options?.eventName
+    ? "ce.event_name_id = (SELECT id FROM target_event_name) AND"
+    : options?.eventNames?.length
+      ? "ce.event_name_id IN (SELECT id FROM target_event_names) AND"
+      : "";
+  return `
+${eventNameSource}
+${cteName} AS (
+  SELECT ${selectColumns}
   FROM custom_events ce
   INNER JOIN custom_event_names cen
     ON cen.id = ce.event_name_id
