@@ -3,6 +3,7 @@ import type * as ReactStartServerModule from "@tanstack/react-start/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as DashboardServerModule from "@/lib/dashboard/server";
+import type * as QueryContractModule from "@/lib/edge/query-contract";
 
 vi.mock("@tanstack/react-start", async (importOriginal) => {
   const actual = await importOriginal<typeof ReactStartModule>();
@@ -67,6 +68,16 @@ vi.mock("@/lib/dashboard/server-query", () => ({
   resolveTeamDashboardRequest: vi.fn(),
 }));
 
+vi.mock("@/lib/edge/query-contract", async (importOriginal) => {
+  const actual = await importOriginal<typeof QueryContractModule>();
+  return {
+    ...actual,
+    executeTypedApplicationOperation: vi.fn(
+      actual.executeTypedApplicationOperation,
+    ),
+  };
+});
+
 vi.mock("@/lib/edge/query-runtime/team-dashboard", () => ({
   readTeamDashboard: vi.fn(),
 }));
@@ -114,6 +125,11 @@ import {
 } from "@/lib/dashboard/route-data";
 import { readDashboardAdmin } from "@/lib/dashboard/server";
 import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
+import {
+  createQueryTime,
+  executeTypedApplicationOperation,
+  teamQueryContext,
+} from "@/lib/edge/query-contract";
 import { readTeamDashboard } from "@/lib/edge/query-runtime/team-dashboard";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 import {
@@ -293,6 +309,14 @@ describe("Dashboard route data loaders", () => {
         env: { DB: {} },
         teamId: "team-requested",
       });
+      const [operation, query] = vi.mocked(executeTypedApplicationOperation)
+        .mock.calls[0]!;
+      expect(operation).toBe("team-dashboard");
+      expect(query.context.subject).toEqual(
+        teamQueryContext("team-1", "private-dashboard", ["site-1"]).subject,
+      );
+      expect(query.context.policy.audience).toBe("private-dashboard");
+      expect(query.time).toEqual(createQueryTime(100, 200, "Asia/Tokyo", 200));
       expect(readTeamDashboard).toHaveBeenCalledWith({
         env: { DB: {} },
         teamId: "team-1",
@@ -305,6 +329,20 @@ describe("Dashboard route data loaders", () => {
         interval: "day",
         allowedSiteIds: ["site-1"],
       });
+    });
+
+    it("keeps typed operation failures as SSR errors", async () => {
+      vi.mocked(executeTypedApplicationOperation).mockResolvedValueOnce({
+        ok: false,
+        error: { kind: "internal", operation: "team-dashboard" },
+      } as never);
+
+      await expect(
+        loadTeamDashboardSnapshot({
+          data: { teamId: "team-requested" },
+        } as never),
+      ).rejects.toThrow("internal");
+      expect(readTeamDashboard).not.toHaveBeenCalled();
     });
 
     it("loads the dashboard root context", async () => {

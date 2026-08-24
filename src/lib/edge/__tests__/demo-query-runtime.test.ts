@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { executeDemoQuery } from "@/lib/edge/query-runtime/demo-query";
+import {
+  executeDemoQuery,
+  executeDemoQueryPayload,
+} from "@/lib/edge/query-runtime/demo-query";
 import {
   DEMO_SITE_PROFILES,
   demoSitePublicSlug,
@@ -66,6 +69,26 @@ describe("server demo query runtime", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("x-insightflare-data-source")).toBe("mock");
+  });
+
+  it("exposes the demo response as a typed-provider payload", async () => {
+    handleDemoRequestMock.mockReturnValue({
+      ok: true,
+      requestId: "demo-request",
+      timestamp: "2026-08-22T00:00:00.000Z",
+      data: { views: 12 },
+    });
+
+    await expect(
+      executeDemoQueryPayload({
+        request: request("/api/private/overview"),
+        url: new URL("https://app.test/api/private/overview"),
+        siteId: "demo-site-001",
+      }),
+    ).resolves.toMatchObject({
+      status: 200,
+      payload: expect.objectContaining({ data: { views: 12 } }),
+    });
   });
 
   it("clones JSON bodies for funnel and saved-filter mutations", async () => {

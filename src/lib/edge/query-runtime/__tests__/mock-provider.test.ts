@@ -1,12 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../demo-query", () => ({
-  executeDemoQuery: vi.fn(
-    async (input: unknown) => new Response(JSON.stringify(input)),
+const mocks = vi.hoisted(() => ({
+  createDemoQueryResponse: vi.fn(
+    (payload: unknown, status: number) =>
+      new Response(JSON.stringify(payload), { status }),
   ),
+  executeDemoQueryPayload: vi.fn(async () => ({
+    payload: { ok: true },
+    status: 200,
+  })),
 }));
 
-import { executeDemoQuery } from "@/lib/edge/query-runtime/demo-query";
+vi.mock("../demo-query", () => ({
+  createDemoQueryResponse: mocks.createDemoQueryResponse,
+  executeDemoQueryPayload: mocks.executeDemoQueryPayload,
+}));
+
+import { siteQueryContext } from "@/lib/edge/query-contract";
 import { executeMockQuery } from "@/lib/edge/query-runtime/mock-provider";
 
 describe("mock query provider", () => {
@@ -16,9 +26,31 @@ describe("mock query provider", () => {
       request: new Request("https://example.test/api/private/overview"),
       url: new URL("https://example.test/api/private/overview"),
       siteId: "site-1",
+      queryContext: siteQueryContext("site-1", "private-dashboard"),
     };
     const response = await executeMockQuery(input);
     expect(response).toBeInstanceOf(Response);
-    expect(executeDemoQuery).toHaveBeenCalledWith(input);
+    expect(mocks.executeDemoQueryPayload).toHaveBeenCalledWith(input);
+    expect(mocks.createDemoQueryResponse).toHaveBeenCalledWith(
+      { ok: true },
+      200,
+      false,
+      expect.objectContaining({ requestId: expect.any(String) }),
+    );
+  });
+
+  it("does not invoke the demo source when the typed operation is denied", async () => {
+    mocks.executeDemoQueryPayload.mockClear();
+    const input = {
+      operation: "event-context" as const,
+      request: new Request("https://example.test/api/public/share/site/events"),
+      url: new URL("https://example.test/api/public/share/site/events"),
+      siteId: "site-1",
+      publicQuery: true,
+      queryContext: siteQueryContext("site-1", "public-share"),
+    };
+    const response = await executeMockQuery(input);
+    expect(response.status).toBe(400);
+    expect(mocks.executeDemoQueryPayload).not.toHaveBeenCalled();
   });
 });

@@ -131,6 +131,7 @@ export function executePublicQuery(
           request: input.request ?? new Request(url, { method: "GET" }),
           url,
           siteId: input.siteId,
+          queryContext,
           publicQuery: true,
           context: ctx,
         }),

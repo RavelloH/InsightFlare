@@ -139,6 +139,7 @@ export function executePrivateQuery(
           request: input.request ?? new Request(input.url, { method: "GET" }),
           url: input.url,
           siteId: input.siteId,
+          queryContext,
           context: ctx,
         }),
     );

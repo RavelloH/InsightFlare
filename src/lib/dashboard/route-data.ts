@@ -30,6 +30,11 @@ import {
 } from "@/lib/dashboard/server";
 import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
 import type { TeamDashboardSnapshot } from "@/lib/dashboard/team-dashboard-query";
+import {
+  createQueryTime,
+  executeTypedApplicationOperation,
+  teamQueryContext,
+} from "@/lib/edge/query-contract";
 import { readTeamDashboard } from "@/lib/edge/query-runtime/team-dashboard";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 import { normalizeNotificationPreferencesData } from "@/lib/edge-client";
@@ -108,18 +113,38 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
     if (resolved instanceof Response) return null;
 
     const window = resolveDashboardInitialWindow(request.headers.get("cookie"));
-    const result = await readTeamDashboard({
-      env: resolved.env,
-      teamId: resolved.teamId,
-      window: {
-        startMs: window.from,
-        endExclusiveMs: window.to,
-        nowMs: window.to,
-        timeZone: window.timeZone,
+    const result = await executeTypedApplicationOperation(
+      "team-dashboard",
+      {
+        context: teamQueryContext(
+          resolved.teamId,
+          "private-dashboard",
+          resolved.allowedSiteIds,
+        ),
+        time: createQueryTime(
+          window.from,
+          window.to,
+          window.timeZone,
+          window.to,
+        ),
       },
-      interval: window.interval,
-      allowedSiteIds: resolved.allowedSiteIds,
-    });
+      async () => {
+        const dashboard = await readTeamDashboard({
+          env: resolved.env,
+          teamId: resolved.teamId,
+          window: {
+            startMs: window.from,
+            endExclusiveMs: window.to,
+            nowMs: window.to,
+            timeZone: window.timeZone,
+          },
+          interval: window.interval,
+          allowedSiteIds: resolved.allowedSiteIds,
+        });
+        return { value: dashboard.data, source: dashboard.source };
+      },
+    );
+    if (!result.ok) throw new Error(result.error.kind);
     return {
       data: result.data,
       window: {

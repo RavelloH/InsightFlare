@@ -45,7 +45,7 @@ function responseHeaders(
   };
 }
 
-function response(
+export function createDemoQueryResponse(
   payload: unknown,
   status: number,
   publicQuery: boolean,
@@ -61,6 +61,11 @@ function response(
     status,
     responseHeaders(publicQuery, status < 400),
   );
+}
+
+export interface DemoQueryPayloadResult {
+  readonly payload: unknown;
+  readonly status: number;
 }
 
 function successStatus(request: Request, url: URL): number {
@@ -120,7 +125,7 @@ export async function executeDemoQuery(
     requestId: getRequestId(request),
   };
   if (unsupportedSavedFilterMethod(request, url)) {
-    return response(
+    return createDemoQueryResponse(
       demoErr("method_not_allowed", "Method Not Allowed"),
       405,
       publicQuery,
@@ -129,7 +134,7 @@ export async function executeDemoQuery(
   }
   const parsedBody = await requestBody(request);
   if (!parsedBody.valid && requiresJsonBodyValidation(request, url)) {
-    return response(
+    return createDemoQueryResponse(
       demoBadRequest("Invalid JSON body"),
       400,
       publicQuery,
@@ -157,14 +162,25 @@ export async function executeDemoQuery(
           ? 405
           : 400
       : successStatus(request, url);
-    return response(result, status, publicQuery, context);
+    return createDemoQueryResponse(result, status, publicQuery, context);
   } catch (error) {
     const message = error instanceof Error ? error.message : "demo_query_error";
-    return response(
+    return createDemoQueryResponse(
       demoErr("internal_error", message),
       500,
       publicQuery,
       context,
     );
   }
+}
+
+/**
+ * Exposes the fixture result as provider data while keeping the legacy
+ * response-producing entry point available to focused runtime tests.
+ */
+export async function executeDemoQueryPayload(
+  input: DemoQueryRuntimeInput,
+): Promise<DemoQueryPayloadResult> {
+  const result = await executeDemoQuery(input);
+  return { payload: await result.json(), status: result.status };
 }
