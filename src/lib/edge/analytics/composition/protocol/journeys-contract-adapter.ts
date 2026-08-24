@@ -1,5 +1,5 @@
 import { resolveReportingTimeZone } from "@/lib/dashboard/time-zone";
-import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1-site-query-runtime";
+import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1";
 import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import { siteQueryContext } from "@/lib/edge/analytics/contract";
 import type { mapVisitors } from "@/lib/edge/analytics/providers/d1/internal/core";

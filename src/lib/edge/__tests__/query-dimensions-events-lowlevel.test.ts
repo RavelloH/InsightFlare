@@ -3,6 +3,17 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  handleEventFieldValuesContract as handleEventTypeFieldValues,
+  handleEventRecordDetailContract as handleEventRecordDetail,
+  handleEventRecordsContract as handleEventsRecords,
+  handleEventsSummaryContract as handleEventsSummary,
+  handleEventsTrendContract as handleEventsTrend,
+  handleEventTypeContextContract as handleEventTypeContext,
+  handleEventTypeDetailContract as handleEventTypeDetail,
+  handleEventTypeFieldsContract as handleEventTypeFields,
+  handleEventTypesContract as handleEventTypes,
+} from "@/lib/edge/analytics/composition/protocol/events-contract-adapter";
 import type { FilterDocument } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import type {
@@ -18,17 +29,6 @@ import {
   querySessionPathDimensionFromD1,
   queryVisitDimensionFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
-import {
-  handleEventFieldValuesContract as handleEventTypeFieldValues,
-  handleEventRecordDetailContract as handleEventRecordDetail,
-  handleEventRecordsContract as handleEventsRecords,
-  handleEventsSummaryContract as handleEventsSummary,
-  handleEventsTrendContract as handleEventsTrend,
-  handleEventTypeContextContract as handleEventTypeContext,
-  handleEventTypeDetailContract as handleEventTypeDetail,
-  handleEventTypeFieldsContract as handleEventTypeFields,
-  handleEventTypesContract as handleEventTypes,
-} from "@/lib/edge/analytics/providers/d1/internal/events-contract-adapter";
 import {
   queryEventFieldsFromD1,
   queryEventFieldValuesFromD1,

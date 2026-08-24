@@ -18,14 +18,14 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/technology/radar", () => ({
   queryReferrerRadarFromD1: vi.fn(),
 }));
 
-import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/providers/d1/internal/funnels-contract-adapter";
+import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/composition/protocol/funnels-contract-adapter";
 import {
   handleBrowserRadarContract,
   handleBrowserVersionBreakdownContract,
   handleClientDimensionTrendContract,
   handleCrossBreakdownContract,
   handleUtmDimensionTrendContract,
-} from "@/lib/edge/analytics/providers/d1/internal/technology-contract-adapter";
+} from "@/lib/edge/analytics/composition/protocol/technology-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
 const env = { DB: {} } as unknown as Env;

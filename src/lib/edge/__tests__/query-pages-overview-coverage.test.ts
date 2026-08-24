@@ -3,24 +3,29 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { handleFilterValuesContract } from "@/lib/edge/analytics/composition/protocol/filter-values-contract-adapter";
+import {
+  handleOverviewContract as handleOverview,
+  handleTrendContract as handleTrend,
+} from "@/lib/edge/analytics/composition/protocol/overview-contract-adapter";
+import { handleOverviewGeoPointsContract as handleOverviewGeoPoints } from "@/lib/edge/analytics/composition/protocol/overview-extras-contract-adapter";
+import { handleOverviewTabContract } from "@/lib/edge/analytics/composition/protocol/overview-tabs-contract-adapter";
+import {
+  handlePagesContract as handlePages,
+  handlePagesDashboardContract as handlePagesDashboard,
+  handleReferrersContract as handleReferrers,
+} from "@/lib/edge/analytics/composition/protocol/pages-contract-adapter";
 import type { FilterDocument } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import {
   mapDimensionRows,
   type QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { handleFilterValuesContract } from "@/lib/edge/analytics/providers/d1/internal/filter-values-contract-adapter";
 import {
   queryLatestSiteActivity,
   queryOverviewFromD1,
   queryTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/overview";
-import {
-  handleOverviewContract as handleOverview,
-  handleTrendContract as handleTrend,
-} from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
-import { handleOverviewGeoPointsContract as handleOverviewGeoPoints } from "@/lib/edge/analytics/providers/d1/internal/overview-extras-contract-adapter";
-import { handleOverviewTabContract } from "@/lib/edge/analytics/providers/d1/internal/overview-tabs-contract-adapter";
 import {
   queryDimensionAggregate,
   queryPageCardMetricsFromD1,
@@ -28,11 +33,6 @@ import {
   queryPageCardTrendFromD1,
   queryTopPagesFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/pages";
-import {
-  handlePagesContract as handlePages,
-  handlePagesDashboardContract as handlePagesDashboard,
-  handleReferrersContract as handleReferrers,
-} from "@/lib/edge/analytics/providers/d1/internal/pages-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

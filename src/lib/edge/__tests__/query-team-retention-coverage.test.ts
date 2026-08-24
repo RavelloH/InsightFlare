@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { executePrivateTeamDashboard } from "@/lib/edge/analytics/adapters/private";
-import { handleRetentionContract as handleRetention } from "@/lib/edge/analytics/providers/d1/internal/analysis-contract-adapter";
+import { handleRetentionContract as handleRetention } from "@/lib/edge/analytics/composition/protocol/analysis-contract-adapter";
 import {
   badRequest,
   normalizePathname,

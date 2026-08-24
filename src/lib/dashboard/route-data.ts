@@ -36,7 +36,6 @@ import {
 } from "@/lib/edge/analytics/composition/ssr-query-runtime";
 import {
   createQueryTime,
-  executeTypedApplicationOperation,
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
@@ -128,7 +127,7 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
       interval: window.interval,
       allowedSiteIds: resolved.allowedSiteIds,
     });
-    const result = await executeTypedApplicationOperation<SsrTeamDashboardData>(
+    const result = await teamDashboardRuntime.execute<SsrTeamDashboardData>(
       "team-dashboard",
       {
         context: teamQueryContext(
@@ -143,7 +142,6 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
           window.to,
         ),
       },
-      teamDashboardRuntime.providerRegistry,
     );
     if (!result.ok) throw new Error(result.error.kind);
     return {

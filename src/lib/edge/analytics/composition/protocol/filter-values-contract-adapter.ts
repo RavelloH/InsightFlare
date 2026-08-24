@@ -1,4 +1,4 @@
-import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1-site-query-runtime";
+import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1";
 import type { FilterValuesResult } from "@/lib/edge/analytics/contract";
 import {
   analyticsFilterDefinition,

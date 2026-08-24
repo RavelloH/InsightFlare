@@ -58,6 +58,17 @@ describe("analytics architecture", () => {
       "composition/create-query-service.ts",
       "composition/api-v1-provider-registry.ts",
       "composition/d1-site-query-runtime.ts",
+      "composition/d1/index.ts",
+      "composition/d1/shared.ts",
+      "composition/d1/overview.ts",
+      "composition/d1/site.ts",
+      "composition/d1/events.ts",
+      "composition/d1/journeys.ts",
+      "composition/d1/technology.ts",
+      "composition/d1/funnels.ts",
+      "composition/d1/create-site-runtime.ts",
+      "composition/d1/create-team-runtime.ts",
+      "composition/protocol/overview-contract-adapter.ts",
       "composition/query-protocol.ts",
       "composition/query-runtime.ts",
       "composition/ssr-query-runtime.ts",
@@ -82,6 +93,18 @@ describe("analytics architecture", () => {
         path.join(analyticsRoot, "composition", "d1-contract-adapters.ts"),
       ),
     ).toBe(false);
+    expect(
+      existsSync(path.join(analyticsRoot, "composition", "d1-provider.ts")),
+    ).toBe(false);
+    const legacyDirectory = path.join(analyticsRoot, "composition", "legacy");
+    if (existsSync(legacyDirectory)) {
+      expect(readdirSync(legacyDirectory)).toHaveLength(0);
+    }
+    for (const file of productionFiles(
+      "src/lib/edge/analytics/providers/d1/internal",
+    )) {
+      expect(file).not.toMatch(/-contract-adapter\.ts$/u);
+    }
   });
 
   it("makes registries the only provider entry point", () => {
@@ -200,6 +223,14 @@ describe("analytics architecture", () => {
     }
   });
 
+  it("does not reintroduce the generic D1 provider barrel", () => {
+    for (const file of productionFiles("src/lib")) {
+      expect(readFileSync(file, "utf8")).not.toContain(
+        "analytics/composition/d1-provider",
+      );
+    }
+  });
+
   it("keeps the provider registry canonical", () => {
     const registry = source(
       "src/lib/edge/analytics/application/provider-registry.ts",
@@ -254,9 +285,9 @@ describe("analytics architecture", () => {
   });
 
   it("keeps site D1 composition on canonical query inputs", () => {
-    const runtime = source(
-      "src/lib/edge/analytics/composition/d1-site-query-runtime.ts",
-    );
+    const runtime = productionFiles("src/lib/edge/analytics/composition/d1")
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n");
     expect(runtime).toContain("typedQueryProvider");
     expect(runtime).toContain('register("overview"');
     expect(runtime).toContain('register("trend"');
@@ -265,9 +296,9 @@ describe("analytics architecture", () => {
     expect(runtime).not.toContain("input.context");
   });
 
-  it("keeps legacy protocol adapters free of provider callbacks", () => {
+  it("keeps protocol adapters free of provider callbacks", () => {
     for (const file of productionFiles(
-      "src/lib/edge/analytics/composition/legacy",
+      "src/lib/edge/analytics/composition/protocol",
     )) {
       const content = readFileSync(file, "utf8");
       expect(content, `${file} creates a local query provider`).not.toMatch(
@@ -277,9 +308,9 @@ describe("analytics architecture", () => {
   });
 
   it("registers every migrated site query operation in the D1 runtime", () => {
-    const runtime = source(
-      "src/lib/edge/analytics/composition/d1-site-query-runtime.ts",
-    );
+    const runtime = productionFiles("src/lib/edge/analytics/composition/d1")
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n");
     for (const operation of [
       "event-types",
       "event-summary",

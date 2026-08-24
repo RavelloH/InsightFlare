@@ -4,7 +4,10 @@ import {
   type TypedQueryProvider,
 } from "@/lib/edge/analytics/application/provider-registry";
 import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
-import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1-site-query-runtime";
+import {
+  createD1SiteQueryRuntime,
+  createD1TeamQueryRuntime,
+} from "@/lib/edge/analytics/composition/d1";
 import {
   EMPTY_FILTER_DOCUMENT,
   type QueryInput,
@@ -21,7 +24,6 @@ import {
 import {
   readSiteEventFields,
   readSiteEventFieldValues,
-  readSiteEventsSummary,
   readSiteEventsTimeseries,
   readSiteEventTypeDetail,
   readSiteEventTypes,
@@ -38,19 +40,11 @@ import {
   readSiteVisitorSessions,
 } from "@/lib/edge/analytics/providers/d1/operations/site-journeys";
 import {
-  readSitePages,
-  readSiteReferrers,
-} from "@/lib/edge/analytics/providers/d1/operations/site-pages";
-import {
   readSitePerformanceBreakdown,
   readSitePerformanceSummary,
   readSitePerformanceTimeseries,
 } from "@/lib/edge/analytics/providers/d1/operations/site-performance";
 import { readSiteRetention } from "@/lib/edge/analytics/providers/d1/operations/site-retention";
-import { readTeamBreakdown } from "@/lib/edge/analytics/providers/d1/operations/team-breakdown";
-import { readTeamOverview } from "@/lib/edge/analytics/providers/d1/operations/team-overview";
-import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
-import { readTeamTimeseries } from "@/lib/edge/analytics/providers/d1/operations/team-timeseries";
 import {
   readSiteRealtimeActiveVisitors,
   readSiteRealtimeEvents,
@@ -138,17 +132,6 @@ function siteId(input: RuntimeQuery, fallback: string): string {
   return stringField(input, "siteId", fallback);
 }
 
-function teamId(input: RuntimeQuery, fallback: string): string {
-  return stringField(input, "teamId", fallback);
-}
-
-function allowedSiteIds(input: RuntimeQuery): readonly string[] | undefined {
-  const value = input.allowedSiteIds;
-  return Array.isArray(value) && value.every((item) => typeof item === "string")
-    ? value
-    : undefined;
-}
-
 function registerSiteOperation(
   registry: AnalyticsProviderRegistry,
   options: QueryRuntimeOptions,
@@ -156,25 +139,25 @@ function registerSiteOperation(
   const operation = canonicalQueryOperationFor(options.operation);
   const { env, siteId: configuredSiteId = "" } = options;
 
+  if (
+    options.operation === "site.analytics.overview" ||
+    options.operation === "site.analytics.timeseries" ||
+    options.operation === "site.analytics.pages" ||
+    options.operation === "site.analytics.referrers" ||
+    options.operation === "site.analytics.eventsSummary"
+  ) {
+    const runtime = createD1SiteQueryRuntime({
+      env,
+      siteId: configuredSiteId,
+    });
+    const canonicalProvider = runtime.providerRegistry.resolve(operation);
+    if (canonicalProvider) {
+      registry.register(operation, canonicalProvider);
+      return;
+    }
+  }
+
   switch (options.operation) {
-    case "site.analytics.overview":
-      registry.register(
-        operation,
-        createD1SiteQueryRuntime({
-          env,
-          siteId: configuredSiteId,
-        }).providerRegistry.resolve("overview")!,
-      );
-      return;
-    case "site.analytics.timeseries":
-      registry.register(
-        operation,
-        createD1SiteQueryRuntime({
-          env,
-          siteId: configuredSiteId,
-        }).providerRegistry.resolve("trend")!,
-      );
-      return;
     case "site.analytics.breakdown":
       registry.register(
         operation,
@@ -201,36 +184,6 @@ function registerSiteOperation(
             secondaryDimension: stringField(input, "secondaryDimension"),
             primaryLimit: numberField(input, "primaryLimit", 20),
             secondaryLimit: numberField(input, "secondaryLimit", 20),
-            window: timeWindow(input.time),
-            filters: filters(input),
-          }),
-        ),
-      );
-      return;
-    case "site.analytics.pages":
-      registry.register(
-        operation,
-        provider((input) =>
-          readSitePages({
-            env,
-            siteId: siteId(input, configuredSiteId),
-            limit: limitField(input),
-            includeDetails: input.includeDetails === true,
-            window: timeWindow(input.time),
-            filters: filters(input),
-          }),
-        ),
-      );
-      return;
-    case "site.analytics.referrers":
-      registry.register(
-        operation,
-        provider((input) =>
-          readSiteReferrers({
-            env,
-            siteId: siteId(input, configuredSiteId),
-            limit: limitField(input),
-            includeFullUrl: input.includeFullUrl === true,
             window: timeWindow(input.time),
             filters: filters(input),
           }),
@@ -335,19 +288,6 @@ function registerSiteOperation(
               options.performanceDimension ?? stringField(input, "dimension"),
             metric: stringField(input, "metric") as never,
             limit: limitField(input),
-            window: timeWindow(input.time),
-            filters: filters(input),
-          }),
-        ),
-      );
-      return;
-    case "site.analytics.eventsSummary":
-      registry.register(
-        operation,
-        provider((input) =>
-          readSiteEventsSummary({
-            env,
-            siteId: siteId(input, configuredSiteId),
             window: timeWindow(input.time),
             filters: filters(input),
           }),
@@ -638,73 +578,12 @@ function registerTeamOperation(
   options: QueryRuntimeOptions,
 ): void {
   const operation = canonicalQueryOperationFor(options.operation);
-  const { env, teamId: configuredTeamId = "" } = options;
-  switch (options.operation) {
-    case "team.analytics.overview":
-      registry.register(
-        operation,
-        provider(async (input) => {
-          const result = await readTeamOverview({
-            env,
-            teamId: teamId(input, configuredTeamId),
-            allowedSiteIds: allowedSiteIds(input),
-            window: timeWindow(input.time),
-            filters: filters(input),
-          });
-          return result;
-        }),
-      );
-      return;
-    case "team.analytics.timeseries":
-      registry.register(
-        operation,
-        provider(async (input) => {
-          const result = await readTeamTimeseries({
-            env,
-            teamId: teamId(input, configuredTeamId),
-            allowedSiteIds: allowedSiteIds(input),
-            interval: input.interval as never,
-            window: timeWindow(input.time),
-            filters: filters(input),
-          });
-          return result;
-        }),
-      );
-      return;
-    case "team.analytics.sites":
-      registry.register(
-        operation,
-        provider(async (input) => {
-          const result = await readTeamSites({
-            env,
-            teamId: teamId(input, configuredTeamId),
-            allowedSiteIds: allowedSiteIds(input),
-            interval: input.interval as never,
-            window: timeWindow(input.time),
-            filters: filters(input),
-          });
-          return result;
-        }),
-      );
-      return;
-    case "team.analytics.breakdown":
-      registry.register(
-        operation,
-        provider((input) =>
-          readTeamBreakdown({
-            env,
-            teamId: teamId(input, configuredTeamId),
-            allowedSiteIds: allowedSiteIds(input),
-            dimension: stringField(input, "dimension"),
-            limit: numberField(input, "limit", 20),
-            window: timeWindow(input.time),
-            filters: filters(input),
-          }),
-        ),
-      );
-      return;
-    default:
-      return;
+  const { env } = options;
+
+  const runtime = createD1TeamQueryRuntime({ env });
+  const canonicalProvider = runtime.providerRegistry.resolve(operation);
+  if (canonicalProvider) {
+    registry.register(operation, canonicalProvider);
   }
 }
 

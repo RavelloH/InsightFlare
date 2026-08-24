@@ -2,9 +2,9 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { handlePerformanceContract as handlePerformance } from "@/lib/edge/analytics/composition/protocol/analysis-contract-adapter";
 import type { FilterDocument } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
-import { handlePerformanceContract as handlePerformance } from "@/lib/edge/analytics/providers/d1/internal/analysis-contract-adapter";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   queryAllPerformanceTrendsFromD1,

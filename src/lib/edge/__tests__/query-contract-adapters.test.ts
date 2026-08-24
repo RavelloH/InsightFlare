@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  type QueryOperation,
-  siteQueryContext,
-} from "@/lib/edge/analytics/contract";
-import {
   handleEventFieldValuesContract,
   handleEventRecordDetailContract,
   handleEventRecordsContract,
@@ -14,27 +10,31 @@ import {
   handleEventTypeDetailContract,
   handleEventTypeFieldsContract,
   handleEventTypesContract,
-} from "@/lib/edge/analytics/providers/d1/internal/events-contract-adapter";
-import { handleFilterValuesContract } from "@/lib/edge/analytics/providers/d1/internal/filter-values-contract-adapter";
-import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/providers/d1/internal/funnels-contract-adapter";
+} from "@/lib/edge/analytics/composition/protocol/events-contract-adapter";
+import { handleFilterValuesContract } from "@/lib/edge/analytics/composition/protocol/filter-values-contract-adapter";
+import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/composition/protocol/funnels-contract-adapter";
 import {
   handleSessionDetailContract,
   handleSessionsContract,
   handleVisitorDetailContract,
   handleVisitorsContract,
-} from "@/lib/edge/analytics/providers/d1/internal/journeys-contract-adapter";
-import { handleOverviewGeoPointsContract } from "@/lib/edge/analytics/providers/d1/internal/overview-extras-contract-adapter";
+} from "@/lib/edge/analytics/composition/protocol/journeys-contract-adapter";
+import { handleOverviewGeoPointsContract } from "@/lib/edge/analytics/composition/protocol/overview-extras-contract-adapter";
 import {
   handlePagesContract,
   handlePagesDashboardContract,
   handleReferrersContract,
-} from "@/lib/edge/analytics/providers/d1/internal/pages-contract-adapter";
+} from "@/lib/edge/analytics/composition/protocol/pages-contract-adapter";
 import {
   handleBrowserVersionBreakdownContract,
   handleClientDimensionTrendContract,
   handleCrossBreakdownContract,
   handleUtmDimensionTrendContract,
-} from "@/lib/edge/analytics/providers/d1/internal/technology-contract-adapter";
+} from "@/lib/edge/analytics/composition/protocol/technology-contract-adapter";
+import {
+  type QueryOperation,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
 import type { Env } from "@/lib/edge/types";
 
 function emptyEnv(): Env {

@@ -1,5 +1,5 @@
-import type { SimpleDimensionKey } from "@/lib/edge/analytics/composition/legacy/dimensions-contract-adapter";
-import type { OverviewTab } from "@/lib/edge/analytics/composition/legacy/overview-tabs-contract-adapter";
+import type { SimpleDimensionKey } from "@/lib/edge/analytics/composition/protocol/dimensions-contract-adapter";
+import type { OverviewTab } from "@/lib/edge/analytics/composition/protocol/overview-tabs-contract-adapter";
 import {
   getRequestId,
   notFound,
@@ -130,19 +130,19 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "overview") {
-    return import("../composition/legacy/overview-contract-adapter").then(
+    return import("../composition/protocol/overview-contract-adapter").then(
       ({ handleOverviewContract }) =>
         handleOverviewContract(input.env, input.siteId, url, ctx, queryContext),
     );
   }
   if (input.pathname === "trend") {
-    return import("../composition/legacy/overview-contract-adapter").then(
+    return import("../composition/protocol/overview-contract-adapter").then(
       ({ handleTrendContract }) =>
         handleTrendContract(input.env, input.siteId, url, ctx, queryContext),
     );
   }
   if (input.pathname === "pages") {
-    return import("../composition/legacy/pages-contract-adapter").then(
+    return import("../composition/protocol/pages-contract-adapter").then(
       ({ handlePagesContract }) =>
         handlePagesContract(
           input.env,
@@ -155,7 +155,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "referrers") {
-    return import("../composition/legacy/pages-contract-adapter").then(
+    return import("../composition/protocol/pages-contract-adapter").then(
       ({ handleReferrersContract }) =>
         handleReferrersContract(
           input.env,
@@ -169,7 +169,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "pages-dashboard") {
-    return import("../composition/legacy/pages-contract-adapter").then(
+    return import("../composition/protocol/pages-contract-adapter").then(
       ({ handlePagesDashboardContract }) =>
         handlePagesDashboardContract(
           input.env,
@@ -181,7 +181,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "retention") {
-    return import("../composition/legacy/analysis-contract-adapter").then(
+    return import("../composition/protocol/analysis-contract-adapter").then(
       ({ handleRetentionContract }) =>
         handleRetentionContract(
           input.env,
@@ -193,7 +193,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "performance") {
-    return import("../composition/legacy/analysis-contract-adapter").then(
+    return import("../composition/protocol/analysis-contract-adapter").then(
       ({ handlePerformanceContract }) =>
         handlePerformanceContract(
           input.env,
@@ -205,7 +205,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "event-types") {
-    return import("../composition/legacy/events-contract-adapter").then(
+    return import("../composition/protocol/events-contract-adapter").then(
       ({ handleEventTypesContract }) =>
         handleEventTypesContract(
           input.env,
@@ -217,7 +217,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "filter-values") {
-    return import("../composition/legacy/filter-values-contract-adapter").then(
+    return import("../composition/protocol/filter-values-contract-adapter").then(
       ({ handleFilterValuesContract }) =>
         handleFilterValuesContract(
           input.env,
@@ -229,7 +229,7 @@ export function executePublicQuery(
     );
   }
   if (input.pathname === "overview-geo-points") {
-    return import("../composition/legacy/overview-extras-contract-adapter").then(
+    return import("../composition/protocol/overview-extras-contract-adapter").then(
       ({ handleOverviewGeoPointsContract }) =>
         handleOverviewGeoPointsContract(
           input.env,
@@ -242,7 +242,7 @@ export function executePublicQuery(
   }
   const dimension = SIMPLE_DIMENSIONS[input.pathname];
   if (dimension) {
-    return import("../composition/legacy/dimensions-contract-adapter").then(
+    return import("../composition/protocol/dimensions-contract-adapter").then(
       ({ handleSimpleDimensionContract }) =>
         handleSimpleDimensionContract(
           input.env,
@@ -256,7 +256,7 @@ export function executePublicQuery(
   }
   const technologyHandler = TECHNOLOGY_HANDLERS[input.pathname];
   if (technologyHandler) {
-    return import("../composition/legacy/technology-contract-adapter").then(
+    return import("../composition/protocol/technology-contract-adapter").then(
       (module) =>
         module[technologyHandler](
           input.env,
@@ -269,7 +269,7 @@ export function executePublicQuery(
   }
   const overviewTab = OVERVIEW_TABS[input.pathname];
   if (overviewTab) {
-    return import("../composition/legacy/overview-tabs-contract-adapter").then(
+    return import("../composition/protocol/overview-tabs-contract-adapter").then(
       ({ handleOverviewTabContract }) =>
         handleOverviewTabContract(
           input.env,

@@ -1,10 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  BrowserCrossBreakdownDimensionDataRow,
-  BrowserTrendPointRow,
-  BrowserTrendSeriesRow,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   handleBrowserCrossBreakdownContract as handleBrowserCrossBreakdown,
   handleBrowserEngineTrendContract as handleBrowserEngineTrend,
@@ -17,7 +12,12 @@ import {
   handleReferrerDimensionTrendContract as handleReferrerDimensionTrend,
   handleReferrerRadarContract as handleReferrerRadar,
   handleUtmDimensionTrendContract as handleUtmDimensionTrend,
-} from "@/lib/edge/analytics/providers/d1/internal/technology-contract-adapter";
+} from "@/lib/edge/analytics/composition/protocol/technology-contract-adapter";
+import type {
+  BrowserCrossBreakdownDimensionDataRow,
+  BrowserTrendPointRow,
+  BrowserTrendSeriesRow,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

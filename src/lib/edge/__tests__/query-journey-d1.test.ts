@@ -3,6 +3,12 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  handleSessionDetailContract as handleSessionDetail,
+  handleSessionsContract as handleSessions,
+  handleVisitorDetailContract as handleVisitorDetail,
+  handleVisitorsContract as handleVisitors,
+} from "@/lib/edge/analytics/composition/protocol/journeys-contract-adapter";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
@@ -29,12 +35,6 @@ import {
   queryVisitorForDetailFromD1,
   queryVisitorsFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/journeys";
-import {
-  handleSessionDetailContract as handleSessionDetail,
-  handleSessionsContract as handleSessions,
-  handleVisitorDetailContract as handleVisitorDetail,
-  handleVisitorsContract as handleVisitors,
-} from "@/lib/edge/analytics/providers/d1/internal/journeys-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

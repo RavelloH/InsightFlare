@@ -1,4 +1,4 @@
-import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1-site-query-runtime";
+import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1";
 import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import { siteQueryContext } from "@/lib/edge/analytics/contract";
 import {
