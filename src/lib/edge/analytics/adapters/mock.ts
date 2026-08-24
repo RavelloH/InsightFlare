@@ -13,18 +13,16 @@ import {
   createMockQuery,
   type MockQueryProviderInput,
 } from "@/lib/edge/analytics/composition/mock-provider";
-import { executeTypedApplicationOperation } from "@/lib/edge/analytics/contract";
+import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 
 export type { MockQueryProviderInput } from "@/lib/edge/analytics/composition/mock-provider";
 
 export async function executeMockQuery(
   input: MockQueryProviderInput,
 ): Promise<Response> {
-  const result = await executeTypedApplicationOperation<DemoQueryPayloadResult>(
-    input.operation,
-    createMockQuery(input),
+  const result = await createAnalyticsQueryRuntime(
     createMockProviderRegistry(input),
-  );
+  ).execute<DemoQueryPayloadResult>(input.operation, createMockQuery(input));
   if (!result.ok) return queryErrorResponse(result.error);
 
   return createDemoQueryResponse(

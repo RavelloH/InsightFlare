@@ -1,13 +1,12 @@
+import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1-site-query-runtime";
 import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import {
-  createTypedQueryProviderRegistry,
-  executeOverview,
-  executeTrend,
-  executeTypedApplicationOperation,
   type OverviewMetrics,
+  type OverviewQuery,
   type OverviewResult,
   siteQueryContext,
   type TrendPoint,
+  type TrendQuery,
   type TrendResult,
 } from "@/lib/edge/analytics/contract";
 import {
@@ -25,10 +24,7 @@ import {
   analyticsDiagnosticHeaders,
   createD1ReadDiagnostics,
 } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
-import {
-  createOverviewReader,
-  toQueryTime,
-} from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
+import { toQueryTime } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 export { readLatestSiteActivity } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 export {
@@ -83,28 +79,18 @@ export async function handleOverviewContract(
     ? toQueryTime(previousComparableWindow(window))
     : undefined;
   const includeDetail = parseBooleanFlag(url, "includeDetail");
-  const result = await executeTypedApplicationOperation<OverviewResult>(
-    "overview",
-    { context: queryContext, time: currentTime, filters },
-    createTypedQueryProviderRegistry("overview", async () => {
-      const value = await executeOverview(
-        createOverviewReader(env, siteId, diagnostics),
-        {
-          context: queryContext,
-          time: currentTime,
-          filters,
-          previousTime,
-          detailInterval: includeDetail ? parseInterval(url) : undefined,
-        },
-      );
-      if (!value.ok) throw new Error(value.error.kind);
-      return {
-        value: value.data,
-        source: value.meta.source,
-        approximateVisitors: value.meta.approximateVisitors,
-      };
-    }),
-  );
+  const query = {
+    context: queryContext,
+    time: currentTime,
+    filters,
+    previousTime,
+    detailInterval: includeDetail ? parseInterval(url) : undefined,
+  } satisfies OverviewQuery;
+  const result = await createD1SiteQueryRuntime({
+    env,
+    siteId,
+    diagnostics,
+  }).execute<OverviewResult>("overview", query);
   if (!result.ok) return queryErrorResponse(result.error);
 
   const current = aggregateMetrics(result.data.current);
@@ -150,27 +136,17 @@ export async function handleTrendContract(
   const diagnostics = createD1ReadDiagnostics();
   const time = toQueryTime(window);
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await executeTypedApplicationOperation<TrendResult>(
-    "trend",
-    { context: queryContext, time, filters },
-    createTypedQueryProviderRegistry("trend", async () => {
-      const value = await executeTrend(
-        createOverviewReader(env, siteId, diagnostics),
-        {
-          context: queryContext,
-          time,
-          filters,
-          interval: parseInterval(url),
-        },
-      );
-      if (!value.ok) throw new Error(value.error.kind);
-      return {
-        value: value.data,
-        source: value.meta.source,
-        approximateVisitors: value.meta.approximateVisitors,
-      };
-    }),
-  );
+  const query = {
+    context: queryContext,
+    time,
+    filters,
+    interval: parseInterval(url),
+  } satisfies TrendQuery;
+  const result = await createD1SiteQueryRuntime({
+    env,
+    siteId,
+    diagnostics,
+  }).execute<TrendResult>("trend", query);
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(
     ctx!,

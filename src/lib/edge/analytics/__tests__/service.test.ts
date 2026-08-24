@@ -7,7 +7,6 @@ import {
   typedQueryProvider,
 } from "@/lib/edge/analytics/application/provider-registry";
 import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
-import { createReaderProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import { createQueryService } from "@/lib/edge/analytics/composition/create-query-service";
 import {
   createQueryTime,
@@ -121,21 +120,6 @@ describe("TypedQueryApplicationService", () => {
 
   it("creates the application service from the composition boundary", () => {
     expect(createQueryService()).toBeInstanceOf(TypedQueryApplicationService);
-  });
-
-  it("canonicalizes protocol operation ids before invoking a reader", async () => {
-    const signal = new AbortController().signal;
-    const registry = createReaderProviderRegistry(
-      "site.analytics.overview",
-      async (input: { readonly signal?: AbortSignal }) => ({
-        signal: input.signal,
-      }),
-    );
-    const provider = registry.resolve("overview");
-    expect(provider).toBeDefined();
-    await expect(provider?.execute({} as never, { signal })).resolves.toEqual({
-      value: { signal },
-    });
   });
 
   it("executes a canonical typed query through the registry", async () => {

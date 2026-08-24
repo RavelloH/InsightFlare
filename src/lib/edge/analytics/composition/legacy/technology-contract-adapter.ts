@@ -1,13 +1,8 @@
-import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1-site-query-runtime";
 import {
-  type FilterDocument,
   parseFilterUrlForAudience,
-} from "@/lib/edge/analytics/contract";
-import {
-  executeTypedApplicationOperation,
   type QueryContext,
   siteQueryContext,
-  typedQueryProvider,
 } from "@/lib/edge/analytics/contract";
 import {
   badRequest,
@@ -21,26 +16,9 @@ import {
   type ResponseContext,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
-  queryBrowserCrossBreakdownFromD1,
-  queryBrowserEngineTrendFromD1,
-  queryBrowserTrendFromD1,
-  queryBrowserVersionBreakdownFromD1,
-} from "@/lib/edge/analytics/providers/d1/internal/technology/browser";
-import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
-import {
   parseClientDimensionKey,
   parseUtmDimensionKey,
 } from "@/lib/edge/analytics/providers/d1/internal/technology/parsers";
-import {
-  queryBrowserRadarFromD1,
-  queryReferrerRadarFromD1,
-} from "@/lib/edge/analytics/providers/d1/internal/technology/radar";
-import {
-  queryClientDimensionTrendFromD1,
-  queryReferrerAndChannelTrendFromD1,
-  queryReferrerTrendFromD1,
-  queryUtmDimensionTrendFromD1,
-} from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend";
 import { toQueryTime } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 import { coerceNumber } from "@/lib/edge/utils";
@@ -52,36 +30,23 @@ async function executeTechnology<T>(
   url: URL,
   ctx: ResponseContext | undefined,
   queryContext: QueryContext,
-  reader: (
-    window: ReturnType<typeof parseWindow> extends infer W
-      ? Exclude<W, null>
-      : never,
-    filters: FilterDocument,
-  ) => Promise<T>,
+  parameters: Record<string, unknown>,
   shape: (value: T) => Record<string, unknown>,
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const providerRegistry = new AnalyticsProviderRegistry().register(
-    operation,
-    typedQueryProvider(async () => ({
-      value: shape(await reader(window, filters)),
-    })),
-  );
-  const result = await executeTypedApplicationOperation<
-    Record<string, unknown>
-  >(
+  const result = await createD1SiteQueryRuntime({ env, siteId }).execute<T>(
     operation,
     {
       context: queryContext,
       time: toQueryTime(window),
-      filters: filters,
+      filters,
+      ...parameters,
     },
-    providerRegistry,
   );
   if (!result.ok) return queryErrorResponse(result.error);
-  return jsonResponseWith(ctx!, { ok: true, ...result.data });
+  return jsonResponseWith(ctx!, { ok: true, ...shape(result.data) });
 }
 
 export function handleBrowserTrendContract(
@@ -92,22 +57,14 @@ export function handleBrowserTrendContract(
   queryContext = siteQueryContext(siteId, "private-dashboard"),
 ) {
   const interval = parseInterval(url);
-  return executeTechnology(
+  return executeTechnology<TechnologyTrend>(
     "share-trend",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) =>
-      queryBrowserTrendFromD1(
-        env,
-        siteId,
-        window,
-        interval,
-        filters,
-        parseLimit(url, 5, 12),
-      ),
+    { variant: "browser", interval, limit: parseLimit(url, 5, 12) },
     (trend) => ({ interval, series: trend.series, data: trend.data }),
   );
 }
@@ -120,22 +77,14 @@ export function handleBrowserEngineTrendContract(
   queryContext = siteQueryContext(siteId, "private-dashboard"),
 ) {
   const interval = parseInterval(url);
-  return executeTechnology(
+  return executeTechnology<TechnologyTrend>(
     "share-trend",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) =>
-      queryBrowserEngineTrendFromD1(
-        env,
-        siteId,
-        window,
-        interval,
-        filters,
-        parseLimit(url, 5, 8),
-      ),
+    { variant: "browser-engine", interval, limit: parseLimit(url, 5, 8) },
     (trend) => ({ interval, series: trend.series, data: trend.data }),
   );
 }
@@ -159,22 +108,14 @@ export function handleBrowserVersionBreakdownContract(
       Math.floor(coerceNumber(url.searchParams.get("versionLimit"), 5) ?? 5),
     ),
   );
-  return executeTechnology(
+  return executeTechnology<readonly unknown[]>(
     "radar",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) =>
-      queryBrowserVersionBreakdownFromD1(
-        env,
-        siteId,
-        window,
-        filters,
-        browserLimit,
-        versionLimit,
-      ),
+    { variant: "version", browserLimit, versionLimit },
     (data) => ({ data }),
   );
 }
@@ -186,23 +127,19 @@ export function handleBrowserCrossBreakdownContract(
   ctx?: ResponseContext,
   queryContext = siteQueryContext(siteId, "private-dashboard"),
 ) {
-  return executeTechnology(
+  return executeTechnology<Record<string, unknown>>(
     "cross-dimension",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) =>
-      queryBrowserCrossBreakdownFromD1(
-        env,
-        siteId,
-        window,
-        filters,
-        parseQueryLimit(url, "browserLimit", 8, 1, 12),
-        parseQueryLimit(url, "osLimit", 6, 1, 8),
-        parseQueryLimit(url, "deviceTypeLimit", 5, 1, 8),
-      ),
+    {
+      variant: "browser",
+      browserLimit: parseQueryLimit(url, "browserLimit", 8, 1, 12),
+      osLimit: parseQueryLimit(url, "osLimit", 6, 1, 8),
+      deviceTypeLimit: parseQueryLimit(url, "deviceTypeLimit", 5, 1, 8),
+    },
     (data) => ({
       operatingSystem: data.operatingSystem,
       deviceType: data.deviceType,
@@ -246,6 +183,17 @@ function radarData(
   }));
 }
 
+type TechnologyTrend = {
+  readonly series: readonly unknown[];
+  readonly data: readonly unknown[];
+};
+type TechnologyReferrerChannelTrend = {
+  readonly source: TechnologyTrend;
+  readonly channel: TechnologyTrend;
+};
+type TechnologyRadarRow = Parameters<typeof radarData>[0][number];
+type TechnologyRadarRows = readonly TechnologyRadarRow[];
+
 export function handleBrowserRadarContract(
   env: Env,
   siteId: string,
@@ -253,14 +201,14 @@ export function handleBrowserRadarContract(
   ctx?: ResponseContext,
   queryContext = siteQueryContext(siteId, "private-dashboard"),
 ) {
-  return executeTechnology(
+  return executeTechnology<TechnologyRadarRows>(
     "radar",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) => queryBrowserRadarFromD1(env, siteId, window, filters),
+    { variant: "browser" },
     (rows) => ({ data: radarData(rows, "browser") }),
   );
 }
@@ -272,21 +220,14 @@ export function handleReferrerRadarContract(
   ctx?: ResponseContext,
   queryContext = siteQueryContext(siteId, "private-dashboard"),
 ) {
-  return executeTechnology(
+  return executeTechnology<TechnologyRadarRows>(
     "radar",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) =>
-      queryReferrerRadarFromD1(
-        env,
-        siteId,
-        window,
-        filters,
-        parseLimit(url, 24, 48),
-      ),
+    { variant: "referrer", limit: parseLimit(url, 24, 48) },
     (rows) => ({ data: radarData(rows, "referrer") }),
   );
 }
@@ -302,23 +243,19 @@ export function handleClientDimensionTrendContract(
   if (!dimension)
     return Promise.resolve(badRequest("Invalid client dimension"));
   const interval = parseInterval(url);
-  return executeTechnology(
+  return executeTechnology<TechnologyTrend>(
     "share-trend",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) =>
-      queryClientDimensionTrendFromD1(
-        env,
-        siteId,
-        window,
-        interval,
-        filters,
-        dimension,
-        parseLimit(url, 5, 8),
-      ),
+    {
+      variant: "client",
+      interval,
+      dimension,
+      limit: parseLimit(url, 5, 8),
+    },
     (trend) => ({ interval, series: trend.series, data: trend.data }),
   );
 }
@@ -333,23 +270,19 @@ export function handleUtmDimensionTrendContract(
   const dimension = parseUtmDimensionKey(url.searchParams.get("dimension"));
   if (!dimension) return Promise.resolve(badRequest("Invalid UTM dimension"));
   const interval = parseInterval(url);
-  return executeTechnology(
+  return executeTechnology<TechnologyTrend>(
     "share-trend",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) =>
-      queryUtmDimensionTrendFromD1(
-        env,
-        siteId,
-        window,
-        interval,
-        filters,
-        dimension,
-        parseLimit(url, 5, 8),
-      ),
+    {
+      variant: "utm",
+      interval,
+      dimension,
+      limit: parseLimit(url, 5, 8),
+    },
     (trend) => ({ interval, series: trend.series, data: trend.data }),
   );
 }
@@ -362,22 +295,14 @@ export function handleReferrerDimensionTrendContract(
   queryContext = siteQueryContext(siteId, "private-dashboard"),
 ) {
   const interval = parseInterval(url);
-  return executeTechnology(
+  return executeTechnology<TechnologyTrend>(
     "share-trend",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) =>
-      queryReferrerTrendFromD1(
-        env,
-        siteId,
-        window,
-        interval,
-        filters,
-        parseLimit(url, 5, 8),
-      ),
+    { variant: "referrer", interval, limit: parseLimit(url, 5, 8) },
     (trend) => ({ interval, series: trend.series, data: trend.data }),
   );
 }
@@ -390,22 +315,18 @@ export function handleReferrerChannelTrendContract(
   queryContext = siteQueryContext(siteId, "private-dashboard"),
 ) {
   const interval = parseInterval(url);
-  return executeTechnology(
+  return executeTechnology<TechnologyReferrerChannelTrend>(
     "share-trend",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) =>
-      queryReferrerAndChannelTrendFromD1(
-        env,
-        siteId,
-        window,
-        interval,
-        filters,
-        parseLimit(url, 5, 12),
-      ),
+    {
+      variant: "referrer-channel",
+      interval,
+      limit: parseLimit(url, 5, 12),
+    },
     (trend) => ({
       interval,
       source: trend.source,
@@ -433,24 +354,20 @@ export function handleCrossBreakdownContract(
     return Promise.resolve(
       badRequest("Primary and secondary dimensions must differ"),
     );
-  return executeTechnology(
+  return executeTechnology<Record<string, unknown>>(
     "cross-dimension",
     env,
     siteId,
     url,
     ctx,
     queryContext,
-    (window, filters) =>
-      queryCrossDimensionFromD1(
-        env,
-        siteId,
-        window,
-        filters,
-        parseQueryLimit(url, "primaryLimit", 5, 1, 12),
-        parseQueryLimit(url, "secondaryLimit", 6, 1, 8),
-        primary,
-        secondary,
-      ),
+    {
+      variant: "generic",
+      primaryLimit: parseQueryLimit(url, "primaryLimit", 5, 1, 12),
+      secondaryLimit: parseQueryLimit(url, "secondaryLimit", 6, 1, 8),
+      primaryDimension: primary,
+      secondaryDimension: secondary,
+    },
     (data) => ({ data }),
   );
 }

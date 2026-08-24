@@ -1,7 +1,7 @@
+import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1-site-query-runtime";
 import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import {
-  createTypedQueryProviderRegistry,
-  executeTypedApplicationOperation,
+  type BaseQuery,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import {
@@ -13,12 +13,8 @@ import {
   queryErrorResponse,
   type ResponseContext,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import {
-  parseRetentionGranularity,
-  queryRetentionFromD1,
-  type RetentionResult,
-} from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
-import { queryPerformanceDashboardFromD1 } from "@/lib/edge/analytics/providers/d1/internal/performance";
+import type { RetentionResult } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
+import type { queryPerformanceDashboardFromD1 } from "@/lib/edge/analytics/providers/d1/internal/performance";
 import { toQueryTime } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 
@@ -31,26 +27,18 @@ export async function handleRetentionContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await executeTypedApplicationOperation<RetentionResult>(
-    "retention",
-    {
-      context: queryContext,
-      time: toQueryTime(window),
-      filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
-    },
-    createTypedQueryProviderRegistry("retention", async () => ({
-      value: await queryRetentionFromD1(
-        env,
-        siteId,
-        window,
-        parseFilterUrlForAudience(queryContext.policy.audience, url),
-        parseRetentionGranularity(
-          url.searchParams.get("granularity") ??
-            url.searchParams.get("interval"),
-        ),
-      ),
-    })),
-  );
+  const result = await createD1SiteQueryRuntime({
+    env,
+    siteId,
+  }).execute<RetentionResult>("retention", {
+    context: queryContext,
+    time: toQueryTime(window),
+    filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
+    granularity:
+      url.searchParams.get("granularity") ??
+      url.searchParams.get("interval") ??
+      "week",
+  } as BaseQuery & { readonly granularity: string });
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
@@ -65,26 +53,18 @@ export async function handlePerformanceContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const interval = parseInterval(url);
-  const result = await executeTypedApplicationOperation<
+  const result = await createD1SiteQueryRuntime({ env, siteId }).execute<
     Awaited<ReturnType<typeof queryPerformanceDashboardFromD1>>
-  >(
-    "performance",
-    {
-      context: queryContext,
-      time: toQueryTime(window),
-      filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
-    },
-    createTypedQueryProviderRegistry("performance", async () => ({
-      value: await queryPerformanceDashboardFromD1(
-        env,
-        siteId,
-        window,
-        interval,
-        parseFilterUrlForAudience(queryContext.policy.audience, url),
-        parseLimit(url, 18, 50),
-      ),
-    })),
-  );
+  >("performance", {
+    context: queryContext,
+    time: toQueryTime(window),
+    filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
+    interval,
+    limit: parseLimit(url, 18, 50),
+  } as BaseQuery & {
+    readonly interval: ReturnType<typeof parseInterval>;
+    readonly limit: number;
+  });
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, {
     ok: true,

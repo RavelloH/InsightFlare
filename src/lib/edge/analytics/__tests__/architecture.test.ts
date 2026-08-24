@@ -56,6 +56,11 @@ describe("analytics architecture", () => {
       "adapters/ssr.ts",
       "composition/create-provider-registry.ts",
       "composition/create-query-service.ts",
+      "composition/api-v1-provider-registry.ts",
+      "composition/d1-site-query-runtime.ts",
+      "composition/query-protocol.ts",
+      "composition/query-runtime.ts",
+      "composition/ssr-query-runtime.ts",
       "index.ts",
     ]) {
       expect(existsSync(path.join(analyticsRoot, relativePath))).toBe(true);
@@ -72,6 +77,11 @@ describe("analytics architecture", () => {
         expect(readdirSync(directory)).toHaveLength(0);
       }
     }
+    expect(
+      existsSync(
+        path.join(analyticsRoot, "composition", "d1-contract-adapters.ts"),
+      ),
+    ).toBe(false);
   });
 
   it("makes registries the only provider entry point", () => {
@@ -114,7 +124,7 @@ describe("analytics architecture", () => {
         continue;
       }
       expect(content).toMatch(
-        /create(?:TypedQuery(?:Result)?|SsrTeamDashboard)ProviderRegistry|createReaderProviderRegistry|new AnalyticsProviderRegistry/u,
+        /create(?:TypedQuery(?:Result)?|SsrTeamDashboard)ProviderRegistry|createReaderProviderRegistry|createTeamDashboardQueryRuntime|new AnalyticsProviderRegistry/u,
       );
     }
   });
@@ -140,10 +150,10 @@ describe("analytics architecture", () => {
       "registerV1TeamAnalyticsRoutes",
     );
     expect(
-      source("src/lib/edge/analytics/composition/create-provider-registry.ts"),
+      source("src/lib/edge/analytics/composition/api-v1-provider-registry.ts"),
     ).toContain("canonicalQueryOperationFor");
     expect(source("src/lib/dashboard/route-data.ts")).toContain(
-      "createSsrTeamDashboardProviderRegistry",
+      "createTeamDashboardQueryRuntime",
     );
     expect(source("src/lib/edge/analytics/adapters/mock.ts")).toContain(
       "createMockProviderRegistry",
@@ -173,6 +183,7 @@ describe("analytics architecture", () => {
       expect(content).not.toMatch(
         /(?:@\/lib\/edge\/analytics\/providers|\.\.\/providers)(?:\/|["'])/u,
       );
+      expect(content).not.toContain("composition/d1-contract-adapters");
       expect(content).not.toContain("assertOperationAllowed");
     }
     for (const directory of [
@@ -180,9 +191,11 @@ describe("analytics architecture", () => {
       "src/lib/hono/routes/public",
     ]) {
       for (const file of productionFiles(directory)) {
-        expect(readFileSync(file, "utf8")).not.toMatch(
+        const content = readFileSync(file, "utf8");
+        expect(content).not.toMatch(
           /@\/lib\/edge\/analytics\/providers(?:\/|["'])/u,
         );
+        expect(content).not.toContain("composition/d1-contract-adapters");
       }
     }
   });
@@ -208,6 +221,20 @@ describe("analytics architecture", () => {
     expect(registry).toMatch(/Map<\s*QueryOperation/u);
   });
 
+  it("keeps API v1 provider assembly in composition", () => {
+    for (const file of [
+      "src/lib/hono/routes/v1/site-analytics.ts",
+      "src/lib/hono/routes/v1/team-analytics.ts",
+    ]) {
+      const content = source(file);
+      expect(content).toContain("createApiV1ProviderRegistry");
+      expect(content).not.toContain("createReaderProviderRegistry");
+      expect(content).not.toMatch(/analytics\/providers(?:\/|["'])/u);
+      expect(content).not.toContain("readSite");
+      expect(content).not.toContain("readTeam");
+    }
+  });
+
   it("keeps the D1 provider free of application policy context", () => {
     for (const file of productionFiles("src/lib/edge/analytics/providers/d1")) {
       const content = readFileSync(file, "utf8");
@@ -223,6 +250,56 @@ describe("analytics architecture", () => {
           forbidden,
         );
       }
+    }
+  });
+
+  it("keeps site D1 composition on canonical query inputs", () => {
+    const runtime = source(
+      "src/lib/edge/analytics/composition/d1-site-query-runtime.ts",
+    );
+    expect(runtime).toContain("typedQueryProvider");
+    expect(runtime).toContain('register("overview"');
+    expect(runtime).toContain('register("trend"');
+    expect(runtime).not.toContain("siteQueryContext");
+    expect(runtime).not.toContain("assertOperationAllowed");
+    expect(runtime).not.toContain("input.context");
+  });
+
+  it("keeps legacy protocol adapters free of provider callbacks", () => {
+    for (const file of productionFiles(
+      "src/lib/edge/analytics/composition/legacy",
+    )) {
+      const content = readFileSync(file, "utf8");
+      expect(content, `${file} creates a local query provider`).not.toMatch(
+        /createTypedQueryProviderRegistry|new AnalyticsProviderRegistry|typedQueryProvider|executeTypedApplicationOperation/u,
+      );
+    }
+  });
+
+  it("registers every migrated site query operation in the D1 runtime", () => {
+    const runtime = source(
+      "src/lib/edge/analytics/composition/d1-site-query-runtime.ts",
+    );
+    for (const operation of [
+      "event-types",
+      "event-summary",
+      "event-trend",
+      "event-records",
+      "event-field-values",
+      "event-fields",
+      "event-context",
+      "event-type-detail",
+      "event-record-detail",
+      "visitors",
+      "sessions",
+      "visitor-detail",
+      "session-detail",
+      "funnel-analysis",
+      "share-trend",
+      "radar",
+      "cross-dimension",
+    ]) {
+      expect(runtime).toContain(`"${operation}"`);
     }
   });
 });

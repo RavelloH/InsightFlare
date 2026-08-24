@@ -1,6 +1,9 @@
 /* c8 ignore file -- this module bridges fixture transport and typed queries. */
 
-import { createTypedQueryProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import {
+  AnalyticsProviderRegistry,
+  typedQueryProvider,
+} from "@/lib/edge/analytics/application/provider-registry";
 import {
   type BaseQuery,
   createQueryTime,
@@ -44,10 +47,13 @@ function mockQuery(input: MockQueryProviderInput): BaseQuery {
 }
 
 export function createMockProviderRegistry(input: MockQueryProviderInput) {
-  return createTypedQueryProviderRegistry(input.operation, async () => ({
-    value: await executeDemoQueryPayload(input),
-    source: "mock" as const,
-  }));
+  return new AnalyticsProviderRegistry().register(
+    input.operation,
+    typedQueryProvider(async () => ({
+      value: await executeDemoQueryPayload(input),
+      source: "mock" as const,
+    })),
+  );
 }
 
 export function createMockQuery(input: MockQueryProviderInput): BaseQuery {

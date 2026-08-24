@@ -31,9 +31,9 @@ import {
 import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
 import type { TeamDashboardSnapshot } from "@/lib/dashboard/team-dashboard-query";
 import {
-  createSsrTeamDashboardProviderRegistry,
+  createTeamDashboardQueryRuntime,
   type SsrTeamDashboardData,
-} from "@/lib/edge/analytics/adapters/ssr";
+} from "@/lib/edge/analytics/composition/ssr-query-runtime";
 import {
   createQueryTime,
   executeTypedApplicationOperation,
@@ -116,6 +116,18 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
     if (resolved instanceof Response) return null;
 
     const window = resolveDashboardInitialWindow(request.headers.get("cookie"));
+    const teamDashboardRuntime = createTeamDashboardQueryRuntime({
+      env: resolved.env,
+      teamId: resolved.teamId,
+      window: {
+        startMs: window.from,
+        endExclusiveMs: window.to,
+        nowMs: window.to,
+        timeZone: window.timeZone,
+      },
+      interval: window.interval,
+      allowedSiteIds: resolved.allowedSiteIds,
+    });
     const result = await executeTypedApplicationOperation<SsrTeamDashboardData>(
       "team-dashboard",
       {
@@ -131,18 +143,7 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
           window.to,
         ),
       },
-      createSsrTeamDashboardProviderRegistry({
-        env: resolved.env,
-        teamId: resolved.teamId,
-        window: {
-          startMs: window.from,
-          endExclusiveMs: window.to,
-          nowMs: window.to,
-          timeZone: window.timeZone,
-        },
-        interval: window.interval,
-        allowedSiteIds: resolved.allowedSiteIds,
-      }),
+      teamDashboardRuntime.providerRegistry,
     );
     if (!result.ok) throw new Error(result.error.kind);
     return {

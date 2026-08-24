@@ -8,20 +8,11 @@ import {
   handleSiteComparisonBreakdown,
 } from "@/lib/api-v1/comparison-handler";
 import { SitePerformanceBreakdownDimensionSchema } from "@/lib/api-v1/dto/analytics";
-import {
-  handlePlannedSiteFunnelAnalysis,
-  type SiteFunnelAnalysisProvider,
-} from "@/lib/api-v1/funnel-analysis-handler";
+import { handlePlannedSiteFunnelAnalysis } from "@/lib/api-v1/funnel-analysis-handler";
 import { handlePlannedSiteOverview } from "@/lib/api-v1/overview-handler";
 import { handlePlannedSavedFilters } from "@/lib/api-v1/saved-filters-handler";
-import {
-  handlePlannedSiteBreakdown,
-  type SiteBreakdownReader,
-} from "@/lib/api-v1/site-breakdown-handler";
-import {
-  handlePlannedSiteCrossBreakdown,
-  type SiteCrossBreakdownReader,
-} from "@/lib/api-v1/site-cross-breakdown-handler";
+import { handlePlannedSiteBreakdown } from "@/lib/api-v1/site-breakdown-handler";
+import { handlePlannedSiteCrossBreakdown } from "@/lib/api-v1/site-cross-breakdown-handler";
 import {
   handlePlannedSiteChannels,
   handlePlannedSiteEventDetail,
@@ -50,82 +41,30 @@ import {
   handlePlannedSiteVisitorEvents,
   handlePlannedSiteVisitorSessions,
   handlePlannedSiteVisitorsSearch,
-  type SiteChannelsReader,
-  type SiteEventDetailReader,
-  type SiteEventFieldsReader,
-  type SiteEventFieldValuesReader,
-  type SiteEventsSearchReader,
-  type SiteEventsSummaryReader,
-  type SiteEventsTimeseriesReader,
-  type SiteEventTypeDetailReader,
-  type SiteEventTypesReader,
-  type SiteFilterValuesReader,
-  type SitePagesReader,
-  type SitePerformanceBreakdownReader,
-  type SitePerformanceSummaryReader,
-  type SitePerformanceTimeseriesReader,
-  type SiteRealtimeActiveVisitorsReader,
-  type SiteRealtimeEventsReader,
-  type SiteRealtimeSessionsReader,
-  type SiteRealtimeSnapshotReader,
-  type SiteReferrersReader,
-  type SiteRetentionReader,
-  type SiteSessionDetailReader,
-  type SiteSessionEventsReader,
-  type SiteSessionsSearchReader,
-  type SiteVisitorDetailReader,
-  type SiteVisitorEventsReader,
-  type SiteVisitorSessionsReader,
-  type SiteVisitorsSearchReader,
 } from "@/lib/api-v1/site-list-handler";
 import { handlePlannedSiteTimeseries } from "@/lib/api-v1/timeseries-handler";
 import { jsonError } from "@/lib/api-v1/wire-helpers";
-import {
-  createOverviewReader,
-  readSiteBreakdown,
-  readSiteChannels,
-  readSiteCrossBreakdown,
-  readSiteEventDetail,
-  readSiteEventFields,
-  readSiteEventFieldValues,
-  readSiteEventRecords,
-  readSiteEventsSummary,
-  readSiteEventsTimeseries,
-  readSiteEventTypeDetail,
-  readSiteEventTypes,
-  readSiteFilterValues,
-  readSiteFunnelAnalysis,
-  readSitePages,
-  readSitePerformanceBreakdown,
-  readSitePerformanceSummary,
-  readSitePerformanceTimeseries,
-  readSiteRealtimeActiveVisitors,
-  readSiteRealtimeEvents,
-  readSiteRealtimeSessions,
-  readSiteRealtimeSnapshot,
-  readSiteReferrers,
-  readSiteRetention,
-  readSiteSessionDetail,
-  readSiteSessionEvents,
-  readSiteSessions,
-  readSiteVisitorDetail,
-  readSiteVisitorEvents,
-  readSiteVisitors,
-  readSiteVisitorSessions,
-} from "@/lib/edge/analytics/adapters/api-v1";
-import { createReaderProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
-import {
-  executeOverview,
-  executeTrend,
-  type OverviewQuery,
-  type TrendQuery,
-} from "@/lib/edge/analytics/contract";
+import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
+import { createApiV1ProviderRegistry } from "@/lib/edge/analytics/composition/api-v1-provider-registry";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import type { AppEnv } from "@/lib/hono/types";
 
 interface SiteAnalyticsRouteDependencies {
   readonly resolvePrincipal: (c: Context<AppEnv>) => ApiKeyPrincipal;
   readonly resourceNotFound: (c: Context<AppEnv>) => Response;
+}
+
+function providerRegistry(
+  c: Context<AppEnv>,
+  operation: AnalyticsOperationId,
+  performanceDimension?: string,
+) {
+  return createApiV1ProviderRegistry({
+    env: c.env,
+    siteId: c.req.param("siteId") ?? "",
+    operation,
+    performanceDimension,
+  });
 }
 
 export function registerV1SiteAnalyticsRoutes(
@@ -166,11 +105,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry(
-        "site.analytics.overview",
-        (query: OverviewQuery) =>
-          executeOverview(createOverviewReader(c.env, siteId), query),
-      ),
+      providerRegistry(c, "site.analytics.overview"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -213,11 +148,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry(
-        "site.analytics.timeseries",
-        (query: TrendQuery) =>
-          executeTrend(createOverviewReader(c.env, siteId), query),
-      ),
+      providerRegistry(c, "site.analytics.timeseries"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -231,23 +162,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       dimension,
-      createReaderProviderRegistry<SiteBreakdownReader>(
-        "site.analytics.breakdown",
-        (input) =>
-          readSiteBreakdown({
-            env: c.env,
-            siteId: input.siteId,
-            dimension: input.dimension,
-            limit: input.limit,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.breakdown"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -259,25 +174,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteCrossBreakdownReader>(
-        "site.analytics.crossBreakdown",
-        (input) =>
-          readSiteCrossBreakdown({
-            env: c.env,
-            siteId: input.siteId,
-            primaryDimension: input.primaryDimension,
-            secondaryDimension: input.secondaryDimension,
-            primaryLimit: input.primaryLimit,
-            secondaryLimit: input.secondaryLimit,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.crossBreakdown"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -289,23 +186,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SitePagesReader>(
-        "site.analytics.pages",
-        (input) =>
-          readSitePages({
-            env: c.env,
-            siteId: input.siteId,
-            limit: input.limit,
-            includeDetails: input.includeDetails,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.pages"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -317,23 +198,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteReferrersReader>(
-        "site.analytics.referrers",
-        (input) =>
-          readSiteReferrers({
-            env: c.env,
-            siteId: input.siteId,
-            limit: input.limit,
-            includeFullUrl: input.includeFullUrl,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.referrers"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -345,22 +210,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteChannelsReader>(
-        "site.analytics.channels",
-        (input) =>
-          readSiteChannels({
-            env: c.env,
-            siteId: input.siteId,
-            limit: input.limit,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.channels"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -372,24 +222,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteFilterValuesReader>(
-        "site.analytics.filterValues",
-        (input) =>
-          readSiteFilterValues({
-            env: c.env,
-            siteId: input.siteId,
-            field: input.field,
-            search: input.search,
-            limit: input.page.limit,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.filterValues"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -401,22 +234,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteRetentionReader>(
-        "site.analytics.retentionCohorts",
-        (input) =>
-          readSiteRetention({
-            env: c.env,
-            siteId: input.siteId,
-            granularity: input.granularity,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.retentionCohorts"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -428,10 +246,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteFunnelAnalysisProvider>(
-        "site.analytics.funnelAnalysis",
-        (input) => readSiteFunnelAnalysis({ env: c.env, ...input }),
-      ),
+      providerRegistry(c, "site.analytics.funnelAnalysis"),
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
@@ -443,21 +258,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SitePerformanceSummaryReader>(
-        "site.analytics.performanceSummary",
-        (input) =>
-          readSitePerformanceSummary({
-            env: c.env,
-            siteId: input.siteId,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.performanceSummary"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -469,22 +270,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SitePerformanceTimeseriesReader>(
-        "site.analytics.performanceTimeseries",
-        (input) =>
-          readSitePerformanceTimeseries({
-            env: c.env,
-            siteId: input.siteId,
-            interval: input.interval,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.performanceTimeseries"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -514,23 +300,10 @@ export function registerV1SiteAnalyticsRoutes(
         c.req.raw,
         deps.resolvePrincipal(c),
         siteId,
-        createReaderProviderRegistry<SitePerformanceBreakdownReader>(
+        providerRegistry(
+          c,
           "site.analytics.performanceBreakdown",
-          (input) =>
-            readSitePerformanceBreakdown({
-              env: c.env,
-              siteId: input.siteId,
-              dimension: parsedDimension.data,
-              metric: input.metric,
-              limit: input.limit,
-              window: {
-                startMs: input.startMs,
-                endExclusiveMs: input.endExclusiveMs,
-                timeZone: input.timeZone,
-                nowMs: Date.now(),
-              },
-              filters: input.filters,
-            }),
+          parsedDimension.data,
         ),
         { signal: c.req.raw.signal, capturedAtMs: Date.now() },
         createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
@@ -544,21 +317,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteEventsSummaryReader>(
-        "site.analytics.eventsSummary",
-        (input) =>
-          readSiteEventsSummary({
-            env: c.env,
-            siteId: input.siteId,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.eventsSummary"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -570,23 +329,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteEventsTimeseriesReader>(
-        "site.analytics.eventsTimeseries",
-        (input) =>
-          readSiteEventsTimeseries({
-            env: c.env,
-            siteId: input.siteId,
-            interval: input.interval,
-            limit: input.limit,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.eventsTimeseries"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -598,23 +341,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteEventTypesReader>(
-        "site.analytics.eventTypes",
-        (input) =>
-          readSiteEventTypes({
-            env: c.env,
-            siteId: input.siteId,
-            search: input.search,
-            limit: input.page.limit,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.eventTypes"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -626,23 +353,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteEventTypeDetailReader>(
-        "site.analytics.eventTypeDetail",
-        (input) =>
-          readSiteEventTypeDetail({
-            env: c.env,
-            siteId: input.siteId,
-            eventName: input.eventName,
-            interval: input.interval,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.eventTypeDetail"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -654,23 +365,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteEventFieldsReader>(
-        "site.analytics.eventFields",
-        (input) =>
-          readSiteEventFields({
-            env: c.env,
-            siteId: input.siteId,
-            eventName: input.eventName,
-            limit: input.page.limit,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.eventFields"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -682,26 +377,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteEventFieldValuesReader>(
-        "site.analytics.eventFieldValues",
-        (input) =>
-          readSiteEventFieldValues({
-            env: c.env,
-            siteId: input.siteId,
-            eventName: input.eventName,
-            fieldPath: input.fieldPath,
-            fieldValueType: input.fieldValueType,
-            search: input.search,
-            limit: input.page.limit,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.eventFieldValues"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -713,25 +389,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteEventsSearchReader>(
-        "site.analytics.eventsSearch",
-        (input) =>
-          readSiteEventRecords({
-            env: c.env,
-            siteId: input.siteId,
-            search: input.search,
-            eventName: input.eventName,
-            sort: input.sort,
-            page: input.page,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-            filters: input.filters,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.eventsSearch"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -743,21 +401,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteEventDetailReader>(
-        "site.analytics.eventDetail",
-        (input) =>
-          readSiteEventDetail({
-            env: c.env,
-            siteId: input.siteId,
-            eventId: input.eventId,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-          }),
-      ),
+      providerRegistry(c, "site.analytics.eventDetail"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -768,18 +412,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteRealtimeSnapshotReader>(
-        "site.analytics.realtimeSnapshot",
-        (input) =>
-          readSiteRealtimeSnapshot({
-            env: c.env,
-            siteId: input.siteId,
-            startMs: input.startMs,
-            endExclusiveMs: input.endExclusiveMs,
-            limit: input.limit,
-            signal: input.signal,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.realtimeSnapshot"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -790,17 +423,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteRealtimeActiveVisitorsReader>(
-        "site.analytics.realtimeActiveVisitors",
-        (input) =>
-          readSiteRealtimeActiveVisitors({
-            env: c.env,
-            siteId: input.siteId,
-            startMs: input.startMs,
-            endExclusiveMs: input.endExclusiveMs,
-            signal: input.signal,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.realtimeActiveVisitors"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -811,18 +434,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteRealtimeEventsReader>(
-        "site.analytics.realtimeEvents",
-        (input) =>
-          readSiteRealtimeEvents({
-            env: c.env,
-            siteId: input.siteId,
-            startMs: input.startMs,
-            endExclusiveMs: input.endExclusiveMs,
-            limit: input.limit,
-            signal: input.signal,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.realtimeEvents"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -833,18 +445,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteRealtimeSessionsReader>(
-        "site.analytics.realtimeSessions",
-        (input) =>
-          readSiteRealtimeSessions({
-            env: c.env,
-            siteId: input.siteId,
-            startMs: input.startMs,
-            endExclusiveMs: input.endExclusiveMs,
-            limit: input.limit,
-            signal: input.signal,
-          }),
-      ),
+      providerRegistry(c, "site.analytics.realtimeSessions"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -855,21 +456,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteVisitorDetailReader>(
-        "site.analytics.visitorDetail",
-        (input) =>
-          readSiteVisitorDetail({
-            env: c.env,
-            siteId: input.siteId,
-            visitorId: input.visitorId,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-          }),
-      ),
+      providerRegistry(c, "site.analytics.visitorDetail"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -880,21 +467,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteSessionDetailReader>(
-        "site.analytics.sessionDetail",
-        (input) =>
-          readSiteSessionDetail({
-            env: c.env,
-            siteId: input.siteId,
-            sessionId: input.sessionId,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-          }),
-      ),
+      providerRegistry(c, "site.analytics.sessionDetail"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -905,24 +478,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteVisitorsSearchReader>(
-        "site.analytics.visitorsSearch",
-        (input) =>
-          readSiteVisitors({
-            env: c.env,
-            siteId: input.siteId,
-            search: input.search,
-            sort: input.sort,
-            page: input.page,
-            filters: input.filters,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-          }),
-      ),
+      providerRegistry(c, "site.analytics.visitorsSearch"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -934,24 +490,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteSessionsSearchReader>(
-        "site.analytics.sessionsSearch",
-        (input) =>
-          readSiteSessions({
-            env: c.env,
-            siteId: input.siteId,
-            search: input.search,
-            sort: input.sort,
-            page: input.page,
-            filters: input.filters,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-          }),
-      ),
+      providerRegistry(c, "site.analytics.sessionsSearch"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -963,24 +502,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteVisitorEventsReader>(
-        "site.analytics.visitorEvents",
-        (input) =>
-          readSiteVisitorEvents({
-            env: c.env,
-            siteId: input.siteId,
-            visitorId: input.visitorId,
-            limit: input.limit,
-            page: { limit: input.limit },
-            filters: input.filters,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-          }),
-      ),
+      providerRegistry(c, "site.analytics.visitorEvents"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -992,24 +514,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteVisitorSessionsReader>(
-        "site.analytics.visitorSessions",
-        (input) =>
-          readSiteVisitorSessions({
-            env: c.env,
-            siteId: input.siteId,
-            visitorId: input.visitorId,
-            limit: input.limit,
-            page: { limit: input.limit },
-            filters: input.filters,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-          }),
-      ),
+      providerRegistry(c, "site.analytics.visitorSessions"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -1021,24 +526,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      createReaderProviderRegistry<SiteSessionEventsReader>(
-        "site.analytics.sessionEvents",
-        (input) =>
-          readSiteSessionEvents({
-            env: c.env,
-            siteId: input.siteId,
-            sessionId: input.sessionId,
-            limit: input.limit,
-            page: { limit: input.limit },
-            filters: input.filters,
-            window: {
-              startMs: input.startMs,
-              endExclusiveMs: input.endExclusiveMs,
-              timeZone: input.timeZone,
-              nowMs: Date.now(),
-            },
-          }),
-      ),
+      providerRegistry(c, "site.analytics.sessionEvents"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );

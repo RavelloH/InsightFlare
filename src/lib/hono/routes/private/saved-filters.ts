@@ -3,7 +3,7 @@ import { type Context, Hono } from "hono";
 import {
   getRequestId,
   resolvePrivateSiteForSession,
-} from "@/lib/edge/analytics/composition/d1-contract-adapters";
+} from "@/lib/edge/analytics/composition/query-protocol";
 import { handleSavedFilters } from "@/lib/edge/saved-filters";
 import type { AppEnv } from "@/lib/hono/types";
 import { requestUrl } from "@/lib/hono/utils/context";

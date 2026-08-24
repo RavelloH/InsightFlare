@@ -6,35 +6,22 @@ import {
   handleTeamComparison,
   handleTeamComparisonBreakdown,
 } from "@/lib/api-v1/comparison-handler";
-import {
-  handleTeamBreakdown,
-  type TeamBreakdownReader,
-} from "@/lib/api-v1/team-breakdown-handler";
-import {
-  handlePlannedTeamOverview,
-  type TeamOverviewReader,
-} from "@/lib/api-v1/team-overview-handler";
-import {
-  handlePlannedTeamSites,
-  type TeamSitesReader,
-} from "@/lib/api-v1/team-sites-handler";
-import {
-  handlePlannedTeamTimeseries,
-  type TeamTimeseriesReader,
-} from "@/lib/api-v1/team-timeseries-handler";
-import {
-  readTeamBreakdown,
-  readTeamOverview,
-  readTeamSites,
-  readTeamTimeseries,
-} from "@/lib/edge/analytics/adapters/api-v1";
-import { createReaderProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
+import { handleTeamBreakdown } from "@/lib/api-v1/team-breakdown-handler";
+import { handlePlannedTeamOverview } from "@/lib/api-v1/team-overview-handler";
+import { handlePlannedTeamSites } from "@/lib/api-v1/team-sites-handler";
+import { handlePlannedTeamTimeseries } from "@/lib/api-v1/team-timeseries-handler";
+import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
+import { createApiV1ProviderRegistry } from "@/lib/edge/analytics/composition/api-v1-provider-registry";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import type { AppEnv } from "@/lib/hono/types";
 
 interface TeamAnalyticsRouteDependencies {
   readonly resolvePrincipal: (c: Context<AppEnv>) => ApiKeyPrincipal;
   readonly resourceNotFound: (c: Context<AppEnv>) => Response;
+}
+
+function providerRegistry(c: Context<AppEnv>, operation: AnalyticsOperationId) {
+  return createApiV1ProviderRegistry({ env: c.env, operation });
 }
 
 function typedTeamOverview(
@@ -44,22 +31,7 @@ function typedTeamOverview(
   return handlePlannedTeamOverview(
     c.req.raw,
     deps.resolvePrincipal(c),
-    createReaderProviderRegistry<TeamOverviewReader>(
-      "team.analytics.overview",
-      (input) =>
-        readTeamOverview({
-          env: c.env,
-          teamId: input.teamId,
-          allowedSiteIds: input.allowedSiteIds,
-          window: {
-            startMs: input.startMs,
-            endExclusiveMs: input.endExclusiveMs,
-            timeZone: input.timeZone,
-            nowMs: Date.now(),
-          },
-          filters: input.filters,
-        }),
-    ),
+    providerRegistry(c, "team.analytics.overview"),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
@@ -71,23 +43,7 @@ function typedTeamTimeseries(
   return handlePlannedTeamTimeseries(
     c.req.raw,
     deps.resolvePrincipal(c),
-    createReaderProviderRegistry<TeamTimeseriesReader>(
-      "team.analytics.timeseries",
-      (input) =>
-        readTeamTimeseries({
-          env: c.env,
-          teamId: input.teamId,
-          allowedSiteIds: input.allowedSiteIds,
-          interval: input.interval,
-          window: {
-            startMs: input.startMs,
-            endExclusiveMs: input.endExclusiveMs,
-            timeZone: input.timeZone,
-            nowMs: Date.now(),
-          },
-          filters: input.filters,
-        }),
-    ),
+    providerRegistry(c, "team.analytics.timeseries"),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
@@ -99,23 +55,7 @@ function typedTeamSites(
   return handlePlannedTeamSites(
     c.req.raw,
     deps.resolvePrincipal(c),
-    createReaderProviderRegistry<TeamSitesReader>(
-      "team.analytics.sites",
-      (input) =>
-        readTeamSites({
-          env: c.env,
-          teamId: input.teamId,
-          allowedSiteIds: input.allowedSiteIds,
-          interval: input.interval,
-          window: {
-            startMs: input.startMs,
-            endExclusiveMs: input.endExclusiveMs,
-            timeZone: input.timeZone,
-            nowMs: Date.now(),
-          },
-          filters: input.filters,
-        }),
-    ),
+    providerRegistry(c, "team.analytics.sites"),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
@@ -130,24 +70,7 @@ function typedTeamBreakdown(
     c.req.raw,
     deps.resolvePrincipal(c),
     dimension,
-    createReaderProviderRegistry<TeamBreakdownReader>(
-      "team.analytics.breakdown",
-      (input) =>
-        readTeamBreakdown({
-          env: c.env,
-          teamId: input.teamId,
-          allowedSiteIds: input.allowedSiteIds,
-          dimension: input.dimension,
-          limit: input.limit,
-          window: {
-            startMs: input.startMs,
-            endExclusiveMs: input.endExclusiveMs,
-            timeZone: input.timeZone,
-            nowMs: Date.now(),
-          },
-          filters: input.filters,
-        }),
-    ),
+    providerRegistry(c, "team.analytics.breakdown"),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }

@@ -5,7 +5,7 @@ import { executePublicQuery } from "@/lib/edge/analytics/adapters/public";
 import {
   jsonResponse,
   PUBLIC_QUERY_PATHS,
-} from "@/lib/edge/analytics/composition/d1-contract-adapters";
+} from "@/lib/edge/analytics/composition/query-protocol";
 import { PUBLIC_QUERY_CACHE_OPTIONS } from "@/lib/edge/dashboard-cache";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import { requireMethodMiddleware } from "@/lib/hono/middleware/method";

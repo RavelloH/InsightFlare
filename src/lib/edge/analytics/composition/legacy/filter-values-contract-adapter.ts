@@ -1,8 +1,8 @@
+import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1-site-query-runtime";
 import type { FilterValuesResult } from "@/lib/edge/analytics/contract";
 import {
   analyticsFilterDefinition,
-  createTypedQueryProviderRegistry,
-  executeTypedApplicationOperation,
+  type FilterValuesQuery,
   parseFilterUrlForAudience,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
@@ -17,7 +17,6 @@ import {
   type ResponseContext,
   withoutFilterKey,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { queryFilterValuesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import { toQueryTime } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 
@@ -43,34 +42,18 @@ export async function handleFilterValuesContract(
     parseFilterUrlForAudience(queryContext.policy.audience, url),
     field,
   );
-  const result = await executeTypedApplicationOperation<FilterValuesResult>(
-    "filter-values",
-    {
-      context: queryContext,
-      time: toQueryTime(window),
-      filters,
-    },
-    createTypedQueryProviderRegistry("filter-values", async () => ({
-      value: {
-        field,
-        data: (
-          await queryFilterValuesFromD1(
-            env,
-            siteId,
-            window,
-            filters,
-            field,
-            parseLimit(url, 50, 500),
-            parseListSearch(url),
-          )
-        ).map((row) => ({
-          value: row.value,
-          label: row.value,
-          occurrences: row.occurrences,
-        })),
-      },
-    })),
-  );
+  const query = {
+    context: queryContext,
+    time: toQueryTime(window),
+    filters,
+    field,
+    limit: parseLimit(url, 50, 500),
+    search: parseListSearch(url),
+  } satisfies FilterValuesQuery;
+  const result = await createD1SiteQueryRuntime({
+    env,
+    siteId,
+  }).execute<FilterValuesResult>("filter-values", query);
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }

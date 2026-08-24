@@ -8,8 +8,8 @@ import {
 import {
   DASHBOARD_QUERY_PATHS,
   notAllowed,
-} from "@/lib/edge/analytics/composition/d1-contract-adapters";
-import { resolveTeamDashboardScope } from "@/lib/edge/analytics/composition/d1-provider";
+} from "@/lib/edge/analytics/composition/query-protocol";
+import { resolveTeamDashboardScope } from "@/lib/edge/analytics/composition/ssr-query-runtime";
 import { withDashboardCache } from "@/lib/edge/dashboard-cache";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import {
