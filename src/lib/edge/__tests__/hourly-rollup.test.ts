@@ -75,7 +75,7 @@ function createEnv() {
     CREATE TABLE visits (
       visit_id TEXT PRIMARY KEY,
       site_id TEXT NOT NULL,
-      site_pk INTEGER,
+      site_pk INTEGER NOT NULL DEFAULT 1,
       visitor_id TEXT NOT NULL DEFAULT '',
       session_id TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL,
@@ -117,12 +117,12 @@ function createEnv() {
       input_cutoff_ms INTEGER NOT NULL,
       aggregated_at INTEGER NOT NULL DEFAULT (unixepoch()),
       schema_version INTEGER NOT NULL DEFAULT 1,
-      PRIMARY KEY (site_id, hour_bucket)
+      PRIMARY KEY (site_pk, hour_bucket)
     );
 
     CREATE TABLE visit_hourly_aggregation_state (
-      site_id TEXT PRIMARY KEY,
-      site_pk INTEGER NOT NULL DEFAULT 1,
+      site_id TEXT NOT NULL,
+      site_pk INTEGER PRIMARY KEY NOT NULL DEFAULT 1,
       aggregated_until_hour INTEGER NOT NULL DEFAULT 0,
       lag_hours INTEGER NOT NULL DEFAULT 12,
       last_run_at INTEGER,
@@ -139,14 +139,6 @@ function createEnv() {
       ON visit_hourly_rollups(site_pk, hour_bucket);
     CREATE INDEX idx_visit_hourly_aggregation_state_site_pk
       ON visit_hourly_aggregation_state(site_pk);
-
-    CREATE TRIGGER test_visits_site_pk
-    AFTER INSERT ON visits
-    BEGIN
-      UPDATE visits
-      SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
-      WHERE visit_id = NEW.visit_id;
-    END;
 
     INSERT INTO site_identities (site_pk, site_id) VALUES (1, 'site-1');
     INSERT INTO sites (id) VALUES ('site-1');
@@ -172,20 +164,22 @@ function insertVisit(
     startedAt: number;
     lastActivityAt?: number;
     durationMs?: number | null;
+    sitePk?: number;
   },
 ): void {
   d1.db
     .prepare(
       `
         INSERT INTO visits (
-          visit_id, site_id, visitor_id, session_id, status, started_at,
+          visit_id, site_id, site_pk, visitor_id, session_id, status, started_at,
           last_activity_at, duration_ms, perf_ttfb_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     )
     .run(
       row.visitId,
       row.siteId ?? "site-1",
+      row.sitePk ?? 1,
       row.visitorId ?? "visitor-1",
       row.sessionId ?? "session-1",
       row.status ?? "closed",
@@ -716,6 +710,7 @@ describe("hourly visit rollups", () => {
     insertVisit(d1, {
       visitId: "visit-2",
       siteId: "site-2",
+      sitePk: 2,
       startedAt: oldHour * 60 * 60 * 1000 + 20_000,
       durationMs: 2000,
     });

@@ -173,4 +173,185 @@ describe("site identity migration", () => {
     ).toBe(true);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
+
+  it("contracts site identity keys and removes the compatibility layer", () => {
+    db = new DatabaseSync(":memory:");
+    for (const sql of migrationSqlThrough(
+      "0038_drop_remaining_redundant_indexes.sql",
+    )) {
+      db.exec(sql);
+    }
+
+    db.prepare(
+      "INSERT INTO users (id, email) VALUES ('user-1', 'owner@example.com')",
+    ).run();
+    db.prepare(
+      "INSERT INTO teams (id, name, slug, owner_user_id) VALUES ('team-1', 'Team', 'team', 'user-1')",
+    ).run();
+    db.prepare(
+      "INSERT INTO sites (id, team_id, name, domain) VALUES ('site-contract', 'team-1', 'Contract', 'contract.example.com')",
+    ).run();
+    insertVisit(db, "visit-contract", "site-contract");
+    db.prepare(
+      `
+        INSERT INTO archive_objects (
+          archive_key, site_id, start_hour, end_hour, granularity, format
+        ) VALUES ('cold/site-contract/1.parquet', 'site-contract', 1, 1, 'hour', 'parquet')
+      `,
+    ).run();
+
+    db.exec(
+      readFileSync(join(MIGRATIONS_DIR, "0039_site_identity_keys.sql"), "utf8"),
+    );
+    db.exec(
+      readFileSync(
+        join(MIGRATIONS_DIR, "0040_switch_site_identity_indexes.sql"),
+        "utf8",
+      ),
+    );
+
+    const sitePk = (
+      db
+        .prepare(
+          "SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ?",
+        )
+        .get("site-contract") as { sitePk: number }
+    ).sitePk;
+    db.prepare(
+      "INSERT INTO custom_event_names (site_id, name, created_at, last_seen_at, site_pk) VALUES (?, ?, 1, 1, ?)",
+    ).run("site-contract", "page_view", sitePk);
+    db.prepare(
+      "INSERT INTO custom_event_json_keys (site_id, key, created_at, last_seen_at, site_pk) VALUES (?, ?, 1, 1, ?)",
+    ).run("site-contract", "plan", sitePk);
+    db.prepare(
+      "INSERT INTO custom_event_json_paths (site_id, path, created_at, last_seen_at, site_pk) VALUES (?, ?, 1, 1, ?)",
+    ).run("site-contract", "$.plan", sitePk);
+    db.prepare(
+      `
+        INSERT INTO custom_events (
+          event_id, site_id, visit_id, event_name_id, occurred_at, received_at,
+          node_count, value_count, site_pk
+        ) VALUES (?, ?, ?, (SELECT id FROM custom_event_names WHERE site_pk = ?), 1, 1, 1, 1, ?)
+      `,
+    ).run("event-contract", "site-contract", "visit-contract", sitePk, sitePk);
+    const eventPk = Number(
+      (
+        db.prepare("SELECT event_pk AS eventPk FROM custom_events").get() as {
+          eventPk: number;
+        }
+      ).eventPk,
+    );
+    const pathId = Number(
+      (
+        db
+          .prepare("SELECT id FROM custom_event_json_paths WHERE site_pk = ?")
+          .get(sitePk) as { id: number }
+      ).id,
+    );
+    db.prepare(
+      `
+        INSERT INTO custom_event_json_nodes (
+          event_pk, node_id, path_id, value_type, depth
+        ) VALUES (?, 1, ?, 1, 0)
+      `,
+    ).run(eventPk, pathId);
+    db.prepare(
+      `
+        INSERT INTO custom_event_json_values (
+          event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+          value_type, string_value, string_hash, site_pk
+        ) VALUES (?, 1, ?, (SELECT id FROM custom_event_names WHERE site_pk = ?), ?, 1, 1, 'pro', 'hash', ?)
+      `,
+    ).run(eventPk, "site-contract", sitePk, pathId, sitePk);
+    db.prepare(
+      `
+        INSERT INTO visit_hourly_aggregation_state (
+          site_id, aggregated_until_hour, site_pk
+        ) VALUES (?, 1, ?)
+      `,
+    ).run("site-contract", sitePk);
+    db.prepare(
+      `
+        INSERT INTO visit_hourly_rollups (
+          site_id, hour_bucket, input_cutoff_ms, site_pk
+        ) VALUES (?, 1, 1, ?)
+      `,
+    ).run("site-contract", sitePk);
+
+    db.exec(
+      readFileSync(
+        join(MIGRATIONS_DIR, "0041_contract_site_identity_keys.sql"),
+        "utf8",
+      ),
+    );
+
+    const contractedTables = [
+      "archive_objects",
+      "custom_event_json_keys",
+      "custom_event_json_paths",
+      "custom_event_json_values",
+      "custom_event_names",
+      "custom_events",
+      "visit_hourly_aggregation_state",
+      "visit_hourly_rollups",
+      "visits",
+    ];
+    for (const table of contractedTables) {
+      const sitePkColumn = (
+        db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+          name: string;
+          notnull: number;
+        }>
+      ).find((column) => column.name === "site_pk");
+      expect(sitePkColumn?.notnull, `${table}.site_pk`).toBe(1);
+    }
+
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'trigger' AND name LIKE '%site_pk%'",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(
+      db
+        .prepare(
+          `
+            SELECT COUNT(*) AS count
+            FROM sqlite_schema
+            WHERE type = 'index'
+              AND tbl_name IN (${contractedTables.map(() => "?").join(", ")})
+              AND sql LIKE '%site_id%'
+          `,
+        )
+        .get(...contractedTables),
+    ).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM visits").get()).toEqual({
+      count: 1,
+    });
+    expect(
+      db.prepare("SELECT COUNT(*) AS count FROM custom_events").get(),
+    ).toEqual({ count: 1 });
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS count FROM custom_event_json_values")
+        .get(),
+    ).toEqual({ count: 1 });
+    expect(
+      db.prepare("SELECT COUNT(*) AS count FROM visit_hourly_rollups").get(),
+    ).toEqual({ count: 1 });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(() =>
+      db
+        ?.prepare(
+          `
+            INSERT INTO visits (
+              visit_id, site_id, visitor_id, session_id, status, started_at,
+              last_activity_at, pathname, hostname
+            ) VALUES ('visit-missing-pk', 'site-contract', 'visitor', 'session', 'complete', 1, 1, '/', 'example.com')
+          `,
+        )
+        .run(),
+    ).toThrow(/NOT NULL/);
+  });
 });

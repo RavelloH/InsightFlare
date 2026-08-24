@@ -1330,7 +1330,7 @@ async function aggregateSiteHours(
             perf_cls_sum, perf_cls_count, perf_inp_sum, perf_inp_count,
             input_cutoff_ms, aggregated_at, schema_version
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)
-          ON CONFLICT(site_id, hour_bucket) DO UPDATE SET
+          ON CONFLICT(site_pk, hour_bucket) DO UPDATE SET
             site_pk = excluded.site_pk,
             views = excluded.views,
             sessions = excluded.sessions,
@@ -1389,7 +1389,7 @@ async function aggregateSiteHours(
           site_id, site_pk, aggregated_until_hour, lag_hours, last_run_at,
           last_success_at, last_error
         ) VALUES (?, ?, ?, ?, unixepoch(), unixepoch(), NULL)
-        ON CONFLICT(site_id) DO UPDATE SET
+        ON CONFLICT(site_pk) DO UPDATE SET
           site_pk = excluded.site_pk,
           aggregated_until_hour = excluded.aggregated_until_hour,
           lag_hours = excluded.lag_hours,
@@ -1419,7 +1419,7 @@ async function markAggregationFailed(
       INSERT INTO visit_hourly_aggregation_state (
         site_id, site_pk, aggregated_until_hour, lag_hours, last_run_at, last_error
       ) VALUES (?, ?, 0, ?, unixepoch(), ?)
-      ON CONFLICT(site_id) DO UPDATE SET
+      ON CONFLICT(site_pk) DO UPDATE SET
         site_pk = excluded.site_pk,
         last_run_at = excluded.last_run_at,
         last_error = excluded.last_error

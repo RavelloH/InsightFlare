@@ -19,6 +19,7 @@ type SqlRow = Record<string, unknown>;
 const VISIT_COLUMNS = [
   "visit_id",
   "site_id",
+  "site_pk",
   "visitor_id",
   "session_id",
   "status",
@@ -75,7 +76,9 @@ const VISIT_COLUMNS = [
 ] as const;
 
 const BUFFERED_VISIT_COLUMNS = [
-  ...VISIT_COLUMNS.filter((column) => column !== "ae_synced_at"),
+  ...VISIT_COLUMNS.filter(
+    (column) => column !== "ae_synced_at" && column !== "site_pk",
+  ),
   "hidden_at",
   "dirty",
   "flush_attempts",
@@ -200,7 +203,7 @@ class FakeD1Database {
       CREATE TABLE visits (
         visit_id TEXT PRIMARY KEY,
         site_id TEXT NOT NULL,
-        site_pk INTEGER,
+        site_pk INTEGER NOT NULL,
         visitor_id TEXT NOT NULL,
         session_id TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -258,35 +261,35 @@ class FakeD1Database {
       CREATE TABLE custom_event_names (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         site_id TEXT NOT NULL,
-        site_pk INTEGER,
+        site_pk INTEGER NOT NULL,
         name TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         last_seen_at INTEGER NOT NULL,
-        UNIQUE(site_id, name)
+        UNIQUE(site_pk, name)
       );
       CREATE TABLE custom_event_json_keys (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         site_id TEXT NOT NULL,
-        site_pk INTEGER,
+        site_pk INTEGER NOT NULL,
         "key" TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         last_seen_at INTEGER NOT NULL,
-        UNIQUE(site_id, "key")
+        UNIQUE(site_pk, "key")
       );
       CREATE TABLE custom_event_json_paths (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         site_id TEXT NOT NULL,
-        site_pk INTEGER,
+        site_pk INTEGER NOT NULL,
         path TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         last_seen_at INTEGER NOT NULL,
-        UNIQUE(site_id, path)
+        UNIQUE(site_pk, path)
       );
       CREATE TABLE custom_events (
         event_pk INTEGER PRIMARY KEY AUTOINCREMENT,
         event_id TEXT NOT NULL UNIQUE,
         site_id TEXT NOT NULL,
-        site_pk INTEGER,
+        site_pk INTEGER NOT NULL,
         visit_id TEXT NOT NULL,
         event_name_id INTEGER NOT NULL,
         occurred_at INTEGER NOT NULL,
@@ -314,7 +317,7 @@ class FakeD1Database {
         event_pk INTEGER NOT NULL,
         node_id INTEGER NOT NULL,
         site_id TEXT NOT NULL,
-        site_pk INTEGER,
+        site_pk INTEGER NOT NULL,
         event_name_id INTEGER NOT NULL,
         path_id INTEGER NOT NULL,
         occurred_at INTEGER NOT NULL,
@@ -327,17 +330,8 @@ class FakeD1Database {
         UNIQUE(event_pk, node_id, path_id)
       );
 
-      CREATE TRIGGER test_visits_site_pk_insert
-      AFTER INSERT ON visits
-      WHEN NEW.site_pk IS NULL
-      BEGIN
-        INSERT OR IGNORE INTO site_identities (site_id) VALUES (NEW.site_id);
-        UPDATE visits
-        SET site_pk = (
-          SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id
-        )
-        WHERE visit_id = NEW.visit_id;
-      END;
+      INSERT INTO site_identities (site_pk, site_id) VALUES (1, 'site-1');
+
     `);
   }
 
@@ -439,6 +433,7 @@ function visitRecord(overrides: Partial<VisitRecord> = {}): VisitRecord {
   return {
     visit_id: "visit-1",
     site_id: "site-1",
+    site_pk: 1,
     visitor_id: "visitor-1",
     session_id: "session-1",
     status: "open",

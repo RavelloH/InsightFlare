@@ -122,7 +122,7 @@ async function resolveDictionaryId(
     `
       INSERT INTO ${spec.table} (site_id, site_pk, ${spec.column}, created_at, last_seen_at)
       VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(site_id, ${spec.column}) DO UPDATE SET
+      ON CONFLICT(site_pk, ${spec.column}) DO UPDATE SET
         last_seen_at = excluded.last_seen_at
     `,
   )
