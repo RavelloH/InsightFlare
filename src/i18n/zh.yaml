@@ -26,7 +26,7 @@ common:
   sessions: 会话数
   visitors: 访客数
   bounceRate: 跳出率
-  avgDuration: 平均停留
+  avgDuration: 平均停留时长
   path: 路径
   title: 标题
   hostname: 主机名
@@ -44,7 +44,7 @@ common:
   region: 地区
   regionCode: 地区代码
   city: 城市
-  continent: 大陆
+  continent: 大洲
   latitude: 纬度
   longitude: 经度
   continentLabels:
@@ -158,8 +158,8 @@ conditionDescription:
   emptyFilter: 尚未设置筛选条件
   filterEquals: "{field} 为 {value}"
   filterNotEquals: "{field} 不为 {value}"
-  filterAnyOf: "{field} 属于 {values} 中的任一值"
-  filterNoneOf: "{field} 不属于 {values} 中的任何值"
+  filterAnyOf: "{field} 是以下任一值：{values}"
+  filterNoneOf: "{field} 不属于以下任一值：{values}"
   filterBetween: "{field} 介于 {from} 与 {to} 之间"
   filterStartsWith: "{field} 以 {value} 开头"
   filterEndsWith: "{field} 以 {value} 结尾"
@@ -349,7 +349,7 @@ realtime:
   subtitle: 查看最近 30 分钟的访问情况
   logTitleSeparator: "："
   activeNow: 当前在线
-  liveMetrics: 在线 / 30 分钟访客 / 30 分钟访问
+  liveMetrics: 当前在线 / 近 30 分钟访客 / 近 30 分钟浏览量
   connected: 已连接
   connecting: 连接中
   reconnecting: 重连中
@@ -358,7 +358,7 @@ realtime:
   enterPage: 进入页面
   leavePage: 退出页面
   viewPage: 访问页面
-  customEvent: 事件
+  customEvent: 自定义事件
   detailsTitle: 事件详情
   detailsSection: 信息
   browsingSection: 浏览
@@ -473,7 +473,7 @@ referrers:
   splitTitle: 来源拆分
   chartTitle: 来源结构
   radarTitle: 前 24 来源雷达图
-  radarSubtitle: 对比头部来源在多项行为指标上的表现
+  radarSubtitle: 对比主要来源在多项行为指标上的表现
   radarDuration: 停留时长
   radarEngagement: 互动率
   radarDepth: 浏览深度
@@ -485,11 +485,11 @@ referrers:
   directViews: 直接访问量
   uniqueDomains: 来源域名数
   uniqueLinks: 来源链接数
-  topSource: 头部外部来源
+  topSource: 主要外部来源
   topSourceShare: 访问占比
   noExternalSource: 暂无外部来源
   externalLabel: 外部来源
-  nextSources: 后续 4 个来源
+  nextSources: 其他 4 个来源
   longTail: 长尾来源
   channelLongTail: 其他渠道
 campaigns:
@@ -516,10 +516,10 @@ sessions:
   duration: 时长
   referrer: 来源
   location: 地区
-  os: 系统
+  os: 操作系统
   browser: 浏览器
   device: 设备
-  pageViews: 页面浏览
+  pageViews: 页面浏览量
   loadError: 无法加载会话数据。
   empty: 当前时间范围内没有会话。
 sessionDetail:
@@ -532,19 +532,19 @@ sessionDetail:
   inactive: 已结束
   status: 状态
   duration: 时长
-  screenViews: 页面浏览
+  screenViews: 页面浏览量
   events: 事件
-  bounce: 跳出
+  bounce: 是否跳出
   entryPath: 入口路径
-  exitPath: 退出路径
+  exitPath: 出口路径
   referrerName: 来源名称
-  os: 系统
+  os: 操作系统
   browser: 浏览器
   device: 设备
   screen: 屏幕
   yes: 是
   no: 否
-  uniquePages: 唯一页面
+  uniquePages: 不同页面数
   firstEvent: 首个事件
   lastEvent: 最后事件
   sessionStarted: 会话开始
@@ -566,10 +566,10 @@ sessionDetail:
   range: 范围
 events:
   title: 自定义事件
-  subtitle: 查看事件规模、上下文、Payload 字段与原始触发记录。
+  subtitle: 查看事件规模、上下文、事件载荷字段与原始触发记录。
   detailTitle: 事件详情
-  detailSubtitle: 查看单次事件的上下文与 payload。
-  typeDetailSubtitle: 查看该事件的趋势、上下文分布、Payload 结构与触发记录。
+  detailSubtitle: 查看单次事件的上下文与事件载荷。
+  typeDetailSubtitle: 查看该事件的趋势、上下文分布、事件载荷结构与触发记录。
   backToEvents: 返回事件总览
   totalEvents: 事件总数
   eventTypes: 事件类型
@@ -582,13 +582,13 @@ events:
   trendTitle: 事件趋势
   topEvents: 事件排行
   recordsTitle: 事件记录
-  fieldsTitle: Payload 字段
+  fieldsTitle: 事件载荷字段
   fieldsSubtitle: 选择字段后查看其值分布和元数据。
   fieldValuesTitle: 字段值
   fieldValuesSubtitle: 展示当前字段的记录及出现次数，点击以进行筛选。
   fieldValuesEmpty: 当前字段暂无记录。
   payloadFilter: 筛选
-  payloadFilterTitle: Payload 筛选
+  payloadFilterTitle: 事件载荷筛选
   payloadFilterSubtitle: 每行一个条件，可使用 == 或 != 组合筛选。
   payloadFilterPlaceholder: "path.value == \"a\"\nlevel != 0"
   payloadFilterApply: 应用筛选
@@ -609,10 +609,10 @@ events:
   referrer: 来源
   location: 地区
   browser: 浏览器
-  os: 系统
+  os: 操作系统
   device: 设备
-  payload: Payload
-  payloadFields: Payload 字段
+  payload: 事件载荷
+  payloadFields: 事件载荷字段
   values: 值
   nodes: 节点
   occurrences: 出现次数
@@ -627,7 +627,7 @@ events:
   copyValueFailed: 复制值失败。
   loadError: 无法加载事件数据。
   empty: 当前筛选范围内没有自定义事件。
-  emptyFields: 当前事件暂无 payload 字段。
+  emptyFields: 当前事件暂无事件载荷字段。
   noEventName: 缺少事件名。
   loading: 加载中
   other: 其他
@@ -667,16 +667,16 @@ funnels:
   deleted: 漏斗已删除。
   deleteFailed: 删除漏斗失败。
   overallConversion: 总转化率
-  startedSessions: 起始会话
-  convertedSessions: 转化会话
-  convertedVisitors: 转化访客
+  startedSessions: 起始会话数
+  convertedSessions: 转化会话数
+  convertedVisitors: 转化访客数
   largestDropOff: 最大流失
   noDropOff: 无流失
   step: 步骤
   sessions: 会话
   visitors: 访客
   conversion: 转化率
-  stepConversion: 步骤转化
+  stepConversion: 步骤转化率
   dropOff: 流失
   updated: 更新于
 visitors:
@@ -688,12 +688,12 @@ visitors:
   anonymous: 匿名访客
   referrer: 来源
   location: 地区
-  os: 系统
+  os: 操作系统
   browser: 浏览器
   device: 设备
-  firstSeen: 首次出现
-  lastSeen: 上次出现
-  pageViews: 页面浏览
+  firstSeen: 首次访问
+  lastSeen: 最近访问
+  pageViews: 页面浏览量
   sessions: 会话数
   loadError: 无法加载访客数据。
   empty: 当前时间范围内没有访客。
@@ -705,13 +705,13 @@ visitorDetail:
   loadError: 无法加载访客详情。
   totalDuration: 总时长
   events: 事件
-  views: 页面浏览
-  uniquePages: 唯一页面
+  views: 页面浏览量
+  uniquePages: 不同页面数
   avgPagesPerSession: 平均页面/会话
   avgEventsPerSession: 平均事件/会话
-  avgStay: 平均停留
-  firstSeen: 首次出现
-  lastSeen: 最近出现
+  avgStay: 平均停留时长
+  firstSeen: 首次访问
+  lastSeen: 最近访问
   daysActive: 活跃天数
   avgTimeBetweenSessions: 平均会话间隔
   activity: 活跃记录
@@ -720,7 +720,7 @@ visitorDetail:
   visitor: 访客
   duration: 时长
   referrer: 来源
-  pageViews: 页面浏览
+  pageViews: 页面浏览量
   visitDetailsTitle: 访问明细
   visitDetailsSubtitle: 按发生顺序展示该访客的会话开始、页面访问、退出和自定义事件。
   customEvents: 自定义事件
@@ -733,11 +733,11 @@ visitorDetail:
   referrerUrl: 来源链接
   location: 位置
   browser: 浏览器
-  os: 系统
+  os: 操作系统
   device: 设备
   screen: 屏幕
   entryPath: 入口路径
-  exitPath: 退出路径
+  exitPath: 出口路径
   sessionStarted: 会话开始
   pageview: 访问页面
   exitPage: 退出页面
@@ -750,7 +750,7 @@ visitorDetail:
 retention:
   title: 留存分析
   subtitle: 基于群组的访客回访分析。
-  cohortDate: 群组
+  cohortDate: 群组日期
   cohortSize: 人数
   periodLabel: "第 {n} 期"
   matrixTitle: 留存矩阵
@@ -760,9 +760,9 @@ retention:
   periodOneMetric: 首期回访
   averageReturnMetric: 平均回访
   strongestCohortMetric: 最佳群组
-  eligibleVisitors: 符合统计的访客
+  eligibleVisitors: 符合条件的访客
   periodsAnalyzed: 已分析周期
-  noEligibleCohorts: 暂无足够历史
+  noEligibleCohorts: 暂无符合条件的群组
   weightedAverage: 加权平均
   legendLow: 低
   legendHigh: 高
@@ -777,7 +777,7 @@ retention:
   sizeDetail: 人数
 geo:
   title: 位置分析
-  subtitle: 研究任意地点的访问效果
+  subtitle: 分析各地点的访问表现
   mapTitle: 请求地理分布
   countryLabel: 国家/地区
   regionLabel: 州/省
@@ -785,12 +785,12 @@ geo:
   back: 返回上一级
   viewOnWikipedia: 查看维基百科
   investigationNotice: 这些数据来源于网络，可能存在错误。
-  timezoneDeltaVsLocal: 较本地 {delta}
+  timezoneDeltaVsLocal: 与本地时间相差 {delta}
   visitorCoordinates: 访客坐标
   ipNotice: 估算的 IP 位置，坐标为粗略范围，不代表精确家庭或办公地址。
-  multipleNotice: 多个估算的 IP 位置，跨会话旅程可能涉及多个城市。
+  multipleNotice: 该访客在不同会话中的旅程可能涉及多个城市。
   investigation:
-    countryScopedLabel: "国家{label}"
+    countryScopedLabel: "所属国家的{label}"
     capital: 首都
     population: 人口
     gdp: GDP
@@ -885,7 +885,7 @@ browsers:
   radarFrequency: 访问频次
   radarTraffic: 流量占比
 performance:
-  title: 性能追踪
+  title: 性能跟踪
   subtitle: 按指标、趋势与路径查看真实访客性能。
   chartTitle: 性能趋势
   avgLabel: 平均值
@@ -897,7 +897,7 @@ performance:
   fcp: 首次内容绘制
   lcp: 最大内容绘制
   cls: 累积布局偏移
-  inp: 下次绘制交互
+  inp: 交互到下一次绘制
   ttfbDescription: 衡量浏览器在收到服务器第一个字节前等待了多久，反映后端响应、网络延迟和缓存效果。
   fcpDescription: 衡量页面首次绘制文本或图片的时间，反映访客多久能看到页面开始加载。
   lcpDescription: 衡量视口内最大内容元素完成渲染的时间，是感知加载速度的核心指标。
@@ -946,9 +946,9 @@ siteSettings:
   trackingStrengthStrong: 强
   trackingStrengthSmart: 智能
   trackingStrengthWeak: 弱
-  trackingStrengthStrongDescription: 始终进行针对访客的高精度追踪。这可能违反某些国家的法规，例如 GDPR。
-  trackingStrengthSmartDescription: 自动根据访客所处国家切换追踪强度。
-  trackingStrengthWeakDescription: 始终降低对访客的追踪精度。这可能导致同一访客在不同时间访问时被计数多次、且无法计算留存率。
+  trackingStrengthStrongDescription: 始终进行针对访客的高精度跟踪。这可能违反某些国家的法规，例如 GDPR。
+  trackingStrengthSmartDescription: 自动根据访客所处国家切换跟踪强度。
+  trackingStrengthWeakDescription: 始终降低对访客的跟踪精度。这可能导致同一访客在不同时间访问时被计数多次、且无法计算留存率。
   queryHashGroupTitle: 查询参数与 Hash 跟踪
   queryHashGroupDescription: 控制 URL 查询参数、Hash 与 Do Not Track 的处理方式。
   trackQueryParamsLabel: 开启查询参数跟踪
@@ -968,19 +968,19 @@ siteSettings:
     /private
   pathBlacklistHint: 采用 startsWith 前缀匹配；命中后不发送采集事件。
   ignoreDoNotTrackLabel: 忽略浏览器 Do Not Track
-  autoTrackGroupTitle: 自动追踪
+  autoTrackGroupTitle: 自动跟踪
   autoTrackGroupDescription: 控制自动事件捕获行为。
-  autoTrackOutboundLinksLabel: 自动追踪外链点击
+  autoTrackOutboundLinksLabel: 自动跟踪外链点击
   autoTrackOutboundLinksHint: 开启后，点击指向外部域名的链接将自动上报 outbound_click 事件。
-  performanceGroupTitle: 性能追踪
-  performanceGroupDescription: 通过一个采样率控制 Web 性能指标采集。
+  performanceGroupTitle: 性能跟踪
+  performanceGroupDescription: 通过采样率控制 Web 性能指标采集。
   performanceSampleRateLabel: 性能采样率（%）
   performanceSampleRateHint: 被采样的访问会在离开页面时记录 TTFB、FCP、LCP、CLS 和 INP。填 0 表示不采样，100 表示全量采集。
   booleanOn: 开启
   booleanOff: 关闭
   loadingSettings: 正在加载脚本设置...
-  saveTracking: 保存追踪设置
-  savingTracking: 保存追踪设置中...
+  saveTracking: 保存跟踪设置
+  savingTracking: 正在保存跟踪设置…
   save: 保存修改
   saving: 保存中...
   transferTitle: 转移到其他团队
@@ -1073,13 +1073,13 @@ notificationCenter:
   empty: 暂无通知。
   loading: 正在加载通知
   markRead: 标记已读
-  markAllRead: 全部标记已读
+  markAllRead: 全部标记为已读
   refresh: 刷新
   attention: 重点
   loadFailed: 加载通知失败。
-  markReadFailed: 标记通知已读失败。
+  markReadFailed: 标记通知为已读失败。
   markAllReadSuccess: 通知已全部标记为已读。
-  markAllReadFailed: 全部标记已读失败。
+  markAllReadFailed: 全部标记为已读失败。
   ruleFilterActive: 正在查看此规则产生的通知。
   ruleFilterClear: 清除筛选
   sections:
@@ -1120,7 +1120,7 @@ notificationCenter:
     failed: 失败
     skipped: 已跳过
   channels:
-    inApp: 站内
+    inApp: 站内通知
     email: 邮件
   channelStatuses:
     sent: 已发送
@@ -1171,7 +1171,7 @@ notificationEmail:
     metric: 指标
     window: 时间窗口
     currentValue: 当前值
-    previousValue: 上一值
+    previousValue: 上期值
     threshold: 阈值
     milestone: 里程碑
     change: 变化
@@ -1264,7 +1264,7 @@ accountLinks:
     roleLabel: 角色
     emailLabel: 邀请邮箱
     accountEmailLabel: 账号邮箱
-    anyEmail: 任意账号
+    anyEmail: 任意邮箱
     expiresLabel: 过期时间
     usernameLabel: 用户名
     nameLabel: 显示名称
@@ -1326,7 +1326,7 @@ teamSelect:
     created: 创建的团队
     managed: 管理的团队
     member: 所属的团队
-    system: 系统全部团队
+    system: 系统中的全部团队
   createHint: 新建团队
   createTitle: 新建团队
   createDescription: 创建后会自动切换到新团队。
@@ -1377,11 +1377,11 @@ teamManagement:
   widgets:
     title: 小组件
     subtitle: 小组件功能正在开发中。
-    underConstruction: 正在施工中
+    underConstruction: 正在开发中
   notifications:
-    title: 事件通知
-    subtitle: 管理当前团队的事件通知规则。
-    empty: 当前团队还没有事件通知规则。
+    title: 通知规则
+    subtitle: 管理当前团队的通知规则。
+    empty: 当前团队还没有通知规则。
     forbiddenTitle: 通知规则由团队管理员管理
     forbiddenDescription: 你仍然可以查看自己的通知消息，并修改个人通知偏好。
     rulesTitle: 通知规则
@@ -1438,7 +1438,7 @@ teamManagement:
     operatorLabel: 操作符
     valueLabel: 阈值
     cooldownLabel: 冷却时间
-    cooldownDescription: 在这段时间内，不会重复发送报告。
+    cooldownDescription: 在这段时间内，不会重复发送通知。
     noDataHoursLabel: 无数据小时数
     pleaseChooseSite: 请选择一个站点。
     pleaseChooseRecipients: 请至少选择一个接收人。
@@ -1505,7 +1505,7 @@ teamManagement:
     nextRunStates:
       disabled: 未启用
       coolingDown: 冷却中
-      dueNow: 现在到期
+      dueNow: 应立即运行
     previewFields:
       status: 状态
       summary: 摘要
@@ -1795,17 +1795,17 @@ managementPages:
     refresh: 刷新
     loadFailed: 加载定时任务失败。
     allStatuses: 全部状态
-    runs24h: 24 小时运行
+    runs24h: 24 小时内运行次数
     successRate24h: 24 小时成功率
     successRateDescription: 只统计成功状态的运行。
-    problemRuns24h: 问题运行
+    problemRuns24h: 异常运行次数
     retentionPrefix: 保留
     days: 天
     failed: 失败
     partial: 部分完成
     lastRun: 最近运行
-    staleRunning: 卡住的运行
-    noStaleRunning: 没有卡住的运行
+    staleRunning: 长时间未完成的运行
+    noStaleRunning: 没有长时间未完成的运行
     taskListTitle: 任务
     taskListDescription: 当前系统注册的定时任务和近 30 天健康状况。
     task: 任务
@@ -1837,9 +1837,9 @@ managementPages:
     messagesCreated: 消息
     emailFailed: 邮件失败
     logs: 日志
-    viewLogs: 查看
+    viewLogs: 查看日志
     logTitle: 运行日志
-    noRunSelected: 选择一次运行查看日志。
+    noRunSelected: 选择一条运行记录以查看日志。
     noLogs: 暂无日志。
     error: 错误
     status:
@@ -1983,7 +1983,7 @@ requestObservation:
   identifiers: 标识符
   fullUserAgent: 完整 User-Agent
   id: ID
-  metadata: Metadata
+  metadata: 元数据
   time: 时间
   site: 站点
   location: 位置
@@ -2081,7 +2081,7 @@ systemSettings:
   botAnalyticsSaveFailed: 保存分析引擎配置失败。
   botAnalyticsDeleted: 分析引擎配置已删除。
   botAnalyticsDeleteFailed: 删除分析引擎配置失败。
-  botAnalyticsDeleteConfirm: 确认删除分析引擎读取配置吗？删除后依赖 Analytics Engine 的功能会显示需要配置。
+  botAnalyticsDeleteConfirm: 确认删除分析引擎读取凭据吗？删除后，依赖 Analytics Engine 的功能将显示为未配置。
   botAnalyticsEngineDisabledTitle: Analytics Engine 尚未启用
   botAnalyticsEngineDisabledDescription:
     当前部署已自动禁用 Analytics Engine 绑定，因为
@@ -2107,15 +2107,15 @@ systemSettings:
     - 选择发送邮件所需的权限，并复制生成后的 API Key。
     - 回到这里填写发件人名称、发件邮箱、Reply-To 和 Resend API Key。
     - 保存后使用测试收件人发送一封测试邮件，确认投递链路正常。
-  loginTurnstileTitle: 登录 Turnstile 保护
+  loginTurnstileTitle: 登录 Turnstile 防护
   loginTurnstileDescription: 启用后，登录页会在后台执行 Cloudflare Turnstile Invisible 验证，并在服务端登录流程中强制校验。
   loginTurnstileEnabledLabel: 启用登录保护
   loginTurnstileSiteKeyLabel: Site Key
   loginTurnstileSecretKeyLabel: Secret Key
   loginTurnstileSecretKeyPlaceholder: 查看教程以获取 Turnstile Secret Key
   loginTurnstileModeLabel: 验证模式
-  loginTurnstileModeInvisible: Invisible
-  loginTurnstileTest: 测试验证
+  loginTurnstileModeInvisible: 隐形（Invisible）
+  loginTurnstileTest: 测试配置
   loginTurnstileTesting: 验证中...
   loginTurnstileTestPassed: 验证成功
   loginTurnstileTestRequired: 新 Secret Key 需要先测试
@@ -2185,7 +2185,7 @@ systemPerformance:
   noRecentWrite: 暂无最近写入
   clockAnomalies: 时钟/延迟异常
   delayed: 延迟
-  future: 未来时钟
+  future: 未来时间戳
   latencyPercentileTrend: 延迟分位趋势
   latencyPercentileTrendDescription: 查看接收事件的 P50、P75、P95 估算延迟。
   throughputTrend: 已接收事件吞吐
@@ -2226,20 +2226,20 @@ systemPerformance:
   doDiagnosticOpenVisits: 缓冲未关闭访问行
   doDiagnosticOpenStale: 未关闭且停滞 >30 分钟
   doDiagnosticOpenTimedOut: 未关闭且停滞 >12 小时
-  doDiagnosticOpenHardAged: 起始 >36 小时
+  doDiagnosticOpenHardAged: 开始时间超过 36 小时
   doDiagnosticOpenFutureSkew: 未来时间戳
-  doDiagnosticStuckDirty: 未刷新卡住
+  doDiagnosticStuckDirty: 未刷新且卡住
   doDiagnosticMaxFlushAttempts: 最大重试次数
   doDiagnosticBufferedCustomEvents: 缓冲自定义事件
   doDiagnosticOldestOpen: 最早未关闭起始
-  doDiagnosticFutureMaxActivity: 最远未来 last_activity
-  doDiagnosticSiteList: 风险靠前的站点
+  doDiagnosticFutureMaxActivity: 最晚的未来活动时间
+  doDiagnosticSiteList: 风险最高的站点
   doDiagnosticSiteListDescription: 按风险评分排序，前 20 个站点的 DO 内部缓冲快照。
   doDiagnosticSiteFailed: 不可达
   doDiagnosticSiteOpen: 未关闭
-  doDiagnosticSiteStuck: 卡住
-  doDiagnosticSiteFuture: 未来
-  doDiagnosticSiteHardAged: 老旧
+  doDiagnosticSiteStuck: 卡滞
+  doDiagnosticSiteFuture: 未来时间戳
+  doDiagnosticSiteHardAged: 超龄
   doDiagnosticSiteAlarm: Alarm 状态
   doDiagnosticSiteAlarmNone: 无
   doDiagnosticSiteAlarmDue: 到期

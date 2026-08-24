@@ -349,7 +349,7 @@ realtime:
   subtitle: View traffic from the last 30 minutes.
   logTitleSeparator: ":"
   activeNow: Active now
-  liveMetrics: Active / 30m Visitors / 30m Views
+  liveMetrics: Active now / Visitors in last 30m / Views in last 30m
   connected: Connected
   connecting: Connecting
   reconnecting: Reconnecting
@@ -358,7 +358,7 @@ realtime:
   enterPage: Enter page
   leavePage: Exit page
   viewPage: View page
-  customEvent: Event
+  customEvent: Custom event
   detailsTitle: Event details
   detailsSection: Information
   browsingSection: Browsing
@@ -464,7 +464,7 @@ pages:
   queryTab: Query Params
   noQuery: No Query Params
   eventTab: Events
-  eventsMetric: Events
+  eventsMetric: Event count
   viewDetails: View details
 referrers:
   title: Referrers
@@ -485,11 +485,11 @@ referrers:
   directViews: Direct Views
   uniqueDomains: Unique Domains
   uniqueLinks: Unique Links
-  topSource: Top External Source
+  topSource: Primary External Source
   topSourceShare: Share of Views
   noExternalSource: No external source
   externalLabel: External
-  nextSources: Next 4 Sources
+  nextSources: Other 4 Sources
   longTail: Long Tail
   channelLongTail: Other channels
 campaigns:
@@ -532,9 +532,9 @@ sessionDetail:
   inactive: Ended
   status: Status
   duration: Duration
-  screenViews: Screen Views
+  screenViews: Page Views
   events: Events
-  bounce: Bounce
+  bounce: Bounced?
   entryPath: Entry Path
   exitPath: Exit Path
   referrerName: Referrer Name
@@ -576,12 +576,12 @@ events:
   backToEvents: Back to Events
   totalEvents: Total Events
   eventTypes: Event Types
-  sessions: Sessions
-  visitors: Visitors
+  sessions: Triggered sessions
+  visitors: Triggered visitors
   avgEventsPerSession: Avg Events / Session
   shareOfAllEvents: Share of All Events
   triggerCount: Triggers
-  triggerVisitors: Triggered Visitors
+  triggerVisitors: Triggered visitors
   trendTitle: Event Trend
   topEvents: Top Events
   recordsTitle: Event Records
@@ -685,7 +685,7 @@ funnels:
   sessions: Sessions
   visitors: Visitors
   conversion: Conversion
-  stepConversion: Step conversion
+  stepConversion: Step conversion rate
   dropOff: Drop-off
   updated: Updated
 visitors:
@@ -700,8 +700,8 @@ visitors:
   os: OS
   browser: Browser
   device: Device
-  firstSeen: First Seen
-  lastSeen: Last Seen
+  firstSeen: First Visit
+  lastSeen: Last Visit
   pageViews: Page Views
   sessions: Sessions
   loadError: Unable to load visitors.
@@ -718,9 +718,9 @@ visitorDetail:
   uniquePages: Unique Pages
   avgPagesPerSession: Avg Pages/Session
   avgEventsPerSession: Avg Events/Session
-  avgStay: Avg Stay
-  firstSeen: First seen
-  lastSeen: Last seen
+  avgStay: Avg. Visit Duration
+  firstSeen: First visit
+  lastSeen: Last visit
   daysActive: Days Active
   avgTimeBetweenSessions: Avg Time Between Sessions
   activity: Activity
@@ -760,8 +760,8 @@ visitorDetail:
 retention:
   title: Retention
   subtitle: Cohort-based visitor return analysis.
-  cohortDate: Cohort
-  cohortSize: Size
+  cohortDate: Cohort date
+  cohortSize: Cohort size
   periodLabel: Period {n}
   matrixTitle: Retention Matrix
   matrixSubtitle: Each row is a first-seen cohort; each column shows the share
@@ -771,9 +771,9 @@ retention:
   periodOneMetric: First Return
   averageReturnMetric: Average Return
   strongestCohortMetric: Best Cohort
-  eligibleVisitors: eligible visitors
-  periodsAnalyzed: periods analyzed
-  noEligibleCohorts: Not enough history
+  eligibleVisitors: Eligible visitors
+  periodsAnalyzed: Periods analyzed
+  noEligibleCohorts: No eligible cohorts
   weightedAverage: Weighted average
   legendLow: Low
   legendHigh: High
@@ -786,11 +786,11 @@ retention:
   unavailableCell: This cohort has not reached this period yet.
   visitorsDetail: Visitors
   rateDetail: Retention
-  cohortDetail: Cohort
-  sizeDetail: Size
+  cohortDetail: Cohort date
+  sizeDetail: Cohort size
 geo:
   title: Location Analysis
-  subtitle: Study traffic performance for any location.
+  subtitle: Analyze traffic performance by location.
   mapTitle: Request Geo Distribution
   countryLabel: Country
   regionLabel: Region
@@ -798,13 +798,13 @@ geo:
   back: Back
   viewOnWikipedia: View on Wikipedia
   investigationNotice: This data comes from the web and may contain errors.
-  timezoneDeltaVsLocal: "{delta} vs local"
+  timezoneDeltaVsLocal: "Difference from local time: {delta}"
   visitorCoordinates: Visitor Coordinates
   ipNotice: Estimated location via IP. Coordinates are approximate and do not
     pinpoint a precise address.
   multipleNotice: Estimated locations via IP. Multi-session journeys may span multiple cities.
   investigation:
-    countryScopedLabel: Country {label}
+    countryScopedLabel: "Country's {label}"
     capital: Capital
     population: Population
     gdp: GDP
@@ -1004,7 +1004,7 @@ siteSettings:
   autoTrackOutboundLinksHint: When enabled, clicking links to external domains
     automatically reports outbound_click events.
   performanceGroupTitle: Performance Tracking
-  performanceGroupDescription: Control Web performance metric collection with one sampling rate.
+  performanceGroupDescription: Control Web performance metric collection with a sampling rate.
   performanceSampleRateLabel: Performance Sample Rate (%)
   performanceSampleRateHint:
     A sampled visit records TTFB, FCP, LCP, CLS, and INP
@@ -1110,7 +1110,7 @@ notificationCenter:
   empty: No notifications yet.
   loading: Loading notifications
   markRead: Mark read
-  markAllRead: Mark all read
+  markAllRead: Mark all as read
   refresh: Refresh
   attention: Attention
   loadFailed: Failed to load notifications.
@@ -1315,7 +1315,7 @@ accountLinks:
     roleLabel: Role
     emailLabel: Invite email
     accountEmailLabel: Account email
-    anyEmail: Any account
+    anyEmail: Any email address
     expiresLabel: Expires
     usernameLabel: Username
     nameLabel: Display name
@@ -1430,9 +1430,9 @@ teamManagement:
     subtitle: Widget functionality is being built.
     underConstruction: Under construction
   notifications:
-    title: Event Notifications
-    subtitle: Manage event notification rules for this team.
-    empty: This team has no event notification rules yet.
+    title: Notification Rules
+    subtitle: Manage notification rules for this team.
+    empty: This team has no notification rules yet.
     forbiddenTitle: Notification rules are managed by team admins
     forbiddenDescription:
       You can still view your own notifications and update your
@@ -1492,7 +1492,7 @@ teamManagement:
     operatorLabel: Operator
     valueLabel: Value
     cooldownLabel: Cooldown
-    cooldownDescription: Reports will not be sent again during this cooldown window.
+    cooldownDescription: Notifications will not be sent again during this cooldown window.
     noDataHoursLabel: No data hours
     pleaseChooseSite: Please choose a site.
     pleaseChooseRecipients: Please choose at least one recipient.
@@ -1855,17 +1855,17 @@ managementPages:
     refresh: Refresh
     loadFailed: Failed to load scheduled tasks.
     allStatuses: All statuses
-    runs24h: 24h runs
-    successRate24h: 24h success rate
+    runs24h: Runs in 24h
+    successRate24h: Success rate in 24h
     successRateDescription: Counts only successful runs.
-    problemRuns24h: Problem runs
+    problemRuns24h: Problematic runs
     retentionPrefix: Retained for
     days: days
     failed: Failed
     partial: Partial
     lastRun: Last run
-    staleRunning: Stale running
-    noStaleRunning: No stale running runs
+    staleRunning: Long-running unfinished runs
+    noStaleRunning: No long-running unfinished runs
     taskListTitle: Tasks
     taskListDescription: Registered scheduled tasks and 30-day health status.
     task: Task
@@ -1897,7 +1897,7 @@ managementPages:
     messagesCreated: Messages
     emailFailed: Email failed
     logs: Logs
-    viewLogs: View
+    viewLogs: View logs
     logTitle: Run logs
     noRunSelected: Select a run to inspect logs.
     noLogs: No logs for this run.
@@ -2162,9 +2162,9 @@ systemSettings:
   botAnalyticsSaveFailed: Failed to save Analytics Engine configuration.
   botAnalyticsDeleted: Analytics Engine configuration deleted.
   botAnalyticsDeleteFailed: Failed to delete Analytics Engine configuration.
-  botAnalyticsDeleteConfirm: Delete the Analytics Engine read configuration?
+  botAnalyticsDeleteConfirm: Delete the Analytics Engine read credentials?
     Features that depend on Analytics Engine will show configuration required
-    until it is restored.
+    until the credentials are restored.
   botAnalyticsEngineDisabledTitle: Analytics Engine is not enabled
   botAnalyticsEngineDisabledDescription: This deployment automatically disabled
     the Analytics Engine binding because the Cloudflare account has not enabled
@@ -2205,7 +2205,7 @@ systemSettings:
   loginTurnstileSecretKeyPlaceholder: View the guide to get a Turnstile Secret Key
   loginTurnstileModeLabel: Verification mode
   loginTurnstileModeInvisible: Invisible
-  loginTurnstileTest: Test verification
+  loginTurnstileTest: Test configuration
   loginTurnstileTesting: Verifying...
   loginTurnstileTestPassed: Verification passed
   loginTurnstileTestRequired: New Secret Key must be tested first
@@ -2278,7 +2278,7 @@ systemPerformance:
   noRecentWrite: No recent write
   clockAnomalies: Clock / Delay Anomalies
   delayed: Delayed
-  future: Future clock
+  future: Future timestamps
   latencyPercentileTrend: Latency Percentile Trend
   latencyPercentileTrendDescription: View estimated P50, P75, and P95 delay for received events.
   throughputTrend: Accepted Event Throughput
@@ -2323,21 +2323,21 @@ systemPerformance:
   doDiagnosticOpenTimedOut: Open idle >12h
   doDiagnosticOpenHardAged: Started >36h ago
   doDiagnosticOpenFutureSkew: Future timestamps
-  doDiagnosticStuckDirty: Stuck dirty
+  doDiagnosticStuckDirty: Stuck unflushed
   doDiagnosticMaxFlushAttempts: Max retry attempts
   doDiagnosticBufferedCustomEvents: Buffered custom events
   doDiagnosticOldestOpen: Oldest open started_at
-  doDiagnosticFutureMaxActivity: Farthest future last_activity
+  doDiagnosticFutureMaxActivity: Latest future activity time
   doDiagnosticSiteList: Top risk sites
   doDiagnosticSiteListDescription: Top 20 sites by risk score, snapshotted from per-DO buffered state.
   doDiagnosticSiteFailed: Unreachable
-  doDiagnosticSiteOpen: open
-  doDiagnosticSiteStuck: stuck
-  doDiagnosticSiteFuture: future
-  doDiagnosticSiteHardAged: aged
+  doDiagnosticSiteOpen: Open
+  doDiagnosticSiteStuck: Stuck
+  doDiagnosticSiteFuture: Future timestamps
+  doDiagnosticSiteHardAged: Over 36h old
   doDiagnosticSiteAlarm: Alarm
-  doDiagnosticSiteAlarmNone: none
-  doDiagnosticSiteAlarmDue: due
+  doDiagnosticSiteAlarmNone: None
+  doDiagnosticSiteAlarmDue: Due
   doDiagnosticSiteResponseMs: Response time
   doDiagnosticThresholdsHint: Thresholds — stale {stale}, timeout {timeout},
     hardAged {hardAged}, stuck flush_attempts ≥ {stuck}

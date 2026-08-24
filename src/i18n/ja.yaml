@@ -349,7 +349,7 @@ realtime:
   subtitle: 直近 30 分間のトラフィックを確認します。
   logTitleSeparator: ":"
   activeNow: 現在アクティブ
-  liveMetrics: アクティブ / 30分訪問者 / 30分表示回数
+  liveMetrics: 現在アクティブ / 過去30分の訪問者数 / 過去30分のページビュー数
   connected: 接続済み
   connecting: 接続中
   reconnecting: 再接続中
@@ -358,7 +358,7 @@ realtime:
   enterPage: ページに入る
   leavePage: ページを離れる
   viewPage: ページ表示
-  customEvent: イベント
+  customEvent: カスタムイベント
   detailsTitle: イベント詳細
   detailsSection: 情報
   browsingSection: 閲覧
@@ -464,7 +464,7 @@ pages:
   queryTab: クエリパラメータ
   noQuery: クエリパラメータなし
   eventTab: イベント
-  eventsMetric: イベント
+  eventsMetric: イベント数
   viewDetails: 詳細を表示
 referrers:
   title: 参照元
@@ -482,14 +482,14 @@ referrers:
   radarTraffic: トラフィック
   directSourceNote: このトラフィックは外部の参照元サイトなしで到達しました。
   breakdownTitle: ソース内訳
-  directViews: 直接表示
-  uniqueDomains: ユニークドメイン
-  uniqueLinks: ユニークリンク
-  topSource: 上位外部ソース
+  directViews: 直接表示回数
+  uniqueDomains: ユニークドメイン数
+  uniqueLinks: ユニークリンク数
+  topSource: 主要な外部ソース
   topSourceShare: 表示回数シェア
   noExternalSource: 外部ソースなし
   externalLabel: 外部
-  nextSources: 次の 4 ソース
+  nextSources: その他 4 件のソース
   longTail: ロングテール
   channelLongTail: その他のチャネル
 campaigns:
@@ -519,7 +519,7 @@ sessions:
   os: OS
   browser: ブラウザー
   device: デバイス
-  pageViews: ページ表示
+  pageViews: ページビュー数
   loadError: セッションを読み込めません。
   empty: この時間範囲にセッションはありません。
 sessionDetail:
@@ -532,9 +532,9 @@ sessionDetail:
   inactive: 終了
   status: ステータス
   duration: 滞在時間
-  screenViews: 画面表示
+  screenViews: ページビュー数
   events: イベント
-  bounce: 直帰
+  bounce: 直帰したか
   entryPath: 入口パス
   exitPath: 離脱パス
   referrerName: 参照元名
@@ -544,7 +544,7 @@ sessionDetail:
   screen: 画面
   yes: はい
   no: いいえ
-  uniquePages: ユニークページ
+  uniquePages: ユニークページ数
   firstEvent: 最初のイベント
   lastEvent: 最後のイベント
   sessionStarted: セッション開始
@@ -573,12 +573,12 @@ events:
   backToEvents: イベントへ戻る
   totalEvents: 総イベント数
   eventTypes: イベント種別
-  sessions: セッション
-  visitors: 訪問者
+  sessions: トリガーセッション数
+  visitors: トリガー訪問者数
   avgEventsPerSession: 平均イベント / セッション
   shareOfAllEvents: 全イベント内シェア
   triggerCount: トリガー数
-  triggerVisitors: トリガー訪問者
+  triggerVisitors: トリガー訪問者数
   trendTitle: イベント推移
   topEvents: 上位イベント
   recordsTitle: イベント記録
@@ -669,16 +669,16 @@ funnels:
   deleted: ファネルを削除しました。
   deleteFailed: ファネルを削除できません。
   overallConversion: 全体コンバージョン
-  startedSessions: 開始セッション
-  convertedSessions: コンバージョンセッション
-  convertedVisitors: コンバージョン訪問者
+  startedSessions: 開始セッション数
+  convertedSessions: コンバージョンセッション数
+  convertedVisitors: コンバージョン訪問者数
   largestDropOff: 最大離脱
   noDropOff: 離脱なし
   step: ステップ
   sessions: セッション
   visitors: 訪問者
   conversion: コンバージョン
-  stepConversion: ステップコンバージョン
+  stepConversion: ステップコンバージョン率
   dropOff: 離脱
   updated: 更新
 visitors:
@@ -693,10 +693,10 @@ visitors:
   os: OS
   browser: ブラウザー
   device: デバイス
-  firstSeen: 初回確認
-  lastSeen: 最終確認
-  pageViews: ページ表示
-  sessions: セッション
+  firstSeen: 初回訪問
+  lastSeen: 最終訪問
+  pageViews: ページビュー数
+  sessions: セッション数
   loadError: 訪問者を読み込めません。
   empty: この時間範囲に訪問者はいません。
 visitorDetail:
@@ -707,13 +707,13 @@ visitorDetail:
   loadError: 訪問者詳細を読み込めません。
   totalDuration: 合計滞在時間
   events: イベント
-  views: ページビュー
-  uniquePages: ユニークページ
+  views: ページビュー数
+  uniquePages: ユニークページ数
   avgPagesPerSession: 平均ページ / セッション
   avgEventsPerSession: 平均イベント / セッション
-  avgStay: 平均滞在
-  firstSeen: 初回確認
-  lastSeen: 最終確認
+  avgStay: 平均滞在時間
+  firstSeen: 初回訪問
+  lastSeen: 最終訪問
   daysActive: アクティブ日数
   avgTimeBetweenSessions: セッション間の平均時間
   activity: アクティビティ
@@ -722,7 +722,7 @@ visitorDetail:
   visitor: 訪問者
   duration: 滞在時間
   referrer: 参照元
-  pageViews: ページ表示
+  pageViews: ページビュー数
   visitDetailsTitle: 訪問詳細
   visitDetailsSubtitle: この訪問者のセッション開始、ページビュー、離脱、カスタムイベントを発生順に表示します。
   customEvents: カスタムイベント
@@ -752,19 +752,19 @@ visitorDetail:
 retention:
   title: リテンション
   subtitle: コホートベースの訪問者再訪分析です。
-  cohortDate: コホート
-  cohortSize: サイズ
+  cohortDate: コホート日付
+  cohortSize: コホート人数
   periodLabel: 期間 {n}
   matrixTitle: リテンションマトリクス
   matrixSubtitle: 各行は初回確認コホート、各列は後続期間に戻ってきた割合を示します。
-  cohortsMetric: コホート
-  visitorsMetric: コホート訪問者
+  cohortsMetric: コホート数
+  visitorsMetric: コホート訪問者数
   periodOneMetric: 初回再訪
   averageReturnMetric: 平均再訪
   strongestCohortMetric: 最良コホート
-  eligibleVisitors: 対象訪問者
+  eligibleVisitors: 対象訪問者数
   periodsAnalyzed: 分析対象期間
-  noEligibleCohorts: 履歴が不足しています
+  noEligibleCohorts: 対象コホートがありません
   weightedAverage: 加重平均
   legendLow: 低
   legendHigh: 高
@@ -775,11 +775,11 @@ retention:
   unavailableCell: このコホートはまだこの期間に到達していません。
   visitorsDetail: 訪問者
   rateDetail: リテンション
-  cohortDetail: コホート
-  sizeDetail: サイズ
+  cohortDetail: コホート日付
+  sizeDetail: コホート人数
 geo:
   title: 地域分析
-  subtitle: 任意の地域におけるトラフィックパフォーマンスを確認します。
+  subtitle: 地域別にトラフィックパフォーマンスを分析します。
   mapTitle: リクエスト地域分布
   countryLabel: 国
   regionLabel: 地域
@@ -792,7 +792,7 @@ geo:
   ipNotice: IP から推定した地域です。座標は概算であり、正確な住所を示すものではありません。
   multipleNotice: IP から推定した地域です。複数セッションのジャーニーは複数都市にまたがる場合があります。
   investigation:
-    countryScopedLabel: 国 {label}
+    countryScopedLabel: 所属国の{label}
     capital: 首都
     population: 人口
     gdp: GDP
@@ -977,7 +977,7 @@ siteSettings:
   autoTrackOutboundLinksLabel: 外部リンククリックを自動追跡
   autoTrackOutboundLinksHint: 有効にすると、外部ドメインへのリンククリックで outbound_click イベントを自動送信します。
   performanceGroupTitle: パフォーマンストラッキング
-  performanceGroupDescription: 1 つのサンプリング率で Web パフォーマンス指標の収集を制御します。
+  performanceGroupDescription: サンプリング率で Web パフォーマンス指標の収集を制御します。
   performanceSampleRateLabel: パフォーマンスサンプリング率（%）
   performanceSampleRateHint: サンプリングされた訪問では、離脱時に TTFB、FCP、LCP、CLS、INP を記録します。0 で無効、100 で全量収集です。
   booleanOn: オン
@@ -1083,7 +1083,7 @@ notificationCenter:
   loadFailed: 通知を読み込めません。
   markReadFailed: 通知を既読にできません。
   markAllReadSuccess: 通知を既読にしました。
-  markAllReadFailed: 通知を既読にできません。
+  markAllReadFailed: すべての通知を既読にできません。
   ruleFilterActive: このルールで作成された通知を表示しています。
   ruleFilterClear: ルールフィルターをクリア
   sections:
@@ -1270,7 +1270,7 @@ accountLinks:
     roleLabel: 権限
     emailLabel: 招待先メール
     accountEmailLabel: アカウントメール
-    anyEmail: 任意のアカウント
+    anyEmail: 任意のメールアドレス
     expiresLabel: 有効期限
     usernameLabel: ユーザー名
     nameLabel: 表示名
@@ -1385,9 +1385,9 @@ teamManagement:
     subtitle: ウィジェット機能を開発中です。
     underConstruction: 準備中
   notifications:
-    title: イベント通知
-    subtitle: このチームのイベント通知ルールを管理します。
-    empty: このチームにはイベント通知ルールがありません。
+    title: 通知ルール
+    subtitle: このチームの通知ルールを管理します。
+    empty: このチームには通知ルールがありません。
     forbiddenTitle: 通知ルールはチーム管理者が管理します
     forbiddenDescription: 自分の通知を確認し、個人の通知設定を更新することはできます。
     rulesTitle: 通知ルール
@@ -1444,7 +1444,7 @@ teamManagement:
     operatorLabel: 演算子
     valueLabel: 値
     cooldownLabel: クールダウン
-    cooldownDescription: このクールダウン期間中、レポートは再送信されません。
+    cooldownDescription: このクールダウン期間中、通知は再送信されません。
     noDataHoursLabel: データなし時間
     pleaseChooseSite: サイトを選択してください。
     pleaseChooseRecipients: 受信者を 1 人以上選択してください。
@@ -1722,7 +1722,7 @@ teamManagement:
     inviteLinksTitle: 招待リンク
     inviteLinksSubtitle: 招待ステータスを確認し、有効なリンクを取り消します。
     noInvites: このチームには招待リンクがありません。
-    anyEmail: 任意のメール
+    anyEmail: 任意のメールアドレス
     revokeInvite: 招待を取り消し
     siteAccessLabel: サイト権限
     siteAccessAll: 全サイト
@@ -1763,7 +1763,7 @@ managementNav:
   versionUpdates: バージョン更新
   scheduledTasks: スケジュールタスク
   requestObservation: リクエスト監視
-  systemPerformance: システム性能
+  systemPerformance: システムパフォーマンス
   systemSettings: システム設定
 managementPages:
   versionUpdates:
@@ -1801,17 +1801,17 @@ managementPages:
     refresh: 更新
     loadFailed: スケジュールタスクを読み込めません。
     allStatuses: すべてのステータス
-    runs24h: 24時間実行
-    successRate24h: 24時間成功率
+    runs24h: 24時間以内の実行回数
+    successRate24h: 24時間以内の成功率
     successRateDescription: 成功した実行のみを数えます。
-    problemRuns24h: 問題のある実行
+    problemRuns24h: 異常な実行回数
     retentionPrefix: 保持期間
     days: 日
     failed: 失敗
     partial: 一部完了
     lastRun: 最終実行
-    staleRunning: 停滞中の実行
-    noStaleRunning: 停滞中の実行なし
+    staleRunning: 長時間未完了の実行
+    noStaleRunning: 長時間未完了の実行なし
     taskListTitle: タスク
     taskListDescription: 登録済みスケジュールタスクと過去 30 日間の健全性です。
     task: タスク
@@ -1843,7 +1843,7 @@ managementPages:
     messagesCreated: メッセージ
     emailFailed: メール失敗
     logs: ログ
-    viewLogs: 表示
+    viewLogs: ログを表示
     logTitle: 実行ログ
     noRunSelected: ログを確認する実行を選択してください。
     noLogs: この実行にログはありません。
@@ -2089,7 +2089,7 @@ systemSettings:
   botAnalyticsSaveFailed: Analytics Engine 設定を保存できません。
   botAnalyticsDeleted: Analytics Engine 設定を削除しました。
   botAnalyticsDeleteFailed: Analytics Engine 設定を削除できません。
-  botAnalyticsDeleteConfirm: Analytics Engine 読み取り設定を削除しますか？依存する機能は復元されるまで設定が必要な状態になります。
+  botAnalyticsDeleteConfirm: Analytics Engine の読み取り用認証情報を削除しますか？依存する機能は認証情報が復元されるまで設定が必要な状態になります。
   botAnalyticsEngineDisabledTitle: Analytics Engine が有効ではありません
   botAnalyticsEngineDisabledDescription:
     Cloudflare アカウントで Analytics Engine
@@ -2128,7 +2128,7 @@ systemSettings:
   loginTurnstileSecretKeyPlaceholder: ガイドを見て Turnstile Secret Key を取得
   loginTurnstileModeLabel: 検証モード
   loginTurnstileModeInvisible: Invisible
-  loginTurnstileTest: 検証をテスト
+  loginTurnstileTest: 設定をテスト
   loginTurnstileTesting: 検証中...
   loginTurnstileTestPassed: 検証に成功しました
   loginTurnstileTestRequired: 新しい Secret Key は先にテストが必要です
@@ -2179,11 +2179,11 @@ systemSettings:
   testFailed: テストメールを送信できません。
   loadFailed: メール設定を読み込めません。
 systemPerformance:
-  title: システム性能
+  title: システムパフォーマンス
   subtitle: 既存の分析行から InsightFlare の収集、バッファリング、書き込みの健全性を監視します。
   refresh: 更新
-  loadFailed: システム性能データを読み込めません。
-  noData: この期間にシステム性能データはありません。
+  loadFailed: システムパフォーマンスデータを読み込めません。
+  noData: この期間にシステムパフォーマンスデータはありません。
   range15m: 過去 15 分
   range1h: 過去 1 時間
   range6h: 過去 6 時間
@@ -2199,7 +2199,7 @@ systemPerformance:
   noRecentWrite: 最近の書き込みなし
   clockAnomalies: 時計 / 遅延異常
   delayed: 遅延
-  future: 未来時刻
+  future: 未来のタイムスタンプ
   latencyPercentileTrend: 遅延パーセンタイル推移
   latencyPercentileTrendDescription: 受信イベントの P50、P75、P95 推定遅延を表示します。
   throughputTrend: 受理イベントスループット
@@ -2235,26 +2235,26 @@ systemPerformance:
   doDiagnosticUnreachable: 一部の DO に到達できません
   doDiagnosticReachableSites: 到達可能 DO
   doDiagnosticTotalSites: 総サイト数
-  doDiagnosticActiveAlarms: アクティブな Alarm タイマー
+  doDiagnosticActiveAlarms: アクティブなアラームタイマー
   doDiagnosticBufferedVisits: バッファ済み訪問
   doDiagnosticOpenVisits: バッファ内未終了行
   doDiagnosticOpenStale: 未終了アイドル >30分
   doDiagnosticOpenTimedOut: 未終了アイドル >12時間
   doDiagnosticOpenHardAged: 開始から >36時間
-  doDiagnosticOpenFutureSkew: 未来タイムスタンプ
-  doDiagnosticStuckDirty: 未フラッシュの滞留
+  doDiagnosticOpenFutureSkew: 未来のタイムスタンプ
+  doDiagnosticStuckDirty: 未フラッシュで停滞
   doDiagnosticMaxFlushAttempts: 最大再試行回数
   doDiagnosticBufferedCustomEvents: バッファ済みカスタムイベント
   doDiagnosticOldestOpen: 最古の未終了 started_at
-  doDiagnosticFutureMaxActivity: 最も未来の last_activity
+  doDiagnosticFutureMaxActivity: 未来側に最もずれた最終活動時刻
   doDiagnosticSiteList: リスク上位サイト
   doDiagnosticSiteListDescription: DO ごとのバッファ状態スナップショットをリスクスコア順に並べた上位 20 サイトです。
   doDiagnosticSiteFailed: 到達不能
   doDiagnosticSiteOpen: 未終了
-  doDiagnosticSiteStuck: 詰まり
-  doDiagnosticSiteFuture: 未来
-  doDiagnosticSiteHardAged: 経過
-  doDiagnosticSiteAlarm: Alarm
+  doDiagnosticSiteStuck: 停滞
+  doDiagnosticSiteFuture: 未来のタイムスタンプ
+  doDiagnosticSiteHardAged: 36時間超過
+  doDiagnosticSiteAlarm: アラーム
   doDiagnosticSiteAlarmNone: なし
   doDiagnosticSiteAlarmDue: 期限到来
   doDiagnosticSiteResponseMs: 応答時間
