@@ -4,7 +4,7 @@ import type {
   BrowserCrossBreakdownDimensionDataRow,
   BrowserTrendPointRow,
   BrowserTrendSeriesRow,
-} from "@/lib/edge/query/core";
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   handleBrowserCrossBreakdownContract as handleBrowserCrossBreakdown,
   handleBrowserEngineTrendContract as handleBrowserEngineTrend,
@@ -17,7 +17,7 @@ import {
   handleReferrerDimensionTrendContract as handleReferrerDimensionTrend,
   handleReferrerRadarContract as handleReferrerRadar,
   handleUtmDimensionTrendContract as handleUtmDimensionTrend,
-} from "@/lib/edge/query/technology-contract-adapter";
+} from "@/lib/edge/analytics/providers/d1/internal/technology-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
@@ -36,30 +36,40 @@ const queryMocks = vi.hoisted(() => ({
   queryUtmDimensionTrendFromD1: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/query/technology/browser", () => ({
-  queryBrowserCrossBreakdownFromD1: queryMocks.queryBrowserCrossBreakdownFromD1,
-  queryBrowserEngineTrendFromD1: queryMocks.queryBrowserEngineTrendFromD1,
-  queryBrowserTrendFromD1: queryMocks.queryBrowserTrendFromD1,
-  queryBrowserVersionBreakdownFromD1:
-    queryMocks.queryBrowserVersionBreakdownFromD1,
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/technology/browser",
+  () => ({
+    queryBrowserCrossBreakdownFromD1:
+      queryMocks.queryBrowserCrossBreakdownFromD1,
+    queryBrowserEngineTrendFromD1: queryMocks.queryBrowserEngineTrendFromD1,
+    queryBrowserTrendFromD1: queryMocks.queryBrowserTrendFromD1,
+    queryBrowserVersionBreakdownFromD1:
+      queryMocks.queryBrowserVersionBreakdownFromD1,
+  }),
+);
 
-vi.mock("@/lib/edge/query/technology/client-cross", () => ({
-  queryCrossDimensionFromD1: queryMocks.queryCrossDimensionFromD1,
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/technology/client-cross",
+  () => ({
+    queryCrossDimensionFromD1: queryMocks.queryCrossDimensionFromD1,
+  }),
+);
 
-vi.mock("@/lib/edge/query/technology/radar", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/technology/radar", () => ({
   queryBrowserRadarFromD1: queryMocks.queryBrowserRadarFromD1,
   queryReferrerRadarFromD1: queryMocks.queryReferrerRadarFromD1,
 }));
 
-vi.mock("@/lib/edge/query/technology/share-trend", () => ({
-  queryClientDimensionTrendFromD1: queryMocks.queryClientDimensionTrendFromD1,
-  queryReferrerAndChannelTrendFromD1:
-    queryMocks.queryReferrerAndChannelTrendFromD1,
-  queryReferrerTrendFromD1: queryMocks.queryReferrerTrendFromD1,
-  queryUtmDimensionTrendFromD1: queryMocks.queryUtmDimensionTrendFromD1,
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/technology/share-trend",
+  () => ({
+    queryClientDimensionTrendFromD1: queryMocks.queryClientDimensionTrendFromD1,
+    queryReferrerAndChannelTrendFromD1:
+      queryMocks.queryReferrerAndChannelTrendFromD1,
+    queryReferrerTrendFromD1: queryMocks.queryReferrerTrendFromD1,
+    queryUtmDimensionTrendFromD1: queryMocks.queryUtmDimensionTrendFromD1,
+  }),
+);
 
 const env = {
   DB: {},

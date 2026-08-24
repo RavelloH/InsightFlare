@@ -104,7 +104,7 @@ import {
   readTeamOverview,
   readTeamSites,
   readTeamTimeseries,
-} from "@/lib/edge/analytics/api-v1-provider";
+} from "@/lib/edge/analytics/adapters/api-v1";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import { authenticateApiKeyMiddleware } from "@/lib/hono/middleware/api-key";
 import type { AppEnv } from "@/lib/hono/types";

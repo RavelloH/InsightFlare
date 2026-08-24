@@ -6,7 +6,7 @@ import {
   systemFilterPresetFromOptionValue,
   systemFilterPresetOptionValue,
 } from "@/lib/dashboard/system-filter-presets";
-import { queryPolicyForAudience } from "@/lib/edge/query-contract/policy";
+import { queryPolicyForAudience } from "@/lib/edge/analytics/contract/policy";
 import {
   analyticsFilterRegistry,
   assertFilterAudience,

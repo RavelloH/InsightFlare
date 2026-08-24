@@ -1,22 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/core", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/core", () => ({
   resolvePrivateTeamForSession: vi.fn(),
 }));
-vi.mock("@/lib/edge/query/team", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
   queryTeamDashboardForTeam: vi.fn(),
 }));
 vi.mock("@/lib/edge/session-auth", () => ({
   requireSession: vi.fn(),
 }));
 
-import { resolvePrivateTeamForSession } from "@/lib/edge/query/core";
-import { queryTeamDashboardForTeam } from "@/lib/edge/query/team";
+import { resolvePrivateTeamForSession } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryTeamDashboardForTeam } from "@/lib/edge/analytics/providers/d1/internal/team";
 import {
   readTeamDashboard,
   resolveDashboardSession,
   resolveTeamDashboardScope,
-} from "@/lib/edge/query-runtime/team-dashboard";
+} from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
 import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
 import { requireSession } from "@/lib/edge/session-auth";
 

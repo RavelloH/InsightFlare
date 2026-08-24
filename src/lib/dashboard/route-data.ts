@@ -31,11 +31,14 @@ import {
 import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
 import type { TeamDashboardSnapshot } from "@/lib/dashboard/team-dashboard-query";
 import {
+  createSsrTeamDashboardProviderRegistry,
+  type SsrTeamDashboardData,
+} from "@/lib/edge/analytics/adapters/ssr";
+import {
   createQueryTime,
   executeTypedApplicationOperation,
   teamQueryContext,
-} from "@/lib/edge/query-contract";
-import { readTeamDashboard } from "@/lib/edge/query-runtime/team-dashboard";
+} from "@/lib/edge/analytics/contract";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 import { normalizeNotificationPreferencesData } from "@/lib/edge-client";
 import { fetchPublicSite } from "@/lib/edge-client";
@@ -113,7 +116,7 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
     if (resolved instanceof Response) return null;
 
     const window = resolveDashboardInitialWindow(request.headers.get("cookie"));
-    const result = await executeTypedApplicationOperation(
+    const result = await executeTypedApplicationOperation<SsrTeamDashboardData>(
       "team-dashboard",
       {
         context: teamQueryContext(
@@ -128,21 +131,18 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
           window.to,
         ),
       },
-      async () => {
-        const dashboard = await readTeamDashboard({
-          env: resolved.env,
-          teamId: resolved.teamId,
-          window: {
-            startMs: window.from,
-            endExclusiveMs: window.to,
-            nowMs: window.to,
-            timeZone: window.timeZone,
-          },
-          interval: window.interval,
-          allowedSiteIds: resolved.allowedSiteIds,
-        });
-        return { value: dashboard.data, source: dashboard.source };
-      },
+      createSsrTeamDashboardProviderRegistry({
+        env: resolved.env,
+        teamId: resolved.teamId,
+        window: {
+          startMs: window.from,
+          endExclusiveMs: window.to,
+          nowMs: window.to,
+          timeZone: window.timeZone,
+        },
+        interval: window.interval,
+        allowedSiteIds: resolved.allowedSiteIds,
+      }),
     );
     if (!result.ok) throw new Error(result.error.kind);
     return {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/funnels", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/funnels", () => ({
   queryFunnelDefinition: vi.fn(),
   queryFunnelAnalysis: vi.fn(),
 }));
@@ -8,8 +8,8 @@ vi.mock("@/lib/edge/query/funnels", () => ({
 import {
   queryFunnelAnalysis,
   queryFunnelDefinition,
-} from "@/lib/edge/query/funnels";
-import { readSiteFunnelAnalysis } from "@/lib/edge/query-runtime/site-funnel-analysis";
+} from "@/lib/edge/analytics/providers/d1/internal/funnels";
+import { readSiteFunnelAnalysis } from "@/lib/edge/analytics/providers/d1/operations/site-funnel-analysis";
 
 const input = {
   env: {} as never,

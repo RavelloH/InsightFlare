@@ -1,25 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/performance", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/performance", () => ({
   queryAllPerformanceTrendsFromD1: vi.fn(),
   queryPerformanceCountriesFromD1: vi.fn(),
   queryPerformanceRoutesFromD1: vi.fn(),
   queryPerformanceSummariesFromD1: vi.fn(),
 }));
 
+import type { FilterFieldId } from "@/lib/edge/analytics/contract";
 import {
   queryAllPerformanceTrendsFromD1,
   queryPerformanceCountriesFromD1,
   queryPerformanceRoutesFromD1,
   queryPerformanceSummariesFromD1,
-} from "@/lib/edge/query/performance";
-import type { FilterFieldId } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/performance";
 import {
   readSitePerformanceBreakdown,
   type ReadSitePerformanceInput,
   readSitePerformanceSummary,
   readSitePerformanceTimeseries,
-} from "@/lib/edge/query-runtime/site-performance";
+} from "@/lib/edge/analytics/providers/d1/operations/site-performance";
 
 const metric = {
   avg: 1,

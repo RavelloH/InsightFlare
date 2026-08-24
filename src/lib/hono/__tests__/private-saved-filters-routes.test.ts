@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type * as QueryCoreModule from "@/lib/edge/query/core";
-import { resolvePrivateSiteForSession } from "@/lib/edge/query/core";
+import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
+import { resolvePrivateSiteForSession } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { handleSavedFilters } from "@/lib/edge/saved-filters";
 import { privateSavedFilterRoutes } from "@/lib/hono/routes/private/saved-filters";
 import type { AppEnv } from "@/lib/hono/types";
@@ -11,10 +11,13 @@ vi.mock("@/lib/edge/saved-filters", () => ({
   handleSavedFilters: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/query/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof QueryCoreModule>();
-  return { ...actual, resolvePrivateSiteForSession: vi.fn() };
-});
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/core",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof QueryCoreModule>();
+    return { ...actual, resolvePrivateSiteForSession: vi.fn() };
+  },
+);
 
 const env = { DB: {} };
 const session = {

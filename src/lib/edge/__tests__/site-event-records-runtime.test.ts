@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/events-records", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-records", () => ({
   parseEventRecordCursor: vi.fn(),
   queryEventRecordDetailFromD1: vi.fn(),
   queryEventRecordPageFromD1: vi.fn(),
@@ -12,11 +12,11 @@ import {
   queryEventRecordDetailFromD1,
   queryEventRecordPageFromD1,
   serializeEventRecordCursor,
-} from "@/lib/edge/query/events-records";
+} from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import {
   readSiteEventDetail,
   readSiteEventRecords,
-} from "@/lib/edge/query-runtime/site-event-records";
+} from "@/lib/edge/analytics/providers/d1/operations/site-event-records";
 
 const base = {
   env: { MAIN_SECRET: "cursor-secret" } as never,

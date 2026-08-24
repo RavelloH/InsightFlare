@@ -112,7 +112,7 @@ import {
 import {
   analyticsOperationById,
   type AnalyticsOperationId,
-} from "@/lib/edge/analytics/operation-registry";
+} from "@/lib/edge/analytics/application/operation-registry";
 
 export type ApiV1ComparisonOperationId =
   | "site.analytics.comparison"

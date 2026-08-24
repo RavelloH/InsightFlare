@@ -3,18 +3,19 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { QueryWindow } from "@/lib/edge/query/core";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   buildSessionAggregationSql,
   buildVisitorAggregationSql,
-} from "@/lib/edge/query/journey-aggregation-sql";
+} from "@/lib/edge/analytics/providers/d1/internal/journey-aggregation-sql";
 import {
   parseSessionListCursor,
   parseVisitorListCursor,
   querySessionsFromD1,
   serializeSessionListCursor,
   serializeVisitorListCursor,
-} from "@/lib/edge/query/journey-list-queries";
+} from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import {
   queryGeoPointAggregate,
   queryGeoPointsFromD1,
@@ -27,14 +28,13 @@ import {
   queryVisitorDetailFromD1,
   queryVisitorForDetailFromD1,
   queryVisitorsFromD1,
-} from "@/lib/edge/query/journeys";
+} from "@/lib/edge/analytics/providers/d1/internal/journeys";
 import {
   handleSessionDetailContract as handleSessionDetail,
   handleSessionsContract as handleSessions,
   handleVisitorDetailContract as handleVisitorDetail,
   handleVisitorsContract as handleVisitors,
-} from "@/lib/edge/query/journeys-contract-adapter";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/journeys-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

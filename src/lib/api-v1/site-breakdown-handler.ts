@@ -10,16 +10,17 @@ import {
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
-import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/catalog";
-import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
-import { type ApiKeyPrincipal, canAccessSiteId } from "@/lib/edge/api-key-auth";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
+import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
   type BreakdownResult,
   type FilterDocument,
   isReportingTimeZone,
   parseApiV1FilterDocument,
   siteQueryContext,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/contract/catalog";
+import { type ApiKeyPrincipal, canAccessSiteId } from "@/lib/edge/api-key-auth";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const DIMENSIONS = new Set<string>(ANALYTICS_DIMENSIONS);
@@ -240,15 +241,20 @@ export async function handlePlannedSiteBreakdown(
       limit: input.limit,
       filters,
     };
-    const serviceResult = await new TypedQueryApplicationService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute<
+      SiteBreakdownReaderInput,
+      BreakdownResult
+    >(
       {
         operation: "site.analytics.breakdown",
         context: siteQueryContext(siteId, "api-v1"),
         query,
-        provider: {
-          execute: ({ query: providerQuery, execution: providerExecution }) =>
-            reader({ ...providerQuery, signal: providerExecution.signal }),
-        },
+        providerRegistry: createCallbackProviderRegistry<
+          SiteBreakdownReaderInput,
+          BreakdownResult
+        >("site.analytics.breakdown", (providerQuery, providerExecution) =>
+          reader({ ...providerQuery, signal: providerExecution.signal }),
+        ),
       },
       {
         signal: executionContext.signal,

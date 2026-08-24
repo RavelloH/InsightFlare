@@ -7,25 +7,25 @@ const readers = vi.hoisted(() => ({
   queryFunnelDefinitions: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/query/funnels", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/funnels", () => ({
   queryFunnelAnalysis: readers.queryFunnelAnalysis,
   queryFunnelDefinition: readers.queryFunnelDefinition,
   queryFunnelDefinitions: readers.queryFunnelDefinitions,
 }));
 
-vi.mock("@/lib/edge/query/technology/radar", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/technology/radar", () => ({
   queryBrowserRadarFromD1: readers.queryBrowserRadarFromD1,
   queryReferrerRadarFromD1: vi.fn(),
 }));
 
-import { handleFunnelAnalysisContract } from "@/lib/edge/query/funnels-contract-adapter";
+import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/providers/d1/internal/funnels-contract-adapter";
 import {
   handleBrowserRadarContract,
   handleBrowserVersionBreakdownContract,
   handleClientDimensionTrendContract,
   handleCrossBreakdownContract,
   handleUtmDimensionTrendContract,
-} from "@/lib/edge/query/technology-contract-adapter";
+} from "@/lib/edge/analytics/providers/d1/internal/technology-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
 const env = { DB: {} } as unknown as Env;

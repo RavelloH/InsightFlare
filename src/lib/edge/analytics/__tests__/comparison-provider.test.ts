@@ -7,12 +7,12 @@ import type {
   FilterDocument,
   QueryContext,
   QueryTime,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
 import {
   createQueryTime,
   siteQueryContext,
   teamQueryContext,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
 import type { Env } from "@/lib/edge/types";
 
 const mocks = vi.hoisted(() => ({
@@ -23,23 +23,26 @@ const mocks = vi.hoisted(() => ({
   readSiteBreakdown: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/query/overview-contract-adapter", () => ({
-  createOverviewReader: mocks.createOverviewReader,
-}));
-vi.mock("@/lib/edge/query/events-summary", () => ({
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
+  () => ({
+    createOverviewReader: mocks.createOverviewReader,
+  }),
+);
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-summary", () => ({
   queryEventSummaryMetricsFromD1: mocks.queryEventSummaryMetricsFromD1,
 }));
-vi.mock("@/lib/edge/query/events-trend", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-trend", () => ({
   queryEventsTrendFromD1: mocks.queryEventsTrendFromD1,
 }));
-vi.mock("@/lib/edge/query/team", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
   listTeamSites: mocks.listTeamSites,
 }));
-vi.mock("@/lib/edge/query-runtime/site-breakdown", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/operations/site-breakdown", () => ({
   readSiteBreakdown: mocks.readSiteBreakdown,
 }));
 
-import { createComparisonProviders } from "@/lib/edge/analytics/comparison-provider";
+import { createComparisonProviders } from "@/lib/edge/analytics/providers/d1/comparison";
 
 const env = {} as Env;
 const filters: FilterDocument = { version: 1, root: null };

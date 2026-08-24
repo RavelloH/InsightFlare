@@ -13,14 +13,16 @@ import {
   type AnalyticsServiceResult,
   type QueryExecutionContext,
   TypedQueryApplicationService,
-} from "@/lib/edge/analytics/service";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+} from "@/lib/edge/analytics/application/service";
 import type {
   AnalyticsResult,
   OverviewReader,
+  TrendQuery,
   TrendResult,
-} from "@/lib/edge/query-contract";
-import { filterConditionCount } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import { filterConditionCount } from "@/lib/edge/analytics/contract";
+import { createOverviewProviderRegistry } from "@/lib/edge/analytics/providers/d1/operations/overview";
+import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 
 export async function executeApiV1SiteTimeseries(
   input: unknown,
@@ -71,13 +73,20 @@ export async function executeApiV1SiteTimeseries(
   if (!filter.ok) return filter;
   return {
     ok: true,
-    value: await new TypedQueryApplicationService(aggregateCache).trend(
-      reader,
+    value: await new TypedQueryApplicationService(aggregateCache).execute<
+      TrendQuery,
+      AnalyticsResult<TrendResult>
+    >(
       {
+        operation: "site.analytics.timeseries",
         context: context.context,
-        time: time.value,
-        filters: filter.value,
-        interval: parsed.data.interval,
+        query: {
+          context: context.context,
+          time: time.value,
+          filters: filter.value,
+          interval: parsed.data.interval,
+        },
+        providerRegistry: createOverviewProviderRegistry(reader),
         cache: {
           key: await aggregateCacheKey({
             operation: "site.analytics.timeseries",
@@ -87,6 +96,7 @@ export async function executeApiV1SiteTimeseries(
             extra: { interval: parsed.data.interval },
           }),
           policy: aggregateCachePolicy,
+          isCacheable: (result) => result.ok,
         },
       },
       {

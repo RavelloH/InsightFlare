@@ -1,25 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/journey-detail-queries", () => ({
-  queryVisitorDetailFromD1: vi.fn(),
-  querySessionDetailFromD1: vi.fn(),
-}));
-vi.mock("@/lib/edge/query/journey-list-queries", () => ({
-  parseSessionListCursor: vi.fn(),
-  parseVisitorListCursor: vi.fn(),
-  querySessionListPageFromD1: vi.fn(),
-  queryJourneyEventsFromD1: vi.fn(),
-  queryJourneyTargetExistsFromD1: vi.fn(),
-  querySessionsFromD1: vi.fn(),
-  queryVisitorListPageFromD1: vi.fn(),
-  serializeSessionListCursor: vi.fn(),
-  serializeVisitorListCursor: vi.fn(),
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/journey-detail-queries",
+  () => ({
+    queryVisitorDetailFromD1: vi.fn(),
+    querySessionDetailFromD1: vi.fn(),
+  }),
+);
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/journey-list-queries",
+  () => ({
+    parseSessionListCursor: vi.fn(),
+    parseVisitorListCursor: vi.fn(),
+    querySessionListPageFromD1: vi.fn(),
+    queryJourneyEventsFromD1: vi.fn(),
+    queryJourneyTargetExistsFromD1: vi.fn(),
+    querySessionsFromD1: vi.fn(),
+    queryVisitorListPageFromD1: vi.fn(),
+    serializeSessionListCursor: vi.fn(),
+    serializeVisitorListCursor: vi.fn(),
+  }),
+);
 
 import {
   querySessionDetailFromD1,
   queryVisitorDetailFromD1,
-} from "@/lib/edge/query/journey-detail-queries";
+} from "@/lib/edge/analytics/providers/d1/internal/journey-detail-queries";
 import {
   parseSessionListCursor,
   parseVisitorListCursor,
@@ -30,7 +36,7 @@ import {
   queryVisitorListPageFromD1,
   serializeSessionListCursor,
   serializeVisitorListCursor,
-} from "@/lib/edge/query/journey-list-queries";
+} from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import {
   readSiteSessionDetail,
   readSiteSessionEvents,
@@ -39,7 +45,7 @@ import {
   readSiteVisitorEvents,
   readSiteVisitors,
   readSiteVisitorSessions,
-} from "@/lib/edge/query-runtime/site-journeys";
+} from "@/lib/edge/analytics/providers/d1/operations/site-journeys";
 
 const base = {
   env: {} as never,

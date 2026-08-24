@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/technology/client-cross", () => ({
-  queryCrossDimensionFromD1: vi.fn(),
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/technology/client-cross",
+  () => ({
+    queryCrossDimensionFromD1: vi.fn(),
+  }),
+);
 
-import { queryCrossDimensionFromD1 } from "@/lib/edge/query/technology/client-cross";
-import { readSiteCrossBreakdown } from "@/lib/edge/query-runtime/site-cross-breakdown";
+import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
+import { readSiteCrossBreakdown } from "@/lib/edge/analytics/providers/d1/operations/site-cross-breakdown";
 
 const input = {
   env: {} as never,

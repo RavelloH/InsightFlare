@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/filter-values", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/filter-values", () => ({
   queryFilterValuesFromD1: vi.fn(),
 }));
 
-import { queryFilterValuesFromD1 } from "@/lib/edge/query/filter-values";
-import type { FilterFieldId } from "@/lib/edge/query-contract";
+import type { FilterFieldId } from "@/lib/edge/analytics/contract";
+import { queryFilterValuesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import {
   readSiteFilterValues,
   type ReadSiteFilterValuesInput,
-} from "@/lib/edge/query-runtime/site-filter-values";
+} from "@/lib/edge/analytics/providers/d1/operations/site-filter-values";
 
 const input = {
   env: {} as never,

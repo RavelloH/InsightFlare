@@ -5,7 +5,7 @@ import {
   assertFilterAudience,
   type FilterDocument,
   normalizeFilterDocument,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
 import {
   FunnelCreateInputSchema,
   FunnelUpdateInputSchema,

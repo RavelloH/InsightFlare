@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
-import { resolveTeamDashboardScope } from "@/lib/edge/query-runtime/team-dashboard";
+import { resolveTeamDashboardScope } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
 import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
 import type { Env } from "@/lib/edge/types";
 
-vi.mock("@/lib/edge/query-runtime/team-dashboard", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/operations/team-dashboard", () => ({
   resolveTeamDashboardScope: vi.fn(),
 }));
 

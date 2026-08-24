@@ -3,12 +3,12 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
-import {
-  createInvocationLogger,
-  runWithInvocationLogger,
-} from "@/lib/edge/observability-logger";
-import type { EventRecordRow, QueryWindow } from "@/lib/edge/query/core";
+import type { FilterDocument } from "@/lib/edge/analytics/contract";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import type {
+  EventRecordRow,
+  QueryWindow,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   queryOverviewClientDimensionsFromD1,
   queryOverviewGeoDimensionsFromD1,
@@ -17,7 +17,7 @@ import {
   querySessionBoundaryDimensionFromD1,
   querySessionPathDimensionFromD1,
   queryVisitDimensionFromD1,
-} from "@/lib/edge/query/dimensions";
+} from "@/lib/edge/analytics/providers/d1/internal/dimensions";
 import {
   handleEventFieldValuesContract as handleEventTypeFieldValues,
   handleEventRecordDetailContract as handleEventRecordDetail,
@@ -28,19 +28,22 @@ import {
   handleEventTypeDetailContract as handleEventTypeDetail,
   handleEventTypeFieldsContract as handleEventTypeFields,
   handleEventTypesContract as handleEventTypes,
-} from "@/lib/edge/query/events-contract-adapter";
+} from "@/lib/edge/analytics/providers/d1/internal/events-contract-adapter";
 import {
   queryEventFieldsFromD1,
   queryEventFieldValuesFromD1,
-} from "@/lib/edge/query/events-fields";
-import { queryEventTypeOverviewFromD1 } from "@/lib/edge/query/events-overview";
+} from "@/lib/edge/analytics/providers/d1/internal/events-fields";
+import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
 import {
   parseEventRecordCursor,
   queryEventRecordDetailFromD1,
   serializeEventRecordCursor,
-} from "@/lib/edge/query/events-records";
-import type { FilterDocument } from "@/lib/edge/query-contract";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/events-records";
+import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
+import {
+  createInvocationLogger,
+  runWithInvocationLogger,
+} from "@/lib/edge/observability-logger";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

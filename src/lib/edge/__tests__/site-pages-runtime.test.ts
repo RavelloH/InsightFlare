@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/pages", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/pages", () => ({
   queryPagesAggregate: vi.fn(),
   queryReferrerAggregate: vi.fn(),
 }));
@@ -8,11 +8,11 @@ vi.mock("@/lib/edge/query/pages", () => ({
 import {
   queryPagesAggregate,
   queryReferrerAggregate,
-} from "@/lib/edge/query/pages";
+} from "@/lib/edge/analytics/providers/d1/internal/pages";
 import {
   readSitePages,
   readSiteReferrers,
-} from "@/lib/edge/query-runtime/site-pages";
+} from "@/lib/edge/analytics/providers/d1/operations/site-pages";
 
 const input = {
   env: {} as never,

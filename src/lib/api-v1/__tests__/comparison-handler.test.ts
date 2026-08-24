@@ -9,10 +9,10 @@ const mocks = vi.hoisted(() => ({
 }));
 const providerCalls = { overview: 0, trend: 0, breakdown: 0 };
 
-vi.mock("@/lib/edge/analytics/comparison-provider", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/comparison", () => ({
   createComparisonProviders: mocks.createComparisonProviders,
 }));
-vi.mock("@/lib/edge/query/team", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
   listTeamSites: mocks.listTeamSites,
 }));
 

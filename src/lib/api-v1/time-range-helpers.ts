@@ -1,5 +1,8 @@
 import { jsonError } from "@/lib/api-v1/wire-helpers";
-import { TIME_PRESETS, type TimePreset } from "@/lib/edge/analytics/catalog";
+import {
+  TIME_PRESETS,
+  type TimePreset,
+} from "@/lib/edge/analytics/contract/catalog";
 
 export interface TimeRange {
   /** Inclusive ISO-8601 range boundary. */

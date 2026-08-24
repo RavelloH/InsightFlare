@@ -1,12 +1,12 @@
 import { apiV1RouteRegistry } from "@/lib/api-v1/route-registry";
 import type { AnalyticsSchemaData } from "@/lib/api-v1/wire";
-import { INTERVALS, TIME_PRESETS } from "@/lib/edge/analytics/catalog";
-import { analyticsOperationById } from "@/lib/edge/analytics/operation-registry";
+import { analyticsOperationById } from "@/lib/edge/analytics/application/operation-registry";
 import {
   FILTER_DOCUMENT_VERSION,
   FILTER_OPERATOR_IDS,
-} from "@/lib/edge/query-contract";
-import { analyticsFilterRegistry } from "@/lib/edge/query-contract/filter-registry";
+} from "@/lib/edge/analytics/contract";
+import { INTERVALS, TIME_PRESETS } from "@/lib/edge/analytics/contract/catalog";
+import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
 
 function metricType(key: string): "integer" | "rate" | "duration_ms" {
   if (key.endsWith("Rate")) return "rate";

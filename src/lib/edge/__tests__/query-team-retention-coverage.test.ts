@@ -3,31 +3,31 @@ import { DatabaseSync } from "node:sqlite";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleRetentionContract as handleRetention } from "@/lib/edge/query/analysis-contract-adapter";
+import { executePrivateTeamDashboard } from "@/lib/edge/analytics/adapters/private";
+import { handleRetentionContract as handleRetention } from "@/lib/edge/analytics/providers/d1/internal/analysis-contract-adapter";
 import {
   badRequest,
   normalizePathname,
   parseWindow,
   resolvePrivateTeam,
-} from "@/lib/edge/query/core";
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   browserMajorVersionExpr,
   clientDimensionDefinition,
   formatPageLabel,
   referrerDomainDimensionDefinition,
   utmDimensionDefinition,
-} from "@/lib/edge/query/core-dimensions";
+} from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
   parseLimit,
   parseQueryLimit,
   parseSessionListSort,
   parseVisitorListSort,
-} from "@/lib/edge/query/core-parsers";
+} from "@/lib/edge/analytics/providers/d1/internal/core-parsers";
 import {
   queryTeamOverviewFromD1,
   queryTeamTrendFromD1,
-} from "@/lib/edge/query/team";
-import { executePrivateTeamDashboard } from "@/lib/edge/query-adapters/private";
+} from "@/lib/edge/analytics/providers/d1/internal/team";
 import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
 import type { Env } from "@/lib/edge/types";
 

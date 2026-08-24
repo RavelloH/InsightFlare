@@ -1,5 +1,8 @@
+import {
+  type QueryContext,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-import { type QueryContext, siteQueryContext } from "@/lib/edge/query-contract";
 
 export type ApiV1QueryContextResult =
   | { readonly ok: true; readonly context: QueryContext }

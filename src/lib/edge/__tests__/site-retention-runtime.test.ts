@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/journey-retention", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/journey-retention", () => ({
   parseRetentionGranularity: (value: string | null) => value ?? "week",
   queryRetentionFromD1: vi.fn(),
 }));
 
-import { queryRetentionFromD1 } from "@/lib/edge/query/journey-retention";
-import type { FilterFieldId } from "@/lib/edge/query-contract";
+import type { FilterFieldId } from "@/lib/edge/analytics/contract";
+import { queryRetentionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import {
   readSiteRetention,
   type ReadSiteRetentionInput,
-} from "@/lib/edge/query-runtime/site-retention";
+} from "@/lib/edge/analytics/providers/d1/operations/site-retention";
 
 const input = {
   env: {} as never,

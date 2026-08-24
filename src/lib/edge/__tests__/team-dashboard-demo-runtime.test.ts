@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   readDemoTeamDashboard,
   resolveDemoTeamDashboardScope,
-} from "@/lib/edge/query-runtime/team-dashboard-demo";
+} from "@/lib/edge/analytics/providers/mock/team-dashboard-demo";
 
 const input = {
   env: {} as never,

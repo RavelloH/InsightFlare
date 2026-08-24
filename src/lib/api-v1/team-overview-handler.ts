@@ -3,18 +3,19 @@ import {
   TeamOverviewQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
-import { exceedsQueryCost } from "@/lib/api-v1/query-cost";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
-import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-import type { FilterDocument } from "@/lib/edge/query-contract";
+import { exceedsQueryCost } from "@/lib/edge/analytics/application/cost";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
+import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
+import type { FilterDocument } from "@/lib/edge/analytics/contract";
 import {
   isReportingTimeZone,
   parseApiV1FilterDocument,
   teamQueryContext,
-} from "@/lib/edge/query-contract";
-import type { TeamOverviewQueryResult } from "@/lib/edge/query-runtime/team-overview";
+} from "@/lib/edge/analytics/contract";
+import type { TeamOverviewQueryResult } from "@/lib/edge/analytics/providers/d1/operations/team-overview";
+import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -195,7 +196,10 @@ export async function handlePlannedTeamOverview(
       timeZone,
       filters,
     };
-    const serviceResult = await new TypedQueryApplicationService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute<
+      TeamOverviewReaderInput,
+      TeamOverviewQueryResult
+    >(
       {
         operation: "team.analytics.overview",
         context: teamQueryContext(
@@ -204,10 +208,12 @@ export async function handlePlannedTeamOverview(
           principal.siteIds,
         ),
         query,
-        provider: {
-          execute: ({ query: providerQuery, execution: providerExecution }) =>
-            reader({ ...providerQuery, signal: providerExecution.signal }),
-        },
+        providerRegistry: createCallbackProviderRegistry<
+          TeamOverviewReaderInput,
+          TeamOverviewQueryResult
+        >("team.analytics.overview", (providerQuery, providerExecution) =>
+          reader({ ...providerQuery, signal: providerExecution.signal }),
+        ),
       },
       {
         signal: executionContext.signal,

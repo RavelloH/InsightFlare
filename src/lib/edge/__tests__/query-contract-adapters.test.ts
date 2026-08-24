@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  type QueryOperation,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
+import {
   handleEventFieldValuesContract,
   handleEventRecordDetailContract,
   handleEventRecordsContract,
@@ -10,31 +14,27 @@ import {
   handleEventTypeDetailContract,
   handleEventTypeFieldsContract,
   handleEventTypesContract,
-} from "@/lib/edge/query/events-contract-adapter";
-import { handleFilterValuesContract } from "@/lib/edge/query/filter-values-contract-adapter";
-import { handleFunnelAnalysisContract } from "@/lib/edge/query/funnels-contract-adapter";
+} from "@/lib/edge/analytics/providers/d1/internal/events-contract-adapter";
+import { handleFilterValuesContract } from "@/lib/edge/analytics/providers/d1/internal/filter-values-contract-adapter";
+import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/providers/d1/internal/funnels-contract-adapter";
 import {
   handleSessionDetailContract,
   handleSessionsContract,
   handleVisitorDetailContract,
   handleVisitorsContract,
-} from "@/lib/edge/query/journeys-contract-adapter";
-import { handleOverviewGeoPointsContract } from "@/lib/edge/query/overview-extras-contract-adapter";
+} from "@/lib/edge/analytics/providers/d1/internal/journeys-contract-adapter";
+import { handleOverviewGeoPointsContract } from "@/lib/edge/analytics/providers/d1/internal/overview-extras-contract-adapter";
 import {
   handlePagesContract,
   handlePagesDashboardContract,
   handleReferrersContract,
-} from "@/lib/edge/query/pages-contract-adapter";
+} from "@/lib/edge/analytics/providers/d1/internal/pages-contract-adapter";
 import {
   handleBrowserVersionBreakdownContract,
   handleClientDimensionTrendContract,
   handleCrossBreakdownContract,
   handleUtmDimensionTrendContract,
-} from "@/lib/edge/query/technology-contract-adapter";
-import {
-  type QueryOperation,
-  siteQueryContext,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/technology-contract-adapter";
 import type { Env } from "@/lib/edge/types";
 
 function emptyEnv(): Env {

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createOperationCacheKey,
   OperationResultCache,
-} from "@/lib/edge/analytics/operation-cache";
+} from "@/lib/edge/analytics/application/cache";
 
 describe("OperationResultCache", () => {
   it("hashes stable semantics without exposing the subject or filter", async () => {

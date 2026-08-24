@@ -1,10 +1,13 @@
-import type { FilterDocument, QueryWindow } from "@/lib/edge/query/core";
-import { queryOverviewAggregate } from "@/lib/edge/query/overview";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import type {
+  FilterDocument,
+  QueryWindow,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryOverviewAggregate } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import {
   queryPagesAggregate,
   queryReferrerAggregate,
-} from "@/lib/edge/query/pages";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/pages";
 import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
 

@@ -2,13 +2,15 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { QueryWindow } from "@/lib/edge/query/core";
+import type { FilterDocument } from "@/lib/edge/analytics/contract";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   BROWSER_VERSION_UNKNOWN_TOKEN,
   clientDimensionDefinition,
   SHARE_TREND_OTHER_LABEL,
   SHARE_TREND_OTHER_TOKEN,
-} from "@/lib/edge/query/core";
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   parseClientDimensionKey,
   parseUtmDimensionKey,
@@ -18,10 +20,8 @@ import {
   queryReferrerAndChannelTrendFromD1,
   queryReferrerRadarFromD1,
   queryShareTrendFromD1,
-} from "@/lib/edge/query/technology";
-import { queryCrossDimensionFromD1 } from "@/lib/edge/query/technology/client-cross";
-import type { FilterDocument } from "@/lib/edge/query-contract";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/technology";
+import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

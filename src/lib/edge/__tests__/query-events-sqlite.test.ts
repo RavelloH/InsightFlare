@@ -2,28 +2,28 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import type { QueryWindow } from "@/lib/edge/query/core";
-import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/query/events-context";
-import { queryEventFieldsFromD1 } from "@/lib/edge/query/events-fields";
-import { queryEventTypeOverviewFromD1 } from "@/lib/edge/query/events-overview";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
+import { queryEventFieldsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
+import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
 import {
   type EventRecordCursor,
   queryEventRecordPageFromD1,
   queryEventRecordsFromD1,
-} from "@/lib/edge/query/events-records";
-import { queryEventSummaryMetricsFromD1 } from "@/lib/edge/query/events-summary";
+} from "@/lib/edge/analytics/providers/d1/internal/events-records";
+import { queryEventSummaryMetricsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import {
   queryEventsTrendFromD1,
   queryEventTypeTrendFromD1,
-} from "@/lib/edge/query/events-trend";
-import { queryFunnelAnalysis } from "@/lib/edge/query/funnels";
+} from "@/lib/edge/analytics/providers/d1/internal/events-trend";
+import { queryFunnelAnalysis } from "@/lib/edge/analytics/providers/d1/internal/funnels";
 import {
   querySessionListPageFromD1,
   querySessionsFromD1,
   queryVisitorListPageFromD1,
   queryVisitorsFromD1,
-} from "@/lib/edge/query/journey-list-queries";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

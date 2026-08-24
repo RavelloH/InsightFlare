@@ -65,15 +65,16 @@ import {
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
-import type { AnalyticsOperationId } from "@/lib/edge/analytics/operation-registry";
-import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
-import { type ApiKeyPrincipal, canAccessSiteId } from "@/lib/edge/api-key-auth";
+import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
+import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
   type FilterDocument,
   isReportingTimeZone,
   parseApiV1FilterDocument,
   siteQueryContext,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import { type ApiKeyPrincipal, canAccessSiteId } from "@/lib/edge/api-key-auth";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -475,15 +476,19 @@ async function handlePlannedSiteList<
       timeZone,
       filters,
     };
-    const serviceResult = await new TypedQueryApplicationService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute<
+      typeof query,
+      Result
+    >(
       {
         operation,
         context: siteQueryContext(siteId, "api-v1"),
         query,
-        provider: {
-          execute: ({ query: providerQuery, execution: providerExecution }) =>
+        providerRegistry: createCallbackProviderRegistry<typeof query, Result>(
+          operation,
+          (providerQuery, providerExecution) =>
             reader({ ...providerQuery, signal: providerExecution.signal }),
-        },
+        ),
       },
       {
         signal: execution.signal,

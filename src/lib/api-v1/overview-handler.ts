@@ -5,9 +5,9 @@ import {
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { serializeAnalyticsResult } from "@/lib/api-v1/serializer";
-import type { QueryExecutionContext } from "@/lib/edge/analytics/service";
+import type { QueryExecutionContext } from "@/lib/edge/analytics/application/service";
+import type { OverviewReader } from "@/lib/edge/analytics/contract";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-import type { OverviewReader } from "@/lib/edge/query-contract";
 
 const MAX_BODY_BYTES = 64 * 1024;
 

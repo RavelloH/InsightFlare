@@ -10,15 +10,16 @@ import {
   jsonSuccess,
   methodNotAllowed,
 } from "@/lib/api-v1/wire-helpers";
-import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-import { canAccessSiteId } from "@/lib/edge/api-key-auth";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
+import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
   parseApiV1FilterDocument,
   siteQueryContext,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { canAccessSiteId } from "@/lib/edge/api-key-auth";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -240,7 +241,10 @@ export async function handlePlannedSiteFunnelAnalysis(
   }
 
   try {
-    const serviceResult = await new TypedQueryApplicationService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute<
+      SiteFunnelAnalysisProviderInput,
+      SiteFunnelAnalysisProviderResult | null
+    >(
       {
         operation: "site.analytics.funnelAnalysis",
         context: siteQueryContext(siteId, "api-v1"),
@@ -255,7 +259,10 @@ export async function handlePlannedSiteFunnelAnalysis(
             timeZone: resolved.timeZone,
           },
         },
-        provider: { execute: ({ query }) => provider(query) },
+        providerRegistry: createCallbackProviderRegistry<
+          SiteFunnelAnalysisProviderInput,
+          SiteFunnelAnalysisProviderResult | null
+        >("site.analytics.funnelAnalysis", (query) => provider(query)),
       },
       {
         signal: execution.signal,

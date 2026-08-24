@@ -5,15 +5,16 @@ import {
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
-import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
+import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
   type FilterDocument,
   isReportingTimeZone,
   parseApiV1FilterDocument,
   teamQueryContext,
-} from "@/lib/edge/query-contract";
-import type { TeamSitesQueryResult } from "@/lib/edge/query-runtime/team-sites";
+} from "@/lib/edge/analytics/contract";
+import type { TeamSitesQueryResult } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
+import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -182,7 +183,10 @@ export async function handlePlannedTeamSites(
       interval: input.interval,
       filters,
     };
-    const serviceResult = await new TypedQueryApplicationService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute<
+      TeamSitesReaderInput,
+      TeamSitesQueryResult
+    >(
       {
         operation: "team.analytics.sites",
         context: teamQueryContext(
@@ -191,10 +195,12 @@ export async function handlePlannedTeamSites(
           principal.siteIds,
         ),
         query,
-        provider: {
-          execute: ({ query: providerQuery, execution: providerExecution }) =>
-            reader({ ...providerQuery, signal: providerExecution.signal }),
-        },
+        providerRegistry: createCallbackProviderRegistry<
+          TeamSitesReaderInput,
+          TeamSitesQueryResult
+        >("team.analytics.sites", (providerQuery, providerExecution) =>
+          reader({ ...providerQuery, signal: providerExecution.signal }),
+        ),
       },
       {
         signal: executionContext.signal,

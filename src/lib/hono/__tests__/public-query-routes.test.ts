@@ -1,14 +1,14 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
+import { fetchPublicSite } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { handleOverviewContract } from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
 import type * as DashboardCacheModule from "@/lib/edge/dashboard-cache";
 import {
   PUBLIC_QUERY_CACHE_OPTIONS,
   withDashboardCache,
 } from "@/lib/edge/dashboard-cache";
-import type * as QueryCoreModule from "@/lib/edge/query/core";
-import { fetchPublicSite } from "@/lib/edge/query/core";
-import { handleOverviewContract } from "@/lib/edge/query/overview-contract-adapter";
 import { publicQueryRoutes } from "@/lib/hono/routes/public/query";
 import type { AppEnv } from "@/lib/hono/types";
 
@@ -26,23 +26,32 @@ vi.mock("@/lib/edge/dashboard-cache", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/edge/query/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof QueryCoreModule>();
-  return {
-    ...actual,
-    fetchPublicSite: vi.fn(),
-  };
-});
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/core",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof QueryCoreModule>();
+    return {
+      ...actual,
+      fetchPublicSite: vi.fn(),
+    };
+  },
+);
 
-vi.mock("@/lib/edge/query/overview-contract-adapter", () => ({
-  handleOverviewContract: vi.fn(),
-  handleTrendContract: vi.fn(),
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
+  () => ({
+    handleOverviewContract: vi.fn(),
+    handleTrendContract: vi.fn(),
+  }),
+);
 
-vi.mock("@/lib/edge/query/pages-contract-adapter", () => ({
-  handlePagesContract: vi.fn(),
-  handleReferrersContract: vi.fn(),
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/pages-contract-adapter",
+  () => ({
+    handlePagesContract: vi.fn(),
+    handleReferrersContract: vi.fn(),
+  }),
+);
 
 const env = { DB: {} };
 const dispatchQueryRoute = vi.fn();

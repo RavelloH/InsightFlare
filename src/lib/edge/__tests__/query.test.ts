@@ -1,18 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  executePrivateQuery,
+  executePrivateTeamDashboard,
+} from "@/lib/edge/analytics/adapters/private";
+import { executePublicQuery } from "@/lib/edge/analytics/adapters/public";
+import {
   badRequest,
   fetchPublicSite,
   notAllowed,
   parseWindow,
   resolvePrivateSite,
   resolvePrivateTeam,
-} from "@/lib/edge/query/core";
-import {
-  executePrivateQuery,
-  executePrivateTeamDashboard,
-} from "@/lib/edge/query-adapters/private";
-import { executePublicQuery } from "@/lib/edge/query-adapters/public";
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   type EdgeSessionClaims,
   requireSession,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  parseApiV1FilterDocument,
+  parseApiV1FilterUrl,
+} from "@/lib/edge/analytics/contract";
+import {
   epochSecondsToIso,
   generatedAt,
   getRequestMeta,
@@ -20,10 +24,6 @@ import {
   validateCrossBreakdownDimension,
   validateDimension,
 } from "@/lib/edge/api-v1-helpers";
-import {
-  parseApiV1FilterDocument,
-  parseApiV1FilterUrl,
-} from "@/lib/edge/query-contract";
 
 function url(path: string): URL {
   return new URL(`https://edge.test${path}`);

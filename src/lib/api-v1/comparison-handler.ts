@@ -17,26 +17,25 @@ import {
 } from "@/lib/api-v1/dto/analytics";
 import { type ApiV1ErrorCode, apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/query-context";
-import { exceedsQueryCost, type QueryCostInput } from "@/lib/api-v1/query-cost";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import {
   resolveApiV1ComparisonDatasetTimeRange,
   resolveApiV1PreviousPeriod,
 } from "@/lib/api-v1/time-range";
-import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/catalog";
+import { OperationResultCache } from "@/lib/edge/analytics/application/cache";
 import {
   comparisonCacheKey,
   comparisonCachePolicy,
-} from "@/lib/edge/analytics/comparison-cache";
-import { createComparisonProviders } from "@/lib/edge/analytics/comparison-provider";
-import { OperationResultCache } from "@/lib/edge/analytics/operation-cache";
+} from "@/lib/edge/analytics/application/comparison-cache";
+import {
+  exceedsQueryCost,
+  type QueryCostInput,
+} from "@/lib/edge/analytics/application/cost";
+import { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
   type QueryExecutionContext,
-  TypedApplicationProviderRegistry,
   TypedQueryApplicationService,
-} from "@/lib/edge/analytics/service";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-import { listTeamSites } from "@/lib/edge/query/team";
+} from "@/lib/edge/analytics/application/service";
 import {
   type AnalyticsDomainError,
   type AnalyticsResult,
@@ -53,13 +52,17 @@ import {
   parseApiV1FilterDocument,
   type QueryContext,
   teamQueryContext,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/contract/catalog";
 import {
   executeComparison,
   executeComparisonBreakdown,
   executeComparisonTrend,
-} from "@/lib/edge/query-contract/comparison";
-import { buildCalendarBucketPlan } from "@/lib/edge/query-contract/helpers";
+} from "@/lib/edge/analytics/contract/comparison";
+import { buildCalendarBucketPlan } from "@/lib/edge/analytics/contract/helpers";
+import { createComparisonProviders } from "@/lib/edge/analytics/providers/d1/comparison";
+import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
+import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import type { Env } from "@/lib/edge/types";
 
 const MAX_BODY_BYTES = 64 * 1024;

@@ -18,7 +18,7 @@ import {
   deleteSiteData,
   ensurePublicSlugAvailable,
 } from "@/lib/edge/admin-sites";
-import { normalizeFunnelSteps } from "@/lib/edge/query/funnels";
+import { normalizeFunnelSteps } from "@/lib/edge/analytics/providers/d1/internal/funnels";
 import {
   readSiteScriptSettings,
   upsertSiteScriptSettings,

@@ -49,4 +49,4 @@ export {
   INTERVALS,
   TIME_PRESETS,
   type TimePreset,
-} from "@/lib/edge/analytics/catalog";
+} from "@/lib/edge/analytics/contract/catalog";

@@ -3,7 +3,7 @@ import type * as ReactStartServerModule from "@tanstack/react-start/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as DashboardServerModule from "@/lib/dashboard/server";
-import type * as QueryContractModule from "@/lib/edge/query-contract";
+import type * as QueryContractModule from "@/lib/edge/analytics/contract";
 
 vi.mock("@tanstack/react-start", async (importOriginal) => {
   const actual = await importOriginal<typeof ReactStartModule>();
@@ -68,7 +68,7 @@ vi.mock("@/lib/dashboard/server-query", () => ({
   resolveTeamDashboardRequest: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/query-contract", async (importOriginal) => {
+vi.mock("@/lib/edge/analytics/contract", async (importOriginal) => {
   const actual = await importOriginal<typeof QueryContractModule>();
   return {
     ...actual,
@@ -78,7 +78,7 @@ vi.mock("@/lib/edge/query-contract", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/edge/query-runtime/team-dashboard", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/operations/team-dashboard", () => ({
   readTeamDashboard: vi.fn(),
 }));
 
@@ -129,8 +129,8 @@ import {
   createQueryTime,
   executeTypedApplicationOperation,
   teamQueryContext,
-} from "@/lib/edge/query-contract";
-import { readTeamDashboard } from "@/lib/edge/query-runtime/team-dashboard";
+} from "@/lib/edge/analytics/contract";
+import { readTeamDashboard } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 import {
   fetchPublicSite,

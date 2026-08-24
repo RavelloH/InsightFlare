@@ -3,7 +3,6 @@ import {
   type TypedBatchItem,
   type TypedBatchRequest,
 } from "@/lib/api-v1/dto/batch";
-import { calculateQueryCost } from "@/lib/api-v1/query-cost";
 import {
   API_V1_BATCH_BODY_MAX_BYTES,
   API_V1_BATCH_ITEM_BODY_MAX_BYTES,
@@ -13,6 +12,7 @@ import {
   apiV1NonBatchRouteRegistry,
   isApiV1BatchEligible,
 } from "@/lib/api-v1/route-registry";
+import { calculateQueryCost } from "@/lib/edge/analytics/application/cost";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 
 export type { TypedBatchItem, TypedBatchRequest } from "@/lib/api-v1/dto/batch";

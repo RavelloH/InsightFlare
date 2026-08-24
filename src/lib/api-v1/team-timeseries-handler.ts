@@ -3,18 +3,19 @@ import {
   TeamTimeseriesQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
-import { exceedsQueryCost } from "@/lib/api-v1/query-cost";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
-import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { exceedsQueryCost } from "@/lib/edge/analytics/application/cost";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
+import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
   type FilterDocument,
   isReportingTimeZone,
   parseApiV1FilterDocument,
   teamQueryContext,
-} from "@/lib/edge/query-contract";
-import type { TeamTimeseriesQueryResult } from "@/lib/edge/query-runtime/team-timeseries";
+} from "@/lib/edge/analytics/contract";
+import type { TeamTimeseriesQueryResult } from "@/lib/edge/analytics/providers/d1/operations/team-timeseries";
+import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -193,7 +194,10 @@ export async function handlePlannedTeamTimeseries(
       interval: input.interval,
       filters,
     };
-    const serviceResult = await new TypedQueryApplicationService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute<
+      TeamTimeseriesReaderInput,
+      TeamTimeseriesQueryResult
+    >(
       {
         operation: "team.analytics.timeseries",
         context: teamQueryContext(
@@ -202,10 +206,12 @@ export async function handlePlannedTeamTimeseries(
           principal.siteIds,
         ),
         query,
-        provider: {
-          execute: ({ query: providerQuery, execution: providerExecution }) =>
-            reader({ ...providerQuery, signal: providerExecution.signal }),
-        },
+        providerRegistry: createCallbackProviderRegistry<
+          TeamTimeseriesReaderInput,
+          TeamTimeseriesQueryResult
+        >("team.analytics.timeseries", (providerQuery, providerExecution) =>
+          reader({ ...providerQuery, signal: providerExecution.signal }),
+        ),
       },
       {
         signal: executionContext.signal,

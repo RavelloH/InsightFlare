@@ -1,12 +1,18 @@
-import { buildTimeBuckets, timeBucketTimestamp } from "./query/core-time";
+import {
+  buildTimeBuckets,
+  timeBucketTimestamp,
+} from "./analytics/providers/d1/internal/core-time";
 import type {
   FilterDocument,
   Interval,
   OverviewAggregateRow,
   QueryWindow,
   TrendAggregateRow,
-} from "./query/core-types";
-import { type D1ReadDiagnostics, recordD1RowsRead } from "./query/diagnostics";
+} from "./analytics/providers/d1/internal/core-types";
+import {
+  type D1ReadDiagnostics,
+  recordD1RowsRead,
+} from "./analytics/providers/d1/internal/diagnostics";
 import type {
   ScheduledTaskLogger,
   ScheduledTaskOutcome,

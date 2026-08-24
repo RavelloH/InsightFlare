@@ -9,7 +9,7 @@ import {
   analyticsFilterRegistry,
   filterFingerprint,
   parseFilterParams,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
 
 const DASHBOARD_CACHE_NAME = "insightflare-dashboard-query";
 const DEFAULT_TTL_SECONDS = 60;

@@ -1,10 +1,10 @@
 import { parseFilterPanelExpression } from "@/lib/dashboard/filter-panel-expression";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import {
   analyticsFilterRegistry,
   type FilterDocument,
   parseApiV1FilterDocument,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import type { Env } from "@/lib/edge/types";
 import { SAVED_FILTER_DSL_VERSION } from "@/lib/saved-filters";
 

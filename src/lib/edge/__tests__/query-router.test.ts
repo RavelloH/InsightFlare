@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assertOperationAllowed,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
+import {
   applyPublicQueryPolicy,
   DASHBOARD_QUERY_PATHS,
   operationForQueryRoute,
   PUBLIC_QUERY_PATHS,
-} from "@/lib/edge/query/router";
-import {
-  assertOperationAllowed,
-  siteQueryContext,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/router";
 
 describe("query route policy", () => {
   it("exposes only the intended public paths", () => {

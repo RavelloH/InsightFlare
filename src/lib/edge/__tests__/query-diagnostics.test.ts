@@ -4,7 +4,7 @@ import {
   analyticsDiagnosticHeaders,
   createD1ReadDiagnostics,
   recordD1RowsRead,
-} from "@/lib/edge/query/diagnostics";
+} from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 
 describe("analytics query diagnostics", () => {
   it("reports the cumulative D1 rows read when every query exposes metadata", () => {

@@ -6,7 +6,7 @@ import {
 import type {
   AnalyticsResult,
   QueryResultMeta,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
 
 export interface ApiV1ResponseMeta {
   readonly requestId: string;

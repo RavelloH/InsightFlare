@@ -1,11 +1,11 @@
 import type { MiddlewareHandler } from "hono";
 
 import { jsonError } from "@/lib/api-v1/wire-helpers";
-import { canAccessSiteId } from "@/lib/edge/api-key-auth";
 import {
   fetchPublicSite,
   resolvePrivateSiteForSession,
-} from "@/lib/edge/query/core";
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import { canAccessSiteId } from "@/lib/edge/api-key-auth";
 import type { AppEnv, HonoApiSite } from "@/lib/hono/types";
 import { requestUrl } from "@/lib/hono/utils/context";
 

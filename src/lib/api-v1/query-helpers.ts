@@ -4,7 +4,7 @@ import {
   ANALYTICS_METRICS,
   type AnalyticsDimension,
   type AnalyticsMetric,
-} from "@/lib/edge/analytics/catalog";
+} from "@/lib/edge/analytics/contract/catalog";
 
 export const DEFAULT_PAGE_LIMIT = 100;
 export const MAX_PAGE_LIMIT = 1000;

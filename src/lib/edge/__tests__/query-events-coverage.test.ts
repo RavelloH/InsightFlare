@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type * as QueryCore from "@/lib/edge/query/core";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import type * as QueryCore from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   addDimensionValue,
   finalizeDimensionBuckets,
@@ -18,33 +19,32 @@ import {
   SHARE_TREND_OTHER_TOKEN,
   siteQueryResponse,
   sqlIntegerLiteral,
-} from "@/lib/edge/query/core";
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   queryEventAnalyticsContextCardsFromD1,
   queryEventDimensionRowsFromFilteredEvents,
   queryEventGeoRowsFromFilteredEvents,
   queryEventSessionBoundaryRowsFromFilteredEvents,
-} from "@/lib/edge/query/events-context";
-import { queryEventTypeOverviewFromD1 } from "@/lib/edge/query/events-overview";
+} from "@/lib/edge/analytics/providers/d1/internal/events-context";
+import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
 import {
   queryEventsSummaryFromD1,
   queryEventSummaryMetricsFromD1,
   queryEventTypeAggregate,
-} from "@/lib/edge/query/events-summary";
+} from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import {
   queryEventsTrendFromD1,
   queryEventTypeTrendFromD1,
-} from "@/lib/edge/query/events-trend";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
 
 const queryD1AllMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/edge/query/core", async () => {
+vi.mock("@/lib/edge/analytics/providers/d1/internal/core", async () => {
   const actual = await vi.importActual<typeof QueryCore>(
-    "@/lib/edge/query/core",
+    "@/lib/edge/analytics/providers/d1/internal/core",
   );
   return {
     ...actual,

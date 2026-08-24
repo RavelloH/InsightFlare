@@ -1,17 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  analyticsFilterRegistry,
+  EMPTY_FILTER_DOCUMENT,
+  hasFilters,
+  normalizeFilterDocument,
+} from "@/lib/edge/analytics/contract";
+import {
   hasFilterDocument,
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollups,
   queryTrendForSitesFromHourlyRollups,
 } from "@/lib/edge/hourly-rollup";
-import {
-  analyticsFilterRegistry,
-  EMPTY_FILTER_DOCUMENT,
-  hasFilters,
-  normalizeFilterDocument,
-} from "@/lib/edge/query-contract";
 import type { Env } from "@/lib/edge/types";
 
 function makeDbMock(firstResult: unknown = null, allResults: unknown[] = []) {

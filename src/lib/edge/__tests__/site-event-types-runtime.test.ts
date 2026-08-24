@@ -1,36 +1,36 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/events-context", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-context", () => ({
   queryEventAnalyticsContextCardsFromD1: vi.fn(),
 }));
-vi.mock("@/lib/edge/query/events-fields", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-fields", () => ({
   queryEventFieldsFromD1: vi.fn(),
   queryEventFieldValuesFromD1: vi.fn(),
 }));
-vi.mock("@/lib/edge/query/events-overview", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-overview", () => ({
   queryEventTypeOverviewFromD1: vi.fn(),
 }));
-vi.mock("@/lib/edge/query/events-summary", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-summary", () => ({
   queryEventTypeAggregate: vi.fn(),
 }));
-vi.mock("@/lib/edge/query/events-trend", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-trend", () => ({
   queryEventTypeTrendFromD1: vi.fn(),
 }));
 
-import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/query/events-context";
+import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import {
   queryEventFieldsFromD1,
   queryEventFieldValuesFromD1,
-} from "@/lib/edge/query/events-fields";
-import { queryEventTypeOverviewFromD1 } from "@/lib/edge/query/events-overview";
-import { queryEventTypeAggregate } from "@/lib/edge/query/events-summary";
-import { queryEventTypeTrendFromD1 } from "@/lib/edge/query/events-trend";
+} from "@/lib/edge/analytics/providers/d1/internal/events-fields";
+import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
+import { queryEventTypeAggregate } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
+import { queryEventTypeTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import {
   readSiteEventFields,
   readSiteEventFieldValues,
   readSiteEventTypeDetail,
   readSiteEventTypes,
-} from "@/lib/edge/query-runtime/site-events";
+} from "@/lib/edge/analytics/providers/d1/operations/site-events";
 
 const base = {
   env: {} as never,

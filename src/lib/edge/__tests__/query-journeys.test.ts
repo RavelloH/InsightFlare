@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { JourneyEventRow, SessionRow } from "@/lib/edge/query/core";
+import type {
+  JourneyEventRow,
+  SessionRow,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   averageGapMs,
   buildJourneySearchSql,
@@ -25,7 +28,7 @@ import {
   summarizeVisitedPages,
   visitorListOrderBy,
   whereClauseWithTarget,
-} from "@/lib/edge/query/journeys";
+} from "@/lib/edge/analytics/providers/d1/internal/journeys";
 
 function performance(
   values: Partial<JourneyEventRow["performance"]> = {},

@@ -49,7 +49,7 @@ vi.mock("@/lib/edge/dashboard-cache", () => ({
   ),
 }));
 
-vi.mock("@/lib/edge/query/core", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/core", () => ({
   fetchPublicSite: vi.fn(),
   resolvePrivateSiteForSession: vi.fn(),
 }));
@@ -65,7 +65,7 @@ vi.mock("@/lib/edge/utils", () => ({
 const { authenticateApiKey } = await import("@/lib/edge/api-key-auth");
 const { withDashboardCache } = await import("@/lib/edge/dashboard-cache");
 const { fetchPublicSite, resolvePrivateSiteForSession } =
-  await import("@/lib/edge/query/core");
+  await import("@/lib/edge/analytics/providers/d1/internal/core");
 const { requireSession } = await import("@/lib/edge/session-auth");
 const { requireSameOrigin } = await import("@/lib/edge/utils");
 

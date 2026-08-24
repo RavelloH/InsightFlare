@@ -9,11 +9,11 @@ import {
   type AnalysisDefinitionReader,
   executeApiV1SiteOverview,
 } from "@/lib/api-v1/analytics-overview";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import {
   EMPTY_FILTER_DOCUMENT,
   type OverviewReader,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 
 beforeEach(() => aggregateCache.clear());
 

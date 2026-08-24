@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { RealtimeProvider } from "@/lib/edge/realtime-provider";
+import { RealtimeProvider } from "@/lib/edge/analytics/providers/realtime/provider";
 
 function env(response: Response | Error) {
   const fetch = vi.fn(async () => {

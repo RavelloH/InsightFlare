@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateQueryCost,
   defaultQueryCostPolicy,
-} from "@/lib/api-v1/query-cost";
+} from "@/lib/edge/analytics/application/cost";
 
 describe("calculateQueryCost", () => {
   it("is deterministic and increases with range, fanout, and provider weight", () => {

@@ -1,14 +1,14 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 
-import { withDashboardCache } from "@/lib/edge/dashboard-cache";
-import { notAllowed } from "@/lib/edge/query/core";
-import { DASHBOARD_QUERY_PATHS } from "@/lib/edge/query/router";
 import {
   executePrivateQuery,
   executePrivateTeamDashboard,
-} from "@/lib/edge/query-adapters/private";
-import { resolveTeamDashboardScope } from "@/lib/edge/query-runtime/team-dashboard";
+} from "@/lib/edge/analytics/adapters/private";
+import { notAllowed } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { DASHBOARD_QUERY_PATHS } from "@/lib/edge/analytics/providers/d1/internal/router";
+import { resolveTeamDashboardScope } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
+import { withDashboardCache } from "@/lib/edge/dashboard-cache";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import {
   requireMethodMiddleware,

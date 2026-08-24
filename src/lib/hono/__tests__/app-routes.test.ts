@@ -4,6 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { handleUsersAdmin } from "@/lib/edge/admin-users";
 import { handleAdminWs } from "@/lib/edge/admin-ws";
+import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  fetchPublicSite,
+  resolvePrivateSiteForSession,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import { handleOverviewContract } from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
+import type * as QueryRouterModule from "@/lib/edge/analytics/providers/d1/internal/router";
 import { authenticateApiKey } from "@/lib/edge/api-key-auth";
 import {
   handlePrivateArchive,
@@ -19,13 +26,6 @@ import {
   handleLegacyAuthLogout,
 } from "@/lib/edge/legacy-auth";
 import { handleMapTileRequest } from "@/lib/edge/map-tiles";
-import type * as QueryCoreModule from "@/lib/edge/query/core";
-import {
-  fetchPublicSite,
-  resolvePrivateSiteForSession,
-} from "@/lib/edge/query/core";
-import { handleOverviewContract } from "@/lib/edge/query/overview-contract-adapter";
-import type * as QueryRouterModule from "@/lib/edge/query/router";
 import { handleReleasesCompareRequest } from "@/lib/edge/releases-compare";
 import { handleTrackerScriptRequest } from "@/lib/edge/script-endpoint";
 import { handleWikiSummaryRequest } from "@/lib/edge/wiki-summary";
@@ -67,31 +67,43 @@ vi.mock("@/lib/edge/releases-compare", () => ({
   handleReleasesCompareRequest: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/query/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof QueryCoreModule>();
-  return {
-    ...actual,
-    fetchPublicSite: vi.fn(),
-    resolvePrivateSiteForSession: vi.fn(),
-  };
-});
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/core",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof QueryCoreModule>();
+    return {
+      ...actual,
+      fetchPublicSite: vi.fn(),
+      resolvePrivateSiteForSession: vi.fn(),
+    };
+  },
+);
 
-vi.mock("@/lib/edge/query/router", async (importOriginal) => {
-  const actual = await importOriginal<typeof QueryRouterModule>();
-  return {
-    ...actual,
-  };
-});
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/router",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof QueryRouterModule>();
+    return {
+      ...actual,
+    };
+  },
+);
 
-vi.mock("@/lib/edge/query/overview-contract-adapter", () => ({
-  handleOverviewContract: vi.fn(),
-  handleTrendContract: vi.fn(),
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
+  () => ({
+    handleOverviewContract: vi.fn(),
+    handleTrendContract: vi.fn(),
+  }),
+);
 
-vi.mock("@/lib/edge/query/pages-contract-adapter", () => ({
-  handlePagesContract: vi.fn(),
-  handleReferrersContract: vi.fn(),
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/pages-contract-adapter",
+  () => ({
+    handlePagesContract: vi.fn(),
+    handleReferrersContract: vi.fn(),
+  }),
+);
 
 vi.mock("@/lib/edge/api-key-auth", () => ({
   authenticateApiKey: vi.fn(),

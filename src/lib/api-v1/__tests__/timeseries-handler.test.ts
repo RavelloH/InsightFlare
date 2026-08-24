@@ -5,8 +5,8 @@ import { aggregateCache } from "@/lib/api-v1/analytics-overview";
 import { executeApiV1SiteTimeseries } from "@/lib/api-v1/analytics-timeseries";
 import { handlePlannedSiteTimeseries } from "@/lib/api-v1/timeseries-handler";
 import { AnalyticsTimeseriesResponseSchema } from "@/lib/api-v1/wire";
+import type { OverviewReader } from "@/lib/edge/analytics/contract";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-import type { OverviewReader } from "@/lib/edge/query-contract";
 
 beforeEach(() => aggregateCache.clear());
 

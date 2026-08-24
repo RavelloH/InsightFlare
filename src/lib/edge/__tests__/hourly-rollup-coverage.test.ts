@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  EMPTY_FILTER_DOCUMENT,
+  hasFilters,
+} from "@/lib/edge/analytics/contract";
+import {
   ROLLUP_LAG_HOURS,
   ROLLUP_SCHEMA_VERSION,
 } from "@/lib/edge/hourly-rollup";
-import { EMPTY_FILTER_DOCUMENT, hasFilters } from "@/lib/edge/query-contract";
 
 describe("hourly-rollup constants", () => {
   it("exports expected constants", () => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import {
   addDimensionValue,
   addGeoDimensionValue,
@@ -61,8 +62,7 @@ import {
   visitSourceBindings,
   withoutFilterKey,
   withoutGeoFilter,
-} from "@/lib/edge/query/core";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

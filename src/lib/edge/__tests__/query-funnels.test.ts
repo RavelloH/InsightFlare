@@ -4,7 +4,7 @@ import {
   analyzeFunnelEvents,
   handleFunnel,
   normalizeFunnelSteps,
-} from "@/lib/edge/query/funnels";
+} from "@/lib/edge/analytics/providers/d1/internal/funnels";
 import type { Env } from "@/lib/edge/types";
 
 interface PreparedCall {

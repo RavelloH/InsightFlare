@@ -1,5 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  geoTabLabel,
+  mapEventField,
+  mapGeoRowsToFilterOptions,
+} from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
+import {
+  customEventJsonTypeCode,
+  customEventJsonTypeLabel,
+  parseEventRecordSort,
+  parseFilterOptionKey,
+  parseListSearch,
+  parseSessionListSort,
+} from "@/lib/edge/analytics/providers/d1/internal/core-parsers";
 import { withDashboardCache } from "@/lib/edge/dashboard-cache";
 import { insertVisit } from "@/lib/edge/ingest-buffer-store";
 import { flushCustomEventRowIndividually } from "@/lib/edge/ingest-custom-event-flush";
@@ -9,19 +22,6 @@ import type {
   BufferedCustomEventRow,
   BufferedVisitRow,
 } from "@/lib/edge/ingest-types";
-import {
-  geoTabLabel,
-  mapEventField,
-  mapGeoRowsToFilterOptions,
-} from "@/lib/edge/query/core-mappers";
-import {
-  customEventJsonTypeCode,
-  customEventJsonTypeLabel,
-  parseEventRecordSort,
-  parseFilterOptionKey,
-  parseListSearch,
-  parseSessionListSort,
-} from "@/lib/edge/query/core-parsers";
 import {
   readSiteScriptSettings,
   readSiteTrackingConfig,

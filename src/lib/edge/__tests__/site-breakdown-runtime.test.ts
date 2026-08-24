@@ -1,19 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/dimensions", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/dimensions", () => ({
   queryDimensionFromD1: vi.fn(),
   querySessionBoundaryDimensionFromD1: vi.fn(),
 }));
-vi.mock("@/lib/edge/query/events-summary", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-summary", () => ({
   queryEventTypeAggregate: vi.fn(),
 }));
 
 import {
   queryDimensionFromD1,
   querySessionBoundaryDimensionFromD1,
-} from "@/lib/edge/query/dimensions";
-import { queryEventTypeAggregate } from "@/lib/edge/query/events-summary";
-import { readSiteBreakdown } from "@/lib/edge/query-runtime/site-breakdown";
+} from "@/lib/edge/analytics/providers/d1/internal/dimensions";
+import { queryEventTypeAggregate } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
+import { readSiteBreakdown } from "@/lib/edge/analytics/providers/d1/operations/site-breakdown";
 
 const input = {
   env: {} as never,

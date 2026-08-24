@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 
-import { resolveDashboardSession } from "@/lib/edge/query-runtime/team-dashboard";
+import { resolveDashboardSession } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
 import type { AppEnv } from "@/lib/hono/types";
 import { una as unauthorized } from "@/lib/response";
 

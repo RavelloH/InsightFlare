@@ -1,20 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/events-summary", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-summary", () => ({
   queryEventsSummaryFromD1: vi.fn(),
 }));
-vi.mock("@/lib/edge/query/events-trend", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/events-trend", () => ({
   queryEventsTrendFromD1: vi.fn(),
 }));
 
-import { queryEventsSummaryFromD1 } from "@/lib/edge/query/events-summary";
-import { queryEventsTrendFromD1 } from "@/lib/edge/query/events-trend";
-import type { FilterFieldId } from "@/lib/edge/query-contract";
+import type { FilterFieldId } from "@/lib/edge/analytics/contract";
+import { queryEventsSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
+import { queryEventsTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import {
   type ReadSiteEventsInput,
   readSiteEventsSummary,
   readSiteEventsTimeseries,
-} from "@/lib/edge/query-runtime/site-events";
+} from "@/lib/edge/analytics/providers/d1/operations/site-events";
 
 const input = {
   env: {} as never,

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
-import type { QueryWindow } from "@/lib/edge/query/core";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   BROWSER_CROSS_OTHER_BROWSER_TOKEN,
   BROWSER_CROSS_OTHER_DIMENSION_TOKEN,
@@ -13,28 +14,27 @@ import {
   SHARE_TREND_OTHER_KEY,
   SHARE_TREND_OTHER_LABEL,
   SHARE_TREND_OTHER_TOKEN,
-} from "@/lib/edge/query/core";
-import { clientDimensionDefinition } from "@/lib/edge/query/core";
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import { clientDimensionDefinition } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   queryBrowserCrossBreakdownFromD1,
   queryBrowserCrossDimensionFromD1,
   queryBrowserEngineTrendFromD1,
   queryBrowserTrendFromD1,
   queryBrowserVersionBreakdownFromD1,
-} from "@/lib/edge/query/technology/browser";
-import { queryCrossDimensionFromD1 } from "@/lib/edge/query/technology/client-cross";
+} from "@/lib/edge/analytics/providers/d1/internal/technology/browser";
+import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
 import {
   queryBrowserRadarFromD1,
   queryReferrerRadarFromD1,
-} from "@/lib/edge/query/technology/radar";
+} from "@/lib/edge/analytics/providers/d1/internal/technology/radar";
 import {
   queryClientDimensionTrendFromD1,
   queryReferrerAndChannelTrendFromD1,
   queryReferrerTrendFromD1,
   queryShareTrendFromD1,
   queryUtmDimensionTrendFromD1,
-} from "@/lib/edge/query/technology/share-trend";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

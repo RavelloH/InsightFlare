@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { analyticsFilterDefinition } from "@/lib/edge/query-contract/filter-registry";
+import { analyticsFilterDefinition } from "@/lib/edge/analytics/contract/filter-registry";
 
 const rfc3339 = z.string().datetime({ offset: true }).max(64);
 const timeZone = z.string().min(1).max(80);

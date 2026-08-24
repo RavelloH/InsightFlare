@@ -10,15 +10,16 @@ import {
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
-import { TypedQueryApplicationService } from "@/lib/edge/analytics/service";
-import { type ApiKeyPrincipal, canAccessSiteId } from "@/lib/edge/api-key-auth";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
+import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
   type CrossBreakdownResult,
   type FilterDocument,
   isReportingTimeZone,
   parseApiV1FilterDocument,
   siteQueryContext,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import { type ApiKeyPrincipal, canAccessSiteId } from "@/lib/edge/api-key-auth";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -235,15 +236,20 @@ export async function handlePlannedSiteCrossBreakdown(
       secondaryLimit: input.secondaryLimit,
       filters,
     };
-    const serviceResult = await new TypedQueryApplicationService().execute(
+    const serviceResult = await new TypedQueryApplicationService().execute<
+      SiteCrossBreakdownReaderInput,
+      CrossBreakdownResult
+    >(
       {
         operation: "site.analytics.crossBreakdown",
         context: siteQueryContext(siteId, "api-v1"),
         query,
-        provider: {
-          execute: ({ query: providerQuery, execution: providerExecution }) =>
-            reader({ ...providerQuery, signal: providerExecution.signal }),
-        },
+        providerRegistry: createCallbackProviderRegistry<
+          SiteCrossBreakdownReaderInput,
+          CrossBreakdownResult
+        >("site.analytics.crossBreakdown", (providerQuery, providerExecution) =>
+          reader({ ...providerQuery, signal: providerExecution.signal }),
+        ),
       },
       {
         signal: execution.signal,

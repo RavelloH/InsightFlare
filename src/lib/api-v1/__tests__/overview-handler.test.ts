@@ -7,11 +7,11 @@ import {
   AnalyticsOverviewResponseSchema,
   ApiV1ErrorEnvelopeSchema,
 } from "@/lib/api-v1/wire";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import {
   EMPTY_FILTER_DOCUMENT,
   type OverviewReader,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",

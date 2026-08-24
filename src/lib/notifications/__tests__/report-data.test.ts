@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 
 const queryOverviewAggregate = vi.hoisted(() => vi.fn());
 const queryPagesAggregate = vi.hoisted(() => vi.fn());
 const queryReferrerAggregate = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/edge/query/overview", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/overview", () => ({
   queryOverviewAggregate,
 }));
 
-vi.mock("@/lib/edge/query/pages", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/pages", () => ({
   queryPagesAggregate,
   queryReferrerAggregate,
 }));

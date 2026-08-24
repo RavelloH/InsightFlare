@@ -1,6 +1,6 @@
 import "@tanstack/react-start/server-only";
 
-import { resolveTeamDashboardScope } from "@/lib/edge/query-runtime/team-dashboard";
+import { resolveTeamDashboardScope } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
 import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
 import type { Env } from "@/lib/edge/types";
 

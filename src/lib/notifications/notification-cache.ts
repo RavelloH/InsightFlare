@@ -1,4 +1,4 @@
-import type { queryOverviewAggregate } from "@/lib/edge/query/overview";
+import type { queryOverviewAggregate } from "@/lib/edge/analytics/providers/d1/internal/overview";
 
 import type { NotificationEmailConfig } from "./email-config";
 import type {

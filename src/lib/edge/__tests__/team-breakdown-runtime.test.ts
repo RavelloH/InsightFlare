@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/edge/query/team", () => ({ listTeamSites: vi.fn() }));
-vi.mock("@/lib/edge/query-runtime/site-breakdown", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
+  listTeamSites: vi.fn(),
+}));
+vi.mock("@/lib/edge/analytics/providers/d1/operations/site-breakdown", () => ({
   readSiteBreakdown: vi.fn(),
 }));
 
-import { listTeamSites } from "@/lib/edge/query/team";
-import { readSiteBreakdown } from "@/lib/edge/query-runtime/site-breakdown";
-import { readTeamBreakdown } from "@/lib/edge/query-runtime/team-breakdown";
+import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
+import { readSiteBreakdown } from "@/lib/edge/analytics/providers/d1/operations/site-breakdown";
+import { readTeamBreakdown } from "@/lib/edge/analytics/providers/d1/operations/team-breakdown";
 
 const input = {
   env: {} as never,

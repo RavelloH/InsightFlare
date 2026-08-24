@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { executePrivateTeamDashboard } from "@/lib/edge/analytics/adapters/private";
 import {
   badRequest,
   parseWindow,
   resolvePrivateTeam,
-} from "@/lib/edge/query/core";
-import { listTeamSites } from "@/lib/edge/query/team";
-import { executePrivateTeamDashboard } from "@/lib/edge/query-adapters/private";
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
 import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
 import type { Env } from "@/lib/edge/types";
 

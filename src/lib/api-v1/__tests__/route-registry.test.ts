@@ -43,7 +43,7 @@ import {
 import {
   analyticsOperationById,
   analyticsOperationRegistry,
-} from "@/lib/edge/analytics/operation-registry";
+} from "@/lib/edge/analytics/application/operation-registry";
 
 describe("target API v1 route registry", () => {
   it("keeps the batch allow-list explicit and read-only", () => {

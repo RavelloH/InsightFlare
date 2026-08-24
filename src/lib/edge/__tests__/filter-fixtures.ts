@@ -2,7 +2,7 @@ import {
   analyticsFilterRegistry,
   type FilterDocument,
   normalizeFilterDocument,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
 
 const fields: Readonly<Record<string, string>> = {
   country: "geo.country",

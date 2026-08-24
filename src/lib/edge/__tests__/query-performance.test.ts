@@ -2,17 +2,17 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { handlePerformanceContract as handlePerformance } from "@/lib/edge/query/analysis-contract-adapter";
-import type { QueryWindow } from "@/lib/edge/query/core";
+import type { FilterDocument } from "@/lib/edge/analytics/contract";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { handlePerformanceContract as handlePerformance } from "@/lib/edge/analytics/providers/d1/internal/analysis-contract-adapter";
+import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   queryAllPerformanceTrendsFromD1,
   queryPerformanceCountriesFromD1,
   queryPerformanceRoutesFromD1,
   queryPerformanceSummariesFromD1,
   queryPerformanceTrendFromD1,
-} from "@/lib/edge/query/performance";
-import type { FilterDocument } from "@/lib/edge/query-contract";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/providers/d1/internal/performance";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

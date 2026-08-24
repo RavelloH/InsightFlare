@@ -7,7 +7,7 @@ export interface BatchWorkItem<T> {
 export {
   calculateQueryCost,
   defaultQueryCostPolicy,
-} from "@/lib/api-v1/query-cost";
+} from "@/lib/edge/analytics/application/cost";
 
 export type BatchItemResult<T> =
   | { readonly id: string; readonly ok: true; readonly value: T }

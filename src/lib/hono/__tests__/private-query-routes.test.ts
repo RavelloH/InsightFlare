@@ -1,15 +1,15 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { withDashboardCache } from "@/lib/edge/dashboard-cache";
-import type * as QueryCoreModule from "@/lib/edge/query/core";
+import type * as PrivateQueryAdapter from "@/lib/edge/analytics/adapters/private";
+import { executePrivateTeamDashboard } from "@/lib/edge/analytics/adapters/private";
+import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   resolvePrivateSiteForSession,
   resolvePrivateTeamForSession,
-} from "@/lib/edge/query/core";
-import { handleOverviewContract } from "@/lib/edge/query/overview-contract-adapter";
-import type * as PrivateQueryAdapter from "@/lib/edge/query-adapters/private";
-import { executePrivateTeamDashboard } from "@/lib/edge/query-adapters/private";
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import { handleOverviewContract } from "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter";
+import { withDashboardCache } from "@/lib/edge/dashboard-cache";
 import { privateQueryRoutes } from "@/lib/hono/routes/private/query";
 import type { AppEnv } from "@/lib/hono/types";
 
@@ -23,37 +23,49 @@ vi.mock("@/lib/edge/dashboard-cache", () => ({
   ),
 }));
 
-vi.mock("@/lib/edge/query/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof QueryCoreModule>();
-  return {
-    ...actual,
-    resolvePrivateSiteForSession: vi.fn(),
-    resolvePrivateTeamForSession: vi.fn(),
-  };
-});
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/core",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof QueryCoreModule>();
+    return {
+      ...actual,
+      resolvePrivateSiteForSession: vi.fn(),
+      resolvePrivateTeamForSession: vi.fn(),
+    };
+  },
+);
 
-vi.mock("@/lib/edge/query/overview-contract-adapter", () => ({
-  handleOverviewContract: vi.fn(),
-  handleTrendContract: vi.fn(),
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/overview-contract-adapter",
+  () => ({
+    handleOverviewContract: vi.fn(),
+    handleTrendContract: vi.fn(),
+  }),
+);
 
-vi.mock("@/lib/edge/query/pages-contract-adapter", () => ({
-  handlePagesContract: vi.fn(),
-  handleReferrersContract: vi.fn(),
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/pages-contract-adapter",
+  () => ({
+    handlePagesContract: vi.fn(),
+    handleReferrersContract: vi.fn(),
+  }),
+);
 
-vi.mock("@/lib/edge/query-adapters/private", async (importOriginal) => {
+vi.mock("@/lib/edge/analytics/adapters/private", async (importOriginal) => {
   const actual = await importOriginal<typeof PrivateQueryAdapter>();
   return { ...actual, executePrivateTeamDashboard: vi.fn() };
 });
 
-vi.mock("@/lib/edge/query/funnels", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/funnels", () => ({
   handleFunnel: vi.fn(async () => new Response("funnel")),
 }));
 
-vi.mock("@/lib/edge/query/events-contract-adapter", () => ({
-  handleEventTypeDetailContract: vi.fn(async () => new Response("query")),
-}));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/events-contract-adapter",
+  () => ({
+    handleEventTypeDetailContract: vi.fn(async () => new Response("query")),
+  }),
+);
 
 const env = { DB: {} };
 const dispatchQueryRoute = vi.fn();

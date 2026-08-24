@@ -8,7 +8,7 @@ import {
 import {
   type AnalyticsDomainError,
   createQueryTime,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
 
 describe("API v1 wire serializer", () => {
   it("uses RFC 6901 paths and stable error definitions", () => {

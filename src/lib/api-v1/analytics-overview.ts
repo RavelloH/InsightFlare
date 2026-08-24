@@ -15,23 +15,25 @@ import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
 import {
   createOperationCacheKey,
   OperationResultCache,
-} from "@/lib/edge/analytics/operation-cache";
+} from "@/lib/edge/analytics/application/cache";
 import {
   type AnalyticsServiceResult,
   type QueryExecutionContext,
   TypedQueryApplicationService,
-} from "@/lib/edge/analytics/service";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+} from "@/lib/edge/analytics/application/service";
 import {
   type AnalyticsResult,
   createQueryTime,
   filterConditionCount,
   type FilterDocument,
   isReportingTimeZone,
+  type OverviewQuery,
   type OverviewReader,
   type OverviewResult,
   parseApiV1FilterDocument,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import { createOverviewProviderRegistry } from "@/lib/edge/analytics/providers/d1/operations/overview";
+import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import { sha256Hex } from "@/lib/edge/utils";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -267,12 +269,19 @@ export async function executeApiV1SiteOverview(
 
   return {
     ok: true,
-    value: await new TypedQueryApplicationService(aggregateCache).overview(
-      reader,
+    value: await new TypedQueryApplicationService(aggregateCache).execute<
+      OverviewQuery,
+      AnalyticsResult<OverviewResult>
+    >(
       {
+        operation: "site.analytics.overview",
         context: context.context,
-        time: time.value,
-        filters: filter.value,
+        query: {
+          context: context.context,
+          time: time.value,
+          filters: filter.value,
+        },
+        providerRegistry: createOverviewProviderRegistry(reader),
         cache: {
           key: await aggregateCacheKey({
             operation: "site.analytics.overview",
@@ -281,6 +290,7 @@ export async function executeApiV1SiteOverview(
             filters: filter.value,
           }),
           policy: aggregateCachePolicy,
+          isCacheable: (result) => result.ok,
         },
       },
       {

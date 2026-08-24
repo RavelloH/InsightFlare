@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { QueryWindow } from "@/lib/edge/query/core";
-import { queryFilterValuesFromD1 } from "@/lib/edge/query/filter-values";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/query-contract";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryFilterValuesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import type { Env } from "@/lib/edge/types";
 
 const window: QueryWindow = {

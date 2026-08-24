@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executeDemoQuery,
   executeDemoQueryPayload,
-} from "@/lib/edge/query-runtime/demo-query";
+} from "@/lib/edge/analytics/providers/mock/demo-query";
 import {
   DEMO_SITE_PROFILES,
   demoSitePublicSlug,
@@ -317,7 +317,7 @@ describe("server demo query runtime", () => {
     vi.stubEnv("VITE_DEMO_MODE", "1");
     vi.resetModules();
     const { executePublicQuery } =
-      await import("@/lib/edge/query-adapters/public");
+      await import("@/lib/edge/analytics/adapters/public");
 
     for (const pathname of [
       "page-query",
@@ -343,7 +343,7 @@ describe("server demo query runtime", () => {
     vi.stubEnv("VITE_DEMO_MODE", "1");
     vi.resetModules();
     const { fetchPublicSite, resolvePrivateSiteForSession } =
-      await import("@/lib/edge/query/core-sites");
+      await import("@/lib/edge/analytics/providers/d1/internal/core-sites");
     const prepare = vi.fn(() => {
       throw new Error("D1 must not be used in demo site resolution");
     });

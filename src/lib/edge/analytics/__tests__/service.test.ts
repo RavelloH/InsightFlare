@@ -1,18 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { OperationResultCache } from "@/lib/edge/analytics/operation-cache";
+import { OperationResultCache } from "@/lib/edge/analytics/application/cache";
 import {
   analyticsOperationProvider,
-  TypedQueryApplicationService,
-} from "@/lib/edge/analytics/service";
+  TypedApplicationProviderRegistry,
+} from "@/lib/edge/analytics/application/provider-registry";
+import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
 import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
   type OverviewReader,
+  type QueryContext,
   type QueryOperation,
   siteQueryContext,
   teamQueryContext,
-} from "@/lib/edge/query-contract";
+} from "@/lib/edge/analytics/contract";
+import { createOverviewProviderRegistry } from "@/lib/edge/analytics/providers/d1/operations/overview";
 
 const time = createQueryTime(1_000, 2_000, "UTC", 2_000);
 
@@ -34,13 +37,58 @@ function reader(): OverviewReader {
   };
 }
 
+function overviewInvocation(
+  overviewReader: OverviewReader,
+  options: {
+    readonly context?: QueryContext;
+    readonly cache?: {
+      readonly key: string;
+      readonly policy: { readonly ttlMs: number; readonly maxEntries: number };
+    };
+  } = {},
+) {
+  const context = options.context ?? siteQueryContext("site-1", "api-v1");
+  return {
+    operation: "site.analytics.overview" as const,
+    context,
+    query: {
+      context,
+      time,
+      filters: EMPTY_FILTER_DOCUMENT,
+    },
+    providerRegistry: createOverviewProviderRegistry(overviewReader),
+    ...(options.cache ? { cache: options.cache } : {}),
+  };
+}
+
+function trendInvocation(
+  overviewReader: OverviewReader,
+  interval: "minute" | "hour" | "day" | "week" | "month" = "hour",
+) {
+  const context = siteQueryContext("site-1", "api-v1");
+  return {
+    operation: "site.analytics.timeseries" as const,
+    context,
+    query: {
+      context,
+      time,
+      filters: EMPTY_FILTER_DOCUMENT,
+      interval,
+    },
+    providerRegistry: createOverviewProviderRegistry(overviewReader),
+  };
+}
+
 describe("TypedQueryApplicationService", () => {
   function invocation<Result>(run: () => Promise<Result>) {
     return {
       operation: "site.analytics.pages" as const,
       context: siteQueryContext("site-1", "api-v1"),
       query: { siteId: "site-1" },
-      provider: analyticsOperationProvider(() => run()),
+      providerRegistry: new TypedApplicationProviderRegistry().register(
+        "site.analytics.pages",
+        analyticsOperationProvider(() => run()),
+      ),
     };
   }
 
@@ -185,13 +233,8 @@ describe("TypedQueryApplicationService", () => {
   it("executes canonical overview input without HTTP dependencies", async () => {
     const service = new TypedQueryApplicationService();
     const overviewReader = reader();
-    const result = await service.overview(
-      overviewReader,
-      {
-        context: siteQueryContext("site-1", "api-v1"),
-        time,
-        filters: EMPTY_FILTER_DOCUMENT,
-      },
+    const result = await service.execute(
+      overviewInvocation(overviewReader),
       {},
     );
 
@@ -207,16 +250,9 @@ describe("TypedQueryApplicationService", () => {
       approximateVisitors: false,
     });
     const service = new TypedQueryApplicationService();
-    const result = await service.trend(
-      overviewReader,
-      {
-        context: siteQueryContext("site-1", "api-v1"),
-        time,
-        filters: EMPTY_FILTER_DOCUMENT,
-        interval: "hour",
-      },
-      { operation: "site.analytics.timeseries" },
-    );
+    const result = await service.execute(trendInvocation(overviewReader), {
+      operation: "site.analytics.timeseries",
+    });
     expect(result).toMatchObject({ ok: true, value: { ok: true } });
     expect(overviewReader.readTrend).toHaveBeenCalledOnce();
   });
@@ -227,24 +263,16 @@ describe("TypedQueryApplicationService", () => {
     const controller = new AbortController();
     controller.abort();
 
-    const cancelled = await service.overview(
-      overviewReader,
+    const cancelled = await service.execute(
+      overviewInvocation(overviewReader),
       {
-        context: siteQueryContext("site-1", "api-v1"),
-        time,
-        filters: EMPTY_FILTER_DOCUMENT,
+        signal: controller.signal,
       },
-      { signal: controller.signal },
     );
-    const expired = await service.overview(
-      overviewReader,
-      {
-        context: siteQueryContext("site-1", "api-v1"),
-        time,
-        filters: EMPTY_FILTER_DOCUMENT,
-      },
-      { deadlineMs: 10, now: () => 10 },
-    );
+    const expired = await service.execute(overviewInvocation(overviewReader), {
+      deadlineMs: 10,
+      now: () => 10,
+    });
 
     expect(cancelled).toEqual({
       ok: false,
@@ -269,9 +297,8 @@ describe("TypedQueryApplicationService", () => {
       },
     };
 
-    const result = await service.overview(
-      overviewReader,
-      { context: deniedContext, time, filters: EMPTY_FILTER_DOCUMENT },
+    const result = await service.execute(
+      overviewInvocation(overviewReader, { context: deniedContext }),
       {},
     );
 
@@ -287,18 +314,13 @@ describe("TypedQueryApplicationService", () => {
     const service = new TypedQueryApplicationService(
       new OperationResultCache(),
     );
-    const execution = {
-      context: siteQueryContext("site-1", "api-v1"),
-      time,
-      filters: EMPTY_FILTER_DOCUMENT,
-      cache: {
-        key: "__query_cache/v1/site.analytics.overview/opaque",
-        policy: { ttlMs: 1_000, maxEntries: 4 },
-      },
+    const cache = {
+      key: "__query_cache/v1/site.analytics.overview/opaque",
+      policy: { ttlMs: 1_000, maxEntries: 4 },
     } as const;
 
-    await service.overview(overviewReader, execution, {});
-    await service.overview(overviewReader, execution, {});
+    await service.execute(overviewInvocation(overviewReader, { cache }), {});
+    await service.execute(overviewInvocation(overviewReader, { cache }), {});
 
     expect(overviewReader.readOverview).toHaveBeenCalledOnce();
   });
@@ -308,23 +330,24 @@ describe("TypedQueryApplicationService", () => {
     const service = new TypedQueryApplicationService(
       new OperationResultCache(),
     );
-    const execution = {
-      context: {
-        ...siteQueryContext("site-1", "api-v1"),
-        policy: {
-          ...siteQueryContext("site-1", "api-v1").policy,
-          allowedOperations: new Set<QueryOperation>(),
-        },
-      },
-      time,
-      filters: EMPTY_FILTER_DOCUMENT,
-      cache: {
-        key: "__query_cache/v1/site.analytics.overview/denied",
-        policy: { ttlMs: 1_000, maxEntries: 4 },
+    const deniedContext = {
+      ...siteQueryContext("site-1", "api-v1"),
+      policy: {
+        ...siteQueryContext("site-1", "api-v1").policy,
+        allowedOperations: new Set<QueryOperation>(),
       },
     } as const;
 
-    const result = await service.overview(overviewReader, execution, {});
+    const result = await service.execute(
+      overviewInvocation(overviewReader, {
+        context: deniedContext,
+        cache: {
+          key: "__query_cache/v1/site.analytics.overview/denied",
+          policy: { ttlMs: 1_000, maxEntries: 4 },
+        },
+      }),
+      {},
+    );
 
     expect(result).toMatchObject({
       ok: true,
@@ -353,26 +376,15 @@ describe("TypedQueryApplicationService", () => {
       };
     });
     await expect(
-      service.overview(
-        overviewReader,
-        {
-          context: siteQueryContext("site-1", "api-v1"),
-          time,
-          filters: EMPTY_FILTER_DOCUMENT,
-        },
-        { signal: cancelled.signal },
-      ),
+      service.execute(overviewInvocation(overviewReader), {
+        signal: cancelled.signal,
+      }),
     ).resolves.toEqual({ ok: false, error: { kind: "request-cancelled" } });
 
-    const afterDeadline = await service.overview(
-      reader(),
-      {
-        context: siteQueryContext("site-1", "api-v1"),
-        time,
-        filters: EMPTY_FILTER_DOCUMENT,
-      },
-      { deadlineMs: 2, now: () => 3 },
-    );
+    const afterDeadline = await service.execute(overviewInvocation(reader()), {
+      deadlineMs: 2,
+      now: () => 3,
+    });
     expect(afterDeadline).toEqual({
       ok: false,
       error: { kind: "deadline-exceeded" },
@@ -386,15 +398,9 @@ describe("TypedQueryApplicationService", () => {
       maxCost: 10,
       providerWeights: { d1: 1, rollup: 1, realtime: 1, mixed: 1 },
     });
-    const result = await service.overview(
-      overviewReader,
-      {
-        context: siteQueryContext("site-1", "api-v1"),
-        time,
-        filters: EMPTY_FILTER_DOCUMENT,
-      },
-      { cost: { rangeMs: 10, provider: "d1" } },
-    );
+    const result = await service.execute(overviewInvocation(overviewReader), {
+      cost: { rangeMs: 10, provider: "d1" },
+    });
     expect(result).toEqual({
       ok: false,
       error: { kind: "query-cost-exceeded", cost: 10 },

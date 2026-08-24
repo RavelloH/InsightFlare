@@ -109,7 +109,7 @@ vi.mock("@/lib/api-v1/site-cross-breakdown-handler", () => ({
   handlePlannedSiteCrossBreakdown: vi.fn(typedReaderMock.invoke),
 }));
 
-vi.mock("@/lib/edge/analytics/api-v1-provider", async (importOriginal) => ({
+vi.mock("@/lib/edge/analytics/adapters/api-v1", async (importOriginal) => ({
   ...(await importOriginal()),
   readSiteBreakdown: vi.fn().mockResolvedValue({ items: [] }),
 }));

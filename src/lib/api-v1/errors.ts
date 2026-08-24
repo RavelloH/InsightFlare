@@ -1,4 +1,4 @@
-import type { AnalyticsDomainError } from "@/lib/edge/query-contract";
+import type { AnalyticsDomainError } from "@/lib/edge/analytics/contract";
 
 export type ApiV1ErrorCode =
   | "validation_failed"
