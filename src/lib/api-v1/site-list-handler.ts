@@ -66,8 +66,8 @@ import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
+import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
-import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
   type FilterDocument,
   isReportingTimeZone,
@@ -373,7 +373,7 @@ async function handlePlannedSiteList<
   siteId: string,
   schema: z.ZodType<Input>,
   operation: AnalyticsOperationId,
-  reader: SiteListReader<Input, Result>,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution: ExecutionContext = {},
   definitions?: AnalysisDefinitionReader,
   responseMeta: ResponseMetaOptions = {},
@@ -484,11 +484,7 @@ async function handlePlannedSiteList<
         operation,
         context: siteQueryContext(siteId, "api-v1"),
         query,
-        providerRegistry: createCallbackProviderRegistry<typeof query, Result>(
-          operation,
-          (providerQuery, providerExecution) =>
-            reader({ ...providerQuery, signal: providerExecution.signal }),
-        ),
+        providerRegistry,
       },
       {
         signal: execution.signal,
@@ -556,7 +552,7 @@ export function handlePlannedSitePages(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SitePagesReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -566,7 +562,7 @@ export function handlePlannedSitePages(
     siteId,
     SitePagesQueryDtoSchema,
     "site.analytics.pages",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -577,7 +573,7 @@ export function handlePlannedSiteReferrers(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteReferrersReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -587,7 +583,7 @@ export function handlePlannedSiteReferrers(
     siteId,
     SiteReferrersQueryDtoSchema,
     "site.analytics.referrers",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -598,7 +594,7 @@ export function handlePlannedSiteChannels(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteChannelsReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -608,7 +604,7 @@ export function handlePlannedSiteChannels(
     siteId,
     SiteChannelsQueryDtoSchema,
     "site.analytics.channels",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -619,7 +615,7 @@ export function handlePlannedSiteFilterValues(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteFilterValuesReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -629,7 +625,7 @@ export function handlePlannedSiteFilterValues(
     siteId,
     SiteFilterValuesQueryDtoSchema,
     "site.analytics.filterValues",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -640,7 +636,7 @@ export function handlePlannedSiteRetention(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteRetentionReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -650,7 +646,7 @@ export function handlePlannedSiteRetention(
     siteId,
     SiteRetentionCohortsQueryDtoSchema,
     "site.analytics.retentionCohorts",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -661,7 +657,7 @@ export function handlePlannedSitePerformanceSummary(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SitePerformanceSummaryReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -671,7 +667,7 @@ export function handlePlannedSitePerformanceSummary(
     siteId,
     SitePerformanceSummaryQueryDtoSchema,
     "site.analytics.performanceSummary",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -682,7 +678,7 @@ export function handlePlannedSitePerformanceTimeseries(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SitePerformanceTimeseriesReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -692,7 +688,7 @@ export function handlePlannedSitePerformanceTimeseries(
     siteId,
     SitePerformanceTimeseriesQueryDtoSchema,
     "site.analytics.performanceTimeseries",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -703,7 +699,7 @@ export function handlePlannedSitePerformanceBreakdown(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SitePerformanceBreakdownReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -713,7 +709,7 @@ export function handlePlannedSitePerformanceBreakdown(
     siteId,
     SitePerformanceBreakdownQueryDtoSchema,
     "site.analytics.performanceBreakdown",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -724,7 +720,7 @@ export function handlePlannedSiteEventsSummary(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteEventsSummaryReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -734,7 +730,7 @@ export function handlePlannedSiteEventsSummary(
     siteId,
     SiteEventsSummaryQueryDtoSchema,
     "site.analytics.eventsSummary",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -745,7 +741,7 @@ export function handlePlannedSiteEventsTimeseries(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteEventsTimeseriesReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -755,7 +751,7 @@ export function handlePlannedSiteEventsTimeseries(
     siteId,
     SiteEventsTimeseriesQueryDtoSchema,
     "site.analytics.eventsTimeseries",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -766,7 +762,7 @@ export function handlePlannedSiteEventsSearch(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteEventsSearchReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -776,7 +772,7 @@ export function handlePlannedSiteEventsSearch(
     siteId,
     SiteEventsSearchQueryDtoSchema,
     "site.analytics.eventsSearch",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -787,7 +783,7 @@ export function handlePlannedSiteEventDetail(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteEventDetailReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -797,7 +793,7 @@ export function handlePlannedSiteEventDetail(
     siteId,
     SiteEventDetailQueryDtoSchema,
     "site.analytics.eventDetail",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -808,7 +804,7 @@ export function handlePlannedSiteEventTypes(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteEventTypesReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -818,7 +814,7 @@ export function handlePlannedSiteEventTypes(
     siteId,
     SiteEventTypesQueryDtoSchema,
     "site.analytics.eventTypes",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -829,7 +825,7 @@ export function handlePlannedSiteEventTypeDetail(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteEventTypeDetailReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -839,7 +835,7 @@ export function handlePlannedSiteEventTypeDetail(
     siteId,
     SiteEventTypeDetailQueryDtoSchema,
     "site.analytics.eventTypeDetail",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -850,7 +846,7 @@ export function handlePlannedSiteEventFields(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteEventFieldsReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -860,7 +856,7 @@ export function handlePlannedSiteEventFields(
     siteId,
     SiteEventFieldsQueryDtoSchema,
     "site.analytics.eventFields",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -871,7 +867,7 @@ export function handlePlannedSiteEventFieldValues(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteEventFieldValuesReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -881,7 +877,7 @@ export function handlePlannedSiteEventFieldValues(
     siteId,
     SiteEventFieldValuesQueryDtoSchema,
     "site.analytics.eventFieldValues",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -892,7 +888,7 @@ export function handlePlannedSiteVisitorDetail(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteVisitorDetailReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
 ): Promise<Response> {
   return handlePlannedSiteList(
@@ -901,7 +897,7 @@ export function handlePlannedSiteVisitorDetail(
     siteId,
     SiteVisitorDetailQueryDtoSchema,
     "site.analytics.visitorDetail",
-    reader,
+    providerRegistry,
     execution,
   );
 }
@@ -911,7 +907,7 @@ export function handlePlannedSiteSessionDetail(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteSessionDetailReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
 ): Promise<Response> {
   return handlePlannedSiteList(
@@ -920,7 +916,7 @@ export function handlePlannedSiteSessionDetail(
     siteId,
     SiteSessionDetailQueryDtoSchema,
     "site.analytics.sessionDetail",
-    reader,
+    providerRegistry,
     execution,
   );
 }
@@ -930,7 +926,7 @@ export function handlePlannedSiteVisitorsSearch(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteVisitorsSearchReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -940,7 +936,7 @@ export function handlePlannedSiteVisitorsSearch(
     siteId,
     SiteVisitorsSearchQueryDtoSchema,
     "site.analytics.visitorsSearch",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -951,7 +947,7 @@ export function handlePlannedSiteSessionsSearch(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteSessionsSearchReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -961,7 +957,7 @@ export function handlePlannedSiteSessionsSearch(
     siteId,
     SiteSessionsSearchQueryDtoSchema,
     "site.analytics.sessionsSearch",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -972,7 +968,7 @@ export function handlePlannedSiteVisitorEvents(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteVisitorEventsReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -982,7 +978,7 @@ export function handlePlannedSiteVisitorEvents(
     siteId,
     SiteVisitorEventsQueryDtoSchema,
     "site.analytics.visitorEvents",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -993,7 +989,7 @@ export function handlePlannedSiteVisitorSessions(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteVisitorSessionsReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -1003,7 +999,7 @@ export function handlePlannedSiteVisitorSessions(
     siteId,
     SiteVisitorSessionsQueryDtoSchema,
     "site.analytics.visitorSessions",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -1014,7 +1010,7 @@ export function handlePlannedSiteSessionEvents(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteSessionEventsReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -1024,7 +1020,7 @@ export function handlePlannedSiteSessionEvents(
     siteId,
     SiteSessionEventsQueryDtoSchema,
     "site.analytics.sessionEvents",
-    reader,
+    providerRegistry,
     execution,
     definitions,
   );
@@ -1035,7 +1031,7 @@ export function handlePlannedSiteRealtimeSnapshot(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteRealtimeSnapshotReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
 ): Promise<Response> {
   return handlePlannedSiteList(
@@ -1044,7 +1040,7 @@ export function handlePlannedSiteRealtimeSnapshot(
     siteId,
     SiteRealtimeSnapshotQueryDtoSchema,
     "site.analytics.realtimeSnapshot",
-    reader,
+    providerRegistry,
     execution,
     undefined,
     { source: "realtime" },
@@ -1054,7 +1050,7 @@ export function handlePlannedSiteRealtimeActiveVisitors(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteRealtimeActiveVisitorsReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
 ): Promise<Response> {
   return handlePlannedSiteList(
@@ -1063,7 +1059,7 @@ export function handlePlannedSiteRealtimeActiveVisitors(
     siteId,
     SiteRealtimeActiveVisitorsQueryDtoSchema,
     "site.analytics.realtimeActiveVisitors",
-    reader,
+    providerRegistry,
     execution,
     undefined,
     { source: "realtime" },
@@ -1073,7 +1069,7 @@ export function handlePlannedSiteRealtimeEvents(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteRealtimeEventsReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
 ): Promise<Response> {
   return handlePlannedSiteList(
@@ -1082,7 +1078,7 @@ export function handlePlannedSiteRealtimeEvents(
     siteId,
     SiteRealtimeEventsQueryDtoSchema,
     "site.analytics.realtimeEvents",
-    reader,
+    providerRegistry,
     execution,
     undefined,
     { source: "realtime" },
@@ -1092,7 +1088,7 @@ export function handlePlannedSiteRealtimeSessions(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: SiteRealtimeSessionsReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   execution?: ExecutionContext,
 ): Promise<Response> {
   return handlePlannedSiteList(
@@ -1101,7 +1097,7 @@ export function handlePlannedSiteRealtimeSessions(
     siteId,
     SiteRealtimeSessionsQueryDtoSchema,
     "site.analytics.realtimeSessions",
-    reader,
+    providerRegistry,
     execution,
     undefined,
     { source: "realtime" },

@@ -6,8 +6,8 @@ import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
 import { exceedsQueryCost } from "@/lib/edge/analytics/application/cost";
+import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
-import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
   type FilterDocument,
   isReportingTimeZone,
@@ -115,7 +115,7 @@ function filter(input: TeamTimeseriesQueryDto): FilterDocument | null {
 export async function handlePlannedTeamTimeseries(
   request: Request,
   principal: ApiKeyPrincipal,
-  reader: TeamTimeseriesReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   executionContext: {
     readonly signal?: AbortSignal;
     readonly deadlineMs?: number;
@@ -206,12 +206,7 @@ export async function handlePlannedTeamTimeseries(
           principal.siteIds,
         ),
         query,
-        providerRegistry: createCallbackProviderRegistry<
-          TeamTimeseriesReaderInput,
-          TeamTimeseriesQueryResult
-        >("team.analytics.timeseries", (providerQuery, providerExecution) =>
-          reader({ ...providerQuery, signal: providerExecution.signal }),
-        ),
+        providerRegistry,
       },
       {
         signal: executionContext.signal,

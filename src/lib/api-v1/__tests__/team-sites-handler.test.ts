@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import {
   handlePlannedTeamSites,
   type TeamSitesReader,
@@ -88,7 +89,11 @@ describe("planned team sites HTTP adapter", () => {
     const provider = reader();
     const app = new Hono();
     app.post("/api/v1/team/analytics/sites", (context) =>
-      handlePlannedTeamSites(context.req.raw, principal, provider),
+      handlePlannedTeamSites(
+        context.req.raw,
+        principal,
+        createTestProviderRegistry(provider),
+      ),
     );
     const response = await app.fetch(request());
     const body = await response.json();
@@ -139,7 +144,7 @@ describe("planned team sites HTTP adapter", () => {
       const response = await handlePlannedTeamSites(
         candidate,
         principal,
-        provider,
+        createTestProviderRegistry(provider),
       );
       expect(response.status).toBeGreaterThanOrEqual(400);
       expect(
@@ -151,23 +156,33 @@ describe("planned team sites HTTP adapter", () => {
         await handlePlannedTeamSites(
           request(),
           { ...principal, scopes: [] },
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
     expect(
       (
-        await handlePlannedTeamSites(request(), principal, provider, {
-          signal: cancelled.signal,
-        })
+        await handlePlannedTeamSites(
+          request(),
+          principal,
+          createTestProviderRegistry(provider),
+          {
+            signal: cancelled.signal,
+          },
+        )
       ).status,
     ).toBe(499);
     expect(
       (
-        await handlePlannedTeamSites(request(), principal, provider, {
-          deadlineMs: 1,
-          now: () => 1,
-        })
+        await handlePlannedTeamSites(
+          request(),
+          principal,
+          createTestProviderRegistry(provider),
+          {
+            deadlineMs: 1,
+            now: () => 1,
+          },
+        )
       ).status,
     ).toBe(504);
     expect(provider).not.toHaveBeenCalled();
@@ -204,7 +219,7 @@ describe("planned team sites HTTP adapter", () => {
     const success = await handlePlannedTeamSites(
       request(),
       principal,
-      approximate,
+      createTestProviderRegistry(approximate),
     );
     await expect(success.json()).resolves.toMatchObject({
       data: {
@@ -217,7 +232,7 @@ describe("planned team sites HTTP adapter", () => {
     const deadline = await handlePlannedTeamSites(
       request(),
       principal,
-      reader(),
+      createTestProviderRegistry(reader()),
       {
         deadlineMs: 1,
         now: () => calls++,
@@ -227,7 +242,9 @@ describe("planned team sites HTTP adapter", () => {
     const failed = await handlePlannedTeamSites(
       request(),
       principal,
-      vi.fn<TeamSitesReader>().mockRejectedValue(new Error("provider down")),
+      createTestProviderRegistry(
+        vi.fn<TeamSitesReader>().mockRejectedValue(new Error("provider down")),
+      ),
     );
     expect(failed.status).toBe(500);
   });
@@ -263,7 +280,7 @@ describe("planned team sites HTTP adapter", () => {
     const response = await handlePlannedTeamSites(
       request(JSON.stringify({ timeRange: input.timeRange })),
       { ...principal, siteIds: [] },
-      zero,
+      createTestProviderRegistry(zero),
     );
     await expect(response.json()).resolves.toMatchObject({
       data: {
@@ -284,9 +301,14 @@ describe("planned team sites HTTP adapter", () => {
     });
     expect(
       (
-        await handlePlannedTeamSites(request(), principal, cancelled, {
-          signal: controller.signal,
-        })
+        await handlePlannedTeamSites(
+          request(),
+          principal,
+          createTestProviderRegistry(cancelled),
+          {
+            signal: controller.signal,
+          },
+        )
       ).status,
     ).toBe(499);
     expect(
@@ -294,7 +316,7 @@ describe("planned team sites HTTP adapter", () => {
         await handlePlannedTeamSites(
           request(),
           { ...principal, status: "revoked" },
-          reader(),
+          createTestProviderRegistry(reader()),
         )
       ).status,
     ).toBe(403);
@@ -305,7 +327,7 @@ describe("planned team sites HTTP adapter", () => {
     const method = await handlePlannedTeamSites(
       request(JSON.stringify(input), { method: "GET" }),
       principal,
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(method.headers.get("Allow")).toBe("POST");
     expect(
@@ -315,7 +337,7 @@ describe("planned team sites HTTP adapter", () => {
             headers: { "content-encoding": "gzip" },
           }),
           principal,
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(415);
@@ -324,7 +346,7 @@ describe("planned team sites HTTP adapter", () => {
         await handlePlannedTeamSites(
           request(),
           { ...principal, status: "revoked" },
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
@@ -334,7 +356,7 @@ describe("planned team sites HTTP adapter", () => {
           await handlePlannedTeamSites(
             request(JSON.stringify(input), { headers: { accept } }),
             principal,
-            reader(),
+            createTestProviderRegistry(reader()),
           )
         ).status,
       ).toBe(200);

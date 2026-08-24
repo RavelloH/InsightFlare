@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import { apiV1AnalyticsListRouteRegistry } from "@/lib/api-v1/route-registry";
 import {
   handlePlannedSiteChannels,
@@ -53,7 +54,7 @@ describe("site analytics channels API", () => {
       }),
       principal,
       "site-1",
-      reader,
+      createTestProviderRegistry(reader),
     );
 
     expect(response.status).toBe(200);

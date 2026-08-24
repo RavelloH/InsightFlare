@@ -4,6 +4,7 @@ import { OperationResultCache } from "@/lib/edge/analytics/application/cache";
 import {
   analyticsOperationProvider,
   TypedApplicationProviderRegistry,
+  TypedQueryProviderRegistry,
 } from "@/lib/edge/analytics/application/provider-registry";
 import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
 import {
@@ -80,6 +81,100 @@ function trendInvocation(
 }
 
 describe("TypedQueryApplicationService", () => {
+  it("runs the canonical typed-query contract through the same service entry", async () => {
+    const service = new TypedQueryApplicationService();
+    const context = siteQueryContext("site-1", "private-dashboard");
+    const run = vi.fn().mockResolvedValue({
+      value: { views: 3 },
+      source: "rollup",
+      approximateVisitors: true,
+    });
+    const providerRegistry = new TypedQueryProviderRegistry().register(
+      "overview",
+      { execute: run },
+    );
+
+    await expect(
+      service.execute({
+        kind: "typed-query",
+        operation: "overview",
+        query: { context, time, filters: EMPTY_FILTER_DOCUMENT },
+        providerRegistry,
+        resultMode: "value",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      data: { views: 3 },
+      meta: {
+        time,
+        source: "rollup",
+        approximateVisitors: true,
+      },
+    });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("returns an internal error when a typed result provider is missing", async () => {
+    await expect(
+      new TypedQueryApplicationService().execute({
+        kind: "typed-query",
+        operation: "overview",
+        query: {
+          context: siteQueryContext("site-1", "private-dashboard"),
+          time,
+          filters: EMPTY_FILTER_DOCUMENT,
+        },
+        providerRegistry: new TypedQueryProviderRegistry(),
+        resultMode: "result",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: { kind: "internal", operation: "overview" },
+    });
+  });
+
+  it("rejects cache loader failures instead of converting them to cache values", async () => {
+    const service = new TypedQueryApplicationService(
+      new OperationResultCache(),
+    );
+    await expect(
+      service.execute(
+        {
+          ...overviewInvocation(reader()),
+          providerRegistry: new TypedApplicationProviderRegistry().register(
+            "site.analytics.overview",
+            analyticsOperationProvider(async () => {
+              throw new Error("cache load failed");
+            }),
+          ),
+          cache: {
+            key: "__query_cache/v1/site.analytics.overview/failure",
+            policy: { ttlMs: 1_000, maxEntries: 4 },
+          },
+        },
+        {},
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("returns operation-not-allowed when the application registry has no provider", async () => {
+    await expect(
+      new TypedQueryApplicationService().execute(
+        {
+          ...overviewInvocation(reader()),
+          providerRegistry: new TypedApplicationProviderRegistry(),
+        },
+        {},
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        kind: "operation-not-allowed",
+        operation: "site.analytics.overview",
+      },
+    });
+  });
+
   function invocation<Result>(run: () => Promise<Result>) {
     return {
       operation: "site.analytics.pages" as const,

@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-v1/analytics-overview";
 import { SiteTimeseriesQueryDtoSchema } from "@/lib/api-v1/dto/analytics";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/query-context";
+import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
   type AnalyticsServiceResult,
   type QueryExecutionContext,
@@ -16,19 +17,17 @@ import {
 } from "@/lib/edge/analytics/application/service";
 import type {
   AnalyticsResult,
-  OverviewReader,
   TrendQuery,
   TrendResult,
 } from "@/lib/edge/analytics/contract";
 import { filterConditionCount } from "@/lib/edge/analytics/contract";
-import { createOverviewProviderRegistry } from "@/lib/edge/analytics/providers/d1/operations/overview";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 
 export async function executeApiV1SiteTimeseries(
   input: unknown,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: OverviewReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   executionContext: QueryExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<
@@ -86,7 +85,7 @@ export async function executeApiV1SiteTimeseries(
           filters: filter.value,
           interval: parsed.data.interval,
         },
-        providerRegistry: createOverviewProviderRegistry(reader),
+        providerRegistry,
         cache: {
           key: await aggregateCacheKey({
             operation: "site.analytics.timeseries",

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import {
   AnalysisDefinitionIntegrityError,
   AnalysisDefinitionReadCancelledError,
@@ -76,7 +77,7 @@ describe("planned site breakdown HTTP adapter", () => {
           principal,
           context.req.param("siteId"),
           context.req.param("dimension"),
-          provider,
+          createTestProviderRegistry(provider),
         ),
     );
     const response = await app.fetch(request());
@@ -119,7 +120,7 @@ describe("planned site breakdown HTTP adapter", () => {
         principal,
         "site-1",
         "page.path",
-        provider,
+        createTestProviderRegistry(provider),
       );
       expect(response.status).toBeGreaterThanOrEqual(400);
       expect(
@@ -133,7 +134,7 @@ describe("planned site breakdown HTTP adapter", () => {
           { ...principal, scopes: [] },
           "site-1",
           "page.path",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
@@ -148,7 +149,7 @@ describe("planned site breakdown HTTP adapter", () => {
       { ...principal, scopes: ["analytics:read", "analysis:read"] },
       "site-1",
       "page.path",
-      provider,
+      createTestProviderRegistry(provider),
       {},
       { resolveTeamVisibleSavedFilter: vi.fn().mockResolvedValue(null) },
     );
@@ -160,7 +161,7 @@ describe("planned site breakdown HTTP adapter", () => {
           principal,
           "site-2",
           "page.path",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(404);
@@ -171,7 +172,7 @@ describe("planned site breakdown HTTP adapter", () => {
           principal,
           "site-1",
           "not.real",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(400);
@@ -195,7 +196,7 @@ describe("planned site breakdown HTTP adapter", () => {
         { ...principal, scopes: ["analytics:read", "analysis:read"] },
         "site-1",
         "page.path",
-        provider,
+        createTestProviderRegistry(provider),
         {},
         definitions,
       ),
@@ -215,7 +216,7 @@ describe("planned site breakdown HTTP adapter", () => {
           principal,
           "site-1",
           "page.path",
-          provider,
+          createTestProviderRegistry(provider),
           {},
           definitions,
         )
@@ -231,7 +232,7 @@ describe("planned site breakdown HTTP adapter", () => {
           principal,
           "site-1",
           "page.path",
-          provider,
+          createTestProviderRegistry(provider),
           { signal: cancelled.signal },
         )
       ).status,
@@ -243,7 +244,7 @@ describe("planned site breakdown HTTP adapter", () => {
           principal,
           "site-1",
           "page.path",
-          provider,
+          createTestProviderRegistry(provider),
           { deadlineMs: 1, now: () => 1 },
         )
       ).status,
@@ -265,7 +266,7 @@ describe("planned site breakdown HTTP adapter", () => {
       principal,
       "site-1",
       "page.path",
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(defaulted.status).toBe(200);
     expect(provider).toHaveBeenLastCalledWith(
@@ -292,7 +293,7 @@ describe("planned site breakdown HTTP adapter", () => {
         savedPrincipal,
         "site-1",
         "page.path",
-        provider,
+        createTestProviderRegistry(provider),
         {},
         { resolveTeamVisibleSavedFilter: vi.fn().mockRejectedValue(error) },
       );
@@ -303,7 +304,7 @@ describe("planned site breakdown HTTP adapter", () => {
       savedPrincipal,
       "site-1",
       "page.path",
-      provider,
+      createTestProviderRegistry(provider),
       {},
       {
         resolveTeamVisibleSavedFilter: vi
@@ -320,7 +321,7 @@ describe("planned site breakdown HTTP adapter", () => {
       principal,
       "site-1",
       "page.path",
-      deadlineProvider,
+      createTestProviderRegistry(deadlineProvider),
       { deadlineMs: 1, now: () => (nowCalls++ === 0 ? 0 : 1) },
     );
     expect(deadlineAfterProvider.status).toBe(504);
@@ -337,7 +338,7 @@ describe("planned site breakdown HTTP adapter", () => {
           principal,
           "site-1",
           "page.path",
-          abortingProvider,
+          createTestProviderRegistry(abortingProvider),
           { signal: controller.signal },
         )
       ).status,
@@ -353,7 +354,7 @@ describe("planned site breakdown HTTP adapter", () => {
           principal,
           "site-1",
           "page.path",
-          failingProvider,
+          createTestProviderRegistry(failingProvider),
         )
       ).status,
     ).toBe(500);
@@ -366,7 +367,7 @@ describe("planned site breakdown HTTP adapter", () => {
       principal,
       "site-1",
       "page.path",
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(method.headers.get("Allow")).toBe("POST");
     expect(
@@ -378,7 +379,7 @@ describe("planned site breakdown HTTP adapter", () => {
           principal,
           "site-1",
           "page.path",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(415);
@@ -389,7 +390,7 @@ describe("planned site breakdown HTTP adapter", () => {
           { ...principal, status: "revoked" },
           "site-1",
           "page.path",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
@@ -405,7 +406,7 @@ describe("planned site breakdown HTTP adapter", () => {
           { ...principal, scopes: ["analytics:read", "analysis:read"] },
           "site-1",
           "page.path",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(404);
@@ -422,7 +423,7 @@ describe("planned site breakdown HTTP adapter", () => {
           principal,
           "site-1",
           "page.path",
-          aborting,
+          createTestProviderRegistry(aborting),
           { signal: controller.signal },
         )
       ).status,

@@ -5,8 +5,8 @@ import {
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
+import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
-import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
   type BreakdownResult,
   type FilterDocument,
@@ -117,7 +117,7 @@ export async function handleTeamBreakdown(
   request: Request,
   principal: ApiKeyPrincipal,
   dimension: string,
-  reader: TeamBreakdownReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   executionContext: {
     readonly signal?: AbortSignal;
     readonly deadlineMs?: number;
@@ -197,12 +197,7 @@ export async function handleTeamBreakdown(
           principal.siteIds,
         ),
         query,
-        providerRegistry: createCallbackProviderRegistry<
-          TeamBreakdownReaderInput,
-          BreakdownResult
-        >("team.analytics.breakdown", (providerQuery, providerExecution) =>
-          reader({ ...providerQuery, signal: providerExecution.signal }),
-        ),
+        providerRegistry,
       },
       {
         signal: executionContext.signal,

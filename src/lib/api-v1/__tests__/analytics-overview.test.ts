@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import {
   AnalysisDefinitionIntegrityError,
   AnalysisDefinitionReadCancelledError,
@@ -67,7 +68,7 @@ describe("API v1 overview adapter", () => {
       { ...body, filter: { type: "saved", id: "filter-1" } },
       principal({ scopes: [] }),
       "site-1",
-      reader,
+      createTestProviderRegistry(reader),
       {},
       definitions,
     );
@@ -93,7 +94,7 @@ describe("API v1 overview adapter", () => {
         siteIds: ["site-1"],
       }),
       "site-1",
-      reader,
+      createTestProviderRegistry(reader),
       {},
       definitions,
     );
@@ -128,7 +129,7 @@ describe("API v1 overview adapter", () => {
       },
       principal(),
       "site-1",
-      reader,
+      createTestProviderRegistry(reader),
       {},
     );
     expect(result).toMatchObject({ ok: true, value: { ok: true } });
@@ -144,7 +145,7 @@ describe("API v1 overview adapter", () => {
       { ...body, filter: { type: "saved", id: "filter-1" } },
       principal(),
       "site-1",
-      reader,
+      createTestProviderRegistry(reader),
       {},
       definitions,
     );
@@ -170,7 +171,7 @@ describe("API v1 overview adapter", () => {
       { ...body, filter: { type: "inline", expression } },
       principal(),
       "site-1",
-      reader,
+      createTestProviderRegistry(reader),
       {},
     );
 
@@ -186,7 +187,13 @@ describe("API v1 overview adapter", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
     expect(
-      await executeApiV1SiteOverview(cyclic, principal(), "site-1", reader, {}),
+      await executeApiV1SiteOverview(
+        cyclic,
+        principal(),
+        "site-1",
+        createTestProviderRegistry(reader),
+        {},
+      ),
     ).toEqual({
       ok: false,
       error: { kind: "invalid_input", reason: "body_not_serializable" },
@@ -196,7 +203,7 @@ describe("API v1 overview adapter", () => {
         { payload: "x".repeat(70_000) },
         principal(),
         "site-1",
-        reader,
+        createTestProviderRegistry(reader),
         {},
       ),
     ).toEqual({
@@ -208,7 +215,7 @@ describe("API v1 overview adapter", () => {
         Array.from({ length: 520 }, () => null),
         principal(),
         "site-1",
-        reader,
+        createTestProviderRegistry(reader),
         {},
       ),
     ).toEqual({
@@ -224,7 +231,7 @@ describe("API v1 overview adapter", () => {
         { ...body, unexpected: true },
         principal(),
         "site-1",
-        reader,
+        createTestProviderRegistry(reader),
         {},
       ),
     ).toEqual({
@@ -234,22 +241,34 @@ describe("API v1 overview adapter", () => {
     const controller = new AbortController();
     controller.abort();
     expect(
-      await executeApiV1SiteOverview(body, principal(), "site-1", reader, {
-        signal: controller.signal,
-      }),
+      await executeApiV1SiteOverview(
+        body,
+        principal(),
+        "site-1",
+        createTestProviderRegistry(reader),
+        {
+          signal: controller.signal,
+        },
+      ),
     ).toEqual({ ok: false, error: { kind: "request_cancelled" } });
     expect(
-      await executeApiV1SiteOverview(body, principal(), "site-1", reader, {
-        now: () => 100,
-        deadlineMs: 100,
-      }),
+      await executeApiV1SiteOverview(
+        body,
+        principal(),
+        "site-1",
+        createTestProviderRegistry(reader),
+        {
+          now: () => 100,
+          deadlineMs: 100,
+        },
+      ),
     ).toEqual({ ok: false, error: { kind: "deadline_exceeded" } });
     expect(
       await executeApiV1SiteOverview(
         body,
         principal({ status: "revoked" }),
         "site-1",
-        reader,
+        createTestProviderRegistry(reader),
         {},
       ),
     ).toEqual({ ok: false, error: { kind: "token_inactive" } });
@@ -258,7 +277,7 @@ describe("API v1 overview adapter", () => {
         body,
         principal({ siteIds: ["other-site"] }),
         "site-1",
-        reader,
+        createTestProviderRegistry(reader),
         {},
       ),
     ).toEqual({ ok: false, error: { kind: "site_not_found" } });
@@ -271,7 +290,7 @@ describe("API v1 overview adapter", () => {
         { ...body, timeRange: { ...body.timeRange, to: body.timeRange.from } },
         principal(),
         "site-1",
-        reader,
+        createTestProviderRegistry(reader),
         {},
       ),
     ).toEqual({
@@ -283,7 +302,7 @@ describe("API v1 overview adapter", () => {
         { ...body, timeRange: { ...body.timeRange, timeZone: "Not/AZone" } },
         principal(),
         "site-1",
-        reader,
+        createTestProviderRegistry(reader),
         {},
       ),
     ).toEqual({
@@ -294,7 +313,7 @@ describe("API v1 overview adapter", () => {
       { ...body, filter: { type: "saved", id: "filter-1" } },
       principal({ scopes: ["analytics:read", "analysis:read"] }),
       "site-1",
-      reader,
+      createTestProviderRegistry(reader),
       {},
     );
     expect(missingDefinitions).toEqual({
@@ -306,7 +325,7 @@ describe("API v1 overview adapter", () => {
       { ...body, filter: { type: "saved", id: "filter-1" } },
       principal({ scopes: ["analytics:read", "analysis:read"] }),
       "site-1",
-      reader,
+      createTestProviderRegistry(reader),
       {},
       { resolveTeamVisibleSavedFilter: vi.fn().mockResolvedValue(null) },
     );
@@ -316,7 +335,7 @@ describe("API v1 overview adapter", () => {
       { ...body, filter: { type: "saved", id: "filter-1" } },
       principal({ scopes: ["analytics:read", "analysis:read"] }),
       "site-1",
-      reader,
+      createTestProviderRegistry(reader),
       {},
       {
         resolveTeamVisibleSavedFilter: vi
@@ -337,7 +356,7 @@ describe("API v1 overview adapter", () => {
         { ...body, filter: { type: "saved", id: "filter-1" } },
         principal({ scopes: ["analytics:read", "analysis:read"] }),
         "site-1",
-        reader,
+        createTestProviderRegistry(reader),
         {},
         { resolveTeamVisibleSavedFilter: vi.fn().mockRejectedValue(error) },
       );

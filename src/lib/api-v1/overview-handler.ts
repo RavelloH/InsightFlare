@@ -5,8 +5,8 @@ import {
 import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { serializeAnalyticsResult } from "@/lib/api-v1/serializer";
+import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import type { QueryExecutionContext } from "@/lib/edge/analytics/application/service";
-import type { OverviewReader } from "@/lib/edge/analytics/contract";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -136,7 +136,7 @@ export async function handlePlannedSiteOverview(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: OverviewReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   executionContext: QueryExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -187,7 +187,7 @@ export async function handlePlannedSiteOverview(
       input,
       principal,
       siteId,
-      reader,
+      providerRegistry,
       executionContext,
       definitions,
     );

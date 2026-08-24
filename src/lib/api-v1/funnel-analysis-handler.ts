@@ -10,8 +10,8 @@ import {
   jsonSuccess,
   methodNotAllowed,
 } from "@/lib/api-v1/wire-helpers";
+import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
-import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
 import {
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
@@ -91,7 +91,7 @@ export async function handlePlannedSiteFunnelAnalysis(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  provider: SiteFunnelAnalysisProvider,
+  providerRegistry: TypedApplicationProviderRegistry,
   definitions?: AnalysisDefinitionReader,
   execution: {
     readonly signal?: AbortSignal;
@@ -259,10 +259,7 @@ export async function handlePlannedSiteFunnelAnalysis(
             timeZone: resolved.timeZone,
           },
         },
-        providerRegistry: createCallbackProviderRegistry<
-          SiteFunnelAnalysisProviderInput,
-          SiteFunnelAnalysisProviderResult | null
-        >("site.analytics.funnelAnalysis", (query) => provider(query)),
+        providerRegistry,
       },
       {
         signal: execution.signal,

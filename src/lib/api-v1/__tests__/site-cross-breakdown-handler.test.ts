@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import {
   AnalysisDefinitionIntegrityError,
   AnalysisDefinitionReadCancelledError,
@@ -64,7 +65,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
         context.req.raw,
         principal,
         context.req.param("siteId"),
-        provider,
+        createTestProviderRegistry(provider),
       ),
     );
     const response = await app.fetch(request());
@@ -106,7 +107,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
         candidate,
         principal,
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       );
       expect(response.status).toBeGreaterThanOrEqual(400);
       expect(
@@ -117,7 +118,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
       request(JSON.stringify(input), { method: "GET" }),
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(method.headers.get("Allow")).toBe("POST");
     expect(
@@ -126,7 +127,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
           request(),
           { ...principal, scopes: [] },
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
@@ -136,7 +137,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
           request(),
           { ...principal, status: "revoked" },
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
@@ -146,7 +147,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
           request(),
           principal,
           "site-2",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(404);
@@ -156,7 +157,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
       ),
       { ...principal, scopes: ["analytics:read", "analysis:read"] },
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
       { resolveTeamVisibleSavedFilter: vi.fn().mockResolvedValue(null) },
     );
@@ -181,7 +182,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
         saved(),
         { ...principal, scopes: ["analytics:read", "analysis:read"] },
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
         {},
         definitions,
       ),
@@ -195,7 +196,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
           saved(),
           principal,
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
           {},
           definitions,
         )
@@ -210,7 +211,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
           request(),
           principal,
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
           { signal: controller.signal },
         )
       ).status,
@@ -221,7 +222,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
           request(),
           principal,
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
           { deadlineMs: 1, now: () => 1 },
         )
       ).status,
@@ -244,7 +245,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
       ),
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(defaulted.status).toBe(200);
     expect(provider).toHaveBeenLastCalledWith(
@@ -271,7 +272,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
         saved(),
         savedPrincipal,
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
         {},
         { resolveTeamVisibleSavedFilter: vi.fn().mockRejectedValue(error) },
       );
@@ -283,7 +284,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
           saved(),
           savedPrincipal,
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
           {},
           {
             resolveTeamVisibleSavedFilter: vi
@@ -301,7 +302,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
           request(),
           principal,
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
           { deadlineMs: 1, now: () => (nowCalls++ === 0 ? 0 : 1) },
         )
       ).status,
@@ -317,7 +318,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
           request(),
           principal,
           "site-1",
-          abortingProvider,
+          createTestProviderRegistry(abortingProvider),
           { signal: aborting.signal },
         )
       ).status,
@@ -331,7 +332,7 @@ describe("planned site cross-breakdown HTTP adapter", () => {
           request(),
           principal,
           "site-1",
-          failing,
+          createTestProviderRegistry(failing),
         )
       ).status,
     ).toBe(500);

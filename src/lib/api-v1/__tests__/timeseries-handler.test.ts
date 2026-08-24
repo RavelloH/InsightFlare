@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import { aggregateCache } from "@/lib/api-v1/analytics-overview";
 import { executeApiV1SiteTimeseries } from "@/lib/api-v1/analytics-timeseries";
 import { handlePlannedSiteTimeseries } from "@/lib/api-v1/timeseries-handler";
@@ -59,7 +60,7 @@ describe("planned site timeseries HTTP adapter", () => {
         context.req.raw,
         principal,
         context.req.param("siteId"),
-        reader(),
+        createTestProviderRegistry(reader()),
         {},
       ),
     );
@@ -107,7 +108,7 @@ describe("planned site timeseries HTTP adapter", () => {
           request(null),
           principal,
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
           {},
         )
       ).status,
@@ -118,7 +119,7 @@ describe("planned site timeseries HTTP adapter", () => {
           request(JSON.stringify(input), { headers: { Accept: "text/plain" } }),
           principal,
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
           {},
         )
       ).status,
@@ -129,7 +130,7 @@ describe("planned site timeseries HTTP adapter", () => {
           request(JSON.stringify(input)),
           { ...principal, scopes: [] },
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
           {},
         )
       ).status,
@@ -145,7 +146,7 @@ describe("planned site timeseries HTTP adapter", () => {
       input,
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       { signal: controller.signal },
     );
     expect(aborted).toMatchObject({
@@ -157,7 +158,7 @@ describe("planned site timeseries HTTP adapter", () => {
       input,
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       { now: () => 10, deadlineMs: 10 },
     );
     expect(deadline).toMatchObject({
@@ -169,7 +170,7 @@ describe("planned site timeseries HTTP adapter", () => {
       { ...input, timeRange: { ...input.timeRange, to: input.timeRange.from } },
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
     );
     expect(invalidRange).toMatchObject({
@@ -181,7 +182,7 @@ describe("planned site timeseries HTTP adapter", () => {
       input,
       { ...principal, siteIds: ["site-2"] },
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
     );
     expect(siteDenied).toMatchObject({
@@ -194,7 +195,7 @@ describe("planned site timeseries HTTP adapter", () => {
       saved,
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
     );
     expect(savedDenied).toMatchObject({
@@ -206,7 +207,7 @@ describe("planned site timeseries HTTP adapter", () => {
       saved,
       { ...principal, scopes: ["analytics:read", "analysis:read"] },
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
     );
     expect(unavailable).toMatchObject({
@@ -224,7 +225,7 @@ describe("planned site timeseries HTTP adapter", () => {
       saved,
       { ...principal, scopes: ["analytics:read", "analysis:read"] },
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
       definitions,
     );
@@ -240,7 +241,7 @@ describe("planned site timeseries HTTP adapter", () => {
       }),
       principal,
       "site-1",
-      reader(),
+      createTestProviderRegistry(reader()),
       {},
     );
     expect(response.status).toBe(415);
@@ -260,7 +261,7 @@ describe("planned site timeseries HTTP adapter", () => {
           request(input),
           { ...principal, status: "revoked" },
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           {},
         )
       ).status,
@@ -274,7 +275,7 @@ describe("planned site timeseries HTTP adapter", () => {
           }),
           principal,
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           {},
         )
       ).status,
@@ -284,7 +285,7 @@ describe("planned site timeseries HTTP adapter", () => {
       request(input),
       principal,
       "site-1",
-      reader(),
+      createTestProviderRegistry(reader()),
       { now: () => (now++ === 0 ? 0 : 100), deadlineMs: 50 },
     );
     expect(response.status).toBe(504);

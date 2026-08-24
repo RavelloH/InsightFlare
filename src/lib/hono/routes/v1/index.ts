@@ -16,7 +16,10 @@ import {
 import { dispatchApiV1CoreRoute } from "@/lib/api-v1/core-dispatcher";
 import { SitePerformanceBreakdownDimensionSchema } from "@/lib/api-v1/dto/analytics";
 import { TypedBatchRequestSchema } from "@/lib/api-v1/dto/batch";
-import { handlePlannedSiteFunnelAnalysis } from "@/lib/api-v1/funnel-analysis-handler";
+import {
+  handlePlannedSiteFunnelAnalysis,
+  type SiteFunnelAnalysisProvider,
+} from "@/lib/api-v1/funnel-analysis-handler";
 import { handlePlannedSiteOverview } from "@/lib/api-v1/overview-handler";
 import {
   API_V1_BATCH_BODY_MAX_BYTES,
@@ -27,8 +30,14 @@ import {
 } from "@/lib/api-v1/request-budget";
 import { handlePlannedResourceRoute } from "@/lib/api-v1/resource-handler";
 import { handlePlannedSavedFilters } from "@/lib/api-v1/saved-filters-handler";
-import { handlePlannedSiteBreakdown } from "@/lib/api-v1/site-breakdown-handler";
-import { handlePlannedSiteCrossBreakdown } from "@/lib/api-v1/site-cross-breakdown-handler";
+import {
+  handlePlannedSiteBreakdown,
+  type SiteBreakdownReader,
+} from "@/lib/api-v1/site-breakdown-handler";
+import {
+  handlePlannedSiteCrossBreakdown,
+  type SiteCrossBreakdownReader,
+} from "@/lib/api-v1/site-cross-breakdown-handler";
 import {
   handlePlannedSiteChannels,
   handlePlannedSiteEventDetail,
@@ -57,11 +66,50 @@ import {
   handlePlannedSiteVisitorEvents,
   handlePlannedSiteVisitorSessions,
   handlePlannedSiteVisitorsSearch,
+  type SiteChannelsReader,
+  type SiteEventDetailReader,
+  type SiteEventFieldsReader,
+  type SiteEventFieldValuesReader,
+  type SiteEventsSearchReader,
+  type SiteEventsSummaryReader,
+  type SiteEventsTimeseriesReader,
+  type SiteEventTypeDetailReader,
+  type SiteEventTypesReader,
+  type SiteFilterValuesReader,
+  type SitePagesReader,
+  type SitePerformanceBreakdownReader,
+  type SitePerformanceSummaryReader,
+  type SitePerformanceTimeseriesReader,
+  type SiteRealtimeActiveVisitorsReader,
+  type SiteRealtimeEventsReader,
+  type SiteRealtimeSessionsReader,
+  type SiteRealtimeSnapshotReader,
+  type SiteReferrersReader,
+  type SiteRetentionReader,
+  type SiteSessionDetailReader,
+  type SiteSessionEventsReader,
+  type SiteSessionsSearchReader,
+  type SiteVisitorDetailReader,
+  type SiteVisitorEventsReader,
+  type SiteVisitorSessionsReader,
+  type SiteVisitorsSearchReader,
 } from "@/lib/api-v1/site-list-handler";
-import { handleTeamBreakdown } from "@/lib/api-v1/team-breakdown-handler";
-import { handlePlannedTeamOverview } from "@/lib/api-v1/team-overview-handler";
-import { handlePlannedTeamSites } from "@/lib/api-v1/team-sites-handler";
-import { handlePlannedTeamTimeseries } from "@/lib/api-v1/team-timeseries-handler";
+import {
+  handleTeamBreakdown,
+  type TeamBreakdownReader,
+} from "@/lib/api-v1/team-breakdown-handler";
+import {
+  handlePlannedTeamOverview,
+  type TeamOverviewReader,
+} from "@/lib/api-v1/team-overview-handler";
+import {
+  handlePlannedTeamSites,
+  type TeamSitesReader,
+} from "@/lib/api-v1/team-sites-handler";
+import {
+  handlePlannedTeamTimeseries,
+  type TeamTimeseriesReader,
+} from "@/lib/api-v1/team-timeseries-handler";
 import { handlePlannedSiteTimeseries } from "@/lib/api-v1/timeseries-handler";
 import {
   executeTypedBatch,
@@ -105,6 +153,18 @@ import {
   readTeamSites,
   readTeamTimeseries,
 } from "@/lib/edge/analytics/adapters/api-v1";
+import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
+import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import { createCallbackProviderRegistry } from "@/lib/edge/analytics/composition/create-provider-registry";
+import {
+  type AnalyticsResult,
+  executeOverview,
+  executeTrend,
+  type OverviewQuery,
+  type OverviewResult,
+  type TrendQuery,
+  type TrendResult,
+} from "@/lib/edge/analytics/contract";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import { authenticateApiKeyMiddleware } from "@/lib/hono/middleware/api-key";
 import type { AppEnv } from "@/lib/hono/types";
@@ -137,6 +197,24 @@ function withSiteId(
   return handler(siteId);
 }
 
+function createReaderProviderRegistry<
+  Reader extends (...args: never[]) => Promise<unknown>,
+>(
+  operation: AnalyticsOperationId,
+  reader: Reader,
+): TypedApplicationProviderRegistry {
+  type Input = Parameters<Reader>[0];
+  type Result = Awaited<ReturnType<Reader>>;
+  return createCallbackProviderRegistry<Input, Result>(
+    operation,
+    (input, execution) =>
+      reader({
+        ...(input as object),
+        signal: execution.signal,
+      } as Input) as Promise<Result>,
+  );
+}
+
 export const v1Routes = new Hono<AppEnv>();
 
 // Batch children are routed through the same Hono registration without a
@@ -166,19 +244,22 @@ function typedTeamOverview(c: Context<AppEnv>): Promise<Response> {
   return handlePlannedTeamOverview(
     c.req.raw,
     principal(c),
-    (input) =>
-      readTeamOverview({
-        env: c.env,
-        teamId: input.teamId,
-        allowedSiteIds: input.allowedSiteIds,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<TeamOverviewReader>(
+      "team.analytics.overview",
+      (input) =>
+        readTeamOverview({
+          env: c.env,
+          teamId: input.teamId,
+          allowedSiteIds: input.allowedSiteIds,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
@@ -187,20 +268,23 @@ function typedTeamTimeseries(c: Context<AppEnv>): Promise<Response> {
   return handlePlannedTeamTimeseries(
     c.req.raw,
     principal(c),
-    (input) =>
-      readTeamTimeseries({
-        env: c.env,
-        teamId: input.teamId,
-        allowedSiteIds: input.allowedSiteIds,
-        interval: input.interval,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<TeamTimeseriesReader>(
+      "team.analytics.timeseries",
+      (input) =>
+        readTeamTimeseries({
+          env: c.env,
+          teamId: input.teamId,
+          allowedSiteIds: input.allowedSiteIds,
+          interval: input.interval,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
@@ -209,20 +293,23 @@ function typedTeamSites(c: Context<AppEnv>): Promise<Response> {
   return handlePlannedTeamSites(
     c.req.raw,
     principal(c),
-    (input) =>
-      readTeamSites({
-        env: c.env,
-        teamId: input.teamId,
-        allowedSiteIds: input.allowedSiteIds,
-        interval: input.interval,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<TeamSitesReader>(
+      "team.analytics.sites",
+      (input) =>
+        readTeamSites({
+          env: c.env,
+          teamId: input.teamId,
+          allowedSiteIds: input.allowedSiteIds,
+          interval: input.interval,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
@@ -234,21 +321,24 @@ function typedTeamBreakdown(c: Context<AppEnv>): Promise<Response> {
     c.req.raw,
     principal(c),
     dimension,
-    (input) =>
-      readTeamBreakdown({
-        env: c.env,
-        teamId: input.teamId,
-        allowedSiteIds: input.allowedSiteIds,
-        dimension: input.dimension,
-        limit: input.limit,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<TeamBreakdownReader>(
+      "team.analytics.breakdown",
+      (input) =>
+        readTeamBreakdown({
+          env: c.env,
+          teamId: input.teamId,
+          allowedSiteIds: input.allowedSiteIds,
+          dimension: input.dimension,
+          limit: input.limit,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
@@ -523,7 +613,12 @@ v1Routes.post("/sites/:siteId/analytics/overview", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    createOverviewReader(c.env, siteId),
+    createCallbackProviderRegistry<
+      OverviewQuery,
+      AnalyticsResult<OverviewResult>
+    >("site.analytics.overview", (query) =>
+      executeOverview(createOverviewReader(c.env, siteId), query),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -557,7 +652,10 @@ v1Routes.post("/sites/:siteId/analytics/timeseries", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    createOverviewReader(c.env, siteId),
+    createCallbackProviderRegistry<TrendQuery, AnalyticsResult<TrendResult>>(
+      "site.analytics.timeseries",
+      (query) => executeTrend(createOverviewReader(c.env, siteId), query),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -571,20 +669,23 @@ v1Routes.post("/sites/:siteId/analytics/breakdowns/:dimension", (c) => {
     principal(c),
     siteId,
     dimension,
-    (input) =>
-      readSiteBreakdown({
-        env: c.env,
-        siteId: input.siteId,
-        dimension: input.dimension,
-        limit: input.limit,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteBreakdownReader>(
+      "site.analytics.breakdown",
+      (input) =>
+        readSiteBreakdown({
+          env: c.env,
+          siteId: input.siteId,
+          dimension: input.dimension,
+          limit: input.limit,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -596,22 +697,25 @@ v1Routes.post("/sites/:siteId/analytics/cross-breakdowns", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteCrossBreakdown({
-        env: c.env,
-        siteId: input.siteId,
-        primaryDimension: input.primaryDimension,
-        secondaryDimension: input.secondaryDimension,
-        primaryLimit: input.primaryLimit,
-        secondaryLimit: input.secondaryLimit,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteCrossBreakdownReader>(
+      "site.analytics.crossBreakdown",
+      (input) =>
+        readSiteCrossBreakdown({
+          env: c.env,
+          siteId: input.siteId,
+          primaryDimension: input.primaryDimension,
+          secondaryDimension: input.secondaryDimension,
+          primaryLimit: input.primaryLimit,
+          secondaryLimit: input.secondaryLimit,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -623,20 +727,23 @@ v1Routes.post("/sites/:siteId/analytics/pages", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSitePages({
-        env: c.env,
-        siteId: input.siteId,
-        limit: input.limit,
-        includeDetails: input.includeDetails,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SitePagesReader>(
+      "site.analytics.pages",
+      (input) =>
+        readSitePages({
+          env: c.env,
+          siteId: input.siteId,
+          limit: input.limit,
+          includeDetails: input.includeDetails,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -648,20 +755,23 @@ v1Routes.post("/sites/:siteId/analytics/referrers", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteReferrers({
-        env: c.env,
-        siteId: input.siteId,
-        limit: input.limit,
-        includeFullUrl: input.includeFullUrl,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteReferrersReader>(
+      "site.analytics.referrers",
+      (input) =>
+        readSiteReferrers({
+          env: c.env,
+          siteId: input.siteId,
+          limit: input.limit,
+          includeFullUrl: input.includeFullUrl,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -673,19 +783,22 @@ v1Routes.post("/sites/:siteId/analytics/channels", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteChannels({
-        env: c.env,
-        siteId: input.siteId,
-        limit: input.limit,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteChannelsReader>(
+      "site.analytics.channels",
+      (input) =>
+        readSiteChannels({
+          env: c.env,
+          siteId: input.siteId,
+          limit: input.limit,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -697,21 +810,24 @@ v1Routes.post("/sites/:siteId/analytics/filter-values", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteFilterValues({
-        env: c.env,
-        siteId: input.siteId,
-        field: input.field,
-        search: input.search,
-        limit: input.page.limit,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteFilterValuesReader>(
+      "site.analytics.filterValues",
+      (input) =>
+        readSiteFilterValues({
+          env: c.env,
+          siteId: input.siteId,
+          field: input.field,
+          search: input.search,
+          limit: input.page.limit,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -723,19 +839,22 @@ v1Routes.post("/sites/:siteId/analytics/retention/cohorts", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteRetention({
-        env: c.env,
-        siteId: input.siteId,
-        granularity: input.granularity,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteRetentionReader>(
+      "site.analytics.retentionCohorts",
+      (input) =>
+        readSiteRetention({
+          env: c.env,
+          siteId: input.siteId,
+          granularity: input.granularity,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -747,7 +866,10 @@ v1Routes.post("/sites/:siteId/analytics/funnel-analysis", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) => readSiteFunnelAnalysis({ env: c.env, ...input }),
+    createReaderProviderRegistry<SiteFunnelAnalysisProvider>(
+      "site.analytics.funnelAnalysis",
+      (input) => readSiteFunnelAnalysis({ env: c.env, ...input }),
+    ),
     createAnalysisDefinitionReader(c.env, principal(c)),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
@@ -759,18 +881,21 @@ v1Routes.post("/sites/:siteId/analytics/performance/summary", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSitePerformanceSummary({
-        env: c.env,
-        siteId: input.siteId,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SitePerformanceSummaryReader>(
+      "site.analytics.performanceSummary",
+      (input) =>
+        readSitePerformanceSummary({
+          env: c.env,
+          siteId: input.siteId,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -782,19 +907,22 @@ v1Routes.post("/sites/:siteId/analytics/performance/timeseries", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSitePerformanceTimeseries({
-        env: c.env,
-        siteId: input.siteId,
-        interval: input.interval,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SitePerformanceTimeseriesReader>(
+      "site.analytics.performanceTimeseries",
+      (input) =>
+        readSitePerformanceTimeseries({
+          env: c.env,
+          siteId: input.siteId,
+          interval: input.interval,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -823,21 +951,24 @@ v1Routes.post(
       c.req.raw,
       principal(c),
       siteId,
-      (input) =>
-        readSitePerformanceBreakdown({
-          env: c.env,
-          siteId: input.siteId,
-          dimension: parsedDimension.data,
-          metric: input.metric,
-          limit: input.limit,
-          window: {
-            startMs: input.startMs,
-            endExclusiveMs: input.endExclusiveMs,
-            timeZone: input.timeZone,
-            nowMs: Date.now(),
-          },
-          filters: input.filters,
-        }),
+      createReaderProviderRegistry<SitePerformanceBreakdownReader>(
+        "site.analytics.performanceBreakdown",
+        (input) =>
+          readSitePerformanceBreakdown({
+            env: c.env,
+            siteId: input.siteId,
+            dimension: parsedDimension.data,
+            metric: input.metric,
+            limit: input.limit,
+            window: {
+              startMs: input.startMs,
+              endExclusiveMs: input.endExclusiveMs,
+              timeZone: input.timeZone,
+              nowMs: Date.now(),
+            },
+            filters: input.filters,
+          }),
+      ),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, principal(c)),
     );
@@ -850,18 +981,21 @@ v1Routes.post("/sites/:siteId/analytics/events/summary", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteEventsSummary({
-        env: c.env,
-        siteId: input.siteId,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteEventsSummaryReader>(
+      "site.analytics.eventsSummary",
+      (input) =>
+        readSiteEventsSummary({
+          env: c.env,
+          siteId: input.siteId,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -873,20 +1007,23 @@ v1Routes.post("/sites/:siteId/analytics/events/timeseries", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteEventsTimeseries({
-        env: c.env,
-        siteId: input.siteId,
-        interval: input.interval,
-        limit: input.limit,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteEventsTimeseriesReader>(
+      "site.analytics.eventsTimeseries",
+      (input) =>
+        readSiteEventsTimeseries({
+          env: c.env,
+          siteId: input.siteId,
+          interval: input.interval,
+          limit: input.limit,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -898,20 +1035,23 @@ v1Routes.post("/sites/:siteId/analytics/event-types", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteEventTypes({
-        env: c.env,
-        siteId: input.siteId,
-        search: input.search,
-        limit: input.page.limit,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteEventTypesReader>(
+      "site.analytics.eventTypes",
+      (input) =>
+        readSiteEventTypes({
+          env: c.env,
+          siteId: input.siteId,
+          search: input.search,
+          limit: input.page.limit,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -923,20 +1063,23 @@ v1Routes.post("/sites/:siteId/analytics/event-types/detail", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteEventTypeDetail({
-        env: c.env,
-        siteId: input.siteId,
-        eventName: input.eventName,
-        interval: input.interval,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteEventTypeDetailReader>(
+      "site.analytics.eventTypeDetail",
+      (input) =>
+        readSiteEventTypeDetail({
+          env: c.env,
+          siteId: input.siteId,
+          eventName: input.eventName,
+          interval: input.interval,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -948,20 +1091,23 @@ v1Routes.post("/sites/:siteId/analytics/event-types/fields", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteEventFields({
-        env: c.env,
-        siteId: input.siteId,
-        eventName: input.eventName,
-        limit: input.page.limit,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteEventFieldsReader>(
+      "site.analytics.eventFields",
+      (input) =>
+        readSiteEventFields({
+          env: c.env,
+          siteId: input.siteId,
+          eventName: input.eventName,
+          limit: input.page.limit,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -973,23 +1119,26 @@ v1Routes.post("/sites/:siteId/analytics/event-types/field-values", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteEventFieldValues({
-        env: c.env,
-        siteId: input.siteId,
-        eventName: input.eventName,
-        fieldPath: input.fieldPath,
-        fieldValueType: input.fieldValueType,
-        search: input.search,
-        limit: input.page.limit,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteEventFieldValuesReader>(
+      "site.analytics.eventFieldValues",
+      (input) =>
+        readSiteEventFieldValues({
+          env: c.env,
+          siteId: input.siteId,
+          eventName: input.eventName,
+          fieldPath: input.fieldPath,
+          fieldValueType: input.fieldValueType,
+          search: input.search,
+          limit: input.page.limit,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -1001,22 +1150,25 @@ v1Routes.post("/sites/:siteId/analytics/events/search", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteEventRecords({
-        env: c.env,
-        siteId: input.siteId,
-        search: input.search,
-        eventName: input.eventName,
-        sort: input.sort,
-        page: input.page,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-        filters: input.filters,
-      }),
+    createReaderProviderRegistry<SiteEventsSearchReader>(
+      "site.analytics.eventsSearch",
+      (input) =>
+        readSiteEventRecords({
+          env: c.env,
+          siteId: input.siteId,
+          search: input.search,
+          eventName: input.eventName,
+          sort: input.sort,
+          page: input.page,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+          filters: input.filters,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -1028,18 +1180,21 @@ v1Routes.post("/sites/:siteId/analytics/events/detail", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteEventDetail({
-        env: c.env,
-        siteId: input.siteId,
-        eventId: input.eventId,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-      }),
+    createReaderProviderRegistry<SiteEventDetailReader>(
+      "site.analytics.eventDetail",
+      (input) =>
+        readSiteEventDetail({
+          env: c.env,
+          siteId: input.siteId,
+          eventId: input.eventId,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 });
@@ -1050,15 +1205,18 @@ v1Routes.post("/sites/:siteId/analytics/realtime/snapshot", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteRealtimeSnapshot({
-        env: c.env,
-        siteId: input.siteId,
-        startMs: input.startMs,
-        endExclusiveMs: input.endExclusiveMs,
-        limit: input.limit,
-        signal: input.signal,
-      }),
+    createReaderProviderRegistry<SiteRealtimeSnapshotReader>(
+      "site.analytics.realtimeSnapshot",
+      (input) =>
+        readSiteRealtimeSnapshot({
+          env: c.env,
+          siteId: input.siteId,
+          startMs: input.startMs,
+          endExclusiveMs: input.endExclusiveMs,
+          limit: input.limit,
+          signal: input.signal,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 });
@@ -1069,14 +1227,17 @@ v1Routes.post("/sites/:siteId/analytics/realtime/active-visitors", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteRealtimeActiveVisitors({
-        env: c.env,
-        siteId: input.siteId,
-        startMs: input.startMs,
-        endExclusiveMs: input.endExclusiveMs,
-        signal: input.signal,
-      }),
+    createReaderProviderRegistry<SiteRealtimeActiveVisitorsReader>(
+      "site.analytics.realtimeActiveVisitors",
+      (input) =>
+        readSiteRealtimeActiveVisitors({
+          env: c.env,
+          siteId: input.siteId,
+          startMs: input.startMs,
+          endExclusiveMs: input.endExclusiveMs,
+          signal: input.signal,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 });
@@ -1087,15 +1248,18 @@ v1Routes.post("/sites/:siteId/analytics/realtime/events", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteRealtimeEvents({
-        env: c.env,
-        siteId: input.siteId,
-        startMs: input.startMs,
-        endExclusiveMs: input.endExclusiveMs,
-        limit: input.limit,
-        signal: input.signal,
-      }),
+    createReaderProviderRegistry<SiteRealtimeEventsReader>(
+      "site.analytics.realtimeEvents",
+      (input) =>
+        readSiteRealtimeEvents({
+          env: c.env,
+          siteId: input.siteId,
+          startMs: input.startMs,
+          endExclusiveMs: input.endExclusiveMs,
+          limit: input.limit,
+          signal: input.signal,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 });
@@ -1106,15 +1270,18 @@ v1Routes.post("/sites/:siteId/analytics/realtime/sessions", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteRealtimeSessions({
-        env: c.env,
-        siteId: input.siteId,
-        startMs: input.startMs,
-        endExclusiveMs: input.endExclusiveMs,
-        limit: input.limit,
-        signal: input.signal,
-      }),
+    createReaderProviderRegistry<SiteRealtimeSessionsReader>(
+      "site.analytics.realtimeSessions",
+      (input) =>
+        readSiteRealtimeSessions({
+          env: c.env,
+          siteId: input.siteId,
+          startMs: input.startMs,
+          endExclusiveMs: input.endExclusiveMs,
+          limit: input.limit,
+          signal: input.signal,
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 });
@@ -1125,18 +1292,21 @@ v1Routes.post("/sites/:siteId/analytics/visitors/detail", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteVisitorDetail({
-        env: c.env,
-        siteId: input.siteId,
-        visitorId: input.visitorId,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-      }),
+    createReaderProviderRegistry<SiteVisitorDetailReader>(
+      "site.analytics.visitorDetail",
+      (input) =>
+        readSiteVisitorDetail({
+          env: c.env,
+          siteId: input.siteId,
+          visitorId: input.visitorId,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 });
@@ -1147,18 +1317,21 @@ v1Routes.post("/sites/:siteId/analytics/sessions/detail", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteSessionDetail({
-        env: c.env,
-        siteId: input.siteId,
-        sessionId: input.sessionId,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-      }),
+    createReaderProviderRegistry<SiteSessionDetailReader>(
+      "site.analytics.sessionDetail",
+      (input) =>
+        readSiteSessionDetail({
+          env: c.env,
+          siteId: input.siteId,
+          sessionId: input.sessionId,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 });
@@ -1169,21 +1342,24 @@ v1Routes.post("/sites/:siteId/analytics/visitors/search", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteVisitors({
-        env: c.env,
-        siteId: input.siteId,
-        search: input.search,
-        sort: input.sort,
-        page: input.page,
-        filters: input.filters,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-      }),
+    createReaderProviderRegistry<SiteVisitorsSearchReader>(
+      "site.analytics.visitorsSearch",
+      (input) =>
+        readSiteVisitors({
+          env: c.env,
+          siteId: input.siteId,
+          search: input.search,
+          sort: input.sort,
+          page: input.page,
+          filters: input.filters,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -1195,21 +1371,24 @@ v1Routes.post("/sites/:siteId/analytics/sessions/search", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteSessions({
-        env: c.env,
-        siteId: input.siteId,
-        search: input.search,
-        sort: input.sort,
-        page: input.page,
-        filters: input.filters,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-      }),
+    createReaderProviderRegistry<SiteSessionsSearchReader>(
+      "site.analytics.sessionsSearch",
+      (input) =>
+        readSiteSessions({
+          env: c.env,
+          siteId: input.siteId,
+          search: input.search,
+          sort: input.sort,
+          page: input.page,
+          filters: input.filters,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -1221,21 +1400,24 @@ v1Routes.post("/sites/:siteId/analytics/visitors/events", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteVisitorEvents({
-        env: c.env,
-        siteId: input.siteId,
-        visitorId: input.visitorId,
-        limit: input.limit,
-        page: { limit: input.limit },
-        filters: input.filters,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-      }),
+    createReaderProviderRegistry<SiteVisitorEventsReader>(
+      "site.analytics.visitorEvents",
+      (input) =>
+        readSiteVisitorEvents({
+          env: c.env,
+          siteId: input.siteId,
+          visitorId: input.visitorId,
+          limit: input.limit,
+          page: { limit: input.limit },
+          filters: input.filters,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -1247,21 +1429,24 @@ v1Routes.post("/sites/:siteId/analytics/visitors/sessions", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteVisitorSessions({
-        env: c.env,
-        siteId: input.siteId,
-        visitorId: input.visitorId,
-        limit: input.limit,
-        page: { limit: input.limit },
-        filters: input.filters,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-      }),
+    createReaderProviderRegistry<SiteVisitorSessionsReader>(
+      "site.analytics.visitorSessions",
+      (input) =>
+        readSiteVisitorSessions({
+          env: c.env,
+          siteId: input.siteId,
+          visitorId: input.visitorId,
+          limit: input.limit,
+          page: { limit: input.limit },
+          filters: input.filters,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );
@@ -1273,21 +1458,24 @@ v1Routes.post("/sites/:siteId/analytics/sessions/events", (c) => {
     c.req.raw,
     principal(c),
     siteId,
-    (input) =>
-      readSiteSessionEvents({
-        env: c.env,
-        siteId: input.siteId,
-        sessionId: input.sessionId,
-        limit: input.limit,
-        page: { limit: input.limit },
-        filters: input.filters,
-        window: {
-          startMs: input.startMs,
-          endExclusiveMs: input.endExclusiveMs,
-          timeZone: input.timeZone,
-          nowMs: Date.now(),
-        },
-      }),
+    createReaderProviderRegistry<SiteSessionEventsReader>(
+      "site.analytics.sessionEvents",
+      (input) =>
+        readSiteSessionEvents({
+          env: c.env,
+          siteId: input.siteId,
+          sessionId: input.sessionId,
+          limit: input.limit,
+          page: { limit: input.limit },
+          filters: input.filters,
+          window: {
+            startMs: input.startMs,
+            endExclusiveMs: input.endExclusiveMs,
+            timeZone: input.timeZone,
+            nowMs: Date.now(),
+          },
+        }),
+    ),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     createAnalysisDefinitionReader(c.env, principal(c)),
   );

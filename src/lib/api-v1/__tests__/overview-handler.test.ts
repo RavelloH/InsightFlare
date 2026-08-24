@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import { aggregateCache } from "@/lib/api-v1/analytics-overview";
 import { handlePlannedSiteOverview } from "@/lib/api-v1/overview-handler";
 import {
@@ -59,7 +60,7 @@ describe("planned site overview HTTP adapter", () => {
         c.req.raw,
         principal,
         c.req.param("siteId"),
-        reader(),
+        createTestProviderRegistry(reader()),
         {},
       ),
     );
@@ -106,7 +107,7 @@ describe("planned site overview HTTP adapter", () => {
       new Request("https://app.test/api/v1/sites/site-1/analytics/overview"),
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
     );
     expect(getResponse.status).toBe(405);
@@ -121,7 +122,7 @@ describe("planned site overview HTTP adapter", () => {
       }),
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
     );
     expect(invalid.status).toBe(400);
@@ -134,7 +135,7 @@ describe("planned site overview HTTP adapter", () => {
       }),
       { ...principal, scopes: [] },
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
     );
     expect(denied.status).toBe(403);
@@ -148,7 +149,7 @@ describe("planned site overview HTTP adapter", () => {
       }),
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
     );
     expect(unsupported.status).toBe(415);
@@ -167,7 +168,7 @@ describe("planned site overview HTTP adapter", () => {
       }),
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
     );
     expect(unacceptable.status).toBe(406);
@@ -191,7 +192,7 @@ describe("planned site overview HTTP adapter", () => {
       }),
       { ...principal, scopes: ["analytics:read", "analysis:read"] },
       "site-1",
-      reader(),
+      createTestProviderRegistry(reader()),
       {},
       definitions,
     );
@@ -225,7 +226,7 @@ describe("planned site overview HTTP adapter", () => {
       }),
       principal,
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       {},
     );
 
@@ -255,7 +256,7 @@ describe("planned site overview HTTP adapter", () => {
           jsonRequest(null),
           principal,
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           {},
         )
       ).status,
@@ -266,7 +267,7 @@ describe("planned site overview HTTP adapter", () => {
           jsonRequest("x".repeat(70_000)),
           principal,
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           {},
         )
       ).status,
@@ -280,7 +281,7 @@ describe("planned site overview HTTP adapter", () => {
           jsonRequest(JSON.stringify(input)),
           principal,
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           { signal: controller.signal },
         )
       ).status,
@@ -291,7 +292,7 @@ describe("planned site overview HTTP adapter", () => {
           jsonRequest(JSON.stringify(input)),
           principal,
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           { now: () => 1, deadlineMs: 1 },
         )
       ).status,
@@ -302,7 +303,7 @@ describe("planned site overview HTTP adapter", () => {
           jsonRequest(JSON.stringify(input)),
           { ...principal, siteIds: ["other-site"] },
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           {},
         )
       ).status,
@@ -313,7 +314,7 @@ describe("planned site overview HTTP adapter", () => {
           jsonRequest(JSON.stringify(input)),
           { ...principal, status: "revoked" },
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           {},
         )
       ).status,
@@ -329,7 +330,7 @@ describe("planned site overview HTTP adapter", () => {
           ),
           { ...principal, scopes: ["analytics:read", "analysis:read"] },
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           {},
         )
       ).status,
@@ -341,7 +342,7 @@ describe("planned site overview HTTP adapter", () => {
             jsonRequest(JSON.stringify(input), { headers: { Accept: accept } }),
             principal,
             "site-1",
-            reader(),
+            createTestProviderRegistry(reader()),
             {},
           )
         ).status,
@@ -358,7 +359,7 @@ describe("planned site overview HTTP adapter", () => {
           ),
           { ...principal, scopes: ["analytics:read", "analysis:read"] },
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           {},
           {
             resolveTeamVisibleSavedFilter: vi
@@ -384,7 +385,7 @@ describe("planned site overview HTTP adapter", () => {
           }),
           principal,
           "site-1",
-          reader(),
+          createTestProviderRegistry(reader()),
           {},
         )
       ).status,
@@ -416,7 +417,7 @@ describe("planned site overview HTTP adapter", () => {
           }),
           principal,
           "site-1",
-          provider,
+          createTestProviderRegistry(provider),
           { signal: controller.signal },
         )
       ).status,

@@ -9,6 +9,44 @@ import { v1Routes } from "@/lib/hono/routes/v1";
 import type { AppEnv } from "@/lib/hono/types";
 
 const typedReaderMock = vi.hoisted(() => {
+  const operationIds = [
+    "site.analytics.overview",
+    "site.analytics.timeseries",
+    "site.analytics.breakdown",
+    "site.analytics.crossBreakdown",
+    "site.analytics.pages",
+    "site.analytics.referrers",
+    "site.analytics.channels",
+    "site.analytics.filterValues",
+    "site.analytics.retentionCohorts",
+    "site.analytics.funnelAnalysis",
+    "site.analytics.performanceSummary",
+    "site.analytics.performanceTimeseries",
+    "site.analytics.performanceBreakdown",
+    "site.analytics.eventsSummary",
+    "site.analytics.eventsTimeseries",
+    "site.analytics.eventsSearch",
+    "site.analytics.eventDetail",
+    "site.analytics.eventTypes",
+    "site.analytics.eventTypeDetail",
+    "site.analytics.eventFields",
+    "site.analytics.eventFieldValues",
+    "site.analytics.visitorDetail",
+    "site.analytics.sessionDetail",
+    "site.analytics.visitorsSearch",
+    "site.analytics.sessionsSearch",
+    "site.analytics.visitorEvents",
+    "site.analytics.visitorSessions",
+    "site.analytics.sessionEvents",
+    "site.analytics.realtimeSnapshot",
+    "site.analytics.realtimeActiveVisitors",
+    "site.analytics.realtimeEvents",
+    "site.analytics.realtimeSessions",
+    "team.analytics.overview",
+    "team.analytics.timeseries",
+    "team.analytics.sites",
+    "team.analytics.breakdown",
+  ] as const;
   const input = {
     siteId: "site-1",
     teamId: "team-1",
@@ -56,6 +94,31 @@ const typedReaderMock = vi.hoisted(() => {
           typeof value === "function",
       );
       if (reader) void reader(input).catch(() => undefined);
+      const registry = args.find(
+        (
+          value,
+        ): value is {
+          readonly resolve: (
+            operation: never,
+          ) =>
+            | { readonly execute: (input: unknown) => Promise<unknown> }
+            | undefined;
+        } =>
+          typeof value === "object" &&
+          value !== null &&
+          "resolve" in value &&
+          typeof value.resolve === "function",
+      );
+      if (registry) {
+        for (const operation of operationIds) {
+          const provider = registry.resolve(operation as never);
+          if (provider) {
+            void provider
+              .execute({ operation, context: {}, query: input, execution: {} })
+              .catch(() => undefined);
+          }
+        }
+      }
       return Promise.resolve(new Response("typed-reader"));
     },
   };

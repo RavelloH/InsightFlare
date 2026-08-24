@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import {
   handlePlannedTeamTimeseries,
   type TeamTimeseriesReader,
@@ -69,7 +70,11 @@ describe("planned team timeseries HTTP adapter", () => {
     const provider = reader();
     const app = new Hono();
     app.post("/api/v1/team/analytics/timeseries", (c) =>
-      handlePlannedTeamTimeseries(c.req.raw, principal, provider),
+      handlePlannedTeamTimeseries(
+        c.req.raw,
+        principal,
+        createTestProviderRegistry(provider),
+      ),
     );
     const response = await app.fetch(request());
     const body = await response.json();
@@ -130,7 +135,7 @@ describe("planned team timeseries HTTP adapter", () => {
       const response = await handlePlannedTeamTimeseries(
         candidate,
         principal,
-        provider,
+        createTestProviderRegistry(provider),
       );
       expect(response.status).toBeGreaterThanOrEqual(400);
       expect(
@@ -142,7 +147,7 @@ describe("planned team timeseries HTTP adapter", () => {
         await handlePlannedTeamTimeseries(
           request(),
           { ...principal, scopes: [] },
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
@@ -151,23 +156,33 @@ describe("planned team timeseries HTTP adapter", () => {
         await handlePlannedTeamTimeseries(
           request(),
           { ...principal, status: "revoked" },
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
     expect(
       (
-        await handlePlannedTeamTimeseries(request(), principal, provider, {
-          signal: cancelled.signal,
-        })
+        await handlePlannedTeamTimeseries(
+          request(),
+          principal,
+          createTestProviderRegistry(provider),
+          {
+            signal: cancelled.signal,
+          },
+        )
       ).status,
     ).toBe(499);
     expect(
       (
-        await handlePlannedTeamTimeseries(request(), principal, provider, {
-          deadlineMs: 1,
-          now: () => 1,
-        })
+        await handlePlannedTeamTimeseries(
+          request(),
+          principal,
+          createTestProviderRegistry(provider),
+          {
+            deadlineMs: 1,
+            now: () => 1,
+          },
+        )
       ).status,
     ).toBe(504);
     expect(provider).not.toHaveBeenCalled();
@@ -197,7 +212,7 @@ describe("planned team timeseries HTTP adapter", () => {
     const success = await handlePlannedTeamTimeseries(
       request(),
       principal,
-      approximate,
+      createTestProviderRegistry(approximate),
     );
     await expect(success.json()).resolves.toMatchObject({
       data: { points: [{ avgDurationMs: 0, bounceRate: 0 }] },
@@ -208,7 +223,7 @@ describe("planned team timeseries HTTP adapter", () => {
     const deadline = await handlePlannedTeamTimeseries(
       request(),
       principal,
-      reader(),
+      createTestProviderRegistry(reader()),
       { deadlineMs: 1, now: () => calls++ },
     );
     expect(deadline.status).toBe(504);
@@ -216,9 +231,11 @@ describe("planned team timeseries HTTP adapter", () => {
     const failed = await handlePlannedTeamTimeseries(
       request(),
       principal,
-      vi
-        .fn<TeamTimeseriesReader>()
-        .mockRejectedValue(new Error("provider down")),
+      createTestProviderRegistry(
+        vi
+          .fn<TeamTimeseriesReader>()
+          .mockRejectedValue(new Error("provider down")),
+      ),
     );
     expect(failed.status).toBe(500);
   });
@@ -246,7 +263,7 @@ describe("planned team timeseries HTTP adapter", () => {
         }),
       ),
       { ...principal, siteIds: [] },
-      provider,
+      createTestProviderRegistry(provider),
       { signal: controller.signal },
     );
     expect(response.status).toBe(499);
@@ -257,7 +274,7 @@ describe("planned team timeseries HTTP adapter", () => {
     const method = await handlePlannedTeamTimeseries(
       request(JSON.stringify(input), { method: "GET" }),
       principal,
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(method.headers.get("Allow")).toBe("POST");
     expect(
@@ -267,7 +284,7 @@ describe("planned team timeseries HTTP adapter", () => {
             headers: { "content-encoding": "gzip" },
           }),
           principal,
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(415);
@@ -276,7 +293,7 @@ describe("planned team timeseries HTTP adapter", () => {
         await handlePlannedTeamTimeseries(
           request(),
           { ...principal, status: "revoked" },
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
@@ -295,7 +312,7 @@ describe("planned team timeseries HTTP adapter", () => {
             }),
           ),
           principal,
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(422);
@@ -303,7 +320,7 @@ describe("planned team timeseries HTTP adapter", () => {
       const response = await handlePlannedTeamTimeseries(
         request(JSON.stringify(input), { headers: { accept } }),
         { ...principal, siteIds: [] },
-        reader(),
+        createTestProviderRegistry(reader()),
       );
       expect(response.status).toBe(200);
     }

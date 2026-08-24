@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import {
   AnalysisDefinitionIntegrityError,
   AnalysisDefinitionReadCancelledError,
@@ -155,19 +156,19 @@ describe("planned site list analytics adapters", () => {
       request("pages", { timeRange }),
       principal,
       "site-1",
-      pages,
+      createTestProviderRegistry(pages),
     );
     const referrerResponse = await handlePlannedSiteReferrers(
       request("referrers", { timeRange }),
       principal,
       "site-1",
-      referrers,
+      createTestProviderRegistry(referrers),
     );
     const filterValuesResponse = await handlePlannedSiteFilterValues(
       request("filter-values", { timeRange, field: "page.path" }),
       principal,
       "site-1",
-      filterValues,
+      createTestProviderRegistry(filterValues),
     );
     expect(
       AnalyticsPagesResponseSchema.safeParse(await pageResponse.json()).success,
@@ -197,7 +198,7 @@ describe("planned site list analytics adapters", () => {
       request("retention/cohorts", { timeRange, granularity: "week" }),
       principal,
       "site-1",
-      retention,
+      createTestProviderRegistry(retention),
     );
     expect(
       AnalyticsRetentionCohortsResponseSchema.safeParse(
@@ -228,14 +229,14 @@ describe("planned site list analytics adapters", () => {
         request("performance/summary", { timeRange }),
         principal,
         "site-1",
-        performanceSummary,
+        createTestProviderRegistry(performanceSummary),
       );
     const performanceTimeseriesResponse =
       await handlePlannedSitePerformanceTimeseries(
         request("performance/timeseries", { timeRange, interval: "day" }),
         principal,
         "site-1",
-        performanceTimeseries,
+        createTestProviderRegistry(performanceTimeseries),
       );
     expect(
       AnalyticsPerformanceSummaryResponseSchema.safeParse(
@@ -271,13 +272,13 @@ describe("planned site list analytics adapters", () => {
       request("events/summary", { timeRange }),
       principal,
       "site-1",
-      eventsSummary,
+      createTestProviderRegistry(eventsSummary),
     );
     const eventsTimeseriesResponse = await handlePlannedSiteEventsTimeseries(
       request("events/timeseries", { timeRange, interval: "day" }),
       principal,
       "site-1",
-      eventsTimeseries,
+      createTestProviderRegistry(eventsTimeseries),
     );
     expect(
       AnalyticsEventsSummaryResponseSchema.safeParse(
@@ -343,13 +344,13 @@ describe("planned site list analytics adapters", () => {
       request("events/search", { timeRange }),
       principal,
       "site-1",
-      search,
+      createTestProviderRegistry(search),
     );
     const detailResponse = await handlePlannedSiteEventDetail(
       request("events/detail", { timeRange, eventId: "evt" }),
       principal,
       "site-1",
-      detail,
+      createTestProviderRegistry(detail),
     );
     expect(
       AnalyticsEventsSearchResponseSchema.safeParse(await searchResponse.json())
@@ -431,13 +432,13 @@ describe("planned site list analytics adapters", () => {
       request("event-types", { timeRange }),
       principal,
       "site-1",
-      eventTypes,
+      createTestProviderRegistry(eventTypes),
     );
     const eventFieldsResponse = await handlePlannedSiteEventFields(
       request("event-types/fields", { timeRange, eventName: "signup" }),
       principal,
       "site-1",
-      eventFields,
+      createTestProviderRegistry(eventFields),
     );
     const eventFieldValuesResponse = await handlePlannedSiteEventFieldValues(
       request("event-types/field-values", {
@@ -448,13 +449,13 @@ describe("planned site list analytics adapters", () => {
       }),
       principal,
       "site-1",
-      eventFieldValues,
+      createTestProviderRegistry(eventFieldValues),
     );
     const eventTypeDetailResponse = await handlePlannedSiteEventTypeDetail(
       request("event-types/detail", { timeRange, eventName: "signup" }),
       principal,
       "site-1",
-      eventTypeDetail,
+      createTestProviderRegistry(eventTypeDetail),
     );
     expect(
       AnalyticsEventTypesResponseSchema.safeParse(
@@ -513,7 +514,7 @@ describe("planned site list analytics adapters", () => {
         candidate,
         principal,
         "site-1",
-        pages,
+        createTestProviderRegistry(pages),
       );
       expect(response.status).toBeGreaterThanOrEqual(400);
       expect(
@@ -526,7 +527,7 @@ describe("planned site list analytics adapters", () => {
           request("pages", { timeRange }),
           { ...principal, scopes: [] },
           "site-1",
-          pages,
+          createTestProviderRegistry(pages),
         )
       ).status,
     ).toBe(403);
@@ -536,7 +537,7 @@ describe("planned site list analytics adapters", () => {
           request("referrers", { timeRange }),
           principal,
           "site-2",
-          referrers,
+          createTestProviderRegistry(referrers),
         )
       ).status,
     ).toBe(404);
@@ -549,7 +550,7 @@ describe("planned site list analytics adapters", () => {
           }),
           principal,
           "site-1",
-          pages,
+          createTestProviderRegistry(pages),
         )
       ).status,
     ).toBe(403);
@@ -561,7 +562,7 @@ describe("planned site list analytics adapters", () => {
           request("pages", { timeRange }),
           principal,
           "site-1",
-          pages,
+          createTestProviderRegistry(pages),
           { signal: controller.signal },
         )
       ).status,
@@ -572,7 +573,7 @@ describe("planned site list analytics adapters", () => {
           request("referrers", { timeRange }),
           principal,
           "site-1",
-          referrers,
+          createTestProviderRegistry(referrers),
           { deadlineMs: 1, now: () => 1 },
         )
       ).status,
@@ -596,7 +597,7 @@ describe("planned site list analytics adapters", () => {
         saved,
         savedPrincipal,
         "site-1",
-        pages,
+        createTestProviderRegistry(pages),
         {},
         {
           resolveTeamVisibleSavedFilter: vi.fn().mockResolvedValue({
@@ -610,7 +611,7 @@ describe("planned site list analytics adapters", () => {
       request("pages", { timeRange, filter: { type: "saved", id: "missing" } }),
       savedPrincipal,
       "site-1",
-      pages,
+      createTestProviderRegistry(pages),
       {},
       { resolveTeamVisibleSavedFilter: vi.fn().mockResolvedValue(null) },
     );
@@ -624,7 +625,7 @@ describe("planned site list analytics adapters", () => {
           }),
           savedPrincipal,
           "site-1",
-          pages,
+          createTestProviderRegistry(pages),
         )
       ).status,
     ).toBe(404);
@@ -641,7 +642,7 @@ describe("planned site list analytics adapters", () => {
             }),
             savedPrincipal,
             "site-1",
-            pages,
+            createTestProviderRegistry(pages),
             {},
             { resolveTeamVisibleSavedFilter: vi.fn().mockRejectedValue(error) },
           )
@@ -657,7 +658,7 @@ describe("planned site list analytics adapters", () => {
           }),
           savedPrincipal,
           "site-1",
-          pages,
+          createTestProviderRegistry(pages),
           {},
           {
             resolveTeamVisibleSavedFilter: vi
@@ -676,7 +677,7 @@ describe("planned site list analytics adapters", () => {
           request("referrers", { timeRange }),
           principal,
           "site-1",
-          failed,
+          createTestProviderRegistry(failed),
         )
       ).status,
     ).toBe(500);
@@ -692,7 +693,7 @@ describe("planned site list analytics adapters", () => {
           request("referrers", { timeRange }),
           principal,
           "site-1",
-          invalidCursor,
+          createTestProviderRegistry(invalidCursor),
         )
       ).status,
     ).toBe(400);
@@ -702,7 +703,7 @@ describe("planned site list analytics adapters", () => {
           request("referrers", { timeRange }),
           principal,
           "site-1",
-          unavailable,
+          createTestProviderRegistry(unavailable),
         )
       ).status,
     ).toBe(503);
@@ -713,7 +714,7 @@ describe("planned site list analytics adapters", () => {
           request("pages", { timeRange }),
           principal,
           "site-1",
-          pages,
+          createTestProviderRegistry(pages),
           { deadlineMs: 1, now: () => (nowCalls++ === 0 ? 0 : 1) },
         )
       ).status,
@@ -732,7 +733,7 @@ describe("planned site list analytics adapters", () => {
           request("filter-values", { timeRange, field: "page.path" }),
           { ...principal, status: "revoked" },
           "site-1",
-          filterValues,
+          createTestProviderRegistry(filterValues),
         )
       ).status,
     ).toBe(403);
@@ -749,7 +750,7 @@ describe("planned site list analytics adapters", () => {
           }),
           principal,
           "site-1",
-          filterValues,
+          createTestProviderRegistry(filterValues),
         )
       ).status,
     ).toBe(400);
@@ -771,7 +772,7 @@ describe("planned site list analytics adapters", () => {
           request("filter-values", { timeRange, field: "page.path" }),
           principal,
           "site-1",
-          abortingReader,
+          createTestProviderRegistry(abortingReader),
           { signal: controller.signal },
         )
       ).status,
@@ -801,25 +802,25 @@ describe("planned site list analytics adapters", () => {
         request("realtime/snapshot", { timeRange }),
         principal,
         "site-1",
-        snapshot,
+        createTestProviderRegistry(snapshot),
       ),
       handlePlannedSiteRealtimeActiveVisitors(
         request("realtime/active-visitors", { timeRange }),
         principal,
         "site-1",
-        activeVisitors,
+        createTestProviderRegistry(activeVisitors),
       ),
       handlePlannedSiteRealtimeEvents(
         request("realtime/events", { timeRange }),
         principal,
         "site-1",
-        events,
+        createTestProviderRegistry(events),
       ),
       handlePlannedSiteRealtimeSessions(
         request("realtime/sessions", { timeRange }),
         principal,
         "site-1",
-        sessions,
+        createTestProviderRegistry(sessions),
       ),
     ]);
     const bodies = await Promise.all(
@@ -884,43 +885,43 @@ describe("planned site list analytics adapters", () => {
         request("visitors/detail", { timeRange, visitorId: "visitor-1" }),
         principal,
         "site-1",
-        detail,
+        createTestProviderRegistry(detail),
       ),
       handlePlannedSiteSessionDetail(
         request("sessions/detail", { timeRange, sessionId: "session-1" }),
         principal,
         "site-1",
-        sessionDetail,
+        createTestProviderRegistry(sessionDetail),
       ),
       handlePlannedSiteVisitorsSearch(
         request("visitors/search", { timeRange }),
         principal,
         "site-1",
-        visitors,
+        createTestProviderRegistry(visitors),
       ),
       handlePlannedSiteSessionsSearch(
         request("sessions/search", { timeRange }),
         principal,
         "site-1",
-        sessions,
+        createTestProviderRegistry(sessions),
       ),
       handlePlannedSiteVisitorEvents(
         request("visitors/events", { timeRange, visitorId: "visitor-1" }),
         principal,
         "site-1",
-        visitorEvents,
+        createTestProviderRegistry(visitorEvents),
       ),
       handlePlannedSiteVisitorSessions(
         request("visitors/sessions", { timeRange, visitorId: "visitor-1" }),
         principal,
         "site-1",
-        visitorSessions,
+        createTestProviderRegistry(visitorSessions),
       ),
       handlePlannedSiteSessionEvents(
         request("sessions/events", { timeRange, sessionId: "session-1" }),
         principal,
         "site-1",
-        sessionEvents,
+        createTestProviderRegistry(sessionEvents),
       ),
     ]);
     expect(responses).toHaveLength(7);

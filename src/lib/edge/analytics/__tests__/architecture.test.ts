@@ -35,6 +35,7 @@ describe("analytics architecture", () => {
       "application/service.ts",
       "application/operation-registry.ts",
       "application/provider-registry.ts",
+      "application/query-validation.ts",
       "application/planner.ts",
       "application/cache.ts",
       "application/cost.ts",
@@ -82,6 +83,10 @@ describe("analytics architecture", () => {
     expect(typedApplication).not.toContain(
       "reader: () => Promise<AnalyticsResult",
     );
+    expect(typedApplication).toContain("new TypedQueryApplicationService");
+    expect(typedApplication).toContain(".execute(invocation)");
+    expect(typedApplication).not.toContain("providerRegistry.resolve");
+    expect(typedApplication).not.toContain("assertOperationAllowed");
   });
 
   it("routes every typed-query runtime through a registry", () => {
@@ -111,6 +116,14 @@ describe("analytics architecture", () => {
         /providerRegistry|TypedApplicationProviderRegistry/u,
       );
     }
+    for (const file of productionFiles("src/lib/api-v1")) {
+      expect(readFileSync(file, "utf8")).not.toContain(
+        "createCallbackProviderRegistry",
+      );
+    }
+    expect(source("src/lib/hono/routes/v1/index.ts")).toContain(
+      "createCallbackProviderRegistry",
+    );
     expect(source("src/lib/dashboard/route-data.ts")).toContain(
       "createSsrTeamDashboardProviderRegistry",
     );

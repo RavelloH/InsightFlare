@@ -16,6 +16,7 @@ import {
   createOperationCacheKey,
   OperationResultCache,
 } from "@/lib/edge/analytics/application/cache";
+import type { TypedApplicationProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
   type AnalyticsServiceResult,
   type QueryExecutionContext,
@@ -28,11 +29,9 @@ import {
   type FilterDocument,
   isReportingTimeZone,
   type OverviewQuery,
-  type OverviewReader,
   type OverviewResult,
   parseApiV1FilterDocument,
 } from "@/lib/edge/analytics/contract";
-import { createOverviewProviderRegistry } from "@/lib/edge/analytics/providers/d1/operations/overview";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import { sha256Hex } from "@/lib/edge/utils";
 
@@ -223,7 +222,7 @@ export async function executeApiV1SiteOverview(
   input: unknown,
   principal: ApiKeyPrincipal,
   siteId: string,
-  reader: OverviewReader,
+  providerRegistry: TypedApplicationProviderRegistry,
   executionContext: QueryExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<
@@ -281,7 +280,7 @@ export async function executeApiV1SiteOverview(
           time: time.value,
           filters: filter.value,
         },
-        providerRegistry: createOverviewProviderRegistry(reader),
+        providerRegistry,
         cache: {
           key: await aggregateCacheKey({
             operation: "site.analytics.overview",

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import { AnalysisDefinitionReadCancelledError } from "@/lib/api-v1/analysis-definition-reader";
 import { handlePlannedSiteFunnelAnalysis } from "@/lib/api-v1/funnel-analysis-handler";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
@@ -75,7 +76,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
       request(body),
       principal(),
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       undefined,
       { capturedAtMs: Date.parse("2026-08-02T00:00:00.000Z") },
     );
@@ -106,7 +107,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         }),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 200);
   });
@@ -117,7 +118,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request(body, { headers: { "content-type": "text/plain" } }),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 415);
     await expect(
@@ -125,7 +126,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request(body),
         principal({ scopes: [] }),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 403);
     await expect(
@@ -133,7 +134,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request(body),
         principal({ siteIds: ["site-2"] }),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 404);
     await expect(
@@ -141,7 +142,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request({ ...body, filter: { type: "saved", id: "filter-1" } }),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 403);
     expect(provider).not.toHaveBeenCalled();
@@ -159,7 +160,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
       request({ ...body, filter: { type: "saved", id: "filter-1" } }),
       principal({ scopes: ["analytics:read", "analysis:read"] }),
       "site-1",
-      provider,
+      createTestProviderRegistry(provider),
       definitions,
     );
     expect(response.status).toBe(404);
@@ -174,7 +175,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         new Request("https://app.test", { method: "GET" }),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 405);
     await expect(
@@ -182,7 +183,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request(body, { headers: { "content-encoding": "gzip" } }),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 415);
     await expect(
@@ -192,7 +193,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         }),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 406);
     await expect(
@@ -200,7 +201,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request({}),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 400);
     await expect(
@@ -208,7 +209,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request({ ...body, filter: { type: "saved", id: "missing" } }),
         principal({ scopes: ["analytics:read", "analysis:read"] }),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 404);
 
@@ -222,7 +223,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request({ ...body, filter: { type: "saved", id: "cancelled" } }),
         principal({ scopes: ["analytics:read", "analysis:read"] }),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
         cancelledDefinitions,
       ),
     ).resolves.toHaveProperty("status", 499);
@@ -231,7 +232,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request(body),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
         undefined,
         { deadlineMs: Date.now() - 1 },
       ),
@@ -243,7 +244,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request(body),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 503);
   });
@@ -257,7 +258,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         }),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 400);
     await expect(
@@ -272,7 +273,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         ),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 422);
     await expect(
@@ -283,7 +284,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         }),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 400);
 
@@ -297,7 +298,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request({ ...body, filter: { type: "saved", id: "broken" } }),
         principal({ scopes: ["analytics:read", "analysis:read"] }),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
         failingDefinitions,
       ),
     ).resolves.toHaveProperty("status", 500);
@@ -309,7 +310,7 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         request(body),
         principal(),
         "site-1",
-        provider,
+        createTestProviderRegistry(provider),
         undefined,
         { signal: controller.signal },
       ),

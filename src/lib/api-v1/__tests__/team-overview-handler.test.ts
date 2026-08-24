@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import {
   handlePlannedTeamOverview,
   type TeamOverviewReader,
@@ -71,7 +72,11 @@ describe("planned team overview HTTP adapter", () => {
     const provider = reader();
     const app = new Hono();
     app.post("/api/v1/team/analytics/overview", (c) =>
-      handlePlannedTeamOverview(c.req.raw, principal, provider),
+      handlePlannedTeamOverview(
+        c.req.raw,
+        principal,
+        createTestProviderRegistry(provider),
+      ),
     );
     const response = await app.fetch(request());
     const body = (await response.json()) as {
@@ -122,7 +127,7 @@ describe("planned team overview HTTP adapter", () => {
       const response = await handlePlannedTeamOverview(
         invalid,
         principal,
-        provider,
+        createTestProviderRegistry(provider),
       );
       expect(response.status).toBeGreaterThanOrEqual(400);
       expect(
@@ -132,7 +137,7 @@ describe("planned team overview HTTP adapter", () => {
     const denied = await handlePlannedTeamOverview(
       request(),
       { ...principal, scopes: [] },
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(denied.status).toBe(403);
     expect(provider).not.toHaveBeenCalled();
@@ -144,17 +149,27 @@ describe("planned team overview HTTP adapter", () => {
     cancelled.abort();
     expect(
       (
-        await handlePlannedTeamOverview(request(), principal, provider, {
-          signal: cancelled.signal,
-        })
+        await handlePlannedTeamOverview(
+          request(),
+          principal,
+          createTestProviderRegistry(provider),
+          {
+            signal: cancelled.signal,
+          },
+        )
       ).status,
     ).toBe(499);
     expect(
       (
-        await handlePlannedTeamOverview(request(), principal, provider, {
-          deadlineMs: 1,
-          now: () => 1,
-        })
+        await handlePlannedTeamOverview(
+          request(),
+          principal,
+          createTestProviderRegistry(provider),
+          {
+            deadlineMs: 1,
+            now: () => 1,
+          },
+        )
       ).status,
     ).toBe(504);
 
@@ -182,7 +197,7 @@ describe("planned team overview HTTP adapter", () => {
         }),
       ),
       { ...principal, siteIds: [] },
-      zero,
+      createTestProviderRegistry(zero),
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -207,7 +222,7 @@ describe("planned team overview HTTP adapter", () => {
     const success = await handlePlannedTeamOverview(
       request(JSON.stringify({ timeRange: input.timeRange })),
       { ...principal, siteIds: [] },
-      approximate,
+      createTestProviderRegistry(approximate),
     );
     await expect(success.json()).resolves.toMatchObject({
       data: { approximateVisitors: true },
@@ -217,7 +232,11 @@ describe("planned team overview HTTP adapter", () => {
     const failed = await handlePlannedTeamOverview(
       request(),
       principal,
-      vi.fn<TeamOverviewReader>().mockRejectedValue(new Error("provider down")),
+      createTestProviderRegistry(
+        vi
+          .fn<TeamOverviewReader>()
+          .mockRejectedValue(new Error("provider down")),
+      ),
     );
     expect(failed.status).toBe(500);
   });
@@ -228,7 +247,7 @@ describe("planned team overview HTTP adapter", () => {
     const response = await handlePlannedTeamOverview(
       request(),
       principal,
-      provider,
+      createTestProviderRegistry(provider),
       {
         deadlineMs: 1,
         now: () => calls++,
@@ -243,7 +262,7 @@ describe("planned team overview HTTP adapter", () => {
     const method = await handlePlannedTeamOverview(
       request(JSON.stringify(input), { method: "GET" }),
       principal,
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(method.status).toBe(405);
     expect(method.headers.get("Allow")).toBe("POST");
@@ -254,7 +273,7 @@ describe("planned team overview HTTP adapter", () => {
             headers: { "content-encoding": "gzip" },
           }),
           principal,
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(415);
@@ -263,7 +282,7 @@ describe("planned team overview HTTP adapter", () => {
         await handlePlannedTeamOverview(
           request(),
           { ...principal, status: "revoked" },
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
@@ -281,7 +300,7 @@ describe("planned team overview HTTP adapter", () => {
             }),
           ),
           principal,
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(422);
@@ -304,9 +323,14 @@ describe("planned team overview HTTP adapter", () => {
     };
     expect(
       (
-        await handlePlannedTeamOverview(request(), principal, aborting, {
-          signal: controller.signal,
-        })
+        await handlePlannedTeamOverview(
+          request(),
+          principal,
+          createTestProviderRegistry(aborting),
+          {
+            signal: controller.signal,
+          },
+        )
       ).status,
     ).toBe(499);
   });

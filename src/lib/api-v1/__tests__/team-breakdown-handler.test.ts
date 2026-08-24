@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import {
   handleTeamBreakdown,
   type TeamBreakdownReader,
@@ -65,7 +66,7 @@ describe("team breakdown HTTP adapter", () => {
       request(),
       principal,
       "page.path",
-      provider,
+      createTestProviderRegistry(provider),
     );
     const body = await response.json();
     expect(response.status).toBe(200);
@@ -119,7 +120,7 @@ describe("team breakdown HTTP adapter", () => {
         candidate,
         candidatePrincipal,
         dimension,
-        provider,
+        createTestProviderRegistry(provider),
         context,
       );
       expect(response.status).toBeGreaterThanOrEqual(400);
@@ -136,7 +137,7 @@ describe("team breakdown HTTP adapter", () => {
       request(input, { method: "GET" }),
       principal,
       "page.path",
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(method.headers.get("Allow")).toBe("POST");
 
@@ -155,7 +156,7 @@ describe("team breakdown HTTP adapter", () => {
       }),
       principal,
       "page.path",
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(invalidFilter.status).toBe(400);
 
@@ -163,7 +164,7 @@ describe("team breakdown HTTP adapter", () => {
       request(),
       { ...principal, siteIds: [] },
       "page.path",
-      provider,
+      createTestProviderRegistry(provider),
     );
     expect(unrestricted.status).toBe(200);
     expect(provider).toHaveBeenLastCalledWith(
@@ -177,9 +178,15 @@ describe("team breakdown HTTP adapter", () => {
     };
     expect(
       (
-        await handleTeamBreakdown(request(), principal, "page.path", aborting, {
-          signal: controller.signal,
-        })
+        await handleTeamBreakdown(
+          request(),
+          principal,
+          "page.path",
+          createTestProviderRegistry(aborting),
+          {
+            signal: controller.signal,
+          },
+        )
       ).status,
     ).toBe(499);
 
@@ -187,8 +194,14 @@ describe("team breakdown HTTP adapter", () => {
       .fn<TeamBreakdownReader>()
       .mockRejectedValue(new Error("provider unavailable"));
     expect(
-      (await handleTeamBreakdown(request(), principal, "page.path", failing))
-        .status,
+      (
+        await handleTeamBreakdown(
+          request(),
+          principal,
+          "page.path",
+          createTestProviderRegistry(failing),
+        )
+      ).status,
     ).toBe(500);
   });
 
@@ -200,7 +213,7 @@ describe("team breakdown HTTP adapter", () => {
           request(input, { headers: { "content-encoding": "gzip" } }),
           principal,
           "page.path",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(415);
@@ -210,7 +223,7 @@ describe("team breakdown HTTP adapter", () => {
           request(),
           { ...principal, status: "revoked" },
           "page.path",
-          provider,
+          createTestProviderRegistry(provider),
         )
       ).status,
     ).toBe(403);
@@ -221,7 +234,7 @@ describe("team breakdown HTTP adapter", () => {
             request(input, { headers: { accept } }),
             principal,
             "page.path",
-            reader(),
+            createTestProviderRegistry(reader()),
           )
         ).status,
       ).toBe(200);

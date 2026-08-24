@@ -7,11 +7,24 @@ import {
   type QueryCostPolicy,
 } from "@/lib/edge/analytics/application/cost";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
-import { type QueryContext } from "@/lib/edge/analytics/contract";
+import type {
+  AnalyticsResult,
+  BaseQuery,
+  QueryContext,
+  QueryOperation,
+} from "@/lib/edge/analytics/contract";
+import {
+  currentInvocationLogger,
+  errorLogData,
+} from "@/lib/edge/observability-logger";
 
 import type { AnalyticsServiceError, AnalyticsServiceResult } from "./errors";
 import { planAnalyticsOperation } from "./planner";
-import type { TypedApplicationProviderRegistry } from "./provider-registry";
+import type {
+  TypedApplicationProviderRegistry,
+  TypedQueryProviderRegistry,
+} from "./provider-registry";
+import { validateTypedQueryInput } from "./query-validation";
 
 export type { AnalyticsServiceError, AnalyticsServiceResult } from "./errors";
 export type { AnalyticsOperationProvider } from "./provider-registry";
@@ -57,6 +70,19 @@ export interface AnalyticsOperationInvocation<Query, Result> {
   };
 }
 
+/**
+ * Compatibility invocation for the canonical typed-query contract. It is
+ * intentionally handled by this service as well, so low-level providers do
+ * not have a second application execution path.
+ */
+export interface TypedQueryOperationInvocation<_Result> {
+  readonly kind: "typed-query";
+  readonly operation: QueryOperation;
+  readonly query: BaseQuery;
+  readonly providerRegistry: TypedQueryProviderRegistry;
+  readonly resultMode: "value" | "result";
+}
+
 function executionError(
   context: QueryExecutionContext,
 ): AnalyticsServiceError | null {
@@ -88,6 +114,14 @@ class UncacheableResult extends Error {
   constructor(readonly value: unknown) {
     super("analytics result must not enter cache");
   }
+}
+
+function isTypedQueryInvocation<Query, Result>(
+  invocation:
+    | AnalyticsOperationInvocation<Query, Result>
+    | TypedQueryOperationInvocation<Result>,
+): invocation is TypedQueryOperationInvocation<Result> {
+  return "kind" in invocation && invocation.kind === "typed-query";
 }
 
 /**
@@ -138,6 +172,60 @@ export class TypedQueryApplicationService {
     }
   }
 
+  private async executeTypedQuery<Result>(
+    invocation: TypedQueryOperationInvocation<Result>,
+  ): Promise<AnalyticsResult<Result>> {
+    const validationError = validateTypedQueryInput(
+      invocation.operation,
+      invocation.query,
+    );
+    if (validationError) return { ok: false, error: validationError };
+
+    try {
+      if (invocation.resultMode === "result") {
+        const provider = invocation.providerRegistry.resolveResult<Result>(
+          invocation.operation,
+        );
+        if (!provider) {
+          return {
+            ok: false,
+            error: { kind: "internal", operation: invocation.operation },
+          };
+        }
+        return await provider.execute(invocation.query);
+      }
+
+      const provider = invocation.providerRegistry.resolve<Result>(
+        invocation.operation,
+      );
+      if (!provider) {
+        return {
+          ok: false,
+          error: { kind: "internal", operation: invocation.operation },
+        };
+      }
+      const result = await provider.execute(invocation.query);
+      return {
+        ok: true,
+        data: result.value,
+        meta: {
+          time: invocation.query.time,
+          source: result.source ?? "raw",
+          approximateVisitors: Boolean(result.approximateVisitors),
+        },
+      };
+    } catch (error) {
+      currentInvocationLogger()?.error("query.application-operation.failed", {
+        operation: invocation.operation,
+        ...errorLogData(error),
+      });
+      return {
+        ok: false,
+        error: { kind: "internal", operation: invocation.operation },
+      };
+    }
+  }
+
   /**
    * Executes a registered analytics operation after validating the trusted
    * policy context and request guards. A provider sees only canonical query
@@ -147,10 +235,19 @@ export class TypedQueryApplicationService {
     invocation: AnalyticsOperationInvocation<Query, Result>,
     executionContext: QueryExecutionContext,
   ): Promise<AnalyticsServiceResult<Result>>;
+  async execute<Result>(
+    invocation: TypedQueryOperationInvocation<Result>,
+    executionContext?: QueryExecutionContext,
+  ): Promise<AnalyticsResult<Result>>;
   async execute<Query, Result>(
-    invocation: AnalyticsOperationInvocation<Query, Result>,
-    executionContext: QueryExecutionContext,
-  ): Promise<AnalyticsServiceResult<Result>> {
+    invocation:
+      | AnalyticsOperationInvocation<Query, Result>
+      | TypedQueryOperationInvocation<Result>,
+    executionContext: QueryExecutionContext = {},
+  ): Promise<AnalyticsServiceResult<Result> | AnalyticsResult<Result>> {
+    if (isTypedQueryInvocation(invocation)) {
+      return this.executeTypedQuery(invocation);
+    }
     emit(executionContext, "start");
     const before = executionError(executionContext);
     if (before) {
