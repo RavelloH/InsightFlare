@@ -50,7 +50,34 @@ describe("typed contract adapter data branches", () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        funnel: { id: "funnel-1" },
+        analysis: { completed: 1 },
+      },
+    });
     expect(readers.queryFunnelAnalysis).toHaveBeenCalledOnce();
+  });
+
+  it("returns funnel definitions inside the standard data envelope", async () => {
+    readers.queryFunnelDefinitions.mockResolvedValueOnce([
+      { id: "funnel-1", name: "Signup" },
+    ]);
+
+    const response = await handleFunnelAnalysisContract(
+      env,
+      siteId,
+      new URL("https://edge.test/query"),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        funnels: [{ id: "funnel-1", name: "Signup" }],
+      },
+    });
   });
 
   it("maps radar metrics for both zero and non-zero denominators", async () => {

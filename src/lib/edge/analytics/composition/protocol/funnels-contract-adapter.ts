@@ -48,7 +48,7 @@ export async function handleFunnelAnalysisContract(
       filters: { version: 1, root: null },
     });
     if (!result.ok) return queryErrorResponse(result.error);
-    return jsonResponseWith(ctx!, { ok: true, ...result.data });
+    return jsonResponseWith(ctx!, { ok: true, data: result.data });
   }
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
@@ -67,7 +67,9 @@ export async function handleFunnelAnalysisContract(
   if (!result.data.analysis) return badRequest("Funnel has fewer than 2 steps");
   return jsonResponseWith(ctx!, {
     ok: true,
-    funnel: result.data.funnel,
-    analysis: result.data.analysis,
+    data: {
+      funnel: result.data.funnel,
+      analysis: result.data.analysis,
+    },
   });
 }

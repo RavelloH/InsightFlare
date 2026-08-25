@@ -281,7 +281,6 @@ function registerSiteOperation(
             window: timeWindow(input.time),
             filters: filters(input),
           });
-          if (!result) throw new Error("resource-not-found");
           return result;
         }),
       );
