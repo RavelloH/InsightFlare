@@ -841,6 +841,61 @@ describe("event detail D1 SQL", () => {
     }
   });
 
+  it("applies generic event filters to journey entities", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    const filters = normalizeFilterDocument(
+      {
+        version: 1,
+        root: {
+          kind: "and",
+          children: [
+            {
+              kind: "condition",
+              target: { kind: "field", field: "event.name" },
+              operator: "eq",
+              value: eventName,
+            },
+            {
+              kind: "condition",
+              target: { kind: "event-payload", path: "/href" },
+              operator: "contains",
+              value: "example.test",
+            },
+          ],
+        },
+      },
+      analyticsFilterRegistry,
+    );
+
+    try {
+      const [sessions, visitors] = await Promise.all([
+        querySessionsFromD1(env, siteId, window, filters, 10),
+        queryVisitorsFromD1(env, siteId, window, filters, 10),
+      ]);
+
+      expect(sessions).toMatchObject([{ sessionId: "session-1", views: 3 }]);
+      expect(visitors).toMatchObject([
+        { visitorId: "visitor-1", views: 3, sessions: 1 },
+      ]);
+      expect(d1.calls.every(({ sql }) => sql.includes("EXISTS ("))).toBe(true);
+      expect(
+        d1.calls.every(({ sql }) =>
+          sql.includes("event_filter_source.event_name"),
+        ),
+      ).toBe(true);
+      expect(
+        d1.calls.every(({ sql }) =>
+          sql.includes("event_filter_source.event_pk"),
+        ),
+      ).toBe(true);
+      expect(
+        d1.calls.every(({ sql }) => !sql.includes("visit_source.event_name")),
+      ).toBe(true);
+    } finally {
+      d1.close();
+    }
+  });
+
   it("keeps the original journey aggregation path without filters", async () => {
     const { env, d1 } = createSqliteEventEnv();
 

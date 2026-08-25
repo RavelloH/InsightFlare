@@ -88,10 +88,53 @@ export function usesSessionBoundaryFilter(filters: FilterDocument): boolean {
   return visit(filters.root);
 }
 
+export function usesEventFilter(filters: FilterDocument): boolean {
+  const visit = (expression: FilterExpression | null): boolean => {
+    if (!expression) return false;
+    if (expression.kind === "condition") {
+      return (
+        expression.target.kind === "event-payload" ||
+        (expression.target.kind === "field" &&
+          expression.target.field === "event.name")
+      );
+    }
+    if (expression.kind === "not") return visit(expression.child);
+    return expression.children.some(visit);
+  };
+  return visit(filters.root);
+}
+
 export function buildVisitFilterSql(
   filters: FilterDocument,
   alias = "visit_source",
 ): { clause: string; bindings: Array<string | number> } {
+  if (usesEventFilter(filters)) {
+    const eventFilter = buildEventFilterSql(filters, "event_filter_source", {
+      sessionSource: "visit_source",
+    });
+    const eventClause = eventFilter.clause.replace(/^WHERE\s+/i, "");
+    return {
+      clause: `WHERE EXISTS (
+  SELECT 1
+  FROM (
+    SELECT
+      ce.event_pk,
+      cen.name AS event_name,
+      v.*
+    FROM custom_events ce
+    INNER JOIN custom_event_names cen
+      ON cen.id = ce.event_name_id
+    INNER JOIN visits v
+      ON v.site_pk = ce.site_pk
+     AND v.visit_id = ce.visit_id
+    WHERE ce.site_pk = ${alias}.site_pk
+      AND ce.visit_id = ${alias}.visit_id
+  ) event_filter_source
+  WHERE ${eventClause}
+)`,
+      bindings: eventFilter.bindings,
+    };
+  }
   const compiled = compileFilterDocument(filters, { alias });
   return { clause: compiled.clause, bindings: [...compiled.bindings] };
 }

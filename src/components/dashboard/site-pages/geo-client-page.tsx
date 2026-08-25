@@ -14,7 +14,11 @@ import {
   fetchOverviewGeoPoints,
   type OverviewGeoTabRows,
 } from "@/lib/dashboard/client-data";
-import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
+import {
+  dashboardFilterFingerprint,
+  serializeDashboardSearchParams,
+  setDashboardFilterValue,
+} from "@/lib/dashboard/filter-state";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import {
   buildLocalityLocationValue,
@@ -355,11 +359,7 @@ function normalizeCountryCode(value: string | null | undefined): string | null {
 }
 
 function dashboardFilterSignature(filters: FilterDocument): string {
-  const entries = Object.entries(filters)
-    .map(([key, value]) => [key, String(value ?? "").trim()] as const)
-    .filter(([, value]) => value.length > 0)
-    .sort(([left], [right]) => left.localeCompare(right));
-  return JSON.stringify(entries);
+  return dashboardFilterFingerprint(filters);
 }
 
 function parseCoordinate(
@@ -1166,12 +1166,10 @@ export function GeoClientPage({
     [searchParams],
   );
   const requestFilters = useMemo<FilterDocument>(
-    () => ({
-      ...filters,
-      ...(requestedLocation?.canonical
-        ? { geo: requestedLocation.canonical }
-        : {}),
-    }),
+    () =>
+      requestedLocation?.canonical
+        ? setDashboardFilterValue(filters, "geo", requestedLocation.canonical)
+        : filters,
     [filters, requestedLocation?.canonical],
   );
   const requestFiltersKey = useMemo(

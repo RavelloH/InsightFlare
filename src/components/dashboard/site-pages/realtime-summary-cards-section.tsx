@@ -5,7 +5,6 @@ import {
   type OverviewPagesSectionCardData,
 } from "@/components/dashboard/site-pages/overview-client-page";
 import type { OverviewTabRows } from "@/lib/dashboard/client-data";
-import { dashboardFilterPresentation } from "@/lib/dashboard/filter-state";
 import {
   buildLocalityLocationValue,
   buildRegionLocationValue,
@@ -32,14 +31,6 @@ interface SessionBoundary {
   entryPath: string;
   exitPath: string;
   visitorId: string;
-}
-
-function equalsTrimmed(left: string, right: string): boolean {
-  return left.trim() === right.trim();
-}
-
-function equalsCaseInsensitive(left: string, right: string): boolean {
-  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 function sessionKeyOf(visit: RealtimeVisit): string {
@@ -149,173 +140,6 @@ function resolveVisitCityValue(visit: RealtimeVisit): string {
     visit.region,
     visit.city,
   );
-}
-
-function matchesSourceLink(
-  referrerUrl: string,
-  referrerHost: string,
-  filterValue: string,
-): boolean {
-  if (filterValue === DIRECT_REFERRER_FILTER_VALUE) {
-    return !referrerUrl.trim() && !referrerHost.trim();
-  }
-
-  if (
-    equalsCaseInsensitive(referrerUrl, filterValue) ||
-    equalsCaseInsensitive(referrerHost, filterValue)
-  ) {
-    return true;
-  }
-
-  try {
-    const hostname = new URL(filterValue).hostname;
-    return equalsCaseInsensitive(referrerHost, hostname);
-  } catch {
-    return false;
-  }
-}
-
-function matchesGeoFilter(visit: RealtimeVisit, filterValue: string): boolean {
-  const parsedFilter = parseGeoLocationValue(filterValue);
-  if (!parsedFilter) return false;
-
-  if (parsedFilter.level === "country") {
-    return equalsCaseInsensitive(visit.country, parsedFilter.countryCode);
-  }
-
-  if (parsedFilter.level === "region") {
-    return equalsCaseInsensitive(
-      resolveVisitRegionValue(visit),
-      parsedFilter.canonical,
-    );
-  }
-
-  if (!parsedFilter.regionCode && !parsedFilter.regionName) {
-    return (
-      equalsCaseInsensitive(visit.country, parsedFilter.countryCode) &&
-      equalsCaseInsensitive(visit.city, parsedFilter.localityName ?? "")
-    );
-  }
-
-  return equalsCaseInsensitive(
-    resolveVisitCityValue(visit),
-    parsedFilter.canonical,
-  );
-}
-
-function filterRealtimeVisits(
-  visits: RealtimeVisit[],
-  document: FilterDocument,
-  sessionBoundaries: Map<string, SessionBoundary>,
-): RealtimeVisit[] {
-  const filters = dashboardFilterPresentation(document);
-  return visits.filter((visit) => {
-    const sessionBoundary = sessionBoundaries.get(sessionKeyOf(visit));
-
-    if (filters.country && !equalsTrimmed(visit.country, filters.country)) {
-      return false;
-    }
-    if (filters.device && !equalsTrimmed(visit.deviceType, filters.device)) {
-      return false;
-    }
-    if (filters.browser && !equalsTrimmed(visit.browser, filters.browser)) {
-      return false;
-    }
-    if (filters.path && !equalsTrimmed(visit.pathname, filters.path)) {
-      return false;
-    }
-    if (filters.title && !equalsTrimmed(visit.title, filters.title)) {
-      return false;
-    }
-    if (filters.hostname && !equalsTrimmed(visit.hostname, filters.hostname)) {
-      return false;
-    }
-    if (
-      filters.entry &&
-      !equalsTrimmed(sessionBoundary?.entryPath ?? "", filters.entry)
-    ) {
-      return false;
-    }
-    if (
-      filters.exit &&
-      !equalsTrimmed(sessionBoundary?.exitPath ?? "", filters.exit)
-    ) {
-      return false;
-    }
-    if (filters.sourceDomain) {
-      if (filters.sourceDomain === DIRECT_REFERRER_FILTER_VALUE) {
-        if (visit.referrerHost.trim()) {
-          return false;
-        }
-      } else if (
-        !equalsCaseInsensitive(visit.referrerHost, filters.sourceDomain)
-      ) {
-        return false;
-      }
-    }
-    if (
-      filters.sourceLink &&
-      !matchesSourceLink(
-        visit.referrerUrl,
-        visit.referrerHost,
-        filters.sourceLink,
-      )
-    ) {
-      return false;
-    }
-    if (
-      filters.clientBrowser &&
-      !equalsTrimmed(visit.browser, filters.clientBrowser)
-    ) {
-      return false;
-    }
-    if (
-      filters.clientOsVersion &&
-      !equalsTrimmed(visit.osVersion, filters.clientOsVersion)
-    ) {
-      return false;
-    }
-    if (
-      filters.clientDeviceType &&
-      !equalsTrimmed(visit.deviceType, filters.clientDeviceType)
-    ) {
-      return false;
-    }
-    if (
-      filters.clientLanguage &&
-      !equalsTrimmed(visit.language, filters.clientLanguage)
-    ) {
-      return false;
-    }
-    if (
-      filters.clientScreenSize &&
-      !equalsTrimmed(visit.screenSize, filters.clientScreenSize)
-    ) {
-      return false;
-    }
-    if (filters.geo && !matchesGeoFilter(visit, filters.geo)) {
-      return false;
-    }
-    if (
-      filters.geoContinent &&
-      !equalsTrimmed(visit.continent, filters.geoContinent)
-    ) {
-      return false;
-    }
-    if (
-      filters.geoTimezone &&
-      !equalsTrimmed(visit.timezone, filters.geoTimezone)
-    ) {
-      return false;
-    }
-    if (
-      filters.geoOrganization &&
-      !equalsTrimmed(visit.organization, filters.geoOrganization)
-    ) {
-      return false;
-    }
-    return true;
-  });
 }
 
 interface VisitDimensionSpec {
@@ -462,9 +286,7 @@ function buildCardData(
   messages: AppMessages,
 ): OverviewPagesSectionCardData {
   const sessionBoundaries = buildSessionBoundaries(visits);
-  const filteredSessionKeys = new Set(
-    visits.map((visit) => sessionKeyOf(visit)),
-  );
+  const sessionKeys = new Set(visits.map((visit) => sessionKeyOf(visit)));
   const aggregated = aggregateVisitDimensions(visits, [
     {
       key: "path",
@@ -560,7 +382,7 @@ function buildCardData(
       title: aggregated.title,
       hostname: aggregated.hostname,
       entry: aggregateSessionBoundaryRows(
-        filteredSessionKeys,
+        sessionKeys,
         sessionBoundaries,
         (boundary) => boundary.entryPath,
         {
@@ -569,7 +391,7 @@ function buildCardData(
         },
       ),
       exit: aggregateSessionBoundaryRows(
-        filteredSessionKeys,
+        sessionKeys,
         sessionBoundaries,
         (boundary) => boundary.exitPath,
         {
@@ -608,17 +430,9 @@ export function RealtimeSummaryCardsSection({
   visits,
   filters,
 }: RealtimeSummaryCardsSectionProps) {
-  const sessionBoundaries = useMemo(
-    () => buildSessionBoundaries(visits),
-    [visits],
-  );
-  const filteredVisits = useMemo(
-    () => filterRealtimeVisits(visits, filters, sessionBoundaries),
-    [filters, sessionBoundaries, visits],
-  );
   const cardDataOverride = useMemo(
-    () => buildCardData(filteredVisits, messages),
-    [filteredVisits, messages],
+    () => buildCardData(visits, messages),
+    [messages, visits],
   );
 
   return (

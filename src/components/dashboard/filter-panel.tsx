@@ -657,9 +657,13 @@ const FILTER_FIELD_GROUPS: readonly {
       "geo.organization",
     ],
   },
+  {
+    key: "event",
+    fieldIds: ["event.name", "event.payload"],
+  },
 ];
 
-const GENERIC_FILTER_HIDDEN_FIELDS = new Set(["event.name", "event.payload"]);
+const GENERIC_FILTER_HIDDEN_FIELDS = new Set<string>();
 
 function fieldLabel(field: string, messages: AppMessages): string {
   return messages.filterBuilder.fieldLabels[field] ?? field;

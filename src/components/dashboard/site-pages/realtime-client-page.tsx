@@ -91,7 +91,8 @@ export function RealtimeClientPage({
 
   const effectiveTheme: EffectiveMapTheme =
     resolvedTheme === "dark" ? "dark" : "light";
-  const requestFilters = useMemo(
+  // Keep URL filters for existing link context; realtime data stays unfiltered.
+  const filters = useMemo(
     () => parseRealtimeCardFilters(new URLSearchParams(searchParamsKey)),
     [searchParamsKey],
   );
@@ -236,7 +237,7 @@ export function RealtimeClientPage({
             siteId={siteId}
             siteDomain={siteDomain}
             visits={realtime.visits}
-            filters={requestFilters}
+            filters={filters}
           />
         </div>
       </div>
