@@ -18,7 +18,7 @@ export function PageHeading({ title, subtitle, actions }: PageHeadingProps) {
         </p>
       </div>
       {actions ? (
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+        <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 md:w-auto">
           {actions}
         </div>
       ) : null}

@@ -1,7 +1,8 @@
-import { memo, useEffect, useState } from "react";
+import { Fragment, memo, type ReactNode, useEffect, useState } from "react";
 import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
 
 import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
+import { AnalyticsTimeTooltipTarget } from "@/components/dashboard/analytics-time-tooltip";
 import { ClickableTableCell } from "@/components/dashboard/clickable-table-cell";
 import {
   BrowserMeta,
@@ -10,6 +11,7 @@ import {
   formatDuration,
   formatPath,
   formatRelativeTime,
+  formatScreen,
   OsMeta,
   ReferrerMeta,
   VisitorAvatar,
@@ -30,6 +32,26 @@ export interface SessionSortState {
   direction: SessionSortDirection;
 }
 
+export const SESSION_TABLE_COLUMN_IDS = [
+  "visitor",
+  "sessionId",
+  "started",
+  "duration",
+  "pageViews",
+  "customEvents",
+  "referrer",
+  "location",
+  "os",
+  "browser",
+  "device",
+  "entryPage",
+  "exitPage",
+  "screenSize",
+  "exitTime",
+] as const;
+
+export type SessionTableColumnId = (typeof SESSION_TABLE_COLUMN_IDS)[number];
+
 export type SessionsTableLabels = AppMessages["sessions"];
 
 interface SessionsTableCardProps {
@@ -47,37 +69,42 @@ interface SessionsTableCardProps {
   hasMore?: boolean;
   skeletonRows?: number;
   onLoadMore?: () => void;
+  visibleColumnIds?: readonly SessionTableColumnId[];
 }
 
-function shortId(value: string): string {
-  if (value.length <= 12) return value;
-  return `${value.slice(0, 9)}...`;
-}
-
-function SessionRowSkeletonContent({ index }: { index: number }) {
-  const widths = [
-    "w-28",
-    "w-24",
-    "w-20",
-    "w-16",
-    "w-10",
-    "w-24",
-    "w-28",
-    "w-24",
-    "w-24",
-    "w-20",
-    "w-36",
-    "w-36",
-  ];
+function SessionRowSkeletonContent({
+  index,
+  columns,
+}: {
+  index: number;
+  columns: readonly SessionTableColumnId[];
+}) {
+  const widths: Record<SessionTableColumnId, string> = {
+    visitor: "w-28",
+    sessionId: "w-24",
+    started: "w-20",
+    duration: "w-16",
+    pageViews: "w-10",
+    customEvents: "w-10",
+    referrer: "w-24",
+    location: "w-28",
+    os: "w-24",
+    browser: "w-24",
+    device: "w-20",
+    entryPage: "w-36",
+    exitPage: "w-36",
+    screenSize: "w-20",
+    exitTime: "w-20",
+  };
 
   return (
     <>
-      {widths.map((width, cellIndex) => (
+      {columns.map((columnId) => (
         <TableCell
-          key={`${index}-${cellIndex}`}
-          className={cellIndex === 0 ? "pl-4" : undefined}
+          key={`${index}-${columnId}`}
+          className={columnId === "visitor" ? "pl-4" : undefined}
         >
-          {cellIndex === 0 ? (
+          {columnId === "visitor" ? (
             <div className="flex items-center gap-2">
               <Skeleton className="size-6 shrink-0 rounded-full" />
               <Skeleton className="h-4 w-20" />
@@ -86,9 +113,11 @@ function SessionRowSkeletonContent({ index }: { index: number }) {
             <Skeleton
               className={cn(
                 "h-4",
-                width,
-                cellIndex === 3 && "ml-auto",
-                cellIndex === 4 && "mx-auto",
+                widths[columnId],
+                ["duration", "pageViews", "customEvents"].includes(columnId) &&
+                  "ml-auto",
+                ["started", "screenSize", "exitTime"].includes(columnId) &&
+                  "mx-auto",
               )}
             />
           )}
@@ -108,6 +137,20 @@ function PageViewsValue({ locale, views }: { locale: Locale; views: number }) {
     );
   }
   return <span className="font-mono tabular-nums">{value}</span>;
+}
+
+function CustomEventsValue({
+  locale,
+  events,
+}: {
+  locale: Locale;
+  events: number;
+}) {
+  return (
+    <span className="font-mono tabular-nums">
+      {numberFormat(locale, events)}
+    </span>
+  );
 }
 
 function SessionDurationValue({
@@ -204,6 +247,7 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
   row,
   now,
   onOpenSession,
+  columns,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -211,12 +255,13 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
   row: JourneySession;
   now: number;
   onOpenSession: (sessionId: string) => void;
+  columns: readonly SessionTableColumnId[];
 }) {
   const active = isSessionActive(row, now);
   const openSession = () => onOpenSession(row.sessionId);
 
-  return (
-    <>
+  const cells: Record<SessionTableColumnId, ReactNode> = {
+    visitor: (
       <ClickableTableCell
         onClick={openSession}
         className="w-32"
@@ -229,27 +274,53 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
           <span className="truncate">{labels.anonymous}</span>
         </div>
       </ClickableTableCell>
-      <ClickableTableCell onClick={openSession}>
-        <span className="font-mono font-medium">{shortId(row.sessionId)}</span>
+    ),
+    sessionId: (
+      <ClickableTableCell onClick={openSession} className="max-w-32">
+        <span
+          className="block truncate font-mono font-medium"
+          title={row.sessionId}
+        >
+          {row.sessionId}
+        </span>
       </ClickableTableCell>
+    ),
+    started: (
       <ClickableTableCell
         onClick={openSession}
         className={cn(
-          "font-mono",
+          "text-center font-mono",
           active ? "text-foreground" : "text-muted-foreground",
         )}
       >
-        {formatRelativeTime(locale, row.startedAt, now)}
+        <AnalyticsTimeTooltipTarget
+          className="block"
+          locale={locale}
+          timestamp={row.startedAt}
+        >
+          {formatRelativeTime(locale, row.startedAt, now)}
+        </AnalyticsTimeTooltipTarget>
       </ClickableTableCell>
+    ),
+    duration: (
       <ClickableTableCell
         onClick={openSession}
         className="text-right font-mono tabular-nums"
       >
         <SessionDurationValue locale={locale} durationMs={row.durationMs} />
       </ClickableTableCell>
-      <ClickableTableCell onClick={openSession} className="text-center">
+    ),
+    pageViews: (
+      <ClickableTableCell onClick={openSession} className="text-right">
         <PageViewsValue locale={locale} views={row.views} />
       </ClickableTableCell>
+    ),
+    customEvents: (
+      <ClickableTableCell onClick={openSession} className="text-right">
+        <CustomEventsValue locale={locale} events={row.events} />
+      </ClickableTableCell>
+    ),
+    referrer: (
       <ClickableTableCell onClick={openSession} className="max-w-48">
         <ReferrerMeta
           referrerHost={row.referrerHost}
@@ -257,6 +328,8 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
           directLabel={messages.overview.direct}
         />
       </ClickableTableCell>
+    ),
+    location: (
       <ClickableTableCell onClick={openSession} className="max-w-52">
         <CountryRegionMeta
           locale={locale}
@@ -266,6 +339,8 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
           regionCode={row.regionCode}
         />
       </ClickableTableCell>
+    ),
+    os: (
       <ClickableTableCell onClick={openSession} className="max-w-40">
         <OsMeta
           os={row.os}
@@ -273,6 +348,8 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
           unknownLabel={messages.common.unknown}
         />
       </ClickableTableCell>
+    ),
+    browser: (
       <ClickableTableCell onClick={openSession} className="max-w-40">
         <BrowserMeta
           browser={row.browser}
@@ -280,6 +357,8 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
           unknownLabel={messages.common.unknown}
         />
       </ClickableTableCell>
+    ),
+    device: (
       <ClickableTableCell onClick={openSession} className="max-w-36">
         <DeviceMeta
           deviceType={row.deviceType}
@@ -287,6 +366,8 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
           unknownLabel={messages.common.unknown}
         />
       </ClickableTableCell>
+    ),
+    entryPage: (
       <ClickableTableCell
         onClick={openSession}
         className="max-w-56 font-mono"
@@ -294,6 +375,8 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
       >
         {formatPath(row.entryPath)}
       </ClickableTableCell>
+    ),
+    exitPage: (
       <ClickableTableCell
         onClick={openSession}
         className="max-w-56 font-mono"
@@ -301,6 +384,39 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
       >
         {formatPath(row.exitPath)}
       </ClickableTableCell>
+    ),
+    screenSize: (
+      <ClickableTableCell
+        onClick={openSession}
+        className="text-center font-mono"
+      >
+        {formatScreen(row.screenWidth, row.screenHeight)}
+      </ClickableTableCell>
+    ),
+    exitTime: (
+      <ClickableTableCell
+        onClick={openSession}
+        className={cn(
+          "text-center font-mono",
+          active ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        <AnalyticsTimeTooltipTarget
+          className="block"
+          locale={locale}
+          timestamp={row.endedAt}
+        >
+          {formatRelativeTime(locale, row.endedAt, now)}
+        </AnalyticsTimeTooltipTarget>
+      </ClickableTableCell>
+    ),
+  };
+
+  return (
+    <>
+      {columns.map((columnId) => (
+        <Fragment key={columnId}>{cells[columnId]}</Fragment>
+      ))}
     </>
   );
 });
@@ -320,6 +436,7 @@ export function SessionsTableCard({
   hasMore = false,
   skeletonRows = 8,
   onLoadMore,
+  visibleColumnIds = SESSION_TABLE_COLUMN_IDS,
 }: SessionsTableCardProps) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -332,37 +449,65 @@ export function SessionsTableCard({
     <AnalyticsDataTable
       header={
         <TableRow>
-          <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>
-          <TableHead>{labels.sessionId}</TableHead>
-          <SortHeader
-            label={labels.started}
-            active={sort.key === "startedAt"}
-            direction={sort.direction}
-            onClick={() => onSort("startedAt")}
-          />
-          <SortHeader
-            label={labels.duration}
-            active={sort.key === "durationMs"}
-            direction={sort.direction}
-            onClick={() => onSort("durationMs")}
-            align="center"
-            className="text-center"
-          />
-          <SortHeader
-            label={labels.pageViews}
-            active={sort.key === "views"}
-            direction={sort.direction}
-            onClick={() => onSort("views")}
-            align="center"
-            className="text-center"
-          />
-          <TableHead>{labels.referrer}</TableHead>
-          <TableHead>{labels.location}</TableHead>
-          <TableHead>{labels.os}</TableHead>
-          <TableHead>{labels.browser}</TableHead>
-          <TableHead>{labels.device}</TableHead>
-          <TableHead>{labels.entryPage}</TableHead>
-          <TableHead>{labels.exitPage}</TableHead>
+          {visibleColumnIds.map((columnId) => {
+            const headers: Record<SessionTableColumnId, ReactNode> = {
+              visitor: (
+                <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>
+              ),
+              sessionId: <TableHead>{labels.sessionId}</TableHead>,
+              started: (
+                <SortHeader
+                  label={labels.started}
+                  active={sort.key === "startedAt"}
+                  direction={sort.direction}
+                  onClick={() => onSort("startedAt")}
+                  align="center"
+                  className="text-center"
+                />
+              ),
+              duration: (
+                <SortHeader
+                  label={labels.duration}
+                  active={sort.key === "durationMs"}
+                  direction={sort.direction}
+                  onClick={() => onSort("durationMs")}
+                  align="right"
+                  className="text-right"
+                />
+              ),
+              pageViews: (
+                <SortHeader
+                  label={labels.pageViews}
+                  active={sort.key === "views"}
+                  direction={sort.direction}
+                  onClick={() => onSort("views")}
+                  align="right"
+                  className="text-right"
+                />
+              ),
+              customEvents: (
+                <TableHead className="text-right">
+                  {labels.customEvents}
+                </TableHead>
+              ),
+              referrer: <TableHead>{labels.referrer}</TableHead>,
+              location: <TableHead>{labels.location}</TableHead>,
+              os: <TableHead>{labels.os}</TableHead>,
+              browser: <TableHead>{labels.browser}</TableHead>,
+              device: <TableHead>{labels.device}</TableHead>,
+              entryPage: <TableHead>{labels.entryPage}</TableHead>,
+              exitPage: <TableHead>{labels.exitPage}</TableHead>,
+              screenSize: (
+                <TableHead className="text-center">
+                  {labels.screenSize}
+                </TableHead>
+              ),
+              exitTime: (
+                <TableHead className="text-center">{labels.exitTime}</TableHead>
+              ),
+            };
+            return <Fragment key={columnId}>{headers[columnId]}</Fragment>;
+          })}
         </TableRow>
       }
       rows={rows}
@@ -375,6 +520,7 @@ export function SessionsTableCard({
             row={row}
             now={now}
             onOpenSession={onOpenSession}
+            columns={visibleColumnIds}
           />
         ),
         props: {
@@ -382,10 +528,12 @@ export function SessionsTableCard({
           className: "cursor-pointer",
         },
       })}
-      renderSkeletonRow={(index) => <SessionRowSkeletonContent index={index} />}
+      renderSkeletonRow={(index) => (
+        <SessionRowSkeletonContent index={index} columns={visibleColumnIds} />
+      )}
       getRowKey={(row) => row.sessionId}
       skeletonRows={skeletonRows}
-      columnCount={12}
+      columnCount={visibleColumnIds.length}
       loading={loadingRows}
       loadingMore={loadingMore}
       error={error}
@@ -395,6 +543,8 @@ export function SessionsTableCard({
       appendErrorContent={labels.loadError}
       hasMore={hasMore}
       onLoadMore={onLoadMore}
+      enableTimeTooltips
+      messages={messages}
     />
   );
 }

@@ -95,6 +95,15 @@ common:
     download: Export CSV
     empty: No rows available to export.
     allTabsUnavailable: All tabs can be exported after their data finishes loading.
+  tableColumns:
+    action: Columns
+    title: Configure columns
+    description: Choose which columns to show and drag to reorder them.
+    visible: Visible columns
+    required: Required
+    reset: Reset to default
+    dragHint: Drag to reorder
+    close: Close
   time: Time
   cycle: Cycle
   close: Close
@@ -521,6 +530,9 @@ sessions:
   browser: Browser
   device: Device
   pageViews: Page Views
+  customEvents: Custom Events
+  screenSize: Screen Size
+  exitTime: Exit Time
   loadError: Unable to load sessions.
   empty: No sessions in this time range.
 sessionDetail:
@@ -619,6 +631,7 @@ events:
   os: OS
   device: Device
   payload: Payload
+  nodeCount: Node Count
   payloadFields: Payload Fields
   values: Values
   nodes: Nodes
@@ -706,6 +719,8 @@ visitors:
   lastSeen: Last Visit
   pageViews: Page Views
   sessions: Sessions
+  customEvents: Custom Events
+  screenSize: Screen Size
   loadError: Unable to load visitors.
   empty: No visitors in this time range.
 visitorDetail:

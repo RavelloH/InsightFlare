@@ -6,6 +6,7 @@ import {
 } from "react";
 
 import { AnalyticsTableCard } from "@/components/dashboard/analytics-table-card";
+import { AnalyticsTimeTooltipProvider } from "@/components/dashboard/analytics-time-tooltip";
 import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import {
@@ -14,6 +15,7 @@ import {
   TableCell,
   TableHeader,
 } from "@/components/ui/table";
+import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
 type AnalyticsDataTableRowProps = Pick<
@@ -49,6 +51,8 @@ interface AnalyticsDataTableProps<TRow> {
   tableClassName?: string;
   tableBodyClassName?: string;
   className?: string;
+  enableTimeTooltips?: boolean;
+  messages?: AppMessages;
 }
 
 const NOOP = () => undefined;
@@ -122,6 +126,8 @@ export function AnalyticsDataTable<TRow>({
   tableClassName,
   tableBodyClassName,
   className,
+  enableTimeTooltips = false,
+  messages,
 }: AnalyticsDataTableProps<TRow>) {
   const loadMore = onLoadMore ?? NOOP;
   const sentinelRef = useInfiniteTableSentinel({
@@ -136,7 +142,7 @@ export function AnalyticsDataTable<TRow>({
   });
 
   const isEmpty = !loading && !error && rows.length === 0 && !hasMore;
-  return (
+  const table = (
     <AnalyticsTableCard minTableWidth={minTableWidth} className={className}>
       <Table className={tableClassName}>
         <TableHeader>{header}</TableHeader>
@@ -237,5 +243,13 @@ export function AnalyticsDataTable<TRow>({
         </TableBody>
       </Table>
     </AnalyticsTableCard>
+  );
+
+  return enableTimeTooltips && messages ? (
+    <AnalyticsTimeTooltipProvider messages={messages}>
+      {table}
+    </AnalyticsTimeTooltipProvider>
+  ) : (
+    table
   );
 }

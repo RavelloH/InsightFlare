@@ -1732,6 +1732,9 @@ function ActivityAndSessionsSection({
             browser: labels.browser,
             device: labels.device,
             pageViews: labels.pageViews,
+            customEvents: labels.customEvents,
+            screenSize: messages.sessions.screenSize,
+            exitTime: messages.sessions.exitTime,
             loadError: labels.loadError,
             empty: labels.emptySessions,
           }}

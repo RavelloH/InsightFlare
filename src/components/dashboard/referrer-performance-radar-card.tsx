@@ -451,7 +451,7 @@ export function ReferrerPerformanceRadarCard({
                 size="sm"
                 className="h-full"
               >
-                <CardContent className="grid grid-cols-[minmax(0,1fr)_152px] items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
+                <CardContent className="grid min-w-0 grid-cols-[minmax(0,1fr)_152px] items-stretch gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
                   <ReferrerMetadataPanel
                     label={label}
                     metadata={metadata}
@@ -460,16 +460,17 @@ export function ReferrerPerformanceRadarCard({
                     locale={locale}
                     messages={messages}
                   />
-                  <div className="flex items-center justify-center">
-                    <PerformanceRadarChart
-                      itemLabel={label}
-                      metrics={item.metrics}
-                      maxByMetric={maxByMetric}
-                      metricLabels={metricLabels}
-                      color={color}
-                      locale={locale}
-                      className="max-w-[220px]"
-                    />
+                  <div className="flex min-w-0 items-center justify-center">
+                    <div className="size-[152px] max-w-full sm:size-[220px]">
+                      <PerformanceRadarChart
+                        itemLabel={label}
+                        metrics={item.metrics}
+                        maxByMetric={maxByMetric}
+                        metricLabels={metricLabels}
+                        color={color}
+                        locale={locale}
+                      />
+                    </div>
                   </div>
                 </CardContent>
               </Card>

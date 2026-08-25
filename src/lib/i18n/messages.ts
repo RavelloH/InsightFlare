@@ -87,6 +87,16 @@ export interface AppMessages {
       empty: string;
       allTabsUnavailable: string;
     };
+    tableColumns: {
+      action: string;
+      title: string;
+      description: string;
+      visible: string;
+      required: string;
+      reset: string;
+      dragHint: string;
+      close: string;
+    };
     time: string;
     cycle: string;
     close: string;
@@ -497,6 +507,9 @@ export interface AppMessages {
     browser: string;
     device: string;
     pageViews: string;
+    customEvents: string;
+    screenSize: string;
+    exitTime: string;
     loadError: string;
     empty: string;
   };
@@ -591,6 +604,7 @@ export interface AppMessages {
     os: string;
     device: string;
     payload: string;
+    nodeCount: string;
     payloadFields: string;
     values: string;
     nodes: string;
@@ -677,6 +691,8 @@ export interface AppMessages {
     lastSeen: string;
     pageViews: string;
     sessions: string;
+    customEvents: string;
+    screenSize: string;
     loadError: string;
     empty: string;
   };
@@ -2410,6 +2426,16 @@ const enMessages = {
       allTabsUnavailable:
         "All tabs can be exported after their data finishes loading.",
     },
+    tableColumns: {
+      action: "Columns",
+      title: "Configure columns",
+      description: "Choose which columns to show and drag to reorder them.",
+      visible: "Visible columns",
+      required: "Required",
+      reset: "Reset to default",
+      dragHint: "Drag to reorder",
+      close: "Close",
+    },
     time: "Time",
     cycle: "Cycle",
     close: "Close",
@@ -2886,6 +2912,9 @@ const enMessages = {
     browser: "Browser",
     device: "Device",
     pageViews: "Page Views",
+    customEvents: "Custom Events",
+    screenSize: "Screen Size",
+    exitTime: "Exit Time",
     loadError: "Unable to load sessions.",
     empty: "No sessions in this time range.",
   },
@@ -2986,6 +3015,7 @@ const enMessages = {
     os: "OS",
     device: "Device",
     payload: "Payload",
+    nodeCount: "Node Count",
     payloadFields: "Payload Fields",
     values: "Values",
     nodes: "Nodes",
@@ -3076,6 +3106,8 @@ const enMessages = {
     lastSeen: "Last Visit",
     pageViews: "Page Views",
     sessions: "Sessions",
+    customEvents: "Custom Events",
+    screenSize: "Screen Size",
     loadError: "Unable to load visitors.",
     empty: "No visitors in this time range.",
   },
@@ -4966,6 +4998,16 @@ const zhMessages = {
       empty: "当前没有可导出的行。",
       allTabsUnavailable: "全部标签页需要在数据加载后才可导出。",
     },
+    tableColumns: {
+      action: "列设置",
+      title: "配置表格列",
+      description: "选择要显示的列，并拖动调整顺序。",
+      visible: "显示的列",
+      required: "必需",
+      reset: "恢复默认",
+      dragHint: "拖动调整顺序",
+      close: "关闭",
+    },
     time: "时间",
     cycle: "周期",
     close: "关闭",
@@ -5429,6 +5471,9 @@ const zhMessages = {
     browser: "浏览器",
     device: "设备",
     pageViews: "页面浏览量",
+    customEvents: "自定义事件",
+    screenSize: "屏幕尺寸",
+    exitTime: "退出时间",
     loadError: "无法加载会话数据。",
     empty: "当前时间范围内没有会话。",
   },
@@ -5525,6 +5570,7 @@ const zhMessages = {
     os: "操作系统",
     device: "设备",
     payload: "事件载荷",
+    nodeCount: "节点数",
     payloadFields: "事件载荷字段",
     values: "值",
     nodes: "节点",
@@ -5611,6 +5657,8 @@ const zhMessages = {
     lastSeen: "最近访问",
     pageViews: "页面浏览量",
     sessions: "会话数",
+    customEvents: "自定义事件",
+    screenSize: "屏幕尺寸",
     loadError: "无法加载访客数据。",
     empty: "当前时间范围内没有访客。",
   },
@@ -7436,6 +7484,16 @@ const jaMessages = {
       allTabsUnavailable:
         "すべてのタブは、各データの読み込み後に利用できます。",
     },
+    tableColumns: {
+      action: "列設定",
+      title: "表の列を設定",
+      description: "表示する列を選び、ドラッグして順序を変更します。",
+      visible: "表示する列",
+      required: "必須",
+      reset: "デフォルトに戻す",
+      dragHint: "ドラッグして並べ替え",
+      close: "閉じる",
+    },
     time: "時刻",
     cycle: "サイクル",
     close: "閉じる",
@@ -7915,6 +7973,9 @@ const jaMessages = {
     browser: "ブラウザー",
     device: "デバイス",
     pageViews: "ページビュー数",
+    customEvents: "カスタムイベント",
+    screenSize: "画面サイズ",
+    exitTime: "離脱時刻",
     loadError: "セッションを読み込めません。",
     empty: "この時間範囲にセッションはありません。",
   },
@@ -8015,6 +8076,7 @@ const jaMessages = {
     os: "OS",
     device: "デバイス",
     payload: "ペイロード",
+    nodeCount: "ノード数",
     payloadFields: "ペイロードフィールド",
     values: "値",
     nodes: "ノード",
@@ -8105,6 +8167,8 @@ const jaMessages = {
     lastSeen: "最終訪問",
     pageViews: "ページビュー数",
     sessions: "セッション数",
+    customEvents: "カスタムイベント",
+    screenSize: "画面サイズ",
     loadError: "訪問者を読み込めません。",
     empty: "この時間範囲に訪問者はいません。",
   },

@@ -141,11 +141,13 @@ export function shortDateTimeWithSeconds(
   locale: Locale,
   value: DateValue,
   timeZone?: string,
+  options: Pick<Intl.DateTimeFormatOptions, "year"> = {},
 ): string {
   return formatDate(
     locale,
     value,
     {
+      ...options,
       month: "short",
       day: "numeric",
       hour: "2-digit",

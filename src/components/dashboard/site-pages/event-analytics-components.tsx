@@ -1,4 +1,5 @@
 import {
+  Fragment,
   type KeyboardEvent,
   memo,
   type MouseEvent,
@@ -29,6 +30,12 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 
 import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
+import {
+  type AnalyticsTableColumnDefinition,
+  AnalyticsTableColumnSettings,
+  useAnalyticsTableColumns,
+} from "@/components/dashboard/analytics-table-column-settings";
+import { AnalyticsTimeTooltipTarget } from "@/components/dashboard/analytics-time-tooltip";
 import { AnimatedDataTableRow } from "@/components/dashboard/animated-data-table-row";
 import {
   createEventTrendChartData,
@@ -214,17 +221,30 @@ export interface EventRecordSortState {
   direction: SortDirection;
 }
 
+export const EVENT_RECORD_TABLE_COLUMN_IDS = [
+  "visitor",
+  "eventName",
+  "eventId",
+  "occurredAt",
+  "page",
+  "referrer",
+  "location",
+  "os",
+  "browser",
+  "device",
+  "payload",
+  "nodeCount",
+] as const;
+
+export type EventRecordTableColumnId =
+  (typeof EVENT_RECORD_TABLE_COLUMN_IDS)[number];
+
 export type EventPageCopy = AppMessages["events"];
 
 export const DEFAULT_EVENT_RECORD_SORT: EventRecordSortState = {
   key: "occurredAt",
   direction: "desc",
 };
-
-function shortId(value: string): string {
-  if (value.length <= 12) return value;
-  return `${value.slice(0, 9)}...`;
-}
 
 function normalizeEventFieldPath(path: string): string {
   const normalized = String(path ?? "").trim();
@@ -765,61 +785,88 @@ function SortHeader({
   active,
   direction,
   onClick,
+  align = "left",
+  className,
 }: {
   label: string;
   active: boolean;
   direction: SortDirection;
   onClick: () => void;
+  align?: "left" | "center" | "right";
+  className?: string;
 }) {
   return (
     <TableHead
       aria-sort={
         active ? (direction === "asc" ? "ascending" : "descending") : "none"
       }
+      className={className}
     >
-      <button
-        type="button"
+      <div
         className={cn(
-          "inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-          active ? "text-foreground" : "text-muted-foreground",
+          "flex",
+          align === "center" && "justify-center",
+          align === "right" && "justify-end",
         )}
-        onClick={onClick}
       >
-        {label}
-        <SortIndicator active={active} direction={direction} />
-      </button>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+            active ? "text-foreground" : "text-muted-foreground",
+          )}
+          onClick={onClick}
+        >
+          {label}
+          <SortIndicator active={active} direction={direction} />
+        </button>
+      </div>
     </TableHead>
   );
 }
 
-function EventRowSkeletonContent({ index }: { index: number }) {
-  const widths = [
-    "w-24",
-    "w-28",
-    "w-24",
-    "w-28",
-    "w-32",
-    "w-40",
-    "w-24",
-    "w-28",
-    "w-24",
-    "w-24",
-    "w-20",
-  ];
+function EventRowSkeletonContent({
+  index,
+  columns,
+}: {
+  index: number;
+  columns: readonly EventRecordTableColumnId[];
+}) {
+  const widths: Record<EventRecordTableColumnId, string> = {
+    visitor: "w-24",
+    eventName: "w-28",
+    eventId: "w-24",
+    occurredAt: "w-28",
+    page: "w-32",
+    referrer: "w-40",
+    location: "w-24",
+    os: "w-28",
+    browser: "w-24",
+    device: "w-24",
+    payload: "w-20",
+    nodeCount: "w-16",
+  };
   return (
     <>
-      {widths.map((width, cellIndex) => (
+      {columns.map((columnId) => (
         <TableCell
-          key={`${index}-${cellIndex}`}
-          className={cellIndex === 0 ? "pl-4" : undefined}
+          key={`${index}-${columnId}`}
+          className={columnId === "visitor" ? "pl-4" : undefined}
         >
-          {cellIndex === 0 ? (
+          {columnId === "visitor" ? (
             <div className="flex items-center gap-2">
               <Skeleton className="size-6 shrink-0 rounded-full" />
               <Skeleton className="h-4 w-20" />
             </div>
           ) : (
-            <Skeleton className={cn("h-4", width)} />
+            <Skeleton
+              className={cn(
+                "h-4",
+                widths[columnId],
+                ["payload", "nodeCount"].includes(columnId) && "ml-auto",
+                columnId === "occurredAt" && "mx-auto",
+              )}
+            />
           )}
         </TableCell>
       ))}
@@ -842,40 +889,61 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
   messages,
   row,
   now,
+  columns,
 }: {
   locale: Locale;
   messages: AppMessages;
   row: EventRecord;
   now: number;
+  columns: readonly EventRecordTableColumnId[];
 }) {
-  return (
-    <>
+  const visitorDisplayId = row.visitorId || row.sessionId || row.visitId;
+  const cells: Record<EventRecordTableColumnId, ReactNode> = {
+    visitor: (
       <TableCell className="max-w-36 pl-4">
         <div className="flex w-28 min-w-0 items-center gap-2">
           <VisitorAvatar
-            seed={row.visitorId || row.eventId}
+            seed={visitorDisplayId || row.eventId}
             className="size-6"
           />
-          <span className="min-w-0 truncate font-mono">
-            {shortId(row.visitorId || row.sessionId || row.visitId)}
+          <span
+            className="min-w-0 truncate font-mono"
+            title={visitorDisplayId || undefined}
+          >
+            {visitorDisplayId}
           </span>
         </div>
       </TableCell>
+    ),
+    eventName: (
       <TableCell className="max-w-48">
         <span className="block truncate font-medium" title={row.eventName}>
           {row.eventName}
         </span>
       </TableCell>
+    ),
+    eventId: (
       <TableCell className="max-w-32">
-        <span className="block truncate font-mono text-muted-foreground">
-          {shortId(row.eventId)}
+        <span
+          className="block truncate font-mono text-muted-foreground"
+          title={row.eventId}
+        >
+          {row.eventId}
         </span>
       </TableCell>
-      <TableCell className="max-w-36 font-mono text-muted-foreground">
-        <span className="block truncate">
+    ),
+    occurredAt: (
+      <TableCell className="max-w-36 text-center font-mono text-muted-foreground">
+        <AnalyticsTimeTooltipTarget
+          className="block truncate"
+          locale={locale}
+          timestamp={row.occurredAt}
+        >
           {formatRelativeTime(locale, row.occurredAt, now)}
-        </span>
+        </AnalyticsTimeTooltipTarget>
       </TableCell>
+    ),
+    page: (
       <TableCell className="max-w-64">
         <span
           className="block truncate font-mono"
@@ -884,6 +952,8 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
           {formatPath(row.pathname)}
         </span>
       </TableCell>
+    ),
+    referrer: (
       <TableCell className="max-w-44">
         <ReferrerMeta
           referrerHost={row.referrerHost || ""}
@@ -891,6 +961,8 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
           className="w-full"
         />
       </TableCell>
+    ),
+    location: (
       <TableCell className="max-w-52">
         <CountryRegionMeta
           locale={locale}
@@ -900,6 +972,8 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
           className="w-full"
         />
       </TableCell>
+    ),
+    os: (
       <TableCell className="max-w-40">
         <OsMeta
           os={row.os || ""}
@@ -908,6 +982,8 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
           className="w-full"
         />
       </TableCell>
+    ),
+    browser: (
       <TableCell className="max-w-40">
         <BrowserMeta
           browser={row.browser || ""}
@@ -916,6 +992,8 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
           className="w-full"
         />
       </TableCell>
+    ),
+    device: (
       <TableCell className="max-w-36">
         <DeviceMeta
           deviceType={row.deviceType || ""}
@@ -924,9 +1002,24 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
           className="w-full"
         />
       </TableCell>
+    ),
+    payload: (
       <TableCell className="pr-4 text-right font-mono tabular-nums">
         {numberFormat(locale, row.valueCount)}
       </TableCell>
+    ),
+    nodeCount: (
+      <TableCell className="pr-4 text-right font-mono tabular-nums">
+        {numberFormat(locale, row.nodeCount)}
+      </TableCell>
+    ),
+  };
+
+  return (
+    <>
+      {columns.map((columnId) => (
+        <Fragment key={columnId}>{cells[columnId]}</Fragment>
+      ))}
     </>
   );
 });
@@ -945,6 +1038,7 @@ function EventRecordsTable({
   appendError,
   hasMore,
   onLoadMore,
+  visibleColumnIds,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -959,6 +1053,7 @@ function EventRecordsTable({
   appendError: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
+  visibleColumnIds: readonly EventRecordTableColumnId[];
 }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -973,32 +1068,54 @@ function EventRecordsTable({
       tableClassName="min-w-[92rem]"
       header={
         <TableRow>
-          <TableHead className="pl-4">{labels.visitor}</TableHead>
-          <SortHeader
-            label={labels.eventName}
-            active={sort.key === "eventName"}
-            direction={sort.direction}
-            onClick={() => onSort("eventName")}
-          />
-          <TableHead>{labels.eventId}</TableHead>
-          <SortHeader
-            label={labels.occurredAt}
-            active={sort.key === "occurredAt"}
-            direction={sort.direction}
-            onClick={() => onSort("occurredAt")}
-          />
-          <SortHeader
-            label={labels.page}
-            active={sort.key === "pathname"}
-            direction={sort.direction}
-            onClick={() => onSort("pathname")}
-          />
-          <TableHead>{labels.referrer}</TableHead>
-          <TableHead>{labels.location}</TableHead>
-          <TableHead>{labels.os}</TableHead>
-          <TableHead>{labels.browser}</TableHead>
-          <TableHead>{labels.device}</TableHead>
-          <TableHead className="pr-4 text-right">{labels.payload}</TableHead>
+          {visibleColumnIds.map((columnId) => {
+            const headers: Record<EventRecordTableColumnId, ReactNode> = {
+              visitor: <TableHead className="pl-4">{labels.visitor}</TableHead>,
+              eventName: (
+                <SortHeader
+                  label={labels.eventName}
+                  active={sort.key === "eventName"}
+                  direction={sort.direction}
+                  onClick={() => onSort("eventName")}
+                />
+              ),
+              eventId: <TableHead>{labels.eventId}</TableHead>,
+              occurredAt: (
+                <SortHeader
+                  label={labels.occurredAt}
+                  active={sort.key === "occurredAt"}
+                  direction={sort.direction}
+                  onClick={() => onSort("occurredAt")}
+                  align="center"
+                  className="text-center"
+                />
+              ),
+              page: (
+                <SortHeader
+                  label={labels.page}
+                  active={sort.key === "pathname"}
+                  direction={sort.direction}
+                  onClick={() => onSort("pathname")}
+                />
+              ),
+              referrer: <TableHead>{labels.referrer}</TableHead>,
+              location: <TableHead>{labels.location}</TableHead>,
+              os: <TableHead>{labels.os}</TableHead>,
+              browser: <TableHead>{labels.browser}</TableHead>,
+              device: <TableHead>{labels.device}</TableHead>,
+              payload: (
+                <TableHead className="pr-4 text-right">
+                  {labels.payload}
+                </TableHead>
+              ),
+              nodeCount: (
+                <TableHead className="pr-4 text-right">
+                  {labels.nodeCount}
+                </TableHead>
+              ),
+            };
+            return <Fragment key={columnId}>{headers[columnId]}</Fragment>;
+          })}
         </TableRow>
       }
       rows={rows}
@@ -1009,6 +1126,7 @@ function EventRecordsTable({
             messages={messages}
             row={row}
             now={now}
+            columns={visibleColumnIds}
           />
         ),
         props: {
@@ -1024,10 +1142,12 @@ function EventRecordsTable({
           },
         },
       })}
-      renderSkeletonRow={(index) => <EventRowSkeletonContent index={index} />}
+      renderSkeletonRow={(index) => (
+        <EventRowSkeletonContent index={index} columns={visibleColumnIds} />
+      )}
       getRowKey={(row) => row.eventId}
       skeletonRows={EVENT_PAGE_SIZE}
-      columnCount={11}
+      columnCount={visibleColumnIds.length}
       loading={loadingRows}
       loadingMore={loadingMore}
       error={error}
@@ -1037,6 +1157,8 @@ function EventRecordsTable({
       appendErrorContent={labels.loadError}
       hasMore={hasMore}
       onLoadMore={onLoadMore}
+      enableTimeTooltips
+      messages={messages}
     />
   );
 }
@@ -2216,6 +2338,29 @@ export function EventRecordsSection({
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState("");
+  const eventColumnDefinitions = useMemo<
+    readonly AnalyticsTableColumnDefinition<EventRecordTableColumnId>[]
+  >(
+    () => [
+      { id: "visitor", label: labels.visitor, required: true },
+      { id: "eventName", label: labels.eventName, required: true },
+      { id: "eventId", label: labels.eventId },
+      { id: "occurredAt", label: labels.occurredAt },
+      { id: "page", label: labels.page },
+      { id: "referrer", label: labels.referrer },
+      { id: "location", label: labels.location },
+      { id: "os", label: labels.os },
+      { id: "browser", label: labels.browser },
+      { id: "device", label: labels.device },
+      { id: "payload", label: labels.payload },
+      { id: "nodeCount", label: labels.nodeCount },
+    ],
+    [labels],
+  );
+  const eventColumns = useAnalyticsTableColumns({
+    storageKey: "insightflare:analytics-table-columns:events",
+    columns: eventColumnDefinitions,
+  });
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
 
   useEffect(() => {
@@ -2328,13 +2473,24 @@ export function EventRecordsSection({
             {labels.recordsTitle}
           </h2>
         </div>
-        <div className="relative w-full sm:max-w-xs">
-          <RiSearchLine className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={labels.search}
-            className="pl-8"
+        <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
+          <div className="relative min-w-0 flex-1 sm:w-80 sm:flex-none">
+            <RiSearchLine className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={labels.search}
+              className="pl-8"
+            />
+          </div>
+          <AnalyticsTableColumnSettings
+            columns={eventColumnDefinitions}
+            orderedIds={eventColumns.orderedIds}
+            visibleIds={eventColumns.visibleIds}
+            onOrderChange={eventColumns.setOrder}
+            onVisibilityChange={eventColumns.setVisible}
+            onReset={eventColumns.reset}
+            labels={messages.common.tableColumns}
           />
         </div>
       </div>
@@ -2353,6 +2509,7 @@ export function EventRecordsSection({
         appendError={appendError}
         hasMore={hasMore}
         onLoadMore={loadNextPage}
+        visibleColumnIds={eventColumns.visibleIds}
       />
 
       <EventRecordDetailDrawer

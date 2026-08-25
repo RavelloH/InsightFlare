@@ -5,7 +5,12 @@ import { cn } from "@/lib/utils";
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
-    <OverlayScrollbar data-slot="table-container" className="relative w-full">
+    <OverlayScrollbar
+      data-slot="table-container"
+      className="relative w-full"
+      maskClassName="from-card via-card/80 to-transparent"
+      showEdgeMasks
+    >
       <table
         data-slot="table"
         className={cn("w-full caption-bottom text-xs", className)}

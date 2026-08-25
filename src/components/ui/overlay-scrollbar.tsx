@@ -70,9 +70,29 @@ export function useNativeScrollbars() {
   return nativeScrollbars;
 }
 
+function syncHorizontalMaskVisibility(
+  leftMask: HTMLDivElement | null,
+  rightMask: HTMLDivElement | null,
+  viewport: HTMLElement | null,
+) {
+  if (!viewport) return;
+
+  const { clientWidth, scrollLeft, scrollWidth } = viewport;
+  const canScroll = scrollWidth > clientWidth + 1;
+  const showLeft = canScroll && scrollLeft > 10;
+  const showRight = canScroll && scrollLeft < scrollWidth - clientWidth - 10;
+
+  leftMask?.classList.toggle("opacity-100", showLeft);
+  leftMask?.classList.toggle("opacity-0", !showLeft);
+  rightMask?.classList.toggle("opacity-100", showRight);
+  rightMask?.classList.toggle("opacity-0", !showRight);
+}
+
 interface OverlayScrollbarProps extends ComponentPropsWithoutRef<"div"> {
   axis?: "horizontal" | "vertical";
+  maskClassName?: string;
   options?: PartialOptions;
+  showEdgeMasks?: boolean;
   syncKey?: string | number | boolean | null;
 }
 
@@ -80,11 +100,17 @@ export function OverlayScrollbar({
   axis = "horizontal",
   children,
   className,
+  maskClassName,
   options,
+  showEdgeMasks = false,
   syncKey,
   ...props
 }: OverlayScrollbarProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const leftMaskRef = useRef<HTMLDivElement | null>(null);
+  const rightMaskRef = useRef<HTMLDivElement | null>(null);
+  const edgeMaskFrameRef = useRef<number | null>(null);
+  const syncEdgeMasksRef = useRef<(() => void) | null>(null);
   const syncSlotBoundsRef = useRef<(() => void) | null>(null);
   const syncSlotBoundsFrameRef = useRef<number | null>(null);
   const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
@@ -223,15 +249,67 @@ export function OverlayScrollbar({
   }, [axis, resolvedOptions]);
 
   useEffect(() => {
+    if (!showEdgeMasks || axis !== "horizontal") return;
+
+    const host = hostRef.current;
+    if (!host) return;
+
+    const getViewport = () =>
+      (shouldUseNativeScrollbars()
+        ? host
+        : scrollbarRef.current?.elements().viewport) ?? host;
+    const sync = () => {
+      if (edgeMaskFrameRef.current !== null) return;
+
+      edgeMaskFrameRef.current = requestAnimationFrame(() => {
+        edgeMaskFrameRef.current = null;
+        syncHorizontalMaskVisibility(
+          leftMaskRef.current,
+          rightMaskRef.current,
+          getViewport(),
+        );
+      });
+    };
+    const instance = scrollbarRef.current;
+
+    host.addEventListener("scroll", sync, { passive: true });
+    instance?.on("scroll", sync);
+    instance?.on("updated", sync);
+
+    const resizeObserver = new ResizeObserver(() => {
+      sync();
+    });
+    resizeObserver.observe(host);
+    syncEdgeMasksRef.current = sync;
+    sync();
+
+    return () => {
+      host.removeEventListener("scroll", sync);
+      instance?.off("scroll", sync);
+      instance?.off("updated", sync);
+      resizeObserver.disconnect();
+      if (edgeMaskFrameRef.current !== null) {
+        cancelAnimationFrame(edgeMaskFrameRef.current);
+        edgeMaskFrameRef.current = null;
+      }
+      if (syncEdgeMasksRef.current === sync) {
+        syncEdgeMasksRef.current = null;
+      }
+    };
+  }, [axis, nativeScrollbars, showEdgeMasks]);
+
+  useEffect(() => {
     syncSlotBoundsRef.current?.();
+    syncEdgeMasksRef.current?.();
   }, [children]);
 
   useEffect(() => {
     scrollbarRef.current?.update();
     syncSlotBoundsRef.current?.();
+    syncEdgeMasksRef.current?.();
   }, [syncKey]);
 
-  return (
+  const scrollbarHost = (
     <div
       {...props}
       ref={hostRef}
@@ -246,6 +324,30 @@ export function OverlayScrollbar({
       data-overlayscrollbars-initialize={nativeScrollbars ? undefined : ""}
     >
       {children}
+    </div>
+  );
+
+  if (!showEdgeMasks || axis !== "horizontal") return scrollbarHost;
+
+  return (
+    <div className="relative">
+      <div
+        ref={leftMaskRef}
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute top-0 bottom-0 left-0 z-10 w-8 bg-gradient-to-r opacity-0 transition-opacity duration-300",
+          maskClassName ?? "from-background via-background/80 to-transparent",
+        )}
+      />
+      <div
+        ref={rightMaskRef}
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute top-0 right-0 bottom-0 z-10 w-8 bg-gradient-to-l opacity-0 transition-opacity duration-300",
+          maskClassName ?? "from-background via-background/80 to-transparent",
+        )}
+      />
+      {scrollbarHost}
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer";
+import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
@@ -94,7 +95,11 @@ export function ResponsiveDialogContent({
 
   return (
     <DialogContent
-      className={cn("max-h-screen max-w-full", desktopClassName, className)}
+      className={cn(
+        "max-h-[calc(100dvh-2rem)] min-h-0 max-w-full flex flex-col overflow-hidden",
+        desktopClassName,
+        className,
+      )}
       overlayClassName={overlayClassName}
       showCloseButton={showCloseButton}
       {...props}
@@ -124,9 +129,13 @@ export function ResponsiveDialogBody({
   }
 
   return (
-    <div className={cn("min-h-0 overflow-y-auto", className)} {...props}>
+    <VerticalScrollMask
+      className="min-h-0 flex-1"
+      contentClassName={className}
+      {...props}
+    >
       {children}
-    </div>
+    </VerticalScrollMask>
   );
 }
 

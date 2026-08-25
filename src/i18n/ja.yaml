@@ -95,6 +95,15 @@ common:
     download: CSV をエクスポート
     empty: エクスポートできる行がありません。
     allTabsUnavailable: すべてのタブは、各データの読み込み後に利用できます。
+  tableColumns:
+    action: 列設定
+    title: 表の列を設定
+    description: 表示する列を選び、ドラッグして順序を変更します。
+    visible: 表示する列
+    required: 必須
+    reset: デフォルトに戻す
+    dragHint: ドラッグして並べ替え
+    close: 閉じる
   time: 時刻
   cycle: サイクル
   close: 閉じる
@@ -521,6 +530,9 @@ sessions:
   browser: ブラウザー
   device: デバイス
   pageViews: ページビュー数
+  customEvents: カスタムイベント
+  screenSize: 画面サイズ
+  exitTime: 離脱時刻
   loadError: セッションを読み込めません。
   empty: この時間範囲にセッションはありません。
 sessionDetail:
@@ -615,6 +627,7 @@ events:
   os: OS
   device: デバイス
   payload: ペイロード
+  nodeCount: ノード数
   payloadFields: ペイロードフィールド
   values: 値
   nodes: ノード
@@ -699,6 +712,8 @@ visitors:
   lastSeen: 最終訪問
   pageViews: ページビュー数
   sessions: セッション数
+  customEvents: カスタムイベント
+  screenSize: 画面サイズ
   loadError: 訪問者を読み込めません。
   empty: この時間範囲に訪問者はいません。
 visitorDetail:

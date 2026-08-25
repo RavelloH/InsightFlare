@@ -2,11 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RiSearchLine } from "@remixicon/react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
+import {
+  type AnalyticsTableColumnDefinition,
+  AnalyticsTableColumnSettings,
+  useAnalyticsTableColumns,
+} from "@/components/dashboard/analytics-table-column-settings";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import {
   type SessionSortKey,
   type SessionSortState,
   SessionsTableCard,
+  type SessionTableColumnId,
 } from "@/components/dashboard/sessions-table-card";
 import {
   DETAIL_QUERY_PARAM,
@@ -104,6 +110,32 @@ export function SessionsClientPage({
   pathname,
 }: SessionsClientPageProps) {
   const labels = messages.sessions;
+  const sessionColumnDefinitions = useMemo<
+    readonly AnalyticsTableColumnDefinition<SessionTableColumnId>[]
+  >(
+    () => [
+      { id: "visitor", label: labels.visitor, required: true },
+      { id: "sessionId", label: labels.sessionId, required: true },
+      { id: "started", label: labels.started },
+      { id: "duration", label: labels.duration },
+      { id: "pageViews", label: labels.pageViews },
+      { id: "customEvents", label: labels.customEvents },
+      { id: "referrer", label: labels.referrer },
+      { id: "location", label: labels.location },
+      { id: "os", label: labels.os },
+      { id: "browser", label: labels.browser },
+      { id: "device", label: labels.device },
+      { id: "entryPage", label: labels.entryPage },
+      { id: "exitPage", label: labels.exitPage },
+      { id: "screenSize", label: labels.screenSize },
+      { id: "exitTime", label: labels.exitTime },
+    ],
+    [labels],
+  );
+  const sessionColumns = useAnalyticsTableColumns({
+    storageKey: "insightflare:analytics-table-columns:sessions",
+    columns: sessionColumnDefinitions,
+  });
   const { filters, window: timeWindow } = useDashboardQuery() as {
     filters: FilterDocument;
     window: TimeWindow;
@@ -266,17 +298,29 @@ export function SessionsClientPage({
       <PageHeading
         title={messages.sessions.title}
         subtitle={messages.sessions.subtitle}
+        actions={
+          <div className="flex w-full items-center justify-end gap-2">
+            <div className="relative min-w-0 flex-1 sm:w-80 sm:flex-none">
+              <RiSearchLine className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={labels.search}
+                className="pl-8"
+              />
+            </div>
+            <AnalyticsTableColumnSettings
+              columns={sessionColumnDefinitions}
+              orderedIds={sessionColumns.orderedIds}
+              visibleIds={sessionColumns.visibleIds}
+              onOrderChange={sessionColumns.setOrder}
+              onVisibilityChange={sessionColumns.setVisible}
+              onReset={sessionColumns.reset}
+              labels={messages.common.tableColumns}
+            />
+          </div>
+        }
       />
-
-      <div className="relative w-full sm:max-w-xs">
-        <RiSearchLine className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={labels.search}
-          className="pl-8"
-        />
-      </div>
 
       <SessionsTableCard
         locale={locale}
@@ -293,6 +337,7 @@ export function SessionsClientPage({
         hasMore={hasMore}
         skeletonRows={SESSION_PAGE_SIZE}
         onLoadMore={loadNextPage}
+        visibleColumnIds={sessionColumns.visibleIds}
       />
 
       {detailSessionId ? (
