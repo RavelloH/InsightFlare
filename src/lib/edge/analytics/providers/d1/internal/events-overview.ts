@@ -9,9 +9,10 @@ import type {
 } from "./core";
 import {
   buildEventAnalyticsSourceCte,
+  buildEventFilteredSourceCte,
   buildEventFilterSql,
-  eventSourceBindings,
   queryD1All,
+  usesSessionBoundaryFilter,
 } from "./core";
 
 export async function queryEventTypeOverviewFromD1(
@@ -23,13 +24,22 @@ export async function queryEventTypeOverviewFromD1(
   options?: { includeBreakdowns?: boolean },
 ) {
   const includeBreakdowns = options?.includeBreakdowns !== false;
-  const eventFilter = buildEventFilterSql(filters, "es");
+  const needsVisitSource = usesSessionBoundaryFilter(filters);
+  const eventFilter = buildEventFilterSql(filters, "es", {
+    sessionSource: needsVisitSource ? "visit_source" : undefined,
+  });
   const hasEventFilter = eventFilter.clause.length > 0;
+  const source = buildEventFilteredSourceCte(
+    siteId,
+    window,
+    filters,
+    eventName,
+    { materialize: true },
+  );
   const bindings = [
-    ...eventSourceBindings(siteId, window, eventName),
-    ...eventFilter.bindings,
+    ...source.bindings,
     ...(hasEventFilter
-      ? [...eventSourceBindings(siteId, window), ...eventFilter.bindings]
+      ? [siteId, window.startMs, window.endExclusiveMs, ...eventFilter.bindings]
       : [siteId, window.startMs, window.endExclusiveMs]),
   ];
   const scopedSummaryCte = hasEventFilter
@@ -52,13 +62,7 @@ scoped_summary AS (
     AND occurred_at >= ? AND occurred_at < ?
 )`;
   const baseCte = `
-WITH
-${buildEventAnalyticsSourceCte({ eventName })},
-filtered_events AS MATERIALIZED (
-  SELECT *
-  FROM event_source es
-  ${eventFilter.clause}
-),
+${source.cte},
 ${scopedSummaryCte}`;
   type OverviewCardRow = EventSummaryRow & {
     cardType: "summary" | "page" | "country" | "device" | "browser";

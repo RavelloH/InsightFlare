@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type DateRange } from "react-day-picker";
 import {
@@ -59,7 +60,6 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@/components/ui/sheet";
 import {
   Tooltip,
@@ -106,6 +106,7 @@ interface DashboardHeaderControlsProps {
   siteId?: string;
   showControls: boolean;
   showFilterSheet: boolean;
+  filterDisabled?: boolean;
   filterAudience?: "private-dashboard" | "public-share";
   showRealtimeBadge?: boolean;
 }
@@ -386,12 +387,60 @@ function FilterActiveCountBadge({ count }: { count: number }) {
   );
 }
 
+function FilterTrigger({
+  activeFilterCount,
+  className,
+  disabled,
+  messages,
+  onClick,
+  style,
+}: {
+  activeFilterCount: number;
+  className: string;
+  disabled: boolean;
+  messages: AppMessages;
+  onClick: () => void;
+  style?: CSSProperties;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={disabled ? 0 : undefined} className="inline-flex">
+          <Button
+            type="button"
+            variant="outline"
+            className={className}
+            disabled={disabled}
+            onClick={onClick}
+            style={style}
+          >
+            <RiFilter3Line
+              className={cn(
+                "size-4",
+                activeFilterCount === 0 && "text-muted-foreground",
+              )}
+            />
+            {messages.dashboardHeader.filters}
+            <FilterActiveCountBadge count={activeFilterCount} />
+          </Button>
+        </span>
+      </TooltipTrigger>
+      {disabled ? (
+        <TooltipContent side="bottom">
+          {messages.dashboardHeader.filterDisabledRealtime}
+        </TooltipContent>
+      ) : null}
+    </Tooltip>
+  );
+}
+
 export function DashboardHeaderControls({
   locale,
   messages,
   siteId,
   showControls,
   showFilterSheet,
+  filterDisabled = false,
   filterAudience = "private-dashboard",
   showRealtimeBadge: shouldShowRealtimeBadge = true,
 }: DashboardHeaderControlsProps) {
@@ -422,7 +471,7 @@ export function DashboardHeaderControls({
   );
   const hasActiveFilters = activeFilterCount > 0;
   const filterTriggerClassName = cn(
-    "gap-2 transition-colors",
+    "gap-2 transition-[color,background-color,border-color,opacity]",
     hasActiveFilters &&
       "!border-primary/60 !bg-primary/10 !text-primary hover:!bg-primary/15 hover:!text-primary aria-expanded:!bg-primary/15 dark:!border-primary/60 dark:!bg-primary/20 dark:hover:!bg-primary/25",
   );
@@ -666,22 +715,14 @@ export function DashboardHeaderControls({
               open={mobileFilterDrawerOpen}
               onOpenChange={setMobileFilterDrawerOpen}
             >
-              <DrawerTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={filterTriggerClassName}
-                  style={filterTriggerStyle}
-                >
-                  <RiFilter3Line
-                    className={cn(
-                      "size-4",
-                      !hasActiveFilters && "text-muted-foreground",
-                    )}
-                  />
-                  {messages.dashboardHeader.filters}
-                  <FilterActiveCountBadge count={activeFilterCount} />
-                </Button>
-              </DrawerTrigger>
+              <FilterTrigger
+                activeFilterCount={activeFilterCount}
+                className={filterTriggerClassName}
+                disabled={filterDisabled}
+                messages={messages}
+                onClick={() => setMobileFilterDrawerOpen(true)}
+                style={filterTriggerStyle}
+              />
               <DrawerContent className="h-[80dvh] max-h-[80dvh] flex flex-col overflow-hidden">
                 <DrawerHeader>
                   <DrawerTitle>
@@ -844,22 +885,14 @@ export function DashboardHeaderControls({
               open={desktopFilterSheetOpen}
               onOpenChange={setDesktopFilterSheetOpen}
             >
-              <SheetTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={filterTriggerClassName}
-                  style={filterTriggerStyle}
-                >
-                  <RiFilter3Line
-                    className={cn(
-                      "size-4",
-                      !hasActiveFilters && "text-muted-foreground",
-                    )}
-                  />
-                  {messages.dashboardHeader.filters}
-                  <FilterActiveCountBadge count={activeFilterCount} />
-                </Button>
-              </SheetTrigger>
+              <FilterTrigger
+                activeFilterCount={activeFilterCount}
+                className={filterTriggerClassName}
+                disabled={filterDisabled}
+                messages={messages}
+                onClick={() => setDesktopFilterSheetOpen(true)}
+                style={filterTriggerStyle}
+              />
               <SheetContent
                 side="right"
                 className="flex h-full max-h-screen w-full flex-col sm:max-w-md"

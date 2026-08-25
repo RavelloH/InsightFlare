@@ -485,7 +485,21 @@ describe("edge query dimensions low-level coverage", () => {
         exit: [{ value: "/last", views: 1, sessions: 1, visitors: 1 }],
       });
 
-      expect(calls).toHaveLength(1);
+      await expect(
+        queryPageTabsFromD1(
+          env,
+          siteId,
+          window,
+          filterFixture({ path: "/last" }),
+          10,
+        ),
+      ).resolves.toMatchObject({
+        path: [{ value: "/last", views: 1, sessions: 1, visitors: 1 }],
+        entry: [{ value: "/first", views: 1, sessions: 1, visitors: 1 }],
+        exit: [{ value: "/last", views: 1, sessions: 1, visitors: 1 }],
+      });
+
+      expect(calls).toHaveLength(2);
       expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
       const plan = database
         .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
@@ -961,11 +975,7 @@ describe("edge query event handlers low-level coverage", () => {
       ok: true,
       data: [{ label: "Signup", views: 6, sessions: 3, visitors: 2 }],
     });
-    expect(calls[0].bindings).toEqual([
-      ...visitBindings(),
-      ...eventBindings(),
-      4,
-    ]);
+    expect(calls[0].bindings).toEqual([...eventBindings(), 4]);
   });
 
   it("uses a keyset cursor for event records and maps current rows", async () => {

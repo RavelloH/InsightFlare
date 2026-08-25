@@ -1,4 +1,5 @@
 import {
+  type FilterExpression,
   type FunnelAnalysis,
   type FunnelDefinition,
   type FunnelStepConfig,
@@ -128,6 +129,19 @@ function uniqueStepValues(
   );
 }
 
+function usesEventFilter(expression: FilterExpression | null): boolean {
+  if (!expression) return false;
+  if (expression.kind === "condition") {
+    return (
+      expression.target.kind === "event-payload" ||
+      (expression.target.kind === "field" &&
+        expression.target.field === "event.name")
+    );
+  }
+  if (expression.kind === "not") return usesEventFilter(expression.child);
+  return expression.children.some(usesEventFilter);
+}
+
 async function queryFunnelPageviewEvents(
   env: Env,
   siteId: string,
@@ -138,12 +152,34 @@ async function queryFunnelPageviewEvents(
   const values = uniqueStepValues(steps, "pageview");
   if (values.length === 0) return [];
 
-  const filter = buildVisitFilterSql(filters, "vs");
-  const filterClause = filter.clause
-    ? `AND ${filter.clause.replace(/^WHERE\s+/i, "")}`
+  const eventFilter = usesEventFilter(filters.root);
+  const filter = eventFilter
+    ? buildEventFilterSql(filters, "fe", { sessionSource: "visit_source" })
+    : buildVisitFilterSql(filters, "vs");
+  const hasFilter = filter.clause.length > 0;
+  const matchedSessionsCte = hasFilter
+    ? eventFilter
+      ? `,
+${buildEventAnalyticsSourceCte({ cteName: "filter_event_source" })},
+matched_sessions AS MATERIALIZED (
+  SELECT DISTINCT fe.session_id
+  FROM filter_event_source fe
+  ${filter.clause}
+    AND TRIM(COALESCE(fe.session_id, '')) != ''
+)`
+      : `,
+matched_sessions AS MATERIALIZED (
+  SELECT DISTINCT vs.session_id
+  FROM visit_source vs
+  ${filter.clause}
+    AND TRIM(COALESCE(vs.session_id, '')) != ''
+)`
+    : "";
+  const matchedSessionJoin = hasFilter
+    ? "INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id"
     : "";
   const sql = `
-WITH ${buildVisitSourceCte()}
+WITH ${buildVisitSourceCte()}${matchedSessionsCte}
 SELECT
   vs.session_id AS sessionId,
   vs.visitor_id AS visitorId,
@@ -151,14 +187,18 @@ SELECT
   vs.started_at AS timestampMs,
   vs.visit_id AS sourceId
 FROM visit_source vs
+${matchedSessionJoin}
 WHERE TRIM(COALESCE(vs.session_id, '')) != ''
-  ${filterClause}
   AND vs.pathname IN (${values.map(() => "?").join(", ")})
 ORDER BY timestampMs ASC, sourceId ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
-    ...filter.bindings,
+    ...(hasFilter
+      ? eventFilter
+        ? [...eventSourceBindings(siteId, window), ...filter.bindings]
+        : filter.bindings
+      : []),
     ...values,
   ]);
 
@@ -183,14 +223,36 @@ async function queryFunnelCustomEvents(
   const values = uniqueStepValues(steps, "event");
   if (values.length === 0) return [];
 
-  const filter = buildEventFilterSql(filters, "es");
-  const filterClause = filter.clause
-    ? `AND ${filter.clause.replace(/^WHERE\s+/i, "")}`
+  const eventFilter = usesEventFilter(filters.root);
+  const filter = eventFilter
+    ? buildEventFilterSql(filters, "fe", { sessionSource: "visit_source" })
+    : buildVisitFilterSql(filters, "mv");
+  const hasFilter = filter.clause.length > 0;
+  const matchedSessionsCte = hasFilter
+    ? eventFilter
+      ? `,
+${buildEventAnalyticsSourceCte({ cteName: "filter_event_source" })},
+matched_sessions AS MATERIALIZED (
+  SELECT DISTINCT fe.session_id
+  FROM filter_event_source fe
+  ${filter.clause}
+    AND TRIM(COALESCE(fe.session_id, '')) != ''
+)`
+      : `,
+matched_sessions AS MATERIALIZED (
+  SELECT DISTINCT mv.session_id
+  FROM visit_source mv
+  ${filter.clause}
+    AND TRIM(COALESCE(mv.session_id, '')) != ''
+)`
+    : "";
+  const matchedSessionJoin = hasFilter
+    ? "INNER JOIN matched_sessions ms ON ms.session_id = es.session_id"
     : "";
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-${buildEventAnalyticsSourceCte({ eventNames: values })}
+${buildEventAnalyticsSourceCte({ eventNames: values })}${matchedSessionsCte}
 SELECT
   es.session_id AS sessionId,
   es.visitor_id AS visitorId,
@@ -199,14 +261,18 @@ SELECT
   COALESCE(es.sequence, 0) AS sequence,
   es.event_id AS sourceId
 FROM event_source es
+${matchedSessionJoin}
 WHERE TRIM(COALESCE(es.session_id, '')) != ''
-  ${filterClause}
 ORDER BY timestampMs ASC, sequence ASC, sourceId ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
     ...eventSourceBindings(siteId, window, values),
-    ...filter.bindings,
+    ...(hasFilter
+      ? eventFilter
+        ? [...eventSourceBindings(siteId, window), ...filter.bindings]
+        : filter.bindings
+      : []),
   ]);
 
   return rows.map((row) => ({

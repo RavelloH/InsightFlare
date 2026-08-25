@@ -98,9 +98,13 @@ export async function querySessionPathDimensionFromD1(
   const filter = buildVisitFilterSql(filters);
   const limitClause = limit > 0 ? "\nLIMIT ?" : "";
   const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
+  const visitSource = buildVisitSourceCte().replace(
+    "visit_source AS (",
+    "visit_source AS MATERIALIZED (",
+  );
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${visitSource},
 filtered_visits AS MATERIALIZED (
   SELECT
     visitor_id,
@@ -111,21 +115,27 @@ filtered_visits AS MATERIALIZED (
   FROM visit_source
   ${filter.clause}
 ),
+matched_sessions AS MATERIALIZED (
+  SELECT DISTINCT session_id
+  FROM filtered_visits
+  WHERE session_id != ''
+),
 ranked_session_visits AS (
   SELECT
-    session_id,
-    visitor_id,
-    pathname,
+    vs.session_id,
+    vs.visitor_id,
+    TRIM(COALESCE(vs.pathname, '')) AS pathname,
     ROW_NUMBER() OVER (
-      PARTITION BY session_id
-      ORDER BY started_at ASC, visit_id ASC
+      PARTITION BY vs.session_id
+      ORDER BY vs.started_at ASC, vs.visit_id ASC
     ) AS first_rank,
     ROW_NUMBER() OVER (
-      PARTITION BY session_id
-      ORDER BY started_at DESC, visit_id DESC
+      PARTITION BY vs.session_id
+      ORDER BY vs.started_at DESC, vs.visit_id DESC
     ) AS latest_rank
-  FROM filtered_visits
-  WHERE session_id != '' AND pathname != ''
+  FROM visit_source vs
+  INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id
+  WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
 ),
 session_edges AS (
   SELECT
@@ -234,9 +244,13 @@ export async function queryPageTabsFromD1(
   exit: DimensionRow[];
 }> {
   const filter = buildVisitFilterSql(filters);
+  const visitSource = buildVisitSourceCte().replace(
+    "visit_source AS (",
+    "visit_source AS MATERIALIZED (",
+  );
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${visitSource},
 filtered_visits AS MATERIALIZED (
   SELECT
     visitor_id,
@@ -249,21 +263,27 @@ filtered_visits AS MATERIALIZED (
   FROM visit_source
   ${filter.clause}
 ),
+matched_sessions AS MATERIALIZED (
+  SELECT DISTINCT session_id
+  FROM filtered_visits
+  WHERE session_id != ''
+),
 ranked_session_visits AS (
   SELECT
-    session_id,
-    visitor_id,
-    pathname,
+    vs.session_id,
+    vs.visitor_id,
+    TRIM(COALESCE(vs.pathname, '')) AS pathname,
     ROW_NUMBER() OVER (
-      PARTITION BY session_id
-      ORDER BY started_at ASC, visit_id ASC
+      PARTITION BY vs.session_id
+      ORDER BY vs.started_at ASC, vs.visit_id ASC
     ) AS first_rank,
     ROW_NUMBER() OVER (
-      PARTITION BY session_id
-      ORDER BY started_at DESC, visit_id DESC
+      PARTITION BY vs.session_id
+      ORDER BY vs.started_at DESC, vs.visit_id DESC
     ) AS latest_rank
-  FROM filtered_visits
-  WHERE session_id != '' AND pathname != ''
+  FROM visit_source vs
+  INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id
+  WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
 ),
 session_edges AS (
   SELECT

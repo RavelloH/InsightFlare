@@ -37,19 +37,39 @@ export async function queryOverviewFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<OverviewAggregateRow> {
   const filter = buildVisitFilterSql(filters);
+  const hasFilter = filter.clause.length > 0;
+  const visitSource = buildVisitSourceCte().replace(
+    "visit_source AS (",
+    "visit_source AS MATERIALIZED (",
+  );
+  const metricSource = hasFilter ? "calculated_visits" : "filtered_visits";
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${visitSource},
 filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
   ${filter.clause}
-),
-session_rollup AS (
-  SELECT session_id, count(*) AS visit_count
+),${
+    hasFilter
+      ? `
+matched_sessions AS MATERIALIZED (
+  SELECT DISTINCT session_id
   FROM filtered_visits
   WHERE session_id != ''
-  GROUP BY session_id
+),
+calculated_visits AS MATERIALIZED (
+  SELECT vs.*
+  FROM visit_source vs
+  INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id
+),`
+      : ""
+  }
+session_rollup AS (
+  SELECT vs.session_id, count(*) AS visit_count
+  FROM ${metricSource} vs
+  WHERE vs.session_id != ''
+  GROUP BY vs.session_id
 )
 SELECT
   count(*) AS views,
@@ -58,7 +78,7 @@ SELECT
   COALESCE((SELECT count(*) FROM session_rollup WHERE visit_count = 1), 0) AS bounces,
   COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
   COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
-FROM filtered_visits
+FROM ${metricSource}
 `;
   const row =
     (
@@ -88,17 +108,37 @@ export async function queryTrendFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<TrendAggregateRow[]> {
   const filter = buildVisitFilterSql(filters);
+  const hasFilter = filter.clause.length > 0;
+  const visitSource = buildVisitSourceCte().replace(
+    "visit_source AS (",
+    "visit_source AS MATERIALIZED (",
+  );
   const buckets = buildTimeBuckets(window, interval);
   const visitBucket = timeBucketCase(buckets, "started_at");
   const sessionBucket = timeBucketCase(buckets, "session_started_at");
+  const metricSource = hasFilter ? "calculated_visits" : "filtered_visits";
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${visitSource},
 filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
   ${filter.clause}
+),${
+    hasFilter
+      ? `
+matched_sessions AS MATERIALIZED (
+  SELECT DISTINCT session_id
+  FROM filtered_visits
+  WHERE session_id != ''
 ),
+calculated_visits AS MATERIALIZED (
+  SELECT vs.*
+  FROM visit_source vs
+  INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id
+),`
+      : ""
+  }
 visit_bucket_rollup AS (
   SELECT
     ${visitBucket.sql} AS bucket,
@@ -106,17 +146,17 @@ visit_bucket_rollup AS (
     count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
     COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
     COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
-  FROM filtered_visits
+  FROM ${metricSource}
   GROUP BY bucket
 ),
 session_rollup AS (
   SELECT
-    session_id,
-    MIN(started_at) AS session_started_at,
+    vs.session_id,
+    MIN(vs.started_at) AS session_started_at,
     count(*) AS visit_count
-  FROM filtered_visits
-  WHERE session_id != ''
-  GROUP BY session_id
+  FROM ${metricSource} vs
+  WHERE vs.session_id != ''
+  GROUP BY vs.session_id
 ),
 session_bucket_rollup AS (
   SELECT
@@ -179,16 +219,36 @@ export async function queryLatestSiteActivity(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<number | null> {
   const filter = buildVisitFilterSql(filters);
+  const hasFilter = filter.clause.length > 0;
+  const visitSource = buildVisitSourceCte().replace(
+    "visit_source AS (",
+    "visit_source AS MATERIALIZED (",
+  );
+  const metricSource = hasFilter ? "calculated_visits" : "filtered_visits";
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${visitSource},
 filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
   ${filter.clause}
-)
+),${
+    hasFilter
+      ? `
+matched_sessions AS MATERIALIZED (
+  SELECT DISTINCT session_id
+  FROM filtered_visits
+  WHERE session_id != ''
+),
+calculated_visits AS MATERIALIZED (
+  SELECT vs.*
+  FROM visit_source vs
+  INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id
+),`
+      : ""
+  }
 SELECT MAX(last_activity_at) AS lastActivityAt
-FROM filtered_visits
+FROM ${metricSource}
 `;
   const row = (
     await queryD1All<Record<string, unknown>>(

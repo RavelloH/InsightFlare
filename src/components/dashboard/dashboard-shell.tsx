@@ -1105,6 +1105,7 @@ export function DashboardShell({
                       Boolean(liveActiveTeamSlug) || isRequestObservationRoute
                     }
                     showFilterSheet={hasActiveSite}
+                    filterDisabled={isRealtimeRoute}
                     showRealtimeBadge={!isRequestObservationRoute}
                   />
                 </div>

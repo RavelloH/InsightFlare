@@ -304,7 +304,7 @@ describe("funnel query handler", () => {
       call.sql.includes("FROM event_source es"),
     );
     expect(pageviewCall?.sql).toContain("vs.device_type");
-    expect(eventCall?.sql).toContain("es.device_type");
+    expect(eventCall?.sql).toContain("mv.device_type");
     expect(pageviewCall?.bindings).toContain("desktop");
     expect(eventCall?.bindings).toContain("desktop");
   });

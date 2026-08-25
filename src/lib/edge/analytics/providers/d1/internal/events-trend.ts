@@ -9,10 +9,8 @@ import type {
   QueryWindow,
 } from "./core";
 import {
-  buildEventAnalyticsSourceCte,
-  buildEventFilterSql,
+  buildEventFilteredSourceCte,
   buildTimeBuckets,
-  eventSourceBindings,
   queryD1All,
   SHARE_TREND_OTHER_KEY,
   SHARE_TREND_OTHER_LABEL,
@@ -30,17 +28,13 @@ export async function queryEventsTrendFromD1(
   limit: number,
   eventName?: string,
 ) {
-  const filter = buildEventFilterSql(filters, "es");
-  const sourceBindings = [...eventSourceBindings(siteId, window, eventName)];
-  const filterBindings = filter.bindings;
-  const baseCte = `
-WITH
-${buildEventAnalyticsSourceCte({ eventName })},
-filtered_events AS (
-  SELECT *
-  FROM event_source es
-  ${filter.clause}
-)`;
+  const source = buildEventFilteredSourceCte(
+    siteId,
+    window,
+    filters,
+    eventName,
+  );
+  const baseCte = source.cte;
   const seriesRows = await queryD1All<EventTrendSeriesRow>(
     env,
     `${baseCte}
@@ -54,7 +48,7 @@ GROUP BY event_name
 ORDER BY events DESC, sessions DESC, eventName ASC
 LIMIT ?
 `,
-    [...sourceBindings, ...filterBindings, limit],
+    [...source.bindings, limit],
   );
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "occurred_at");
@@ -90,12 +84,7 @@ FROM bucketed
 WHERE bucket IS NOT NULL
 ORDER BY bucket ASC
 `,
-    [
-      ...sourceBindings,
-      ...filterBindings,
-      ...seriesNames,
-      SHARE_TREND_OTHER_TOKEN,
-    ],
+    [...source.bindings, ...seriesNames, SHARE_TREND_OTHER_TOKEN],
   );
   const hasOther = trendRows.some(
     (row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN,
@@ -112,12 +101,7 @@ SELECT
 FROM filtered_events
 ${seriesNames.length > 0 ? `WHERE event_name NOT IN (${seriesNames.map(() => "?").join(", ")})` : ""}
 `,
-        [
-          ...sourceBindings,
-          ...filterBindings,
-          SHARE_TREND_OTHER_LABEL,
-          ...seriesNames,
-        ],
+        [...source.bindings, SHARE_TREND_OTHER_LABEL, ...seriesNames],
       )
     : [];
   const series: Array<{
@@ -181,19 +165,17 @@ export async function queryEventTypeTrendFromD1(
   filters: FilterDocument,
   eventName: string,
 ) {
-  const filter = buildEventFilterSql(filters, "es");
+  const source = buildEventFilteredSourceCte(
+    siteId,
+    window,
+    filters,
+    eventName,
+  );
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "occurred_at");
   const rows = await queryD1All<EventTypeTrendPointRow>(
     env,
-    `
-WITH
-${buildEventAnalyticsSourceCte({ eventName })},
-filtered_events AS (
-  SELECT *
-  FROM event_source es
-  ${filter.clause}
-),
+    `${source.cte},
 bucketed AS (
   SELECT
     ${bucket.sql} AS bucket,
@@ -210,7 +192,7 @@ FROM bucketed
 WHERE bucket IS NOT NULL
 ORDER BY bucket ASC
 `,
-    [...eventSourceBindings(siteId, window, eventName), ...filter.bindings],
+    source.bindings,
   );
   const data = buckets.map((item) => ({
     bucket: item.index,

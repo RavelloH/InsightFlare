@@ -21,6 +21,7 @@ import {
   mapDimensionRows,
   type QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryRetentionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import {
   queryLatestSiteActivity,
   queryOverviewFromD1,
@@ -1085,18 +1086,15 @@ describe("edge overview D1 queries and handlers", () => {
           env,
           siteId,
           window,
-          filterFixture({
-            country: "US",
-            clientBrowser: "Chrome",
-          }),
+          filterFixture({ path: "/docs" }),
         ),
       ).resolves.toEqual({
-        views: 3,
-        sessions: 2,
+        views: 2,
+        sessions: 1,
         visitors: 1,
-        bounces: 1,
-        totalDuration: 150,
-        durationViews: 2,
+        bounces: 0,
+        totalDuration: 100,
+        durationViews: 1,
       });
 
       expect(calls).toHaveLength(1);
@@ -1217,6 +1215,88 @@ describe("edge overview D1 queries and handlers", () => {
       expect(
         plan.some((row) => row.detail.includes("CORRELATED SCALAR SUBQUERY")),
       ).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses filtered visits to select retention visitors, then counts their later visits", async () => {
+    const database = new DatabaseSync(":memory:");
+    for (const migration of [
+      "migrations/0008_rebuild_analytics.sql",
+      "migrations/0013_add_visit_performance_metrics.sql",
+    ]) {
+      database.exec(readFileSync(migration, "utf8"));
+    }
+    installVisitSiteIdentityFixture(database);
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: (...bindings: QueryBinding[]) => ({
+            all: async () => ({
+              results: database.prepare(sql).all(...bindings) as D1Row[],
+            }),
+          }),
+        }),
+      } as unknown as D1Database,
+    } as Env;
+    const insert = database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, pathname, hostname
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test')
+    `);
+
+    try {
+      insert.run(
+        "retention-match",
+        siteId,
+        "visitor-match",
+        "retention-session",
+        baseMs + 100,
+        baseMs + 100,
+        "/match",
+      );
+      insert.run(
+        "retention-return",
+        siteId,
+        "visitor-match",
+        "retention-session",
+        baseMs + 60 * 60 * 1000 + 100,
+        baseMs + 60 * 60 * 1000 + 100,
+        "/return",
+      );
+      insert.run(
+        "retention-other",
+        siteId,
+        "visitor-other",
+        "other-session",
+        baseMs + 100,
+        baseMs + 100,
+        "/other",
+      );
+
+      await expect(
+        queryRetentionFromD1(
+          env,
+          siteId,
+          window,
+          filterFixture({ path: "/match" }),
+          "hour",
+        ),
+      ).resolves.toEqual({
+        granularity: "hour",
+        cohorts: [
+          {
+            bucket: baseMs,
+            size: 1,
+            periods: [
+              { index: 0, visitors: 1, rate: 1 },
+              { index: 1, visitors: 1, rate: 1 },
+            ],
+          },
+        ],
+      });
     } finally {
       database.close();
     }
@@ -1369,19 +1449,9 @@ describe("edge overview D1 queries and handlers", () => {
           siteId,
           window,
           "hour",
-          filterFixture({ country: "US" }),
+          filterFixture({ path: "/docs" }),
         ),
       ).resolves.toEqual([
-        {
-          bucket: 0,
-          timestampMs: baseMs,
-          views: 1,
-          visitors: 1,
-          sessions: 1,
-          bounces: 1,
-          totalDuration: 100,
-          durationViews: 1,
-        },
         {
           bucket: 1,
           timestampMs: baseMs + 60 * 60 * 1000,

@@ -2,7 +2,11 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import {
+  analyticsFilterRegistry,
+  EMPTY_FILTER_DOCUMENT,
+  normalizeFilterDocument,
+} from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import { queryEventFieldsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
@@ -618,6 +622,65 @@ describe("event detail D1 SQL", () => {
     }
   });
 
+  it("applies page filters to the session scope without removing funnel steps", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      const analysis = await queryFunnelAnalysis(
+        env,
+        siteId,
+        window,
+        filterFixture({ path: "/posts/minecraft-meteor-guide" }),
+        [
+          { type: "pageview", value: "/entry" },
+          { type: "pageview", value: "/posts/minecraft-meteor-guide" },
+          { type: "event", value: eventName },
+        ],
+      );
+
+      expect(analysis.steps.map((step) => step.sessions)).toEqual([1, 1, 1]);
+      expect(analysis.summary).toMatchObject({
+        totalSessions: 1,
+        convertedSessions: 1,
+      });
+      expect(
+        d1.calls.some((call) => call.sql.includes("matched_sessions")),
+      ).toBe(true);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("uses event filters to select funnel sessions before loading page steps", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    const filters = normalizeFilterDocument(
+      {
+        version: 1,
+        root: {
+          kind: "condition",
+          target: { kind: "field", field: "event.name" },
+          operator: "eq",
+          value: eventName,
+        },
+      },
+      analyticsFilterRegistry,
+    );
+
+    try {
+      const analysis = await queryFunnelAnalysis(env, siteId, window, filters, [
+        { type: "pageview", value: "/entry" },
+        { type: "event", value: eventName },
+      ]);
+
+      expect(analysis.steps.map((step) => step.sessions)).toEqual([1, 1]);
+      expect(
+        d1.calls.every((call) => call.sql.includes("filter_event_source")),
+      ).toBe(true);
+    } finally {
+      d1.close();
+    }
+  });
+
   it("queries only requested context cards without building session edges", async () => {
     const { env, d1 } = createSqliteEventEnv();
 
@@ -694,6 +757,99 @@ describe("event detail D1 SQL", () => {
       const query = d1.calls.at(-1);
       expect(query?.sql).toContain("scoped_event_source AS");
       expect(query?.sql).toContain("TRIM(COALESCE(es.pathname, '')) = ?");
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("keeps complete journey aggregates after a visit filter matches", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      d1.database
+        .prepare(
+          `INSERT INTO visits (
+            visit_id, site_id, visitor_id, session_id, started_at, pathname
+          ) VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "visit-other-session",
+          siteId,
+          "visitor-1",
+          "session-2",
+          eventTime + 2,
+          "/other",
+        );
+
+      const filter = filterFixture({ path: "/posts/minecraft-meteor-guide" });
+      const sessions = await querySessionsFromD1(
+        env,
+        siteId,
+        window,
+        filter,
+        10,
+      );
+      const visitors = await queryVisitorsFromD1(
+        env,
+        siteId,
+        window,
+        filter,
+        10,
+      );
+      const sessionPage = await querySessionListPageFromD1(
+        env,
+        siteId,
+        window,
+        filter,
+        {
+          pageSize: 10,
+          sort: { key: "startedAt", direction: "asc" },
+        },
+      );
+      const visitorPage = await queryVisitorListPageFromD1(
+        env,
+        siteId,
+        window,
+        filter,
+        {
+          pageSize: 10,
+          sort: { key: "firstSeenAt", direction: "asc" },
+        },
+      );
+
+      expect(sessions).toMatchObject([
+        {
+          sessionId: "session-1",
+          views: 3,
+          entryPath: "/entry",
+          exitPath: "/exit",
+        },
+      ]);
+      expect(visitors).toMatchObject([
+        {
+          visitorId: "visitor-1",
+          views: 4,
+          sessions: 2,
+          firstSeenAt: eventTime - 2,
+          lastSeenAt: eventTime + 2,
+        },
+      ]);
+      expect(sessionPage.rows).toEqual(sessions);
+      expect(visitorPage.rows).toEqual(visitors);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("keeps the original journey aggregation path without filters", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      await querySessionsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, 10);
+      expect(d1.calls.at(-1)?.sql).not.toContain("matched_sessions AS");
+
+      await queryVisitorsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, 10);
+      expect(d1.calls.at(-1)?.sql).not.toContain("matched_visitors AS");
     } finally {
       d1.close();
     }

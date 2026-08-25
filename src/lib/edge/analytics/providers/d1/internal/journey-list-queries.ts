@@ -64,6 +64,30 @@ export interface SessionListPage {
   nextCursor: SessionListCursor | null;
 }
 
+function hasJourneyFilters(filters: FilterDocument): boolean {
+  return filters.root !== null;
+}
+
+function fullEntityFilterCtes(
+  entity: "visitor" | "session",
+  filterClause: string,
+  searchCondition?: string,
+): string {
+  const column = entity === "visitor" ? "visitor_id" : "session_id";
+  return `matched_${entity}s AS (
+  SELECT DISTINCT visit_source.${column}
+  FROM visit_source
+  ${filterClause}
+    AND visit_source.${column} != ''
+    ${searchCondition ? `AND ${searchCondition}` : ""}
+),
+filtered_visits AS (
+  SELECT v.*
+  FROM visit_source v
+  INNER JOIN matched_${entity}s me ON me.${column} = v.${column}
+)`;
+}
+
 /**
  * Establishes a target's site/window scope before reading its trajectory.
  * Empty trajectories are valid, while IDs known only outside the window remain
@@ -293,6 +317,7 @@ export async function queryVisitorsFromD1(
 ): Promise<VisitorRow[]> {
   const filter = buildVisitFilterSql(filters);
   const searchSql = buildJourneySearchSql(search);
+  const hasFilters = hasJourneyFilters(filters);
   const searchCte = searchSql
     ? `,
 matched_visitors AS (
@@ -314,14 +339,18 @@ matched_visitors AS (
 WITH
 ${buildVisitSourceCte()},
 ${buildCustomEventSourceCte()},
-filtered_visits AS (
+${
+  hasFilters
+    ? fullEntityFilterCtes("visitor", targetClause, searchSql?.condition)
+    : `filtered_visits AS (
   SELECT *
   FROM visit_source
   ${targetClause}
-)
-${searchCte},
+  )`
+}
+${hasFilters ? "" : searchCte},
 ${buildVisitorAggregationSql({
-  searchWhere,
+  searchWhere: hasFilters ? "" : searchWhere,
   browserVersionExpression: browserMajorVersionExpr(),
   orderBy: visitorListOrderBy(sort),
   limitOffset: "LIMIT ? OFFSET ?",
@@ -353,6 +382,7 @@ export async function queryVisitorListPageFromD1(
 ): Promise<VisitorListPage> {
   const filter = buildVisitFilterSql(filters);
   const searchSql = buildJourneySearchSql(options.search);
+  const hasFilters = hasJourneyFilters(filters);
   const searchCte = searchSql
     ? `,
 matched_visitors AS (
@@ -371,14 +401,18 @@ matched_visitors AS (
 WITH
 ${buildVisitSourceCte()},
 ${buildCustomEventSourceCte()},
-filtered_visits AS (
+${
+  hasFilters
+    ? fullEntityFilterCtes("visitor", filter.clause, searchSql?.condition)
+    : `filtered_visits AS (
   SELECT *
   FROM visit_source
   ${filter.clause}
-)
-${searchCte},
+  )`
+}
+${hasFilters ? "" : searchCte},
 ${buildVisitorAggregationSql({
-  searchWhere,
+  searchWhere: hasFilters ? "" : searchWhere,
   browserVersionExpression: browserMajorVersionExpr(),
   cursorWhere: cursor.clause,
   orderBy: visitorListOrderBy(options.sort),
@@ -416,6 +450,7 @@ export async function querySessionsFromD1(
 ): Promise<SessionRow[]> {
   const filter = buildVisitFilterSql(filters);
   const searchSql = buildJourneySearchSql(search);
+  const hasFilters = hasJourneyFilters(filters);
   const searchCte = searchSql
     ? `,
 matched_sessions AS (
@@ -443,14 +478,18 @@ matched_sessions AS (
 WITH
 ${buildVisitSourceCte()},
 ${buildCustomEventSourceCte()},
-filtered_visits AS (
+${
+  hasFilters
+    ? fullEntityFilterCtes("session", targetClause, searchSql?.condition)
+    : `filtered_visits AS (
   SELECT *
   FROM visit_source
   ${targetClause}
-)
-${searchCte},
+  )`
+}
+${hasFilters ? "" : searchCte},
 ${buildSessionAggregationSql({
-  searchWhere,
+  searchWhere: hasFilters ? "" : searchWhere,
   browserVersionExpression: browserMajorVersionExpr(),
   orderBy: sessionListOrderBy(sort),
   limitOffset: "LIMIT ? OFFSET ?",
@@ -482,6 +521,7 @@ export async function querySessionListPageFromD1(
 ): Promise<SessionListPage> {
   const filter = buildVisitFilterSql(filters);
   const searchSql = buildJourneySearchSql(options.search);
+  const hasFilters = hasJourneyFilters(filters);
   const searchCte = searchSql
     ? `,
 matched_sessions AS (
@@ -500,14 +540,18 @@ matched_sessions AS (
 WITH
 ${buildVisitSourceCte()},
 ${buildCustomEventSourceCte()},
-filtered_visits AS (
+${
+  hasFilters
+    ? fullEntityFilterCtes("session", filter.clause, searchSql?.condition)
+    : `filtered_visits AS (
   SELECT *
   FROM visit_source
   ${filter.clause}
-)
-${searchCte},
+  )`
+}
+${hasFilters ? "" : searchCte},
 ${buildSessionAggregationSql({
-  searchWhere,
+  searchWhere: hasFilters ? "" : searchWhere,
   browserVersionExpression: browserMajorVersionExpr(),
   cursorWhere: cursor.clause,
   orderBy: sessionListOrderBy(options.sort),

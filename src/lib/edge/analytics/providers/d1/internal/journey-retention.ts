@@ -34,36 +34,40 @@ export async function queryRetentionFromD1(
   const buckets = buildTimeBuckets(window, granularity);
   const bucket = timeBucketCase(buckets, "started_at");
 
-  const filter = buildVisitFilterSql(filters);
-  const filterAndClause = filter.clause
-    ? filter.clause.replace(/^WHERE\s+/i, "AND ")
-    : "";
+  const filter = buildVisitFilterSql(filters, "all_visits");
   const sql = `
 WITH
 ${buildVisitSourceCte()},
-filtered_visits AS MATERIALIZED (
+all_visits AS MATERIALIZED (
   SELECT
-    visitor_id,
-    started_at,
+    *,
     ${bucket.sql} AS bucket
   FROM visit_source
   WHERE visitor_id != ''
-  ${filterAndClause}
 ),
-visitor_buckets AS MATERIALIZED (
+filtered_visits AS MATERIALIZED (
   SELECT
     visitor_id,
     bucket
-  FROM filtered_visits
-  WHERE bucket IS NOT NULL
-  GROUP BY visitor_id, bucket
+  FROM all_visits
+  ${filter.clause}
 ),
 cohort_assign AS (
   SELECT
     visitor_id,
     MIN(bucket) AS cohort_bucket
-  FROM visitor_buckets
+  FROM filtered_visits
+  WHERE bucket IS NOT NULL
   GROUP BY visitor_id
+),
+visitor_buckets AS MATERIALIZED (
+  SELECT
+    av.visitor_id,
+    av.bucket
+  FROM all_visits av
+  INNER JOIN cohort_assign ca ON ca.visitor_id = av.visitor_id
+  WHERE av.bucket IS NOT NULL AND av.bucket >= ca.cohort_bucket
+  GROUP BY av.visitor_id, av.bucket
 )
 SELECT
   cohort_bucket AS cohortBucket,

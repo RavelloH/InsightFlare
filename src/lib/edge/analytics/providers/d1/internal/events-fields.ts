@@ -7,10 +7,8 @@ import type {
   QueryWindow,
 } from "./core";
 import {
-  buildEventAnalyticsSourceCte,
-  buildEventFilterSql,
+  buildEventFilteredSourceCte,
   customEventJsonTypeCode,
-  eventSourceBindings,
   queryD1All,
 } from "./core";
 
@@ -22,15 +20,14 @@ export async function queryEventFieldsFromD1(
   eventName: string,
   limit: number,
 ): Promise<EventFieldRow[]> {
-  const filter = buildEventFilterSql(filters, "es");
+  const source = buildEventFilteredSourceCte(
+    siteId,
+    window,
+    filters,
+    eventName,
+  );
   const sql = `
-WITH
-${buildEventAnalyticsSourceCte({ eventName })},
-filtered_events AS (
-  SELECT *
-  FROM event_source es
-  ${filter.clause}
-),
+${source.cte},
 field_rows AS (
   SELECT
     p.path,
@@ -60,12 +57,8 @@ FROM field_rows
 GROUP BY path, valueType
 ORDER BY events DESC, occurrences DESC, path ASC
 LIMIT ?
-`;
-  return queryD1All<EventFieldRow>(env, sql, [
-    ...eventSourceBindings(siteId, window, eventName),
-    ...filter.bindings,
-    limit,
-  ]);
+  `;
+  return queryD1All<EventFieldRow>(env, sql, [...source.bindings, limit]);
 }
 
 export async function queryEventFieldValuesFromD1(
@@ -79,7 +72,12 @@ export async function queryEventFieldValuesFromD1(
   limit: number,
   search?: string,
 ): Promise<EventFieldValueRow[]> {
-  const filter = buildEventFilterSql(filters, "es");
+  const source = buildEventFilteredSourceCte(
+    siteId,
+    window,
+    filters,
+    eventName,
+  );
   const valueTypeCode = customEventJsonTypeCode(fieldValueType);
   if (valueTypeCode === null) return [];
   const normalizedSearch = search?.trim().toLowerCase();
@@ -95,13 +93,7 @@ export async function queryEventFieldValuesFromD1(
     ? `%${normalizedSearch.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`
     : null;
   const sql = `
-WITH
-${buildEventAnalyticsSourceCte({ eventName })},
-filtered_events AS (
-  SELECT *
-  FROM event_source es
-  ${filter.clause}
-),
+${source.cte},
 field_rows AS (
   SELECT
     v.value_type AS valueType,
@@ -131,10 +123,9 @@ FROM field_rows
 GROUP BY valueType, stringValue, numberValue, booleanValue
 ORDER BY occurrences DESC, events DESC, stringValue ASC, numberValue ASC, booleanValue ASC
 LIMIT ?
-`;
+  `;
   return queryD1All<EventFieldValueRow>(env, sql, [
-    ...eventSourceBindings(siteId, window, eventName),
-    ...filter.bindings,
+    ...source.bindings,
     fieldPath,
     valueTypeCode,
     ...(searchPattern ? [searchPattern] : []),

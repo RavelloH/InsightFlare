@@ -141,6 +141,7 @@ dashboardHeader:
   intervalDisabledWeek: 仅在最近 12 个月内可选周间隔。
   filterTitle: 筛选条件
   filterSubtitle: 新建、保存筛选条件，或者使用个人/团队保存的筛选条件。
+  filterDisabledRealtime: 实时页面中筛选不可用。
   previousPeriod: 上个周期
   nextPeriod: 下个周期
   customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）"

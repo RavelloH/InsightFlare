@@ -141,6 +141,7 @@ dashboardHeader:
   intervalDisabledWeek: 週単位の間隔は過去 12 か月以内でのみ利用できます。
   filterTitle: フィルター
   filterSubtitle: フィルターを新規作成・保存するか、個人またはチームで保存したフィルターを使用します。
+  filterDisabledRealtime: リアルタイムページではフィルタリングを利用できません。
   previousPeriod: 前の期間
   nextPeriod: 次の期間
   customSelectionSummary: "選択範囲：{from} から {to}（{days} 日）"

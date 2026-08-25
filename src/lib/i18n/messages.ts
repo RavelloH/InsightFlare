@@ -136,6 +136,7 @@ export interface AppMessages {
     intervalDisabledWeek: string;
     filterTitle: string;
     filterSubtitle: string;
+    filterDisabledRealtime: string;
     previousPeriod: string;
     nextPeriod: string;
     customSelectionSummary: string;
@@ -2461,6 +2462,7 @@ const enMessages = {
     filterTitle: "Filters",
     filterSubtitle:
       "Create and save filters, or use your personal and team saved filters.",
+    filterDisabledRealtime: "Filtering is unavailable on the real-time page.",
     previousPeriod: "Previous period",
     nextPeriod: "Next period",
     customSelectionSummary: "Selected range: {from} to {to} ({days} days)",
@@ -5013,6 +5015,7 @@ const zhMessages = {
     intervalDisabledWeek: "仅在最近 12 个月内可选周间隔。",
     filterTitle: "筛选条件",
     filterSubtitle: "新建、保存筛选条件，或者使用个人/团队保存的筛选条件。",
+    filterDisabledRealtime: "实时页面中筛选不可用。",
     previousPeriod: "上个周期",
     nextPeriod: "下个周期",
     customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）",
@@ -7483,6 +7486,8 @@ const jaMessages = {
     filterTitle: "フィルター",
     filterSubtitle:
       "フィルターを新規作成・保存するか、個人またはチームで保存したフィルターを使用します。",
+    filterDisabledRealtime:
+      "リアルタイムページではフィルタリングを利用できません。",
     previousPeriod: "前の期間",
     nextPeriod: "次の期間",
     customSelectionSummary: "選択範囲：{from} から {to}（{days} 日）",

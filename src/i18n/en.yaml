@@ -141,6 +141,7 @@ dashboardHeader:
   intervalDisabledWeek: Week interval is only available within the last 12 months.
   filterTitle: Filters
   filterSubtitle: Create and save filters, or use your personal and team saved filters.
+  filterDisabledRealtime: Filtering is unavailable on the real-time page.
   previousPeriod: Previous period
   nextPeriod: Next period
   customSelectionSummary: "Selected range: {from} to {to} ({days} days)"

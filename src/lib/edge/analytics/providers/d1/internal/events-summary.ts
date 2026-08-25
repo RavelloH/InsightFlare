@@ -7,15 +7,7 @@ import type {
   FilterDocument,
   QueryWindow,
 } from "./core";
-import {
-  buildCustomEventSourceCte,
-  buildEventFilteredSourceCte,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  eventSourceBindings,
-  queryD1All,
-  visitSourceBindings,
-} from "./core";
+import { buildEventFilteredSourceCte, queryD1All } from "./core";
 
 async function queryCustomEventNamesFromD1(
   env: Env,
@@ -25,44 +17,10 @@ async function queryCustomEventNamesFromD1(
   limit: number,
   search?: string,
 ): Promise<DimensionRow[]> {
-  const filter = buildVisitFilterSql(filters, "vc");
+  const source = buildEventFilteredSourceCte(siteId, window, filters);
   const limitClause = limit > 0 ? "\nLIMIT ?" : "";
   const sql = `
-WITH
-${buildVisitSourceCte()},
-${buildCustomEventSourceCte()},
-event_with_context AS (
-  SELECT
-    e.event_id,
-    e.event_name,
-    COALESCE(vs.session_id, '') AS session_id,
-    COALESCE(vs.visitor_id, '') AS visitor_id,
-    COALESCE(vs.country, '') AS country,
-    COALESCE(vs.region, '') AS region,
-    COALESCE(vs.region_code, '') AS region_code,
-    COALESCE(vs.city, '') AS city,
-    COALESCE(vs.pathname, '') AS pathname,
-    COALESCE(vs.title, '') AS title,
-    COALESCE(vs.hostname, '') AS hostname,
-    COALESCE(vs.referrer_host, '') AS referrer_host,
-    COALESCE(vs.referrer_url, '') AS referrer_url,
-    COALESCE(vs.device_type, '') AS device_type,
-    COALESCE(vs.browser, '') AS browser,
-    COALESCE(vs.os, '') AS os,
-    COALESCE(vs.os_version, '') AS os_version,
-    COALESCE(vs.language, '') AS language,
-    COALESCE(vs.screen_width, 0) AS screen_width,
-    COALESCE(vs.screen_height, 0) AS screen_height
-  FROM event_source e
-  LEFT JOIN visit_source vs
-    ON vs.site_pk = e.site_pk
-   AND vs.visit_id = e.visit_id
-),
-filtered_events AS (
-  SELECT *
-  FROM event_with_context vc
-  ${filter.clause}
-),
+${source.cte},
 event_rollup AS (
   SELECT
     COALESCE(event_name, '') AS value,
@@ -81,9 +39,7 @@ ${limitClause}
 `;
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
-      ...visitSourceBindings(siteId, window),
-      ...eventSourceBindings(siteId, window),
-      ...filter.bindings,
+      ...source.bindings,
       ...(search
         ? [
             `%${search
