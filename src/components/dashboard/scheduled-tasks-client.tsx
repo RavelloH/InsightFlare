@@ -17,14 +17,13 @@ import {
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { AnalyticsTableCard } from "@/components/dashboard/analytics-table-card";
+import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { JsonTreePanel } from "@/components/dashboard/json-tree";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { EVENT_RECORD_DRAWER_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
 import { TableActionButton } from "@/components/dashboard/table-action-button";
-import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -54,13 +53,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  Table,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { requestAdminService } from "@/lib/admin-service-client";
 import {
   durationFormat,
@@ -96,7 +89,6 @@ const STATUS_OPTIONS: Array<ScheduledTaskStatus | "all"> = [
   "skipped",
 ];
 const RUN_PAGE_SIZE = 50;
-const RUN_SKELETON_ROWS = 8;
 const RUN_TABLE_COLUMN_COUNT = 10;
 const INITIAL_RUN_META: ScheduledTaskRunsMeta = {
   page: 1,
@@ -334,13 +326,7 @@ function appendUniqueRuns(
   return nextRuns.length > 0 ? [...current, ...nextRuns] : current;
 }
 
-function ScheduledRunRowSkeleton({
-  index,
-  sentinelRef,
-}: {
-  index: number;
-  sentinelRef?: (node: HTMLTableRowElement | null) => void;
-}) {
+function ScheduledRunRowSkeleton({ index }: { index: number }) {
   const widths = [
     "w-32",
     "w-32",
@@ -354,7 +340,7 @@ function ScheduledRunRowSkeleton({
     "w-20",
   ];
   return (
-    <TableRow ref={sentinelRef} aria-hidden="true">
+    <>
       {widths.map((width, cellIndex) => (
         <TableCell
           key={`${index}-${cellIndex}`}
@@ -366,7 +352,7 @@ function ScheduledRunRowSkeleton({
           <Skeleton className={cn("h-4", width)} />
         </TableCell>
       ))}
-    </TableRow>
+    </>
   );
 }
 
@@ -382,7 +368,7 @@ function ScheduledTaskRunsTable({
   error,
   appendError,
   hasMore,
-  sentinelRef,
+  onLoadMore,
 }: {
   locale: Locale;
   timeZone: string | undefined;
@@ -395,7 +381,7 @@ function ScheduledTaskRunsTable({
   error: boolean;
   appendError: boolean;
   hasMore: boolean;
-  sentinelRef?: (node: HTMLTableRowElement | null) => void;
+  onLoadMore: () => void;
 }) {
   const handleKeyDown = (
     event: KeyboardEvent<HTMLTableRowElement>,
@@ -405,174 +391,122 @@ function ScheduledTaskRunsTable({
     event.preventDefault();
     onOpenRun(run);
   };
-  const bodyState = loadingRows
-    ? "loading"
-    : error
-      ? "error"
-      : rows.length === 0 && !hasMore
-        ? "empty"
-        : "rows";
-
   return (
-    <AnalyticsTableCard minTableWidth="82rem">
-      <Table className="min-w-[82rem]">
-        <TableHeader>
-          <TableRow>
-            <TableHead className="pl-4">{labels.scheduledAt}</TableHead>
-            <TableHead>{labels.startedAt}</TableHead>
-            <TableHead>{labels.finishedAt}</TableHead>
-            <TableHead>{labels.trigger}</TableHead>
-            <TableHead>{labels.statusLabel}</TableHead>
-            <TableHead className="text-right">{labels.duration}</TableHead>
-            <TableHead>{labels.taskResult}</TableHead>
-            <TableHead className="text-right">{labels.taskCount}</TableHead>
-            <TableHead className="text-right">{labels.subtaskCount}</TableHead>
-            <TableHead className="pr-4 text-right">{labels.logs}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <AutoTransition
-          as="tbody"
-          transitionKey={bodyState}
-          initial={false}
-          duration={0.18}
-          type="fade"
-          presenceMode="wait"
-          aria-busy={loadingRows || loadingMore}
-          data-slot="table-body"
-          className="[&_tr:last-child]:border-0"
-        >
-          {loadingRows ? (
-            Array.from({ length: RUN_SKELETON_ROWS }, (_, index) => (
-              <ScheduledRunRowSkeleton key={index} index={index} />
-            ))
-          ) : error ? (
-            <TableRow>
-              <TableCell
-                colSpan={RUN_TABLE_COLUMN_COUNT}
-                className="h-28 text-center text-muted-foreground"
-              >
-                {labels.loadFailed}
-              </TableCell>
-            </TableRow>
-          ) : rows.length === 0 && !hasMore ? (
-            <TableRow>
-              <TableCell
-                colSpan={RUN_TABLE_COLUMN_COUNT}
-                className="h-28 text-center text-muted-foreground"
-              >
-                {labels.noRuns}
-              </TableCell>
-            </TableRow>
-          ) : (
+    <AnalyticsDataTable
+      minTableWidth="82rem"
+      tableClassName="min-w-[82rem]"
+      header={
+        <TableRow>
+          <TableHead className="pl-4">{labels.scheduledAt}</TableHead>
+          <TableHead>{labels.startedAt}</TableHead>
+          <TableHead>{labels.finishedAt}</TableHead>
+          <TableHead>{labels.trigger}</TableHead>
+          <TableHead>{labels.statusLabel}</TableHead>
+          <TableHead className="text-right">{labels.duration}</TableHead>
+          <TableHead>{labels.taskResult}</TableHead>
+          <TableHead className="text-right">{labels.taskCount}</TableHead>
+          <TableHead className="text-right">{labels.subtaskCount}</TableHead>
+          <TableHead className="pr-4 text-right">{labels.logs}</TableHead>
+        </TableRow>
+      }
+      rows={rows}
+      renderRow={(run) => {
+        const selected = selectedRunId === run.id;
+        return {
+          children: (
             <>
-              {rows.map((run) => {
-                const selected = selectedRunId === run.id;
-                return (
-                  <TableRow
-                    key={run.id}
-                    role="button"
-                    tabIndex={0}
-                    className={cn(
-                      "group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-                      selected && "bg-muted/55",
-                    )}
-                    onClick={() => onOpenRun(run)}
-                    onKeyDown={(event) => handleKeyDown(event, run)}
-                  >
-                    <TableCell className="pl-4 font-mono text-xs">
-                      {formatDateOrDash(locale, run.scheduledAt, timeZone)}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {shortDateTimeWithSeconds(
-                        locale,
-                        run.startedAt,
-                        timeZone,
-                      )}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {formatDateOrDash(locale, run.finishedAt, timeZone)}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {run.triggerType}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={run.status} labels={labels.status} />
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {formatDuration(locale, run.durationMs)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex min-w-40 flex-wrap items-center gap-1.5 text-xs">
-                        <Badge variant="outline">
-                          {numberFormat(locale, run.taskCount)}
-                        </Badge>
-                        {run.successCount > 0 ? (
-                          <span className="font-mono text-emerald-600 dark:text-emerald-400">
-                            {labels.status.success}:
-                            {numberFormat(locale, run.successCount)}
-                          </span>
-                        ) : null}
-                        {run.failedCount > 0 ? (
-                          <span className="font-mono text-destructive">
-                            {labels.status.failed}:
-                            {numberFormat(locale, run.failedCount)}
-                          </span>
-                        ) : null}
-                        {run.partialCount > 0 ? (
-                          <span className="font-mono text-amber-600 dark:text-amber-400">
-                            {labels.status.partial}:
-                            {numberFormat(locale, run.partialCount)}
-                          </span>
-                        ) : null}
-                        {run.runningCount > 0 ? (
-                          <span className="font-mono text-sky-600 dark:text-sky-400">
-                            {labels.status.running}:
-                            {numberFormat(locale, run.runningCount)}
-                          </span>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {numberFormat(locale, run.taskCount)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {numberFormat(locale, runSubtaskCount(run))}
-                    </TableCell>
-                    <TableCell className="pr-4 text-right">
-                      <TableActionButton
-                        label={`${numberFormat(locale, run.logsCount)} ${labels.viewLogs}`}
-                        onClick={() => onOpenRun(run)}
-                        className={cn(selected && "text-foreground")}
-                      >
-                        <RiFileList3Line className="size-4" />
-                      </TableActionButton>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {appendError ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={RUN_TABLE_COLUMN_COUNT}
-                    className="h-16 text-center text-muted-foreground"
-                  >
-                    {labels.loadFailed}
-                  </TableCell>
-                </TableRow>
-              ) : hasMore ? (
-                Array.from({ length: RUN_SKELETON_ROWS }, (_, index) => (
-                  <ScheduledRunRowSkeleton
-                    key={`append-${rows.length}-${index}`}
-                    index={index}
-                    sentinelRef={index === 0 ? sentinelRef : undefined}
-                  />
-                ))
-              ) : null}
+              <TableCell className="pl-4 font-mono text-xs">
+                {formatDateOrDash(locale, run.scheduledAt, timeZone)}
+              </TableCell>
+              <TableCell className="font-mono text-xs">
+                {shortDateTimeWithSeconds(locale, run.startedAt, timeZone)}
+              </TableCell>
+              <TableCell className="font-mono text-xs">
+                {formatDateOrDash(locale, run.finishedAt, timeZone)}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {run.triggerType}
+              </TableCell>
+              <TableCell>
+                <StatusBadge status={run.status} labels={labels.status} />
+              </TableCell>
+              <TableCell className="text-right font-mono">
+                {formatDuration(locale, run.durationMs)}
+              </TableCell>
+              <TableCell>
+                <div className="flex min-w-40 flex-wrap items-center gap-1.5 text-xs">
+                  <Badge variant="outline">
+                    {numberFormat(locale, run.taskCount)}
+                  </Badge>
+                  {run.successCount > 0 ? (
+                    <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                      {labels.status.success}:
+                      {numberFormat(locale, run.successCount)}
+                    </span>
+                  ) : null}
+                  {run.failedCount > 0 ? (
+                    <span className="font-mono text-destructive">
+                      {labels.status.failed}:
+                      {numberFormat(locale, run.failedCount)}
+                    </span>
+                  ) : null}
+                  {run.partialCount > 0 ? (
+                    <span className="font-mono text-amber-600 dark:text-amber-400">
+                      {labels.status.partial}:
+                      {numberFormat(locale, run.partialCount)}
+                    </span>
+                  ) : null}
+                  {run.runningCount > 0 ? (
+                    <span className="font-mono text-sky-600 dark:text-sky-400">
+                      {labels.status.running}:
+                      {numberFormat(locale, run.runningCount)}
+                    </span>
+                  ) : null}
+                </div>
+              </TableCell>
+              <TableCell className="text-right font-mono">
+                {numberFormat(locale, run.taskCount)}
+              </TableCell>
+              <TableCell className="text-right font-mono">
+                {numberFormat(locale, runSubtaskCount(run))}
+              </TableCell>
+              <TableCell className="pr-4 text-right">
+                <TableActionButton
+                  label={`${numberFormat(locale, run.logsCount)} ${labels.viewLogs}`}
+                  onClick={() => onOpenRun(run)}
+                  className={cn(selected && "text-foreground")}
+                >
+                  <RiFileList3Line className="size-4" />
+                </TableActionButton>
+              </TableCell>
             </>
-          )}
-        </AutoTransition>
-      </Table>
-    </AnalyticsTableCard>
+          ),
+          props: {
+            role: "button",
+            tabIndex: 0,
+            className: cn(
+              "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+              selected && "bg-muted/55",
+            ),
+            onClick: () => onOpenRun(run),
+            onKeyDown: (event) => handleKeyDown(event, run),
+          },
+        };
+      }}
+      renderSkeletonRow={(index) => <ScheduledRunRowSkeleton index={index} />}
+      getRowKey={(run) => run.id}
+      skeletonRows={RUN_PAGE_SIZE}
+      columnCount={RUN_TABLE_COLUMN_COUNT}
+      loading={loadingRows}
+      loadingMore={loadingMore}
+      error={error}
+      errorContent={labels.loadFailed}
+      emptyContent={labels.noRuns}
+      appendError={appendError}
+      appendErrorContent={labels.loadFailed}
+      hasMore={hasMore}
+      onLoadMore={onLoadMore}
+    />
   );
 }
 
@@ -965,16 +899,6 @@ export function ScheduledTasksClient({
     void runsQuery.fetchNextPage();
   });
 
-  const sentinelRef = useInfiniteTableSentinel({
-    enabled:
-      !loadingInitial &&
-      !loadingMore &&
-      !appendError &&
-      !error &&
-      runsMeta.hasMore,
-    onReachEnd: loadNextPage,
-  });
-
   const detailQuery = useQuery({
     queryKey: ["dashboard", "scheduled-task-run", selectedRunId],
     queryFn: ({ signal }) =>
@@ -1252,7 +1176,7 @@ export function ScheduledTasksClient({
           error={error}
           appendError={appendError}
           hasMore={runsMeta.hasMore}
-          sentinelRef={sentinelRef}
+          onLoadMore={loadNextPage}
         />
       </section>
 

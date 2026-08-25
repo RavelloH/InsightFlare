@@ -19,7 +19,7 @@ export interface AutoTransitionProps extends Omit<
   "children" | "className"
 > {
   children: React.ReactNode;
-  as?: "div" | "span" | "g" | "tbody";
+  as?: "div" | "span" | "g" | "tbody" | "tr";
   className?: string;
   duration?: number;
   type?: TransitionType;
@@ -74,19 +74,25 @@ const transitionVariants: Record<
   },
 };
 
-export function AutoTransition({
-  children,
-  as = "div",
-  className = "",
-  duration = 0.3,
-  type = "fade",
-  initial = true,
-  custom,
-  transitionKey,
-  presenceMode = "wait",
-  customVariants,
-  ...motionProps
-}: AutoTransitionProps) {
+export const AutoTransition = React.forwardRef<
+  HTMLElement,
+  AutoTransitionProps
+>(function AutoTransition(
+  {
+    children,
+    as = "div",
+    className = "",
+    duration = 0.3,
+    type = "fade",
+    initial = true,
+    custom,
+    transitionKey,
+    presenceMode = "wait",
+    customVariants,
+    ...motionProps
+  },
+  ref,
+) {
   const [hasRendered, setHasRendered] = useState(initial);
 
   useEffect(() => {
@@ -131,15 +137,18 @@ export function AutoTransition({
       ? motion.g
       : as === "tbody"
         ? motion.tbody
-        : as === "span"
-          ? motion.span
-          : motion.div
+        : as === "tr"
+          ? motion.tr
+          : as === "span"
+            ? motion.span
+            : motion.div
   ) as React.ElementType;
 
   return (
     <AnimatePresence mode={resolvedPresenceMode} custom={custom}>
       <MotionComponent
         {...motionProps}
+        ref={ref}
         key={key}
         className={className}
         custom={custom}
@@ -153,4 +162,6 @@ export function AutoTransition({
       </MotionComponent>
     </AnimatePresence>
   );
-}
+});
+
+AutoTransition.displayName = "AutoTransition";

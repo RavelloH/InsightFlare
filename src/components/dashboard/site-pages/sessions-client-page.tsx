@@ -13,7 +13,6 @@ import {
   DetailDrawer,
 } from "@/components/dashboard/site-pages/detail-query-modal";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
-import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { Input } from "@/components/ui/input";
 import {
   pushUrlWithoutNavigation,
@@ -37,7 +36,6 @@ interface SessionsClientPageProps {
 }
 
 const SESSION_PAGE_SIZE = 50;
-const SESSION_SKELETON_ROWS = 8;
 
 const SessionDetailClientPage = dynamic(
   () =>
@@ -189,12 +187,6 @@ export function SessionsClientPage({
     void fetchNextPage();
   }, [appendError, fetchNextPage, hasMore, loadingInitial, loadingMore]);
 
-  const sentinelRef = useInfiniteTableSentinel({
-    enabled:
-      !loadingInitial && !loadingMore && !appendError && !error && hasMore,
-    onReachEnd: loadNextPage,
-  });
-
   const toggleSort = (key: SessionSortKey) => {
     setSort((current) =>
       current.key === key
@@ -299,8 +291,8 @@ export function SessionsClientPage({
         error={error}
         appendError={appendError}
         hasMore={hasMore}
-        skeletonRows={SESSION_SKELETON_ROWS}
-        sentinelRef={sentinelRef}
+        skeletonRows={SESSION_PAGE_SIZE}
+        onLoadMore={loadNextPage}
       />
 
       {detailSessionId ? (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface UseInfiniteTableSentinelOptions {
   enabled: boolean;
@@ -11,28 +11,53 @@ export function useInfiniteTableSentinel({
   onReachEnd,
   rootMargin = "360px 0px",
 }: UseInfiniteTableSentinelOptions) {
-  const [sentinelNode, setSentinelNode] = useState<HTMLTableRowElement | null>(
-    null,
-  );
+  const [sentinelNodes, setSentinelNodes] = useState<HTMLElement[]>([]);
+
+  const setSentinelNode = useCallback((node: HTMLElement | null) => {
+    setSentinelNodes((currentNodes) => {
+      const nextNodes = new Set(
+        currentNodes.filter((currentNode) => currentNode.isConnected),
+      );
+      if (node) nextNodes.add(node);
+
+      const nextNodeList = [...nextNodes];
+      if (
+        nextNodeList.length === currentNodes.length &&
+        nextNodeList.every(
+          (currentNode, index) => currentNode === currentNodes[index],
+        )
+      ) {
+        return currentNodes;
+      }
+      return nextNodeList;
+    });
+  }, []);
 
   useEffect(() => {
+    const connectedSentinelNodes = sentinelNodes.filter(
+      (node) => node.isConnected,
+    );
+
     if (
-      !sentinelNode ||
+      connectedSentinelNodes.length === 0 ||
       !enabled ||
       typeof IntersectionObserver === "undefined"
     ) {
       return;
     }
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) onReachEnd();
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onReachEnd();
       },
       { root: null, rootMargin, threshold: 0.01 },
     );
-    observer.observe(sentinelNode);
+    connectedSentinelNodes.forEach((node) => observer.observe(node));
     const frameId = window.requestAnimationFrame(() => {
-      const rect = sentinelNode.getBoundingClientRect();
-      if (rect.top <= window.innerHeight + 480 && rect.bottom >= -480) {
+      const isInTriggerRange = connectedSentinelNodes.some((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.top <= window.innerHeight + 480 && rect.bottom >= -480;
+      });
+      if (isInTriggerRange) {
         onReachEnd();
       }
     });
@@ -40,7 +65,7 @@ export function useInfiniteTableSentinel({
       window.cancelAnimationFrame(frameId);
       observer.disconnect();
     };
-  }, [enabled, onReachEnd, rootMargin, sentinelNode]);
+  }, [enabled, onReachEnd, rootMargin, sentinelNodes]);
 
   return setSentinelNode;
 }

@@ -27,7 +27,7 @@ describe("useInfiniteTableSentinel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("loads when the sentinel is intersecting", () => {
+  it("loads when any sentinel row is intersecting", () => {
     let callback: IntersectionObserverCallback | undefined;
     const observe = vi.fn();
     vi.stubGlobal(
@@ -55,16 +55,24 @@ describe("useInfiniteTableSentinel", () => {
       return createElement(
         "table",
         null,
-        createElement("tbody", null, createElement("tr", { ref: sentinelRef })),
+        createElement(
+          "tbody",
+          null,
+          createElement("tr", { ref: sentinelRef }),
+          createElement("tr", { ref: sentinelRef }),
+        ),
       );
     }
 
     act(() => root.render(createElement(Probe)));
-    expect(observe).toHaveBeenCalledTimes(1);
+    expect(observe).toHaveBeenCalledTimes(2);
 
     act(() => {
       callback?.(
-        [{ isIntersecting: true }] as IntersectionObserverEntry[],
+        [
+          { isIntersecting: false },
+          { isIntersecting: true },
+        ] as IntersectionObserverEntry[],
         {} as IntersectionObserver,
       );
     });

@@ -29,7 +29,7 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 
-import { AnalyticsTableCard } from "@/components/dashboard/analytics-table-card";
+import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
 import {
   AsyncDimensionBreakdownCard,
   type AsyncDimensionBreakdownLabelAppearance,
@@ -45,7 +45,6 @@ import {
 } from "@/components/dashboard/journey-display";
 import { ShareRadialCard } from "@/components/dashboard/share-radial-card";
 import { EVENT_RECORD_DRAWER_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
-import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -75,13 +74,7 @@ import { ModalOverlay, overlayZIndexFor } from "@/components/ui/modal-overlay";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  Table,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { requestAdminService } from "@/lib/admin-service-client";
 import {
   durationFormat,
@@ -330,7 +323,31 @@ interface RequestObservationDetailData {
 
 const DIMENSION_ROW_LIMIT = 30;
 const BOT_EVENT_FETCH_LIMIT = 50;
-const BOT_EVENT_SKELETON_ROWS = 8;
+const BOT_EVENT_SKELETON_WIDTHS = [
+  "w-24",
+  "w-28",
+  "w-24",
+  "w-28",
+  "w-32",
+  "w-40",
+  "w-24",
+  "w-28",
+  "w-24",
+  "w-24",
+  "w-20",
+] as const;
+const NORMAL_REQUEST_SKELETON_WIDTHS = [
+  "w-24",
+  "w-28",
+  "w-24",
+  "w-16",
+  "w-24",
+  "w-40",
+  "w-24",
+  "w-28",
+  "w-24",
+  "w-20",
+] as const;
 const ABNORMAL_POINT_COLOR: [number, number, number] = [239, 68, 68];
 const NORMAL_POINT_COLOR: [number, number, number] = [34, 197, 154];
 const PERFORMANCE_WARNING_COLOR = "oklch(0.75 0.16 80)";
@@ -2636,29 +2653,15 @@ function ConfidenceBlocks({
   );
 }
 
-function BotEventRowSkeleton({
+function RequestObservationRowSkeletonContent({
   index,
-  sentinelRef,
+  widths,
 }: {
   index: number;
-  sentinelRef?: (node: HTMLTableRowElement | null) => void;
+  widths: readonly string[];
 }) {
-  const widths = [
-    "w-24",
-    "w-28",
-    "w-24",
-    "w-28",
-    "w-32",
-    "w-40",
-    "w-24",
-    "w-28",
-    "w-24",
-    "w-24",
-    "w-20",
-    "w-48",
-  ];
   return (
-    <TableRow ref={sentinelRef} aria-hidden="true">
+    <>
       {widths.map((width, cellIndex) => (
         <TableCell
           key={`${index}:${cellIndex}`}
@@ -2667,7 +2670,7 @@ function BotEventRowSkeleton({
           <Skeleton className={cn("h-4", width)} />
         </TableCell>
       ))}
-    </TableRow>
+    </>
   );
 }
 
@@ -3389,11 +3392,6 @@ function BotEventsTable({
     return () => window.clearInterval(interval);
   }, []);
 
-  const sentinelRef = useInfiniteTableSentinel({
-    enabled: !loading && !loadingMore && hasMore,
-    onReachEnd: onLoadMore,
-  });
-
   const updateDetailParam = (detailId: string, mode: "push" | "replace") => {
     const nextParams = new URLSearchParams(window.location.search);
     if (detailId) nextParams.set("detail", detailId);
@@ -3451,12 +3449,6 @@ function BotEventsTable({
     openEvent(event);
   };
 
-  const bodyState = loading
-    ? "loading"
-    : events.length === 0
-      ? "empty"
-      : "rows";
-
   return (
     <>
       <section className="space-y-3">
@@ -3479,173 +3471,151 @@ function BotEventsTable({
           </div>
         </div>
 
-        <AnalyticsTableCard minTableWidth="92rem">
-          <Table className="min-w-[92rem]">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-4">{copy.id}</TableHead>
-                <TableHead>{copy.time}</TableHead>
-                <TableHead>{copy.site}</TableHead>
-                <TableHead>{copy.reason}</TableHead>
-                <TableHead>{copy.confidence}</TableHead>
-                <TableHead>{copy.network}</TableHead>
-                <TableHead>{copy.asn}</TableHead>
-                <TableHead>{copy.ip}</TableHead>
-                <TableHead>{copy.location}</TableHead>
-                <TableHead>{copy.pathname}</TableHead>
-                <TableHead className="pr-4">{copy.userAgent}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <AutoTransition
-              as="tbody"
-              transitionKey={bodyState}
-              initial={false}
-              duration={0.18}
-              type="fade"
-              presenceMode="wait"
-              aria-busy={loading}
-              data-slot="table-body"
-              className="[&_tr:last-child]:border-0"
-            >
-              {loading ? (
-                Array.from({ length: BOT_EVENT_SKELETON_ROWS }, (_, index) => (
-                  <BotEventRowSkeleton key={index} index={index} />
-                ))
-              ) : events.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={11}
-                    className="h-28 text-center text-muted-foreground"
-                  >
-                    {copy.noData}
-                  </TableCell>
-                </TableRow>
-              ) : (
+        <AnalyticsDataTable
+          minTableWidth="92rem"
+          tableClassName="min-w-[92rem]"
+          header={
+            <TableRow>
+              <TableHead className="pl-4">{copy.id}</TableHead>
+              <TableHead>{copy.time}</TableHead>
+              <TableHead>{copy.site}</TableHead>
+              <TableHead>{copy.reason}</TableHead>
+              <TableHead>{copy.confidence}</TableHead>
+              <TableHead>{copy.network}</TableHead>
+              <TableHead>{copy.asn}</TableHead>
+              <TableHead>{copy.ip}</TableHead>
+              <TableHead>{copy.location}</TableHead>
+              <TableHead>{copy.pathname}</TableHead>
+              <TableHead className="pr-4">{copy.userAgent}</TableHead>
+            </TableRow>
+          }
+          rows={events}
+          renderRow={(event) => {
+            const reasonLabel = botReasonLabel(
+              copy,
+              event.reasons[0] || event.confidence || "",
+            );
+            const eventId = event.traceId || event.rayId || "";
+            return {
+              children: (
                 <>
-                  {events.map((event, index) => {
-                    const reasonLabel = botReasonLabel(
-                      copy,
-                      event.reasons[0] || event.confidence || "",
-                    );
-                    const eventId = event.traceId || event.rayId || "";
-                    const rowKey =
-                      eventId ||
-                      `${event.siteId}:${event.ip}:${event.pathname}:${event.receivedAt}`;
-                    return (
-                      <TableRow
-                        key={`${rowKey}:${index}`}
-                        role="button"
-                        tabIndex={0}
-                        className="group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
-                        onClick={() => openEvent(event)}
-                        onKeyDown={(keyboardEvent) =>
-                          handleKeyDown(keyboardEvent, event)
-                        }
+                  <TableCell className="pl-4 max-w-36">
+                    <div className="flex w-28 min-w-0 items-center gap-2">
+                      <VisitorAvatar
+                        seed={eventId || "unknown"}
+                        className="size-6"
+                      />
+                      <span
+                        className="min-w-0 truncate font-mono"
+                        title={eventId || undefined}
                       >
-                        <TableCell className="pl-4 max-w-36">
-                          <div className="flex w-28 min-w-0 items-center gap-2">
-                            <VisitorAvatar
-                              seed={eventId || "unknown"}
-                              className="size-6"
-                            />
-                            <span
-                              className="min-w-0 truncate font-mono"
-                              title={eventId || undefined}
-                            >
-                              {eventId ? shortId(eventId) : "--"}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-36 font-mono text-muted-foreground">
-                          <span className="block truncate">
-                            {formatRelativeTime(locale, event.receivedAt, now)}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-48">
-                          <span
-                            className="block truncate font-medium"
-                            title={event.siteName}
-                          >
-                            {event.siteName}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-48">
-                          <span
-                            className="block truncate font-medium"
-                            title={reasonLabel}
-                          >
-                            {reasonLabel}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-36">
-                          <ConfidenceBlocks
-                            confidence={event.confidence}
-                            label={event.confidence || "--"}
-                          />
-                        </TableCell>
-                        <TableCell className="max-w-44">
-                          <span
-                            className="block truncate"
-                            title={event.asOrganization || undefined}
-                          >
-                            {event.asOrganization || "--"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-24">
-                          <span className="block truncate font-mono">
-                            {event.asn ? `AS${event.asn}` : "--"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-36">
-                          <span className="block truncate font-mono text-muted-foreground">
-                            {event.ip || "--"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-52">
-                          <CountryRegionMeta
-                            locale={locale}
-                            messages={messages}
-                            country={event.country || ""}
-                            region={event.region}
-                            className="w-full"
-                          />
-                        </TableCell>
-                        <TableCell className="max-w-64">
-                          <span
-                            className="block truncate font-mono"
-                            title={event.pathname || "/"}
-                          >
-                            {event.pathname || "/"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-80 pr-4">
-                          <span
-                            className="block truncate font-mono text-muted-foreground"
-                            title={event.userAgent || undefined}
-                          >
-                            {event.userAgent || "--"}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  {hasMore
-                    ? Array.from(
-                        { length: BOT_EVENT_SKELETON_ROWS },
-                        (_, index) => (
-                          <BotEventRowSkeleton
-                            key={`append-${events.length}-${index}`}
-                            index={index}
-                            sentinelRef={index === 0 ? sentinelRef : undefined}
-                          />
-                        ),
-                      )
-                    : null}
+                        {eventId ? shortId(eventId) : "--"}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="max-w-36 font-mono text-muted-foreground">
+                    <span className="block truncate">
+                      {formatRelativeTime(locale, event.receivedAt, now)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-48">
+                    <span
+                      className="block truncate font-medium"
+                      title={event.siteName}
+                    >
+                      {event.siteName}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-48">
+                    <span
+                      className="block truncate font-medium"
+                      title={reasonLabel}
+                    >
+                      {reasonLabel}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-36">
+                    <ConfidenceBlocks
+                      confidence={event.confidence}
+                      label={event.confidence || "--"}
+                    />
+                  </TableCell>
+                  <TableCell className="max-w-44">
+                    <span
+                      className="block truncate"
+                      title={event.asOrganization || undefined}
+                    >
+                      {event.asOrganization || "--"}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-24">
+                    <span className="block truncate font-mono">
+                      {event.asn ? `AS${event.asn}` : "--"}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-36">
+                    <span className="block truncate font-mono text-muted-foreground">
+                      {event.ip || "--"}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-52">
+                    <CountryRegionMeta
+                      locale={locale}
+                      messages={messages}
+                      country={event.country || ""}
+                      region={event.region}
+                      className="w-full"
+                    />
+                  </TableCell>
+                  <TableCell className="max-w-64">
+                    <span
+                      className="block truncate font-mono"
+                      title={event.pathname || "/"}
+                    >
+                      {event.pathname || "/"}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-80 pr-4">
+                    <span
+                      className="block truncate font-mono text-muted-foreground"
+                      title={event.userAgent || undefined}
+                    >
+                      {event.userAgent || "--"}
+                    </span>
+                  </TableCell>
                 </>
-              )}
-            </AutoTransition>
-          </Table>
-        </AnalyticsTableCard>
+              ),
+              props: {
+                role: "button",
+                tabIndex: 0,
+                className:
+                  "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+                onClick: () => openEvent(event),
+                onKeyDown: (keyboardEvent) =>
+                  handleKeyDown(keyboardEvent, event),
+              },
+            };
+          }}
+          renderSkeletonRow={(index) => (
+            <RequestObservationRowSkeletonContent
+              index={index}
+              widths={BOT_EVENT_SKELETON_WIDTHS}
+            />
+          )}
+          getRowKey={(event, index) =>
+            event.traceId ||
+            event.rayId ||
+            `${event.siteId}:${event.ip}:${event.pathname}:${event.receivedAt}:${index}`
+          }
+          skeletonRows={BOT_EVENT_FETCH_LIMIT}
+          columnCount={11}
+          loading={loading}
+          loadingMore={loadingMore}
+          errorContent={copy.loadFailed}
+          emptyContent={copy.noData}
+          hasMore={hasMore}
+          onLoadMore={onLoadMore}
+        />
       </section>
 
       <BotRequestDetailDrawer
@@ -3769,16 +3739,6 @@ function NormalRequestsTable({
     return () => window.clearInterval(interval);
   }, []);
 
-  const sentinelRef = useInfiniteTableSentinel({
-    enabled: !loading && !loadingMore && hasMore,
-    onReachEnd: onLoadMore,
-  });
-
-  const bodyState = loading
-    ? "loading"
-    : events.length === 0
-      ? "empty"
-      : "rows";
   const title = copy.recentNormal.title;
   const description = copy.recentNormal.description;
   const openEvent = (event: NormalRequestEvent) => {
@@ -3814,158 +3774,135 @@ function NormalRequestsTable({
           </div>
         </div>
 
-        <AnalyticsTableCard>
-          <Table className="min-w-[80rem]">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-4">{copy.id}</TableHead>
-                <TableHead>{copy.time}</TableHead>
-                <TableHead>{copy.site}</TableHead>
-                <TableHead>{copy.kind}</TableHead>
-                <TableHead>{copy.normalDetail.requestMethod}</TableHead>
-                <TableHead>{copy.network}</TableHead>
-                <TableHead>{copy.asn}</TableHead>
-                <TableHead>{copy.location}</TableHead>
-                <TableHead>{copy.pathname}</TableHead>
-                <TableHead className="pr-4">
-                  {copy.normalDetail.edgeLatency}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <AutoTransition
-              as="tbody"
-              transitionKey={bodyState}
-              initial={false}
-              duration={0.18}
-              type="fade"
-              presenceMode="wait"
-              aria-busy={loading}
-              data-slot="table-body"
-              className="[&_tr:last-child]:border-0"
-            >
-              {loading ? (
-                Array.from({ length: BOT_EVENT_SKELETON_ROWS }, (_, index) => (
-                  <BotEventRowSkeleton key={index} index={index} />
-                ))
-              ) : events.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={10}
-                    className="h-28 text-center text-muted-foreground"
-                  >
-                    {copy.noData}
-                  </TableCell>
-                </TableRow>
-              ) : (
+        <AnalyticsDataTable
+          tableClassName="min-w-[80rem]"
+          header={
+            <TableRow>
+              <TableHead className="pl-4">{copy.id}</TableHead>
+              <TableHead>{copy.time}</TableHead>
+              <TableHead>{copy.site}</TableHead>
+              <TableHead>{copy.kind}</TableHead>
+              <TableHead>{copy.normalDetail.requestMethod}</TableHead>
+              <TableHead>{copy.network}</TableHead>
+              <TableHead>{copy.asn}</TableHead>
+              <TableHead>{copy.location}</TableHead>
+              <TableHead>{copy.pathname}</TableHead>
+              <TableHead className="pr-4">
+                {copy.normalDetail.edgeLatency}
+              </TableHead>
+            </TableRow>
+          }
+          rows={events}
+          renderRow={(event) => {
+            const eventId = event.traceId || event.rayId || "";
+            return {
+              children: (
                 <>
-                  {events.map((event, index) => {
-                    const eventId = event.traceId || event.rayId || "";
-                    const rowKey =
-                      eventId ||
-                      `${event.siteId}:${event.pathname}:${event.receivedAt}`;
-                    return (
-                      <TableRow
-                        key={`${rowKey}:${index}`}
-                        role="button"
-                        tabIndex={0}
-                        className="group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
-                        onClick={() => openEvent(event)}
-                        onKeyDown={(keyboardEvent) =>
-                          handleKeyDown(keyboardEvent, event)
-                        }
+                  <TableCell className="pl-4 max-w-36">
+                    <div className="flex w-28 min-w-0 items-center gap-2">
+                      <VisitorAvatar
+                        seed={eventId || "normal"}
+                        className="size-6"
+                      />
+                      <span
+                        className="min-w-0 truncate font-mono"
+                        title={eventId || undefined}
                       >
-                        <TableCell className="pl-4 max-w-36">
-                          <div className="flex w-28 min-w-0 items-center gap-2">
-                            <VisitorAvatar
-                              seed={eventId || "normal"}
-                              className="size-6"
-                            />
-                            <span
-                              className="min-w-0 truncate font-mono"
-                              title={eventId || undefined}
-                            >
-                              {eventId ? shortId(eventId) : "--"}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-36 font-mono text-muted-foreground">
-                          <span className="block truncate">
-                            {formatRelativeTime(locale, event.receivedAt, now)}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-48">
-                          <span
-                            className="block truncate font-medium"
-                            title={event.siteName}
-                          >
-                            {event.siteName || event.siteDomain || event.siteId}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-28">
-                          <Badge variant="outline">
-                            {requestKindLabel(copy, event.kind)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="max-w-24">
-                          <span className="block truncate font-mono">
-                            {event.requestMethod || "--"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-44">
-                          <span
-                            className="block truncate"
-                            title={event.asOrganization || undefined}
-                          >
-                            {event.asOrganization || "--"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-24">
-                          <span className="block truncate font-mono">
-                            {event.asn ? `AS${event.asn}` : "--"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-52">
-                          <CountryRegionMeta
-                            locale={locale}
-                            messages={messages}
-                            country={event.country || ""}
-                            region={event.region}
-                            className="w-full"
-                          />
-                        </TableCell>
-                        <TableCell className="max-w-64">
-                          <span
-                            className="block truncate font-mono"
-                            title={event.pathname || "/"}
-                          >
-                            {event.pathname || "/"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-28 pr-4">
-                          <span className="block truncate font-mono tabular-nums text-muted-foreground">
-                            {latencyFormat(locale, copy, event.edgeLatencyMs)}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  {hasMore
-                    ? Array.from(
-                        { length: BOT_EVENT_SKELETON_ROWS },
-                        (_, index) => (
-                          <BotEventRowSkeleton
-                            key={`append-${events.length}-${index}`}
-                            index={index}
-                            sentinelRef={index === 0 ? sentinelRef : undefined}
-                          />
-                        ),
-                      )
-                    : null}
+                        {eventId ? shortId(eventId) : "--"}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="max-w-36 font-mono text-muted-foreground">
+                    <span className="block truncate">
+                      {formatRelativeTime(locale, event.receivedAt, now)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-48">
+                    <span
+                      className="block truncate font-medium"
+                      title={event.siteName}
+                    >
+                      {event.siteName || event.siteDomain || event.siteId}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-28">
+                    <Badge variant="outline">
+                      {requestKindLabel(copy, event.kind)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="max-w-24">
+                    <span className="block truncate font-mono">
+                      {event.requestMethod || "--"}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-44">
+                    <span
+                      className="block truncate"
+                      title={event.asOrganization || undefined}
+                    >
+                      {event.asOrganization || "--"}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-24">
+                    <span className="block truncate font-mono">
+                      {event.asn ? `AS${event.asn}` : "--"}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-52">
+                    <CountryRegionMeta
+                      locale={locale}
+                      messages={messages}
+                      country={event.country || ""}
+                      region={event.region}
+                      className="w-full"
+                    />
+                  </TableCell>
+                  <TableCell className="max-w-64">
+                    <span
+                      className="block truncate font-mono"
+                      title={event.pathname || "/"}
+                    >
+                      {event.pathname || "/"}
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-w-28 pr-4">
+                    <span className="block truncate font-mono tabular-nums text-muted-foreground">
+                      {latencyFormat(locale, copy, event.edgeLatencyMs)}
+                    </span>
+                  </TableCell>
                 </>
-              )}
-            </AutoTransition>
-          </Table>
-        </AnalyticsTableCard>
+              ),
+              props: {
+                role: "button",
+                tabIndex: 0,
+                className:
+                  "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+                onClick: () => openEvent(event),
+                onKeyDown: (keyboardEvent) =>
+                  handleKeyDown(keyboardEvent, event),
+              },
+            };
+          }}
+          renderSkeletonRow={(index) => (
+            <RequestObservationRowSkeletonContent
+              index={index}
+              widths={NORMAL_REQUEST_SKELETON_WIDTHS}
+            />
+          )}
+          getRowKey={(event, index) =>
+            event.traceId ||
+            event.rayId ||
+            `${event.siteId}:${event.pathname}:${event.receivedAt}:${index}`
+          }
+          skeletonRows={BOT_EVENT_FETCH_LIMIT}
+          columnCount={10}
+          loading={loading}
+          loadingMore={loadingMore}
+          errorContent={copy.loadFailed}
+          emptyContent={copy.noData}
+          hasMore={hasMore}
+          onLoadMore={onLoadMore}
+        />
       </section>
 
       <NormalRequestDetailDrawer

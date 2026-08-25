@@ -1,7 +1,7 @@
 import { memo, useEffect, useState } from "react";
 import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
 
-import { AnalyticsTableCard } from "@/components/dashboard/analytics-table-card";
+import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
 import { ClickableTableCell } from "@/components/dashboard/clickable-table-cell";
 import {
   BrowserMeta,
@@ -14,15 +14,8 @@ import {
   ReferrerMeta,
   VisitorAvatar,
 } from "@/components/dashboard/journey-display";
-import { AutoTransition } from "@/components/ui/auto-transition";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { JourneySession } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
@@ -53,7 +46,7 @@ interface SessionsTableCardProps {
   appendError?: boolean;
   hasMore?: boolean;
   skeletonRows?: number;
-  sentinelRef?: (node: HTMLTableRowElement | null) => void;
+  onLoadMore?: () => void;
 }
 
 function shortId(value: string): string {
@@ -61,13 +54,7 @@ function shortId(value: string): string {
   return `${value.slice(0, 9)}...`;
 }
 
-function SessionRowSkeleton({
-  index,
-  sentinelRef,
-}: {
-  index: number;
-  sentinelRef?: (node: HTMLTableRowElement | null) => void;
-}) {
+function SessionRowSkeletonContent({ index }: { index: number }) {
   const widths = [
     "w-28",
     "w-24",
@@ -84,7 +71,7 @@ function SessionRowSkeleton({
   ];
 
   return (
-    <TableRow ref={sentinelRef} aria-hidden="true">
+    <>
       {widths.map((width, cellIndex) => (
         <TableCell
           key={`${index}-${cellIndex}`}
@@ -107,7 +94,7 @@ function SessionRowSkeleton({
           )}
         </TableCell>
       ))}
-    </TableRow>
+    </>
   );
 }
 
@@ -210,7 +197,7 @@ function isSessionActive(row: JourneySession, now: number): boolean {
   return row.endedAt > now - 5 * 60 * 1000;
 }
 
-const SessionTableRow = memo(function SessionTableRow({
+const SessionTableRowContent = memo(function SessionTableRowContent({
   locale,
   messages,
   labels,
@@ -229,7 +216,7 @@ const SessionTableRow = memo(function SessionTableRow({
   const openSession = () => onOpenSession(row.sessionId);
 
   return (
-    <TableRow data-session-row="" className="group cursor-pointer">
+    <>
       <ClickableTableCell
         onClick={openSession}
         className="w-32"
@@ -314,7 +301,7 @@ const SessionTableRow = memo(function SessionTableRow({
       >
         {formatPath(row.exitPath)}
       </ClickableTableCell>
-    </TableRow>
+    </>
   );
 });
 
@@ -332,7 +319,7 @@ export function SessionsTableCard({
   appendError = false,
   hasMore = false,
   skeletonRows = 8,
-  sentinelRef,
+  onLoadMore,
 }: SessionsTableCardProps) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -341,123 +328,73 @@ export function SessionsTableCard({
     return () => window.clearInterval(interval);
   }, []);
 
-  const bodyState = loadingRows
-    ? "loading"
-    : error
-      ? "error"
-      : rows.length === 0 && !hasMore
-        ? "empty"
-        : "rows";
-
   return (
-    <AnalyticsTableCard>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>
-            <TableHead>{labels.sessionId}</TableHead>
-            <SortHeader
-              label={labels.started}
-              active={sort.key === "startedAt"}
-              direction={sort.direction}
-              onClick={() => onSort("startedAt")}
-            />
-            <SortHeader
-              label={labels.duration}
-              active={sort.key === "durationMs"}
-              direction={sort.direction}
-              onClick={() => onSort("durationMs")}
-              align="center"
-              className="text-center"
-            />
-            <SortHeader
-              label={labels.pageViews}
-              active={sort.key === "views"}
-              direction={sort.direction}
-              onClick={() => onSort("views")}
-              align="center"
-              className="text-center"
-            />
-            <TableHead>{labels.referrer}</TableHead>
-            <TableHead>{labels.location}</TableHead>
-            <TableHead>{labels.os}</TableHead>
-            <TableHead>{labels.browser}</TableHead>
-            <TableHead>{labels.device}</TableHead>
-            <TableHead>{labels.entryPage}</TableHead>
-            <TableHead>{labels.exitPage}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <AutoTransition
-          as="tbody"
-          transitionKey={bodyState}
-          initial={false}
-          duration={0.18}
-          type="fade"
-          presenceMode="wait"
-          aria-busy={loadingRows || loadingMore}
-          data-slot="table-body"
-          className="[&_tr:last-child]:border-0"
-        >
-          {loadingRows ? (
-            Array.from({ length: skeletonRows }, (_, index) => (
-              <SessionRowSkeleton
-                key={`initial-skeleton-${index}`}
-                index={index}
-              />
-            ))
-          ) : error ? (
-            <TableRow>
-              <TableCell
-                colSpan={12}
-                className="h-28 text-center text-muted-foreground"
-              >
-                {labels.loadError}
-              </TableCell>
-            </TableRow>
-          ) : rows.length === 0 && !hasMore ? (
-            <TableRow>
-              <TableCell
-                colSpan={12}
-                className="h-28 text-center text-muted-foreground"
-              >
-                {labels.empty}
-              </TableCell>
-            </TableRow>
-          ) : (
-            <>
-              {rows.map((row) => (
-                <SessionTableRow
-                  key={row.sessionId}
-                  locale={locale}
-                  messages={messages}
-                  labels={labels}
-                  row={row}
-                  now={now}
-                  onOpenSession={onOpenSession}
-                />
-              ))}
-              {appendError ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={12}
-                    className="h-16 text-center text-muted-foreground"
-                  >
-                    {labels.loadError}
-                  </TableCell>
-                </TableRow>
-              ) : hasMore ? (
-                Array.from({ length: skeletonRows }, (_, index) => (
-                  <SessionRowSkeleton
-                    key={`append-skeleton-${rows.length}-${index}`}
-                    index={index}
-                    sentinelRef={index === 0 ? sentinelRef : undefined}
-                  />
-                ))
-              ) : null}
-            </>
-          )}
-        </AutoTransition>
-      </Table>
-    </AnalyticsTableCard>
+    <AnalyticsDataTable
+      header={
+        <TableRow>
+          <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>
+          <TableHead>{labels.sessionId}</TableHead>
+          <SortHeader
+            label={labels.started}
+            active={sort.key === "startedAt"}
+            direction={sort.direction}
+            onClick={() => onSort("startedAt")}
+          />
+          <SortHeader
+            label={labels.duration}
+            active={sort.key === "durationMs"}
+            direction={sort.direction}
+            onClick={() => onSort("durationMs")}
+            align="center"
+            className="text-center"
+          />
+          <SortHeader
+            label={labels.pageViews}
+            active={sort.key === "views"}
+            direction={sort.direction}
+            onClick={() => onSort("views")}
+            align="center"
+            className="text-center"
+          />
+          <TableHead>{labels.referrer}</TableHead>
+          <TableHead>{labels.location}</TableHead>
+          <TableHead>{labels.os}</TableHead>
+          <TableHead>{labels.browser}</TableHead>
+          <TableHead>{labels.device}</TableHead>
+          <TableHead>{labels.entryPage}</TableHead>
+          <TableHead>{labels.exitPage}</TableHead>
+        </TableRow>
+      }
+      rows={rows}
+      renderRow={(row) => ({
+        children: (
+          <SessionTableRowContent
+            locale={locale}
+            messages={messages}
+            labels={labels}
+            row={row}
+            now={now}
+            onOpenSession={onOpenSession}
+          />
+        ),
+        props: {
+          "data-session-row": "",
+          className: "cursor-pointer",
+        },
+      })}
+      renderSkeletonRow={(index) => <SessionRowSkeletonContent index={index} />}
+      getRowKey={(row) => row.sessionId}
+      skeletonRows={skeletonRows}
+      columnCount={12}
+      loading={loadingRows}
+      loadingMore={loadingMore}
+      error={error}
+      errorContent={labels.loadError}
+      emptyContent={labels.empty}
+      appendError={appendError}
+      appendErrorContent={labels.loadError}
+      hasMore={hasMore}
+      onLoadMore={onLoadMore}
+    />
   );
 }

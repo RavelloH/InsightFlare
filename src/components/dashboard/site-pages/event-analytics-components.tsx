@@ -28,7 +28,7 @@ import {
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 
-import { AnalyticsTableCard } from "@/components/dashboard/analytics-table-card";
+import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
 import { AnimatedDataTableRow } from "@/components/dashboard/animated-data-table-row";
 import {
   createEventTrendChartData,
@@ -61,7 +61,6 @@ import {
   EVENT_RECORD_DRAWER_Z_INDEX,
   NESTED_DETAIL_DRAWER_Z_INDEX,
 } from "@/components/dashboard/site-pages/floating-layer";
-import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -89,13 +88,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  Table,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import {
   fetchEventRecordDetail,
   fetchEventsRecords,
@@ -129,7 +122,6 @@ interface EventPayloadFilterRule {
   operator: "eq" | "neq";
   value: EventPayloadFilterValue;
 }
-const EVENT_SKELETON_ROWS = 8;
 const FIELD_TREE_CHILD_TRANSITION = {
   initial: { opacity: 0, y: -6 },
   animate: { opacity: 1, y: 0 },
@@ -800,13 +792,7 @@ function SortHeader({
   );
 }
 
-function EventRowSkeleton({
-  index,
-  sentinelRef,
-}: {
-  index: number;
-  sentinelRef?: (node: HTMLTableRowElement | null) => void;
-}) {
+function EventRowSkeletonContent({ index }: { index: number }) {
   const widths = [
     "w-24",
     "w-28",
@@ -821,16 +807,23 @@ function EventRowSkeleton({
     "w-20",
   ];
   return (
-    <TableRow ref={sentinelRef} aria-hidden="true">
+    <>
       {widths.map((width, cellIndex) => (
         <TableCell
           key={`${index}-${cellIndex}`}
           className={cellIndex === 0 ? "pl-4" : undefined}
         >
-          <Skeleton className={cn("h-4", width)} />
+          {cellIndex === 0 ? (
+            <div className="flex items-center gap-2">
+              <Skeleton className="size-6 shrink-0 rounded-full" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+          ) : (
+            <Skeleton className={cn("h-4", width)} />
+          )}
         </TableCell>
       ))}
-    </TableRow>
+    </>
   );
 }
 
@@ -844,34 +837,19 @@ function appendUniqueEvents(
   return nextRows.length > 0 ? [...current, ...nextRows] : current;
 }
 
-const EventRecordTableRow = memo(function EventRecordTableRow({
+const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
   locale,
   messages,
   row,
   now,
-  onOpenRecord,
 }: {
   locale: Locale;
   messages: AppMessages;
   row: EventRecord;
   now: number;
-  onOpenRecord: (eventId: string) => void;
 }) {
-  const openRecord = () => onOpenRecord(row.eventId);
-  const handleKeyDown = (event: KeyboardEvent<HTMLTableRowElement>) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    openRecord();
-  };
-
   return (
-    <TableRow
-      role="button"
-      tabIndex={0}
-      className="group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
-      onClick={openRecord}
-      onKeyDown={handleKeyDown}
-    >
+    <>
       <TableCell className="max-w-36 pl-4">
         <div className="flex w-28 min-w-0 items-center gap-2">
           <VisitorAvatar
@@ -949,7 +927,7 @@ const EventRecordTableRow = memo(function EventRecordTableRow({
       <TableCell className="pr-4 text-right font-mono tabular-nums">
         {numberFormat(locale, row.valueCount)}
       </TableCell>
-    </TableRow>
+    </>
   );
 });
 
@@ -966,7 +944,7 @@ function EventRecordsTable({
   error,
   appendError,
   hasMore,
-  sentinelRef,
+  onLoadMore,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -980,7 +958,7 @@ function EventRecordsTable({
   error: boolean;
   appendError: boolean;
   hasMore: boolean;
-  sentinelRef?: (node: HTMLTableRowElement | null) => void;
+  onLoadMore: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -989,115 +967,77 @@ function EventRecordsTable({
     return () => window.clearInterval(interval);
   }, []);
 
-  const bodyState = loadingRows
-    ? "loading"
-    : error
-      ? "error"
-      : rows.length === 0 && !hasMore
-        ? "empty"
-        : "rows";
-
   return (
-    <AnalyticsTableCard minTableWidth="92rem">
-      <Table className="min-w-[92rem]">
-        <TableHeader>
-          <TableRow>
-            <TableHead className="pl-4">{labels.visitor}</TableHead>
-            <SortHeader
-              label={labels.eventName}
-              active={sort.key === "eventName"}
-              direction={sort.direction}
-              onClick={() => onSort("eventName")}
-            />
-            <TableHead>{labels.eventId}</TableHead>
-            <SortHeader
-              label={labels.occurredAt}
-              active={sort.key === "occurredAt"}
-              direction={sort.direction}
-              onClick={() => onSort("occurredAt")}
-            />
-            <SortHeader
-              label={labels.page}
-              active={sort.key === "pathname"}
-              direction={sort.direction}
-              onClick={() => onSort("pathname")}
-            />
-            <TableHead>{labels.referrer}</TableHead>
-            <TableHead>{labels.location}</TableHead>
-            <TableHead>{labels.os}</TableHead>
-            <TableHead>{labels.browser}</TableHead>
-            <TableHead>{labels.device}</TableHead>
-            <TableHead className="pr-4 text-right">{labels.payload}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <AutoTransition
-          as="tbody"
-          transitionKey={bodyState}
-          initial={false}
-          duration={0.18}
-          type="fade"
-          presenceMode="wait"
-          aria-busy={loadingRows || loadingMore}
-          data-slot="table-body"
-          className="[&_tr:last-child]:border-0"
-        >
-          {loadingRows ? (
-            Array.from({ length: EVENT_SKELETON_ROWS }, (_, index) => (
-              <EventRowSkeleton key={index} index={index} />
-            ))
-          ) : error ? (
-            <TableRow>
-              <TableCell
-                colSpan={11}
-                className="h-28 text-center text-muted-foreground"
-              >
-                {labels.loadError}
-              </TableCell>
-            </TableRow>
-          ) : rows.length === 0 && !hasMore ? (
-            <TableRow>
-              <TableCell
-                colSpan={11}
-                className="h-28 text-center text-muted-foreground"
-              >
-                {labels.empty}
-              </TableCell>
-            </TableRow>
-          ) : (
-            <>
-              {rows.map((row) => (
-                <EventRecordTableRow
-                  key={row.eventId}
-                  locale={locale}
-                  messages={messages}
-                  row={row}
-                  now={now}
-                  onOpenRecord={onOpenRecord}
-                />
-              ))}
-              {appendError ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={11}
-                    className="h-16 text-center text-muted-foreground"
-                  >
-                    {labels.loadError}
-                  </TableCell>
-                </TableRow>
-              ) : hasMore ? (
-                Array.from({ length: EVENT_SKELETON_ROWS }, (_, index) => (
-                  <EventRowSkeleton
-                    key={`append-${rows.length}-${index}`}
-                    index={index}
-                    sentinelRef={index === 0 ? sentinelRef : undefined}
-                  />
-                ))
-              ) : null}
-            </>
-          )}
-        </AutoTransition>
-      </Table>
-    </AnalyticsTableCard>
+    <AnalyticsDataTable
+      minTableWidth="92rem"
+      tableClassName="min-w-[92rem]"
+      header={
+        <TableRow>
+          <TableHead className="pl-4">{labels.visitor}</TableHead>
+          <SortHeader
+            label={labels.eventName}
+            active={sort.key === "eventName"}
+            direction={sort.direction}
+            onClick={() => onSort("eventName")}
+          />
+          <TableHead>{labels.eventId}</TableHead>
+          <SortHeader
+            label={labels.occurredAt}
+            active={sort.key === "occurredAt"}
+            direction={sort.direction}
+            onClick={() => onSort("occurredAt")}
+          />
+          <SortHeader
+            label={labels.page}
+            active={sort.key === "pathname"}
+            direction={sort.direction}
+            onClick={() => onSort("pathname")}
+          />
+          <TableHead>{labels.referrer}</TableHead>
+          <TableHead>{labels.location}</TableHead>
+          <TableHead>{labels.os}</TableHead>
+          <TableHead>{labels.browser}</TableHead>
+          <TableHead>{labels.device}</TableHead>
+          <TableHead className="pr-4 text-right">{labels.payload}</TableHead>
+        </TableRow>
+      }
+      rows={rows}
+      renderRow={(row) => ({
+        children: (
+          <EventRecordTableRowContent
+            locale={locale}
+            messages={messages}
+            row={row}
+            now={now}
+          />
+        ),
+        props: {
+          role: "button",
+          tabIndex: 0,
+          className:
+            "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+          onClick: () => onOpenRecord(row.eventId),
+          onKeyDown: (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            onOpenRecord(row.eventId);
+          },
+        },
+      })}
+      renderSkeletonRow={(index) => <EventRowSkeletonContent index={index} />}
+      getRowKey={(row) => row.eventId}
+      skeletonRows={EVENT_PAGE_SIZE}
+      columnCount={11}
+      loading={loadingRows}
+      loadingMore={loadingMore}
+      error={error}
+      errorContent={labels.loadError}
+      emptyContent={labels.empty}
+      appendError={appendError}
+      appendErrorContent={labels.loadError}
+      hasMore={hasMore}
+      onLoadMore={onLoadMore}
+    />
   );
 }
 
@@ -2343,12 +2283,6 @@ export function EventRecordsSection({
     void fetchNextPage();
   }, [appendError, fetchNextPage, hasMore, loadingInitial, loadingMore]);
 
-  const sentinelRef = useInfiniteTableSentinel({
-    enabled:
-      !loadingInitial && !loadingMore && !appendError && !error && hasMore,
-    onReachEnd: loadNextPage,
-  });
-
   const detailQuery = useQuery({
     queryKey: [
       "dashboard",
@@ -2418,7 +2352,7 @@ export function EventRecordsSection({
         error={error}
         appendError={appendError}
         hasMore={hasMore}
-        sentinelRef={sentinelRef}
+        onLoadMore={loadNextPage}
       />
 
       <EventRecordDetailDrawer
