@@ -604,6 +604,7 @@ export interface AppMessages {
     copiedValue: string;
     copyValueFailed: string;
     loadError: string;
+    detailNotFound: string;
     empty: string;
     emptyFields: string;
     noEventName: string;
@@ -2997,6 +2998,7 @@ const enMessages = {
     copiedValue: "Value copied.",
     copyValueFailed: "Failed to copy value.",
     loadError: "Unable to load event data.",
+    detailNotFound: "This event record was not found.",
     empty: "No custom events in this range.",
     emptyFields: "No payload fields for this event.",
     noEventName: "Missing event name.",
@@ -5534,6 +5536,7 @@ const zhMessages = {
     copiedValue: "值已复制。",
     copyValueFailed: "复制值失败。",
     loadError: "无法加载事件数据。",
+    detailNotFound: "未找到该事件记录。",
     empty: "当前筛选范围内没有自定义事件。",
     emptyFields: "当前事件暂无事件载荷字段。",
     noEventName: "缺少事件名。",
@@ -8021,6 +8024,7 @@ const jaMessages = {
     copiedValue: "値をコピーしました。",
     copyValueFailed: "値のコピーに失敗しました。",
     loadError: "イベントデータを読み込めません。",
+    detailNotFound: "このイベント記録が見つかりません。",
     empty: "この範囲にカスタムイベントはありません。",
     emptyFields: "このイベントにペイロードフィールドはありません。",
     noEventName: "イベント名がありません。",

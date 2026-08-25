@@ -37,6 +37,10 @@ import {
 } from "@/components/dashboard/charts/event-trend-bar-chart";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import {
+  GeoPointsMapIsland,
+  type GeoPointsMapPoint,
+} from "@/components/dashboard/geo-points-map-island";
+import {
   BrowserMeta,
   CountryRegionMeta,
   DeviceMeta,
@@ -100,6 +104,7 @@ import {
 } from "@/lib/dashboard/client-data";
 import { appendEventPayloadFilter } from "@/lib/dashboard/filter-state";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
+import { parseGeoLocationValue } from "@/lib/dashboard/geo-location";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
 import type {
@@ -129,6 +134,58 @@ const FIELD_TREE_CHILD_TRANSITION = {
   initial: { opacity: 0, y: -6 },
   animate: { opacity: 1, y: 0 },
   exit: { opacity: 0, y: -6 },
+};
+
+type EventRecordDetail = NonNullable<EventRecordDetailData["data"]>;
+
+const EVENT_DETAIL_SKELETON_DATA: EventRecordDetail = {
+  event: {
+    eventId: "",
+    eventName: "",
+    occurredAt: 0,
+    receivedAt: 0,
+    sequence: 0,
+    visitId: "",
+    sessionId: "",
+    visitorId: "",
+    pathname: "",
+    title: "",
+    hostname: "",
+    referrerHost: "",
+    country: "",
+    region: "",
+    browser: "",
+    browserVersion: "",
+    os: "",
+    osVersion: "",
+    deviceType: "",
+    nodeCount: 0,
+    valueCount: 0,
+  },
+  context: {
+    visitId: "",
+    sessionId: "",
+    visitorId: "",
+    pathname: "",
+    title: "",
+    hostname: "",
+    referrerHost: "",
+    country: "",
+    region: "",
+    browser: "",
+    browserVersion: "",
+    os: "",
+    osVersion: "",
+    deviceType: "",
+    performance: {
+      ttfb: null,
+      fcp: null,
+      lcp: null,
+      cls: null,
+      inp: null,
+    },
+  },
+  eventData: null,
 };
 
 const VisitorDetailClientPage = dynamic(
@@ -532,9 +589,28 @@ function EventMetricCell({
           )}
         </AutoTransition>
       </AutoResizer>
-      <p className="mt-3 min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground">
-        {detail}
-      </p>
+      <AutoTransition
+        initial={false}
+        transitionKey={loading ? "loading" : detail}
+        className="mt-3 h-[14px]"
+        duration={0.2}
+        type="fade"
+        presenceMode="wait"
+      >
+        {loading ? (
+          <Skeleton
+            key="loading"
+            className="h-full w-[min(12rem,72%)] rounded-none"
+          />
+        ) : (
+          <p
+            key={detail}
+            className="h-[14px] min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground"
+          >
+            {detail}
+          </p>
+        )}
+      </AutoTransition>
     </div>
   );
 }
@@ -1028,17 +1104,151 @@ function EventRecordsTable({
 function DetailItem({
   label,
   value,
+  loading = false,
   wide = false,
 }: {
   label: string;
   value: ReactNode;
+  loading?: boolean;
   wide?: boolean;
 }) {
+  const skeletonClassName = wide
+    ? "my-1 h-3 w-[min(20rem,88%)]"
+    : "my-1 h-3 w-[min(11rem,78%)]";
+
   return (
     <div className={cn("space-y-1", wide && "sm:col-span-2")}>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0">{value}</dd>
+      <dd className="min-w-0">
+        <AutoResizer className="min-w-0" duration={0.2}>
+          <AutoTransition
+            initial={false}
+            transitionKey={loading ? "loading" : "ready"}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="flex min-h-5 min-w-0 items-center"
+          >
+            {loading ? (
+              <Skeleton key="loading" className={skeletonClassName} />
+            ) : (
+              <div key="ready" className="min-h-5 min-w-0 leading-5">
+                {value}
+              </div>
+            )}
+          </AutoTransition>
+        </AutoResizer>
+      </dd>
     </div>
+  );
+}
+
+function hasValidEventCoordinate(
+  latitude: number | null | undefined,
+  longitude: number | null | undefined,
+): boolean {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+}
+
+function EventRecordPayloadState({
+  detail,
+  labels,
+  loading,
+}: {
+  detail: EventRecordDetail;
+  labels: EventPageCopy;
+  loading: boolean;
+}) {
+  return (
+    <AutoResizer className="w-full" duration={0.24}>
+      <AutoTransition
+        initial={false}
+        transitionKey={loading ? "loading" : "ready"}
+        duration={0.22}
+        type="fade"
+        presenceMode="wait"
+        className="w-full"
+      >
+        {loading ? (
+          <div
+            key="loading"
+            className="space-y-3 border border-border/70 bg-muted/20 p-4"
+          >
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-4 w-[78%]" />
+            <Skeleton className="h-4 w-[62%]" />
+            <Skeleton className="h-4 w-[70%]" />
+            <Skeleton className="h-4 w-[48%]" />
+          </div>
+        ) : (
+          <div key="ready" className="w-full">
+            <JsonTreePanel value={detail.eventData ?? {}} labels={labels} />
+          </div>
+        )}
+      </AutoTransition>
+    </AutoResizer>
+  );
+}
+
+function EventRecordLocationMap({
+  locale,
+  messages,
+  context,
+  loading,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  context: EventRecordDetail["context"];
+  loading: boolean;
+}) {
+  const hasLocation = hasValidEventCoordinate(
+    context.latitude,
+    context.longitude,
+  );
+  const points = useMemo<GeoPointsMapPoint[]>(
+    () =>
+      hasLocation
+        ? [
+            {
+              latitude: Number(context.latitude),
+              longitude: Number(context.longitude),
+              country: String(context.country ?? ""),
+            },
+          ]
+        : [],
+    [context.country, context.latitude, context.longitude, hasLocation],
+  );
+
+  return (
+    <AutoResizer className="w-full" duration={0.24}>
+      <AutoTransition
+        initial={false}
+        transitionKey={loading ? "loading" : "ready"}
+        duration={0.22}
+        type="fade"
+        presenceMode="wait"
+        className="w-full"
+      >
+        {loading ? (
+          <Skeleton key="loading" className="h-[11rem] w-full sm:h-[13rem]" />
+        ) : (
+          <div key="ready" className="w-full">
+            <GeoPointsMapIsland
+              locale={locale}
+              messages={messages}
+              points={points}
+              emptyLabel={messages.realtime.visitorMapUnavailable}
+              heightClassName="h-[11rem] sm:h-[13rem]"
+              initialZoom={0.3}
+              countryHoverEnabled={false}
+            />
+          </div>
+        )}
+      </AutoTransition>
+    </AutoResizer>
   );
 }
 
@@ -1053,8 +1263,10 @@ function formatEventDetailDateTime(
   locale: Locale,
   value: number | null | undefined,
   unknownLabel: string,
+  missingLabel = unknownLabel,
 ): string {
-  return typeof value === "number" && value > 0
+  if (value === null || value === undefined) return missingLabel;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
     ? formatShortDateTime(locale, value, undefined)
     : unknownLabel;
 }
@@ -1075,7 +1287,8 @@ function formatEventDetailBoolean(
   value: boolean | undefined,
   messages: AppMessages,
 ): string {
-  if (value === undefined) return messages.common.unknown;
+  if (value === undefined) return messages.common.noData;
+  if (typeof value !== "boolean") return messages.common.unknown;
   return value ? messages.sessionDetail.yes : messages.sessionDetail.no;
 }
 
@@ -1083,7 +1296,9 @@ function formatEventDetailStatus(
   value: string | undefined,
   messages: AppMessages,
 ): string {
-  const key = value?.trim() as keyof AppMessages["realtime"]["statusLabels"];
+  const normalized = value?.trim() || "";
+  if (!normalized) return messages.common.noData;
+  const key = normalized as keyof AppMessages["realtime"]["statusLabels"];
   return key && messages.realtime.statusLabels[key]
     ? messages.realtime.statusLabels[key]
     : messages.common.unknown;
@@ -1091,17 +1306,57 @@ function formatEventDetailStatus(
 
 function formatEventDetailText(
   value: string | null | undefined,
-  unknownLabel: string,
+  missingLabel: string,
+  unknownLabel = missingLabel,
 ) {
   const normalized = value?.trim() || "";
-  return normalized || unknownLabel;
+  if (!normalized) return missingLabel;
+  return ["unknown", "undefined", "null"].includes(
+    normalized.toLocaleLowerCase(),
+  )
+    ? unknownLabel
+    : normalized;
+}
+
+function formatEventDetailPath(
+  value: string | null | undefined,
+  missingLabel: string,
+  unknownLabel: string,
+): string {
+  const normalized = value?.trim() || "";
+  if (!normalized) return missingLabel;
+  if (["unknown", "undefined", "null"].includes(normalized.toLowerCase())) {
+    return unknownLabel;
+  }
+  return formatPath(normalized);
+}
+
+function formatEventDetailCity(
+  value: string | null | undefined,
+  missingLabel: string,
+  unknownLabel: string,
+): string {
+  const normalized = value?.trim() || "";
+  const parsed = parseGeoLocationValue(normalized);
+  return formatEventDetailText(
+    parsed?.localityName || parsed?.regionName || normalized,
+    missingLabel,
+    unknownLabel,
+  );
 }
 
 function formatEventDetailScreen(
   width: number | null | undefined,
   height: number | null | undefined,
   unknownLabel: string,
+  missingLabel = unknownLabel,
 ): string {
+  if (width === null || width === undefined) {
+    return height === null || height === undefined
+      ? missingLabel
+      : unknownLabel;
+  }
+  if (height === null || height === undefined) return unknownLabel;
   const screen = formatScreen(width, height);
   return screen === "/" ? unknownLabel : screen;
 }
@@ -1111,10 +1366,10 @@ function formatEventDetailPerformance(
   value: number | null | undefined,
   metric: "ttfb" | "fcp" | "lcp" | "cls" | "inp",
   unknownLabel: string,
+  missingLabel = unknownLabel,
 ): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) {
-    return unknownLabel;
-  }
+  if (value === null || value === undefined) return missingLabel;
+  if (typeof value !== "number" || !Number.isFinite(value)) return unknownLabel;
   const formatted = numberFormat(locale, value);
   return metric === "cls" ? formatted : `${formatted} ms`;
 }
@@ -1133,8 +1388,9 @@ export function EventRecordDetailDrawer({
   pathname,
   open,
   onOpenChange,
-  detail,
+  detail: detailData,
   loading,
+  error,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -1145,17 +1401,21 @@ export function EventRecordDetailDrawer({
   onOpenChange: (open: boolean) => void;
   detail: EventRecordDetailData["data"] | null;
   loading: boolean;
+  error: boolean;
 }) {
+  const detail = detailData ?? EVENT_DETAIL_SKELETON_DATA;
   const [nestedDetails, setNestedDetails] = useState<EventRecordNestedDetail[]>(
     [],
   );
   const nestedDetailKeyRef = useRef(0);
   const basePath = pathname.replace(/\/events(?:\/detail)?$/, "");
-  const visitorId = detail?.context.visitorId?.trim() || "";
-  const sessionId = detail?.context.sessionId?.trim() || "";
+  const visitorId = detail.context.visitorId.trim();
+  const sessionId = detail.context.sessionId.trim();
   const visitorPathname = `${basePath}/visitors`;
   const sessionPathname = `${basePath}/sessions`;
   const nestedDetailOpen = nestedDetails.length > 0;
+  const missingDetailLabel = messages.common.noData;
+  const unknownDetailLabel = messages.common.unknown;
 
   useEffect(() => {
     if (!open) setNestedDetails([]);
@@ -1257,19 +1517,17 @@ export function EventRecordDetailDrawer({
           <DrawerHeader className="border-b">
             <DrawerTitle>{labels.detailTitle}</DrawerTitle>
             <DrawerDescription>
-              {detail?.event.eventName || labels.detailSubtitle}
+              {detailData?.event.eventName || labels.detailSubtitle}
             </DrawerDescription>
           </DrawerHeader>
           <DrawerScrollArea contentClassName="p-4">
-            {loading ? (
-              <div className="space-y-4">
-                <Skeleton className="h-5 w-48" />
-                <Skeleton className="h-28 w-full" />
-                <Skeleton className="h-64 w-full" />
-              </div>
-            ) : !detail ? (
+            {error ? (
               <div className="flex h-64 items-center justify-center text-muted-foreground">
-                {labels.empty}
+                {labels.loadError}
+              </div>
+            ) : !detailData && !loading ? (
+              <div className="flex h-64 items-center justify-center text-muted-foreground">
+                {labels.detailNotFound}
               </div>
             ) : (
               <div className="space-y-5">
@@ -1277,38 +1535,54 @@ export function EventRecordDetailDrawer({
                   <h3 className="text-sm font-medium">{labels.detailTitle}</h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={labels.eventId}
+                      wide
                       value={
                         <span className="break-all font-mono text-[11px]">
-                          {detail.event.eventId}
+                          {formatEventDetailText(
+                            detail.event.eventId,
+                            missingDetailLabel,
+                            unknownDetailLabel,
+                          )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={labels.eventName}
                       value={
                         <span className="break-words text-[11px]">
-                          {detail.event.eventName || messages.common.unknown}
+                          {formatEventDetailText(
+                            detail.event.eventName,
+                            labels.noEventName,
+                            unknownDetailLabel,
+                          )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={labels.occurredAt}
-                      value={formatShortDateTime(
+                      value={formatEventDetailDateTime(
                         locale,
                         detail.event.occurredAt,
-                        undefined,
+                        unknownDetailLabel,
+                        missingDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={labels.receivedAt}
-                      value={formatShortDateTime(
+                      value={formatEventDetailDateTime(
                         locale,
                         detail.event.receivedAt,
-                        undefined,
+                        unknownDetailLabel,
+                        missingDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={labels.payloadFields}
                       value={
                         <span className="text-[11px]">
@@ -1326,9 +1600,10 @@ export function EventRecordDetailDrawer({
 
                 <section className="space-y-3">
                   <h3 className="text-sm font-medium">{labels.payload}</h3>
-                  <JsonTreePanel
-                    value={detail.eventData ?? {}}
+                  <EventRecordPayloadState
+                    detail={detail}
                     labels={labels}
+                    loading={loading}
                   />
                 </section>
 
@@ -1340,31 +1615,47 @@ export function EventRecordDetailDrawer({
                   </h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={messages.common.title}
                       value={
                         <span className="break-words text-[11px]">
-                          {detail.context.title || messages.common.unknown}
+                          {formatEventDetailText(
+                            detail.context.title,
+                            missingDetailLabel,
+                            unknownDetailLabel,
+                          )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.hostname}
                       value={
                         <span className="break-all font-mono text-[11px]">
-                          {detail.context.hostname || messages.common.unknown}
+                          {formatEventDetailText(
+                            detail.context.hostname,
+                            missingDetailLabel,
+                            unknownDetailLabel,
+                          )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.path}
                       wide
                       value={
                         <span className="break-all font-mono text-[11px]">
-                          {formatPath(detail.context.pathname)}
+                          {formatEventDetailPath(
+                            detail.context.pathname,
+                            missingDetailLabel,
+                            unknownDetailLabel,
+                          )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.queryString}
                       wide
                       value={
@@ -1372,18 +1663,21 @@ export function EventRecordDetailDrawer({
                           {formatEventDetailText(
                             detail.context.queryString,
                             messages.pages.noQuery,
+                            unknownDetailLabel,
                           )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.pages.hashTab}
                       wide
                       value={
                         <span className="break-all font-mono text-[11px]">
                           {formatEventDetailText(
                             detail.context.hash,
-                            messages.common.unknown,
+                            messages.pages.noHash,
+                            unknownDetailLabel,
                           )}
                         </span>
                       }
@@ -1399,23 +1693,31 @@ export function EventRecordDetailDrawer({
                   </h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.visitorId}
                       wide
                       value={
                         <span className="break-all font-mono text-[11px]">
-                          {visitorId || messages.common.unknown}
+                          {formatEventDetailText(
+                            visitorId,
+                            missingDetailLabel,
+                            unknownDetailLabel,
+                          )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.userName}
                       value={formatEventDetailText(
                         detail.context.userName,
                         messages.campaigns.notSet,
+                        unknownDetailLabel,
                       )}
                     />
-                    {detail.context.userId?.trim() ? (
+                    {loading || detail.context.userId?.trim() ? (
                       <DetailItem
+                        loading={loading}
                         label={messages.realtime.userId}
                         value={
                           <span className="break-all font-mono text-[11px]">
@@ -1425,48 +1727,57 @@ export function EventRecordDetailDrawer({
                       />
                     ) : null}
                     <DetailItem
+                      loading={loading}
                       label={labels.browser}
                       value={
                         <BrowserMeta
                           browser={detail.context.browser || ""}
                           version={detail.context.browserVersion}
-                          unknownLabel={messages.common.unknown}
+                          unknownLabel={unknownDetailLabel}
+                          missingLabel={missingDetailLabel}
                         />
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={labels.os}
                       value={
                         <OsMeta
                           os={detail.context.os || ""}
                           version={detail.context.osVersion}
-                          unknownLabel={messages.common.unknown}
+                          unknownLabel={unknownDetailLabel}
+                          missingLabel={missingDetailLabel}
                         />
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={labels.device}
                       value={
                         <DeviceMeta
                           deviceType={detail.context.deviceType || ""}
                           deviceLabels={messages.common.deviceLabels}
-                          unknownLabel={messages.common.unknown}
+                          unknownLabel={unknownDetailLabel}
+                          missingLabel={missingDetailLabel}
                         />
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.userAgent}
                       wide
                       value={
                         <span className="break-all font-mono text-[11px]">
                           {formatEventDetailText(
                             detail.context.userAgent,
-                            messages.common.unknown,
+                            missingDetailLabel,
+                            unknownDetailLabel,
                           )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.isEU}
                       value={formatEventDetailBoolean(
                         detail.context.isEU,
@@ -1474,26 +1785,32 @@ export function EventRecordDetailDrawer({
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.screenSize}
                       value={formatEventDetailScreen(
                         detail.context.screenWidth,
                         detail.context.screenHeight,
-                        messages.common.unknown,
+                        unknownDetailLabel,
+                        missingDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.language}
                       value={formatEventDetailText(
                         detail.context.language,
-                        messages.common.unknown,
+                        missingDetailLabel,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.organization}
                       wide
                       value={formatEventDetailText(
                         detail.context.organization,
-                        messages.common.unknown,
+                        missingDetailLabel,
+                        unknownDetailLabel,
                       )}
                     />
                   </dl>
@@ -1519,24 +1836,35 @@ export function EventRecordDetailDrawer({
                   </h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.sessionId}
                       wide
                       value={
                         <span className="break-all font-mono text-[11px]">
-                          {sessionId || messages.common.unknown}
+                          {formatEventDetailText(
+                            sessionId,
+                            missingDetailLabel,
+                            unknownDetailLabel,
+                          )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.visitId}
                       wide
                       value={
                         <span className="break-all font-mono text-[11px]">
-                          {detail.context.visitId || messages.common.unknown}
+                          {formatEventDetailText(
+                            detail.context.visitId,
+                            missingDetailLabel,
+                            unknownDetailLabel,
+                          )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.status}
                       value={formatEventDetailStatus(
                         detail.context.status,
@@ -1544,14 +1872,17 @@ export function EventRecordDetailDrawer({
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.startedAt}
                       value={formatEventDetailDateTime(
                         locale,
                         detail.context.startedAt,
-                        messages.common.unknown,
+                        unknownDetailLabel,
+                        missingDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.previousVisitStartedAt}
                       value={formatEventDetailDateTimeOrAbsent(
                         locale,
@@ -1562,34 +1893,44 @@ export function EventRecordDetailDrawer({
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.endedAt}
                       value={formatEventDetailDateTime(
                         locale,
                         detail.context.endedAt,
-                        messages.common.unknown,
+                        unknownDetailLabel,
+                        missingDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.duration}
                       value={
                         detail.context.durationMs === null ||
                         detail.context.durationMs === undefined
-                          ? messages.common.unknown
-                          : formatDuration(locale, detail.context.durationMs)
+                          ? missingDetailLabel
+                          : typeof detail.context.durationMs !== "number" ||
+                              !Number.isFinite(detail.context.durationMs)
+                            ? unknownDetailLabel
+                            : formatDuration(locale, detail.context.durationMs)
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.durationSource}
                       value={formatEventDetailText(
                         detail.context.durationSource,
-                        messages.common.unknown,
+                        missingDetailLabel,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.exitReason}
                       value={formatEventDetailText(
                         detail.context.exitReason,
-                        messages.common.unknown,
+                        missingDetailLabel,
+                        unknownDetailLabel,
                       )}
                     />
                   </dl>
@@ -1615,78 +1956,109 @@ export function EventRecordDetailDrawer({
                   </h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={labels.location}
+                      wide
                       value={
                         <CountryRegionMeta
                           locale={locale}
                           messages={messages}
                           country={detail.context.country || ""}
                           region={detail.context.region}
+                          city={detail.context.city}
+                          missingLabel={missingDetailLabel}
                         />
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.regionCode}
                       value={formatEventDetailText(
                         detail.context.regionCode,
-                        messages.common.unknown,
+                        missingDetailLabel,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.city}
-                      value={formatEventDetailText(
+                      value={formatEventDetailCity(
                         detail.context.city,
-                        messages.common.unknown,
+                        missingDetailLabel,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.continent}
                       value={formatEventDetailText(
                         detail.context.continent,
-                        messages.common.unknown,
+                        missingDetailLabel,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.timezone}
                       value={formatEventDetailText(
                         detail.context.timezone,
-                        messages.common.unknown,
+                        missingDetailLabel,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.postalCode}
                       value={formatEventDetailText(
                         detail.context.postalCode,
-                        messages.common.unknown,
+                        missingDetailLabel,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.metroCode}
                       value={formatEventDetailText(
                         detail.context.metroCode,
-                        messages.common.unknown,
+                        missingDetailLabel,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.latitude}
                       value={
                         detail.context.latitude === null ||
                         detail.context.latitude === undefined
-                          ? messages.common.unknown
-                          : numberFormat(locale, detail.context.latitude)
+                          ? missingDetailLabel
+                          : typeof detail.context.latitude !== "number" ||
+                              !Number.isFinite(detail.context.latitude)
+                            ? unknownDetailLabel
+                            : numberFormat(locale, detail.context.latitude)
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.longitude}
                       value={
                         detail.context.longitude === null ||
                         detail.context.longitude === undefined
-                          ? messages.common.unknown
-                          : numberFormat(locale, detail.context.longitude)
+                          ? missingDetailLabel
+                          : typeof detail.context.longitude !== "number" ||
+                              !Number.isFinite(detail.context.longitude)
+                            ? unknownDetailLabel
+                            : numberFormat(locale, detail.context.longitude)
                       }
                     />
                   </dl>
                 </section>
+
+                <EventRecordLocationMap
+                  locale={locale}
+                  messages={messages}
+                  context={detail.context}
+                  loading={loading}
+                />
 
                 <Separator />
 
@@ -1696,6 +2068,7 @@ export function EventRecordDetailDrawer({
                   </h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={labels.referrer}
                       value={
                         <ReferrerMeta
@@ -1706,50 +2079,62 @@ export function EventRecordDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.sessionDetail.referrerUrl}
                       wide
                       value={
                         <span className="break-all font-mono text-[11px]">
                           {formatEventDetailText(
                             detail.context.referrerUrl,
-                            messages.common.unknown,
+                            missingDetailLabel,
+                            unknownDetailLabel,
                           )}
                         </span>
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.utmSource}
                       value={formatEventDetailText(
                         detail.context.utmSource,
                         messages.campaigns.notSet,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.utmMedium}
                       value={formatEventDetailText(
                         detail.context.utmMedium,
                         messages.campaigns.notSet,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.utmCampaign}
                       value={formatEventDetailText(
                         detail.context.utmCampaign,
                         messages.campaigns.notSet,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.utmTerm}
                       value={formatEventDetailText(
                         detail.context.utmTerm,
                         messages.campaigns.notSet,
+                        unknownDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.utmContent}
                       value={formatEventDetailText(
                         detail.context.utmContent,
                         messages.campaigns.notSet,
+                        unknownDetailLabel,
                       )}
                     />
                   </dl>
@@ -1763,48 +2148,58 @@ export function EventRecordDetailDrawer({
                   </h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={messages.performance.ttfb}
                       value={formatEventDetailPerformance(
                         locale,
                         detail.context.performance?.ttfb,
                         "ttfb",
-                        messages.common.unknown,
+                        unknownDetailLabel,
+                        missingDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.performance.fcp}
                       value={formatEventDetailPerformance(
                         locale,
                         detail.context.performance?.fcp,
                         "fcp",
-                        messages.common.unknown,
+                        unknownDetailLabel,
+                        missingDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.performance.lcp}
                       value={formatEventDetailPerformance(
                         locale,
                         detail.context.performance?.lcp,
                         "lcp",
-                        messages.common.unknown,
+                        unknownDetailLabel,
+                        missingDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.performance.cls}
                       value={formatEventDetailPerformance(
                         locale,
                         detail.context.performance?.cls,
                         "cls",
-                        messages.common.unknown,
+                        unknownDetailLabel,
+                        missingDetailLabel,
                       )}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.performance.inp}
                       value={formatEventDetailPerformance(
                         locale,
                         detail.context.performance?.inp,
                         "inp",
-                        messages.common.unknown,
+                        unknownDetailLabel,
+                        missingDetailLabel,
                       )}
                     />
                   </dl>
@@ -1964,7 +2359,10 @@ export function EventRecordsSection({
       timeWindow.to,
     ],
     queryFn: ({ signal }) =>
-      fetchEventRecordDetail(siteId, selectedEventId, timeWindow, { signal }),
+      fetchEventRecordDetail(siteId, selectedEventId, timeWindow, {
+        signal,
+        preserveErrors: true,
+      }),
     enabled:
       typeof window !== "undefined" && drawerOpen && Boolean(selectedEventId),
   });
@@ -2033,6 +2431,7 @@ export function EventRecordsSection({
         onOpenChange={setDrawerOpen}
         detail={detail}
         loading={detailLoading}
+        error={detailQuery.isError}
       />
     </section>
   );

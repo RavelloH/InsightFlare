@@ -837,6 +837,22 @@ describe("mock — handleDemoRequest", () => {
           geo: expect.any(Object),
         }),
       );
+
+      const context = asRecord(
+        handleDemoRequest({
+          path: "/api/private/event-type-context",
+          params: { ...ANALYTICS_PARAMS, eventName, cards: "path" },
+        }),
+      );
+      expect(context.eventName).toBe(eventName);
+      expect(context.cards).toEqual(
+        expect.objectContaining({
+          page: expect.objectContaining({ path: expect.any(Array) }),
+          source: expect.any(Object),
+          client: expect.any(Object),
+          geo: expect.any(Object),
+        }),
+      );
       expect(typeDetail.fields).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ path: "/plan", valueType: "string" }),
@@ -1374,7 +1390,6 @@ describe("mock — handleDemoRequest", () => {
           path: "/api/private/events-records",
           params: {
             ...ANALYTICS_PARAMS,
-            page: 1,
             pageSize: 2,
             sortBy: "eventName",
             sortDir: "asc",
@@ -1382,9 +1397,7 @@ describe("mock — handleDemoRequest", () => {
           },
         }),
       );
-      expect(events.meta).toEqual(
-        expect.objectContaining({ page: 1, pageSize: 2 }),
-      );
+      expect(events.meta).toEqual(expect.objectContaining({ pageSize: 2 }));
     });
 
     it("builds visitor and session details from IDs returned by list routes", () => {

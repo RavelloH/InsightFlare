@@ -74,6 +74,7 @@ import {
   generateDemoEventsRecords,
   generateDemoEventsSummary,
   generateDemoEventsTrend,
+  generateDemoEventTypeContext,
   generateDemoEventTypeDetail,
   generateDemoEventTypeFieldValues,
 } from "@/lib/realtime/mock/events";
@@ -1096,6 +1097,9 @@ function handleDemoRequestInner(options: {
     (path.includes("/event-type-fields") || path.endsWith("/event-fields"))
   ) {
     return generateDemoEventFields(siteId, params);
+  }
+  if (path.includes("/event-type-context")) {
+    return generateDemoEventTypeContext(siteId, params);
   }
   if (path.includes("/event-type-detail")) {
     return generateDemoEventTypeDetail(siteId, params);

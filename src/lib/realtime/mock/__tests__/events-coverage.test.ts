@@ -216,16 +216,14 @@ describe("mock/events coverage", () => {
       search: "pricing",
       sortBy: "pathname",
       sortDir: "asc",
-      page: 1,
       pageSize: 1,
     }) as any;
 
     expect(result.meta).toEqual({
-      page: 1,
       pageSize: 1,
       returned: 1,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     });
     expect(result.data).toEqual([
       expect.objectContaining({
@@ -236,7 +234,7 @@ describe("mock/events coverage", () => {
     ]);
   });
 
-  it("reports hasMore and nextPage when event records have another page", () => {
+  it("reports and consumes a cursor when event records have another page", () => {
     const visits = [
       makeVisit({ visitId: "first", eventType: "signup", startedAt: 1_000 }),
       makeVisit({
@@ -260,22 +258,39 @@ describe("mock/events coverage", () => {
     const result = generateDemoEventsRecords("site", {
       from: 0,
       to: 10_000,
-      page: 1,
       pageSize: 2,
       sortBy: "occurredAt",
       sortDir: "desc",
     }) as any;
 
     expect(result.meta).toEqual({
-      page: 1,
       pageSize: 2,
       returned: 2,
       hasMore: true,
-      nextPage: 2,
+      nextCursor: "2",
     });
     expect(result.data.map((row: any) => row.eventId)).toEqual([
       "third:signup",
       "second:signup",
+    ]);
+
+    const nextPage = generateDemoEventsRecords("site", {
+      from: 0,
+      to: 10_000,
+      cursor: result.meta.nextCursor,
+      pageSize: 2,
+      sortBy: "occurredAt",
+      sortDir: "desc",
+    }) as any;
+
+    expect(nextPage.meta).toEqual({
+      pageSize: 2,
+      returned: 1,
+      hasMore: false,
+      nextCursor: null,
+    });
+    expect(nextPage.data.map((row: any) => row.eventId)).toEqual([
+      "first:signup",
     ]);
   });
 
@@ -303,18 +318,17 @@ describe("mock/events coverage", () => {
         to: 10_000,
         eventName: "signup",
         search: "checkout",
-        page: 2,
+        cursor: "20",
         pageSize: 20,
       }),
     ).toEqual({
       ok: true,
       data: [],
       meta: {
-        page: 2,
         pageSize: 20,
         returned: 0,
         hasMore: false,
-        nextPage: null,
+        nextCursor: null,
       },
     });
   });

@@ -259,7 +259,10 @@ export function EventTypeDetailClientPage({
                   }}
                   viewsLabel={labels.triggerCount}
                   visitorsLabel={labels.triggerVisitors}
-                  className="h-[320px]"
+                  axisDateFormat="regular"
+                  showLegend
+                  loading={loading}
+                  className="h-[280px]"
                 />
               </CardContent>
             </Card>

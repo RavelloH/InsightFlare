@@ -628,6 +628,7 @@ events:
   copiedValue: 値をコピーしました。
   copyValueFailed: 値のコピーに失敗しました。
   loadError: イベントデータを読み込めません。
+  detailNotFound: このイベント記録が見つかりません。
   empty: この範囲にカスタムイベントはありません。
   emptyFields: このイベントにペイロードフィールドはありません。
   noEventName: イベント名がありません。

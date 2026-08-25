@@ -587,11 +587,11 @@ export async function fetchEventRecordDetail(
   siteId: string,
   eventId: string,
   window?: TimeWindow,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; preserveErrors?: boolean },
 ): Promise<EventRecordDetailData> {
   const normalizedEventId = eventId.trim();
   if (!normalizedEventId) return emptyEventRecordDetail();
-  return fetchPrivateJson<EventRecordDetailData>(
+  const request = fetchPrivateJson<EventRecordDetailData>(
     "/api/private/event-record-detail",
     {
       siteId,
@@ -599,7 +599,12 @@ export async function fetchEventRecordDetail(
       ...(window ? { from: window.from, to: window.to } : {}),
     },
     { signal: options?.signal },
-  ).catch((error) => fallbackUnlessAborted(error, emptyEventRecordDetail));
+  );
+  return options?.preserveErrors
+    ? request
+    : request.catch((error) =>
+        fallbackUnlessAborted(error, emptyEventRecordDetail),
+      );
 }
 
 export async function fetchPerformance(

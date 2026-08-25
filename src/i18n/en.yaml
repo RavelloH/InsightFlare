@@ -632,6 +632,7 @@ events:
   copiedValue: Value copied.
   copyValueFailed: Failed to copy value.
   loadError: Unable to load event data.
+  detailNotFound: This event record was not found.
   empty: No custom events in this range.
   emptyFields: No payload fields for this event.
   noEventName: Missing event name.

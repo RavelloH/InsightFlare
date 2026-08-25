@@ -293,9 +293,13 @@ export const EventTrendLegend = memo(function EventTrendLegend({
         </span>
       </div>
 
-      <div
+      <AutoTransition
+        initial={false}
         className="grid grid-cols-1 gap-x-6 gap-y-0.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"
         aria-busy={loading}
+        transitionKey={loading && series.length === 0 ? "loading" : "ready"}
+        duration={0.2}
+        presenceMode="wait"
       >
         {loading && series.length === 0
           ? Array.from({ length: 5 }, (_, index) => (
@@ -356,7 +360,7 @@ export const EventTrendLegend = memo(function EventTrendLegend({
                 </button>
               );
             })}
-      </div>
+      </AutoTransition>
     </div>
   );
 });

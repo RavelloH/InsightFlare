@@ -345,7 +345,6 @@ export function generateDemoEventsRecords(
 ): Record<string, unknown> {
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
-  const page = parseDemoLimit(params.page, 1, 1, 10_000);
   const pageSize = parseDemoLimit(params.pageSize, 80, 1, 120);
   const filters = parseDemoFilters(params);
   const eventName = normalizeDemoFilterValue(params.eventName);
@@ -369,7 +368,10 @@ export function generateDemoEventsRecords(
     ]);
   });
   const sorted = sortDemoEventRecords(events, parseDemoEventRecordSort(params));
-  const offset = (page - 1) * pageSize;
+  const offset =
+    params.cursor !== undefined
+      ? parseDemoLimit(params.cursor, 0, 0, 1_000_000)
+      : (parseDemoLimit(params.page, 1, 1, 10_000) - 1) * pageSize;
   const requestedRows = sorted.slice(offset, offset + pageSize + 1);
   const hasMore = requestedRows.length > pageSize;
   const currentRows = requestedRows.slice(0, pageSize);
@@ -378,11 +380,10 @@ export function generateDemoEventsRecords(
     ok: true,
     data: currentRows.map(demoEventRecordFromFact),
     meta: {
-      page,
       pageSize,
       returned: currentRows.length,
       hasMore,
-      nextPage: hasMore ? page + 1 : null,
+      nextCursor: hasMore ? String(offset + pageSize) : null,
     },
   };
 }
@@ -480,6 +481,29 @@ export function generateDemoEventTypeDetail(
     },
     cards: demoEventContextCards(dataset, events, 100),
     fields: collectDemoEventFields(events, 100),
+  };
+}
+
+export function generateDemoEventTypeContext(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const eventName = normalizeDemoFilterValue(params.eventName) ?? "";
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const limit = parseDemoLimit(params.limit, 100, 1, 100);
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const events = filterDemoCustomEventsByPayload(
+    createDemoCustomEventFacts(filtered.visits),
+    filters,
+  ).filter((event) => event.eventName === eventName);
+
+  return {
+    ok: true,
+    eventName,
+    cards: demoEventContextCards(dataset, events, limit),
   };
 }
 

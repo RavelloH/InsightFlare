@@ -457,6 +457,16 @@ describe("fetchEventRecordDetail", () => {
     expect(result).toEqual(emptyEventRecordDetail());
   });
 
+  it("can preserve detail request errors for the drawer", async () => {
+    fetchPrivateJsonMock.mockRejectedValueOnce(new Error("fail"));
+
+    await expect(
+      fetchEventRecordDetail("site-1", "evt-1", undefined, {
+        preserveErrors: true,
+      }),
+    ).rejects.toThrow("fail");
+  });
+
   it("forwards cancellation signals and preserves aborts", async () => {
     const controller = new AbortController();
     fetchPrivateJsonMock.mockResolvedValueOnce(emptyEventRecordDetail());
