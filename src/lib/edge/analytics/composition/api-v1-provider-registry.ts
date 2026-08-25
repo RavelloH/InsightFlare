@@ -9,6 +9,7 @@ import {
   createD1TeamQueryRuntime,
 } from "@/lib/edge/analytics/composition/d1";
 import {
+  type AnalyticsResult,
   EMPTY_FILTER_DOCUMENT,
   type QueryInput,
   type QueryTime,
@@ -128,6 +129,35 @@ function provider<Result>(
   };
 }
 
+/**
+ * Site overview/timeseries API v1 handlers consume the full canonical result
+ * envelope because they expose source and accuracy metadata. The canonical
+ * runtime provider reports those fields beside its value, so adapt that shape
+ * at the protocol composition boundary instead of leaking API concerns into
+ * the shared runtime.
+ */
+function analyticsResultProvider<Result>(
+  source: TypedQueryProvider<Result>,
+): TypedQueryProvider<AnalyticsResult<Result>> {
+  return {
+    execute: async (input, execution) => {
+      const result = await source.execute(input, execution);
+      const runtimeInput = query(input);
+      return {
+        value: {
+          ok: true,
+          data: result.value,
+          meta: {
+            time: runtimeInput.time,
+            source: result.source ?? "raw",
+            approximateVisitors: Boolean(result.approximateVisitors),
+          },
+        },
+      };
+    },
+  };
+}
+
 function siteId(input: RuntimeQuery, fallback: string): string {
   return stringField(input, "siteId", fallback);
 }
@@ -152,7 +182,13 @@ function registerSiteOperation(
     });
     const canonicalProvider = runtime.providerRegistry.resolve(operation);
     if (canonicalProvider) {
-      registry.register(operation, canonicalProvider);
+      registry.register(
+        operation,
+        options.operation === "site.analytics.overview" ||
+          options.operation === "site.analytics.timeseries"
+          ? analyticsResultProvider(canonicalProvider)
+          : canonicalProvider,
+      );
       return;
     }
   }
