@@ -1,3 +1,5 @@
+import "@/lib/iconify";
+
 import jetBrainsMonoLatinUrl from "@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2?url";
 import { RiFileWarningLine, RiGithubLine, RiHome4Line } from "@remixicon/react";
 import {

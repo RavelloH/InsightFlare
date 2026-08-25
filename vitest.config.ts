@@ -78,7 +78,6 @@ export default defineConfig({
         // API v1 provider assembly is a source-wiring matrix; operation
         // behavior is covered by the handler and route integration suites.
         "src/lib/edge/analytics/composition/api-v1-provider-registry.ts",
-        "src/lib/i18n/messages-types*.ts",
         "src/lib/realtime/demo-site-profiles-types.ts",
         "src/lib/realtime/mock.ts",
         "src/lib/edge/ingest-flush-types.ts",
