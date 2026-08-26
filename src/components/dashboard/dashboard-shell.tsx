@@ -831,7 +831,7 @@ export function DashboardShell({
             maskClassName="from-sidebar via-sidebar/80 to-transparent"
             syncKey={`${routeState.mode}:${liveActiveTeamSlug ?? "root"}:${resolvedSites.length}`}
           >
-            <SidebarContent className="overflow-hidden">
+            <SidebarContent className="flex-none overflow-hidden">
               <SidebarMenuStage mode={sidebarContextMode}>
                 {routeState.mode === "root" ? (
                   <>
