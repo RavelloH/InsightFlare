@@ -43,6 +43,7 @@ import {
 } from "@/components/dashboard/site-pages/detail-query-modal";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
+import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitor-detail-client-page";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
@@ -55,7 +56,6 @@ import { fetchVisitors } from "@/lib/dashboard/client-data";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-import dynamic from "@/lib/dynamic";
 import type { VisitorsData } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
@@ -72,19 +72,6 @@ interface VisitorsClientPageProps {
 type VisitorRow = VisitorsData["data"][number];
 
 const VISITOR_PAGE_SIZE = 50;
-
-const VisitorDetailClientPage = dynamic(
-  () =>
-    import("@/components/dashboard/site-pages/visitor-detail-client-page").then(
-      (module) => module.VisitorDetailClientPage,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="p-6 text-sm text-muted-foreground">Loading...</div>
-    ),
-  },
-);
 
 type SortDirection = "asc" | "desc";
 type VisitorSortKey = "firstSeenAt" | "lastSeenAt" | "sessions" | "views";

@@ -524,22 +524,53 @@ function FunnelMetric({
   label,
   value,
   detail,
+  loading = false,
 }: {
   label: string;
   value: string;
   detail: string;
+  loading?: boolean;
 }) {
   return (
     <div className="min-w-0 bg-card p-4">
       <p className="truncate text-[11px] uppercase text-muted-foreground">
         {label}
       </p>
-      <p className="mt-3 truncate font-mono text-xl leading-7 font-semibold">
-        {value}
-      </p>
-      <p className="mt-3 truncate text-[11px] text-muted-foreground">
-        {detail}
-      </p>
+      <AutoTransition
+        initial={false}
+        transitionKey={loading ? "loading" : value}
+        duration={0.18}
+        type="fade"
+        presenceMode="wait"
+        className="mt-3 h-7"
+      >
+        {loading ? (
+          <Skeleton key="loading" className="h-7 w-20" />
+        ) : (
+          <p
+            key="ready"
+            className="truncate font-mono text-xl leading-7 font-semibold"
+          >
+            {value}
+          </p>
+        )}
+      </AutoTransition>
+      <AutoTransition
+        initial={false}
+        transitionKey={loading ? "loading" : detail}
+        duration={0.18}
+        type="fade"
+        presenceMode="wait"
+        className="mt-3 h-4"
+      >
+        {loading ? (
+          <Skeleton key="loading" className="h-3 w-32" />
+        ) : (
+          <p key="ready" className="truncate text-[11px] text-muted-foreground">
+            {detail}
+          </p>
+        )}
+      </AutoTransition>
     </div>
   );
 }
@@ -548,10 +579,12 @@ function FunnelStepRow({
   locale,
   labels,
   step,
+  loading = false,
 }: {
   locale: Locale;
   labels: FunnelCopy;
   step: FunnelAnalysisStep;
+  loading?: boolean;
 }) {
   const width = `${Math.max(2, Math.min(100, step.conversionRate * 100))}%`;
 
@@ -562,83 +595,188 @@ function FunnelStepRow({
       </div>
       <div className="min-w-0 space-y-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Badge variant="outline">{stepTypeLabel(labels, step.type)}</Badge>
-          <p className="min-w-0 truncate font-mono font-medium">{step.label}</p>
+          <AutoTransition
+            initial={false}
+            transitionKey={loading ? "loading" : step.type}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="h-5"
+          >
+            {loading ? (
+              <Skeleton key="loading" className="h-5 w-20" />
+            ) : (
+              <Badge key="ready" variant="outline">
+                {stepTypeLabel(labels, step.type)}
+              </Badge>
+            )}
+          </AutoTransition>
+          <AutoTransition
+            initial={false}
+            transitionKey={loading ? "loading" : step.label}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="min-w-0 h-5 flex-1"
+          >
+            {loading ? (
+              <Skeleton key="loading" className="h-5 w-[min(22rem,72%)]" />
+            ) : (
+              <p key="ready" className="min-w-0 truncate font-mono font-medium">
+                {step.label}
+              </p>
+            )}
+          </AutoTransition>
         </div>
-        <div className="h-2 overflow-hidden bg-muted">
-          <div
-            className="h-full bg-primary transition-[width]"
-            style={{ width }}
-          />
-        </div>
+        <AutoTransition
+          initial={false}
+          transitionKey={loading ? "loading" : width}
+          duration={0.18}
+          type="fade"
+          presenceMode="wait"
+          className="h-2"
+        >
+          {loading ? (
+            <Skeleton key="loading" className="h-2 w-full" />
+          ) : (
+            <div key="ready" className="h-2 overflow-hidden bg-muted">
+              <div
+                className="h-full bg-primary transition-[width]"
+                style={{ width }}
+              />
+            </div>
+          )}
+        </AutoTransition>
       </div>
       <div className="grid min-w-0 grid-cols-2 gap-3 text-xs">
         <div>
           <p className="text-muted-foreground">{labels.sessions}</p>
-          <p className="mt-1 font-mono">
-            {numberFormat(locale, step.sessions)}
-          </p>
+          <AutoTransition
+            initial={false}
+            transitionKey={loading ? "loading" : step.sessions}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="mt-1 h-4"
+          >
+            {loading ? (
+              <Skeleton key="loading" className="h-4 w-14" />
+            ) : (
+              <p key="ready" className="font-mono">
+                {numberFormat(locale, step.sessions)}
+              </p>
+            )}
+          </AutoTransition>
         </div>
         <div>
           <p className="text-muted-foreground">{labels.visitors}</p>
-          <p className="mt-1 font-mono">
-            {numberFormat(locale, step.visitors)}
-          </p>
+          <AutoTransition
+            initial={false}
+            transitionKey={loading ? "loading" : step.visitors}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="mt-1 h-4"
+          >
+            {loading ? (
+              <Skeleton key="loading" className="h-4 w-14" />
+            ) : (
+              <p key="ready" className="font-mono">
+                {numberFormat(locale, step.visitors)}
+              </p>
+            )}
+          </AutoTransition>
         </div>
       </div>
       <div className="grid min-w-0 grid-cols-2 gap-3 text-xs">
         <div>
           <p className="text-muted-foreground">{labels.stepConversion}</p>
-          <p className="mt-1 font-mono">
-            {percentFormat(locale, step.stepConversionRate)}
-          </p>
+          <AutoTransition
+            initial={false}
+            transitionKey={loading ? "loading" : step.stepConversionRate}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="mt-1 h-4"
+          >
+            {loading ? (
+              <Skeleton key="loading" className="h-4 w-14" />
+            ) : (
+              <p key="ready" className="font-mono">
+                {percentFormat(locale, step.stepConversionRate)}
+              </p>
+            )}
+          </AutoTransition>
         </div>
         <div>
           <p className="text-muted-foreground">{labels.dropOff}</p>
-          <p className="mt-1 font-mono">
-            {numberFormat(locale, step.dropOffSessions)}
-          </p>
+          <AutoTransition
+            initial={false}
+            transitionKey={loading ? "loading" : step.dropOffSessions}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="mt-1 h-4"
+          >
+            {loading ? (
+              <Skeleton key="loading" className="h-4 w-14" />
+            ) : (
+              <p key="ready" className="font-mono">
+                {numberFormat(locale, step.dropOffSessions)}
+              </p>
+            )}
+          </AutoTransition>
         </div>
       </div>
     </div>
   );
 }
 
-function FunnelDetailLoading({ labels }: { labels: FunnelCopy }) {
-  return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="space-y-2">
-        <Skeleton className="h-5 w-56" />
-        <Skeleton className="h-3 w-80 max-w-full" />
-      </div>
-      <Card className="min-w-0 py-0">
-        <CardContent className="p-0">
-          <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 4 }, (_, index) => (
-              <div key={index} className="bg-card p-4">
-                <Skeleton className="h-3 w-24" />
-                <Skeleton className="mt-3 h-7 w-20" />
-                <Skeleton className="mt-3 h-3 w-32" />
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-      <Card className="min-w-0">
-        <CardHeader>
-          <CardTitle className="inline-flex items-center gap-2">
-            <RiArrowRightLine className="size-4" />
-            {labels.step}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {Array.from({ length: 4 }, (_, index) => (
-            <Skeleton key={index} className="h-16 w-full" />
-          ))}
-        </CardContent>
-      </Card>
-    </div>
-  );
+function createFunnelDetailPlaceholder(
+  siteId: string,
+  funnelId: string,
+): FunnelDetailData {
+  const steps: FunnelStep[] = [
+    { type: "pageview", value: "" },
+    { type: "event", value: "" },
+    { type: "event", value: "" },
+    { type: "pageview", value: "" },
+  ];
+
+  return {
+    ok: true,
+    data: {
+      funnel: {
+        id: funnelId,
+        siteId,
+        name: "",
+        steps,
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      analysis: {
+        steps: steps.map((step, index) => ({
+          index,
+          label: step.value,
+          type: step.type,
+          sessions: 0,
+          visitors: 0,
+          conversionRate: 0,
+          stepConversionRate: 0,
+          dropOffSessions: 0,
+          dropOffRate: 0,
+        })),
+        summary: {
+          totalSessions: 0,
+          convertedSessions: 0,
+          totalVisitors: 0,
+          convertedVisitors: 0,
+          overallConversionRate: 0,
+          largestDropOffStepIndex: null,
+        },
+      },
+    },
+  };
 }
 
 function FunnelDetailContent({
@@ -646,11 +784,13 @@ function FunnelDetailContent({
   labels,
   payload,
   onDelete,
+  loading = false,
 }: {
   locale: Locale;
   labels: FunnelCopy;
   payload: FunnelDetailData;
   onDelete: (funnel: FunnelDefinition) => void;
+  loading?: boolean;
 }) {
   const { funnel, analysis } = payload.data;
   const largestDropOffStep =
@@ -663,19 +803,61 @@ function FunnelDetailContent({
       <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0 space-y-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h2 className="truncate text-xl font-semibold">{funnel.name}</h2>
-            <Badge variant="outline">
-              {numberFormat(locale, funnel.steps.length)}
-            </Badge>
+            <AutoTransition
+              initial={false}
+              transitionKey={loading ? "loading" : funnel.name}
+              duration={0.18}
+              type="fade"
+              presenceMode="wait"
+              className="h-7 min-w-0 flex-1"
+            >
+              {loading ? (
+                <Skeleton key="loading" className="h-7 w-56 max-w-full" />
+              ) : (
+                <h2 key="ready" className="truncate text-xl font-semibold">
+                  {funnel.name}
+                </h2>
+              )}
+            </AutoTransition>
+            <AutoTransition
+              initial={false}
+              transitionKey={loading ? "loading" : funnel.steps.length}
+              duration={0.18}
+              type="fade"
+              presenceMode="wait"
+              className="h-5"
+            >
+              {loading ? (
+                <Skeleton key="loading" className="h-5 w-8 rounded-full" />
+              ) : (
+                <Badge key="ready" variant="outline">
+                  {numberFormat(locale, funnel.steps.length)}
+                </Badge>
+              )}
+            </AutoTransition>
           </div>
-          <p className="text-sm text-muted-foreground">
-            {updatedLabel(locale, labels, funnel.updatedAt)}
-          </p>
+          <AutoTransition
+            initial={false}
+            transitionKey={loading ? "loading" : funnel.updatedAt}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="h-5"
+          >
+            {loading ? (
+              <Skeleton key="loading" className="h-4 w-44" />
+            ) : (
+              <p key="ready" className="text-sm text-muted-foreground">
+                {updatedLabel(locale, labels, funnel.updatedAt)}
+              </p>
+            )}
+          </AutoTransition>
         </div>
         <Button
           type="button"
           variant="destructive"
           className="w-full sm:w-auto md:justify-self-end"
+          disabled={loading}
           onClick={() => onDelete(funnel)}
         >
           <RiDeleteBinLine />
@@ -696,16 +878,19 @@ function FunnelDetailContent({
                 locale,
                 analysis.summary.totalSessions,
               )} ${labels.sessions}`}
+              loading={loading}
             />
             <FunnelMetric
               label={labels.startedSessions}
               value={numberFormat(locale, analysis.summary.totalSessions)}
               detail={numberFormat(locale, analysis.summary.totalVisitors)}
+              loading={loading}
             />
             <FunnelMetric
               label={labels.convertedSessions}
               value={numberFormat(locale, analysis.summary.convertedSessions)}
               detail={`${numberFormat(locale, analysis.summary.convertedVisitors)} ${labels.convertedVisitors}`}
+              loading={loading}
             />
             <FunnelMetric
               label={labels.largestDropOff}
@@ -722,6 +907,7 @@ function FunnelDetailContent({
                     )}`
                   : labels.noDropOff
               }
+              loading={loading}
             />
           </div>
         </CardContent>
@@ -742,6 +928,7 @@ function FunnelDetailContent({
               locale={locale}
               labels={labels}
               step={step}
+              loading={loading}
             />
           ))}
         </CardContent>
@@ -772,7 +959,7 @@ function FunnelDetailDrawer({
   const {
     data: payload,
     isError: error,
-    isPending: loading,
+    isPending,
   } = useQuery({
     queryKey: [
       "dashboard",
@@ -788,9 +975,9 @@ function FunnelDetailDrawer({
       fetchFunnelDetail(siteId, funnelId, timeWindow, filters, { signal }),
     enabled: typeof window !== "undefined" && Boolean(funnelId),
   });
+  const loading = isPending && !payload;
 
-  if (loading) return <FunnelDetailLoading labels={labels} />;
-  if (error || !payload) {
+  if (error && !payload) {
     return (
       <div className="p-4 md:p-6">
         <FunnelStateCard
@@ -805,8 +992,9 @@ function FunnelDetailDrawer({
     <FunnelDetailContent
       locale={locale}
       labels={labels}
-      payload={payload}
+      payload={payload ?? createFunnelDetailPlaceholder(siteId, funnelId)}
       onDelete={onDelete}
+      loading={loading}
     />
   );
 }

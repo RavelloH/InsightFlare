@@ -72,6 +72,7 @@ import {
   NESTED_DETAIL_DRAWER_Z_INDEX,
 } from "@/components/dashboard/site-pages/floating-layer";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
+import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitor-detail-client-page";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -110,7 +111,6 @@ import { appendEventPayloadFilter } from "@/lib/dashboard/filter-state";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import { parseGeoLocationValue } from "@/lib/dashboard/geo-location";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-import dynamic from "@/lib/dynamic";
 import type {
   EventField,
   EventFieldValueStat,
@@ -190,19 +190,6 @@ const EVENT_DETAIL_SKELETON_DATA: EventRecordDetail = {
   },
   eventData: null,
 };
-
-const VisitorDetailClientPage = dynamic(
-  () =>
-    import("@/components/dashboard/site-pages/visitor-detail-client-page").then(
-      (module) => module.VisitorDetailClientPage,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="p-6 text-sm text-muted-foreground">Loading...</div>
-    ),
-  },
-);
 
 type SortDirection = "asc" | "desc";
 export type EventRecordSortKey = "occurredAt" | "eventName" | "pathname";
@@ -1699,9 +1686,22 @@ export function EventRecordDetailDrawer({
         >
           <DrawerHeader className="border-b">
             <DrawerTitle>{labels.detailTitle}</DrawerTitle>
-            <DrawerDescription>
-              {detailData?.event.eventName || labels.detailSubtitle}
-            </DrawerDescription>
+            <AutoTransition
+              initial={false}
+              transitionKey={loading ? "loading" : detailData?.event.eventName}
+              duration={0.18}
+              type="fade"
+              presenceMode="wait"
+              className="h-5"
+            >
+              {loading ? (
+                <Skeleton key="loading" className="h-4 w-44" />
+              ) : (
+                <DrawerDescription key="ready">
+                  {detailData?.event.eventName || labels.detailSubtitle}
+                </DrawerDescription>
+              )}
+            </AutoTransition>
           </DrawerHeader>
           <DrawerScrollArea contentClassName="p-4">
             {error ? (
@@ -2567,7 +2567,8 @@ export function EventRecordsSection({
       typeof window !== "undefined" && drawerOpen && Boolean(selectedEventId),
   });
   const detail = detailQuery.data?.data ?? null;
-  const detailLoading = detailQuery.isPending;
+  const detailLoading = detailQuery.isPending && !detail;
+  const detailError = detailQuery.isError && !detail;
 
   const toggleSort = (key: EventRecordSortKey) => {
     setSort((current) =>
@@ -2643,7 +2644,7 @@ export function EventRecordsSection({
         onOpenChange={setDrawerOpen}
         detail={detail}
         loading={detailLoading}
-        error={detailQuery.isError}
+        error={detailError}
       />
     </section>
   );

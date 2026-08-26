@@ -9,12 +9,7 @@ import { AnalyticsTableCard } from "@/components/dashboard/analytics-table-card"
 import { AnalyticsTimeTooltipProvider } from "@/components/dashboard/analytics-time-tooltip";
 import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { AutoTransition } from "@/components/ui/auto-transition";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-} from "@/components/ui/table";
+import { Table, TableCell, TableHeader } from "@/components/ui/table";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
@@ -142,11 +137,24 @@ export function AnalyticsDataTable<TRow>({
   });
 
   const isEmpty = !loading && !error && rows.length === 0 && !hasMore;
+  const tableBodyTransitionKey = loading
+    ? "loading"
+    : error
+      ? "error"
+      : isEmpty
+        ? "empty"
+        : "content";
   const table = (
     <AnalyticsTableCard minTableWidth={minTableWidth} className={className}>
       <Table className={tableClassName}>
         <TableHeader>{header}</TableHeader>
-        <TableBody
+        <AutoTransition
+          as="tbody"
+          initial={false}
+          transitionKey={tableBodyTransitionKey}
+          duration={0.18}
+          type="fade"
+          presenceMode="wait"
           aria-busy={loading || loadingMore}
           data-slot="table-body"
           className={cn("[&_tr:last-child]:border-0", tableBodyClassName)}
@@ -240,7 +248,7 @@ export function AnalyticsDataTable<TRow>({
                           )
                         : []),
                   ]}
-        </TableBody>
+        </AutoTransition>
       </Table>
     </AnalyticsTableCard>
   );

@@ -33,6 +33,7 @@ import { JsonTreePanel } from "@/components/dashboard/json-tree";
 import { useGeoStateTranslationBundle } from "@/components/dashboard/lazy-geo-location-label";
 import { DetailDrawer } from "@/components/dashboard/site-pages/detail-drawer";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
+import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitor-detail-client-page";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
@@ -56,7 +57,6 @@ import {
   formatLocalizedGeoValue,
   resolveLocalizedCityName,
 } from "@/lib/dashboard/geo-translation";
-import dynamic from "@/lib/dynamic";
 import {
   resolveContinentLabel,
   resolveCountryFlagCode,
@@ -115,19 +115,6 @@ const PANEL_SCROLLBAR_OPTIONS = {
     autoHideSuspend: false,
   },
 } satisfies PartialOptions;
-
-const VisitorDetailClientPage = dynamic(
-  () =>
-    import("@/components/dashboard/site-pages/visitor-detail-client-page").then(
-      (module) => module.VisitorDetailClientPage,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="p-6 text-sm text-muted-foreground">Loading...</div>
-    ),
-  },
-);
 
 type RealtimeLogEventKind = "enter" | "exit" | "view" | "visibility" | "custom";
 type RealtimeEventDisplayData = {

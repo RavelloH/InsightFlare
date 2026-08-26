@@ -20,6 +20,7 @@ import {
 } from "@/components/dashboard/site-pages/detail-query-modal";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
+import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitor-detail-client-page";
 import { Input } from "@/components/ui/input";
 import {
   pushUrlWithoutNavigation,
@@ -29,7 +30,6 @@ import {
 import { fetchSessions } from "@/lib/dashboard/client-data";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-import dynamic from "@/lib/dynamic";
 import type { JourneySession } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
@@ -43,19 +43,6 @@ interface SessionsClientPageProps {
 }
 
 const SESSION_PAGE_SIZE = 50;
-
-const VisitorDetailClientPage = dynamic(
-  () =>
-    import("@/components/dashboard/site-pages/visitor-detail-client-page").then(
-      (module) => module.VisitorDetailClientPage,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="p-6 text-sm text-muted-foreground">Loading...</div>
-    ),
-  },
-);
 
 const DEFAULT_SESSION_SORT: SessionSortState = {
   key: "startedAt",
