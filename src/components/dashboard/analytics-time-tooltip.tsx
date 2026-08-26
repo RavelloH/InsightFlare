@@ -11,11 +11,13 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { RiSearchLine } from "@remixicon/react";
 import { toast } from "sonner";
 
 import { useReportingTimeZone } from "@/components/time-zone-provider";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { Badge } from "@/components/ui/badge";
+import { Clickable } from "@/components/ui/clickable";
 import {
   Tooltip,
   TooltipContent,
@@ -28,6 +30,33 @@ import { cn } from "@/lib/utils";
 
 type TooltipSide = "left" | "right";
 
+interface TimeTooltipRequest {
+  kind: "time";
+  locale: Locale;
+  timestamp: number;
+}
+
+export interface AnalyticsTooltipDetail {
+  label: string;
+  value: ReactNode;
+  copyValue?: string;
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
+}
+
+export interface AnalyticsDetailsTooltipRequest {
+  kind: "details";
+  key: string;
+  locale: Locale;
+  items: readonly AnalyticsTooltipDetail[];
+}
+
+type AnalyticsTooltipRequest =
+  | TimeTooltipRequest
+  | AnalyticsDetailsTooltipRequest;
+
 interface TooltipRect {
   height: number;
   left: number;
@@ -36,19 +65,17 @@ interface TooltipRect {
 }
 
 interface ActiveTooltip {
-  locale: Locale;
   rect: TooltipRect;
   side: TooltipSide;
   target: HTMLElement;
-  timestamp: number;
+  request: AnalyticsTooltipRequest;
 }
 
 interface AnalyticsTimeTooltipContextValue {
   groupId: string;
   show: (
     target: HTMLElement,
-    timestamp: number,
-    locale: Locale,
+    request: AnalyticsTooltipRequest,
     clientX: number,
   ) => void;
   hide: () => void;
@@ -184,6 +211,15 @@ function formatTimeZoneShortName(
   }
 }
 
+async function copyAnalyticsValue(value: string, messages: AppMessages) {
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success(messages.events.copiedValue);
+  } catch {
+    toast.error(messages.events.copyValueFailed);
+  }
+}
+
 function AnalyticsTimeTooltipContent({
   locale,
   messages,
@@ -210,15 +246,6 @@ function AnalyticsTimeTooltipContent({
     year: "numeric",
   });
 
-  const copyTime = async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      toast.success(messages.events.copiedValue);
-    } catch {
-      toast.error(messages.events.copyValueFailed);
-    }
-  };
-
   return (
     <AutoResizer animateWidth className="min-w-0" duration={0.16}>
       <div className="grid grid-cols-[max-content_max-content] items-center gap-x-2 gap-y-1.5 whitespace-nowrap">
@@ -233,7 +260,7 @@ function AnalyticsTimeTooltipContent({
           <button
             type="button"
             aria-label={`${messages.events.copyValue}: ${utcTime}`}
-            onClick={() => void copyTime(utcTime)}
+            onClick={() => void copyAnalyticsValue(utcTime, messages)}
           >
             UTC
           </button>
@@ -249,7 +276,7 @@ function AnalyticsTimeTooltipContent({
           <button
             type="button"
             aria-label={`${messages.events.copyValue}: ${localTime}`}
-            onClick={() => void copyTime(localTime)}
+            onClick={() => void copyAnalyticsValue(localTime, messages)}
           >
             {localTimeZoneLabel}
           </button>
@@ -259,6 +286,89 @@ function AnalyticsTimeTooltipContent({
         </div>
       </div>
     </AutoResizer>
+  );
+}
+
+function AnalyticsDetailsTooltipContent({
+  messages,
+  request,
+}: {
+  messages: AppMessages;
+  request: AnalyticsDetailsTooltipRequest;
+}) {
+  return (
+    <AutoResizer animateWidth className="min-w-0" duration={0.16}>
+      <div className="grid w-max grid-cols-[max-content_max-content] items-center gap-x-2 gap-y-1.5 whitespace-nowrap">
+        {request.items.map((item) => {
+          const copyValue = item.copyValue;
+
+          return (
+            <div key={item.label} className="contents">
+              {copyValue !== undefined ? (
+                <Badge
+                  asChild
+                  variant="link"
+                  className="h-5 min-w-max cursor-copy px-1 text-[10px]"
+                >
+                  <button
+                    type="button"
+                    aria-label={`${messages.events.copyValue}: ${copyValue}`}
+                    onClick={() => void copyAnalyticsValue(copyValue, messages)}
+                  >
+                    {item.label}
+                  </button>
+                </Badge>
+              ) : (
+                <span className="text-xs leading-5 text-background/70">
+                  {item.label}
+                </span>
+              )}
+              <div className="inline-flex min-w-0 items-center gap-1 leading-5">
+                <span>{item.value}</span>
+                {item.action ? (
+                  <Clickable
+                    className="shrink-0 text-background/70 transition-colors hover:text-background"
+                    onClick={item.action.onClick}
+                    aria-label={item.action.label}
+                    title={item.action.label}
+                  >
+                    <RiSearchLine size="1.2em" />
+                  </Clickable>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </AutoResizer>
+  );
+}
+
+function AnalyticsTooltipContent({
+  browserTimeZone,
+  messages,
+  now,
+  request,
+}: {
+  browserTimeZone: string;
+  messages: AppMessages;
+  now: number;
+  request: AnalyticsTooltipRequest;
+}) {
+  if (request.kind === "time") {
+    return (
+      <AnalyticsTimeTooltipContent
+        locale={request.locale}
+        messages={messages}
+        timestamp={request.timestamp}
+        now={now}
+        browserTimeZone={browserTimeZone}
+      />
+    );
+  }
+
+  return (
+    <AnalyticsDetailsTooltipContent messages={messages} request={request} />
   );
 }
 
@@ -291,8 +401,7 @@ export function AnalyticsTimeTooltipProvider({
   const updateActive = useCallback(
     (
       target: HTMLElement,
-      timestamp: number,
-      locale: Locale,
+      request: AnalyticsTooltipRequest,
       clientX: number,
     ) => {
       const rect = getTooltipRect(target);
@@ -301,8 +410,12 @@ export function AnalyticsTimeTooltipProvider({
       const current = activeRef.current;
       if (
         current?.target === target &&
-        current.timestamp === timestamp &&
-        current.locale === locale &&
+        current.request.kind === request.kind &&
+        (request.kind === "time"
+          ? current.request.kind === "time" &&
+            current.request.timestamp === request.timestamp
+          : current.request.kind === "details" &&
+            current.request.key === request.key) &&
         current.side === nextSide &&
         areRectsEqual(current.rect, rect)
       ) {
@@ -310,11 +423,10 @@ export function AnalyticsTimeTooltipProvider({
       }
       shouldAnimatePositionRef.current = current !== null;
       const next = {
-        locale,
         rect,
         side: nextSide,
         target,
-        timestamp,
+        request,
       } satisfies ActiveTooltip;
       activeRef.current = next;
       setContent(next);
@@ -349,12 +461,11 @@ export function AnalyticsTimeTooltipProvider({
   const show = useCallback(
     (
       target: HTMLElement,
-      timestamp: number,
-      locale: Locale,
+      request: AnalyticsTooltipRequest,
       clientX: number,
     ) => {
       cancelHide();
-      updateActive(target, timestamp, locale, clientX);
+      updateActive(target, request, clientX);
     },
     [cancelHide, updateActive],
   );
@@ -485,12 +596,11 @@ export function AnalyticsTimeTooltipProvider({
             onPointerLeave={scheduleHide}
             updatePositionStrategy="always"
           >
-            <AnalyticsTimeTooltipContent
-              locale={content.locale}
-              messages={messages}
-              timestamp={content.timestamp}
-              now={now}
+            <AnalyticsTooltipContent
               browserTimeZone={browserTimeZone}
+              messages={messages}
+              now={now}
+              request={content.request}
             />
           </TooltipContent>
         ) : null}
@@ -516,11 +626,19 @@ export function AnalyticsTimeTooltipTarget({
 
   const handleEnter = (event: MouseEvent<HTMLSpanElement>) => {
     context.cancelHide();
-    context.show(event.currentTarget, timestamp, locale, event.clientX);
+    context.show(
+      event.currentTarget,
+      { kind: "time", locale, timestamp },
+      event.clientX,
+    );
   };
 
   const handleMove = (event: MouseEvent<HTMLSpanElement>) => {
-    context.show(event.currentTarget, timestamp, locale, event.clientX);
+    context.show(
+      event.currentTarget,
+      { kind: "time", locale, timestamp },
+      event.clientX,
+    );
   };
 
   const handleLeave = (event: MouseEvent<HTMLSpanElement>) => {
@@ -543,6 +661,60 @@ export function AnalyticsTimeTooltipTarget({
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
       onMouseMove={handleMove}
+    >
+      {children}
+    </span>
+  );
+}
+
+export function AnalyticsDetailsTooltipTarget({
+  children,
+  className,
+  locale,
+  request,
+}: {
+  children: ReactNode;
+  className?: string;
+  locale: Locale;
+  request: Omit<AnalyticsDetailsTooltipRequest, "kind" | "locale">;
+}) {
+  const context = useContext(AnalyticsTimeTooltipContext);
+
+  if (!context) return <>{children}</>;
+
+  const showDetails = (event: MouseEvent<HTMLSpanElement>) => {
+    context.show(
+      event.currentTarget,
+      { ...request, kind: "details", locale },
+      event.clientX,
+    );
+  };
+
+  const handleEnter = (event: MouseEvent<HTMLSpanElement>) => {
+    context.cancelHide();
+    showDetails(event);
+  };
+
+  const handleLeave = (event: MouseEvent<HTMLSpanElement>) => {
+    const relatedTarget = event.relatedTarget;
+    if (
+      relatedTarget instanceof HTMLElement &&
+      relatedTarget.closest(
+        `[data-analytics-time-tooltip-group="${context.groupId}"]`,
+      )
+    ) {
+      return;
+    }
+    context.hide();
+  };
+
+  return (
+    <span
+      className={cn(className)}
+      data-analytics-time-tooltip-group={context.groupId}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+      onMouseMove={showDetails}
     >
       {children}
     </span>

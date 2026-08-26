@@ -35,7 +35,10 @@ import {
   AnalyticsTableColumnSettings,
   useAnalyticsTableColumns,
 } from "@/components/dashboard/analytics-table-column-settings";
-import { AnalyticsTimeTooltipTarget } from "@/components/dashboard/analytics-time-tooltip";
+import {
+  AnalyticsDetailsTooltipTarget,
+  AnalyticsTimeTooltipTarget,
+} from "@/components/dashboard/analytics-time-tooltip";
 import { AnimatedDataTableRow } from "@/components/dashboard/animated-data-table-row";
 import {
   createEventTrendChartData,
@@ -887,17 +890,25 @@ function appendUniqueEvents(
 const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
   locale,
   messages,
+  labels,
   row,
   now,
   columns,
 }: {
   locale: Locale;
   messages: AppMessages;
+  labels: EventPageCopy;
   row: EventRecord;
   now: number;
   columns: readonly EventRecordTableColumnId[];
 }) {
   const visitorDisplayId = row.visitorId || row.sessionId || row.visitId;
+  const visitorIdentifier = row.visitorId.trim()
+    ? { label: messages.realtime.visitorId, value: row.visitorId.trim() }
+    : row.sessionId.trim()
+      ? { label: messages.sessionDetail.sessionId, value: row.sessionId.trim() }
+      : { label: labels.visit, value: row.visitId.trim() };
+  const referrerHost = row.referrerHost.trim();
   const cells: Record<EventRecordTableColumnId, ReactNode> = {
     visitor: (
       <TableCell className="max-w-36 pl-4">
@@ -906,30 +917,67 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
             seed={visitorDisplayId || row.eventId}
             className="size-6"
           />
-          <span
-            className="min-w-0 truncate font-mono"
-            title={visitorDisplayId || undefined}
+          <AnalyticsDetailsTooltipTarget
+            className="min-w-0 truncate"
+            locale={locale}
+            request={{
+              key: `event-visitor:${row.eventId}:${visitorIdentifier.label}:${visitorIdentifier.value}`,
+              items: [
+                {
+                  label: visitorIdentifier.label,
+                  value: visitorIdentifier.value || messages.common.unknown,
+                  copyValue: visitorIdentifier.value || undefined,
+                },
+              ],
+            }}
           >
-            {visitorDisplayId}
-          </span>
+            <span className="min-w-0 truncate font-mono">
+              {visitorDisplayId}
+            </span>
+          </AnalyticsDetailsTooltipTarget>
         </div>
       </TableCell>
     ),
     eventName: (
       <TableCell className="max-w-48">
-        <span className="block truncate font-medium" title={row.eventName}>
-          {row.eventName}
-        </span>
+        <AnalyticsDetailsTooltipTarget
+          className="block truncate"
+          locale={locale}
+          request={{
+            key: `event-name:${row.eventId}:${row.eventName}`,
+            items: [
+              {
+                label: labels.eventName,
+                value: row.eventName || messages.common.unknown,
+                copyValue: row.eventName || undefined,
+              },
+            ],
+          }}
+        >
+          <span className="block truncate font-medium">{row.eventName}</span>
+        </AnalyticsDetailsTooltipTarget>
       </TableCell>
     ),
     eventId: (
       <TableCell className="max-w-32">
-        <span
-          className="block truncate font-mono text-muted-foreground"
-          title={row.eventId}
+        <AnalyticsDetailsTooltipTarget
+          className="block truncate"
+          locale={locale}
+          request={{
+            key: `event-id:${row.eventId}`,
+            items: [
+              {
+                label: labels.eventId,
+                value: row.eventId || messages.common.unknown,
+                copyValue: row.eventId || undefined,
+              },
+            ],
+          }}
         >
-          {row.eventId}
-        </span>
+          <span className="block truncate font-mono text-muted-foreground">
+            {row.eventId}
+          </span>
+        </AnalyticsDetailsTooltipTarget>
       </TableCell>
     ),
     occurredAt: (
@@ -945,32 +993,86 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
     ),
     page: (
       <TableCell className="max-w-64">
-        <span
-          className="block truncate font-mono"
-          title={formatPath(row.pathname)}
+        <AnalyticsDetailsTooltipTarget
+          className="block truncate"
+          locale={locale}
+          request={{
+            key: `event-page:${row.eventId}:${row.pathname}`,
+            items: [
+              {
+                label: labels.page,
+                value: formatPath(row.pathname),
+                copyValue: formatPath(row.pathname),
+              },
+            ],
+          }}
         >
-          {formatPath(row.pathname)}
-        </span>
+          <span className="block truncate font-mono">
+            {formatPath(row.pathname)}
+          </span>
+        </AnalyticsDetailsTooltipTarget>
       </TableCell>
     ),
     referrer: (
       <TableCell className="max-w-44">
-        <ReferrerMeta
-          referrerHost={row.referrerHost || ""}
-          directLabel={messages.overview.direct}
-          className="w-full"
-        />
+        <AnalyticsDetailsTooltipTarget
+          className="block"
+          locale={locale}
+          request={{
+            key: `event-referrer:${row.eventId}:${referrerHost}`,
+            items: [
+              referrerHost
+                ? {
+                    label: messages.common.referrerHost,
+                    value: referrerHost,
+                    copyValue: referrerHost,
+                  }
+                : {
+                    label: messages.common.referrer,
+                    value: messages.overview.direct,
+                  },
+            ],
+          }}
+        >
+          <ReferrerMeta
+            referrerHost={row.referrerHost || ""}
+            directLabel={messages.overview.direct}
+            className="w-full"
+          />
+        </AnalyticsDetailsTooltipTarget>
       </TableCell>
     ),
     location: (
       <TableCell className="max-w-52">
-        <CountryRegionMeta
+        <AnalyticsDetailsTooltipTarget
+          className="block"
           locale={locale}
-          messages={messages}
-          country={row.country || ""}
-          region={row.region}
-          className="w-full"
-        />
+          request={{
+            key: `event-location:${row.eventId}:${row.country}:${row.region}`,
+            items: [
+              {
+                label: messages.common.location,
+                value: (
+                  <CountryRegionMeta
+                    locale={locale}
+                    messages={messages}
+                    country={row.country || ""}
+                    region={row.region}
+                    className="max-w-none"
+                  />
+                ),
+              },
+            ],
+          }}
+        >
+          <CountryRegionMeta
+            locale={locale}
+            messages={messages}
+            country={row.country || ""}
+            region={row.region}
+            className="w-full"
+          />
+        </AnalyticsDetailsTooltipTarget>
       </TableCell>
     ),
     os: (
@@ -1124,6 +1226,7 @@ function EventRecordsTable({
           <EventRecordTableRowContent
             locale={locale}
             messages={messages}
+            labels={labels}
             row={row}
             now={now}
             columns={visibleColumnIds}

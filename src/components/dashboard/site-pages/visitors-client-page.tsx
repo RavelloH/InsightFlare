@@ -21,7 +21,10 @@ import {
   AnalyticsTableColumnSettings,
   useAnalyticsTableColumns,
 } from "@/components/dashboard/analytics-table-column-settings";
-import { AnalyticsTimeTooltipTarget } from "@/components/dashboard/analytics-time-tooltip";
+import {
+  AnalyticsDetailsTooltipTarget,
+  AnalyticsTimeTooltipTarget,
+} from "@/components/dashboard/analytics-time-tooltip";
 import { ClickableTableCell } from "@/components/dashboard/clickable-table-cell";
 import {
   BrowserMeta,
@@ -260,15 +263,13 @@ function appendUniqueVisitors(
   return nextRows.length > 0 ? [...current, ...nextRows] : current;
 }
 
-function SessionIdValue({ value }: { value?: string }) {
+function VisitorIdValue({ value }: { value?: string }) {
   const normalized = String(value || "").trim();
   if (!normalized) {
     return <span className="font-mono text-muted-foreground">/</span>;
   }
   return (
-    <span className="block truncate font-mono font-medium" title={normalized}>
-      {normalized}
-    </span>
+    <span className="block truncate font-mono font-medium">{normalized}</span>
   );
 }
 
@@ -290,6 +291,40 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
   columns: readonly VisitorTableColumnId[];
 }) {
   const openDetail = () => onOpenDetail(row.visitorId);
+  const visitorId = row.visitorId.trim();
+  const referrerHost = String(row.referrerHost || "").trim();
+  const referrerUrl = String(row.referrerUrl || "").trim();
+  const referrerDetails = {
+    key: `visitor-referrer:${visitorId}:${referrerHost}:${referrerUrl}`,
+    items:
+      referrerHost || referrerUrl
+        ? [
+            ...(referrerHost
+              ? [
+                  {
+                    label: messages.common.referrerHost,
+                    value: referrerHost,
+                    copyValue: referrerHost,
+                  },
+                ]
+              : []),
+            ...(referrerUrl
+              ? [
+                  {
+                    label: messages.sessionDetail.referrerUrl,
+                    value: referrerUrl,
+                    copyValue: referrerUrl,
+                  },
+                ]
+              : []),
+          ]
+        : [
+            {
+              label: messages.common.referrer,
+              value: messages.overview.direct,
+            },
+          ],
+  };
 
   const cells: Record<VisitorTableColumnId, ReactNode> = {
     visitor: (
@@ -302,13 +337,56 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
       >
         <div className="flex w-28 items-center gap-2">
           <VisitorAvatar seed={row.visitorId} className="size-6" />
-          <span className="truncate">{labels.anonymous}</span>
+          <AnalyticsDetailsTooltipTarget
+            locale={locale}
+            request={{
+              key: `visitor-id:${visitorId}`,
+              items: [
+                {
+                  label: messages.visitorDetail.visitorId,
+                  value: visitorId || messages.common.unknown,
+                  copyValue: visitorId || undefined,
+                  action: visitorId
+                    ? {
+                        label: messages.common.search,
+                        onClick: openDetail,
+                      }
+                    : undefined,
+                },
+              ],
+            }}
+          >
+            <span className="truncate">{labels.anonymous}</span>
+          </AnalyticsDetailsTooltipTarget>
         </div>
       </ClickableTableCell>
     ),
     sessionId: (
       <ClickableTableCell onClick={openDetail} className="max-w-32">
-        <SessionIdValue value={row.sessionId} />
+        <div className="flex min-w-0 items-center gap-1">
+          <AnalyticsDetailsTooltipTarget
+            className="min-w-0 flex-1 truncate"
+            locale={locale}
+            request={{
+              key: `visitor-id-column:${visitorId}`,
+              items: [
+                {
+                  label: messages.visitorDetail.visitorId,
+                  value: visitorId || messages.common.unknown,
+                  copyValue: visitorId || undefined,
+                  action: visitorId
+                    ? {
+                        label: messages.common.search,
+                        onClick: openDetail,
+                      }
+                    : undefined,
+                },
+              ],
+            }}
+          >
+            <VisitorIdValue value={visitorId} />
+          </AnalyticsDetailsTooltipTarget>
+        </div>
       </ClickableTableCell>
     ),
     firstSeen: (
@@ -363,22 +441,52 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
     ),
     referrer: (
       <ClickableTableCell onClick={openDetail} className="max-w-48">
-        <ReferrerMeta
-          referrerHost={row.referrerHost || ""}
-          referrerUrl={row.referrerUrl}
-          directLabel={messages.overview.direct}
-        />
+        <AnalyticsDetailsTooltipTarget
+          className="block"
+          locale={locale}
+          request={referrerDetails}
+        >
+          <ReferrerMeta
+            referrerHost={row.referrerHost || ""}
+            referrerUrl={row.referrerUrl}
+            directLabel={messages.overview.direct}
+          />
+        </AnalyticsDetailsTooltipTarget>
       </ClickableTableCell>
     ),
     location: (
       <ClickableTableCell onClick={openDetail} className="max-w-52">
-        <CountryRegionMeta
+        <AnalyticsDetailsTooltipTarget
+          className="block"
           locale={locale}
-          messages={messages}
-          country={row.country || ""}
-          region={row.region}
-          regionCode={row.regionCode}
-        />
+          request={{
+            key: `visitor-location:${visitorId}:${row.country}:${row.region}:${row.regionCode}:${row.city}`,
+            items: [
+              {
+                label: messages.common.location,
+                value: (
+                  <CountryRegionMeta
+                    locale={locale}
+                    messages={messages}
+                    country={row.country || ""}
+                    region={row.region}
+                    regionCode={row.regionCode}
+                    city={row.city}
+                    className="max-w-none text-background [&_.text-foreground]:text-background"
+                  />
+                ),
+              },
+            ],
+          }}
+        >
+          <CountryRegionMeta
+            locale={locale}
+            messages={messages}
+            country={row.country || ""}
+            region={row.region}
+            regionCode={row.regionCode}
+          />
+        </AnalyticsDetailsTooltipTarget>
       </ClickableTableCell>
     ),
     os: (
@@ -456,7 +564,7 @@ export function VisitorsClientPage({
   >(
     () => [
       { id: "visitor", label: labels.visitor, required: true },
-      { id: "sessionId", label: labels.sessionId },
+      { id: "sessionId", label: messages.visitorDetail.visitorId },
       { id: "firstSeen", label: labels.firstSeen },
       { id: "lastSeen", label: labels.lastSeen },
       { id: "sessions", label: labels.sessions },
@@ -469,7 +577,7 @@ export function VisitorsClientPage({
       { id: "device", label: labels.device },
       { id: "screenSize", label: labels.screenSize },
     ],
-    [labels],
+    [labels, messages.visitorDetail.visitorId],
   );
   const visitorColumns = useAnalyticsTableColumns({
     storageKey: "insightflare:analytics-table-columns:visitors",
@@ -675,7 +783,9 @@ export function VisitorsClientPage({
                 visitor: (
                   <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>
                 ),
-                sessionId: <TableHead>{labels.sessionId}</TableHead>,
+                sessionId: (
+                  <TableHead>{messages.visitorDetail.visitorId}</TableHead>
+                ),
                 firstSeen: (
                   <SortHeader
                     label={labels.firstSeen}

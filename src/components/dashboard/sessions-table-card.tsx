@@ -2,7 +2,10 @@ import { Fragment, memo, type ReactNode, useEffect, useState } from "react";
 import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
 
 import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
-import { AnalyticsTimeTooltipTarget } from "@/components/dashboard/analytics-time-tooltip";
+import {
+  AnalyticsDetailsTooltipTarget,
+  AnalyticsTimeTooltipTarget,
+} from "@/components/dashboard/analytics-time-tooltip";
 import { ClickableTableCell } from "@/components/dashboard/clickable-table-cell";
 import {
   BrowserMeta,
@@ -60,6 +63,7 @@ interface SessionsTableCardProps {
   labels: SessionsTableLabels;
   rows: JourneySession[];
   onOpenSession: (sessionId: string) => void;
+  onOpenVisitor?: (visitorId: string) => void;
   sort: SessionSortState;
   onSort: (key: SessionSortKey) => void;
   loadingRows?: boolean;
@@ -247,6 +251,7 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
   row,
   now,
   onOpenSession,
+  onOpenVisitor,
   columns,
 }: {
   locale: Locale;
@@ -255,10 +260,48 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
   row: JourneySession;
   now: number;
   onOpenSession: (sessionId: string) => void;
+  onOpenVisitor?: (visitorId: string) => void;
   columns: readonly SessionTableColumnId[];
 }) {
   const active = isSessionActive(row, now);
   const openSession = () => onOpenSession(row.sessionId);
+  const sessionId = row.sessionId.trim();
+  const visitorId = row.visitorId.trim();
+  const entryPath = formatPath(row.entryPath);
+  const exitPath = formatPath(row.exitPath);
+  const referrerHost = row.referrerHost.trim();
+  const referrerUrl = row.referrerUrl.trim();
+  const referrerDetails = {
+    key: `session-referrer:${sessionId}:${referrerHost}:${referrerUrl}`,
+    items:
+      referrerHost || referrerUrl
+        ? [
+            ...(referrerHost
+              ? [
+                  {
+                    label: messages.common.referrerHost,
+                    value: referrerHost,
+                    copyValue: referrerHost,
+                  },
+                ]
+              : []),
+            ...(referrerUrl
+              ? [
+                  {
+                    label: messages.sessionDetail.referrerUrl,
+                    value: referrerUrl,
+                    copyValue: referrerUrl,
+                  },
+                ]
+              : []),
+          ]
+        : [
+            {
+              label: messages.common.referrer,
+              value: messages.overview.direct,
+            },
+          ],
+  };
 
   const cells: Record<SessionTableColumnId, ReactNode> = {
     visitor: (
@@ -269,20 +312,62 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
         focusable
         ariaLabel={`${labels.sessionId}: ${row.sessionId}`}
       >
-        <div className="flex w-28 items-center gap-2">
+        <div className="flex w-28 min-w-0 items-center gap-2">
           <VisitorAvatar seed={row.visitorId} className="size-6" />
-          <span className="truncate">{labels.anonymous}</span>
+          <AnalyticsDetailsTooltipTarget
+            className="min-w-0 flex-1 truncate"
+            locale={locale}
+            request={{
+              key: `session-visitor:${sessionId}:${visitorId}`,
+              items: [
+                {
+                  label: messages.sessionDetail.visitorId,
+                  value: visitorId || messages.common.unknown,
+                  copyValue: visitorId || undefined,
+                  action:
+                    visitorId && onOpenVisitor
+                      ? {
+                          label: messages.common.search,
+                          onClick: () => onOpenVisitor(visitorId),
+                        }
+                      : undefined,
+                },
+              ],
+            }}
+          >
+            <span className="truncate">{labels.anonymous}</span>
+          </AnalyticsDetailsTooltipTarget>
         </div>
       </ClickableTableCell>
     ),
     sessionId: (
       <ClickableTableCell onClick={openSession} className="max-w-32">
-        <span
-          className="block truncate font-mono font-medium"
-          title={row.sessionId}
-        >
-          {row.sessionId}
-        </span>
+        <div className="flex min-w-0 items-center gap-1">
+          <AnalyticsDetailsTooltipTarget
+            className="min-w-0 flex-1 truncate"
+            locale={locale}
+            request={{
+              key: `session-id:${sessionId}`,
+              items: [
+                {
+                  label: labels.sessionId,
+                  value: sessionId || messages.common.unknown,
+                  copyValue: sessionId || undefined,
+                  action: sessionId
+                    ? {
+                        label: messages.common.search,
+                        onClick: openSession,
+                      }
+                    : undefined,
+                },
+              ],
+            }}
+          >
+            <span className="block truncate font-mono font-medium">
+              {row.sessionId}
+            </span>
+          </AnalyticsDetailsTooltipTarget>
+        </div>
       </ClickableTableCell>
     ),
     started: (
@@ -322,22 +407,52 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
     ),
     referrer: (
       <ClickableTableCell onClick={openSession} className="max-w-48">
-        <ReferrerMeta
-          referrerHost={row.referrerHost}
-          referrerUrl={row.referrerUrl}
-          directLabel={messages.overview.direct}
-        />
+        <AnalyticsDetailsTooltipTarget
+          className="block"
+          locale={locale}
+          request={referrerDetails}
+        >
+          <ReferrerMeta
+            referrerHost={row.referrerHost}
+            referrerUrl={row.referrerUrl}
+            directLabel={messages.overview.direct}
+          />
+        </AnalyticsDetailsTooltipTarget>
       </ClickableTableCell>
     ),
     location: (
       <ClickableTableCell onClick={openSession} className="max-w-52">
-        <CountryRegionMeta
+        <AnalyticsDetailsTooltipTarget
+          className="block"
           locale={locale}
-          messages={messages}
-          country={row.country}
-          region={row.region}
-          regionCode={row.regionCode}
-        />
+          request={{
+            key: `session-location:${sessionId}:${row.country}:${row.region}:${row.regionCode}:${row.city}`,
+            items: [
+              {
+                label: messages.common.location,
+                value: (
+                  <CountryRegionMeta
+                    locale={locale}
+                    messages={messages}
+                    country={row.country}
+                    region={row.region}
+                    regionCode={row.regionCode}
+                    city={row.city}
+                    className="max-w-none text-background [&_.text-foreground]:text-background"
+                  />
+                ),
+              },
+            ],
+          }}
+        >
+          <CountryRegionMeta
+            locale={locale}
+            messages={messages}
+            country={row.country}
+            region={row.region}
+            regionCode={row.regionCode}
+          />
+        </AnalyticsDetailsTooltipTarget>
       </ClickableTableCell>
     ),
     os: (
@@ -373,7 +488,22 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
         className="max-w-56 font-mono"
         buttonClassName="truncate"
       >
-        {formatPath(row.entryPath)}
+        <AnalyticsDetailsTooltipTarget
+          className="block truncate"
+          locale={locale}
+          request={{
+            key: `session-entry-page:${sessionId}:${row.entryPath}`,
+            items: [
+              {
+                label: labels.entryPage,
+                value: entryPath,
+                copyValue: entryPath,
+              },
+            ],
+          }}
+        >
+          {entryPath}
+        </AnalyticsDetailsTooltipTarget>
       </ClickableTableCell>
     ),
     exitPage: (
@@ -382,7 +512,22 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
         className="max-w-56 font-mono"
         buttonClassName="truncate pr-4"
       >
-        {formatPath(row.exitPath)}
+        <AnalyticsDetailsTooltipTarget
+          className="block truncate"
+          locale={locale}
+          request={{
+            key: `session-exit-page:${sessionId}:${row.exitPath}`,
+            items: [
+              {
+                label: labels.exitPage,
+                value: exitPath,
+                copyValue: exitPath,
+              },
+            ],
+          }}
+        >
+          {exitPath}
+        </AnalyticsDetailsTooltipTarget>
       </ClickableTableCell>
     ),
     screenSize: (
@@ -427,6 +572,7 @@ export function SessionsTableCard({
   labels,
   rows,
   onOpenSession,
+  onOpenVisitor,
   sort,
   onSort,
   loadingRows = false,
@@ -520,6 +666,7 @@ export function SessionsTableCard({
             row={row}
             now={now}
             onOpenSession={onOpenSession}
+            onOpenVisitor={onOpenVisitor}
             columns={visibleColumnIds}
           />
         ),

@@ -29,31 +29,67 @@ export function AutoResizer({
   );
   const [updateCount, setUpdateCount] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
+  const heightRef = useRef<number | "auto">(
+    initial && animateHeight ? 0 : "auto",
+  );
+  const widthRef = useRef<number | "auto">(
+    initial && animateWidth ? 0 : "auto",
+  );
 
   useEffect(() => {
     if (!contentRef.current) return;
     const measureContent = (element: HTMLElement) => {
       const nextHeight = element.scrollHeight;
       const nextWidth = element.scrollWidth;
+      let changed = false;
+
       if (animateHeight) {
-        setHeight(nextHeight);
+        if (heightRef.current !== nextHeight) {
+          heightRef.current = nextHeight;
+          setHeight(nextHeight);
+          changed = true;
+        }
       }
       if (animateWidth) {
-        setWidth(nextWidth);
+        if (widthRef.current !== nextWidth) {
+          widthRef.current = nextWidth;
+          setWidth(nextWidth);
+          changed = true;
+        }
       }
-      setUpdateCount((prev) => prev + 1);
+      if (changed) setUpdateCount((prev) => prev + 1);
     };
 
     measureContent(contentRef.current);
 
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        measureContent(entry.target as HTMLElement);
-      }
-    });
+    let frameId: number | null = null;
+    const scheduleMeasure = () => {
+      if (frameId !== null) return;
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        if (contentRef.current) measureContent(contentRef.current);
+      });
+    };
+
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
 
     resizeObserver.observe(contentRef.current);
-    return () => resizeObserver.disconnect();
+
+    const mutationObserver =
+      animateWidth && typeof MutationObserver !== "undefined"
+        ? new MutationObserver(scheduleMeasure)
+        : null;
+    mutationObserver?.observe(contentRef.current, {
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver?.disconnect();
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+    };
   }, [animateHeight, animateWidth]);
 
   const shouldAnimate = initial || updateCount > 1;
@@ -70,6 +106,7 @@ export function AutoResizer({
     <motion.div
       className={className}
       style={{
+        alignItems: animateWidth ? "flex-start" : undefined,
         overflow: "hidden",
         display: animateWidth ? "inline-flex" : undefined,
       }}
@@ -85,6 +122,7 @@ export function AutoResizer({
           animateWidth
             ? {
                 display: "inline-block",
+                flexShrink: 0,
                 width: "max-content",
               }
             : undefined

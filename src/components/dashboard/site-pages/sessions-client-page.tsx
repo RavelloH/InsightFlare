@@ -286,6 +286,10 @@ export function SessionsClientPage({
     },
     [],
   );
+  const openVisitorDetail = useCallback(
+    (visitorId: string) => openNestedDetail("visitor", visitorId),
+    [openNestedDetail],
+  );
   const closeNestedDetail = useCallback((stackKey: string) => {
     setNestedDetails((current) => {
       const index = current.findIndex((item) => item.stackKey === stackKey);
@@ -328,6 +332,7 @@ export function SessionsClientPage({
         labels={labels}
         rows={rows}
         onOpenSession={stableOpenSessionDetail}
+        onOpenVisitor={openVisitorDetail}
         sort={sort}
         onSort={toggleSort}
         loadingRows={replacingRows}
