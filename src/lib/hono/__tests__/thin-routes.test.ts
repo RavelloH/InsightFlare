@@ -18,9 +18,6 @@ import {
 } from "@/lib/edge/legacy-auth";
 import { handleMapRelayRequest } from "@/lib/edge/map-relay";
 import { handleReleasesCompareRequest } from "@/lib/edge/releases-compare";
-import { handleWikiSummaryRequest } from "@/lib/edge/wiki-summary";
-import { handleWorldCountriesRequest } from "@/lib/edge/world-countries";
-import { adminWsRoutes } from "@/lib/hono/routes/admin-ws";
 import { privateAdminRoutes } from "@/lib/hono/routes/private/admin";
 import { privateNotificationRoutes } from "@/lib/hono/routes/private/notifications";
 import { privateRealtimeRoutes } from "@/lib/hono/routes/private/realtime";
@@ -29,8 +26,6 @@ import { privateSessionRoutes } from "@/lib/hono/routes/private/session";
 import { publicResourceRoutes } from "@/lib/hono/routes/public/resources";
 import { publicSessionRoutes } from "@/lib/hono/routes/public/session";
 import { wellKnownRoutes } from "@/lib/hono/routes/well-known";
-import { wikiSummaryRoutes } from "@/lib/hono/routes/wiki-summary";
-import { worldCountriesRoutes } from "@/lib/hono/routes/world-countries";
 
 vi.mock("@/lib/edge/admin-ws", () => ({
   handleAdminWs: vi.fn(),
@@ -61,14 +56,6 @@ vi.mock("@/lib/edge/legacy-auth", () => ({
 
 vi.mock("@/lib/edge/releases-compare", () => ({
   handleReleasesCompareRequest: vi.fn(),
-}));
-
-vi.mock("@/lib/edge/wiki-summary", () => ({
-  handleWikiSummaryRequest: vi.fn(),
-}));
-
-vi.mock("@/lib/edge/world-countries", () => ({
-  handleWorldCountriesRequest: vi.fn(),
 }));
 
 const env = { DB: {} };
@@ -104,16 +91,9 @@ describe("thin Hono route modules", () => {
     vi.mocked(handleReleasesCompareRequest).mockResolvedValue(
       new Response("release"),
     );
-    vi.mocked(handleWikiSummaryRequest).mockResolvedValue(new Response("wiki"));
-    vi.mocked(handleWorldCountriesRequest).mockResolvedValue(
-      new Response("countries"),
-    );
   });
 
-  it("forwards public session, ws, resource, and release routes to edge handlers", async () => {
-    await expect(
-      adminWsRoutes.fetch(request("/api/private/realtime/ws"), env as never),
-    ).resolves.toMatchObject({ status: 200 });
+  it("forwards public session, private realtime, resource, and release routes to edge handlers", async () => {
     await publicSessionRoutes.fetch(
       request("/", { method: "POST" }),
       env as never,
@@ -122,8 +102,6 @@ describe("thin Hono route modules", () => {
       request("/", { method: "DELETE" }),
       env as never,
     );
-    await wikiSummaryRoutes.fetch(request("/wiki-summary"), env as never);
-    await worldCountriesRoutes.fetch(request("/world-countries"), env as never);
     await privateRealtimeRoutes.fetch(request("/ws"), env as never);
     await privateReleaseRoutes.fetch(request("/compare"), env as never);
     await publicResourceRoutes.fetch(
@@ -131,11 +109,9 @@ describe("thin Hono route modules", () => {
       env as never,
     );
 
-    expect(handleAdminWs).toHaveBeenCalledTimes(2);
+    expect(handleAdminWs).toHaveBeenCalledTimes(1);
     expect(handleLegacyAuthLogin).toHaveBeenCalled();
     expect(handleLegacyAuthLogout).toHaveBeenCalled();
-    expect(handleWikiSummaryRequest).toHaveBeenCalled();
-    expect(handleWorldCountriesRequest).toHaveBeenCalled();
     expect(handleReleasesCompareRequest).toHaveBeenCalledWith(
       expect.any(Request),
       env,

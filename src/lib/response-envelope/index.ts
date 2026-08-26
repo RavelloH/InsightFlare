@@ -1,7 +1,6 @@
 // Shared response envelope primitives for the browser and mock layers. Their
-// shapes mirror the server-side helpers in src/lib/response.ts (jsonResponse /
-// errorResponse) and api-v1-helpers.ts (jsonSuccess / jsonError), so demo mode
-// produces byte-for-byte compatible bodies with the real private/public API.
+// shapes mirror the server-side response helpers, so demo mode produces
+// byte-for-byte compatible bodies with the real private/public API.
 export interface ErrorDetails {
   [key: string]: unknown;
 }

@@ -9,7 +9,6 @@ import {
   authenticateApiKeyMiddleware,
   requireApiScopeMiddleware,
 } from "@/lib/hono/middleware/api-key";
-import { normalizeJsonBodyMiddleware } from "@/lib/hono/middleware/body";
 import { dashboardCacheMiddleware } from "@/lib/hono/middleware/dashboard-cache";
 import {
   errorBoundaryMiddleware,
@@ -20,7 +19,6 @@ import {
   requireMethodsMiddleware,
 } from "@/lib/hono/middleware/method";
 import { requestIdMiddleware } from "@/lib/hono/middleware/request-id";
-import { sameOriginMiddleware } from "@/lib/hono/middleware/same-origin";
 import { requireSessionMiddleware } from "@/lib/hono/middleware/session";
 import {
   resolveApiSiteMiddleware,
@@ -58,16 +56,11 @@ vi.mock("@/lib/edge/session-auth", () => ({
   requireSession: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/utils", () => ({
-  requireSameOrigin: vi.fn(),
-}));
-
 const { authenticateApiKey } = await import("@/lib/edge/api-key-auth");
 const { withDashboardCache } = await import("@/lib/edge/dashboard-cache");
 const { fetchPublicSite, resolvePrivateSiteForSession } =
   await import("@/lib/edge/analytics/providers/d1/internal/core");
 const { requireSession } = await import("@/lib/edge/session-auth");
-const { requireSameOrigin } = await import("@/lib/edge/utils");
 
 const ctx = {
   passThroughOnException: vi.fn(),
@@ -140,7 +133,6 @@ function responseWithThrowingHeaderSet(): Response {
 describe("Hono middleware foundation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requireSameOrigin).mockReturnValue(null);
   });
 
   it("stores the shared request id value", async () => {
@@ -237,38 +229,6 @@ describe("Hono middleware foundation", () => {
     );
   });
 
-  it("short-circuits unsafe cross-origin requests", async () => {
-    vi.mocked(requireSameOrigin).mockReturnValue(
-      new Response("Forbidden", { status: 403 }),
-    );
-    const app = createApp(sameOriginMiddleware(), () => new Response("ok"));
-
-    const response = await app.fetch(
-      request("/api/private/admin/users", {
-        method: "POST",
-        headers: { origin: "https://evil.test" },
-      }),
-      createEnv(),
-      ctx,
-    );
-
-    expect(response.status).toBe(403);
-    await expect(response.text()).resolves.toBe("Forbidden");
-  });
-
-  it("continues same-origin middleware when the shared helper allows the request", async () => {
-    const app = createApp(sameOriginMiddleware(), () => new Response("ok"));
-
-    const response = await app.fetch(
-      request("/api/private/admin/users", { method: "POST" }),
-      createEnv(),
-      ctx,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.text()).resolves.toBe("ok");
-  });
-
   it("guards exact and grouped methods with the API v1 response shape", async () => {
     const exact = createApp(requireMethodMiddleware("POST"), () =>
       Response.json({ ok: true }),
@@ -316,69 +276,6 @@ describe("Hono middleware foundation", () => {
 
     expect(exactResponse.status).toBe(200);
     expect(groupedResponse.status).toBe(200);
-  });
-
-  it("normalizes JSON bodies by replacing the raw request body", async () => {
-    const app = createApp(
-      normalizeJsonBodyMiddleware((body) => ({ ...body, added: true })),
-      async (c) => Response.json(await c.req.raw.json()),
-    );
-
-    const response = await app.fetch(
-      request("/api/private/admin/sites", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Site" }),
-      }),
-      createEnv(),
-      ctx,
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      name: "Site",
-      added: true,
-    });
-  });
-
-  it("leaves non-record JSON bodies unchanged", async () => {
-    const app = createApp(
-      normalizeJsonBodyMiddleware((body) => ({ ...body, added: true })),
-      async (c) => Response.json(await c.req.raw.json()),
-    );
-
-    const response = await app.fetch(
-      request("/api/private/admin/sites", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(["Site"]),
-      }),
-      createEnv(),
-      ctx,
-    );
-
-    await expect(response.json()).resolves.toEqual(["Site"]);
-  });
-
-  it("leaves invalid JSON bodies available to downstream handlers", async () => {
-    const app = createApp(
-      normalizeJsonBodyMiddleware((body) => ({ ...body, added: true })),
-      async (c) => {
-        await expect(c.req.raw.text()).resolves.toBe("{");
-        return new Response("ok");
-      },
-    );
-
-    const response = await app.fetch(
-      request("/api/private/admin/sites", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{",
-      }),
-      createEnv(),
-      ctx,
-    );
-
-    await expect(response.text()).resolves.toBe("ok");
   });
 
   it("stores authenticated session claims", async () => {

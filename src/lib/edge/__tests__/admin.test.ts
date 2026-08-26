@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handlePrivateAdmin } from "@/lib/edge/admin";
 import {
   canAdministerTeam,
   canManageSite,
@@ -20,6 +19,9 @@ import {
   upsertSiteScriptSettings,
 } from "@/lib/edge/site-settings-store";
 import type { Env } from "@/lib/edge/types";
+import { privateAdminRoutes } from "@/lib/hono/routes/private/admin";
+import { privateSessionRoutes } from "@/lib/hono/routes/private/session";
+import { publicSessionRoutes } from "@/lib/hono/routes/public/session";
 import { deriveSecret, SECRET_PURPOSES } from "@/lib/secrets";
 import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
 import type { DoDiagnosticPayload } from "@/lib/system-performance";
@@ -347,8 +349,20 @@ function edgeRequest(path: string, init?: RequestInit): Request {
 }
 
 async function dispatch(path: string, env: Env, init?: RequestInit) {
-  const request = edgeRequest(path, init);
-  return handlePrivateAdmin(request, env, new URL(request.url));
+  if (path === "/api/public/session") {
+    return publicSessionRoutes.fetch(edgeRequest("/", init), env);
+  }
+  if (path === "/api/private/session") {
+    return privateSessionRoutes.fetch(edgeRequest("/", init), env);
+  }
+  const adminPrefix = "/api/private/admin";
+  if (path.startsWith(`${adminPrefix}/`)) {
+    return privateAdminRoutes.fetch(
+      edgeRequest(path.slice(adminPrefix.length), init),
+      env,
+    );
+  }
+  return new Response("Not Found", { status: 404 });
 }
 
 function mockUuid(...ids: string[]) {
@@ -726,8 +740,27 @@ describe("private admin edge handler", () => {
     expect(prepare).not.toHaveBeenCalled();
   });
 
+  it("routes less common admin services through the canonical route table", async () => {
+    const { env, prepare } = createEnv();
+    setSession(null);
+
+    for (const route of [
+      "account-links",
+      "team-invites",
+      "bot-analytics-config",
+      "bot-analytics",
+      "do-diagnostic",
+      "e2e/flush",
+    ]) {
+      const response = await dispatch(`/api/private/admin/${route}`, env);
+      expect(response.status).toBe(route === "e2e/flush" ? 404 : 401);
+    }
+
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
   describe("auth routes", () => {
-    it("rejects unsupported login and auth/me methods before database access", async () => {
+    it("returns not found for unsupported login and auth/me methods", async () => {
       const { env, prepare } = createEnv();
 
       const login = await dispatch("/api/public/session", env, {
@@ -737,15 +770,15 @@ describe("private admin edge handler", () => {
         method: "POST",
       });
 
-      expect(login.status).toBe(405);
-      expect(me.status).toBe(405);
+      expect(login.status).toBe(404);
+      expect(me.status).toBe(404);
       expect(await login.json()).toMatchObject({
         ok: false,
-        error: { message: "Method Not Allowed" },
+        error: { message: "Not Found" },
       });
       expect(await me.json()).toMatchObject({
         ok: false,
-        error: { message: "Method Not Allowed" },
+        error: { message: "Not Found" },
       });
       expect(requireSessionMock).not.toHaveBeenCalled();
       expect(prepare).not.toHaveBeenCalled();
@@ -2461,17 +2494,17 @@ describe("private admin edge handler", () => {
         deleteSite,
       ]);
 
-      await expect(
-        dispatch(
-          "/api/private/admin/sites",
-          env,
-          jsonInit({
-            teamId: "team-1",
-            name: "Docs",
-            domain: "docs.example.test",
-          }),
-        ),
-      ).rejects.toThrow("kv down");
+      const response = await dispatch(
+        "/api/private/admin/sites",
+        env,
+        jsonInit({
+          teamId: "team-1",
+          name: "Docs",
+          domain: "docs.example.test",
+        }),
+      );
+
+      expect(response.status).toBe(500);
 
       expect(insertSite.bind).toHaveBeenCalled();
       expect(deleteSite.bind).toHaveBeenCalledWith(

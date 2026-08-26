@@ -12,16 +12,22 @@ import {
   SHARE_TREND_OTHER_TOKEN,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
+  queryBrowserCrossDimensionFromD1,
+  queryBrowserVersionBreakdownFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/technology/browser";
+import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
+import {
   parseClientDimensionKey,
   parseUtmDimensionKey,
-  queryBrowserCrossDimensionFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/technology/parsers";
+import {
   queryBrowserRadarFromD1,
-  queryBrowserVersionBreakdownFromD1,
-  queryReferrerAndChannelTrendFromD1,
   queryReferrerRadarFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/technology/radar";
+import {
+  queryReferrerAndChannelTrendFromD1,
   queryShareTrendFromD1,
-} from "@/lib/edge/analytics/providers/d1/internal/technology";
-import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
+} from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";

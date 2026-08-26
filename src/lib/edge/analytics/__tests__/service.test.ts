@@ -7,7 +7,6 @@ import {
   typedQueryProvider,
 } from "@/lib/edge/analytics/application/provider-registry";
 import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
-import { createQueryService } from "@/lib/edge/analytics/composition/create-query-service";
 import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
@@ -116,10 +115,6 @@ describe("TypedQueryApplicationService", () => {
     await expect(
       factoryRegistry.resolve("overview")?.execute({} as never),
     ).resolves.toEqual({ value: { views: 2 } });
-  });
-
-  it("creates the application service from the composition boundary", () => {
-    expect(createQueryService()).toBeInstanceOf(TypedQueryApplicationService);
   });
 
   it("executes a canonical typed query through the registry", async () => {
