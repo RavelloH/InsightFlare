@@ -41,6 +41,7 @@ import {
   DETAIL_QUERY_PARAM,
   DetailDrawer,
 } from "@/components/dashboard/site-pages/detail-query-modal";
+import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -76,19 +77,6 @@ const VisitorDetailClientPage = dynamic(
   () =>
     import("@/components/dashboard/site-pages/visitor-detail-client-page").then(
       (module) => module.VisitorDetailClientPage,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="p-6 text-sm text-muted-foreground">Loading...</div>
-    ),
-  },
-);
-
-const SessionDetailClientPage = dynamic(
-  () =>
-    import("@/components/dashboard/site-pages/session-detail-client-page").then(
-      (module) => module.SessionDetailClientPage,
     ),
   {
     ssr: false,

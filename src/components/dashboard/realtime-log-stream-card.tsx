@@ -32,6 +32,7 @@ import {
 import { JsonTreePanel } from "@/components/dashboard/json-tree";
 import { useGeoStateTranslationBundle } from "@/components/dashboard/lazy-geo-location-label";
 import { DetailDrawer } from "@/components/dashboard/site-pages/detail-drawer";
+import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
@@ -119,19 +120,6 @@ const VisitorDetailClientPage = dynamic(
   () =>
     import("@/components/dashboard/site-pages/visitor-detail-client-page").then(
       (module) => module.VisitorDetailClientPage,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="p-6 text-sm text-muted-foreground">Loading...</div>
-    ),
-  },
-);
-
-const SessionDetailClientPage = dynamic(
-  () =>
-    import("@/components/dashboard/site-pages/session-detail-client-page").then(
-      (module) => module.SessionDetailClientPage,
     ),
   {
     ssr: false,

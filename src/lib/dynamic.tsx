@@ -6,14 +6,14 @@ import {
 } from "react";
 import { ClientOnly } from "@tanstack/react-router";
 
-interface DynamicOptions {
-  loading?: ComponentType;
+interface DynamicOptions<Props extends object> {
+  loading?: ComponentType<Props>;
   ssr?: boolean;
 }
 
 export default function dynamic<Props extends object>(
   loader: () => Promise<ComponentType<Props>>,
-  options: DynamicOptions = {},
+  options: DynamicOptions<Props> = {},
 ): ComponentType<Props> {
   const LazyComponent: LazyExoticComponent<ComponentType<Props>> = lazy(
     async () => ({ default: await loader() }),
@@ -22,12 +22,14 @@ export default function dynamic<Props extends object>(
 
   return function DynamicComponent(props: Props) {
     const content = (
-      <Suspense fallback={<Loading />}>
+      <Suspense fallback={<Loading {...props} />}>
         <LazyComponent {...props} />
       </Suspense>
     );
     if (options.ssr === false) {
-      return <ClientOnly fallback={<Loading />}>{content}</ClientOnly>;
+      return (
+        <ClientOnly fallback={<Loading {...props} />}>{content}</ClientOnly>
+      );
     }
     return content;
   };

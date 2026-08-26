@@ -10,6 +10,7 @@ import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clickable } from "@/components/ui/clickable";
+import { Skeleton } from "@/components/ui/skeleton";
 import { numberFormat } from "@/lib/dashboard/format";
 import {
   buildLocalityLocationValue,
@@ -50,6 +51,7 @@ interface JourneyGeoLocationCardProps {
   messages: AppMessages;
   title: string;
   locations: JourneyGeoLocationInput[];
+  loading?: boolean;
 }
 
 interface NormalizedJourneyGeoLocation {
@@ -796,6 +798,7 @@ export function JourneyGeoLocationCard({
   messages,
   title,
   locations,
+  loading = false,
 }: JourneyGeoLocationCardProps) {
   const entries = useMemo(
     () => normalizeJourneyGeoLocations(locations, locale, messages),
@@ -836,29 +839,31 @@ export function JourneyGeoLocationCard({
     retry: false,
     staleTime: Infinity,
   });
-  const loading = investigationQuery.isPending;
+  const investigationLoading = investigationQuery.isPending;
   const investigation = investigationQuery.data?.investigation ?? null;
   const wikiSummary = investigationQuery.data?.wikiSummary ?? null;
 
-  if (!selectedEntry) return null;
+  if (!selectedEntry && !loading) return null;
 
-  const headline = investigation?.headline || selectedEntry.label;
-  const context = investigation?.context ?? selectedEntry.context;
+  const headline = investigation?.headline || selectedEntry?.label || "";
+  const context = investigation?.context ?? selectedEntry?.context;
   const baseRows =
     investigation?.rows && investigation.rows.length > 0
       ? investigation.rows
       : [];
-  const visitorCoordinateRow = buildVisitorCoordinateRow(
-    selectedEntry,
-    messages.geo.visitorCoordinates,
-    messages.geo.investigation,
-  );
+  const visitorCoordinateRow = selectedEntry
+    ? buildVisitorCoordinateRow(
+        selectedEntry,
+        messages.geo.visitorCoordinates,
+        messages.geo.investigation,
+      )
+    : null;
   const rows = visitorCoordinateRow
     ? [...baseRows, visitorCoordinateRow]
     : baseRows;
   const transitionKey = [
-    selectedEntry.key,
-    loading ? "loading" : "ready",
+    selectedEntry?.key ?? "initial-loading",
+    investigationLoading ? "loading" : "ready",
     headline,
     context ?? "",
     wikiSummary?.title ?? "",
@@ -866,7 +871,7 @@ export function JourneyGeoLocationCard({
   ].join("::");
 
   return (
-    <Card>
+    <Card aria-busy={loading || investigationLoading ? "true" : undefined}>
       <CardHeader>
         <CardTitle className="inline-flex items-center gap-2">
           <RiMapPin2Line className="size-4" />
@@ -874,93 +879,141 @@ export function JourneyGeoLocationCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="px-0 pb-0">
-        <JourneyGeoSelector
-          entries={entries}
-          selectedKey={selectedEntry.key}
-          onSelect={setSelectedKey}
-        />
-        <AutoResizer initial>
-          <AutoTransition initial type="fade">
-            <div
-              key={transitionKey}
-              className="border-t border-border/70 px-4 py-3"
-            >
-              {loading ? (
-                <div className="py-6 text-sm text-muted-foreground">
-                  {messages.common.loading}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-2xl leading-tight font-semibold tracking-tight text-foreground sm:text-[1.9rem]">
-                      {headline}
-                    </div>
-                    {context ? (
-                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        {context}
-                      </p>
-                    ) : null}
-                    {wikiSummary?.description ? (
-                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        {wikiSummary.description}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  {rows.length > 0 ? (
-                    <dl className="grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4">
-                      {rows.map((row, index) => (
-                        <div
-                          key={`${row.label}-${index}`}
-                          className={cn(
-                            "min-w-0",
-                            row.fullWidth && "sm:col-span-2 lg:col-span-2",
-                          )}
-                        >
-                          <dt className="text-[11px] leading-4 text-muted-foreground">
-                            {row.label}
-                          </dt>
-                          <dd className="mt-0.5 break-words text-sm leading-5 font-medium whitespace-pre-line text-foreground">
-                            {row.value}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  ) : null}
-
-                  {wikiSummary?.extract ? (
-                    <p className="text-sm leading-6 text-foreground/80">
-                      {wikiSummary.extract}
-                    </p>
-                  ) : null}
-
-                  {wikiSummary?.pageUrl ? (
-                    <a
-                      href={wikiSummary.pageUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground transition-colors hover:text-primary"
+        <AutoResizer duration={0.24}>
+          <AutoTransition
+            initial={false}
+            transitionKey={selectedEntry ? "ready" : "loading"}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+          >
+            {selectedEntry ? (
+              <div key="ready">
+                <JourneyGeoSelector
+                  entries={entries}
+                  selectedKey={selectedEntry.key}
+                  onSelect={setSelectedKey}
+                />
+                <AutoResizer initial>
+                  <AutoTransition initial type="fade">
+                    <div
+                      key={transitionKey}
+                      className="border-t border-border/70 px-4 py-3"
                     >
-                      {messages.geo.viewOnWikipedia}
-                      <RiExternalLinkLine className="size-3.5 shrink-0" />
-                    </a>
-                  ) : null}
+                      {investigationLoading ? (
+                        <div className="space-y-3" aria-busy="true">
+                          <Skeleton className="h-7 w-44" />
+                          <Skeleton className="h-4 w-[min(30rem,82%)]" />
+                          <div className="grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                            {Array.from({ length: 4 }, (_, index) => (
+                              <div
+                                key={`geo-investigation-skeleton-${index}`}
+                                className="space-y-1"
+                              >
+                                <Skeleton className="h-3 w-20" />
+                                <Skeleton className="h-4 w-28" />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div>
+                            <div className="text-2xl leading-tight font-semibold tracking-tight text-foreground sm:text-[1.9rem]">
+                              {headline}
+                            </div>
+                            {context ? (
+                              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                                {context}
+                              </p>
+                            ) : null}
+                            {wikiSummary?.description ? (
+                              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                                {wikiSummary.description}
+                              </p>
+                            ) : null}
+                          </div>
 
-                  <div className="space-y-1.5 text-[11px] leading-4 text-muted-foreground">
-                    <p>
-                      <span className="mr-1.5 inline-flex h-4 align-top items-center">
-                        <RiInformationLine className="size-3.5" />
-                      </span>
-                      {messages.geo.ipNotice}
-                    </p>
-                    {entries.length > 1 ? (
-                      <p className="pl-5">{messages.geo.multipleNotice}</p>
-                    ) : null}
-                    <p className="pl-5">{messages.geo.investigationNotice}</p>
-                  </div>
+                          {rows.length > 0 ? (
+                            <dl className="grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                              {rows.map((row, index) => (
+                                <div
+                                  key={`${row.label}-${index}`}
+                                  className={cn(
+                                    "min-w-0",
+                                    row.fullWidth &&
+                                      "sm:col-span-2 lg:col-span-2",
+                                  )}
+                                >
+                                  <dt className="text-[11px] leading-4 text-muted-foreground">
+                                    {row.label}
+                                  </dt>
+                                  <dd className="mt-0.5 break-words text-sm leading-5 font-medium whitespace-pre-line text-foreground">
+                                    {row.value}
+                                  </dd>
+                                </div>
+                              ))}
+                            </dl>
+                          ) : null}
+
+                          {wikiSummary?.extract ? (
+                            <p className="text-sm leading-6 text-foreground/80">
+                              {wikiSummary.extract}
+                            </p>
+                          ) : null}
+
+                          {wikiSummary?.pageUrl ? (
+                            <a
+                              href={wikiSummary.pageUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground transition-colors hover:text-primary"
+                            >
+                              {messages.geo.viewOnWikipedia}
+                              <RiExternalLinkLine className="size-3.5 shrink-0" />
+                            </a>
+                          ) : null}
+
+                          <div className="space-y-1.5 text-[11px] leading-4 text-muted-foreground">
+                            <p>
+                              <span className="mr-1.5 inline-flex h-4 align-top items-center">
+                                <RiInformationLine className="size-3.5" />
+                              </span>
+                              {messages.geo.ipNotice}
+                            </p>
+                            {entries.length > 1 ? (
+                              <p className="pl-5">
+                                {messages.geo.multipleNotice}
+                              </p>
+                            ) : null}
+                            <p className="pl-5">
+                              {messages.geo.investigationNotice}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </AutoTransition>
+                </AutoResizer>
+              </div>
+            ) : (
+              <div
+                key="loading"
+                className="space-y-3 border-t border-border/70 px-4 py-3"
+                aria-busy="true"
+              >
+                <Skeleton className="h-7 w-44" />
+                <Skeleton className="h-4 w-[min(30rem,82%)]" />
+                <div className="grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                  {Array.from({ length: 4 }, (_, index) => (
+                    <div key={`geo-skeleton-${index}`} className="space-y-1">
+                      <Skeleton className="h-3 w-20" />
+                      <Skeleton className="h-4 w-28" />
+                    </div>
+                  ))}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </AutoTransition>
         </AutoResizer>
       </CardContent>

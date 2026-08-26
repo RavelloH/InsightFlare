@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { EVENT_TREND_MAX_SERIES } from "@/components/dashboard/charts/event-trend-bar-chart";
 import {
   DETAIL_QUERY_PARAM,
   DetailModal,
-  useDetailModalReady,
 } from "@/components/dashboard/site-pages/detail-query-modal";
 import {
   EventMetricGrid,
@@ -13,7 +12,7 @@ import {
   EventRecordsSection,
   EventTrendStackedBarCard,
 } from "@/components/dashboard/site-pages/event-analytics-components";
-import { EventTypeDetailLoadingState } from "@/components/dashboard/site-pages/event-type-detail-loading-state";
+import { EventTypeDetailClientPage } from "@/components/dashboard/site-pages/event-type-detail-client-page";
 import {
   OverviewPagesSection,
   type OverviewPagesSectionCardData,
@@ -31,7 +30,6 @@ import {
 } from "@/lib/dashboard/client-data";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-import dynamic from "@/lib/dynamic";
 import type { EventsSummaryData, EventsTrendData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -42,71 +40,6 @@ interface EventsClientPageProps {
   siteId: string;
   siteDomain: string;
   pathname: string;
-}
-
-const EventTypeDetailClientPage = dynamic(
-  () =>
-    import("@/components/dashboard/site-pages/event-type-detail-client-page").then(
-      (module) => module.EventTypeDetailClientPage,
-    ),
-  {
-    ssr: false,
-    loading: () => <EventTypeDetailModalLoadingState />,
-  },
-);
-
-function EventTypeDetailModalLoadingState({
-  loadingLabel,
-}: {
-  loadingLabel?: string;
-}) {
-  return (
-    <div className="mx-auto w-full max-w-[1400px] space-y-6 p-4 md:p-6">
-      <EventTypeDetailLoadingState loadingLabel={loadingLabel} />
-    </div>
-  );
-}
-
-function EventTypeDetailModalContent(props: {
-  locale: Locale;
-  messages: AppMessages;
-  siteId: string;
-  siteDomain: string;
-  pathname: string;
-  eventName: string;
-}) {
-  const modalReady = useDetailModalReady();
-  const [renderEventName, setRenderEventName] = useState("");
-
-  useEffect(() => {
-    if (!modalReady) {
-      setRenderEventName("");
-      return;
-    }
-
-    let firstFrame = 0;
-    let secondFrame = 0;
-    firstFrame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => {
-        setRenderEventName(props.eventName);
-      });
-    });
-
-    return () => {
-      window.cancelAnimationFrame(firstFrame);
-      window.cancelAnimationFrame(secondFrame);
-    };
-  }, [modalReady, props.eventName]);
-
-  if (!modalReady || renderEventName !== props.eventName) {
-    return (
-      <EventTypeDetailModalLoadingState
-        loadingLabel={props.messages.common.loading}
-      />
-    );
-  }
-
-  return <EventTypeDetailClientPage key={props.eventName} {...props} />;
 }
 
 function emptySummary(): EventsSummaryData {
@@ -280,7 +213,6 @@ export function EventsClientPage({
       const target = detailQueryTarget(pathname, searchParams, eventName);
       if (!target) return;
       openedDetailFromListRef.current = true;
-      void import("@/components/dashboard/site-pages/event-type-detail-client-page");
       pushUrlWithoutNavigation(target);
     },
     [pathname, searchParams],
@@ -403,7 +335,7 @@ export function EventsClientPage({
           modalKey={`event:${detailEventName}`}
           onClose={closeEventType}
         >
-          <EventTypeDetailModalContent
+          <EventTypeDetailClientPage
             locale={locale}
             messages={messages}
             siteId={siteId}

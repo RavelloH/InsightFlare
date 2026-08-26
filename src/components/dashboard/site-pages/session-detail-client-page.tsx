@@ -16,10 +16,7 @@ import {
   type AsyncDimensionBreakdownRow,
 } from "@/components/dashboard/async-dimension-breakdown-card";
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
-import {
-  JourneyDetailLoadingState,
-  JourneyDetailStateSwitch,
-} from "@/components/dashboard/journey-detail-state";
+import { JourneyDetailStateSwitch } from "@/components/dashboard/journey-detail-state";
 import {
   BrowserMeta,
   DeviceMeta,
@@ -50,6 +47,8 @@ import type {
   SessionLocationPoint,
 } from "@/components/dashboard/site-pages/session-detail-map-stage";
 import { useTheme } from "@/components/theme-provider";
+import { AutoResizer } from "@/components/ui/auto-resizer";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import {
   Card,
   CardContent,
@@ -58,6 +57,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Clickable } from "@/components/ui/clickable";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   fetchSessionDetail,
   type OverviewTabRows,
@@ -96,6 +96,60 @@ type SessionDetail = NonNullable<SessionDetailData["data"]>;
 type Labels = AppMessages["sessionDetail"];
 type SessionPerformancePanelKey = PerformanceMetricKey | "score";
 type SessionPerformanceStatus = "great" | "needs-improvement" | "poor" | "none";
+
+const EMPTY_SESSION_PERFORMANCE_METRIC: JourneyPerformanceMetricSummary = {
+  avg: null,
+  p75: null,
+  min: null,
+  max: null,
+  samples: 0,
+};
+
+const EMPTY_SESSION_PERFORMANCE: JourneyPerformanceSummary = {
+  ttfb: EMPTY_SESSION_PERFORMANCE_METRIC,
+  fcp: EMPTY_SESSION_PERFORMANCE_METRIC,
+  lcp: EMPTY_SESSION_PERFORMANCE_METRIC,
+  cls: EMPTY_SESSION_PERFORMANCE_METRIC,
+  inp: EMPTY_SESSION_PERFORMANCE_METRIC,
+};
+
+function createSessionDetailPlaceholder(sessionId: string): SessionDetail {
+  return {
+    session: {
+      sessionId,
+      visitorId: "",
+      startedAt: 0,
+      endedAt: 0,
+      durationMs: 0,
+      active: false,
+      views: 0,
+      events: 0,
+      bounce: false,
+      entryPath: "",
+      exitPath: "",
+      referrerHost: "",
+      referrerUrl: "",
+      country: "",
+      region: "",
+      regionCode: "",
+      city: "",
+      latitude: null,
+      longitude: null,
+      browser: "",
+      browserVersion: "",
+      os: "",
+      osVersion: "",
+      deviceType: "",
+      screenWidth: null,
+      screenHeight: null,
+    },
+    locationPoints: [],
+    events: [],
+    visitedPages: [],
+    eventDistribution: [],
+    performance: EMPTY_SESSION_PERFORMANCE,
+  };
+}
 
 const SESSION_PERFORMANCE_METRICS: PerformanceMetricKey[] = [
   "ttfb",
@@ -540,11 +594,13 @@ function SessionPerformanceCell({
   value,
   status,
   details,
+  loading = false,
 }: {
   label: string;
   value: string;
   status: SessionPerformanceStatus;
   details: string[];
+  loading?: boolean;
 }) {
   const statusStyle = SESSION_PERFORMANCE_STATUS_STYLE[status];
   const StatusIcon = statusStyle.icon;
@@ -555,25 +611,78 @@ function SessionPerformanceCell({
         <p className="min-w-0 truncate text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
           {label}
         </p>
-        <span
-          className={cn(
-            "inline-flex size-7 shrink-0 items-center justify-center rounded-full",
-            statusStyle.softClassName,
-          )}
+        <AutoTransition
+          initial={false}
+          transitionKey={loading ? "loading" : "ready"}
+          duration={0.18}
+          type="fade"
+          presenceMode="wait"
+          className="size-7 shrink-0"
         >
-          <StatusIcon className="size-3.5" />
-        </span>
+          {loading ? (
+            <Skeleton key="loading" className="size-7 rounded-full" />
+          ) : (
+            <span
+              key="ready"
+              className={cn(
+                "inline-flex size-7 items-center justify-center rounded-full",
+                statusStyle.softClassName,
+              )}
+            >
+              <StatusIcon className="size-3.5" />
+            </span>
+          )}
+        </AutoTransition>
       </div>
-      <p className="mt-3 min-w-0 truncate font-mono text-xl font-semibold leading-7 text-foreground">
-        {value}
-      </p>
-      <div className="mt-3 flex min-w-0 flex-col gap-1 text-[11px] leading-[14px] text-muted-foreground">
-        {details.map((detail) => (
-          <span key={detail} className="min-w-0 truncate">
-            {detail}
-          </span>
-        ))}
-      </div>
+      <AutoTransition
+        initial={false}
+        transitionKey={loading ? "loading" : "ready"}
+        duration={0.18}
+        type="fade"
+        presenceMode="wait"
+        className="mt-3 min-h-7"
+      >
+        {loading ? (
+          <Skeleton key="loading" className="h-7 w-20" />
+        ) : (
+          <p
+            key="ready"
+            className="min-w-0 truncate font-mono text-xl font-semibold leading-7 text-foreground"
+          >
+            {value}
+          </p>
+        )}
+      </AutoTransition>
+      <AutoTransition
+        initial={false}
+        transitionKey={loading ? "loading" : "ready"}
+        duration={0.18}
+        type="fade"
+        presenceMode="wait"
+        className="mt-3 min-h-8"
+      >
+        {loading ? (
+          <div key="loading" className="flex min-w-0 flex-col gap-1">
+            {details.map((detail, index) => (
+              <Skeleton
+                key={`${detail}-${index}`}
+                className={cn("h-[14px]", index === 0 ? "w-36" : "w-24")}
+              />
+            ))}
+          </div>
+        ) : (
+          <div
+            key="ready"
+            className="flex min-w-0 flex-col gap-1 text-[11px] leading-[14px] text-muted-foreground"
+          >
+            {details.map((detail) => (
+              <span key={detail} className="min-w-0 truncate">
+                {detail}
+              </span>
+            ))}
+          </div>
+        )}
+      </AutoTransition>
     </div>
   );
 }
@@ -584,12 +693,14 @@ function SessionPerformanceMetricCell({
   labels,
   metric,
   summary,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
   labels: Labels;
   metric: PerformanceMetricKey;
   summary: JourneyPerformanceMetricSummary;
+  loading?: boolean;
 }) {
   const value = summary.p75;
   const status = sessionMetricStatus(metric, value);
@@ -606,6 +717,7 @@ function SessionPerformanceMetricCell({
         metric,
         summary,
       )}
+      loading={loading}
     />
   );
 }
@@ -615,11 +727,13 @@ function SessionPerformancePanel({
   messages,
   labels,
   performance,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
   labels: Labels;
   performance: JourneyPerformanceSummary;
+  loading?: boolean;
 }) {
   const score = sessionPerformanceScore(performance);
   const samples = sessionPerformanceSamples(performance);
@@ -627,7 +741,7 @@ function SessionPerformancePanel({
   const statusStyle = SESSION_PERFORMANCE_STATUS_STYLE[scoreStatus];
   const StatusIcon = statusStyle.icon;
   const hasSamples = hasSessionPerformanceSamples(performance);
-  if (!hasSamples) return null;
+  if (!hasSamples && !loading) return null;
 
   return (
     <Card>
@@ -645,8 +759,25 @@ function SessionPerformancePanel({
               statusStyle.softClassName,
             )}
           >
-            <StatusIcon className="size-3.5" />
-            <span>{sessionPerformanceStatusLabel(messages, scoreStatus)}</span>
+            <AutoTransition
+              initial={false}
+              transitionKey={loading ? "loading" : "ready"}
+              duration={0.18}
+              type="fade"
+              presenceMode="wait"
+              className="flex h-4 items-center"
+            >
+              {loading ? (
+                <Skeleton key="loading" className="h-4 w-24 rounded-full" />
+              ) : (
+                <span key="ready" className="inline-flex items-center gap-2">
+                  <StatusIcon className="size-3.5" />
+                  <span>
+                    {sessionPerformanceStatusLabel(messages, scoreStatus)}
+                  </span>
+                </span>
+              )}
+            </AutoTransition>
           </div>
         </div>
       </CardHeader>
@@ -662,6 +793,7 @@ function SessionPerformancePanel({
             )}
             status={scoreStatus}
             details={sessionScoreDetailRows(locale, messages, labels, samples)}
+            loading={loading}
           />
           {SESSION_PERFORMANCE_METRICS.map((metric) => (
             <SessionPerformanceMetricCell
@@ -671,6 +803,7 @@ function SessionPerformancePanel({
               labels={labels}
               metric={metric}
               summary={performance[metric]}
+              loading={loading}
             />
           ))}
         </div>
@@ -684,30 +817,56 @@ function SummaryGridItem({
   value,
   mono = false,
   prominent = false,
+  loading = false,
   className,
 }: {
   label: string;
   value: ReactNode;
   mono?: boolean;
   prominent?: boolean;
+  loading?: boolean;
   className?: string;
 }) {
+  const valueClassName = prominent
+    ? "h-7 text-xl font-semibold leading-7"
+    : "h-5 text-xs leading-5";
+
   return (
     <div className={cn("min-w-0 bg-card p-4", className)}>
       <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </p>
-      <div
-        className={cn(
-          "mt-2 min-w-0 text-foreground [overflow-wrap:anywhere]",
-          mono && "font-mono",
-          prominent
-            ? "text-xl font-semibold leading-tight"
-            : "text-xs leading-relaxed",
-        )}
-      >
-        {value}
-      </div>
+      <AutoResizer className="mt-2 min-w-0" duration={0.2}>
+        <AutoTransition
+          initial={false}
+          transitionKey={loading ? "loading" : "ready"}
+          duration={0.18}
+          type="fade"
+          presenceMode="wait"
+          className={cn("min-w-0 overflow-hidden", valueClassName)}
+        >
+          {loading ? (
+            <Skeleton
+              key="loading"
+              className={cn(
+                valueClassName,
+                prominent ? "w-20" : "w-[min(18rem,88%)]",
+              )}
+            />
+          ) : (
+            <div
+              key="ready"
+              className={cn(
+                "min-w-0 overflow-hidden text-foreground [overflow-wrap:anywhere]",
+                mono && "font-mono",
+                valueClassName,
+              )}
+            >
+              {value}
+            </div>
+          )}
+        </AutoTransition>
+      </AutoResizer>
     </div>
   );
 }
@@ -787,6 +946,7 @@ function SessionMapHero({
   visitorHref,
   onBack,
   onOpenVisitor,
+  loading = false,
 }: {
   labels: Labels;
   session: JourneySession;
@@ -795,6 +955,7 @@ function SessionMapHero({
   visitorHref: string;
   onBack?: () => void;
   onOpenVisitor?: (visitorId: string) => void;
+  loading?: boolean;
 }) {
   const modalReady = useDetailDrawerReady();
   const { resolvedTheme } = useTheme();
@@ -808,11 +969,24 @@ function SessionMapHero({
 
   return (
     <div className="relative h-[17rem] overflow-hidden sm:h-[19rem]">
-      {modalReady ? (
-        <SessionDetailMapStage theme={effectiveTheme} points={points} />
-      ) : (
-        <DetailMapPlaceholder />
-      )}
+      <AutoTransition
+        initial={false}
+        transitionKey={modalReady && !loading ? "map" : "placeholder"}
+        duration={0.24}
+        type="fade"
+        presenceMode="wait"
+        className="absolute inset-0"
+      >
+        {modalReady && !loading ? (
+          <SessionDetailMapStage
+            key="map"
+            theme={effectiveTheme}
+            points={points}
+          />
+        ) : (
+          <DetailMapPlaceholder key="placeholder" />
+        )}
+      </AutoTransition>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-background via-background/70 to-transparent" />
 
@@ -845,53 +1019,74 @@ function SessionMapHero({
         </div>
       </div>
 
-      {visitorId ? (
-        onOpenVisitor ? (
-          <button
-            type="button"
-            className="absolute bottom-4 left-4 z-10 flex min-w-0 max-w-[calc(100%-2rem)] items-center gap-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/70 sm:bottom-5 sm:left-5"
-            onClick={() => onOpenVisitor(visitorId)}
-          >
-            <VisitorAvatar seed={session.visitorId} className="size-12" />
-            <div className="min-w-0">
-              <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground">
-                {labels.anonymous}
-              </h1>
-              <p className="mt-1 truncate font-mono text-[11px] text-foreground/70">
-                {labels.visitorId}: {session.visitorId}
-              </p>
+      <AutoTransition
+        initial={false}
+        transitionKey={
+          loading ? "loading" : visitorId ? `visitor:${visitorId}` : "empty"
+        }
+        duration={0.18}
+        type="fade"
+        presenceMode="wait"
+        className="absolute bottom-4 left-4 z-10 min-w-0 max-w-[calc(100%-2rem)] sm:bottom-5 sm:left-5"
+      >
+        {loading ? (
+          <div key="loading" className="flex min-w-0 items-center gap-3">
+            <Skeleton className="size-12 shrink-0 rounded-full bg-muted/80" />
+            <div className="min-w-0 space-y-2">
+              <Skeleton className="h-8 w-36 max-w-[64vw] bg-muted/80" />
+              <Skeleton className="h-3 w-56 max-w-[72vw] bg-muted/80" />
             </div>
-          </button>
-        ) : (
-          <Link
-            href={visitorHref}
-            data-skip-page-transition=""
-            className="absolute bottom-4 left-4 z-10 flex min-w-0 max-w-[calc(100%-2rem)] items-center gap-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/70 sm:bottom-5 sm:left-5"
-          >
-            <VisitorAvatar seed={session.visitorId} className="size-12" />
-            <div className="min-w-0">
-              <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground">
-                {labels.anonymous}
-              </h1>
-              <p className="mt-1 truncate font-mono text-[11px] text-foreground/70">
-                {labels.visitorId}: {session.visitorId}
-              </p>
-            </div>
-          </Link>
-        )
-      ) : (
-        <div className="absolute bottom-4 left-4 z-10 flex min-w-0 max-w-[calc(100%-2rem)] items-center gap-3 sm:bottom-5 sm:left-5">
-          <VisitorAvatar seed={session.visitorId} className="size-12" />
-          <div className="min-w-0">
-            <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground">
-              {labels.anonymous}
-            </h1>
-            <p className="mt-1 truncate font-mono text-[11px] text-foreground/70">
-              {labels.visitorId}: --
-            </p>
           </div>
-        </div>
-      )}
+        ) : visitorId ? (
+          onOpenVisitor ? (
+            <button
+              key="visitor-button"
+              type="button"
+              className="flex min-w-0 items-center gap-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+              onClick={() => onOpenVisitor(visitorId)}
+            >
+              <VisitorAvatar seed={session.visitorId} className="size-12" />
+              <div className="min-w-0">
+                <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground">
+                  {labels.anonymous}
+                </h1>
+                <p className="mt-1 truncate font-mono text-[11px] text-foreground/70">
+                  {labels.visitorId}: {session.visitorId}
+                </p>
+              </div>
+            </button>
+          ) : (
+            <Link
+              key="visitor-link"
+              href={visitorHref}
+              data-skip-page-transition=""
+              className="flex min-w-0 items-center gap-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+            >
+              <VisitorAvatar seed={session.visitorId} className="size-12" />
+              <div className="min-w-0">
+                <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground">
+                  {labels.anonymous}
+                </h1>
+                <p className="mt-1 truncate font-mono text-[11px] text-foreground/70">
+                  {labels.visitorId}: {session.visitorId}
+                </p>
+              </div>
+            </Link>
+          )
+        ) : (
+          <div key="empty" className="flex min-w-0 items-center gap-3">
+            <VisitorAvatar seed={session.visitorId} className="size-12" />
+            <div className="min-w-0">
+              <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground">
+                {labels.anonymous}
+              </h1>
+              <p className="mt-1 truncate font-mono text-[11px] text-foreground/70">
+                {labels.visitorId}: --
+              </p>
+            </div>
+          </div>
+        )}
+      </AutoTransition>
     </div>
   );
 }
@@ -903,6 +1098,7 @@ function MetaPanel({
   detail,
   pagesPath,
   timeZone,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -910,6 +1106,7 @@ function MetaPanel({
   detail: SessionDetail;
   pagesPath: string;
   timeZone: string;
+  loading?: boolean;
 }) {
   const session = detail.session;
   const firstEvent = detail.events.reduce<JourneyEvent | null>(
@@ -931,29 +1128,34 @@ function MetaPanel({
             label={labels.duration}
             prominent
             mono
+            loading={loading}
             value={formatDuration(locale, session.durationMs)}
           />
           <SummaryGridItem
             label={labels.screenViews}
             prominent
             mono
+            loading={loading}
             value={numberFormat(locale, session.views)}
           />
           <SummaryGridItem
             label={labels.events}
             prominent
             mono
+            loading={loading}
             value={numberFormat(locale, session.events)}
           />
           <SummaryGridItem
             label={labels.uniquePages}
             prominent
             mono
+            loading={loading}
             value={numberFormat(locale, detail.visitedPages.length)}
           />
           <SummaryGridItem
             label={labels.entryPath}
             className="col-span-2"
+            loading={loading}
             value={
               <SummaryPathLink
                 pathname={session.entryPath}
@@ -964,6 +1166,7 @@ function MetaPanel({
           <SummaryGridItem
             label={labels.exitPath}
             className="col-span-2"
+            loading={loading}
             value={
               <SummaryPathLink
                 pathname={session.exitPath}
@@ -972,23 +1175,8 @@ function MetaPanel({
             }
           />
           <SummaryGridItem
-            label={labels.referrerName}
-            value={
-              <ReferrerMeta
-                referrerHost={session.referrerHost}
-                referrerUrl={session.referrerUrl}
-                directLabel={messages.overview.direct}
-              />
-            }
-          />
-          <SummaryGridItem
-            label={labels.referrerUrl}
-            mono
-            value={session.referrerUrl || messages.overview.direct}
-          />
-          <SummaryGridItem
             label={labels.location}
-            className="col-span-2"
+            loading={loading}
             value={
               <SessionGeoBreadcrumb
                 locale={locale}
@@ -998,7 +1186,26 @@ function MetaPanel({
             }
           />
           <SummaryGridItem
+            label={labels.referrerName}
+            loading={loading}
+            value={
+              <ReferrerMeta
+                referrerHost={session.referrerHost}
+                referrerUrl={session.referrerUrl}
+                directLabel={messages.overview.direct}
+              />
+            }
+          />
+          <SummaryGridItem
+            className="col-span-2"
+            label={labels.referrerUrl}
+            mono
+            loading={loading}
+            value={session.referrerUrl || messages.overview.direct}
+          />
+          <SummaryGridItem
             label={labels.browser}
+            loading={loading}
             value={
               <BrowserMeta
                 browser={session.browser}
@@ -1009,6 +1216,7 @@ function MetaPanel({
           />
           <SummaryGridItem
             label={labels.os}
+            loading={loading}
             value={
               <OsMeta
                 os={session.os}
@@ -1019,6 +1227,7 @@ function MetaPanel({
           />
           <SummaryGridItem
             label={labels.device}
+            loading={loading}
             value={
               <DeviceMeta
                 deviceType={session.deviceType}
@@ -1030,11 +1239,13 @@ function MetaPanel({
           <SummaryGridItem
             label={labels.screen}
             mono
+            loading={loading}
             value={formatScreen(session.screenWidth, session.screenHeight)}
           />
           <SummaryGridItem
             label={labels.firstEvent}
             mono
+            loading={loading}
             value={
               firstEvent
                 ? formatShortDateTime(locale, firstEvent.occurredAt, timeZone)
@@ -1044,6 +1255,7 @@ function MetaPanel({
           <SummaryGridItem
             label={labels.lastEvent}
             mono
+            loading={loading}
             value={
               lastEvent
                 ? formatShortDateTime(locale, lastEvent.occurredAt, timeZone)
@@ -1052,10 +1264,12 @@ function MetaPanel({
           />
           <SummaryGridItem
             label={labels.bounce}
+            loading={loading}
             value={session.bounce ? labels.yes : labels.no}
           />
           <SummaryGridItem
             label={labels.status}
+            loading={loading}
             value={session.active ? labels.active : labels.inactive}
           />
         </div>
@@ -1080,7 +1294,7 @@ function SessionEventCard({
   timeZone: string;
 }) {
   return (
-    <Card size="sm" className="py-0">
+    <Card size="sm" className="border border-foreground/10 py-0 ring-0">
       <CardContent className="p-0">
         <div className="flex items-center gap-2 px-1.5 py-1">
           <EventIcon event={event} />
@@ -1119,18 +1333,42 @@ function SessionEventCard({
   );
 }
 
+function SessionEventSkeletonCard() {
+  return (
+    <Card size="sm" className="border border-foreground/10 py-0 ring-0">
+      <CardContent className="p-0">
+        <div className="flex items-center gap-2 px-1.5 py-1">
+          <Skeleton className="size-[34px] shrink-0" />
+          <div className="flex min-w-0 flex-1 items-stretch justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <Skeleton className="h-5 w-[min(26rem,80%)]" />
+              <Skeleton className="h-[14px] w-[min(18rem,68%)]" />
+            </div>
+            <div className="flex h-[34px] min-w-0 w-[42%] shrink-0 flex-col items-end justify-between text-right sm:w-auto sm:max-w-[24rem]">
+              <Skeleton className="ml-auto h-[14px] w-24" />
+              <Skeleton className="ml-auto h-[13px] w-20" />
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function VisitDetailsTab({
   locale,
   messages,
   labels,
   events,
   timeZone,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
   labels: Labels;
   events: JourneyEvent[];
   timeZone: string;
+  loading?: boolean;
 }) {
   const chronologicalEvents = useMemo(
     () =>
@@ -1143,6 +1381,11 @@ function VisitDetailsTab({
       }),
     [events],
   );
+  const eventContentKey = loading
+    ? "loading"
+    : chronologicalEvents.length > 0
+      ? chronologicalEvents.map((event) => event.id).join(":")
+      : "empty";
 
   return (
     <Card>
@@ -1154,28 +1397,44 @@ function VisitDetailsTab({
         <CardDescription>{labels.visitDetailsSubtitle}</CardDescription>
       </CardHeader>
       <CardContent className="px-4">
-        {chronologicalEvents.length === 0 ? (
-          <EmptyState>{labels.emptyEvents}</EmptyState>
-        ) : (
-          <div className="space-y-1.5">
-            {chronologicalEvents.map((event, index) => (
-              <SessionEventCard
-                key={event.id}
-                locale={locale}
-                messages={messages}
-                labels={labels}
-                event={event}
-                timeZone={timeZone}
-                deltaMs={
-                  index > 0
-                    ? event.occurredAt -
-                      chronologicalEvents[index - 1].occurredAt
-                    : null
-                }
-              />
-            ))}
-          </div>
-        )}
+        <AutoResizer duration={0.24}>
+          <AutoTransition
+            initial={false}
+            transitionKey={eventContentKey}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+          >
+            {loading ? (
+              <div key="loading" className="space-y-1.5" aria-busy="true">
+                {Array.from({ length: 5 }, (_, index) => (
+                  <SessionEventSkeletonCard key={`event-skeleton-${index}`} />
+                ))}
+              </div>
+            ) : chronologicalEvents.length === 0 ? (
+              <EmptyState key="empty">{labels.emptyEvents}</EmptyState>
+            ) : (
+              <div key={eventContentKey} className="space-y-1.5">
+                {chronologicalEvents.map((event, index) => (
+                  <SessionEventCard
+                    key={event.id}
+                    locale={locale}
+                    messages={messages}
+                    labels={labels}
+                    event={event}
+                    timeZone={timeZone}
+                    deltaMs={
+                      index > 0
+                        ? event.occurredAt -
+                          chronologicalEvents[index - 1].occurredAt
+                        : null
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </AutoTransition>
+        </AutoResizer>
       </CardContent>
     </Card>
   );
@@ -1333,6 +1592,7 @@ function SessionDetailBottomCards({
   siteId,
   siteBasePath,
   siteDomain,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -1341,6 +1601,7 @@ function SessionDetailBottomCards({
   siteId: string;
   siteBasePath: string;
   siteDomain: string;
+  loading?: boolean;
 }) {
   const pageCardData = useMemo(
     () => buildSessionOverviewPageCardData(detail, messages.common.unknown),
@@ -1378,6 +1639,7 @@ function SessionDetailBottomCards({
           visibleCards={["page"]}
           pageCardTabs={SESSION_OVERVIEW_PAGE_CARD_TABS}
           pageCardShowVisitors={false}
+          loading={loading}
         />
       </div>
 
@@ -1391,6 +1653,7 @@ function SessionDetailBottomCards({
           className="h-full"
           showVisitors={false}
           emptyLabel={labels.emptyCustomEvents}
+          loadingByTab={{ event: loading }}
         />
       </div>
     </section>
@@ -1406,6 +1669,7 @@ function DetailContent({
   pathname,
   timeZone,
   onOpenVisitor,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -1415,6 +1679,7 @@ function DetailContent({
   pathname: string;
   timeZone: string;
   onOpenVisitor?: (visitorId: string) => void;
+  loading?: boolean;
 }) {
   const modalClose = useDetailDrawerClose();
   const session = detail.session;
@@ -1443,6 +1708,7 @@ function DetailContent({
         visitorHref={visitorHref}
         onBack={modalClose ?? undefined}
         onOpenVisitor={onOpenVisitor}
+        loading={loading}
       />
 
       <div className="mx-auto mt-6 w-full max-w-[1400px] space-y-6 px-4 md:px-6">
@@ -1453,6 +1719,7 @@ function DetailContent({
           detail={detail}
           pagesPath={pagesPath}
           timeZone={timeZone}
+          loading={loading}
         />
 
         <section>
@@ -1462,6 +1729,7 @@ function DetailContent({
             labels={labels}
             events={detail.events}
             timeZone={timeZone}
+            loading={loading}
           />
         </section>
 
@@ -1473,6 +1741,7 @@ function DetailContent({
           siteId={siteId}
           siteBasePath={siteBasePath}
           siteDomain={sessionSiteDomain}
+          loading={loading}
         />
 
         <JourneyGeoLocationCard
@@ -1480,6 +1749,7 @@ function DetailContent({
           messages={messages}
           title={labels.geoLocationTitle}
           locations={geoLocations}
+          loading={loading}
         />
 
         <SessionPerformancePanel
@@ -1487,6 +1757,7 @@ function DetailContent({
           messages={messages}
           labels={labels}
           performance={detail.performance}
+          loading={loading}
         />
       </div>
     </div>
@@ -1515,7 +1786,7 @@ export function SessionDetailClientPage({
     enabled: typeof window !== "undefined" && Boolean(sessionId),
   });
   const detail = detailQuery.data?.data ?? null;
-  const loading = detailQuery.isPending;
+  const loading = detailQuery.isPending && !detail;
   const error = detailQuery.isError;
 
   if (!sessionId) {
@@ -1530,18 +1801,7 @@ export function SessionDetailClientPage({
     );
   }
 
-  if (loading) {
-    return (
-      <JourneyDetailStateSwitch stateKey="session-loading">
-        <JourneyDetailLoadingState
-          kind="session"
-          loadingLabel={messages.common.loading}
-        />
-      </JourneyDetailStateSwitch>
-    );
-  }
-
-  if (error) {
+  if (error && !detail) {
     return (
       <JourneyDetailStateSwitch stateKey="session-error">
         <Card>
@@ -1553,7 +1813,7 @@ export function SessionDetailClientPage({
     );
   }
 
-  if (!detail) {
+  if (!detail && !loading) {
     return (
       <JourneyDetailStateSwitch stateKey="session-not-found">
         <Card>
@@ -1566,17 +1826,16 @@ export function SessionDetailClientPage({
   }
 
   return (
-    <JourneyDetailStateSwitch stateKey={`session-content-${requestKey}`}>
-      <DetailContent
-        locale={locale}
-        messages={messages}
-        labels={labels}
-        detail={detail}
-        siteId={siteId}
-        pathname={pathname}
-        timeZone={timeZone}
-        onOpenVisitor={onOpenVisitor}
-      />
-    </JourneyDetailStateSwitch>
+    <DetailContent
+      locale={locale}
+      messages={messages}
+      labels={labels}
+      detail={detail ?? createSessionDetailPlaceholder(sessionId)}
+      siteId={siteId}
+      pathname={pathname}
+      timeZone={timeZone}
+      onOpenVisitor={onOpenVisitor}
+      loading={loading}
+    />
   );
 }

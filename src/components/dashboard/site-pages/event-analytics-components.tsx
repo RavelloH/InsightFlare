@@ -71,6 +71,7 @@ import {
   EVENT_RECORD_DRAWER_Z_INDEX,
   NESTED_DETAIL_DRAWER_Z_INDEX,
 } from "@/components/dashboard/site-pages/floating-layer";
+import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -194,19 +195,6 @@ const VisitorDetailClientPage = dynamic(
   () =>
     import("@/components/dashboard/site-pages/visitor-detail-client-page").then(
       (module) => module.VisitorDetailClientPage,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="p-6 text-sm text-muted-foreground">Loading...</div>
-    ),
-  },
-);
-
-const SessionDetailClientPage = dynamic(
-  () =>
-    import("@/components/dashboard/site-pages/session-detail-client-page").then(
-      (module) => module.SessionDetailClientPage,
     ),
   {
     ssr: false,
@@ -553,6 +541,38 @@ function collectEventFieldTreeExpansionKeys(
   return keys;
 }
 
+function EventFieldTreeSkeleton({ loadingLabel }: { loadingLabel: string }) {
+  const rows = [
+    { indent: "pl-0", width: "w-28", branch: true },
+    { indent: "pl-5", width: "w-24", branch: true },
+    { indent: "pl-10", width: "w-32", branch: false },
+    { indent: "pl-10", width: "w-20", branch: false },
+    { indent: "pl-5", width: "w-28", branch: true },
+    { indent: "pl-10", width: "w-24", branch: false },
+  ];
+
+  return (
+    <div
+      className="space-y-0.5 border border-border/50 bg-muted/10 px-2 py-2"
+      aria-busy="true"
+      aria-label={loadingLabel}
+    >
+      {rows.map((row, index) => (
+        <div
+          key={index}
+          className={`flex h-8 items-center gap-2 ${row.indent}`}
+        >
+          <Skeleton className="size-6 shrink-0 rounded-none" />
+          <Skeleton className={`h-3.5 ${row.width} rounded-none`} />
+          {row.branch ? (
+            <Skeleton className="ml-auto size-5 shrink-0 rounded-none" />
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function formatEventFieldKeySegment(segment: string): string {
   return segment.replace(/~1/g, "/").replace(/~0/g, "~");
 }
@@ -591,9 +611,7 @@ function EventMetricCell({
           presenceMode="wait"
         >
           {loading ? (
-            <div key="loading" className="flex h-7 items-center">
-              <Spinner className="size-5" />
-            </div>
+            <Skeleton key="loading" className="h-7 w-24 rounded-none" />
           ) : (
             <p
               key={value}
@@ -3186,13 +3204,7 @@ export function EventFieldsCard({
             <CardContent className="space-y-2 pb-5">
               <div className="max-h-[38rem] overflow-auto pr-1 font-mono text-[13px] leading-6">
                 {fieldListLoading ? (
-                  <div
-                    className="flex min-h-32 items-center justify-center gap-2 border border-border/50 bg-muted/20 px-4 py-6 font-sans text-sm text-muted-foreground"
-                    aria-busy="true"
-                  >
-                    <Spinner className="size-4" />
-                    {labels.loading}
-                  </div>
+                  <EventFieldTreeSkeleton loadingLabel={labels.loading} />
                 ) : fieldListError ? (
                   <div className="rounded-none border border-border/50 bg-muted/20 px-4 py-6 font-sans text-sm text-muted-foreground">
                     {labels.loadError}
