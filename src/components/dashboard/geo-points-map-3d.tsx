@@ -5,7 +5,7 @@ import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
 import type { Feature, GeoJSON, Geometry } from "geojson";
 import isoCountries from "i18n-iso-countries";
-import type { Map as MaplibreMap, StyleSpecification } from "maplibre-gl";
+import type { Map as MaplibreMap } from "maplibre-gl";
 import { animate, AnimatePresence, motion } from "motion/react";
 
 import { useTheme } from "@/components/theme-provider";
@@ -14,6 +14,11 @@ import { AutoTransition } from "@/components/ui/auto-transition";
 import { Spinner } from "@/components/ui/spinner";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { numberFormat } from "@/lib/dashboard/format";
+import {
+  applyVectorBasemapColorOverrides,
+  getVectorBasemapSky,
+  getVectorBasemapStyleUrl,
+} from "@/lib/dashboard/map-basemap";
 import { resolveCountryLabel } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -91,65 +96,6 @@ const EMPTY_COUNTRY_FEATURES = {
 } as const satisfies GeoJSON;
 
 type CountryFeature = Feature<Geometry, Record<string, unknown>>;
-
-function buildRasterStyle(
-  theme: EffectiveMapTheme,
-  projectionMode: "mercator" | "globe",
-): StyleSpecification {
-  const sourceId = `insightflare-raster-source-${theme}`;
-  const layerId = `insightflare-raster-layer-${theme}`;
-  const endpoint = `/api/public/resources/map-tiles/{z}/{x}/{y}.png?theme=${theme}`;
-  const isGlobe = projectionMode === "globe";
-  const backgroundColor =
-    theme === "dark" ? "rgb(10, 10, 10)" : "rgb(255, 255, 255)";
-
-  return {
-    version: 8,
-    name: `insightflare-raster-${theme}`,
-    projection: {
-      type: projectionMode,
-    },
-    ...(isGlobe
-      ? {
-          sky: {
-            "sky-color": backgroundColor,
-            "horizon-color": backgroundColor,
-            "fog-color": backgroundColor,
-            "atmosphere-blend": 0.18,
-          },
-        }
-      : {}),
-    sources: {
-      [sourceId]: {
-        type: "raster",
-        tiles: [endpoint],
-        tileSize: 256,
-        attribution: "© OpenStreetMap contributors © CARTO",
-      },
-    },
-    layers: [
-      ...(isGlobe
-        ? [
-            {
-              id: "insightflare-globe-ocean",
-              type: "background" as const,
-              paint: {
-                "background-color": backgroundColor,
-                "background-opacity": 1,
-              },
-            },
-          ]
-        : []),
-      {
-        id: layerId,
-        type: "raster",
-        source: sourceId,
-        minzoom: 0,
-        maxzoom: 22,
-      },
-    ],
-  };
-}
 
 const DEFAULT_VIEW_STATE: MapViewState = {
   longitude: 0,
@@ -563,7 +509,6 @@ export function GeoPointsMap3D({
     latitude: number;
     zoom: number;
   } | null>(null);
-  const [mapLoaded, setMapLoaded] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -719,7 +664,11 @@ export function GeoPointsMap3D({
   const effectiveMapTheme: EffectiveMapTheme =
     mounted && resolvedTheme === "dark" ? "dark" : "light";
   const mapStyle = useMemo(
-    () => buildRasterStyle(effectiveMapTheme, "globe"),
+    () => getVectorBasemapStyleUrl(effectiveMapTheme, locale),
+    [effectiveMapTheme, locale],
+  );
+  const mapSky = useMemo(
+    () => getVectorBasemapSky(effectiveMapTheme),
     [effectiveMapTheme],
   );
 
@@ -915,26 +864,6 @@ export function GeoPointsMap3D({
     setMapSettled(true);
   }, []);
 
-  const applyProjectionMode = useCallback(
-    (map: MaplibreMap) => {
-      if (!map.isStyleLoaded()) return false;
-      map.setProjection({ type: isGlobe ? "globe" : "mercator" });
-      if (isGlobe) {
-        map.jumpTo({
-          center: [initialViewState.longitude, initialViewState.latitude],
-          zoom: initialViewState.zoom,
-          bearing: 0,
-          pitch: 0,
-        });
-        setCurrentZoom(
-          normalizeClusterZoom(initialViewState.zoom ?? GLOBE_VIEW_STATE.zoom),
-        );
-      }
-      return true;
-    },
-    [initialViewState, isGlobe],
-  );
-
   useEffect(() => {
     const map = mapRef.current?.getMap();
     if (!map || !isMobile) return;
@@ -948,19 +877,6 @@ export function GeoPointsMap3D({
       normalizeClusterZoom(initialViewState.zoom ?? DEFAULT_VIEW_STATE.zoom),
     );
   }, [initialViewState, isMobile]);
-
-  useEffect(() => {
-    const map = mapRef.current?.getMap();
-    if (!map || !mapLoaded || applyProjectionMode(map)) return;
-
-    const handleStyleReady = () => {
-      applyProjectionMode(map);
-    };
-    map.once("styledata", handleStyleReady);
-    return () => {
-      map.off("styledata", handleStyleReady);
-    };
-  }, [applyProjectionMode, mapLoaded]);
 
   useEffect(() => {
     if (!autoRotateEnabled || !mapSettled) return;
@@ -1108,6 +1024,8 @@ export function GeoPointsMap3D({
           ref={mapRef}
           initialViewState={mapInitialViewState}
           mapStyle={mapStyle}
+          projection="globe"
+          sky={mapSky}
           attributionControl={false}
           scrollZoom
           maxPitch={0}
@@ -1136,10 +1054,12 @@ export function GeoPointsMap3D({
           onMouseDown={pauseAutoRotate}
           onTouchStart={pauseAutoRotate}
           onLoad={(event) => {
-            setMapLoaded(true);
-            applyProjectionMode(event.target);
+            applyVectorBasemapColorOverrides(event.target, effectiveMapTheme);
             markMapSettled(event.target);
           }}
+          onStyleData={(event) =>
+            applyVectorBasemapColorOverrides(event.target, effectiveMapTheme)
+          }
           onIdle={(event) => markMapSettled(event.target)}
         >
           <DeckOverlay interleaved={false} layers={layers} />

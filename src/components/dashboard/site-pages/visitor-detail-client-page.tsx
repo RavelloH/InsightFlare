@@ -1112,7 +1112,11 @@ function VisitorMapHero({
   return (
     <div className="relative h-[17rem] overflow-hidden sm:h-[19rem]">
       {modalReady && !loading ? (
-        <VisitorDetailMapStage theme={effectiveTheme} points={points} />
+        <VisitorDetailMapStage
+          locale={locale}
+          theme={effectiveTheme}
+          points={points}
+        />
       ) : (
         <DetailMapPlaceholder />
       )}

@@ -5,7 +5,6 @@ import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
 import type { Feature, GeoJSON, Geometry } from "geojson";
 import isoCountries from "i18n-iso-countries";
-import type { StyleSpecification } from "maplibre-gl";
 import { animate, AnimatePresence, motion } from "motion/react";
 
 import { useTheme } from "@/components/theme-provider";
@@ -14,6 +13,10 @@ import { AutoTransition } from "@/components/ui/auto-transition";
 import { Spinner } from "@/components/ui/spinner";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { numberFormat } from "@/lib/dashboard/format";
+import {
+  applyVectorBasemapColorOverrides,
+  getVectorBasemapStyleUrl,
+} from "@/lib/dashboard/map-basemap";
 import { resolveCountryLabel } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -68,34 +71,6 @@ const EMPTY_COUNTRY_FEATURES = {
 } as const satisfies GeoJSON;
 
 type CountryFeature = Feature<Geometry, Record<string, unknown>>;
-
-function buildRasterStyle(theme: EffectiveMapTheme): StyleSpecification {
-  const sourceId = `insightflare-raster-source-${theme}`;
-  const layerId = `insightflare-raster-layer-${theme}`;
-  const endpoint = `/api/public/resources/map-tiles/{z}/{x}/{y}.png?theme=${theme}`;
-
-  return {
-    version: 8,
-    name: `insightflare-raster-${theme}`,
-    sources: {
-      [sourceId]: {
-        type: "raster",
-        tiles: [endpoint],
-        tileSize: 256,
-        attribution: "© OpenStreetMap contributors © CARTO",
-      },
-    },
-    layers: [
-      {
-        id: layerId,
-        type: "raster",
-        source: sourceId,
-        minzoom: 0,
-        maxzoom: 22,
-      },
-    ],
-  };
-}
 
 const DEFAULT_VIEW_STATE: MapViewState = {
   longitude: 0,
@@ -569,8 +544,8 @@ export function FlatGeoPointsMap({
   const effectiveMapTheme: EffectiveMapTheme =
     mounted && resolvedTheme === "dark" ? "dark" : "light";
   const mapStyle = useMemo(
-    () => buildRasterStyle(effectiveMapTheme),
-    [effectiveMapTheme],
+    () => getVectorBasemapStyleUrl(effectiveMapTheme, locale),
+    [effectiveMapTheme, locale],
   );
   const normalizedSelectedCountryCode = useMemo(
     () => normalizeCountryCode(selectedCountryCode),
@@ -779,6 +754,12 @@ export function FlatGeoPointsMap({
         maxPitch={0}
         dragRotate={false}
         pitchWithRotate={false}
+        onLoad={(event) =>
+          applyVectorBasemapColorOverrides(event.target, effectiveMapTheme)
+        }
+        onStyleData={(event) =>
+          applyVectorBasemapColorOverrides(event.target, effectiveMapTheme)
+        }
         onZoom={(event) => {
           const nextZoom = normalizeClusterZoom(event.viewState.zoom);
           setCurrentZoom((prev) =>

@@ -12,7 +12,6 @@ import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
 import type { Feature, GeoJSON, Geometry } from "geojson";
 import isoCountries from "i18n-iso-countries";
-import type { StyleSpecification } from "maplibre-gl";
 import { animate, AnimatePresence, motion } from "motion/react";
 
 import { useTheme } from "@/components/theme-provider";
@@ -20,6 +19,10 @@ import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { ParsedGeoLocation } from "@/lib/dashboard/geo-location";
+import {
+  applyVectorBasemapColorOverrides,
+  getVectorBasemapStyleUrl,
+} from "@/lib/dashboard/map-basemap";
 import { resolveCountryLabel } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 
@@ -126,34 +129,6 @@ function resolveGeoMapPadding(isMobile: boolean): {
     right: GEO_MAP_DESKTOP_PANEL_WIDTH_PX + GEO_MAP_EDGE_PADDING_PX,
     bottom: GEO_MAP_EDGE_PADDING_PX,
     left: GEO_MAP_EDGE_PADDING_PX,
-  };
-}
-
-function buildRasterStyle(theme: EffectiveMapTheme): StyleSpecification {
-  const sourceId = `insightflare-geo-map-source-${theme}`;
-  const layerId = `insightflare-geo-map-layer-${theme}`;
-  const endpoint = `/api/public/resources/map-tiles/{z}/{x}/{y}.png?theme=${theme}`;
-
-  return {
-    version: 8,
-    name: `insightflare-geo-map-${theme}`,
-    sources: {
-      [sourceId]: {
-        type: "raster",
-        tiles: [endpoint],
-        tileSize: 256,
-        attribution: "© OpenStreetMap contributors © CARTO",
-      },
-    },
-    layers: [
-      {
-        id: layerId,
-        type: "raster",
-        source: sourceId,
-        minzoom: 0,
-        maxzoom: 22,
-      },
-    ],
   };
 }
 
@@ -547,8 +522,8 @@ export function GeoClientMapStage({
   const effectiveMapTheme: EffectiveMapTheme =
     resolvedTheme === "dark" ? "dark" : "light";
   const mapStyle = useMemo(
-    () => buildRasterStyle(effectiveMapTheme),
-    [effectiveMapTheme],
+    () => getVectorBasemapStyleUrl(effectiveMapTheme, locale),
+    [effectiveMapTheme, locale],
   );
   const clusteredPoints = useMemo(
     () => clusterGeoPoints(points, currentZoom),
@@ -753,6 +728,7 @@ export function GeoClientMapStage({
         dragRotate={false}
         pitchWithRotate={false}
         onLoad={(event) => {
+          applyVectorBasemapColorOverrides(event.target, effectiveMapTheme);
           event.target.setPadding(resolveGeoMapPadding(isMobile));
           transitionKeyRef.current = transitionKey;
           setCurrentZoom(
@@ -763,6 +739,9 @@ export function GeoClientMapStage({
           setIsMapMoving(false);
           setMapLoaded(true);
         }}
+        onStyleData={(event) =>
+          applyVectorBasemapColorOverrides(event.target, effectiveMapTheme)
+        }
         onZoom={(event) => {
           const nextZoom = normalizeClusterZoom(event.viewState.zoom);
           setCurrentZoom((previous) =>

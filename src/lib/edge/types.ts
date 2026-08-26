@@ -10,6 +10,7 @@ export interface Env {
   DISABLE_CRON_TASKS?: string;
   ADMIN_WS_TOKEN?: string;
   PARQUET_WASM_URL?: string;
+  MAP_RELAY_BASE_URL?: string;
   BOOTSTRAP_ADMIN_PASSWORD?: string;
   SESSION_WINDOW_MINUTES?: string;
   SCRIPT_CACHE_TTL_SECONDS?: string;

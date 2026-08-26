@@ -119,6 +119,7 @@ export function RealtimeClientPage({
     <div className="space-y-6 pb-6">
       <div className="relative h-[min(72svh,calc(100svh-10.5rem))] min-h-[18rem] sm:min-h-[22rem] overflow-hidden">
         <RealtimeMapStage
+          locale={locale}
           siteId={siteId}
           theme={effectiveTheme}
           points={realtime.points}

@@ -25,7 +25,7 @@ import {
   handleLegacyAuthLogin,
   handleLegacyAuthLogout,
 } from "@/lib/edge/legacy-auth";
-import { handleMapTileRequest } from "@/lib/edge/map-tiles";
+import { handleMapRelayRequest } from "@/lib/edge/map-relay";
 import { handleReleasesCompareRequest } from "@/lib/edge/releases-compare";
 import { handleTrackerScriptRequest } from "@/lib/edge/script-endpoint";
 import { handleWikiSummaryRequest } from "@/lib/edge/wiki-summary";
@@ -57,10 +57,6 @@ vi.mock("@/lib/edge/collect", () => ({
 vi.mock("@/lib/edge/legacy-auth", () => ({
   handleLegacyAuthLogin: vi.fn(),
   handleLegacyAuthLogout: vi.fn(),
-}));
-
-vi.mock("@/lib/edge/map-tiles", () => ({
-  handleMapTileRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/edge/releases-compare", () => ({
@@ -117,6 +113,10 @@ vi.mock("@/lib/edge/world-countries", () => ({
   handleWorldCountriesRequest: vi.fn(),
 }));
 
+vi.mock("@/lib/edge/map-relay", () => ({
+  handleMapRelayRequest: vi.fn(),
+}));
+
 vi.mock("@/lib/edge/wiki-summary", () => ({
   handleWikiSummaryRequest: vi.fn(),
 }));
@@ -170,6 +170,7 @@ describe("Hono API app routing", () => {
     vi.mocked(handleWorldCountriesRequest).mockResolvedValue(
       new Response("countries"),
     );
+    vi.mocked(handleMapRelayRequest).mockResolvedValue(new Response("map"));
     vi.mocked(handleWikiSummaryRequest).mockResolvedValue(new Response("wiki"));
     vi.mocked(handleReleasesCompareRequest).mockResolvedValue(
       new Response("compare"),
@@ -212,7 +213,6 @@ describe("Hono API app routing", () => {
     vi.mocked(handleLegacyAuthLogout).mockResolvedValue(
       new Response("legacy-logout"),
     );
-    vi.mocked(handleMapTileRequest).mockResolvedValue(new Response("tile"));
     vi.mocked(handleAdminWs).mockResolvedValue(new Response("ws"));
   });
 
@@ -491,19 +491,8 @@ describe("Hono API app routing", () => {
       env as any,
       executionCtx,
     );
-    await apiApp.fetch(
-      publicBrowserRequest("/api/public/resources/map-tiles/1/0/0.png"),
-      env as any,
-      executionCtx,
-    );
-
     expect(handleLegacyAuthLogin).toHaveBeenCalled();
     expect(handleLegacyAuthLogout).toHaveBeenCalled();
-    expect(handleMapTileRequest).toHaveBeenCalledWith(
-      expect.any(Request),
-      { z: "1", x: "0", y: "0.png" },
-      expect.anything(),
-    );
   });
 
   it("routes private endpoints only after session authentication", async () => {
@@ -565,11 +554,6 @@ describe("Hono API app routing", () => {
       env as any,
       executionCtx,
     );
-    const legacyMap = await apiApp.fetch(
-      request("/api" + "/map-tiles/1/0/0.png"),
-      env as any,
-      executionCtx,
-    );
     const legacyWs = await apiApp.fetch(
       request("/admin" + "/ws?siteId=site-1"),
       env as any,
@@ -578,7 +562,6 @@ describe("Hono API app routing", () => {
 
     expect(legacyAdmin.status).toBe(404);
     expect(legacyArchive.status).toBe(404);
-    expect(legacyMap.status).toBe(404);
     expect(legacyWs.status).toBe(404);
   });
 
@@ -591,6 +574,20 @@ describe("Hono API app routing", () => {
 
     expect(await response.text()).toBe("countries");
     expect(handleWorldCountriesRequest).toHaveBeenCalledWith(
+      original,
+      expect.anything(),
+    );
+  });
+
+  it("routes map resources through the backend relay handler", async () => {
+    const original = publicBrowserRequest(
+      "/api/public/resources/map/v1/styles/dark/style.json",
+    );
+
+    const response = await apiApp.fetch(original, env as any, executionCtx);
+
+    expect(await response.text()).toBe("map");
+    expect(handleMapRelayRequest).toHaveBeenCalledWith(
       original,
       expect.anything(),
     );

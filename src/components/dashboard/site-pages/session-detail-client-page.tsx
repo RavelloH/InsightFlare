@@ -939,6 +939,7 @@ function DetailMapPlaceholder() {
 }
 
 function SessionMapHero({
+  locale,
   labels,
   session,
   locationPoints,
@@ -948,6 +949,7 @@ function SessionMapHero({
   onOpenVisitor,
   loading = false,
 }: {
+  locale: Locale;
   labels: Labels;
   session: JourneySession;
   locationPoints: SessionDetail["locationPoints"] | undefined;
@@ -980,6 +982,7 @@ function SessionMapHero({
         {modalReady && !loading ? (
           <SessionDetailMapStage
             key="map"
+            locale={locale}
             theme={effectiveTheme}
             points={points}
           />
@@ -1701,6 +1704,7 @@ function DetailContent({
   return (
     <div className="pb-6">
       <SessionMapHero
+        locale={locale}
         labels={labels}
         session={session}
         locationPoints={detail.locationPoints}

@@ -97,7 +97,7 @@ describe("publicApiGate", () => {
       headers: browserHeaders({ "sec-fetch-mode": "navigate" }),
     });
     const imageWithoutResourceAllowance = request(
-      "/api/public/resources/map-tiles/1/0/0.png",
+      "/api/public/resources/world-countries",
       {
         headers: browserHeaders({
           "sec-fetch-mode": "no-cors",
@@ -280,7 +280,7 @@ describe("publicApiGate", () => {
     const app = createApp({ allowImageDest: true });
 
     const response = await app.fetch(
-      request("/api/public/resources/map-tiles/1/0/0.png", {
+      request("/api/public/resources/world-countries", {
         headers: browserHeaders({
           "sec-fetch-mode": "no-cors",
           "sec-fetch-dest": "image",

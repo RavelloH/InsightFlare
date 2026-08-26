@@ -2,13 +2,18 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Map, { useControl } from "react-map-gl/maplibre";
 import { ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
-import type { StyleSpecification } from "maplibre-gl";
 
+import {
+  applyVectorBasemapColorOverrides,
+  getVectorBasemapStyleUrl,
+} from "@/lib/dashboard/map-basemap";
+import type { Locale } from "@/lib/i18n/config";
 import type { RealtimeVisitorPoint } from "@/lib/realtime/types";
 
 type EffectiveMapTheme = "light" | "dark";
 
 export interface RealtimeMapStageProps {
+  locale: Locale;
   siteId: string;
   theme: EffectiveMapTheme;
   points: RealtimeVisitorPoint[];
@@ -56,34 +61,6 @@ interface RenderedRealtimePoint {
   longitude: number;
   radius: number;
   fillColor: [number, number, number, number];
-}
-
-function buildRasterStyle(theme: EffectiveMapTheme): StyleSpecification {
-  const sourceId = `insightflare-realtime-map-source-${theme}`;
-  const layerId = `insightflare-realtime-map-layer-${theme}`;
-  const endpoint = `/api/public/resources/map-tiles/{z}/{x}/{y}.png?theme=${theme}`;
-
-  return {
-    version: 8,
-    name: `insightflare-realtime-map-${theme}`,
-    sources: {
-      [sourceId]: {
-        type: "raster",
-        tiles: [endpoint],
-        tileSize: 256,
-        attribution: "© OpenStreetMap contributors © CARTO",
-      },
-    },
-    layers: [
-      {
-        id: layerId,
-        type: "raster",
-        source: sourceId,
-        minzoom: 0,
-        maxzoom: 22,
-      },
-    ],
-  };
 }
 
 function hasValidCoordinate(
@@ -161,6 +138,7 @@ const DeckOverlay = memo(function DeckOverlay(props: MapboxOverlayProps) {
 });
 
 export const RealtimeMapStage = memo(function RealtimeMapStage({
+  locale,
   siteId,
   theme,
   points,
@@ -390,7 +368,10 @@ export const RealtimeMapStage = memo(function RealtimeMapStage({
     ],
     [renderedPoints, renderedRipples],
   );
-  const mapStyle = useMemo(() => buildRasterStyle(theme), [theme]);
+  const mapStyle = useMemo(
+    () => getVectorBasemapStyleUrl(theme, locale),
+    [locale, theme],
+  );
 
   return (
     <Map
@@ -398,6 +379,9 @@ export const RealtimeMapStage = memo(function RealtimeMapStage({
       mapStyle={mapStyle}
       reuseMaps
       attributionControl={false}
+      onStyleData={(event) =>
+        applyVectorBasemapColorOverrides(event.target, theme)
+      }
     >
       <DeckOverlay interleaved={false} layers={layers} />
     </Map>

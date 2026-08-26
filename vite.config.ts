@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 import { cloudflare } from "@cloudflare/vite-plugin";
@@ -8,6 +9,21 @@ import { defineConfig, loadEnv } from "vite";
 import { parse } from "yaml";
 
 import packageJson from "./package.json";
+
+function resolveCommitSha(): string {
+  const configured = process.env.COMMIT_SHA?.trim();
+  if (configured) return configured;
+
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: import.meta.dirname,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
 
 function ssrMapStubs() {
   const stubPath = path.resolve(
@@ -61,9 +77,7 @@ export default defineConfig(({ mode }) => {
   return {
     define: {
       "import.meta.env.VITE_APP_VERSION": JSON.stringify(packageJson.version),
-      "import.meta.env.VITE_COMMIT_SHA": JSON.stringify(
-        process.env.COMMIT_SHA || "",
-      ),
+      "import.meta.env.VITE_COMMIT_SHA": JSON.stringify(resolveCommitSha()),
       "import.meta.env.VITE_DEMO_MODE": JSON.stringify(demoMode),
       "import.meta.env.VITE_GITHUB_API_BASE": JSON.stringify(
         e2eGithubApiBase || "https://api.github.com",

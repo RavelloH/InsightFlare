@@ -4231,14 +4231,6 @@ function mergeProjectOperations(spec: OpenAPISpec): void {
       security: publicRouteSecurity,
     },
     {
-      path: "/api/public/resources/map-tiles/{z}/{x}/{y}",
-      methods: ["get"],
-      operationId: "public.resources.mapTile",
-      summary: "Get a map tile",
-      tag: "Dashboard",
-      security: publicRouteSecurity,
-    },
-    {
       path: "/api/public/share/{slug}/site",
       methods: ["get"],
       operationId: "public.share.site",
