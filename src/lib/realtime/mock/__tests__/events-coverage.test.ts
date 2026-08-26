@@ -445,7 +445,7 @@ describe("mock/events coverage", () => {
     expect(result.fields).toEqual([]);
   });
 
-  it("returns field values only when required field params are present", () => {
+  it("returns field values across event types when no event name is provided", () => {
     const visits = [
       makeVisit({ visitId: "one", eventType: "signup" }),
       makeVisit({ visitId: "two", eventType: "signup", sessionId: "s2" }),
@@ -454,18 +454,17 @@ describe("mock/events coverage", () => {
     mockBuildDemoFactDataset.mockReturnValue(dataset);
     mockApplyDemoFilters.mockReturnValue(makeFiltered(visits));
 
-    expect(
-      generateDemoEventTypeFieldValues("site", {
-        eventName: "",
-        fieldPath: "/plan",
-        fieldValueType: "string",
-      }),
-    ).toEqual({
+    const allEventTypes = generateDemoEventTypeFieldValues("site", {
+      eventName: "",
+      fieldPath: "/plan",
+      fieldValueType: "string",
+    }) as any;
+    expect(allEventTypes).toMatchObject({
       ok: true,
       fieldPath: "/plan",
       fieldValueType: "string",
-      data: [],
     });
+    expect(allEventTypes.data.length).toBeGreaterThan(0);
 
     const result = generateDemoEventTypeFieldValues("site", {
       eventName: "signup",

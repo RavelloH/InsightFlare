@@ -149,7 +149,7 @@ export function registerEventProviders(
       "event-field-values",
       typedQueryProvider(async (input) => {
         const request = query(input!);
-        const eventName = stringField(request, "eventName");
+        const eventName = stringField(request, "eventName") || undefined;
         const fieldPath = stringField(request, "fieldPath");
         const fieldValueType = stringField(request, "fieldValueType");
         return {
@@ -177,7 +177,7 @@ export function registerEventProviders(
       "event-fields",
       typedQueryProvider(async (input) => {
         const request = query(input!);
-        const eventName = stringField(request, "eventName");
+        const eventName = stringField(request, "eventName") || undefined;
         return {
           value: {
             eventName,

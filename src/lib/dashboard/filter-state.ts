@@ -320,6 +320,7 @@ export function serializeDashboardSearchParams(
       const readableKey = encodeURIComponent(key)
         .replaceAll("%5B", "[")
         .replaceAll("%5D", "]")
+        .replaceAll("%2F", "/")
         .replaceAll("%3A", ":");
       const readableValue = encodeURIComponent(value)
         .replaceAll("%2F", "/")

@@ -1077,14 +1077,20 @@ describe("mock — handleDemoRequest", () => {
       expect(res).toMatchObject({ ok: true, field: "page.path" });
     });
 
-    it("returns an empty event-fields response when eventName is absent", () => {
+    it("returns payload fields across event types when eventName is absent", () => {
       const res = asRecord(
         handleDemoRequest({
           path: "/api/private/event-type-fields",
           params: ANALYTICS_PARAMS,
         }),
       );
-      expect(res).toMatchObject({ ok: true, eventName: "", fields: [] });
+      expect(res).toMatchObject({ ok: true, eventName: "" });
+      expect(res.fields).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: "/plan", valueType: "string" }),
+          expect.objectContaining({ path: "/value", valueType: "number" }),
+        ]),
+      );
     });
 
     it("limits public filter values to public canonical fields", () => {

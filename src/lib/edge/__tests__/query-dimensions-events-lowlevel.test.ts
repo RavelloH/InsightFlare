@@ -848,8 +848,10 @@ describe("edge query event handlers low-level coverage", () => {
       error: { message: "Invalid time window" },
     });
     await expect(missingFieldName.json()).resolves.toMatchObject({
-      ok: false,
-      error: { message: "eventName is required" },
+      ok: true,
+      fieldPath: "/paid",
+      fieldValueType: "boolean",
+      data: [],
     });
     await expect(missingFieldPath.json()).resolves.toMatchObject({
       ok: false,
@@ -863,7 +865,7 @@ describe("edge query event handlers low-level coverage", () => {
       ok: false,
       error: { message: "eventId is required" },
     });
-    expect(prepare).not.toHaveBeenCalled();
+    expect(prepare).toHaveBeenCalledTimes(1);
   });
 
   it("returns narrow field and context handler responses", async () => {

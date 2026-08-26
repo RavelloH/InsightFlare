@@ -68,6 +68,7 @@ import type { DashboardFilterOptionKey } from "@/lib/dashboard/client-data";
 import {
   createSavedFilter,
   deleteSavedFilter,
+  fetchEventTypeFields,
   fetchEventTypeFieldValues,
   fetchFilterValues,
   fetchSavedFilters,
@@ -86,6 +87,7 @@ import {
   type SystemFilterPresetId,
   systemFilterPresetOptionValue,
 } from "@/lib/dashboard/system-filter-presets";
+import type { EventField } from "@/lib/edge-client";
 import {
   analyticsFilterRegistry,
   type CanonicalJsonPath,
@@ -942,8 +944,172 @@ function SavedFilterFormFields({
   );
 }
 
+function isSelectablePayloadFieldType(
+  valueType: EventField["valueType"],
+): valueType is "string" | "number" | "boolean" {
+  return (
+    valueType === "string" || valueType === "number" || valueType === "boolean"
+  );
+}
+
+function payloadFieldTypeLabel(
+  valueType: EventField["valueType"],
+  messages: AppMessages,
+): string {
+  if (
+    valueType === "string" ||
+    valueType === "number" ||
+    valueType === "boolean"
+  ) {
+    return messages.filterBuilder.valueKinds[valueType];
+  }
+  return valueType;
+}
+
+function SearchablePayloadPathInput({
+  condition,
+  document,
+  eventName,
+  messages,
+  needsValue,
+  onChange,
+  onSelect,
+  siteId,
+  window,
+}: {
+  condition: EditorCondition;
+  document: FilterDocument;
+  eventName: string | undefined;
+  messages: AppMessages;
+  needsValue: boolean;
+  onChange: (payloadPath: string) => void;
+  onSelect: (field: EventField) => void;
+  siteId: string | undefined;
+  window: TimeWindow | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const [searchToken, setSearchToken] = useState("");
+  const deferredSearchToken = useDeferredValue(searchToken);
+  const canSearch = Boolean(siteId && window);
+  const fieldsQuery = useQuery<{ fields: EventField[] }>({
+    queryKey: [
+      "dashboard",
+      "event-field-paths",
+      siteId,
+      window?.from,
+      window?.to,
+      window?.timeZone,
+      eventName,
+      document,
+      needsValue,
+    ],
+    queryFn: ({ signal }) =>
+      fetchEventTypeFields(siteId!, window!, eventName, document, { signal }),
+    enabled: open && canSearch,
+  });
+  const fields = fieldsQuery.data?.fields ?? [];
+  const suggestions = useMemo(() => {
+    const search = deferredSearchToken.trim().toLocaleLowerCase();
+    return fields
+      .filter(
+        (field) =>
+          field.path &&
+          (!needsValue || isSelectablePayloadFieldType(field.valueType)) &&
+          (!search || field.path.toLocaleLowerCase().includes(search)),
+      )
+      .slice(0, 12);
+  }, [deferredSearchToken, fields, needsValue]);
+  const menuState = fieldsQuery.isFetching
+    ? "loading"
+    : suggestions.length > 0
+      ? "suggestions"
+      : "empty";
+
+  useEffect(() => {
+    if (open) setSearchToken("");
+  }, [condition.field, condition.id, eventName, open]);
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-8 w-full justify-between pr-2 text-xs font-normal"
+        >
+          <span className="min-w-0 truncate text-left">
+            {condition.payloadPath || messages.filterBuilder.valueUnset}
+          </span>
+          <RiArrowDownSLine className="size-4 shrink-0 text-muted-foreground" />
+        </Button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="start"
+          sideOffset={4}
+          className="relative z-50 w-[var(--radix-popover-trigger-width)] origin-(--radix-popover-content-transform-origin) overflow-hidden rounded-none border border-border bg-popover text-popover-foreground shadow-md outline-none duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+        >
+          <div className="relative">
+            <RiSearchLine
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              autoFocus
+              className="border-0 pl-9 font-mono text-xs shadow-none focus-visible:ring-0"
+              value={searchToken}
+              placeholder={messages.filterBuilder.jsonPointerPlaceholder}
+              onChange={(event) => {
+                const next = event.target.value;
+                setSearchToken(next);
+                onChange(next);
+              }}
+            />
+          </div>
+          <AutoResizer initial duration={0.18}>
+            <AutoTransition transitionKey={menuState} duration={0.18}>
+              {fieldsQuery.isFetching ? (
+                <div className="flex min-h-10 items-center justify-center border-t border-border text-muted-foreground">
+                  <Spinner aria-label={messages.filterBuilder.valueLoading} />
+                </div>
+              ) : suggestions.length > 0 ? (
+                <OverlayScrollbar
+                  axis="vertical"
+                  syncKey={suggestions.length}
+                  className="max-h-56 border-t border-border pt-1"
+                >
+                  {suggestions.map((field) => (
+                    <button
+                      key={`${field.valueType}:${field.path}`}
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
+                      onClick={() => {
+                        onSelect(field);
+                        setSearchToken("");
+                        setOpen(false);
+                      }}
+                    >
+                      <span className="min-w-0 truncate font-mono">
+                        {field.path}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {payloadFieldTypeLabel(field.valueType, messages)}
+                      </span>
+                    </button>
+                  ))}
+                </OverlayScrollbar>
+              ) : null}
+            </AutoTransition>
+          </AutoResizer>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
 function SearchableValueInput({
   condition,
+  disabled = false,
   document,
   eventName,
   messages,
@@ -954,6 +1120,7 @@ function SearchableValueInput({
   window,
 }: {
   condition: EditorCondition;
+  disabled?: boolean;
   document: FilterDocument;
   eventName: string | undefined;
   messages: AppMessages;
@@ -976,7 +1143,7 @@ function SearchableValueInput({
     siteId &&
     window &&
     (isPayload
-      ? eventName && condition.payloadPath.trim()
+      ? condition.payloadPath.trim()
       : condition.field !== "event.payload"),
   );
   const suggestionsQuery = useQuery<ValueSuggestion[]>({
@@ -998,7 +1165,7 @@ function SearchableValueInput({
         return fetchEventTypeFieldValues(
           siteId!,
           window!,
-          eventName!,
+          eventName,
           condition.payloadPath,
           condition.scalarKind,
           document,
@@ -1013,7 +1180,7 @@ function SearchableValueInput({
         { limit: 12, search: deferredSearchToken, signal },
       );
     },
-    enabled: open && canSearch,
+    enabled: open && canSearch && !disabled,
   });
   const suggestions = suggestionsQuery.data ?? [];
   const inputMode =
@@ -1055,7 +1222,8 @@ function SearchableValueInput({
         <Button
           type="button"
           variant="outline"
-          className="h-8 w-full justify-between text-xs font-normal"
+          disabled={disabled}
+          className="h-8 w-full justify-between pr-2 text-xs font-normal"
         >
           <span className="min-w-0 truncate text-left">
             {isList
@@ -1100,6 +1268,7 @@ function SearchableValueInput({
             />
             <Input
               autoFocus
+              disabled={disabled}
               className="border-0 pl-9 text-xs shadow-none focus-visible:ring-0"
               type={inputType}
               value={searchToken}
@@ -1174,11 +1343,13 @@ function SearchableValueInput({
 
 function RangeValueInput({
   condition,
+  disabled = false,
   inputMode,
   messages,
   onChange,
 }: {
   condition: EditorCondition;
+  disabled?: boolean;
   inputMode?: "decimal";
   messages: AppMessages;
   onChange: (valueText: string) => void;
@@ -1187,12 +1358,14 @@ function RangeValueInput({
   return (
     <div className="grid gap-2 sm:grid-cols-2">
       <Input
+        disabled={disabled}
         value={lower.trim()}
         inputMode={inputMode}
         placeholder={messages.filterBuilder.rangeStartPlaceholder}
         onChange={(event) => onChange(`${event.target.value}, ${upper.trim()}`)}
       />
       <Input
+        disabled={disabled}
         value={upper.trim()}
         inputMode={inputMode}
         placeholder={messages.filterBuilder.rangeEndPlaceholder}
@@ -1242,6 +1415,7 @@ function ConditionEditor({
   }, [fields]);
   const isPayload = condition.field === "event.payload";
   const needsValue = !VALUELESS_OPERATORS.has(condition.operator);
+  const valueDisabled = isPayload && !condition.payloadPath.trim();
   const valueIsBoolean =
     needsValue &&
     (definition?.valueKind === "boolean" ||
@@ -1260,7 +1434,7 @@ function ConditionEditor({
     onChange((current) => ({
       ...current,
       field,
-      payloadPath: field === "event.payload" ? "/value" : "",
+      payloadPath: "",
       operator: firstOperator(nextDefinition),
       value: undefined,
       listValues: undefined,
@@ -1289,7 +1463,7 @@ function ConditionEditor({
           index: path.join("."),
         })}
       </div>
-      <div className="space-y-1.5">
+      <div className={cn("space-y-1.5", isPayload && "sm:col-span-2")}>
         <Select value={condition.field} onValueChange={setField}>
           <SelectTrigger className="w-full">
             <SelectValue />
@@ -1312,30 +1486,33 @@ function ConditionEditor({
         </Select>
       </div>
 
-      <div className="space-y-1.5">
-        <Select value={condition.operator} onValueChange={setOperator}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {operators.map((operator) => (
-              <SelectItem key={operator} value={operator}>
-                {messages.filterBuilder.operatorLabels[operator] ?? operator}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
       {isPayload ? (
-        <div className="space-y-1.5">
-          <Label>{messages.filterBuilder.jsonPointer}</Label>
-          <Input
-            value={condition.payloadPath}
-            placeholder="/metadata/plan"
-            onChange={(event) => {
-              const payloadPath = event.target.value;
+        <div className="space-y-1.5 sm:col-span-2">
+          <SearchablePayloadPathInput
+            condition={condition}
+            document={document}
+            eventName={eventName}
+            messages={messages}
+            needsValue={needsValue}
+            siteId={siteId}
+            window={window}
+            onChange={(payloadPath) => {
               onChange((current) => ({ ...current, payloadPath }));
+            }}
+            onSelect={(field) => {
+              onChange((current) => ({
+                ...current,
+                payloadPath: field.path,
+                ...(isSelectablePayloadFieldType(field.valueType)
+                  ? {
+                      scalarKind: field.valueType,
+                      value: undefined,
+                      listValues: undefined,
+                      valueText: "",
+                      valueDirty: true,
+                    }
+                  : {}),
+              }));
             }}
           />
         </div>
@@ -1343,7 +1520,6 @@ function ConditionEditor({
 
       {isPayload && needsValue ? (
         <div className="space-y-1.5">
-          <Label>{messages.filterBuilder.valueType}</Label>
           <Select
             value={condition.scalarKind}
             onValueChange={(value) => {
@@ -1382,10 +1558,45 @@ function ConditionEditor({
         </div>
       ) : null}
 
+      {!isPayload ? (
+        <div className="space-y-1.5">
+          <Select value={condition.operator} onValueChange={setOperator}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {operators.map((operator) => (
+                <SelectItem key={operator} value={operator}>
+                  {messages.filterBuilder.operatorLabels[operator] ?? operator}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+
+      {isPayload ? (
+        <div className={cn("space-y-1.5", !needsValue && "sm:col-span-2")}>
+          <Select value={condition.operator} onValueChange={setOperator}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {operators.map((operator) => (
+                <SelectItem key={operator} value={operator}>
+                  {messages.filterBuilder.operatorLabels[operator] ?? operator}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+
       {needsValue ? (
         <div className="space-y-1.5 sm:col-span-2">
           {valueIsBoolean ? (
             <Select
+              disabled={valueDisabled}
               value={condition.valueText || undefined}
               onValueChange={(value) => {
                 onChange((current) => ({
@@ -1410,6 +1621,7 @@ function ConditionEditor({
           ) : valueIsRange ? (
             <RangeValueInput
               condition={condition}
+              disabled={valueDisabled}
               inputMode={valueIsNumber ? "decimal" : undefined}
               messages={messages}
               onChange={(valueText) => {
@@ -1423,6 +1635,7 @@ function ConditionEditor({
           ) : (
             <SearchableValueInput
               condition={condition}
+              disabled={valueDisabled}
               document={document}
               eventName={eventName}
               messages={messages}

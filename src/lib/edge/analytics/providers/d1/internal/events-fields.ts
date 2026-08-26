@@ -17,7 +17,7 @@ export async function queryEventFieldsFromD1(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
-  eventName: string,
+  eventName: string | undefined,
   limit: number,
 ): Promise<EventFieldRow[]> {
   const source = buildEventFilteredSourceCte(
@@ -66,7 +66,7 @@ export async function queryEventFieldValuesFromD1(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
-  eventName: string,
+  eventName: string | undefined,
   fieldPath: string,
   fieldValueType: string,
   limit: number,

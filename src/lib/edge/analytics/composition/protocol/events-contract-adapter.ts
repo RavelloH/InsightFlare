@@ -155,10 +155,9 @@ export async function handleEventFieldValuesContract(
   ctx?: ResponseContext,
   queryContext = siteQueryContext(siteId, "private-dashboard"),
 ): Promise<Response> {
-  const eventName = parseEventName(url);
+  const eventName = parseEventName(url) ?? undefined;
   const fieldPath = parseEventFieldPath(url);
   const fieldValueType = parseEventFieldValueType(url);
-  if (!eventName) return badRequest("eventName is required");
   if (!fieldPath) return badRequest("fieldPath is required");
   if (!fieldValueType) return badRequest("fieldValueType is required");
   const window = parseWindow(url);
@@ -172,7 +171,7 @@ export async function handleEventFieldValuesContract(
     context: queryContext,
     time: toQueryTime(window),
     filters,
-    eventName,
+    eventName: eventName ?? "",
     fieldPath,
     fieldValueType,
     limit: parseLimit(url, 25, 100),
@@ -205,8 +204,7 @@ export async function handleEventTypeFieldsContract(
   ctx?: ResponseContext,
   queryContext = siteQueryContext(siteId, "private-dashboard"),
 ): Promise<Response> {
-  const eventName = parseEventName(url);
-  if (!eventName) return badRequest("eventName is required");
+  const eventName = parseEventName(url) ?? undefined;
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
@@ -217,7 +215,7 @@ export async function handleEventTypeFieldsContract(
     context: queryContext,
     time: toQueryTime(window),
     filters,
-    eventName,
+    eventName: eventName ?? "",
     limit: 100,
   });
   if (!result.ok) return queryErrorResponse(result.error);

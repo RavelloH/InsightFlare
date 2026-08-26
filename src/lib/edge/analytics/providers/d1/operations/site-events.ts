@@ -48,12 +48,12 @@ export interface ReadSiteEventTypeDetailInput extends ReadSiteEventsInput {
 }
 
 export interface ReadSiteEventFieldsInput extends ReadSiteEventsInput {
-  readonly eventName: string;
+  readonly eventName?: string;
   readonly limit: number;
 }
 
 export interface ReadSiteEventFieldValuesInput extends ReadSiteEventsInput {
-  readonly eventName: string;
+  readonly eventName?: string;
   readonly fieldPath: string;
   readonly fieldValueType: string;
   readonly limit: number;
@@ -128,7 +128,7 @@ export async function readSiteEventTypes(input: ReadSiteEventTypesInput) {
 
 export async function readSiteEventFields(input: ReadSiteEventFieldsInput) {
   return {
-    eventName: input.eventName,
+    eventName: input.eventName ?? "",
     fields: (
       await queryEventFieldsFromD1(
         input.env,
@@ -147,7 +147,7 @@ export async function readSiteEventFieldValues(
   input: ReadSiteEventFieldValuesInput,
 ) {
   return {
-    eventName: input.eventName,
+    eventName: input.eventName ?? "",
     fieldPath: input.fieldPath,
     fieldValueType: input.fieldValueType,
     items: (

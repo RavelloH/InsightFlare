@@ -488,12 +488,11 @@ export async function fetchEventTypeDetail(
 export async function fetchEventTypeFields(
   siteId: string,
   window: TimeWindow,
-  eventName: string,
+  eventName?: string,
   filters?: FilterDocument,
   options?: { signal?: AbortSignal },
 ): Promise<Pick<EventTypeDetailData, "fields">> {
-  const normalizedEventName = eventName.trim();
-  if (!normalizedEventName) return { fields: [] };
+  const normalizedEventName = eventName?.trim() ?? "";
   return fetchPrivateJson<Pick<EventTypeDetailData, "fields">>(
     "/api/private/event-type-fields",
     withFilters(
@@ -502,7 +501,7 @@ export async function fetchEventTypeFields(
         from: window.from,
         to: window.to,
         timeZone: window.timeZone,
-        eventName: normalizedEventName,
+        ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
       },
       filters,
     ),
@@ -544,7 +543,7 @@ export async function fetchEventTypeContextCards(
 export async function fetchEventTypeFieldValues(
   siteId: string,
   window: TimeWindow,
-  eventName: string,
+  eventName: string | undefined,
   fieldPath: string,
   fieldValueType: EventField["valueType"],
   filters?: FilterDocument,
@@ -554,9 +553,9 @@ export async function fetchEventTypeFieldValues(
     signal?: AbortSignal;
   },
 ): Promise<EventFieldValuesData> {
-  const normalizedEventName = eventName.trim();
+  const normalizedEventName = eventName?.trim() ?? "";
   const normalizedFieldPath = String(fieldPath ?? "");
-  if (!normalizedEventName || !normalizedFieldPath) {
+  if (!normalizedFieldPath) {
     return emptyEventFieldValues(normalizedFieldPath, fieldValueType);
   }
   return fetchPrivateJson<EventFieldValuesData>(
@@ -567,7 +566,7 @@ export async function fetchEventTypeFieldValues(
         from: window.from,
         to: window.to,
         timeZone: window.timeZone,
-        eventName: normalizedEventName,
+        ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
         fieldPath: normalizedFieldPath,
         fieldValueType,
         limit: options?.limit ?? 25,

@@ -303,13 +303,14 @@ describe("fetchEventTypeDetail", () => {
 });
 
 describe("fetchEventTypeFields", () => {
-  it("returns empty fields without a request for an empty event name", async () => {
-    await expect(fetchEventTypeFields("site-1", window, "  ")).resolves.toEqual(
-      {
-        fields: [],
-      },
+  it("loads fields across event types without an event name", async () => {
+    await fetchEventTypeFields("site-1", window, "  ");
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/event-type-fields",
+      expect.not.objectContaining({ eventName: expect.anything() }),
+      { signal: undefined },
     );
-    expect(fetchPrivateJsonMock).not.toHaveBeenCalled();
   });
 
   it("uses the private fields endpoint and keeps filters", async () => {
@@ -405,16 +406,14 @@ describe("fetchEventTypeFieldValues", () => {
     );
   });
 
-  it("returns emptyEventFieldValues for empty eventName", async () => {
-    const result = await fetchEventTypeFieldValues(
-      "site-1",
-      window,
-      "  ",
-      "field",
-      "string",
+  it("loads field values across event types without an event name", async () => {
+    await fetchEventTypeFieldValues("site-1", window, "  ", "field", "string");
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/event-type-field-values",
+      expect.not.objectContaining({ eventName: expect.anything() }),
+      { signal: undefined },
     );
-    expect(result).toEqual(emptyEventFieldValues("field", "string"));
-    expect(fetchPrivateJsonMock).not.toHaveBeenCalled();
   });
 
   it("returns emptyEventFieldValues for empty fieldPath", async () => {

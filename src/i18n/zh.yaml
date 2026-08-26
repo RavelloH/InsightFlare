@@ -251,6 +251,7 @@ filterBuilder:
   rangeStartPlaceholder: 下限
   rangeEndPlaceholder: 上限
   jsonPointer: JSON 指针
+  jsonPointerPlaceholder: 搜索或输入 JSON 指针
   match: 匹配方式
   expression: 筛选表达式
   expressionPlaceholder: 筛选表达式...

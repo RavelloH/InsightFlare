@@ -203,6 +203,7 @@ export interface AppMessages {
     rangeStartPlaceholder: string;
     rangeEndPlaceholder: string;
     jsonPointer: string;
+    jsonPointerPlaceholder: string;
     match: string;
     expression: string;
     expressionPlaceholder: string;
@@ -2596,6 +2597,7 @@ const enMessages = {
     rangeStartPlaceholder: "Lower bound",
     rangeEndPlaceholder: "Upper bound",
     jsonPointer: "JSON Pointer",
+    jsonPointerPlaceholder: "Search or enter a JSON pointer",
     match: "Match",
     expression: "Filter expression",
     expressionPlaceholder: "Filter expression...",
@@ -5165,6 +5167,7 @@ const zhMessages = {
     rangeStartPlaceholder: "下限",
     rangeEndPlaceholder: "上限",
     jsonPointer: "JSON 指针",
+    jsonPointerPlaceholder: "搜索或输入 JSON 指针",
     match: "匹配方式",
     expression: "筛选表达式",
     expressionPlaceholder: "筛选表达式...",
@@ -7653,6 +7656,7 @@ const jaMessages = {
     rangeStartPlaceholder: "下限",
     rangeEndPlaceholder: "上限",
     jsonPointer: "JSON ポインター",
+    jsonPointerPlaceholder: "JSON ポインターを検索または入力",
     match: "一致条件",
     expression: "フィルター式",
     expressionPlaceholder: "フィルター式...",

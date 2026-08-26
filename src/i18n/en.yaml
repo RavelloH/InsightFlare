@@ -251,6 +251,7 @@ filterBuilder:
   rangeStartPlaceholder: Lower bound
   rangeEndPlaceholder: Upper bound
   jsonPointer: JSON Pointer
+  jsonPointerPlaceholder: Search or enter a JSON pointer
   match: Match
   expression: Filter expression
   expressionPlaceholder: Filter expression...

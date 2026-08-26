@@ -512,7 +512,6 @@ export function generateDemoEventFields(
   params: Record<string, string | number>,
 ): Record<string, unknown> {
   const eventName = normalizeDemoFilterValue(params.eventName) ?? "";
-  if (!eventName) return { ok: true, eventName, fields: [] };
 
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
@@ -522,7 +521,7 @@ export function generateDemoEventFields(
   const events = filterDemoCustomEventsByPayload(
     createDemoCustomEventFacts(filtered.visits),
     filters,
-  ).filter((event) => event.eventName === eventName);
+  ).filter((event) => !eventName || event.eventName === eventName);
 
   return {
     ok: true,
@@ -546,7 +545,7 @@ export function generateDemoEventTypeFieldValues(
   const filters = parseDemoFilters(params);
   const limit = parseDemoLimit(params.limit, 25, 1, 100);
   const search = normalizeDemoSearch(params);
-  if (!eventName || !fieldPath || !fieldValueType) {
+  if (!fieldPath || !fieldValueType) {
     return {
       ok: true,
       fieldPath,
@@ -559,7 +558,7 @@ export function generateDemoEventTypeFieldValues(
   const events = filterDemoCustomEventsByPayload(
     createDemoCustomEventFacts(filtered.visits),
     filters,
-  ).filter((event) => event.eventName === eventName);
+  ).filter((event) => !eventName || event.eventName === eventName);
 
   return {
     ok: true,

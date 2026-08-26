@@ -368,12 +368,13 @@ describe("dashboard query-state helpers", () => {
       const params = new URLSearchParams([
         ["filter[page.path]", "/politics"],
         ["filter[page.path][or:0.0]", "/world"],
+        ["filter[event.payload][/device/screen/width]", "json:1920"],
         ["filter[referrer.domain]", "google.com"],
         ["filter[page.title]", "News & Politics"],
       ]);
 
       expect(serializeDashboardSearchParams(params)).toBe(
-        "filter[page.path]=/politics&filter[page.path][or:0.0]=/world&filter[referrer.domain]=google.com&filter[page.title]=News%20%26%20Politics",
+        "filter[page.path]=/politics&filter[page.path][or:0.0]=/world&filter[event.payload][/device/screen/width]=json:1920&filter[referrer.domain]=google.com&filter[page.title]=News%20%26%20Politics",
       );
     });
   });

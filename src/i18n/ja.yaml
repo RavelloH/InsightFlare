@@ -251,6 +251,7 @@ filterBuilder:
   rangeStartPlaceholder: 下限
   rangeEndPlaceholder: 上限
   jsonPointer: JSON ポインター
+  jsonPointerPlaceholder: JSON ポインターを検索または入力
   match: 一致条件
   expression: フィルター式
   expressionPlaceholder: フィルター式...
