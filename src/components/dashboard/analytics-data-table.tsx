@@ -227,25 +227,23 @@ export function AnalyticsDataTable<TRow>({
                               ),
                         ]
                       : hasMore
-                        ? Array.from({ length: skeletonRows }, (_, index) =>
-                            (() => {
-                              return (
-                                <AutoTransition
-                                  as="tr"
-                                  key={`skeleton-more-${index}`}
-                                  transitionKey={`skeleton-more-${index}`}
-                                  duration={0.18}
-                                  type="fade"
-                                  ref={sentinelRef}
-                                  aria-hidden="true"
-                                  data-slot="table-row"
-                                  className={TABLE_ROW_CLASS_NAME}
-                                >
-                                  {renderSkeletonRow(index)}
-                                </AutoTransition>
-                              );
-                            })(),
-                          )
+                        ? Array.from({ length: skeletonRows }, (_, index) => {
+                            return (
+                              <AutoTransition
+                                as="tr"
+                                key={`skeleton-more-${index}`}
+                                transitionKey={`skeleton-more-${index}`}
+                                duration={0.18}
+                                type="fade"
+                                ref={sentinelRef}
+                                aria-hidden="true"
+                                data-slot="table-row"
+                                className={TABLE_ROW_CLASS_NAME}
+                              >
+                                {renderSkeletonRow(index)}
+                              </AutoTransition>
+                            );
+                          })
                         : []),
                   ]}
         </AutoTransition>

@@ -72,6 +72,7 @@ interface VisitorsClientPageProps {
 type VisitorRow = VisitorsData["data"][number];
 
 const VISITOR_PAGE_SIZE = 50;
+const VISITOR_SKELETON_ROWS = 25;
 
 type SortDirection = "asc" | "desc";
 type VisitorSortKey = "firstSeenAt" | "lastSeenAt" | "sessions" | "views";
@@ -527,6 +528,146 @@ function detailQueryTarget(
   return query ? `${pathname}?${query}` : pathname;
 }
 
+const VisitorAnalyticsTable = memo(function VisitorAnalyticsTable({
+  locale,
+  messages,
+  labels,
+  rows,
+  now,
+  columns,
+  sort,
+  onToggleSort,
+  onOpenDetail,
+  loading,
+  loadingMore,
+  error,
+  errorContent,
+  emptyContent,
+  appendError,
+  appendErrorContent,
+  hasMore,
+  onLoadMore,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  labels: AppMessages["visitors"];
+  rows: readonly VisitorRow[];
+  now: number;
+  columns: readonly VisitorTableColumnId[];
+  sort: VisitorSortState;
+  onToggleSort: (key: VisitorSortKey) => void;
+  onOpenDetail: (visitorId: string) => void;
+  loading: boolean;
+  loadingMore: boolean;
+  error: boolean;
+  errorContent: string;
+  emptyContent: string;
+  appendError: boolean;
+  appendErrorContent: string;
+  hasMore: boolean;
+  onLoadMore: () => void;
+}) {
+  const headers: Record<VisitorTableColumnId, ReactNode> = {
+    visitor: <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>,
+    sessionId: <TableHead>{messages.visitorDetail.visitorId}</TableHead>,
+    firstSeen: (
+      <SortHeader
+        label={labels.firstSeen}
+        active={sort.key === "firstSeenAt"}
+        direction={sort.direction}
+        onClick={() => onToggleSort("firstSeenAt")}
+        align="center"
+        className="text-center"
+      />
+    ),
+    lastSeen: (
+      <SortHeader
+        label={labels.lastSeen}
+        active={sort.key === "lastSeenAt"}
+        direction={sort.direction}
+        onClick={() => onToggleSort("lastSeenAt")}
+        align="center"
+        className="text-center"
+      />
+    ),
+    sessions: (
+      <SortHeader
+        label={labels.sessions}
+        active={sort.key === "sessions"}
+        direction={sort.direction}
+        onClick={() => onToggleSort("sessions")}
+        align="right"
+        className="text-right"
+      />
+    ),
+    pageViews: (
+      <SortHeader
+        label={labels.pageViews}
+        active={sort.key === "views"}
+        direction={sort.direction}
+        onClick={() => onToggleSort("views")}
+        align="right"
+        className="text-right"
+      />
+    ),
+    customEvents: (
+      <TableHead className="text-right">{labels.customEvents}</TableHead>
+    ),
+    referrer: <TableHead>{labels.referrer}</TableHead>,
+    location: <TableHead>{labels.location}</TableHead>,
+    os: <TableHead>{labels.os}</TableHead>,
+    browser: <TableHead>{labels.browser}</TableHead>,
+    device: <TableHead className="pr-4">{labels.device}</TableHead>,
+    screenSize: (
+      <TableHead className="pr-4 text-center">{labels.screenSize}</TableHead>
+    ),
+  };
+
+  return (
+    <AnalyticsDataTable
+      header={
+        <TableRow>
+          {columns.map((columnId) => (
+            <Fragment key={columnId}>{headers[columnId]}</Fragment>
+          ))}
+        </TableRow>
+      }
+      rows={rows}
+      renderRow={(row) => ({
+        children: (
+          <VisitorTableRowContent
+            locale={locale}
+            messages={messages}
+            labels={labels}
+            row={row}
+            now={now}
+            onOpenDetail={onOpenDetail}
+            columns={columns}
+          />
+        ),
+        props: { className: "cursor-pointer" },
+      })}
+      renderSkeletonRow={(index) => (
+        <VisitorRowSkeletonContent index={index} columns={columns} />
+      )}
+      getRowKey={(row) => row.visitorId}
+      skeletonRows={VISITOR_SKELETON_ROWS}
+      columnCount={columns.length}
+      loading={loading}
+      loadingMore={loadingMore}
+      error={error}
+      errorContent={errorContent}
+      emptyContent={emptyContent}
+      appendError={appendError}
+      appendErrorContent={appendErrorContent}
+      enableTimeTooltips
+      messages={messages}
+      hasMore={hasMore}
+      onLoadMore={onLoadMore}
+    />
+  );
+});
+
 export function VisitorsClientPage({
   locale,
   messages,
@@ -647,7 +788,7 @@ export function VisitorsClientPage({
     void fetchNextPage();
   }, [appendError, fetchNextPage, hasMore, loadingInitial, loadingMore]);
 
-  const toggleSort = (key: VisitorSortKey) => {
+  const toggleSort = useCallback((key: VisitorSortKey) => {
     setSort((current) =>
       current.key === key
         ? {
@@ -656,7 +797,7 @@ export function VisitorsClientPage({
           }
         : { key, direction: "desc" },
     );
-  };
+  }, []);
 
   const openVisitorDetail = useCallback(
     (visitorId: string) => {
@@ -714,6 +855,14 @@ export function VisitorsClientPage({
     },
     [],
   );
+  const openNestedSession = useCallback(
+    (sessionId: string) => openNestedDetail("session", sessionId),
+    [openNestedDetail],
+  );
+  const openNestedVisitor = useCallback(
+    (visitorId: string) => openNestedDetail("visitor", visitorId),
+    [openNestedDetail],
+  );
   const closeNestedDetail = useCallback((stackKey: string) => {
     setNestedDetails((current) => {
       const index = current.findIndex((item) => item.stackKey === stackKey);
@@ -750,101 +899,16 @@ export function VisitorsClientPage({
         }
       />
 
-      <AnalyticsDataTable
-        header={
-          <TableRow>
-            {visitorColumns.visibleIds.map((columnId) => {
-              const headers: Record<VisitorTableColumnId, ReactNode> = {
-                visitor: (
-                  <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>
-                ),
-                sessionId: (
-                  <TableHead>{messages.visitorDetail.visitorId}</TableHead>
-                ),
-                firstSeen: (
-                  <SortHeader
-                    label={labels.firstSeen}
-                    active={sort.key === "firstSeenAt"}
-                    direction={sort.direction}
-                    onClick={() => toggleSort("firstSeenAt")}
-                    align="center"
-                    className="text-center"
-                  />
-                ),
-                lastSeen: (
-                  <SortHeader
-                    label={labels.lastSeen}
-                    active={sort.key === "lastSeenAt"}
-                    direction={sort.direction}
-                    onClick={() => toggleSort("lastSeenAt")}
-                    align="center"
-                    className="text-center"
-                  />
-                ),
-                sessions: (
-                  <SortHeader
-                    label={labels.sessions}
-                    active={sort.key === "sessions"}
-                    direction={sort.direction}
-                    onClick={() => toggleSort("sessions")}
-                    align="right"
-                    className="text-right"
-                  />
-                ),
-                pageViews: (
-                  <SortHeader
-                    label={labels.pageViews}
-                    active={sort.key === "views"}
-                    direction={sort.direction}
-                    onClick={() => toggleSort("views")}
-                    align="right"
-                    className="text-right"
-                  />
-                ),
-                customEvents: (
-                  <TableHead className="text-right">
-                    {labels.customEvents}
-                  </TableHead>
-                ),
-                referrer: <TableHead>{labels.referrer}</TableHead>,
-                location: <TableHead>{labels.location}</TableHead>,
-                os: <TableHead>{labels.os}</TableHead>,
-                browser: <TableHead>{labels.browser}</TableHead>,
-                device: <TableHead className="pr-4">{labels.device}</TableHead>,
-                screenSize: (
-                  <TableHead className="pr-4 text-center">
-                    {labels.screenSize}
-                  </TableHead>
-                ),
-              };
-              return <Fragment key={columnId}>{headers[columnId]}</Fragment>;
-            })}
-          </TableRow>
-        }
+      <VisitorAnalyticsTable
+        locale={locale}
+        messages={messages}
+        labels={labels}
         rows={rows}
-        renderRow={(row) => ({
-          children: (
-            <VisitorTableRowContent
-              locale={locale}
-              messages={messages}
-              labels={labels}
-              row={row}
-              now={now}
-              onOpenDetail={stableOpenVisitorDetail}
-              columns={visitorColumns.visibleIds}
-            />
-          ),
-          props: { className: "cursor-pointer" },
-        })}
-        renderSkeletonRow={(index) => (
-          <VisitorRowSkeletonContent
-            index={index}
-            columns={visitorColumns.visibleIds}
-          />
-        )}
-        getRowKey={(row) => row.visitorId}
-        skeletonRows={VISITOR_PAGE_SIZE}
-        columnCount={visitorColumns.visibleIds.length}
+        now={now}
+        columns={visitorColumns.visibleIds}
+        sort={sort}
+        onToggleSort={toggleSort}
+        onOpenDetail={stableOpenVisitorDetail}
         loading={replacingRows}
         loadingMore={loadingMore}
         error={error}
@@ -852,8 +916,6 @@ export function VisitorsClientPage({
         emptyContent={labels.empty}
         appendError={appendError}
         appendErrorContent={labels.loadError}
-        enableTimeTooltips
-        messages={messages}
         hasMore={hasMore}
         onLoadMore={loadNextPage}
       />
@@ -873,9 +935,7 @@ export function VisitorsClientPage({
             siteId={siteId}
             pathname={pathname}
             visitorId={detailVisitorId}
-            onOpenSession={(sessionId) =>
-              openNestedDetail("session", sessionId)
-            }
+            onOpenSession={openNestedSession}
           />
         </DetailDrawer>
       ) : null}
@@ -901,9 +961,7 @@ export function VisitorsClientPage({
               siteId={siteId}
               pathname={pathname}
               visitorId={nestedDetail.id}
-              onOpenSession={(sessionId) =>
-                openNestedDetail("session", sessionId)
-              }
+              onOpenSession={openNestedSession}
             />
           ) : (
             <SessionDetailClientPage
@@ -912,9 +970,7 @@ export function VisitorsClientPage({
               siteId={siteId}
               pathname={sessionsPathname}
               sessionId={nestedDetail.id}
-              onOpenVisitor={(visitorId) =>
-                openNestedDetail("visitor", visitorId)
-              }
+              onOpenVisitor={openNestedVisitor}
             />
           )}
         </DetailDrawer>

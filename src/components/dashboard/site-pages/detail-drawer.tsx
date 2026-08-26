@@ -23,10 +23,7 @@ import {
   subscribeDetailDrawerLayers,
 } from "@/components/dashboard/site-pages/floating-layer";
 import { ModalOverlay } from "@/components/ui/modal-overlay";
-import {
-  prepareNativeScrollbarHost,
-  shouldUseNativeScrollbars,
-} from "@/components/ui/overlay-scrollbar";
+import { shouldUseNativeScrollbars } from "@/components/ui/overlay-scrollbar";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { cn } from "@/lib/utils";
 
@@ -116,9 +113,6 @@ export function DetailDrawer({
   const closeAnimationFrameRef = useRef<number | null>(null);
   const closeScrollFrameRef = useRef<number | null>(null);
   const closeScrollTimeoutRef = useRef<number | null>(null);
-  const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
-    null,
-  );
   const isPreparingCloseRef = useRef(false);
   const layerIdRef = useRef<string | null>(null);
   if (layerIdRef.current === null) {
@@ -173,9 +167,7 @@ export function DetailDrawer({
     if (shouldUseNativeScrollbars()) return scrollContainer;
 
     return (
-      scrollbarRef.current?.elements().viewport ??
-      OverlayScrollbars(scrollContainer)?.elements().viewport ??
-      scrollContainer
+      OverlayScrollbars(scrollContainer)?.elements().viewport ?? scrollContainer
     );
   }, []);
 
@@ -432,37 +424,6 @@ export function DetailDrawer({
     layerZIndex,
     rendered,
   ]);
-
-  useEffect(() => {
-    if (!mounted || !rendered) return;
-
-    const host = scrollContainerRef.current;
-    if (!host) return;
-    if (prepareNativeScrollbarHost(host)) return;
-
-    const existing = OverlayScrollbars(host);
-    const instance =
-      existing ?? OverlayScrollbars(host, DETAIL_DRAWER_SCROLLBAR_OPTIONS);
-
-    if (existing) {
-      existing.options(DETAIL_DRAWER_SCROLLBAR_OPTIONS);
-    }
-    scrollbarRef.current = instance;
-
-    const frame = window.requestAnimationFrame(() => {
-      instance.update();
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      if (!existing) {
-        instance.destroy();
-      }
-      if (scrollbarRef.current === instance) {
-        scrollbarRef.current = null;
-      }
-    };
-  }, [drawerKey, mounted, rendered]);
 
   useEffect(() => {
     if (!isClosing) return;

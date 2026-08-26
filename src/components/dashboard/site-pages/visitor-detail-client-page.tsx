@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  memo,
   type ReactNode,
   useEffect,
   useMemo,
@@ -617,7 +618,7 @@ function SummaryGridItem({
       <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </p>
-      <AutoResizer className="mt-2 min-w-0" duration={0.2}>
+      <div className="mt-2 min-w-0">
         <AutoTransition
           initial={false}
           transitionKey={loading ? "loading" : "ready"}
@@ -647,7 +648,7 @@ function SummaryGridItem({
             </div>
           )}
         </AutoTransition>
-      </AutoResizer>
+      </div>
     </div>
   );
 }
@@ -1701,7 +1702,7 @@ function VisitorEventCard({
   )}`;
 
   return (
-    <Card size="sm" className="py-0">
+    <Card size="sm" className="border border-foreground/10 py-0 ring-0">
       <CardContent className="p-0">
         <div className="flex items-center gap-2 px-1.5 py-1">
           <EventIcon event={event} />
@@ -1762,7 +1763,7 @@ function VisitorEventCard({
 
 function VisitorEventSkeletonCard() {
   return (
-    <Card size="sm" className="py-0">
+    <Card size="sm" className="border border-foreground/10 py-0 ring-0">
       <CardContent className="p-0">
         <div className="flex items-center gap-2 px-1.5 py-1">
           <Skeleton className="size-[34px] shrink-0" />
@@ -2361,7 +2362,7 @@ function DetailContent({
   );
 }
 
-export function VisitorDetailClientPage({
+export const VisitorDetailClientPage = memo(function VisitorDetailClientPage({
   locale,
   messages,
   siteId,
@@ -2435,4 +2436,6 @@ export function VisitorDetailClientPage({
       loading={loading}
     />
   );
-}
+});
+
+VisitorDetailClientPage.displayName = "VisitorDetailClientPage";

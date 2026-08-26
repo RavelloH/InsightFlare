@@ -43,6 +43,7 @@ interface SessionsClientPageProps {
 }
 
 const SESSION_PAGE_SIZE = 50;
+const SESSION_SKELETON_ROWS = 25;
 
 const DEFAULT_SESSION_SORT: SessionSortState = {
   key: "startedAt",
@@ -315,7 +316,7 @@ export function SessionsClientPage({
         error={error}
         appendError={appendError}
         hasMore={hasMore}
-        skeletonRows={SESSION_PAGE_SIZE}
+        skeletonRows={SESSION_SKELETON_ROWS}
         onLoadMore={loadNextPage}
         visibleColumnIds={sessionColumns.visibleIds}
       />

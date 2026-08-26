@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from "react";
+import { memo, type ReactNode, useMemo } from "react";
 import {
   RiArrowLeftLine,
   RiCalendarEventLine,
@@ -836,7 +836,7 @@ function SummaryGridItem({
       <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </p>
-      <AutoResizer className="mt-2 min-w-0" duration={0.2}>
+      <div className="mt-2 min-w-0">
         <AutoTransition
           initial={false}
           transitionKey={loading ? "loading" : "ready"}
@@ -866,7 +866,7 @@ function SummaryGridItem({
             </div>
           )}
         </AutoTransition>
-      </AutoResizer>
+      </div>
     </div>
   );
 }
@@ -1764,7 +1764,7 @@ function DetailContent({
   );
 }
 
-export function SessionDetailClientPage({
+export const SessionDetailClientPage = memo(function SessionDetailClientPage({
   locale,
   messages,
   siteId,
@@ -1838,4 +1838,6 @@ export function SessionDetailClientPage({
       loading={loading}
     />
   );
-}
+});
+
+SessionDetailClientPage.displayName = "SessionDetailClientPage";

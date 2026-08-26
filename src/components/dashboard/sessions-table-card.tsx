@@ -580,7 +580,7 @@ export function SessionsTableCard({
   error = false,
   appendError = false,
   hasMore = false,
-  skeletonRows = 8,
+  skeletonRows = 25,
   onLoadMore,
   visibleColumnIds = SESSION_TABLE_COLUMN_IDS,
 }: SessionsTableCardProps) {

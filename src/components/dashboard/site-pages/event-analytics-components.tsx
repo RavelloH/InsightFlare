@@ -127,6 +127,7 @@ import { useRouter } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const EVENT_PAGE_SIZE = 50;
+const EVENT_SKELETON_ROWS = 25;
 type EventPayloadFilterValue = FilterValue;
 interface EventPayloadFilterRule {
   path: string;
@@ -1254,7 +1255,7 @@ function EventRecordsTable({
         <EventRowSkeletonContent index={index} columns={visibleColumnIds} />
       )}
       getRowKey={(row) => row.eventId}
-      skeletonRows={EVENT_PAGE_SIZE}
+      skeletonRows={EVENT_SKELETON_ROWS}
       columnCount={visibleColumnIds.length}
       loading={loadingRows}
       loadingMore={loadingMore}
