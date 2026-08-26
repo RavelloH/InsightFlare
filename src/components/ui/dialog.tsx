@@ -1,15 +1,43 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import type { RemixiconComponentType } from "@remixicon/react";
 import { RiCloseLine, RiInformationLine } from "@remixicon/react";
+import { AnimatePresence, motion } from "motion/react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+const DialogOpenContext = React.createContext(false);
+
 function Dialog({
-  ...props
+  defaultOpen = false,
+  open,
+  onOpenChange,
+  ...rootProps
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />;
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const isControlled = open !== undefined;
+  const currentOpen = isControlled ? open : uncontrolledOpen;
+  const handleOpenChange = React.useCallback(
+    (nextOpen: boolean) => {
+      if (!isControlled) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [isControlled, onOpenChange],
+  );
+
+  return (
+    <DialogOpenContext.Provider value={currentOpen}>
+      <DialogPrimitive.Root
+        data-slot="dialog"
+        {...rootProps}
+        open={currentOpen}
+        onOpenChange={handleOpenChange}
+        modal={false}
+      />
+    </DialogOpenContext.Provider>
+  );
 }
 
 function DialogTrigger({
@@ -19,9 +47,12 @@ function DialogTrigger({
 }
 
 function DialogPortal({
-  ...props
+  children,
+  container,
 }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
-  return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />;
+  if (typeof document === "undefined") return null;
+
+  return createPortal(children, container ?? document.body);
 }
 
 function DialogClose({
@@ -33,16 +64,28 @@ function DialogClose({
 function DialogOverlay({
   className,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
+}: React.ComponentPropsWithoutRef<"div">) {
+  const open = React.useContext(DialogOpenContext);
+
   return (
-    <DialogPrimitive.Overlay
-      data-slot="dialog-overlay"
-      className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-        className,
-      )}
-      {...props}
-    />
+    <AnimatePresence>
+      {open ? (
+        <motion.div
+          key="dialog-overlay"
+          data-slot="dialog-overlay"
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-auto fixed inset-0 isolate z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs",
+            className,
+          )}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.1, ease: "easeOut" }}
+          {...(props as unknown as React.ComponentProps<typeof motion.div>)}
+        />
+      ) : null}
+    </AnimatePresence>
   );
 }
 
