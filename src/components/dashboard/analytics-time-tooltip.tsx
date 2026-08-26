@@ -53,9 +53,16 @@ export interface AnalyticsDetailsTooltipRequest {
   items: readonly AnalyticsTooltipDetail[];
 }
 
+export interface AnalyticsCustomTooltipRequest {
+  kind: "custom";
+  key: string;
+  content: ReactNode;
+}
+
 type AnalyticsTooltipRequest =
   | TimeTooltipRequest
-  | AnalyticsDetailsTooltipRequest;
+  | AnalyticsDetailsTooltipRequest
+  | AnalyticsCustomTooltipRequest;
 
 interface TooltipRect {
   height: number;
@@ -344,6 +351,14 @@ function AnalyticsDetailsTooltipContent({
   );
 }
 
+function AnalyticsCustomTooltipContent({ content }: { content: ReactNode }) {
+  return (
+    <AutoResizer animateWidth className="min-w-0" duration={0.16}>
+      {content}
+    </AutoResizer>
+  );
+}
+
 function AnalyticsTooltipContent({
   browserTimeZone,
   messages,
@@ -351,10 +366,16 @@ function AnalyticsTooltipContent({
   request,
 }: {
   browserTimeZone: string;
-  messages: AppMessages;
+  messages?: AppMessages;
   now: number;
   request: AnalyticsTooltipRequest;
 }) {
+  if (request.kind === "custom") {
+    return <AnalyticsCustomTooltipContent content={request.content} />;
+  }
+
+  if (!messages) return null;
+
   if (request.kind === "time") {
     return (
       <AnalyticsTimeTooltipContent
@@ -375,9 +396,11 @@ function AnalyticsTooltipContent({
 export function AnalyticsTimeTooltipProvider({
   children,
   messages,
+  retentionMode = "table-column",
 }: {
   children: ReactNode;
-  messages: AppMessages;
+  messages?: AppMessages;
+  retentionMode?: "table-column" | "target";
 }) {
   const groupId = useId();
   const [active, setActive] = useState<ActiveTooltip | null>(null);
@@ -414,8 +437,11 @@ export function AnalyticsTimeTooltipProvider({
         (request.kind === "time"
           ? current.request.kind === "time" &&
             current.request.timestamp === request.timestamp
-          : current.request.kind === "details" &&
-            current.request.key === request.key) &&
+          : request.kind === "details"
+            ? current.request.kind === "details" &&
+              current.request.key === request.key
+            : current.request.kind === "custom" &&
+              current.request.key === request.key) &&
         current.side === nextSide &&
         areRectsEqual(current.rect, rect)
       ) {
@@ -486,6 +512,8 @@ export function AnalyticsTimeTooltipProvider({
       }
 
       const cell = current.target.closest<HTMLTableCellElement>("td");
+      if (retentionMode === "target") return false;
+
       const table = cell?.closest<HTMLTableElement>("table");
       const body = table?.tBodies[0];
       if (!cell || !body) return false;
@@ -499,7 +527,7 @@ export function AnalyticsTimeTooltipProvider({
         clientY <= bodyRect.bottom
       );
     },
-    [groupId],
+    [groupId, retentionMode],
   );
 
   const isActive = active !== null;
@@ -715,6 +743,58 @@ export function AnalyticsDetailsTooltipTarget({
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
       onMouseMove={showDetails}
+    >
+      {children}
+    </span>
+  );
+}
+
+export function AnalyticsTooltipTarget({
+  children,
+  className,
+  request,
+}: {
+  children: ReactNode;
+  className?: string;
+  request: Omit<AnalyticsCustomTooltipRequest, "kind">;
+}) {
+  const context = useContext(AnalyticsTimeTooltipContext);
+
+  if (!context) return <>{children}</>;
+
+  const showTooltip = (event: MouseEvent<HTMLSpanElement>) => {
+    context.show(
+      event.currentTarget,
+      { ...request, kind: "custom" },
+      event.clientX,
+    );
+  };
+
+  const handleEnter = (event: MouseEvent<HTMLSpanElement>) => {
+    context.cancelHide();
+    showTooltip(event);
+  };
+
+  const handleLeave = (event: MouseEvent<HTMLSpanElement>) => {
+    const relatedTarget = event.relatedTarget;
+    if (
+      relatedTarget instanceof HTMLElement &&
+      relatedTarget.closest(
+        `[data-analytics-time-tooltip-group="${context.groupId}"]`,
+      )
+    ) {
+      return;
+    }
+    context.hide();
+  };
+
+  return (
+    <span
+      className={cn(className)}
+      data-analytics-time-tooltip-group={context.groupId}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+      onMouseMove={showTooltip}
     >
       {children}
     </span>

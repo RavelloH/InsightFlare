@@ -1058,7 +1058,7 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
                     messages={messages}
                     country={row.country || ""}
                     region={row.region}
-                    className="max-w-none"
+                    className="max-w-none text-background [&_.text-foreground]:text-background"
                   />
                 ),
               },

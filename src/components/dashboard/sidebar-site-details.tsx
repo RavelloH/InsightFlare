@@ -1,6 +1,10 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import {
+  AnalyticsTimeTooltipProvider,
+  AnalyticsTooltipTarget,
+} from "@/components/dashboard/analytics-time-tooltip";
 import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
 import { SiteBrandIcon } from "@/components/dashboard/site-brand-icon";
@@ -95,68 +99,77 @@ const SidebarSiteRow = memo(function SidebarSiteRow({
     activeSiteSlug &&
     (site.slug === activeSiteSlug || site.id === activeSiteSlug),
   );
-  const tooltip = {
-    hidden: isMobile,
-    children:
-      sidebarState === "collapsed" ? (
-        site.name
-      ) : (
-        <div className="grid min-w-24 gap-1">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-background/70">{viewsLabel}</span>
-            <span className="font-mono font-medium tabular-nums">
-              {metrics ? numberFormat(locale, metrics.views) : "—"}
-            </span>
+  const tooltipContent =
+    sidebarState === "collapsed" ? (
+      site.name
+    ) : (
+      <div className="grid min-w-24 gap-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-background/70">{viewsLabel}</span>
+          <span className="font-mono font-medium tabular-nums">
+            {metrics ? numberFormat(locale, metrics.views) : "—"}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-background/70">{visitorsLabel}</span>
+          <span className="font-mono font-medium tabular-nums">
+            {metrics ? numberFormat(locale, metrics.visitors) : "—"}
+          </span>
+        </div>
+      </div>
+    );
+  const tooltipKey =
+    sidebarState === "collapsed"
+      ? `sidebar-site:${site.id}:collapsed`
+      : `sidebar-site:${site.id}:expanded:${metrics?.views ?? "pending"}:${metrics?.visitors ?? "pending"}`;
+
+  const siteLink = (
+    <SidebarMenuButton asChild isActive={isActive} className="h-8 rounded-none">
+      <Link href={buildSitePath(locale, teamSlug, site.slug, currentSection)}>
+        <SiteBrandIcon
+          siteId={site.id}
+          siteName={site.name}
+          domain={site.domain}
+          iconSrc={site.iconPath}
+          size="sm"
+        />
+        <div className={SITE_ROW_DETAIL_CLASS}>
+          <div className="min-w-0">
+            <span className="block truncate text-xs">{site.name}</span>
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-background/70">{visitorsLabel}</span>
-            <span className="font-mono font-medium tabular-nums">
-              {metrics ? numberFormat(locale, metrics.visitors) : "—"}
-            </span>
+          <div className="min-w-0">
+            {shouldRenderCharts ? (
+              <TrafficPairBarChart
+                data={trend}
+                locale={locale}
+                timeZone={dashboardWindow.timeZone}
+                interval={dashboardWindow.interval}
+                viewsLabel={viewsLabel}
+                visitorsLabel={visitorsLabel}
+                compact
+                dataIsComplete
+              />
+            ) : (
+              <div className="h-4 w-full" />
+            )}
           </div>
         </div>
-      ),
-  };
+      </Link>
+    </SidebarMenuButton>
+  );
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton
-        asChild
-        isActive={isActive}
-        tooltip={tooltip}
-        className="h-8 rounded-none"
-      >
-        <Link href={buildSitePath(locale, teamSlug, site.slug, currentSection)}>
-          <SiteBrandIcon
-            siteId={site.id}
-            siteName={site.name}
-            domain={site.domain}
-            iconSrc={site.iconPath}
-            size="sm"
-          />
-          <div className={SITE_ROW_DETAIL_CLASS}>
-            <div className="min-w-0">
-              <span className="block truncate text-xs">{site.name}</span>
-            </div>
-            <div className="min-w-0">
-              {shouldRenderCharts ? (
-                <TrafficPairBarChart
-                  data={trend}
-                  locale={locale}
-                  timeZone={dashboardWindow.timeZone}
-                  interval={dashboardWindow.interval}
-                  viewsLabel={viewsLabel}
-                  visitorsLabel={visitorsLabel}
-                  compact
-                  dataIsComplete
-                />
-              ) : (
-                <div className="h-4 w-full" />
-              )}
-            </div>
-          </div>
-        </Link>
-      </SidebarMenuButton>
+      {isMobile ? (
+        siteLink
+      ) : (
+        <AnalyticsTooltipTarget
+          className="block"
+          request={{ key: tooltipKey, content: tooltipContent }}
+        >
+          {siteLink}
+        </AnalyticsTooltipTarget>
+      )}
     </SidebarMenuItem>
   );
 });
@@ -237,7 +250,7 @@ export function SidebarSiteDetails({
     [sites, siteTrendById],
   );
 
-  return (
+  const menu = (
     <SidebarMenu>
       {cards.map(({ site, trend }) => {
         return (
@@ -260,5 +273,13 @@ export function SidebarSiteDetails({
         );
       })}
     </SidebarMenu>
+  );
+
+  return isMobile ? (
+    menu
+  ) : (
+    <AnalyticsTimeTooltipProvider retentionMode="target">
+      {menu}
+    </AnalyticsTimeTooltipProvider>
   );
 }
