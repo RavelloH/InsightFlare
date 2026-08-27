@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type DateRange } from "react-day-picker";
 import {
   RiArrowDownSLine,
@@ -434,7 +434,7 @@ function FilterTrigger({
   );
 }
 
-export function DashboardHeaderControls({
+export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   locale,
   messages,
   siteId,
@@ -1093,4 +1093,4 @@ export function DashboardHeaderControls({
       </Dialog>
     </>
   );
-}
+});

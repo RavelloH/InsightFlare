@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { RiAddLine, RiCloseLine } from "@remixicon/react";
 import { toast } from "sonner";
 
@@ -54,7 +54,7 @@ interface TeamSelectProps {
 
 const CREATE_TEAM_VALUE = "__create_team__";
 
-export function TeamSelect({
+export const TeamSelect = memo(function TeamSelect({
   locale,
   messages,
   options,
@@ -314,4 +314,4 @@ export function TeamSelect({
       {createTeamDialog}
     </>
   );
-}
+});

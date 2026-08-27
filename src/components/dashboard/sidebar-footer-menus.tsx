@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   RiCheckLine,
   RiComputerLine,
@@ -66,7 +66,7 @@ const triggerBaseClass =
 const footerGridClass =
   "m-0 grid w-full grid-cols-3 p-0 transition-[grid-template-columns] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-data-[collapsible=icon]:grid-cols-1";
 
-export function SidebarFooterMenus({
+export const SidebarFooterMenus = memo(function SidebarFooterMenus({
   locale,
   switchToEn,
   switchToZh,
@@ -275,4 +275,4 @@ export function SidebarFooterMenus({
       </DropdownMenu>
     </div>
   );
-}
+});

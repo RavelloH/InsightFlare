@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -145,7 +146,9 @@ function globalNavigationSearchParams(
   return next;
 }
 
-export function AnalyticsTabs({ items }: AnalyticsTabsProps) {
+export const AnalyticsTabs = memo(function AnalyticsTabs({
+  items,
+}: AnalyticsTabsProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const normalizedPathname = normalizePathname(pathname || "");
@@ -453,4 +456,4 @@ export function AnalyticsTabs({ items }: AnalyticsTabsProps) {
       </div>
     </div>
   );
-}
+});

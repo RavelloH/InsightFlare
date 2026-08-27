@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { RiBarChartBoxLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
@@ -150,7 +150,7 @@ function buildCrossDisplayDimension(
   };
 }
 
-function BrowserCrossStackedBarCard({
+const BrowserCrossStackedBarCard = memo(function BrowserCrossStackedBarCard({
   locale,
   messages,
   title,
@@ -370,7 +370,7 @@ function BrowserCrossStackedBarCard({
       </CardContent>
     </Card>
   );
-}
+});
 
 function emptyBreakdownUnlessAborted(
   error: unknown,
@@ -403,7 +403,10 @@ export function BrowserCrossBreakdownGrid({
       ),
     enabled: typeof window !== "undefined",
   });
-  const breakdownData = data ?? emptyBrowserCrossBreakdown();
+  const breakdownData = useMemo(
+    () => data ?? emptyBrowserCrossBreakdown(),
+    [data],
+  );
   const loading = isFetching;
   const hydrated = data !== undefined;
 

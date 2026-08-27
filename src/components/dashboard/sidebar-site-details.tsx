@@ -174,7 +174,7 @@ const SidebarSiteRow = memo(function SidebarSiteRow({
   );
 });
 
-export function SidebarSiteDetails({
+export const SidebarSiteDetails = memo(function SidebarSiteDetails({
   locale,
   teamId,
   teamSlug,
@@ -282,4 +282,4 @@ export function SidebarSiteDetails({
       {menu}
     </AnalyticsTimeTooltipProvider>
   );
-}
+});

@@ -716,6 +716,24 @@ export function DashboardShell({
         : undefined,
     [locale, teamGroups],
   );
+  const sidebarSites = useMemo(
+    () =>
+      resolvedSites.map((site) => ({
+        id: site.id,
+        slug: site.slug,
+        name: site.name,
+        domain: site.domain,
+        iconPath: site.iconPath,
+      })),
+    [resolvedSites],
+  );
+  const sidebarLabels = useMemo(
+    () => ({
+      views: messages.common.views,
+      visitors: messages.common.visitors,
+    }),
+    [messages.common.visitors, messages.common.views],
+  );
   const sidebarContextMode = routeState.mode === "root" ? "root" : "team";
   const teamSelector = liveActiveTeamSlug ? (
     <SidebarGroup className={SIDEBAR_COLLAPSE_SECTION_CLASS}>
@@ -1029,17 +1047,8 @@ export function DashboardShell({
                                 teamSlug={liveActiveTeamSlug || ""}
                                 activeSiteSlug={resolvedActiveSiteSlug}
                                 currentSection={currentAnalyticsSection}
-                                sites={resolvedSites.map((site) => ({
-                                  id: site.id,
-                                  slug: site.slug,
-                                  name: site.name,
-                                  domain: site.domain,
-                                  iconPath: site.iconPath,
-                                }))}
-                                labels={{
-                                  views: messages.common.views,
-                                  visitors: messages.common.visitors,
-                                }}
+                                sites={sidebarSites}
+                                labels={sidebarLabels}
                               />
                             </SidebarGroupContent>
                           </SidebarGroup>

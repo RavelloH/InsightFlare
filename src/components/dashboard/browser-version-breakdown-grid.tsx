@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { Fragment, memo, useMemo } from "react";
 import { RiGlobalLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 import { Cell, Pie, PieChart } from "recharts";
@@ -92,7 +92,7 @@ function buildVersionCardData(
   }));
 }
 
-function BrowserVersionDonutCard({
+const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
   locale,
   messages,
   browser,
@@ -186,11 +186,8 @@ function BrowserVersionDonutCard({
 
           <div className="grid grid-cols-[minmax(0,1fr)_max-content_max-content] items-center gap-x-3 gap-y-2">
             {browser.versions.map((version) => (
-              <>
-                <div
-                  key={version.key}
-                  className="inline-flex min-w-0 items-center gap-2 overflow-hidden"
-                >
+              <Fragment key={version.key}>
+                <div className="inline-flex min-w-0 items-center gap-2 overflow-hidden">
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
                     style={{ backgroundColor: version.color }}
@@ -208,14 +205,14 @@ function BrowserVersionDonutCard({
                 <span className="text-right font-mono text-[11px] text-muted-foreground tabular-nums">
                   {percentFormat(locale, version.share)}
                 </span>
-              </>
+              </Fragment>
             ))}
           </div>
         </div>
       </CardContent>
     </Card>
   );
-}
+});
 
 function emptyBreakdownUnlessAborted(
   error: unknown,
@@ -250,7 +247,10 @@ export function BrowserVersionBreakdownGrid({
       }).catch(emptyBreakdownUnlessAborted),
     enabled: typeof window !== "undefined",
   });
-  const breakdownData = data ?? emptyBrowserVersionBreakdown();
+  const breakdownData = useMemo(
+    () => data ?? emptyBrowserVersionBreakdown(),
+    [data],
+  );
 
   const browsers = useMemo(
     () => buildVersionCardData(breakdownData, messages),

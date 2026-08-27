@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { RiBarChartBoxLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
@@ -126,7 +126,7 @@ function buildDisplayDimension(
   };
 }
 
-function CrossBreakdownCard({
+const CrossBreakdownCard = memo(function CrossBreakdownCard({
   locale,
   messages,
   title,
@@ -306,7 +306,7 @@ function CrossBreakdownCard({
       </CardContent>
     </Card>
   );
-}
+});
 
 export function DeviceCrossBreakdownGrid({
   locale,
@@ -350,8 +350,14 @@ export function DeviceCrossBreakdownGrid({
     },
     enabled: typeof window !== "undefined",
   });
-  const browserData = crossBreakdownQuery.data?.browserData ?? emptyDimension();
-  const osData = crossBreakdownQuery.data?.osData ?? emptyDimension();
+  const browserData = useMemo(
+    () => crossBreakdownQuery.data?.browserData ?? emptyDimension(),
+    [crossBreakdownQuery.data?.browserData],
+  );
+  const osData = useMemo(
+    () => crossBreakdownQuery.data?.osData ?? emptyDimension(),
+    [crossBreakdownQuery.data?.osData],
+  );
   const loading = crossBreakdownQuery.isPending;
 
   const browserDimension = useMemo(
