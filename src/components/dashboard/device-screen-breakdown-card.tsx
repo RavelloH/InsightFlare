@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   RiArrowDownSLine,
   RiComputerLine,
@@ -502,116 +502,124 @@ interface DeviceScreenBreakdownCardProps {
   filters: FilterDocument;
 }
 
-export function DeviceScreenBreakdownCard({
-  locale,
-  messages,
-  siteId,
-  siteDomain,
-  window,
-  filters,
-}: DeviceScreenBreakdownCardProps) {
-  const screenTrendQuery = useQuery({
-    queryKey: [
-      "dashboard",
-      "device-screen-breakdown",
-      siteId,
-      window.from,
-      window.to,
-      window.timeZone,
-      window.interval,
-      filters,
-    ],
-    queryFn: async ({ signal }) => {
-      try {
-        return await fetchClientDimensionTrend(
-          siteId,
-          window,
-          "screenSize",
-          filters,
-          { limit: 10, signal },
-        );
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") throw error;
-        return EMPTY_TREND;
-      }
-    },
-    enabled: typeof window !== "undefined",
-  });
-  const screenTrend = screenTrendQuery.data ?? EMPTY_TREND;
-  const loading = screenTrendQuery.isPending;
+export const DeviceScreenBreakdownCard = memo(
+  function DeviceScreenBreakdownCard({
+    locale,
+    messages,
+    siteId,
+    siteDomain,
+    window,
+    filters,
+  }: DeviceScreenBreakdownCardProps) {
+    const screenTrendQuery = useQuery({
+      queryKey: [
+        "dashboard",
+        "device-screen-breakdown",
+        siteId,
+        window.from,
+        window.to,
+        window.timeZone,
+        window.interval,
+        filters,
+      ],
+      queryFn: async ({ signal }) => {
+        try {
+          return await fetchClientDimensionTrend(
+            siteId,
+            window,
+            "screenSize",
+            filters,
+            { limit: 10, signal },
+          );
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError")
+            throw error;
+          return EMPTY_TREND;
+        }
+      },
+      enabled: typeof window !== "undefined",
+    });
+    const screenTrend = screenTrendQuery.data ?? EMPTY_TREND;
+    const loading = screenTrendQuery.isPending;
 
-  const totalVisitors = useMemo(
-    () => screenTrend.series.reduce((sum, item) => sum + item.visitors, 0),
-    [screenTrend.series],
-  );
-  const listItems = useMemo<ScreenListItem[]>(
-    () =>
-      screenTrend.series.map((series) => {
-        const parsed = parseScreenSizeLabel(series.label);
-        return {
-          ...series,
-          key: (series as { key?: string }).key || series.label,
-          displayLabel: displaySeriesLabel(series, messages),
-          share: totalVisitors > 0 ? series.visitors / totalVisitors : 0,
-          parsed,
-          bucket: parsed ? classifyScreenBucket(series.label) : "unclassified",
-        };
-      }),
-    [messages, screenTrend.series, totalVisitors],
-  );
-  const explicitItems = useMemo(
-    () => listItems.filter((item) => item.parsed && !item.isOther),
-    [listItems],
-  );
-  const bucketSummary = useMemo(() => {
-    const buckets = [...aggregateScreenBuckets(screenTrend.series).buckets];
-    buckets.sort((left, right) => right.visitors - left.visitors);
-    return buckets;
-  }, [screenTrend.series]);
-  const previewUrl = useMemo(() => resolvePreviewUrl(siteDomain), [siteDomain]);
+    const totalVisitors = useMemo(
+      () => screenTrend.series.reduce((sum, item) => sum + item.visitors, 0),
+      [screenTrend.series],
+    );
+    const listItems = useMemo<ScreenListItem[]>(
+      () =>
+        screenTrend.series.map((series) => {
+          const parsed = parseScreenSizeLabel(series.label);
+          return {
+            ...series,
+            key: (series as { key?: string }).key || series.label,
+            displayLabel: displaySeriesLabel(series, messages),
+            share: totalVisitors > 0 ? series.visitors / totalVisitors : 0,
+            parsed,
+            bucket: parsed
+              ? classifyScreenBucket(series.label)
+              : "unclassified",
+          };
+        }),
+      [messages, screenTrend.series, totalVisitors],
+    );
+    const explicitItems = useMemo(
+      () => listItems.filter((item) => item.parsed && !item.isOther),
+      [listItems],
+    );
+    const bucketSummary = useMemo(() => {
+      const buckets = [...aggregateScreenBuckets(screenTrend.series).buckets];
+      buckets.sort((left, right) => right.visitors - left.visitors);
+      return buckets;
+    }, [screenTrend.series]);
+    const previewUrl = useMemo(
+      () => resolvePreviewUrl(siteDomain),
+      [siteDomain],
+    );
 
-  return (
-    <section className="space-y-4">
-      <div className="px-1">
-        <h2 className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
-          <RiComputerLine className="size-4 shrink-0" />
-          {messages.devices.screenDistributionTitle}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {messages.devices.screenDistributionSubtitle}
-        </p>
-      </div>
+    return (
+      <section className="space-y-4">
+        <div className="px-1">
+          <h2 className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
+            <RiComputerLine className="size-4 shrink-0" />
+            {messages.devices.screenDistributionTitle}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {messages.devices.screenDistributionSubtitle}
+          </p>
+        </div>
 
-      <ContentSwitch
-        loading={loading}
-        hasContent={listItems.length > 0}
-        loadingLabel={messages.common.loading}
-        emptyContent={<p>{messages.common.noData}</p>}
-        minHeightClassName="min-h-[320px]"
-      >
-        <div className="space-y-4">
-          <div className="grid items-stretch gap-4 lg:grid-cols-2">
-            <ScreenCategoryPieCard
+        <ContentSwitch
+          loading={loading}
+          hasContent={listItems.length > 0}
+          loadingLabel={messages.common.loading}
+          emptyContent={<p>{messages.common.noData}</p>}
+          minHeightClassName="min-h-[320px]"
+        >
+          <div className="space-y-4">
+            <div className="grid items-stretch gap-4 lg:grid-cols-2">
+              <ScreenCategoryPieCard
+                locale={locale}
+                messages={messages}
+                bucketSummary={bucketSummary}
+              />
+              <ScreenValueListCard
+                locale={locale}
+                messages={messages}
+                items={explicitItems}
+                loading={loading}
+              />
+            </div>
+
+            <ScreenPreviewCard
               locale={locale}
               messages={messages}
-              bucketSummary={bucketSummary}
-            />
-            <ScreenValueListCard
-              locale={locale}
-              messages={messages}
+              previewUrl={previewUrl}
               items={explicitItems}
-              loading={loading}
             />
           </div>
-
-          <ScreenPreviewCard
-            locale={locale}
-            messages={messages}
-            previewUrl={previewUrl}
-            items={explicitItems}
-          />
-        </div>
-      </ContentSwitch>
-    </section>
-  );
-}
+        </ContentSwitch>
+      </section>
+    );
+  },
+);

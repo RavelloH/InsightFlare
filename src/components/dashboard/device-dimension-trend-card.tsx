@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journey-display";
 import { ShareTrendCard } from "@/components/dashboard/share-trend-card";
 import { fetchClientDimensionTrend } from "@/lib/dashboard/client-data";
@@ -47,7 +49,7 @@ async function fetchOperatingSystemTrend(
   );
 }
 
-export function DeviceDimensionTrendCard({
+export const DeviceDimensionTrendCard = memo(function DeviceDimensionTrendCard({
   locale,
   messages,
   siteId,
@@ -95,4 +97,4 @@ export function DeviceDimensionTrendCard({
       }
     />
   );
-}
+});

@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { ShareTrendCard } from "@/components/dashboard/share-trend-card";
 import { fetchBrowserEngineTrend } from "@/lib/dashboard/client-data";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -13,23 +15,25 @@ interface BrowserEngineShareTrendCardProps {
   filters: FilterDocument;
 }
 
-export function BrowserEngineShareTrendCard({
-  locale,
-  messages,
-  siteId,
-  window,
-  filters,
-}: BrowserEngineShareTrendCardProps) {
-  return (
-    <ShareTrendCard
-      locale={locale}
-      messages={messages}
-      siteId={siteId}
-      window={window}
-      filters={filters}
-      queryKey={["browser-engine"]}
-      title={messages.browsers.engineTrendTitle}
-      fetchTrend={fetchBrowserEngineTrend}
-    />
-  );
-}
+export const BrowserEngineShareTrendCard = memo(
+  function BrowserEngineShareTrendCard({
+    locale,
+    messages,
+    siteId,
+    window,
+    filters,
+  }: BrowserEngineShareTrendCardProps) {
+    return (
+      <ShareTrendCard
+        locale={locale}
+        messages={messages}
+        siteId={siteId}
+        window={window}
+        filters={filters}
+        queryKey={["browser-engine"]}
+        title={messages.browsers.engineTrendTitle}
+        fetchTrend={fetchBrowserEngineTrend}
+      />
+    );
+  },
+);

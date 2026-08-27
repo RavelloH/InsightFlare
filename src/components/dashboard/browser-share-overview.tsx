@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { ShareRadialCard } from "@/components/dashboard/share-radial-card";
@@ -31,7 +31,7 @@ interface BrowserShareOverviewProps {
   filters: FilterDocument;
 }
 
-export function BrowserShareOverview({
+export const BrowserShareOverview = memo(function BrowserShareOverview({
   locale,
   messages,
   siteId,
@@ -140,4 +140,4 @@ export function BrowserShareOverview({
       </AutoTransition>
     </div>
   );
-}
+});

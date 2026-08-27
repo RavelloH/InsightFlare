@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { RiPulseLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -74,92 +74,96 @@ interface BrowserPerformanceRadarCardProps {
   filters: FilterDocument;
 }
 
-export function BrowserPerformanceRadarCard({
-  locale,
-  messages,
-  siteId,
-  window: tw,
-  filters,
-}: BrowserPerformanceRadarCardProps) {
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
-  const { data: response, isPending: loading } = useQuery({
-    queryKey: [
-      "dashboard",
-      "browser-radar",
-      siteId,
-      tw.from,
-      tw.to,
-      tw.timeZone,
-      filtersKey,
-    ],
-    queryFn: ({ signal }) =>
-      fetchBrowserRadar(siteId, tw, filters, { signal })
-        .then((result) =>
-          Array.isArray(result.data) ? result.data : ([] as BrowserRadarItem[]),
-        )
-        .catch(emptyRadarUnlessAborted),
-    enabled: !import.meta.env.SSR,
-  });
-  const data = response ?? [];
+export const BrowserPerformanceRadarCard = memo(
+  function BrowserPerformanceRadarCard({
+    locale,
+    messages,
+    siteId,
+    window: tw,
+    filters,
+  }: BrowserPerformanceRadarCardProps) {
+    const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+    const { data: response, isPending: loading } = useQuery({
+      queryKey: [
+        "dashboard",
+        "browser-radar",
+        siteId,
+        tw.from,
+        tw.to,
+        tw.timeZone,
+        filtersKey,
+      ],
+      queryFn: ({ signal }) =>
+        fetchBrowserRadar(siteId, tw, filters, { signal })
+          .then((result) =>
+            Array.isArray(result.data)
+              ? result.data
+              : ([] as BrowserRadarItem[]),
+          )
+          .catch(emptyRadarUnlessAborted),
+      enabled: !import.meta.env.SSR,
+    });
+    const data = response ?? [];
 
-  const metricLabels = useMemo(
-    () => ({
-      duration: messages.browsers.radarDuration,
-      engagement: messages.browsers.radarEngagement,
-      depth: messages.browsers.radarDepth,
-      loyalty: messages.browsers.radarLoyalty,
-      frequency: messages.browsers.radarFrequency,
-      traffic: messages.browsers.radarTraffic,
-    }),
-    [messages],
-  );
+    const metricLabels = useMemo(
+      () => ({
+        duration: messages.browsers.radarDuration,
+        engagement: messages.browsers.radarEngagement,
+        depth: messages.browsers.radarDepth,
+        loyalty: messages.browsers.radarLoyalty,
+        frequency: messages.browsers.radarFrequency,
+        traffic: messages.browsers.radarTraffic,
+      }),
+      [messages],
+    );
 
-  const maxByMetric = useMemo(() => {
-    const result = {} as Record<PerformanceRadarMetricKey, number>;
-    for (const key of PERFORMANCE_RADAR_METRIC_KEYS) {
-      result[key] = Math.max(...data.map((i) => i.metrics[key]), 0);
-    }
-    return result;
-  }, [data]);
+    const maxByMetric = useMemo(() => {
+      const result = {} as Record<PerformanceRadarMetricKey, number>;
+      for (const key of PERFORMANCE_RADAR_METRIC_KEYS) {
+        result[key] = Math.max(...data.map((i) => i.metrics[key]), 0);
+      }
+      return result;
+    }, [data]);
 
-  const hasContent = data.length > 0;
+    const hasContent = data.length > 0;
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="inline-flex items-center gap-2">
-          <RiPulseLine className="size-4" />
-          {messages.browsers.radarTitle}
-        </CardTitle>
-        <p className="text-sm text-muted-foreground">
-          {messages.browsers.radarSubtitle}
-        </p>
-      </CardHeader>
-      <CardContent>
-        <ContentSwitch
-          loading={loading}
-          hasContent={hasContent}
-          loadingLabel={messages.common.loading}
-          emptyContent={<p>{messages.common.noData}</p>}
-          minHeightClassName="min-h-[200px]"
-        >
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            {data.map((item, i) => {
-              const color = CHART_COLORS[i % CHART_COLORS.length];
-              return (
-                <SingleBrowserRadar
-                  key={item.browser}
-                  item={item}
-                  color={color}
-                  locale={locale}
-                  maxByMetric={maxByMetric}
-                  metricLabels={metricLabels}
-                />
-              );
-            })}
-          </div>
-        </ContentSwitch>
-      </CardContent>
-    </Card>
-  );
-}
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="inline-flex items-center gap-2">
+            <RiPulseLine className="size-4" />
+            {messages.browsers.radarTitle}
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            {messages.browsers.radarSubtitle}
+          </p>
+        </CardHeader>
+        <CardContent>
+          <ContentSwitch
+            loading={loading}
+            hasContent={hasContent}
+            loadingLabel={messages.common.loading}
+            emptyContent={<p>{messages.common.noData}</p>}
+            minHeightClassName="min-h-[200px]"
+          >
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              {data.map((item, i) => {
+                const color = CHART_COLORS[i % CHART_COLORS.length];
+                return (
+                  <SingleBrowserRadar
+                    key={item.browser}
+                    item={item}
+                    color={color}
+                    locale={locale}
+                    maxByMetric={maxByMetric}
+                    metricLabels={metricLabels}
+                  />
+                );
+              })}
+            </div>
+          </ContentSwitch>
+        </CardContent>
+      </Card>
+    );
+  },
+);

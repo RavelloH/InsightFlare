@@ -379,78 +379,80 @@ function emptyBreakdownUnlessAborted(
   return emptyBrowserCrossBreakdown();
 }
 
-export function BrowserCrossBreakdownGrid({
-  locale,
-  messages,
-  siteId,
-  window,
-  filters,
-}: BrowserCrossBreakdownGridProps) {
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
-  const { data, isFetching, isPending } = useQuery({
-    queryKey: [
-      "dashboard",
-      "browser-cross-breakdown",
-      siteId,
-      window.from,
-      window.to,
-      window.timeZone,
-      filtersKey,
-    ],
-    queryFn: ({ signal }) =>
-      fetchBrowserCrossBreakdown(siteId, window, filters, { signal }).catch(
-        emptyBreakdownUnlessAborted,
-      ),
-    enabled: !import.meta.env.SSR,
-  });
-  const breakdownData = useMemo(
-    () => data ?? emptyBrowserCrossBreakdown(),
-    [data],
-  );
-  const loading = isPending || isFetching;
-  const hydrated = data !== undefined;
+export const BrowserCrossBreakdownGrid = memo(
+  function BrowserCrossBreakdownGrid({
+    locale,
+    messages,
+    siteId,
+    window,
+    filters,
+  }: BrowserCrossBreakdownGridProps) {
+    const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+    const { data, isFetching, isPending } = useQuery({
+      queryKey: [
+        "dashboard",
+        "browser-cross-breakdown",
+        siteId,
+        window.from,
+        window.to,
+        window.timeZone,
+        filtersKey,
+      ],
+      queryFn: ({ signal }) =>
+        fetchBrowserCrossBreakdown(siteId, window, filters, { signal }).catch(
+          emptyBreakdownUnlessAborted,
+        ),
+      enabled: !import.meta.env.SSR,
+    });
+    const breakdownData = useMemo(
+      () => data ?? emptyBrowserCrossBreakdown(),
+      [data],
+    );
+    const loading = isPending || isFetching;
+    const hydrated = data !== undefined;
 
-  const operatingSystem = useMemo(
-    () => buildCrossDisplayDimension(breakdownData.operatingSystem, messages),
-    [breakdownData.operatingSystem, messages],
-  );
-  const deviceType = useMemo(
-    () =>
-      buildCrossDisplayDimension(breakdownData.deviceType, messages, {
-        formatColumnLabel: (value) =>
-          resolveDeviceTypeMeta(
-            value,
-            messages.common.deviceLabels,
-            messages.common.unknown,
-          ).label,
-        resolveColumnIcon: (value) =>
-          resolveDeviceTypeMeta(
-            value,
-            messages.common.deviceLabels,
-            messages.common.unknown,
-          ).Icon,
-      }),
-    [breakdownData.deviceType, locale, messages],
-  );
+    const operatingSystem = useMemo(
+      () => buildCrossDisplayDimension(breakdownData.operatingSystem, messages),
+      [breakdownData.operatingSystem, messages],
+    );
+    const deviceType = useMemo(
+      () =>
+        buildCrossDisplayDimension(breakdownData.deviceType, messages, {
+          formatColumnLabel: (value) =>
+            resolveDeviceTypeMeta(
+              value,
+              messages.common.deviceLabels,
+              messages.common.unknown,
+            ).label,
+          resolveColumnIcon: (value) =>
+            resolveDeviceTypeMeta(
+              value,
+              messages.common.deviceLabels,
+              messages.common.unknown,
+            ).Icon,
+        }),
+      [breakdownData.deviceType, locale, messages],
+    );
 
-  return (
-    <section className="grid gap-4 2xl:grid-cols-2">
-      <BrowserCrossStackedBarCard
-        locale={locale}
-        messages={messages}
-        title={messages.browsers.osBreakdownTitle}
-        dimension={operatingSystem}
-        loading={loading}
-        hydrated={hydrated}
-      />
-      <BrowserCrossStackedBarCard
-        locale={locale}
-        messages={messages}
-        title={messages.browsers.deviceTypeBreakdownTitle}
-        dimension={deviceType}
-        loading={loading}
-        hydrated={hydrated}
-      />
-    </section>
-  );
-}
+    return (
+      <section className="grid gap-4 2xl:grid-cols-2">
+        <BrowserCrossStackedBarCard
+          locale={locale}
+          messages={messages}
+          title={messages.browsers.osBreakdownTitle}
+          dimension={operatingSystem}
+          loading={loading}
+          hydrated={hydrated}
+        />
+        <BrowserCrossStackedBarCard
+          locale={locale}
+          messages={messages}
+          title={messages.browsers.deviceTypeBreakdownTitle}
+          dimension={deviceType}
+          loading={loading}
+          hydrated={hydrated}
+        />
+      </section>
+    );
+  },
+);

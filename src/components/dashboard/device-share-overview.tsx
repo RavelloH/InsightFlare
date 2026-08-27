@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journey-display";
@@ -37,7 +37,7 @@ interface DeviceShareOverviewProps {
   filters: FilterDocument;
 }
 
-export function DeviceShareOverview({
+export const DeviceShareOverview = memo(function DeviceShareOverview({
   locale,
   messages,
   siteId,
@@ -157,4 +157,4 @@ export function DeviceShareOverview({
       </AutoTransition>
     </div>
   );
-}
+});

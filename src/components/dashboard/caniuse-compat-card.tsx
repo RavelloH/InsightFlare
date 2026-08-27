@@ -1,5 +1,6 @@
 import {
   Fragment,
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -175,7 +176,7 @@ interface CanIUseCompatCardProps {
   filters: FilterDocument;
 }
 
-export function CanIUseCompatCard({
+export const CanIUseCompatCard = memo(function CanIUseCompatCard({
   locale,
   messages,
   siteId,
@@ -775,4 +776,4 @@ export function CanIUseCompatCard({
       </Card>
     </section>
   );
-}
+});

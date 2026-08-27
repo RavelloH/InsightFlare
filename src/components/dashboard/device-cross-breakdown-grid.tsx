@@ -308,7 +308,7 @@ const CrossBreakdownCard = memo(function CrossBreakdownCard({
   );
 });
 
-export function DeviceCrossBreakdownGrid({
+export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
   locale,
   messages,
   siteId,
@@ -403,4 +403,4 @@ export function DeviceCrossBreakdownGrid({
       />
     </div>
   );
-}
+});

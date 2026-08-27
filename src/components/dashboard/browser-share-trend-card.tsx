@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { ShareTrendCard } from "@/components/dashboard/share-trend-card";
 import { fetchBrowserTrend } from "@/lib/dashboard/client-data";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -13,7 +15,7 @@ interface BrowserShareTrendCardProps {
   filters: FilterDocument;
 }
 
-export function BrowserShareTrendCard({
+export const BrowserShareTrendCard = memo(function BrowserShareTrendCard({
   locale,
   messages,
   siteId,
@@ -32,4 +34,4 @@ export function BrowserShareTrendCard({
       fetchTrend={fetchBrowserTrend}
     />
   );
-}
+});
