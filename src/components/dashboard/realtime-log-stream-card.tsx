@@ -2311,7 +2311,7 @@ function RealtimeLogEventDetailsDrawer({
   );
 }
 
-export function RealtimeLogStreamCard({
+export const RealtimeLogStreamCard = memo(function RealtimeLogStreamCard({
   locale,
   messages,
   hasConnected,
@@ -2651,4 +2651,4 @@ export function RealtimeLogStreamCard({
         : null}
     </>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { RiPulseLine } from "@remixicon/react";
 
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
@@ -68,7 +68,7 @@ function buildRealtimeTrendData(
   }));
 }
 
-export function RealtimeTrafficTrendCard({
+export const RealtimeTrafficTrendCard = memo(function RealtimeTrafficTrendCard({
   locale,
   messages,
   hasConnected,
@@ -127,4 +127,4 @@ export function RealtimeTrafficTrendCard({
       </CardContent>
     </Card>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 
 import {
   OverviewPagesSection,
@@ -422,31 +422,33 @@ function buildCardData(
   };
 }
 
-export function RealtimeSummaryCardsSection({
-  locale,
-  messages,
-  siteId,
-  siteDomain,
-  visits,
-  filters,
-}: RealtimeSummaryCardsSectionProps) {
-  const cardDataOverride = useMemo(
-    () => buildCardData(visits, messages),
-    [messages, visits],
-  );
+export const RealtimeSummaryCardsSection = memo(
+  function RealtimeSummaryCardsSection({
+    locale,
+    messages,
+    siteId,
+    siteDomain,
+    visits,
+    filters,
+  }: RealtimeSummaryCardsSectionProps) {
+    const cardDataOverride = useMemo(
+      () => buildCardData(visits, messages),
+      [messages, visits],
+    );
 
-  return (
-    <OverviewPagesSection
-      locale={locale}
-      messages={messages}
-      siteId={siteId}
-      siteDomain={siteDomain}
-      pathname=""
-      filters={filters}
-      cardDataOverride={cardDataOverride}
-    />
-  );
-}
+    return (
+      <OverviewPagesSection
+        locale={locale}
+        messages={messages}
+        siteId={siteId}
+        siteDomain={siteDomain}
+        pathname=""
+        filters={filters}
+        cardDataOverride={cardDataOverride}
+      />
+    );
+  },
+);
 
 export function parseRealtimeCardFilters(
   searchParams: URLSearchParams,
