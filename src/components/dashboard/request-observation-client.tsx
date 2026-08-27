@@ -1145,6 +1145,36 @@ export function RequestObservationClient({
       ),
     [copy.emptyValue, locale, timeWindow],
   );
+  const loadAbnormalDetectionRows = useCallback(
+    (tab: DetectionDimensionTab, _signal?: AbortSignal) =>
+      loadAbnormalDimensionRows("detection", tab),
+    [loadAbnormalDimensionRows],
+  );
+  const loadAbnormalTargetRows = useCallback(
+    (tab: TargetDimensionTab, _signal?: AbortSignal) =>
+      loadAbnormalDimensionRows("target", tab),
+    [loadAbnormalDimensionRows],
+  );
+  const loadAbnormalNetworkRows = useCallback(
+    (tab: NetworkDimensionTab, _signal?: AbortSignal) =>
+      loadAbnormalDimensionRows("network", tab),
+    [loadAbnormalDimensionRows],
+  );
+  const loadAbnormalClientRows = useCallback(
+    (tab: ClientDimensionTab, _signal?: AbortSignal) =>
+      loadAbnormalDimensionRows("client", tab),
+    [loadAbnormalDimensionRows],
+  );
+  const loadNormalTargetRows = useCallback(
+    (tab: TargetDimensionTab, _signal?: AbortSignal) =>
+      loadNormalDimensionRows("target", tab),
+    [loadNormalDimensionRows],
+  );
+  const loadNormalNetworkRows = useCallback(
+    (tab: NetworkDimensionTab, _signal?: AbortSignal) =>
+      loadNormalDimensionRows("network", tab),
+    [loadNormalDimensionRows],
+  );
 
   const requestKey = `${timeWindow.interval}:${data?.generatedAt ?? 0}`;
   const overview = data?.overview;
@@ -1742,9 +1772,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={detectionTabs}
-                          loadRows={(tab) =>
-                            loadAbnormalDimensionRows("detection", tab)
-                          }
+                          loadRows={loadAbnormalDetectionRows}
                           requestKey={`${requestKey}:detection`}
                           className="h-full"
                           secondaryMetricLabel={copy.highConfidenceRequests}
@@ -1754,9 +1782,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={targetTabs}
-                          loadRows={(tab) =>
-                            loadAbnormalDimensionRows("target", tab)
-                          }
+                          loadRows={loadAbnormalTargetRows}
                           requestKey={`${requestKey}:target`}
                           className="h-full"
                           secondaryMetricLabel={copy.highConfidenceRequests}
@@ -1766,9 +1792,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={networkTabs}
-                          loadRows={(tab) =>
-                            loadAbnormalDimensionRows("network", tab)
-                          }
+                          loadRows={loadAbnormalNetworkRows}
                           requestKey={`${requestKey}:network`}
                           className="h-full"
                           secondaryMetricLabel={copy.highConfidenceRequests}
@@ -1778,9 +1802,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={clientTabs}
-                          loadRows={(tab) =>
-                            loadAbnormalDimensionRows("client", tab)
-                          }
+                          loadRows={loadAbnormalClientRows}
                           requestKey={`${requestKey}:client`}
                           className="h-full"
                           secondaryMetricLabel={copy.highConfidenceRequests}
@@ -1876,9 +1898,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={targetTabs}
-                          loadRows={(tab) =>
-                            loadNormalDimensionRows("target", tab)
-                          }
+                          loadRows={loadNormalTargetRows}
                           requestKey={`${requestKey}:normal-target`}
                           className="h-full"
                           showVisitors={false}
@@ -1888,9 +1908,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={networkTabs}
-                          loadRows={(tab) =>
-                            loadNormalDimensionRows("network", tab)
-                          }
+                          loadRows={loadNormalNetworkRows}
                           requestKey={`${requestKey}:normal-network`}
                           className="h-full"
                           showVisitors={false}
