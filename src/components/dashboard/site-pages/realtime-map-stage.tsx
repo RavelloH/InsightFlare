@@ -137,12 +137,15 @@ const DeckOverlay = memo(function DeckOverlay(props: MapboxOverlayProps) {
   return null;
 });
 
-export const RealtimeMapStage = memo(function RealtimeMapStage({
-  locale,
+type RealtimeMapAnimationOverlayProps = Pick<
+  RealtimeMapStageProps,
+  "siteId" | "points"
+>;
+
+const RealtimeMapAnimationOverlay = memo(function RealtimeMapAnimationOverlay({
   siteId,
-  theme,
   points,
-}: RealtimeMapStageProps) {
+}: RealtimeMapAnimationOverlayProps) {
   const [animatedPoints, setAnimatedPoints] = useState<AnimatedPoint[]>([]);
   const [ripples, setRipples] = useState<RealtimeRipplePoint[]>([]);
   const [animationNow, setAnimationNow] = useState(() => Date.now());
@@ -368,6 +371,15 @@ export const RealtimeMapStage = memo(function RealtimeMapStage({
     ],
     [renderedPoints, renderedRipples],
   );
+  return <DeckOverlay interleaved={false} layers={layers} />;
+});
+
+export const RealtimeMapStage = memo(function RealtimeMapStage({
+  locale,
+  siteId,
+  theme,
+  points,
+}: RealtimeMapStageProps) {
   const mapStyle = useMemo(
     () => getVectorBasemapStyleUrl(theme, locale),
     [locale, theme],
@@ -383,7 +395,7 @@ export const RealtimeMapStage = memo(function RealtimeMapStage({
         applyVectorBasemapColorOverrides(event.target, theme)
       }
     >
-      <DeckOverlay interleaved={false} layers={layers} />
+      <RealtimeMapAnimationOverlay siteId={siteId} points={points} />
     </Map>
   );
 });

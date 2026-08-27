@@ -411,6 +411,12 @@ export function AnalyticsTimeTooltipProvider({
   );
   const activeRef = useRef<ActiveTooltip | null>(null);
   const hideTimerRef = useRef<number | null>(null);
+  const pointerMoveFrameRef = useRef<number | null>(null);
+  const latestPointerMoveRef = useRef<{
+    eventTarget: EventTarget | null;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
   const shouldAnimatePositionRef = useRef(false);
   const tooltipContentRef = useRef<HTMLDivElement | null>(null);
   const { browserTimeZone } = useReportingTimeZone();
@@ -542,19 +548,57 @@ export function AnalyticsTimeTooltipProvider({
   useEffect(() => {
     if (!isActive) return;
 
-    const handlePointerMove = (event: PointerEvent) => {
-      if (isWithinRetentionZone(event.target, event.clientX, event.clientY)) {
+    const processPointerMove = () => {
+      pointerMoveFrameRef.current = null;
+      const latest = latestPointerMoveRef.current;
+      if (!latest) return;
+
+      if (
+        isWithinRetentionZone(
+          latest.eventTarget,
+          latest.clientX,
+          latest.clientY,
+        )
+      ) {
         cancelHide();
       } else {
         scheduleHide();
       }
     };
 
+    const handlePointerMove = (event: PointerEvent) => {
+      if (
+        isElement(event.target) &&
+        (event.target.closest(
+          `[data-analytics-time-tooltip-group="${groupId}"]`,
+        ) ||
+          event.target.closest("[data-analytics-time-tooltip-content]"))
+      ) {
+        latestPointerMoveRef.current = null;
+        cancelHide();
+        return;
+      }
+
+      latestPointerMoveRef.current = {
+        eventTarget: event.target,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      };
+      if (pointerMoveFrameRef.current !== null) return;
+      pointerMoveFrameRef.current =
+        window.requestAnimationFrame(processPointerMove);
+    };
+
     document.addEventListener("pointermove", handlePointerMove, true);
     return () => {
       document.removeEventListener("pointermove", handlePointerMove, true);
+      latestPointerMoveRef.current = null;
+      if (pointerMoveFrameRef.current !== null) {
+        window.cancelAnimationFrame(pointerMoveFrameRef.current);
+        pointerMoveFrameRef.current = null;
+      }
     };
-  }, [cancelHide, isActive, isWithinRetentionZone, scheduleHide]);
+  }, [cancelHide, groupId, isActive, isWithinRetentionZone, scheduleHide]);
 
   useEffect(() => {
     return () => {
