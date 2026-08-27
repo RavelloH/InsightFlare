@@ -1,5 +1,6 @@
 import {
   type KeyboardEvent,
+  useCallback,
   useEffect,
   useEffectEvent,
   useMemo,
@@ -383,118 +384,132 @@ function ScheduledTaskRunsTable({
   hasMore: boolean;
   onLoadMore: () => void;
 }) {
-  const handleKeyDown = (
-    event: KeyboardEvent<HTMLTableRowElement>,
-    run: ScheduledTaskRunGroup,
-  ) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    onOpenRun(run);
-  };
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTableRowElement>, run: ScheduledTaskRunGroup) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      onOpenRun(run);
+    },
+    [onOpenRun],
+  );
+  const header = useMemo(
+    () => (
+      <TableRow>
+        <TableHead className="pl-4">{labels.scheduledAt}</TableHead>
+        <TableHead>{labels.startedAt}</TableHead>
+        <TableHead>{labels.finishedAt}</TableHead>
+        <TableHead>{labels.trigger}</TableHead>
+        <TableHead>{labels.statusLabel}</TableHead>
+        <TableHead className="text-right">{labels.duration}</TableHead>
+        <TableHead>{labels.taskResult}</TableHead>
+        <TableHead className="text-right">{labels.taskCount}</TableHead>
+        <TableHead className="text-right">{labels.subtaskCount}</TableHead>
+        <TableHead className="pr-4 text-right">{labels.logs}</TableHead>
+      </TableRow>
+    ),
+    [labels],
+  );
+  const renderRow = useCallback(
+    (run: ScheduledTaskRunGroup) => {
+      const selected = selectedRunId === run.id;
+      return {
+        children: (
+          <>
+            <TableCell className="pl-4 font-mono text-xs">
+              {formatDateOrDash(locale, run.scheduledAt, timeZone)}
+            </TableCell>
+            <TableCell className="font-mono text-xs">
+              {shortDateTimeWithSeconds(locale, run.startedAt, timeZone)}
+            </TableCell>
+            <TableCell className="font-mono text-xs">
+              {formatDateOrDash(locale, run.finishedAt, timeZone)}
+            </TableCell>
+            <TableCell className="text-xs text-muted-foreground">
+              {run.triggerType}
+            </TableCell>
+            <TableCell>
+              <StatusBadge status={run.status} labels={labels.status} />
+            </TableCell>
+            <TableCell className="text-right font-mono">
+              {formatDuration(locale, run.durationMs)}
+            </TableCell>
+            <TableCell>
+              <div className="flex min-w-40 flex-wrap items-center gap-1.5 text-xs">
+                <Badge variant="outline">
+                  {numberFormat(locale, run.taskCount)}
+                </Badge>
+                {run.successCount > 0 ? (
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                    {labels.status.success}:
+                    {numberFormat(locale, run.successCount)}
+                  </span>
+                ) : null}
+                {run.failedCount > 0 ? (
+                  <span className="font-mono text-destructive">
+                    {labels.status.failed}:
+                    {numberFormat(locale, run.failedCount)}
+                  </span>
+                ) : null}
+                {run.partialCount > 0 ? (
+                  <span className="font-mono text-amber-600 dark:text-amber-400">
+                    {labels.status.partial}:
+                    {numberFormat(locale, run.partialCount)}
+                  </span>
+                ) : null}
+                {run.runningCount > 0 ? (
+                  <span className="font-mono text-sky-600 dark:text-sky-400">
+                    {labels.status.running}:
+                    {numberFormat(locale, run.runningCount)}
+                  </span>
+                ) : null}
+              </div>
+            </TableCell>
+            <TableCell className="text-right font-mono">
+              {numberFormat(locale, run.taskCount)}
+            </TableCell>
+            <TableCell className="text-right font-mono">
+              {numberFormat(locale, runSubtaskCount(run))}
+            </TableCell>
+            <TableCell className="pr-4 text-right">
+              <TableActionButton
+                label={`${numberFormat(locale, run.logsCount)} ${labels.viewLogs}`}
+                onClick={() => onOpenRun(run)}
+                className={cn(selected && "text-foreground")}
+              >
+                <RiFileList3Line className="size-4" />
+              </TableActionButton>
+            </TableCell>
+          </>
+        ),
+        props: {
+          role: "button" as const,
+          tabIndex: 0,
+          className: cn(
+            "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+            selected && "bg-muted/55",
+          ),
+          onClick: () => onOpenRun(run),
+          onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) =>
+            handleKeyDown(event, run),
+        },
+      };
+    },
+    [handleKeyDown, labels, locale, onOpenRun, selectedRunId, timeZone],
+  );
+  const renderSkeletonRow = useCallback(
+    (index: number) => <ScheduledRunRowSkeleton index={index} />,
+    [],
+  );
+  const getRowKey = useCallback((run: ScheduledTaskRunGroup) => run.id, []);
   return (
     <AnalyticsDataTable
       minTableWidth="82rem"
       tableClassName="min-w-[82rem]"
-      header={
-        <TableRow>
-          <TableHead className="pl-4">{labels.scheduledAt}</TableHead>
-          <TableHead>{labels.startedAt}</TableHead>
-          <TableHead>{labels.finishedAt}</TableHead>
-          <TableHead>{labels.trigger}</TableHead>
-          <TableHead>{labels.statusLabel}</TableHead>
-          <TableHead className="text-right">{labels.duration}</TableHead>
-          <TableHead>{labels.taskResult}</TableHead>
-          <TableHead className="text-right">{labels.taskCount}</TableHead>
-          <TableHead className="text-right">{labels.subtaskCount}</TableHead>
-          <TableHead className="pr-4 text-right">{labels.logs}</TableHead>
-        </TableRow>
-      }
+      header={header}
       rows={rows}
-      renderRow={(run) => {
-        const selected = selectedRunId === run.id;
-        return {
-          children: (
-            <>
-              <TableCell className="pl-4 font-mono text-xs">
-                {formatDateOrDash(locale, run.scheduledAt, timeZone)}
-              </TableCell>
-              <TableCell className="font-mono text-xs">
-                {shortDateTimeWithSeconds(locale, run.startedAt, timeZone)}
-              </TableCell>
-              <TableCell className="font-mono text-xs">
-                {formatDateOrDash(locale, run.finishedAt, timeZone)}
-              </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {run.triggerType}
-              </TableCell>
-              <TableCell>
-                <StatusBadge status={run.status} labels={labels.status} />
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                {formatDuration(locale, run.durationMs)}
-              </TableCell>
-              <TableCell>
-                <div className="flex min-w-40 flex-wrap items-center gap-1.5 text-xs">
-                  <Badge variant="outline">
-                    {numberFormat(locale, run.taskCount)}
-                  </Badge>
-                  {run.successCount > 0 ? (
-                    <span className="font-mono text-emerald-600 dark:text-emerald-400">
-                      {labels.status.success}:
-                      {numberFormat(locale, run.successCount)}
-                    </span>
-                  ) : null}
-                  {run.failedCount > 0 ? (
-                    <span className="font-mono text-destructive">
-                      {labels.status.failed}:
-                      {numberFormat(locale, run.failedCount)}
-                    </span>
-                  ) : null}
-                  {run.partialCount > 0 ? (
-                    <span className="font-mono text-amber-600 dark:text-amber-400">
-                      {labels.status.partial}:
-                      {numberFormat(locale, run.partialCount)}
-                    </span>
-                  ) : null}
-                  {run.runningCount > 0 ? (
-                    <span className="font-mono text-sky-600 dark:text-sky-400">
-                      {labels.status.running}:
-                      {numberFormat(locale, run.runningCount)}
-                    </span>
-                  ) : null}
-                </div>
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                {numberFormat(locale, run.taskCount)}
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                {numberFormat(locale, runSubtaskCount(run))}
-              </TableCell>
-              <TableCell className="pr-4 text-right">
-                <TableActionButton
-                  label={`${numberFormat(locale, run.logsCount)} ${labels.viewLogs}`}
-                  onClick={() => onOpenRun(run)}
-                  className={cn(selected && "text-foreground")}
-                >
-                  <RiFileList3Line className="size-4" />
-                </TableActionButton>
-              </TableCell>
-            </>
-          ),
-          props: {
-            role: "button",
-            tabIndex: 0,
-            className: cn(
-              "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-              selected && "bg-muted/55",
-            ),
-            onClick: () => onOpenRun(run),
-            onKeyDown: (event) => handleKeyDown(event, run),
-          },
-        };
-      }}
-      renderSkeletonRow={(index) => <ScheduledRunRowSkeleton index={index} />}
-      getRowKey={(run) => run.id}
+      renderRow={renderRow}
+      renderSkeletonRow={renderSkeletonRow}
+      getRowKey={getRowKey}
       skeletonRows={RUN_PAGE_SIZE}
       columnCount={RUN_TABLE_COLUMN_COUNT}
       loading={loadingRows}
