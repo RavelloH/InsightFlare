@@ -783,7 +783,7 @@ retention:
   eligibleVisitors: 対象訪問者数
   periodsAnalyzed: 分析対象期間
   noEligibleCohorts: 対象コホートがありません
-  weightedAverage: 加重平均
+  overallRetention: 全体リテンション
   legendLow: 低
   legendHigh: 高
   periodZero: 初回
@@ -2000,7 +2000,6 @@ requestObservation:
   trendDescription: 通常リクエスト、異常リクエスト、分流比率を間隔ごとに表示します。
   recentTitle: 最近の Bot リクエスト
   recentDescription: Bot 用 Analytics Engine データセットにのみ書き込まれた詳細記録です。
-  recentShowing: 表示中
   recentLoadedAll: すべての記録を読み込みました
   detailTitle: Bot リクエスト詳細
   detailSubtitle: この分流リクエストの検出シグナル、ネットワークコンテキスト、クライアントデータを確認します。
@@ -2023,6 +2022,7 @@ requestObservation:
   highConfidenceRequests: 高信頼度リクエスト
   emptyValue: 不明
   kind: 種別
+  botScore: Bot スコア
   botScoreBucket: Bot スコア分類
   verifiedBotCategory: 認証済み Bot カテゴリ
   hostname: ホスト名

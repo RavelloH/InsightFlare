@@ -9,6 +9,10 @@ import {
 } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
+import {
+  AnalyticsDetailsTooltipTarget,
+  AnalyticsTimeTooltipProvider,
+} from "@/components/dashboard/analytics-time-tooltip";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import { AutoResizer } from "@/components/ui/auto-resizer";
@@ -23,12 +27,6 @@ import {
 import { OverlayScrollbar } from "@/components/ui/overlay-scrollbar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
   fetchRetention,
   type RetentionGranularity,
@@ -438,8 +436,9 @@ const RetentionMetricCell = memo(function RetentionMetricCell({
           {label}
         </p>
       </div>
-      <AutoResizer initial className="mt-3">
+      <AutoResizer initial animateHeight={false} className="mt-3 h-7">
         <AutoTransition
+          className="h-7"
           transitionKey={contentKey}
           initial={false}
           duration={0.2}
@@ -453,16 +452,35 @@ const RetentionMetricCell = memo(function RetentionMetricCell({
           ) : (
             <p
               key={value}
-              className="min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground"
+              className="h-7 min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground"
             >
               {value}
             </p>
           )}
         </AutoTransition>
       </AutoResizer>
-      <p className="mt-3 min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground">
-        {detail}
-      </p>
+      <AutoTransition
+        initial={false}
+        transitionKey={loading ? "loading" : detail}
+        className="mt-3 h-[14px]"
+        duration={0.2}
+        type="fade"
+        presenceMode="wait"
+      >
+        {loading ? (
+          <Skeleton
+            key="loading"
+            className="h-full w-[min(12rem,72%)] rounded-none"
+          />
+        ) : (
+          <p
+            key={detail}
+            className="h-[14px] min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground"
+          >
+            {detail}
+          </p>
+        )}
+      </AutoTransition>
     </div>
   );
 });
@@ -570,127 +588,114 @@ const RetentionLoading = memo(function RetentionLoading({
   const columns = Array.from({ length: shape.columns }, (_, index) => index);
 
   return (
-    <div className="space-y-4" aria-hidden="true">
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-3 w-80 max-w-full" />
-        </CardHeader>
-        <CardContent className="px-0">
-          <OverlayScrollbar className="pb-1">
-            <table
+    <OverlayScrollbar className="pb-1" aria-hidden="true">
+      <table
+        className={cn(
+          RETENTION_TABLE_COLUMNS,
+          "w-max min-w-full table-fixed border-separate border-spacing-0 text-left text-xs",
+        )}
+      >
+        <colgroup>
+          <col className={RETENTION_COHORT_COLUMN} />
+          <col className={RETENTION_SIZE_COLUMN} />
+          {columns.map((index) => (
+            <col key={index} className={RETENTION_PERIOD_COLUMN} />
+          ))}
+        </colgroup>
+        <thead>
+          <tr>
+            <th
               className={cn(
-                RETENTION_TABLE_COLUMNS,
-                "w-max min-w-full border-separate border-spacing-0 text-left text-xs",
+                RETENTION_COHORT_COLUMN,
+                "sticky left-0 z-40 border-b bg-card py-2 pr-2 pl-3",
               )}
             >
-              <colgroup>
-                <col className={RETENTION_COHORT_COLUMN} />
-                <col className={RETENTION_SIZE_COLUMN} />
-                {columns.map((index) => (
-                  <col key={index} className={RETENTION_PERIOD_COLUMN} />
-                ))}
-              </colgroup>
-              <thead>
-                <tr>
-                  <th
-                    className={cn(
-                      RETENTION_COHORT_COLUMN,
-                      "sticky left-0 z-40 border-b bg-card py-2 pr-2 pl-3",
-                    )}
-                  >
-                    <Skeleton className="h-3 w-16" />
-                  </th>
-                  <th
-                    className={cn(
-                      RETENTION_SIZE_COLUMN,
-                      "sticky left-[var(--retention-cohort-width)] z-40 border-r border-b bg-card px-2 py-2",
-                    )}
-                  >
-                    <Skeleton className="ml-auto h-3 w-8" />
-                  </th>
-                  {columns.map((index) => (
-                    <th
-                      key={index}
-                      className={cn(
-                        RETENTION_PERIOD_COLUMN,
-                        "border-b px-1 py-2",
-                      )}
-                    >
-                      <Skeleton className="mx-auto h-3 w-10" />
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((rowIndex) => (
-                  <tr key={rowIndex}>
-                    <th
-                      className={cn(
-                        RETENTION_COHORT_COLUMN,
-                        "sticky left-0 z-30 border-b bg-card py-2 pr-2 pl-3",
-                      )}
-                    >
-                      <Skeleton className="h-4 w-14" />
-                    </th>
-                    <td
-                      className={cn(
-                        RETENTION_SIZE_COLUMN,
-                        "sticky left-[var(--retention-cohort-width)] z-30 border-r border-b bg-card px-2 py-2",
-                      )}
-                    >
-                      <Skeleton className="ml-auto h-4 w-9" />
-                    </td>
-                    {columns.map((cellIndex) => (
-                      <td
-                        key={`${rowIndex}-${cellIndex}`}
-                        className={cn(
-                          RETENTION_PERIOD_COLUMN,
-                          "border-r border-b p-1 align-middle",
-                        )}
-                      >
-                        <Skeleton className="h-8 w-full" />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <th
-                    className={cn(
-                      RETENTION_COHORT_COLUMN,
-                      "sticky left-0 z-30 border-t bg-card py-2 pr-2 pl-3",
-                    )}
-                  >
-                    <Skeleton className="h-4 w-16" />
-                  </th>
-                  <td
-                    className={cn(
-                      RETENTION_SIZE_COLUMN,
-                      "sticky left-[var(--retention-cohort-width)] z-30 border-r border-t bg-card px-2 py-2",
-                    )}
-                  >
-                    <Skeleton className="ml-auto h-4 w-9" />
-                  </td>
-                  {columns.map((index) => (
-                    <td
-                      key={index}
-                      className={cn(
-                        RETENTION_PERIOD_COLUMN,
-                        "border-t border-r p-1 align-middle",
-                      )}
-                    >
-                      <Skeleton className="h-8 w-full" />
-                    </td>
-                  ))}
-                </tr>
-              </tfoot>
-            </table>
-          </OverlayScrollbar>
-        </CardContent>
-      </Card>
-    </div>
+              <Skeleton className="h-3 w-16" />
+            </th>
+            <th
+              className={cn(
+                RETENTION_SIZE_COLUMN,
+                "sticky left-[var(--retention-cohort-width)] z-40 border-r border-b bg-card px-2 py-2",
+              )}
+            >
+              <Skeleton className="ml-auto h-3 w-8" />
+            </th>
+            {columns.map((index) => (
+              <th
+                key={index}
+                className={cn(RETENTION_PERIOD_COLUMN, "border-b px-1 py-2")}
+              >
+                <Skeleton className="mx-auto h-3 w-10" />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((rowIndex) => (
+            <tr key={rowIndex}>
+              <th
+                className={cn(
+                  RETENTION_COHORT_COLUMN,
+                  "sticky left-0 z-30 border-b bg-card py-2 pr-2 pl-3",
+                )}
+              >
+                <Skeleton className="h-4 w-14" />
+              </th>
+              <td
+                className={cn(
+                  RETENTION_SIZE_COLUMN,
+                  "sticky left-[var(--retention-cohort-width)] z-30 border-r border-b bg-card px-2 py-2",
+                )}
+              >
+                <Skeleton className="ml-auto h-4 w-9" />
+              </td>
+              {columns.map((cellIndex) => (
+                <td
+                  key={`${rowIndex}-${cellIndex}`}
+                  className={cn(
+                    RETENTION_PERIOD_COLUMN,
+                    "border-r border-b p-1 align-middle",
+                  )}
+                >
+                  <Skeleton className="h-8 w-full" />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th
+              className={cn(
+                RETENTION_COHORT_COLUMN,
+                "sticky left-0 z-30 border-t bg-card py-2 pr-2 pl-3",
+              )}
+            >
+              <Skeleton className="h-4 w-16" />
+            </th>
+            <td
+              className={cn(
+                RETENTION_SIZE_COLUMN,
+                "sticky left-[var(--retention-cohort-width)] z-30 border-r border-t bg-card px-2 py-2",
+              )}
+            >
+              <Skeleton className="ml-auto h-4 w-9" />
+            </td>
+            {columns.map((index) => (
+              <td
+                key={index}
+                className={cn(
+                  RETENTION_PERIOD_COLUMN,
+                  "border-t border-r p-1 align-middle",
+                )}
+              >
+                <Skeleton className="h-8 w-full" />
+              </td>
+            ))}
+          </tr>
+        </tfoot>
+      </table>
+    </OverlayScrollbar>
   );
 });
 
@@ -707,32 +712,23 @@ const RetentionCell = memo(function RetentionCell({
   cohort: RetentionCohortView;
   cell: RetentionCellView;
 }) {
-  const label = periodLabel(messages, labels, cell.index);
-
-  if (!cell.available) {
-    return (
-      <td
-        className={cn(
-          RETENTION_PERIOD_COLUMN,
-          "border-b border-r p-1 align-middle",
-        )}
-      >
-        <div
-          className="h-8 w-16 border border-dashed border-border/70 bg-muted/20"
-          title={labels.unavailableCell}
-          aria-label={labels.unavailableCell}
-        />
-      </td>
-    );
-  }
-
-  const tooltip = [
-    `${labels.cohortDetail}: ${cohort.label}`,
-    `${label}`,
-    `${labels.sizeDetail}: ${numberFormat(locale, cohort.size)}`,
-    `${labels.visitorsDetail}: ${numberFormat(locale, cell.visitors)}`,
-    `${labels.rateDetail}: ${percentFormat(locale, cell.rate)}`,
-  ].join("\n");
+  const tooltipItems = cell.available
+    ? [
+        { label: messages.retention.cohortDate, value: cohort.label },
+        { label: labels.sizeDetail, value: numberFormat(locale, cohort.size) },
+        {
+          label: labels.visitorsDetail,
+          value: numberFormat(locale, cell.visitors),
+        },
+        {
+          label: labels.rateDetail,
+          value: percentFormat(locale, cell.rate),
+        },
+      ]
+    : [{ label: labels.unavailableCell, value: "" }];
+  const tooltip = cell.available
+    ? tooltipItems.map((item) => `${item.label}: ${item.value}`).join("\n")
+    : labels.unavailableCell;
 
   return (
     <td
@@ -741,21 +737,30 @@ const RetentionCell = memo(function RetentionCell({
         "border-b border-r p-1 align-middle",
       )}
     >
-      <Tooltip>
-        <TooltipTrigger asChild>
+      <AnalyticsDetailsTooltipTarget
+        className="block"
+        locale={locale}
+        request={{
+          key: `retention-cell:${cohort.bucket}:${cell.index}:${cell.available}`,
+          items: tooltipItems,
+        }}
+      >
+        {cell.available ? (
           <button
             type="button"
-            className="flex h-8 w-16 items-center justify-center font-mono text-[11px] tabular-nums outline-none ring-0 transition-transform hover:scale-[1.035] focus-visible:ring-2 focus-visible:ring-ring/70"
+            className="flex h-8 w-full items-center justify-center font-mono text-[11px] tabular-nums outline-none ring-0 transition-transform hover:scale-[1.035] focus-visible:ring-2 focus-visible:ring-ring/70"
             style={retentionCellStyle(cell.rate, cell.available)}
             aria-label={tooltip}
           >
             {percentFormat(locale, cell.rate)}
           </button>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="whitespace-pre-line">
-          {tooltip}
-        </TooltipContent>
-      </Tooltip>
+        ) : (
+          <div
+            className="h-8 w-full border border-dashed border-border/70 bg-muted/20"
+            aria-label={tooltip}
+          />
+        )}
+      </AnalyticsDetailsTooltipTarget>
     </td>
   );
 });
@@ -765,11 +770,15 @@ const RetentionMatrix = memo(function RetentionMatrix({
   messages,
   labels,
   viewModel,
+  loading = false,
+  loadingShape,
 }: {
   locale: Locale;
   messages: AppMessages;
   labels: RetentionCopy;
   viewModel: RetentionViewModel;
+  loading?: boolean;
+  loadingShape: RetentionLoadingShape;
 }) {
   return (
     <Card>
@@ -799,144 +808,190 @@ const RetentionMatrix = memo(function RetentionMatrix({
         </div>
       </CardHeader>
       <CardContent className="px-0">
-        <TooltipProvider>
-          <OverlayScrollbar className="pb-1">
-            <table
-              className={cn(
-                RETENTION_TABLE_COLUMNS,
-                "w-max min-w-full border-separate border-spacing-0 text-left text-xs",
-              )}
-            >
-              <colgroup>
-                <col className={RETENTION_COHORT_COLUMN} />
-                <col className={RETENTION_SIZE_COLUMN} />
-                {viewModel.columns.map((index) => (
-                  <col key={index} className={RETENTION_PERIOD_COLUMN} />
-                ))}
-              </colgroup>
-              <thead>
-                <tr>
-                  <th
-                    className={cn(
-                      RETENTION_COHORT_COLUMN,
-                      "sticky left-0 z-40 truncate border-b bg-card py-2 pr-2 pl-3 font-medium text-muted-foreground",
-                    )}
-                  >
-                    {messages.retention.cohortDate}
-                  </th>
-                  <th
-                    className={cn(
-                      RETENTION_SIZE_COLUMN,
-                      "sticky left-[var(--retention-cohort-width)] z-40 border-r border-b bg-card px-2 py-2 text-right font-medium whitespace-nowrap text-muted-foreground",
-                    )}
-                  >
-                    {messages.retention.cohortSize}
-                  </th>
-                  {viewModel.columns.map((index) => (
-                    <th
-                      key={index}
-                      className={cn(
-                        RETENTION_PERIOD_COLUMN,
-                        "border-b px-1 py-2 text-center font-medium text-muted-foreground",
-                      )}
-                    >
-                      <span className="inline-block w-16 truncate">
-                        {periodLabel(messages, labels, index)}
-                      </span>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {viewModel.cohorts.map((cohort) => (
-                  <tr key={cohort.bucket} className="group">
-                    <th
-                      className={cn(
-                        RETENTION_COHORT_COLUMN,
-                        "sticky left-0 z-30 truncate border-b bg-card py-2 pr-2 pl-3 font-mono font-medium group-hover:bg-muted",
-                      )}
-                    >
-                      {cohort.label}
-                    </th>
-                    <td
-                      className={cn(
-                        RETENTION_SIZE_COLUMN,
-                        "sticky left-[var(--retention-cohort-width)] z-30 border-r border-b bg-card px-2 py-2 text-right font-mono tabular-nums whitespace-nowrap text-muted-foreground group-hover:bg-muted",
-                      )}
-                    >
-                      {numberFormat(locale, cohort.size)}
-                    </td>
-                    {cohort.cells.map((cell) => (
-                      <RetentionCell
-                        key={`${cohort.bucket}-${cell.index}`}
-                        locale={locale}
-                        labels={labels}
-                        messages={messages}
-                        cohort={cohort}
-                        cell={cell}
-                      />
+        <AutoTransition
+          transitionKey={loading ? "loading" : "ready"}
+          initial={false}
+          duration={0.18}
+          type="fade"
+          presenceMode="wait"
+        >
+          {loading ? (
+            <RetentionLoading shape={loadingShape} />
+          ) : (
+            <AnalyticsTimeTooltipProvider messages={messages}>
+              <OverlayScrollbar className="pb-1">
+                <table
+                  className={cn(
+                    RETENTION_TABLE_COLUMNS,
+                    "w-max min-w-full table-fixed border-separate border-spacing-0 text-left text-xs",
+                  )}
+                >
+                  <colgroup>
+                    <col className={RETENTION_COHORT_COLUMN} />
+                    <col className={RETENTION_SIZE_COLUMN} />
+                    {viewModel.columns.map((index) => (
+                      <col key={index} className={RETENTION_PERIOD_COLUMN} />
                     ))}
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <th
-                    className={cn(
-                      RETENTION_COHORT_COLUMN,
-                      "sticky left-0 z-30 truncate border-t bg-card py-2 pr-2 pl-3 font-medium text-muted-foreground",
-                    )}
-                  >
-                    {labels.weightedAverage}
-                  </th>
-                  <td
-                    className={cn(
-                      RETENTION_SIZE_COLUMN,
-                      "sticky left-[var(--retention-cohort-width)] z-30 border-r border-t bg-card px-2 py-2 text-right font-mono whitespace-nowrap text-muted-foreground",
-                    )}
-                  >
-                    {numberFormat(locale, viewModel.summary.totalVisitors)}
-                  </td>
-                  {viewModel.periodAverages.map((average) => (
-                    <td
-                      key={average.index}
-                      className={cn(
-                        RETENTION_PERIOD_COLUMN,
-                        "border-t border-r p-1 align-middle",
-                      )}
-                    >
-                      <div
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th
                         className={cn(
-                          "flex h-8 w-16 items-center justify-center font-mono text-[11px] tabular-nums",
-                          average.rate === null && "text-muted-foreground",
+                          RETENTION_COHORT_COLUMN,
+                          "sticky left-0 z-40 truncate border-b bg-card py-2 pr-2 pl-3 font-medium text-muted-foreground",
                         )}
-                        style={retentionCellStyle(
-                          average.rate ?? 0,
-                          average.rate !== null,
-                        )}
-                        title={
-                          average.rate === null
-                            ? labels.unavailableCell
-                            : `${labels.weightedAverage}\n${labels.visitorsDetail}: ${numberFormat(
-                                locale,
-                                average.visitors,
-                              )}\n${labels.rateDetail}: ${percentFormat(
-                                locale,
-                                average.rate,
-                              )}`
-                        }
                       >
-                        {average.rate === null
-                          ? "--"
-                          : percentFormat(locale, average.rate)}
-                      </div>
-                    </td>
-                  ))}
-                </tr>
-              </tfoot>
-            </table>
-          </OverlayScrollbar>
-        </TooltipProvider>
+                        {messages.retention.cohortDate}
+                      </th>
+                      <th
+                        className={cn(
+                          RETENTION_SIZE_COLUMN,
+                          "sticky left-[var(--retention-cohort-width)] z-40 border-r border-b bg-card px-2 py-2 text-right font-medium whitespace-nowrap text-muted-foreground",
+                        )}
+                      >
+                        {messages.retention.cohortSize}
+                      </th>
+                      {viewModel.columns.map((index) => (
+                        <th
+                          key={index}
+                          className={cn(
+                            RETENTION_PERIOD_COLUMN,
+                            "border-b px-1 py-2 text-center font-medium text-muted-foreground",
+                          )}
+                        >
+                          <span className="inline-block w-16 truncate">
+                            {periodLabel(messages, labels, index)}
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        className={cn(
+                          RETENTION_COHORT_COLUMN,
+                          "sticky left-0 z-30 truncate border-b bg-card py-2 pr-2 pl-3 font-medium text-muted-foreground",
+                        )}
+                      >
+                        {labels.overallRetention}
+                      </th>
+                      <td
+                        className={cn(
+                          RETENTION_SIZE_COLUMN,
+                          "sticky left-[var(--retention-cohort-width)] z-30 border-r border-b bg-card px-2 py-2 text-right font-mono whitespace-nowrap text-muted-foreground",
+                        )}
+                      >
+                        {numberFormat(locale, viewModel.summary.totalVisitors)}
+                      </td>
+                      {viewModel.periodAverages.map((average) => {
+                        const tooltipItems =
+                          average.rate === null
+                            ? [
+                                {
+                                  label: periodLabel(
+                                    messages,
+                                    labels,
+                                    average.index,
+                                  ),
+                                  value: labels.unavailableCell,
+                                },
+                              ]
+                            : [
+                                {
+                                  label: labels.overallRetention,
+                                  value: periodLabel(
+                                    messages,
+                                    labels,
+                                    average.index,
+                                  ),
+                                },
+                                {
+                                  label: labels.visitorsDetail,
+                                  value: numberFormat(locale, average.visitors),
+                                },
+                                {
+                                  label: labels.rateDetail,
+                                  value: percentFormat(locale, average.rate),
+                                },
+                              ];
+                        const tooltip = tooltipItems
+                          .map((item) => `${item.label}: ${item.value}`)
+                          .join("\n");
+                        return (
+                          <td
+                            key={average.index}
+                            className={cn(
+                              RETENTION_PERIOD_COLUMN,
+                              "border-b border-r p-1 align-middle",
+                            )}
+                          >
+                            <AnalyticsDetailsTooltipTarget
+                              className="block"
+                              locale={locale}
+                              request={{
+                                key: `retention-overall:${average.index}:${average.rate ?? "unavailable"}`,
+                                items: tooltipItems,
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className={cn(
+                                  "flex h-8 w-full items-center justify-center font-mono text-[11px] tabular-nums outline-none ring-0 transition-transform hover:scale-[1.035] focus-visible:ring-2 focus-visible:ring-ring/70",
+                                  average.rate === null &&
+                                    "text-muted-foreground",
+                                )}
+                                style={retentionCellStyle(
+                                  average.rate ?? 0,
+                                  average.rate !== null,
+                                )}
+                                aria-label={tooltip}
+                              >
+                                {average.rate === null
+                                  ? "--"
+                                  : percentFormat(locale, average.rate)}
+                              </button>
+                            </AnalyticsDetailsTooltipTarget>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {viewModel.cohorts.map((cohort) => (
+                      <tr key={cohort.bucket} className="group">
+                        <th
+                          className={cn(
+                            RETENTION_COHORT_COLUMN,
+                            "sticky left-0 z-30 truncate border-b bg-card py-2 pr-2 pl-3 font-mono font-medium group-hover:bg-muted",
+                          )}
+                        >
+                          {cohort.label}
+                        </th>
+                        <td
+                          className={cn(
+                            RETENTION_SIZE_COLUMN,
+                            "sticky left-[var(--retention-cohort-width)] z-30 border-r border-b bg-card px-2 py-2 text-right font-mono tabular-nums whitespace-nowrap text-muted-foreground group-hover:bg-muted",
+                          )}
+                        >
+                          {numberFormat(locale, cohort.size)}
+                        </td>
+                        {cohort.cells.map((cell) => (
+                          <RetentionCell
+                            key={`${cohort.bucket}-${cell.index}`}
+                            locale={locale}
+                            labels={labels}
+                            messages={messages}
+                            cohort={cohort}
+                            cell={cell}
+                          />
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </OverlayScrollbar>
+            </AnalyticsTimeTooltipProvider>
+          )}
+        </AutoTransition>
       </CardContent>
     </Card>
   );
@@ -1027,37 +1082,39 @@ export function RetentionClientPage({
         />
       ) : null}
 
-      <AutoTransition
-        transitionKey={bodyState}
-        duration={0.18}
-        type="fade"
-        presenceMode="wait"
-      >
-        {resolvedLoading ? (
-          <RetentionLoading shape={loadingShape} />
-        ) : error ? (
-          <RetentionStateCard
-            title={labels.loadError}
-            subtitle={messages.retention.subtitle}
-            icon={RiPulseLine}
+      {resolvedLoading || (!error && !isEmpty) ? (
+        <div className="space-y-4">
+          <RetentionMatrix
+            locale={locale}
+            messages={messages}
+            labels={labels}
+            viewModel={viewModel}
+            loading={resolvedLoading}
+            loadingShape={loadingShape}
           />
-        ) : isEmpty ? (
-          <RetentionStateCard
-            title={labels.empty}
-            subtitle={labels.emptyHint}
-            icon={RiRepeat2Line}
-          />
-        ) : (
-          <div className="space-y-4">
-            <RetentionMatrix
-              locale={locale}
-              messages={messages}
-              labels={labels}
-              viewModel={viewModel}
+        </div>
+      ) : (
+        <AutoTransition
+          transitionKey={bodyState}
+          duration={0.18}
+          type="fade"
+          presenceMode="wait"
+        >
+          {error ? (
+            <RetentionStateCard
+              title={labels.loadError}
+              subtitle={messages.retention.subtitle}
+              icon={RiPulseLine}
             />
-          </div>
-        )}
-      </AutoTransition>
+          ) : (
+            <RetentionStateCard
+              title={labels.empty}
+              subtitle={labels.emptyHint}
+              icon={RiRepeat2Line}
+            />
+          )}
+        </AutoTransition>
+      )}
     </div>
   );
 }

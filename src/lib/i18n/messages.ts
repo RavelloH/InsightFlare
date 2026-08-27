@@ -764,7 +764,7 @@ export interface AppMessages {
     eligibleVisitors: string;
     periodsAnalyzed: string;
     noEligibleCohorts: string;
-    weightedAverage: string;
+    overallRetention: string;
     legendLow: string;
     legendHigh: string;
     periodZero: string;
@@ -2038,7 +2038,6 @@ export interface AppMessages {
     trendDescription: string;
     recentTitle: string;
     recentDescription: string;
-    recentShowing: string;
     recentLoadedAll: string;
     detailTitle: string;
     detailSubtitle: string;
@@ -2061,6 +2060,7 @@ export interface AppMessages {
     highConfidenceRequests: string;
     emptyValue: string;
     kind: string;
+    botScore: string;
     botScoreBucket: string;
     verifiedBotCategory: string;
     hostname: string;
@@ -3182,7 +3182,7 @@ const enMessages = {
     eligibleVisitors: "Eligible visitors",
     periodsAnalyzed: "Periods analyzed",
     noEligibleCohorts: "No eligible cohorts",
-    weightedAverage: "Weighted average",
+    overallRetention: "Overall retention",
     legendLow: "Low",
     legendHigh: "High",
     periodZero: "Initial",
@@ -4560,7 +4560,6 @@ const enMessages = {
     recentTitle: "Recent Bot Requests",
     recentDescription:
       "Detailed records written only to the bot Analytics Engine dataset.",
-    recentShowing: "Showing",
     recentLoadedAll: "All records loaded",
     detailTitle: "Bot Request Detail",
     detailSubtitle:
@@ -4584,6 +4583,7 @@ const enMessages = {
     highConfidenceRequests: "High-confidence Requests",
     emptyValue: "Unknown",
     kind: "Type",
+    botScore: "Bot Score",
     botScoreBucket: "Bot Score Bucket",
     verifiedBotCategory: "Verified Bot Category",
     hostname: "Hostname",
@@ -5734,7 +5734,7 @@ const zhMessages = {
     eligibleVisitors: "符合条件的访客",
     periodsAnalyzed: "已分析周期",
     noEligibleCohorts: "暂无符合条件的群组",
-    weightedAverage: "加权平均",
+    overallRetention: "整体留存",
     legendLow: "低",
     legendHigh: "高",
     periodZero: "初始",
@@ -7057,7 +7057,6 @@ const zhMessages = {
     trendDescription: "按时间间隔显示正常请求、异常请求与分流比例。",
     recentTitle: "最近机器人请求",
     recentDescription: "这些详细记录只写入机器人 Analytics Engine 数据集。",
-    recentShowing: "已显示",
     recentLoadedAll: "已加载全部记录",
     detailTitle: "机器人请求详情",
     detailSubtitle: "查看这次分流请求的检测信号、网络和客户端上下文。",
@@ -7080,6 +7079,7 @@ const zhMessages = {
     highConfidenceRequests: "高置信请求",
     emptyValue: "未知",
     kind: "类型",
+    botScore: "Bot 分数",
     botScoreBucket: "Bot Score 区间",
     verifiedBotCategory: "验证机器人类别",
     hostname: "主机名",
@@ -8245,7 +8245,7 @@ const jaMessages = {
     eligibleVisitors: "対象訪問者数",
     periodsAnalyzed: "分析対象期間",
     noEligibleCohorts: "対象コホートがありません",
-    weightedAverage: "加重平均",
+    overallRetention: "全体リテンション",
     legendLow: "低",
     legendHigh: "高",
     periodZero: "初回",
@@ -9621,7 +9621,6 @@ const jaMessages = {
     recentTitle: "最近の Bot リクエスト",
     recentDescription:
       "Bot 用 Analytics Engine データセットにのみ書き込まれた詳細記録です。",
-    recentShowing: "表示中",
     recentLoadedAll: "すべての記録を読み込みました",
     detailTitle: "Bot リクエスト詳細",
     detailSubtitle:
@@ -9645,6 +9644,7 @@ const jaMessages = {
     highConfidenceRequests: "高信頼度リクエスト",
     emptyValue: "不明",
     kind: "種別",
+    botScore: "Bot スコア",
     botScoreBucket: "Bot スコア分類",
     verifiedBotCategory: "認証済み Bot カテゴリ",
     hostname: "ホスト名",

@@ -781,7 +781,7 @@ retention:
   eligibleVisitors: 符合条件的访客
   periodsAnalyzed: 已分析周期
   noEligibleCohorts: 暂无符合条件的群组
-  weightedAverage: 加权平均
+  overallRetention: 整体留存
   legendLow: 低
   legendHigh: 高
   periodZero: 初始
@@ -1992,7 +1992,6 @@ requestObservation:
   trendDescription: 按时间间隔显示正常请求、异常请求与分流比例。
   recentTitle: 最近机器人请求
   recentDescription: 这些详细记录只写入机器人 Analytics Engine 数据集。
-  recentShowing: 已显示
   recentLoadedAll: 已加载全部记录
   detailTitle: 机器人请求详情
   detailSubtitle: 查看这次分流请求的检测信号、网络和客户端上下文。
@@ -2015,6 +2014,7 @@ requestObservation:
   highConfidenceRequests: 高置信请求
   emptyValue: 未知
   kind: 类型
+  botScore: Bot 分数
   botScoreBucket: Bot Score 区间
   verifiedBotCategory: 验证机器人类别
   hostname: 主机名

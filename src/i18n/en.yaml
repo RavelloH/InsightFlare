@@ -792,7 +792,7 @@ retention:
   eligibleVisitors: Eligible visitors
   periodsAnalyzed: Periods analyzed
   noEligibleCohorts: No eligible cohorts
-  weightedAverage: Weighted average
+  overallRetention: Overall retention
   legendLow: Low
   legendHigh: High
   periodZero: Initial
@@ -2060,7 +2060,6 @@ requestObservation:
   trendDescription: Normal requests, abnormal requests, and diversion ratio by interval.
   recentTitle: Recent Bot Requests
   recentDescription: Detailed records written only to the bot Analytics Engine dataset.
-  recentShowing: Showing
   recentLoadedAll: All records loaded
   detailTitle: Bot Request Detail
   detailSubtitle:
@@ -2085,6 +2084,7 @@ requestObservation:
   highConfidenceRequests: High-confidence Requests
   emptyValue: Unknown
   kind: Type
+  botScore: Bot Score
   botScoreBucket: Bot Score Bucket
   verifiedBotCategory: Verified Bot Category
   hostname: Hostname

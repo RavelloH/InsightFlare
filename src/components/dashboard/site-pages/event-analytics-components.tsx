@@ -509,8 +509,9 @@ function EventMetricCell({
           {label}
         </p>
       </div>
-      <AutoResizer initial className="mt-3">
+      <AutoResizer initial animateHeight={false} className="mt-3 h-7">
         <AutoTransition
+          className="h-7"
           transitionKey={contentKey}
           initial={false}
           duration={0.2}
@@ -518,11 +519,13 @@ function EventMetricCell({
           presenceMode="wait"
         >
           {loading ? (
-            <Skeleton key="loading" className="h-7 w-24 rounded-none" />
+            <div key="loading" className="flex h-7 items-center">
+              <Spinner className="size-5" />
+            </div>
           ) : (
             <p
               key={value}
-              className="min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground"
+              className="h-7 min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground"
             >
               {value}
             </p>
