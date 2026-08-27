@@ -1,4 +1,4 @@
-import { type ComponentType, useMemo } from "react";
+import { type ComponentType, memo, useMemo } from "react";
 import { RiDonutChartLine } from "@remixicon/react";
 
 import {
@@ -65,7 +65,7 @@ function resolveShareItems(
   });
 }
 
-export function ShareRadialCard({
+export const ShareRadialCard = memo(function ShareRadialCard({
   title,
   items,
   maxItems,
@@ -142,7 +142,7 @@ export function ShareRadialCard({
       </CardContent>
     </Card>
   );
-}
+});
 
 export function ShareRadialCardSkeleton({
   className,

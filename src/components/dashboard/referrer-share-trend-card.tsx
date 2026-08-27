@@ -102,13 +102,13 @@ function ReferrerTrendPanel({
   const trendData = trendQueryData?.trendData ?? fallbackTrendData;
   const dataWindow = trendQueryData?.dataWindow ?? currentDataWindow;
   const hydrated = Boolean(trendQueryData);
-  const sourceTrendData = asBrowserTrendData(
-    trendData.interval,
-    trendData.source,
+  const sourceTrendData = useMemo(
+    () => asBrowserTrendData(trendData.interval, trendData.source),
+    [trendData.interval, trendData.source],
   );
-  const channelTrendData = asBrowserTrendData(
-    trendData.interval,
-    trendData.channel,
+  const channelTrendData = useMemo(
+    () => asBrowserTrendData(trendData.interval, trendData.channel),
+    [trendData.channel, trendData.interval],
   );
 
   const formatSourceLabel = useMemo(

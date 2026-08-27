@@ -71,8 +71,44 @@ export function DeviceShareOverview({
     },
     enabled: typeof window !== "undefined",
   });
-  const deviceTrend = data?.deviceTrend ?? emptyTrend();
-  const osTrend = data?.osTrend ?? emptyTrend();
+  const deviceTrend = useMemo(
+    () => data?.deviceTrend ?? emptyTrend(),
+    [data?.deviceTrend],
+  );
+  const osTrend = useMemo(() => data?.osTrend ?? emptyTrend(), [data?.osTrend]);
+  const deviceItems = useMemo(
+    () =>
+      deviceTrend.series.map((item) => {
+        const deviceMeta = resolveDeviceTypeMeta(
+          item.label,
+          messages.common.deviceLabels,
+          messages.common.unknown,
+        );
+        return {
+          key: item.key,
+          label: item.isOther ? messages.devices.otherLabel : deviceMeta.label,
+          value: item.visitors,
+          isOther: item.isOther,
+          icon: item.isOther ? undefined : deviceMeta.Icon,
+        };
+      }),
+    [
+      deviceTrend.series,
+      messages.common.deviceLabels,
+      messages.common.unknown,
+      messages.devices.otherLabel,
+    ],
+  );
+  const osItems = useMemo(
+    () =>
+      osTrend.series.map((item) => ({
+        key: item.key,
+        label: seriesLabel(item, messages),
+        value: item.visitors,
+        isOther: item.isOther,
+      })),
+    [messages, osTrend.series],
+  );
   const showOverlayLoading = isFetching && data !== undefined;
   const showInitialLoading = isFetching && data === undefined;
 
@@ -81,22 +117,7 @@ export function DeviceShareOverview({
       <div className="grid gap-4">
         <ShareRadialCard
           title={messages.devices.deviceShareTitle}
-          items={deviceTrend.series.map((item) => {
-            const deviceMeta = resolveDeviceTypeMeta(
-              item.label,
-              messages.common.deviceLabels,
-              messages.common.unknown,
-            );
-            return {
-              key: item.key,
-              label: item.isOther
-                ? messages.devices.otherLabel
-                : deviceMeta.label,
-              value: item.visitors,
-              isOther: item.isOther,
-              icon: item.isOther ? undefined : deviceMeta.Icon,
-            };
-          })}
+          items={deviceItems}
           maxItems={6}
           locale={locale}
           valueLabel={messages.common.visitors}
@@ -105,12 +126,7 @@ export function DeviceShareOverview({
         />
         <ShareRadialCard
           title={messages.devices.osShareTitle}
-          items={osTrend.series.map((item) => ({
-            key: item.key,
-            label: seriesLabel(item, messages),
-            value: item.visitors,
-            isOther: item.isOther,
-          }))}
+          items={osItems}
           maxItems={6}
           locale={locale}
           valueLabel={messages.common.visitors}

@@ -79,41 +79,60 @@ export function ReferrerSummarySection({
     0,
     externalViews - (topSource?.views ?? 0) - nextFourViews,
   );
-  const splitItems = [
-    {
-      key: "direct",
-      label: messages.overview.direct,
-      value: directViews,
-      color: "var(--color-chart-1)",
-    },
-    {
-      key: "external",
-      label: messages.referrers.externalLabel,
-      value: externalViews,
-      color: "var(--color-chart-3)",
-    },
-  ];
-  const mixItems = [
-    {
-      key: "top",
-      label: topSource?.label ?? messages.referrers.topSource,
-      value: topSource?.views ?? 0,
-      color: "var(--color-chart-1)",
-    },
-    {
-      key: "next",
-      label: messages.referrers.nextSources,
-      value: nextFourViews,
-      color: "var(--color-chart-3)",
-    },
-    {
-      key: "tail",
-      label: messages.referrers.longTail,
-      value: longTailViews,
-      color: "var(--muted-foreground)",
-      isOther: true,
-    },
-  ];
+  const splitItems = useMemo(
+    () => [
+      {
+        key: "direct",
+        label: messages.overview.direct,
+        value: directViews,
+        color: "var(--color-chart-1)",
+      },
+      {
+        key: "external",
+        label: messages.referrers.externalLabel,
+        value: externalViews,
+        color: "var(--color-chart-3)",
+      },
+    ],
+    [
+      directViews,
+      externalViews,
+      messages.overview.direct,
+      messages.referrers.externalLabel,
+    ],
+  );
+  const mixItems = useMemo(
+    () => [
+      {
+        key: "top",
+        label: topSource?.label ?? messages.referrers.topSource,
+        value: topSource?.views ?? 0,
+        color: "var(--color-chart-1)",
+      },
+      {
+        key: "next",
+        label: messages.referrers.nextSources,
+        value: nextFourViews,
+        color: "var(--color-chart-3)",
+      },
+      {
+        key: "tail",
+        label: messages.referrers.longTail,
+        value: longTailViews,
+        color: "var(--muted-foreground)",
+        isOther: true,
+      },
+    ],
+    [
+      longTailViews,
+      messages.referrers.longTail,
+      messages.referrers.nextSources,
+      messages.referrers.topSource,
+      nextFourViews,
+      topSource?.label,
+      topSource?.views,
+    ],
+  );
 
   return (
     <section className="space-y-6">

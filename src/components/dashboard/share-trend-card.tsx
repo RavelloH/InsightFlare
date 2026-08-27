@@ -1,4 +1,4 @@
-import { type ComponentType, type ReactNode, useMemo } from "react";
+import { type ComponentType, memo, type ReactNode, useMemo } from "react";
 import { RiLineChartLine } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
@@ -155,7 +155,7 @@ export interface ShareTrendChartCardProps {
   ) => ComponentType<{ className?: string }> | undefined;
 }
 
-export function ShareTrendChartCard({
+export const ShareTrendChartCard = memo(function ShareTrendChartCard({
   locale,
   messages,
   title,
@@ -239,9 +239,31 @@ export function ShareTrendChartCard({
       </CardContent>
     </Card>
   );
+});
+
+function areShareTrendCardPropsEqual(
+  previous: ShareTrendCardProps,
+  next: ShareTrendCardProps,
+): boolean {
+  return (
+    previous.locale === next.locale &&
+    previous.messages === next.messages &&
+    previous.siteId === next.siteId &&
+    previous.window === next.window &&
+    previous.filters === next.filters &&
+    previous.title === next.title &&
+    previous.fetchTrend === next.fetchTrend &&
+    previous.limit === next.limit &&
+    previous.otherLabel === next.otherLabel &&
+    previous.headerBelow === next.headerBelow &&
+    previous.formatSeriesLabel === next.formatSeriesLabel &&
+    previous.resolveSeriesIcon === next.resolveSeriesIcon &&
+    previous.queryKey.length === next.queryKey.length &&
+    previous.queryKey.every((value, index) => value === next.queryKey[index])
+  );
 }
 
-export function ShareTrendCard({
+export const ShareTrendCard = memo(function ShareTrendCard({
   locale,
   messages,
   siteId,
@@ -319,4 +341,4 @@ export function ShareTrendCard({
       resolveSeriesIcon={resolveSeriesIcon}
     />
   );
-}
+}, areShareTrendCardPropsEqual);

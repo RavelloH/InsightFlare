@@ -64,8 +64,34 @@ export function BrowserShareOverview({
     },
     enabled: typeof window !== "undefined",
   });
-  const browserTrend = data?.browserTrend ?? emptyTrend();
-  const engineTrend = data?.engineTrend ?? emptyTrend();
+  const browserTrend = useMemo(
+    () => data?.browserTrend ?? emptyTrend(),
+    [data?.browserTrend],
+  );
+  const engineTrend = useMemo(
+    () => data?.engineTrend ?? emptyTrend(),
+    [data?.engineTrend],
+  );
+  const browserItems = useMemo(
+    () =>
+      browserTrend.series.map((item) => ({
+        key: item.key,
+        label: item.label,
+        value: item.visitors,
+        isOther: item.isOther,
+      })),
+    [browserTrend.series],
+  );
+  const engineItems = useMemo(
+    () =>
+      engineTrend.series.map((item) => ({
+        key: item.key,
+        label: item.label,
+        value: item.visitors,
+        isOther: item.isOther,
+      })),
+    [engineTrend.series],
+  );
   const showOverlayLoading = isFetching && data !== undefined;
   const showInitialLoading = isFetching && data === undefined;
 
@@ -74,12 +100,7 @@ export function BrowserShareOverview({
       <div className="grid gap-4">
         <ShareRadialCard
           title={messages.browsers.browserShareTitle}
-          items={browserTrend.series.map((item) => ({
-            key: item.key,
-            label: item.label,
-            value: item.visitors,
-            isOther: item.isOther,
-          }))}
+          items={browserItems}
           maxItems={6}
           locale={locale}
           valueLabel={messages.common.visitors}
@@ -88,12 +109,7 @@ export function BrowserShareOverview({
         />
         <ShareRadialCard
           title={messages.browsers.engineShareTitle}
-          items={engineTrend.series.map((item) => ({
-            key: item.key,
-            label: item.label,
-            value: item.visitors,
-            isOther: item.isOther,
-          }))}
+          items={engineItems}
           maxItems={6}
           locale={locale}
           valueLabel={messages.common.visitors}
