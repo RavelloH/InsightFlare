@@ -485,6 +485,11 @@ export function DashboardShell({
       : activeTeamId
         ? (clientSitesByTeam[activeTeamId] ?? [])
         : [];
+  const isSidebarSitesLoading = Boolean(
+    activeTeamId &&
+    sites.length === 0 &&
+    !Object.prototype.hasOwnProperty.call(clientSitesByTeam, activeTeamId),
+  );
   const resolvedTeamSections = useMemo(() => {
     if (teamSections) return teamSections;
     if (!liveActiveTeamSlug || !activeTeam) return undefined;
@@ -1048,6 +1053,8 @@ export function DashboardShell({
                                 activeSiteSlug={resolvedActiveSiteSlug}
                                 currentSection={currentAnalyticsSection}
                                 sites={sidebarSites}
+                                loading={isSidebarSitesLoading}
+                                loadingLabel={messages.common.loading}
                                 labels={sidebarLabels}
                               />
                             </SidebarGroupContent>

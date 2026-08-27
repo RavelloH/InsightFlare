@@ -8,12 +8,13 @@ import {
 import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
 import { SiteBrandIcon } from "@/components/dashboard/site-brand-icon";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import {
   SidebarMenu,
   SidebarMenuButton,
-  SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Spinner } from "@/components/ui/spinner";
 import { numberFormat } from "@/lib/dashboard/format";
 import {
   buildTeamSiteTrends,
@@ -39,6 +40,8 @@ interface SidebarSiteDetailsProps {
   activeSiteSlug?: string;
   currentSection?: string;
   sites: SidebarSiteSummary[];
+  loading?: boolean;
+  loadingLabel: string;
   labels: {
     views: string;
     visitors: string;
@@ -158,19 +161,15 @@ const SidebarSiteRow = memo(function SidebarSiteRow({
     </SidebarMenuButton>
   );
 
-  return (
-    <SidebarMenuItem>
-      {isMobile ? (
-        siteLink
-      ) : (
-        <AnalyticsTooltipTarget
-          className="block"
-          request={{ key: tooltipKey, content: tooltipContent }}
-        >
-          {siteLink}
-        </AnalyticsTooltipTarget>
-      )}
-    </SidebarMenuItem>
+  return isMobile ? (
+    siteLink
+  ) : (
+    <AnalyticsTooltipTarget
+      className="block"
+      request={{ key: tooltipKey, content: tooltipContent }}
+    >
+      {siteLink}
+    </AnalyticsTooltipTarget>
   );
 });
 
@@ -181,6 +180,8 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
   activeSiteSlug,
   currentSection,
   sites,
+  loading = false,
+  loadingLabel,
   labels,
 }: SidebarSiteDetailsProps) {
   const { state: sidebarState, isMobile } = useSidebar();
@@ -251,27 +252,49 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
   );
 
   const menu = (
-    <SidebarMenu>
-      {cards.map(({ site, trend }) => {
-        return (
-          <SidebarSiteRow
-            key={site.id}
-            locale={locale}
-            teamSlug={teamSlug}
-            activeSiteSlug={activeSiteSlug}
-            currentSection={currentSection}
-            site={site}
-            trend={trend}
-            dashboardWindow={dashboardWindow}
-            viewsLabel={labels.views}
-            visitorsLabel={labels.visitors}
-            shouldRenderCharts={shouldRenderCharts}
-            metrics={siteMetricsById.get(site.id)}
-            sidebarState={sidebarState}
-            isMobile={isMobile}
-          />
-        );
-      })}
+    <SidebarMenu aria-busy={loading}>
+      <AutoTransition
+        as="li"
+        initial={false}
+        transitionKey={loading ? "loading" : "sites"}
+        duration={0.18}
+        type="fade"
+        presenceMode="wait"
+        aria-hidden={loading ? undefined : cards.length === 0}
+        className="group/menu-item relative"
+      >
+        {loading ? (
+          <div role="status" aria-live="polite">
+            <SidebarMenuButton type="button" disabled aria-label={loadingLabel}>
+              <Spinner aria-hidden="true" />
+              <span>{loadingLabel}</span>
+            </SidebarMenuButton>
+          </div>
+        ) : (
+          <div className="flex w-full min-w-0 flex-col gap-1">
+            {cards.map(({ site, trend }) => {
+              return (
+                <SidebarSiteRow
+                  key={site.id}
+                  locale={locale}
+                  teamSlug={teamSlug}
+                  activeSiteSlug={activeSiteSlug}
+                  currentSection={currentSection}
+                  site={site}
+                  trend={trend}
+                  dashboardWindow={dashboardWindow}
+                  viewsLabel={labels.views}
+                  visitorsLabel={labels.visitors}
+                  shouldRenderCharts={shouldRenderCharts}
+                  metrics={siteMetricsById.get(site.id)}
+                  sidebarState={sidebarState}
+                  isMobile={isMobile}
+                />
+              );
+            })}
+          </div>
+        )}
+      </AutoTransition>
     </SidebarMenu>
   );
 

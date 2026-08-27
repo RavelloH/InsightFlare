@@ -19,7 +19,7 @@ export interface AutoTransitionProps extends Omit<
   "children" | "className"
 > {
   children: React.ReactNode;
-  as?: "div" | "span" | "g" | "tbody" | "tr";
+  as?: "div" | "span" | "g" | "tbody" | "tr" | "li";
   className?: string;
   duration?: number;
   type?: TransitionType;
@@ -139,9 +139,11 @@ export const AutoTransition = React.forwardRef<
         ? motion.tbody
         : as === "tr"
           ? motion.tr
-          : as === "span"
-            ? motion.span
-            : motion.div
+          : as === "li"
+            ? motion.li
+            : as === "span"
+              ? motion.span
+              : motion.div
   ) as React.ElementType;
 
   return (
