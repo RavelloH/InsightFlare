@@ -70,6 +70,14 @@ interface AnalyticsDataTableBodyProps<TRow> {
   tableBodyClassName?: string;
 }
 
+interface AnalyticsDataTableAnimatedRowProps<TRow> {
+  row: TRow;
+  index: number;
+  renderRow: (row: TRow, index: number) => AnalyticsDataTableRow;
+  getRowKey: (row: TRow, index: number) => Key;
+  skeletonRows: number;
+}
+
 const NOOP = () => undefined;
 const TABLE_ROW_CLASS_NAME =
   "group border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted";
@@ -119,6 +127,50 @@ function renderAppendErrorRow(
     </AutoTransition>
   );
 }
+
+const AnalyticsDataTableAnimatedRow = memo(
+  function AnalyticsDataTableAnimatedRow<TRow>({
+    row,
+    index,
+    renderRow,
+    getRowKey,
+    skeletonRows,
+  }: AnalyticsDataTableAnimatedRowProps<TRow>) {
+    const rendered = renderRow(row, index);
+    const rowKey = String(getRowKey(row, index));
+    const { className: rowClassName, ...rowProps } = rendered.props ?? {};
+
+    return (
+      <AutoTransition
+        as="tr"
+        key={`row-${rowKey}`}
+        transitionKey={`row-${rowKey}`}
+        initial
+        duration={0.18}
+        type="fade"
+        style={
+          {
+            "--analytics-data-row-delay": `${
+              (index % Math.max(skeletonRows, 1)) * DATA_ROW_STAGGER_MS
+            }ms`,
+          } as CSSProperties
+        }
+        {...rowProps}
+        data-slot="table-row"
+        data-analytics-row-enter=""
+        className={cn(TABLE_ROW_CLASS_NAME, rowClassName)}
+      >
+        {rendered.children}
+      </AutoTransition>
+    );
+  },
+  (previous, next) =>
+    previous.row === next.row &&
+    previous.index === next.index &&
+    previous.renderRow === next.renderRow &&
+    previous.getRowKey === next.getRowKey &&
+    previous.skeletonRows === next.skeletonRows,
+) as <TRow>(props: AnalyticsDataTableAnimatedRowProps<TRow>) => ReactNode;
 
 const AnalyticsDataTableBody = memo(function AnalyticsDataTableBody<TRow>({
   rows,
@@ -180,33 +232,15 @@ const AnalyticsDataTableBody = memo(function AnalyticsDataTableBody<TRow>({
             ? renderStateRow("empty", emptyContent, columnCount)
             : [
                 ...rows.map((row, index) => {
-                  const rendered = renderRow(row, index);
-                  const rowKey = String(getRowKey(row, index));
-                  const { className: rowClassName, ...rowProps } =
-                    rendered.props ?? {};
                   return (
-                    <AutoTransition
-                      as="tr"
-                      key={`row-${rowKey}`}
-                      transitionKey={`row-${rowKey}`}
-                      initial
-                      duration={0.18}
-                      type="fade"
-                      style={
-                        {
-                          "--analytics-data-row-delay": `${
-                            (index % Math.max(skeletonRows, 1)) *
-                            DATA_ROW_STAGGER_MS
-                          }ms`,
-                        } as CSSProperties
-                      }
-                      {...rowProps}
-                      data-slot="table-row"
-                      data-analytics-row-enter=""
-                      className={cn(TABLE_ROW_CLASS_NAME, rowClassName)}
-                    >
-                      {rendered.children}
-                    </AutoTransition>
+                    <AnalyticsDataTableAnimatedRow
+                      key={`row-${String(getRowKey(row, index))}`}
+                      row={row}
+                      index={index}
+                      renderRow={renderRow}
+                      getRowKey={getRowKey}
+                      skeletonRows={skeletonRows}
+                    />
                   );
                 }),
                 ...(appendError
