@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   RiArrowDownLine,
   RiArrowRightSLine,
@@ -97,7 +97,7 @@ function PageMetricField({
   );
 }
 
-function PageTrafficCard({
+const PageTrafficCard = memo(function PageTrafficCard({
   item,
   interval,
   range,
@@ -212,9 +212,9 @@ function PageTrafficCard({
       </motion.div>
     </Link>
   );
-}
+});
 
-function PageTrafficCardSkeleton() {
+const PageTrafficCardSkeleton = memo(function PageTrafficCardSkeleton() {
   return (
     <Card className="h-full">
       <CardHeader className="space-y-2">
@@ -236,7 +236,7 @@ function PageTrafficCardSkeleton() {
       </CardContent>
     </Card>
   );
-}
+});
 
 export function PagesClientPage({
   locale,
@@ -298,10 +298,10 @@ export function PagesClientPage({
   const appendError = isFetchNextPageError
     ? messages.pages.loadMoreError
     : null;
-  const loadNextPage = () => {
+  const loadNextPage = useCallback(() => {
     if (loadingInitial || loadingMore || appendError || !hasNextPage) return;
     void fetchNextPage();
-  };
+  }, [appendError, fetchNextPage, hasNextPage, loadingInitial, loadingMore]);
 
   useEffect(() => {
     const target = sentinelNode;
@@ -345,11 +345,11 @@ export function PagesClientPage({
     };
   }, [
     appendError,
-    fetchNextPage,
     error,
     hasNextPage,
     loadingInitial,
     loadingMore,
+    loadNextPage,
     sentinelNode,
   ]);
 

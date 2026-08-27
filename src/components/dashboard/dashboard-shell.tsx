@@ -112,6 +112,23 @@ type AnalyticsNavKey =
   | "request-abnormal"
   | "request-normal";
 
+const VALID_ANALYTICS_SECTIONS = new Set([
+  "realtime",
+  "pages",
+  "referrers",
+  "sessions",
+  "events",
+  "visitors",
+  "geo",
+  "devices",
+  "browsers",
+  "performance",
+  "settings",
+  "campaigns",
+  "funnels",
+  "retention",
+]);
+
 const DASHBOARD_SCROLLBAR_OPTIONS = {
   overflow: {
     x: "hidden",
@@ -485,8 +502,11 @@ export function DashboardShell({
     teamSections,
     user.systemRole,
   ]);
-  const routeState = parseSidebarRouteState(livePathname, liveActiveTeamSlug);
-  const activeTeamLocalPath = (() => {
+  const routeState = useMemo(
+    () => parseSidebarRouteState(livePathname, liveActiveTeamSlug),
+    [liveActiveTeamSlug, livePathname],
+  );
+  const activeTeamLocalPath = useMemo(() => {
     if (!liveActiveTeamSlug) return [];
     const segments = livePathname.split("/").filter((s) => s.length > 0);
     const teamIndex = segments.findIndex(
@@ -496,27 +516,10 @@ export function DashboardShell({
         segments[index - 1] === "app",
     );
     return teamIndex >= 0 ? segments.slice(teamIndex + 1) : [];
-  })();
+  }, [liveActiveTeamSlug, livePathname]);
   const mainSiteSection = activeTeamLocalPath[1] || "";
   const mainSiteSubSection = activeTeamLocalPath[2] || "";
 
-  // Derive current analytics section from the live pathname directly.
-  const VALID_ANALYTICS_SECTIONS = new Set([
-    "realtime",
-    "pages",
-    "referrers",
-    "sessions",
-    "events",
-    "visitors",
-    "geo",
-    "devices",
-    "browsers",
-    "performance",
-    "settings",
-    "campaigns",
-    "funnels",
-    "retention",
-  ]);
   const currentAnalyticsSection = (() => {
     if (routeState.mode !== "site" || !routeState.activeSiteSlug)
       return undefined;
@@ -536,33 +539,38 @@ export function DashboardShell({
       ? buildSitePath(locale, liveActiveTeamSlug, resolvedActiveSiteSlug)
       : null;
 
-  const analyticsSections: Array<{
-    key: AnalyticsNavKey;
-    href: string;
-    label?: string;
-    queryKey?: string;
-    queryValue?: string;
-    queryDefault?: boolean;
-  }> =
-    hasActiveSite && activeSiteBase
-      ? [
-          { key: "overview", href: activeSiteBase },
-          { key: "realtime", href: `${activeSiteBase}/realtime` },
-          { key: "pages", href: `${activeSiteBase}/pages` },
-          { key: "referrers", href: `${activeSiteBase}/referrers` },
-          { key: "campaigns", href: `${activeSiteBase}/campaigns` },
-          { key: "sessions", href: `${activeSiteBase}/sessions` },
-          { key: "visitors", href: `${activeSiteBase}/visitors` },
-          { key: "events", href: `${activeSiteBase}/events` },
-          { key: "funnels", href: `${activeSiteBase}/funnels` },
-          { key: "retention", href: `${activeSiteBase}/retention` },
-          { key: "geo", href: `${activeSiteBase}/geo` },
-          { key: "devices", href: `${activeSiteBase}/devices` },
-          { key: "browsers", href: `${activeSiteBase}/browsers` },
-          { key: "performance", href: `${activeSiteBase}/performance` },
-          { key: "settings", href: `${activeSiteBase}/settings` },
-        ]
-      : [];
+  const analyticsSections = useMemo<
+    Array<{
+      key: AnalyticsNavKey;
+      href: string;
+      label?: string;
+      queryKey?: string;
+      queryValue?: string;
+      queryDefault?: boolean;
+    }>
+  >(
+    () =>
+      hasActiveSite && activeSiteBase
+        ? [
+            { key: "overview", href: activeSiteBase },
+            { key: "realtime", href: `${activeSiteBase}/realtime` },
+            { key: "pages", href: `${activeSiteBase}/pages` },
+            { key: "referrers", href: `${activeSiteBase}/referrers` },
+            { key: "campaigns", href: `${activeSiteBase}/campaigns` },
+            { key: "sessions", href: `${activeSiteBase}/sessions` },
+            { key: "visitors", href: `${activeSiteBase}/visitors` },
+            { key: "events", href: `${activeSiteBase}/events` },
+            { key: "funnels", href: `${activeSiteBase}/funnels` },
+            { key: "retention", href: `${activeSiteBase}/retention` },
+            { key: "geo", href: `${activeSiteBase}/geo` },
+            { key: "devices", href: `${activeSiteBase}/devices` },
+            { key: "browsers", href: `${activeSiteBase}/browsers` },
+            { key: "performance", href: `${activeSiteBase}/performance` },
+            { key: "settings", href: `${activeSiteBase}/settings` },
+          ]
+        : [],
+    [activeSiteBase, hasActiveSite],
+  );
   const localeSuffix = normalizeLocalePath(livePathname);
   const switchToEn = `/en${localeSuffix}`;
   const switchToZh = `/zh${localeSuffix}`;
@@ -593,39 +601,51 @@ export function DashboardShell({
     normalizeLocalePath(livePathname) === "/app/manage/request-observation",
   );
   const requestObservationBase = `/${locale}/app/manage/request-observation`;
-  const requestObservationSections: Array<{
-    key: AnalyticsNavKey;
-    href: string;
-    label: string;
-    queryKey: string;
-    queryValue: string;
-    queryDefault?: boolean;
-  }> = isRequestObservationRoute
-    ? [
-        {
-          key: "request-overview",
-          href: requestObservationBase,
-          label: messages.requestObservation.tabs.overview,
-          queryKey: "requestTab",
-          queryValue: "overview",
-          queryDefault: true,
-        },
-        {
-          key: "request-abnormal",
-          href: `${requestObservationBase}?requestTab=abnormal`,
-          label: messages.requestObservation.tabs.abnormal,
-          queryKey: "requestTab",
-          queryValue: "abnormal",
-        },
-        {
-          key: "request-normal",
-          href: `${requestObservationBase}?requestTab=normal`,
-          label: messages.requestObservation.tabs.normal,
-          queryKey: "requestTab",
-          queryValue: "normal",
-        },
-      ]
-    : [];
+  const requestObservationSections = useMemo<
+    Array<{
+      key: AnalyticsNavKey;
+      href: string;
+      label: string;
+      queryKey: string;
+      queryValue: string;
+      queryDefault?: boolean;
+    }>
+  >(
+    () =>
+      isRequestObservationRoute
+        ? [
+            {
+              key: "request-overview",
+              href: requestObservationBase,
+              label: messages.requestObservation.tabs.overview,
+              queryKey: "requestTab",
+              queryValue: "overview",
+              queryDefault: true,
+            },
+            {
+              key: "request-abnormal",
+              href: `${requestObservationBase}?requestTab=abnormal`,
+              label: messages.requestObservation.tabs.abnormal,
+              queryKey: "requestTab",
+              queryValue: "abnormal",
+            },
+            {
+              key: "request-normal",
+              href: `${requestObservationBase}?requestTab=normal`,
+              label: messages.requestObservation.tabs.normal,
+              queryKey: "requestTab",
+              queryValue: "normal",
+            },
+          ]
+        : [],
+    [
+      isRequestObservationRoute,
+      messages.requestObservation.tabs.abnormal,
+      messages.requestObservation.tabs.normal,
+      messages.requestObservation.tabs.overview,
+      requestObservationBase,
+    ],
+  );
   const topbarSections =
     analyticsSections.length > 0
       ? analyticsSections
@@ -659,35 +679,43 @@ export function DashboardShell({
   const mobileCurrentLevelName = hasActiveSite
     ? activeSiteName
     : activeTeamName || messages.appName;
-  const teamOptions = teams.map((team) => ({
-    slug: team.slug,
-    name: team.name,
-    href: `/${locale}/app/${team.slug}`,
-  }));
-  const teamOptionGroups = teamGroups
-    ? {
-        created: teamGroups.created.map((team) => ({
-          slug: team.slug,
-          name: team.name,
-          href: `/${locale}/app/${team.slug}`,
-        })),
-        managed: teamGroups.managed.map((team) => ({
-          slug: team.slug,
-          name: team.name,
-          href: `/${locale}/app/${team.slug}`,
-        })),
-        member: teamGroups.member.map((team) => ({
-          slug: team.slug,
-          name: team.name,
-          href: `/${locale}/app/${team.slug}`,
-        })),
-        system: teamGroups.system.map((team) => ({
-          slug: team.slug,
-          name: team.name,
-          href: `/${locale}/app/${team.slug}`,
-        })),
-      }
-    : undefined;
+  const teamOptions = useMemo(
+    () =>
+      teams.map((team) => ({
+        slug: team.slug,
+        name: team.name,
+        href: `/${locale}/app/${team.slug}`,
+      })),
+    [locale, teams],
+  );
+  const teamOptionGroups = useMemo(
+    () =>
+      teamGroups
+        ? {
+            created: teamGroups.created.map((team) => ({
+              slug: team.slug,
+              name: team.name,
+              href: `/${locale}/app/${team.slug}`,
+            })),
+            managed: teamGroups.managed.map((team) => ({
+              slug: team.slug,
+              name: team.name,
+              href: `/${locale}/app/${team.slug}`,
+            })),
+            member: teamGroups.member.map((team) => ({
+              slug: team.slug,
+              name: team.name,
+              href: `/${locale}/app/${team.slug}`,
+            })),
+            system: teamGroups.system.map((team) => ({
+              slug: team.slug,
+              name: team.name,
+              href: `/${locale}/app/${team.slug}`,
+            })),
+          }
+        : undefined,
+    [locale, teamGroups],
+  );
   const sidebarContextMode = routeState.mode === "root" ? "root" : "team";
   const teamSelector = liveActiveTeamSlug ? (
     <SidebarGroup className={SIDEBAR_COLLAPSE_SECTION_CLASS}>
