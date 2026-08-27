@@ -32,6 +32,7 @@ describe("Geographic Translation Utilities", () => {
     it("should resolve API locale correctly", () => {
       expect(resolveGeoTranslationApiLocale("zh")).toBe("zh-CN");
       expect(resolveGeoTranslationApiLocale("en")).toBeNull();
+      expect(resolveGeoTranslationApiLocale("ja")).toBe("ja");
     });
 
     it("should build translation API URL correctly", () => {

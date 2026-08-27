@@ -8,7 +8,7 @@ const GEO_TRANSLATION_API_LOCALE_BY_APP_LOCALE: Record<Locale, string | null> =
   {
     en: null,
     zh: GEO_TRANSLATION_DATA_LOCALE,
-    ja: null,
+    ja: "ja",
   };
 
 const GEO_COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/;
