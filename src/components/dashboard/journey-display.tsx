@@ -1,5 +1,6 @@
 import {
   type ComponentType,
+  memo,
   type ReactNode,
   type SyntheticEvent,
   useEffect,
@@ -104,7 +105,7 @@ export function resolveDeviceTypeMeta(
   return { label, Icon };
 }
 
-export function VisitorAvatar({
+export const VisitorAvatar = memo(function VisitorAvatar({
   seed,
   className,
 }: {
@@ -128,7 +129,7 @@ export function VisitorAvatar({
       />
     </span>
   );
-}
+});
 
 function handleImageFallback(
   event: SyntheticEvent<HTMLImageElement>,
@@ -262,7 +263,7 @@ function osLabel(os: string, version?: string | null): string {
   return `${base} ${suffix}`;
 }
 
-export function BrowserMeta({
+export const BrowserMeta = memo(function BrowserMeta({
   browser,
   version,
   unknownLabel,
@@ -296,9 +297,9 @@ export function BrowserMeta({
       className={className}
     />
   );
-}
+});
 
-export function OsMeta({
+export const OsMeta = memo(function OsMeta({
   os,
   version,
   unknownLabel,
@@ -328,9 +329,9 @@ export function OsMeta({
       className={className}
     />
   );
-}
+});
 
-export function DeviceMeta({
+export const DeviceMeta = memo(function DeviceMeta({
   deviceType,
   deviceLabels,
   unknownLabel,
@@ -356,9 +357,9 @@ export function DeviceMeta({
       className={className}
     />
   );
-}
+});
 
-export function LocationMeta({
+export const LocationMeta = memo(function LocationMeta({
   locale,
   messages,
   country,
@@ -400,7 +401,7 @@ export function LocationMeta({
       className={className}
     />
   );
-}
+});
 
 function resolveCountryRegionBreadcrumbData({
   locale,
@@ -476,7 +477,7 @@ function resolveCountryRegionBreadcrumbData({
   };
 }
 
-export function CountryRegionMeta({
+export const CountryRegionMeta = memo(function CountryRegionMeta({
   locale,
   messages,
   country,
@@ -533,7 +534,7 @@ export function CountryRegionMeta({
       )}
     </span>
   );
-}
+});
 
 function sanitizeHostname(value: string): string {
   return value
@@ -559,7 +560,7 @@ function faviconUrl(value: string): string | null {
   }
 }
 
-export function ReferrerMeta({
+export const ReferrerMeta = memo(function ReferrerMeta({
   referrerHost,
   referrerUrl,
   directLabel,
@@ -580,7 +581,7 @@ export function ReferrerMeta({
       className={className}
     />
   );
-}
+});
 
 function ReferrerIcon({
   src,
@@ -633,7 +634,7 @@ function ReferrerIcon({
   );
 }
 
-export function InlineMeta({
+export const InlineMeta = memo(function InlineMeta({
   icon,
   label,
   className,
@@ -656,7 +657,7 @@ export function InlineMeta({
       <span className="truncate leading-5">{label}</span>
     </span>
   );
-}
+});
 
 export function formatRelativeTime(
   locale: Locale,
