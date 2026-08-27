@@ -24,6 +24,7 @@ import {
 } from "@/lib/dashboard/client-data";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { EventTypeDetailData } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -92,6 +93,23 @@ function emptyDetailCards(): EventTypeDetailData["cards"] {
       organization: [],
     },
   };
+}
+
+function createEventTypeContextFetcher<T>(
+  eventName: string,
+  cardKey: string,
+  select: (cards: EventTypeDetailData["cards"]) => T,
+) {
+  return async (siteId: string, window: TimeWindow, filters: FilterDocument) =>
+    select(
+      await fetchEventTypeContextCards(
+        siteId,
+        window,
+        eventName,
+        cardKey,
+        filters,
+      ),
+    );
 }
 
 export function EventTypeDetailClientPage({
@@ -180,6 +198,114 @@ export function EventTypeDetailClientPage({
       })),
     [detail.trend.data],
   );
+  const contextCardFetchers = useMemo(
+    () => ({
+      pageCardFetchers: {
+        path: createEventTypeContextFetcher(
+          eventName,
+          "path",
+          (cards) => cards.page.path,
+        ),
+        query: createEventTypeContextFetcher(
+          eventName,
+          "query",
+          (cards) => cards.page.query,
+        ),
+        title: createEventTypeContextFetcher(
+          eventName,
+          "title",
+          (cards) => cards.page.title,
+        ),
+        hostname: createEventTypeContextFetcher(
+          eventName,
+          "hostname",
+          (cards) => cards.page.hostname,
+        ),
+        entry: createEventTypeContextFetcher(
+          eventName,
+          "entry",
+          (cards) => cards.page.entry,
+        ),
+        exit: createEventTypeContextFetcher(
+          eventName,
+          "exit",
+          (cards) => cards.page.exit,
+        ),
+      },
+      sourceCardFetchers: {
+        domain: createEventTypeContextFetcher(
+          eventName,
+          "sourceDomain",
+          (cards) => cards.source.domain,
+        ),
+        link: createEventTypeContextFetcher(
+          eventName,
+          "sourceLink",
+          (cards) => cards.source.link,
+        ),
+      },
+      clientCardFetchers: {
+        browser: createEventTypeContextFetcher(
+          eventName,
+          "browser",
+          (cards) => cards.client.browser,
+        ),
+        osVersion: createEventTypeContextFetcher(
+          eventName,
+          "osVersion",
+          (cards) => cards.client.osVersion,
+        ),
+        deviceType: createEventTypeContextFetcher(
+          eventName,
+          "deviceType",
+          (cards) => cards.client.deviceType,
+        ),
+        language: createEventTypeContextFetcher(
+          eventName,
+          "language",
+          (cards) => cards.client.language,
+        ),
+        screenSize: createEventTypeContextFetcher(
+          eventName,
+          "screenSize",
+          (cards) => cards.client.screenSize,
+        ),
+      },
+      geoCardFetchers: {
+        country: createEventTypeContextFetcher(
+          eventName,
+          "country",
+          (cards) => cards.geo.country,
+        ),
+        region: createEventTypeContextFetcher(
+          eventName,
+          "region",
+          (cards) => cards.geo.region,
+        ),
+        city: createEventTypeContextFetcher(
+          eventName,
+          "city",
+          (cards) => cards.geo.city,
+        ),
+        continent: createEventTypeContextFetcher(
+          eventName,
+          "continent",
+          (cards) => cards.geo.continent,
+        ),
+        timezone: createEventTypeContextFetcher(
+          eventName,
+          "timezone",
+          (cards) => cards.geo.timezone,
+        ),
+        organization: createEventTypeContextFetcher(
+          eventName,
+          "organization",
+          (cards) => cards.geo.organization,
+        ),
+      },
+    }),
+    [eventName],
+  );
 
   if (!eventName) {
     return (
@@ -267,170 +393,7 @@ export function EventTypeDetailClientPage({
           pathname={siteBasePath}
           filters={requestFilters}
           loading={loading}
-          pageCardFetchers={{
-            path: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "path",
-                requestedFilters,
-              ).then((cards) => cards.page.path),
-            query: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "query",
-                requestedFilters,
-              ).then((cards) => cards.page.query),
-            title: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "title",
-                requestedFilters,
-              ).then((cards) => cards.page.title),
-            hostname: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "hostname",
-                requestedFilters,
-              ).then((cards) => cards.page.hostname),
-            entry: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "entry",
-                requestedFilters,
-              ).then((cards) => cards.page.entry),
-            exit: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "exit",
-                requestedFilters,
-              ).then((cards) => cards.page.exit),
-          }}
-          sourceCardFetchers={{
-            domain: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "sourceDomain",
-                requestedFilters,
-              ).then((cards) => cards.source.domain),
-            link: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "sourceLink",
-                requestedFilters,
-              ).then((cards) => cards.source.link),
-          }}
-          clientCardFetchers={{
-            browser: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "browser",
-                requestedFilters,
-              ).then((cards) => cards.client.browser),
-            osVersion: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "osVersion",
-                requestedFilters,
-              ).then((cards) => cards.client.osVersion),
-            deviceType: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "deviceType",
-                requestedFilters,
-              ).then((cards) => cards.client.deviceType),
-            language: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "language",
-                requestedFilters,
-              ).then((cards) => cards.client.language),
-            screenSize: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "screenSize",
-                requestedFilters,
-              ).then((cards) => cards.client.screenSize),
-          }}
-          geoCardFetchers={{
-            country: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "country",
-                requestedFilters,
-              ).then((cards) => cards.geo.country),
-            region: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "region",
-                requestedFilters,
-              ).then((cards) => cards.geo.region),
-            city: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "city",
-                requestedFilters,
-              ).then((cards) => cards.geo.city),
-            continent: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "continent",
-                requestedFilters,
-              ).then((cards) => cards.geo.continent),
-            timezone: (requestedSiteId, requestedWindow, requestedFilters) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "timezone",
-                requestedFilters,
-              ).then((cards) => cards.geo.timezone),
-            organization: (
-              requestedSiteId,
-              requestedWindow,
-              requestedFilters,
-            ) =>
-              fetchEventTypeContextCards(
-                requestedSiteId,
-                requestedWindow,
-                eventName,
-                "organization",
-                requestedFilters,
-              ).then((cards) => cards.geo.organization),
-          }}
+          {...contextCardFetchers}
           primaryMetricLabel={labels.totalEvents}
           geoPageBasePathname={siteBasePath}
         />
