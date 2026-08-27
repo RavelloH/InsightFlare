@@ -505,7 +505,7 @@ function VisitorPerformanceMetricCell({
   );
 }
 
-function VisitorPerformancePanel({
+const VisitorPerformancePanel = memo(function VisitorPerformancePanel({
   locale,
   messages,
   labels,
@@ -597,7 +597,7 @@ function VisitorPerformancePanel({
       </CardContent>
     </Card>
   );
-}
+});
 
 function SummaryGridItem({
   label,
@@ -1086,7 +1086,7 @@ function DetailMapPlaceholder() {
   );
 }
 
-function VisitorMapHero({
+const VisitorMapHero = memo(function VisitorMapHero({
   locale,
   labels,
   visitor,
@@ -1190,9 +1190,9 @@ function VisitorMapHero({
       </AutoTransition>
     </div>
   );
-}
+});
 
-function VisitorMetaPanel({
+const VisitorMetaPanel = memo(function VisitorMetaPanel({
   locale,
   messages,
   labels,
@@ -1385,7 +1385,7 @@ function VisitorMetaPanel({
       </CardContent>
     </Card>
   );
-}
+});
 
 function activityDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -1394,7 +1394,7 @@ function activityDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function ActivityGrid({
+const ActivityGrid = memo(function ActivityGrid({
   activity,
   locale,
   timeZone,
@@ -1684,9 +1684,9 @@ function ActivityGrid({
       </div>
     </div>
   );
-}
+});
 
-function VisitorEventCard({
+const VisitorEventCard = memo(function VisitorEventCard({
   locale,
   messages,
   labels,
@@ -1790,7 +1790,7 @@ function VisitorEventCard({
       </Card>
     </Clickable>
   );
-}
+});
 
 function VisitorEventSkeletonCard() {
   return (
@@ -1814,7 +1814,7 @@ function VisitorEventSkeletonCard() {
   );
 }
 
-function VisitDetailsCard({
+const VisitDetailsCard = memo(function VisitDetailsCard({
   locale,
   messages,
   labels,
@@ -1910,7 +1910,7 @@ function VisitDetailsCard({
       </CardContent>
     </Card>
   );
-}
+});
 
 function sortVisitorSessions(
   rows: JourneySession[],
@@ -1934,7 +1934,7 @@ function sortVisitorSessions(
   });
 }
 
-function ActivityAndSessionsSection({
+const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
   locale,
   labels,
   messages,
@@ -2043,7 +2043,7 @@ function ActivityAndSessionsSection({
       </section>
     </section>
   );
-}
+});
 
 interface VisitorOverviewRowInput {
   label: string;
@@ -2210,7 +2210,7 @@ function buildVisitorEventBreakdownRows(
   );
 }
 
-function VisitorDetailBottomCards({
+const VisitorDetailBottomCards = memo(function VisitorDetailBottomCards({
   locale,
   messages,
   labels,
@@ -2284,7 +2284,7 @@ function VisitorDetailBottomCards({
       </div>
     </section>
   );
-}
+});
 
 function DetailContent({
   locale,

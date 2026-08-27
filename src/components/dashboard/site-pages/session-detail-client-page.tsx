@@ -727,7 +727,7 @@ function SessionPerformanceMetricCell({
   );
 }
 
-function SessionPerformancePanel({
+const SessionPerformancePanel = memo(function SessionPerformancePanel({
   locale,
   messages,
   labels,
@@ -815,7 +815,7 @@ function SessionPerformancePanel({
       </CardContent>
     </Card>
   );
-}
+});
 
 function SummaryGridItem({
   label,
@@ -943,7 +943,7 @@ function DetailMapPlaceholder() {
   );
 }
 
-function SessionMapHero({
+const SessionMapHero = memo(function SessionMapHero({
   locale,
   labels,
   session,
@@ -1097,9 +1097,9 @@ function SessionMapHero({
       </AutoTransition>
     </div>
   );
-}
+});
 
-function MetaPanel({
+const MetaPanel = memo(function MetaPanel({
   locale,
   messages,
   labels,
@@ -1284,9 +1284,9 @@ function MetaPanel({
       </CardContent>
     </Card>
   );
-}
+});
 
-function SessionEventCard({
+const SessionEventCard = memo(function SessionEventCard({
   locale,
   messages,
   labels,
@@ -1351,7 +1351,7 @@ function SessionEventCard({
       </Card>
     </Clickable>
   );
-}
+});
 
 function SessionEventSkeletonCard() {
   return (
@@ -1375,7 +1375,7 @@ function SessionEventSkeletonCard() {
   );
 }
 
-function VisitDetailsTab({
+const VisitDetailsTab = memo(function VisitDetailsTab({
   locale,
   messages,
   labels,
@@ -1461,7 +1461,7 @@ function VisitDetailsTab({
       </CardContent>
     </Card>
   );
-}
+});
 
 const SESSION_DETAIL_OVERVIEW_FILTERS = EMPTY_DASHBOARD_FILTER_DOCUMENT;
 const SESSION_OVERVIEW_PAGE_CARD_TABS = ["path", "title"] as const;
@@ -1607,7 +1607,7 @@ function buildSessionEventBreakdownRows(
   );
 }
 
-function SessionDetailBottomCards({
+const SessionDetailBottomCards = memo(function SessionDetailBottomCards({
   locale,
   messages,
   labels,
@@ -1681,7 +1681,7 @@ function SessionDetailBottomCards({
       </div>
     </section>
   );
-}
+});
 
 function DetailContent({
   locale,
