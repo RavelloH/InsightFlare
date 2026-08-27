@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { RiCopyrightLine, RiMapPin2Line } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
@@ -35,7 +35,7 @@ function dashboardFilterSignature(filters: FilterDocument): string {
   return JSON.stringify(entries);
 }
 
-export function OverviewGeoPointsMapCard({
+export const OverviewGeoPointsMapCard = memo(function OverviewGeoPointsMapCard({
   locale,
   messages,
   siteId,
@@ -138,4 +138,4 @@ export function OverviewGeoPointsMapCard({
       </div>
     </Card>
   );
-}
+});

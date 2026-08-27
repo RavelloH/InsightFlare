@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { createIsomorphicFn } from "@tanstack/react-start";
 
 import { Spinner } from "@/components/ui/spinner";
@@ -86,7 +87,7 @@ const GeoPointsMap3DClient = createIsomorphicFn()
 
 export type { GeoPointsMapCountryCount, GeoPointsMapPoint };
 
-export function GeoPointsMapIsland({
+export const GeoPointsMapIsland = memo(function GeoPointsMapIsland({
   heightClassName,
   initialZoom,
   projectionMode = "mercator",
@@ -118,4 +119,4 @@ export function GeoPointsMapIsland({
       )}
     </div>
   );
-}
+});
