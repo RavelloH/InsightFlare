@@ -1,4 +1,5 @@
 import {
+  memo,
   type MouseEvent,
   useCallback,
   useEffect,
@@ -323,7 +324,7 @@ function changeRateClass(value: number | null, lowerIsBetter = false): string {
   return isImprovement ? "text-emerald-600" : "text-rose-600";
 }
 
-function ChangeRateInline({
+const ChangeRateInline = memo(function ChangeRateInline({
   value,
   lowerIsBetter = false,
 }: {
@@ -340,7 +341,7 @@ function ChangeRateInline({
       {formatChangeRate(value)}
     </span>
   );
-}
+});
 
 type PageCardTab = "path" | "query" | "title" | "hostname" | "entry" | "exit";
 type PageCardSortKey = "views" | "visitors";
@@ -1222,7 +1223,7 @@ function resolveUmamiIconSource(
   return null;
 }
 
-function LabelWithLeadingIcon({
+const LabelWithLeadingIcon = memo(function LabelWithLeadingIcon({
   label,
   iconName,
 }: {
@@ -1271,7 +1272,7 @@ function LabelWithLeadingIcon({
       <span className="break-words">{label}</span>
     </span>
   );
-}
+});
 
 function normalizeDimensionLabel(
   value: string,
@@ -1443,7 +1444,7 @@ function resolveTimezoneDisplayLabel(params: {
   return normalized;
 }
 
-function DomainOrUrlIcon({
+const DomainOrUrlIcon = memo(function DomainOrUrlIcon({
   label,
   unknownLabel,
 }: {
@@ -1510,9 +1511,9 @@ function DomainOrUrlIcon({
       )}
     </AutoTransition>
   );
-}
+});
 
-function LabelWithOptionalIcon({
+const LabelWithOptionalIcon = memo(function LabelWithOptionalIcon({
   label,
   showIcon,
   unknownLabel,
@@ -1533,7 +1534,7 @@ function LabelWithOptionalIcon({
       <span className="break-words">{label}</span>
     </span>
   );
-}
+});
 
 function resolvePageCardTargetUrl(params: {
   tab: PageCardTab;
