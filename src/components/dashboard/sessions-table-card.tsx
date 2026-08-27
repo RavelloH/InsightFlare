@@ -1,4 +1,12 @@
-import { Fragment, memo, type ReactNode, useEffect, useState } from "react";
+import {
+  Fragment,
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
 
 import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
@@ -591,94 +599,113 @@ export const SessionsTableCard = memo(function SessionsTableCard({
     return () => window.clearInterval(interval);
   }, []);
 
+  const headers = useMemo<Record<SessionTableColumnId, ReactNode>>(
+    () => ({
+      visitor: <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>,
+      sessionId: <TableHead>{labels.sessionId}</TableHead>,
+      started: (
+        <SortHeader
+          label={labels.started}
+          active={sort.key === "startedAt"}
+          direction={sort.direction}
+          onClick={() => onSort("startedAt")}
+          align="center"
+          className="text-center"
+        />
+      ),
+      duration: (
+        <SortHeader
+          label={labels.duration}
+          active={sort.key === "durationMs"}
+          direction={sort.direction}
+          onClick={() => onSort("durationMs")}
+          align="right"
+          className="text-right"
+        />
+      ),
+      pageViews: (
+        <SortHeader
+          label={labels.pageViews}
+          active={sort.key === "views"}
+          direction={sort.direction}
+          onClick={() => onSort("views")}
+          align="right"
+          className="text-right"
+        />
+      ),
+      customEvents: (
+        <TableHead className="text-right">{labels.customEvents}</TableHead>
+      ),
+      referrer: <TableHead>{labels.referrer}</TableHead>,
+      location: <TableHead>{labels.location}</TableHead>,
+      os: <TableHead>{labels.os}</TableHead>,
+      browser: <TableHead>{labels.browser}</TableHead>,
+      device: <TableHead>{labels.device}</TableHead>,
+      entryPage: <TableHead>{labels.entryPage}</TableHead>,
+      exitPage: <TableHead>{labels.exitPage}</TableHead>,
+      screenSize: (
+        <TableHead className="text-center">{labels.screenSize}</TableHead>
+      ),
+      exitTime: (
+        <TableHead className="text-center">{labels.exitTime}</TableHead>
+      ),
+    }),
+    [labels, onSort, sort],
+  );
+  const header = useMemo(
+    () => (
+      <TableRow>
+        {visibleColumnIds.map((columnId) => (
+          <Fragment key={columnId}>{headers[columnId]}</Fragment>
+        ))}
+      </TableRow>
+    ),
+    [headers, visibleColumnIds],
+  );
+  const renderRow = useCallback(
+    (row: JourneySession) => ({
+      children: (
+        <SessionTableRowContent
+          locale={locale}
+          messages={messages}
+          labels={labels}
+          row={row}
+          now={now}
+          onOpenSession={onOpenSession}
+          onOpenVisitor={onOpenVisitor}
+          columns={visibleColumnIds}
+        />
+      ),
+      props: {
+        "data-session-row": "",
+        className: "cursor-pointer",
+      },
+    }),
+    [
+      labels,
+      locale,
+      messages,
+      now,
+      onOpenSession,
+      onOpenVisitor,
+      visibleColumnIds,
+    ],
+  );
+  const renderSkeletonRow = useCallback(
+    (index: number) => (
+      <SessionRowSkeletonContent index={index} columns={visibleColumnIds} />
+    ),
+    [visibleColumnIds],
+  );
+  const getRowKey = useCallback((row: JourneySession) => row.sessionId, []);
+
   return (
     <AnalyticsDataTable
-      header={
-        <TableRow>
-          {visibleColumnIds.map((columnId) => {
-            const headers: Record<SessionTableColumnId, ReactNode> = {
-              visitor: (
-                <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>
-              ),
-              sessionId: <TableHead>{labels.sessionId}</TableHead>,
-              started: (
-                <SortHeader
-                  label={labels.started}
-                  active={sort.key === "startedAt"}
-                  direction={sort.direction}
-                  onClick={() => onSort("startedAt")}
-                  align="center"
-                  className="text-center"
-                />
-              ),
-              duration: (
-                <SortHeader
-                  label={labels.duration}
-                  active={sort.key === "durationMs"}
-                  direction={sort.direction}
-                  onClick={() => onSort("durationMs")}
-                  align="right"
-                  className="text-right"
-                />
-              ),
-              pageViews: (
-                <SortHeader
-                  label={labels.pageViews}
-                  active={sort.key === "views"}
-                  direction={sort.direction}
-                  onClick={() => onSort("views")}
-                  align="right"
-                  className="text-right"
-                />
-              ),
-              customEvents: (
-                <TableHead className="text-right">
-                  {labels.customEvents}
-                </TableHead>
-              ),
-              referrer: <TableHead>{labels.referrer}</TableHead>,
-              location: <TableHead>{labels.location}</TableHead>,
-              os: <TableHead>{labels.os}</TableHead>,
-              browser: <TableHead>{labels.browser}</TableHead>,
-              device: <TableHead>{labels.device}</TableHead>,
-              entryPage: <TableHead>{labels.entryPage}</TableHead>,
-              exitPage: <TableHead>{labels.exitPage}</TableHead>,
-              screenSize: (
-                <TableHead className="text-center">
-                  {labels.screenSize}
-                </TableHead>
-              ),
-              exitTime: (
-                <TableHead className="text-center">{labels.exitTime}</TableHead>
-              ),
-            };
-            return <Fragment key={columnId}>{headers[columnId]}</Fragment>;
-          })}
-        </TableRow>
-      }
+      header={header}
       rows={rows}
-      renderRow={(row) => ({
-        children: (
-          <SessionTableRowContent
-            locale={locale}
-            messages={messages}
-            labels={labels}
-            row={row}
-            now={now}
-            onOpenSession={onOpenSession}
-            onOpenVisitor={onOpenVisitor}
-            columns={visibleColumnIds}
-          />
-        ),
-        props: {
-          "data-session-row": "",
-          className: "cursor-pointer",
-        },
-      })}
-      renderSkeletonRow={(index) => (
-        <SessionRowSkeletonContent index={index} columns={visibleColumnIds} />
-      )}
-      getRowKey={(row) => row.sessionId}
+      renderRow={renderRow}
+      renderSkeletonRow={renderSkeletonRow}
+      getRowKey={getRowKey}
       skeletonRows={skeletonRows}
       columnCount={visibleColumnIds.length}
       loading={loadingRows}

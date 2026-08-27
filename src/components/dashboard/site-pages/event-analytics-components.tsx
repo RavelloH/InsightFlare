@@ -1089,91 +1089,104 @@ const EventRecordsTable = memo(function EventRecordsTable({
     return () => window.clearInterval(interval);
   }, []);
 
+  const headers = useMemo<Record<EventRecordTableColumnId, ReactNode>>(
+    () => ({
+      visitor: <TableHead className="pl-4">{labels.visitor}</TableHead>,
+      eventName: (
+        <SortHeader
+          label={labels.eventName}
+          active={sort.key === "eventName"}
+          direction={sort.direction}
+          onClick={() => onSort("eventName")}
+        />
+      ),
+      eventId: <TableHead>{labels.eventId}</TableHead>,
+      occurredAt: (
+        <SortHeader
+          label={labels.occurredAt}
+          active={sort.key === "occurredAt"}
+          direction={sort.direction}
+          onClick={() => onSort("occurredAt")}
+          align="center"
+          className="text-center"
+        />
+      ),
+      page: (
+        <SortHeader
+          label={labels.page}
+          active={sort.key === "pathname"}
+          direction={sort.direction}
+          onClick={() => onSort("pathname")}
+        />
+      ),
+      referrer: <TableHead>{labels.referrer}</TableHead>,
+      location: <TableHead>{labels.location}</TableHead>,
+      os: <TableHead>{labels.os}</TableHead>,
+      browser: <TableHead>{labels.browser}</TableHead>,
+      device: <TableHead>{labels.device}</TableHead>,
+      payload: (
+        <TableHead className="pr-4 text-right">{labels.payload}</TableHead>
+      ),
+      nodeCount: (
+        <TableHead className="pr-4 text-right">{labels.nodeCount}</TableHead>
+      ),
+    }),
+    [labels, onSort, sort],
+  );
+  const header = useMemo(
+    () => (
+      <TableRow>
+        {visibleColumnIds.map((columnId) => (
+          <Fragment key={columnId}>{headers[columnId]}</Fragment>
+        ))}
+      </TableRow>
+    ),
+    [headers, visibleColumnIds],
+  );
+  const renderRow = useCallback(
+    (row: EventRecord) => ({
+      children: (
+        <EventRecordTableRowContent
+          locale={locale}
+          messages={messages}
+          labels={labels}
+          row={row}
+          now={now}
+          columns={visibleColumnIds}
+        />
+      ),
+      props: {
+        role: "button" as const,
+        tabIndex: 0,
+        className:
+          "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+        onClick: () => onOpenRecord(row.eventId),
+        onKeyDown: (event: KeyboardEvent) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          onOpenRecord(row.eventId);
+        },
+      },
+    }),
+    [labels, locale, messages, now, onOpenRecord, visibleColumnIds],
+  );
+  const renderSkeletonRow = useCallback(
+    (index: number) => (
+      <EventRowSkeletonContent index={index} columns={visibleColumnIds} />
+    ),
+    [visibleColumnIds],
+  );
+  const getRowKey = useCallback((row: EventRecord) => row.eventId, []);
+
   return (
     <AnalyticsDataTable
       minTableWidth="92rem"
       tableClassName="min-w-[92rem]"
-      header={
-        <TableRow>
-          {visibleColumnIds.map((columnId) => {
-            const headers: Record<EventRecordTableColumnId, ReactNode> = {
-              visitor: <TableHead className="pl-4">{labels.visitor}</TableHead>,
-              eventName: (
-                <SortHeader
-                  label={labels.eventName}
-                  active={sort.key === "eventName"}
-                  direction={sort.direction}
-                  onClick={() => onSort("eventName")}
-                />
-              ),
-              eventId: <TableHead>{labels.eventId}</TableHead>,
-              occurredAt: (
-                <SortHeader
-                  label={labels.occurredAt}
-                  active={sort.key === "occurredAt"}
-                  direction={sort.direction}
-                  onClick={() => onSort("occurredAt")}
-                  align="center"
-                  className="text-center"
-                />
-              ),
-              page: (
-                <SortHeader
-                  label={labels.page}
-                  active={sort.key === "pathname"}
-                  direction={sort.direction}
-                  onClick={() => onSort("pathname")}
-                />
-              ),
-              referrer: <TableHead>{labels.referrer}</TableHead>,
-              location: <TableHead>{labels.location}</TableHead>,
-              os: <TableHead>{labels.os}</TableHead>,
-              browser: <TableHead>{labels.browser}</TableHead>,
-              device: <TableHead>{labels.device}</TableHead>,
-              payload: (
-                <TableHead className="pr-4 text-right">
-                  {labels.payload}
-                </TableHead>
-              ),
-              nodeCount: (
-                <TableHead className="pr-4 text-right">
-                  {labels.nodeCount}
-                </TableHead>
-              ),
-            };
-            return <Fragment key={columnId}>{headers[columnId]}</Fragment>;
-          })}
-        </TableRow>
-      }
+      header={header}
       rows={rows}
-      renderRow={(row) => ({
-        children: (
-          <EventRecordTableRowContent
-            locale={locale}
-            messages={messages}
-            labels={labels}
-            row={row}
-            now={now}
-            columns={visibleColumnIds}
-          />
-        ),
-        props: {
-          role: "button",
-          tabIndex: 0,
-          className:
-            "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-          onClick: () => onOpenRecord(row.eventId),
-          onKeyDown: (event) => {
-            if (event.key !== "Enter" && event.key !== " ") return;
-            event.preventDefault();
-            onOpenRecord(row.eventId);
-          },
-        },
-      })}
-      renderSkeletonRow={(index) => (
-        <EventRowSkeletonContent index={index} columns={visibleColumnIds} />
-      )}
-      getRowKey={(row) => row.eventId}
+      renderRow={renderRow}
+      renderSkeletonRow={renderSkeletonRow}
+      getRowKey={getRowKey}
       skeletonRows={EVENT_SKELETON_ROWS}
       columnCount={visibleColumnIds.length}
       loading={loadingRows}

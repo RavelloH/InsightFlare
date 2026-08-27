@@ -567,90 +567,106 @@ const VisitorAnalyticsTable = memo(function VisitorAnalyticsTable({
   hasMore: boolean;
   onLoadMore: () => void;
 }) {
-  const headers: Record<VisitorTableColumnId, ReactNode> = {
-    visitor: <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>,
-    sessionId: <TableHead>{messages.visitorDetail.visitorId}</TableHead>,
-    firstSeen: (
-      <SortHeader
-        label={labels.firstSeen}
-        active={sort.key === "firstSeenAt"}
-        direction={sort.direction}
-        onClick={() => onToggleSort("firstSeenAt")}
-        align="center"
-        className="text-center"
-      />
+  const headers = useMemo<Record<VisitorTableColumnId, ReactNode>>(
+    () => ({
+      visitor: <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>,
+      sessionId: <TableHead>{messages.visitorDetail.visitorId}</TableHead>,
+      firstSeen: (
+        <SortHeader
+          label={labels.firstSeen}
+          active={sort.key === "firstSeenAt"}
+          direction={sort.direction}
+          onClick={() => onToggleSort("firstSeenAt")}
+          align="center"
+          className="text-center"
+        />
+      ),
+      lastSeen: (
+        <SortHeader
+          label={labels.lastSeen}
+          active={sort.key === "lastSeenAt"}
+          direction={sort.direction}
+          onClick={() => onToggleSort("lastSeenAt")}
+          align="center"
+          className="text-center"
+        />
+      ),
+      sessions: (
+        <SortHeader
+          label={labels.sessions}
+          active={sort.key === "sessions"}
+          direction={sort.direction}
+          onClick={() => onToggleSort("sessions")}
+          align="right"
+          className="text-right"
+        />
+      ),
+      pageViews: (
+        <SortHeader
+          label={labels.pageViews}
+          active={sort.key === "views"}
+          direction={sort.direction}
+          onClick={() => onToggleSort("views")}
+          align="right"
+          className="text-right"
+        />
+      ),
+      customEvents: (
+        <TableHead className="text-right">{labels.customEvents}</TableHead>
+      ),
+      referrer: <TableHead>{labels.referrer}</TableHead>,
+      location: <TableHead>{labels.location}</TableHead>,
+      os: <TableHead>{labels.os}</TableHead>,
+      browser: <TableHead>{labels.browser}</TableHead>,
+      device: <TableHead className="pr-4">{labels.device}</TableHead>,
+      screenSize: (
+        <TableHead className="pr-4 text-center">{labels.screenSize}</TableHead>
+      ),
+    }),
+    [labels, messages.visitorDetail.visitorId, onToggleSort, sort],
+  );
+  const header = useMemo(
+    () => (
+      <TableRow>
+        {columns.map((columnId) => (
+          <Fragment key={columnId}>{headers[columnId]}</Fragment>
+        ))}
+      </TableRow>
     ),
-    lastSeen: (
-      <SortHeader
-        label={labels.lastSeen}
-        active={sort.key === "lastSeenAt"}
-        direction={sort.direction}
-        onClick={() => onToggleSort("lastSeenAt")}
-        align="center"
-        className="text-center"
-      />
+    [columns, headers],
+  );
+  const renderRow = useCallback(
+    (row: VisitorRow) => ({
+      children: (
+        <VisitorTableRowContent
+          locale={locale}
+          messages={messages}
+          labels={labels}
+          row={row}
+          now={now}
+          onOpenDetail={onOpenDetail}
+          columns={columns}
+        />
+      ),
+      props: { className: "cursor-pointer" },
+    }),
+    [columns, labels, locale, messages, now, onOpenDetail],
+  );
+  const renderSkeletonRow = useCallback(
+    (index: number) => (
+      <VisitorRowSkeletonContent index={index} columns={columns} />
     ),
-    sessions: (
-      <SortHeader
-        label={labels.sessions}
-        active={sort.key === "sessions"}
-        direction={sort.direction}
-        onClick={() => onToggleSort("sessions")}
-        align="right"
-        className="text-right"
-      />
-    ),
-    pageViews: (
-      <SortHeader
-        label={labels.pageViews}
-        active={sort.key === "views"}
-        direction={sort.direction}
-        onClick={() => onToggleSort("views")}
-        align="right"
-        className="text-right"
-      />
-    ),
-    customEvents: (
-      <TableHead className="text-right">{labels.customEvents}</TableHead>
-    ),
-    referrer: <TableHead>{labels.referrer}</TableHead>,
-    location: <TableHead>{labels.location}</TableHead>,
-    os: <TableHead>{labels.os}</TableHead>,
-    browser: <TableHead>{labels.browser}</TableHead>,
-    device: <TableHead className="pr-4">{labels.device}</TableHead>,
-    screenSize: (
-      <TableHead className="pr-4 text-center">{labels.screenSize}</TableHead>
-    ),
-  };
+    [columns],
+  );
+  const getRowKey = useCallback((row: VisitorRow) => row.visitorId, []);
 
   return (
     <AnalyticsDataTable
-      header={
-        <TableRow>
-          {columns.map((columnId) => (
-            <Fragment key={columnId}>{headers[columnId]}</Fragment>
-          ))}
-        </TableRow>
-      }
+      header={header}
       rows={rows}
-      renderRow={(row) => ({
-        children: (
-          <VisitorTableRowContent
-            locale={locale}
-            messages={messages}
-            labels={labels}
-            row={row}
-            now={now}
-            onOpenDetail={onOpenDetail}
-            columns={columns}
-          />
-        ),
-        props: { className: "cursor-pointer" },
-      })}
-      renderSkeletonRow={(index) => (
-        <VisitorRowSkeletonContent index={index} columns={columns} />
-      )}
-      getRowKey={(row) => row.visitorId}
+      renderRow={renderRow}
+      renderSkeletonRow={renderSkeletonRow}
+      getRowKey={getRowKey}
       skeletonRows={VISITOR_SKELETON_ROWS}
       columnCount={columns.length}
       loading={loading}
