@@ -31,7 +31,7 @@ export interface TabbedScrollMaskCardTab<T extends string = string> {
 interface TabbedScrollMaskCardProps<T extends string = string> {
   value: T;
   onValueChange: (value: T) => void;
-  tabs: TabbedScrollMaskCardTab<T>[];
+  tabs: readonly TabbedScrollMaskCardTab<T>[];
   children: ReactNode;
   headerRight?: ReactNode;
   headerHidden?: boolean;

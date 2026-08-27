@@ -1026,67 +1026,67 @@ function TabbedDataTableCardImpl<
     setExportOpen(false);
   }
 
-  const searchContent = searchEnabled ? (
-    <div className="space-y-3">
-      <Input
-        value={searchTerm}
-        onChange={(event) => setSearchTerm(event.target.value)}
-        placeholder={activeSearchPlaceholder}
-      />
-      <VerticalScrollMask className="max-h-[60vh]" contentClassName="pr-1">
-        <DataTableSwitch
-          loading={searchLoading}
-          hasContent={searchedRows.length > 0}
-          loadingLabel={loadingLabel}
-          emptyLabel={emptyLabel}
-          colSpan={searchColSpan}
-          header={renderTableHeader(activeSearchTab, activeSearchColumns)}
-          rows={renderRows(
-            activeSearchTab,
-            searchedRows,
-            activeSearchColumns,
-            "search",
-          )}
-          contentKey={`search-${activeSearchTab}-${deferredSearchTerm}-${searchedRows.length}`}
+  const searchContent =
+    searchEnabled && searchTab !== null ? (
+      <div className="space-y-3">
+        <Input
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder={activeSearchPlaceholder}
         />
-      </VerticalScrollMask>
-    </div>
-  ) : null;
-
-  const searchPanel =
-    searchEnabled && searchContent ? (
-      isMobile ? (
-        <Drawer
-          open={searchTab !== null}
-          onOpenChange={(open) => {
-            if (!open) setSearchTab(null);
-          }}
-        >
-          <DrawerContent className="max-h-[80dvh]">
-            <DrawerHeader>
-              <DrawerTitle>{activeSearchTitle}</DrawerTitle>
-            </DrawerHeader>
-            <DrawerScrollArea contentClassName="px-4 pb-4">
-              {searchContent}
-            </DrawerScrollArea>
-          </DrawerContent>
-        </Drawer>
-      ) : (
-        <Dialog
-          open={searchTab !== null}
-          onOpenChange={(open) => {
-            if (!open) setSearchTab(null);
-          }}
-        >
-          <DialogContent className="max-w-3xl">
-            <DialogHeader>
-              <DialogTitle icon={RiSearchLine}>{activeSearchTitle}</DialogTitle>
-            </DialogHeader>
-            {searchContent}
-          </DialogContent>
-        </Dialog>
-      )
+        <VerticalScrollMask className="max-h-[60vh]" contentClassName="pr-1">
+          <DataTableSwitch
+            loading={searchLoading}
+            hasContent={searchedRows.length > 0}
+            loadingLabel={loadingLabel}
+            emptyLabel={emptyLabel}
+            colSpan={searchColSpan}
+            header={renderTableHeader(activeSearchTab, activeSearchColumns)}
+            rows={renderRows(
+              activeSearchTab,
+              searchedRows,
+              activeSearchColumns,
+              "search",
+            )}
+            contentKey={`search-${activeSearchTab}-${deferredSearchTerm}-${searchedRows.length}`}
+          />
+        </VerticalScrollMask>
+      </div>
     ) : null;
+
+  const searchPanel = searchContent ? (
+    isMobile ? (
+      <Drawer
+        open={searchTab !== null}
+        onOpenChange={(open) => {
+          if (!open) setSearchTab(null);
+        }}
+      >
+        <DrawerContent className="max-h-[80dvh]">
+          <DrawerHeader>
+            <DrawerTitle>{activeSearchTitle}</DrawerTitle>
+          </DrawerHeader>
+          <DrawerScrollArea contentClassName="px-4 pb-4">
+            {searchContent}
+          </DrawerScrollArea>
+        </DrawerContent>
+      </Drawer>
+    ) : (
+      <Dialog
+        open={searchTab !== null}
+        onOpenChange={(open) => {
+          if (!open) setSearchTab(null);
+        }}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle icon={RiSearchLine}>{activeSearchTitle}</DialogTitle>
+          </DialogHeader>
+          {searchContent}
+        </DialogContent>
+      </Dialog>
+    )
+  ) : null;
 
   const searchAction =
     searchEnabled && !headerHidden ? (
@@ -1112,9 +1112,10 @@ function TabbedDataTableCardImpl<
       </Clickable>
     ) : null;
 
-  const exportRowCount = exportEnabled ? countExportRows() : 0;
+  const exportRowCount =
+    exportEnabled && !headerHidden && exportOpen ? countExportRows() : 0;
   const exportPanel =
-    exportEnabled && !headerHidden ? (
+    exportEnabled && !headerHidden && exportOpen ? (
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1223,7 +1224,7 @@ function TabbedDataTableCardImpl<
       <TabbedScrollMaskCard
         value={activeTab}
         onValueChange={(next) => setActiveTab(next)}
-        tabs={[...tabs]}
+        tabs={tabs}
         headerRight={
           headerRight || exportAction || searchAction ? (
             <div className="inline-flex items-center gap-1">
