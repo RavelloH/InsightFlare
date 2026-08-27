@@ -1,4 +1,4 @@
-import { type CSSProperties, useMemo } from "react";
+import { type CSSProperties, memo, useMemo } from "react";
 import {
   type RemixiconComponentType,
   RiCalendarLine,
@@ -413,7 +413,7 @@ function retentionCellStyle(rate: number, available: boolean): CSSProperties {
   };
 }
 
-function RetentionMetricCell({
+const RetentionMetricCell = memo(function RetentionMetricCell({
   icon: Icon,
   label,
   value,
@@ -465,9 +465,9 @@ function RetentionMetricCell({
       </p>
     </div>
   );
-}
+});
 
-function RetentionSummaryGrid({
+const RetentionSummaryGrid = memo(function RetentionSummaryGrid({
   locale,
   labels,
   viewModel,
@@ -535,9 +535,9 @@ function RetentionSummaryGrid({
       </CardContent>
     </Card>
   );
-}
+});
 
-function RetentionStateCard({
+const RetentionStateCard = memo(function RetentionStateCard({
   title,
   subtitle,
   icon: Icon,
@@ -559,9 +559,13 @@ function RetentionStateCard({
       </CardContent>
     </Card>
   );
-}
+});
 
-function RetentionLoading({ shape }: { shape: RetentionLoadingShape }) {
+const RetentionLoading = memo(function RetentionLoading({
+  shape,
+}: {
+  shape: RetentionLoadingShape;
+}) {
   const rows = Array.from({ length: shape.rows }, (_, index) => index);
   const columns = Array.from({ length: shape.columns }, (_, index) => index);
 
@@ -688,9 +692,9 @@ function RetentionLoading({ shape }: { shape: RetentionLoadingShape }) {
       </Card>
     </div>
   );
-}
+});
 
-function RetentionCell({
+const RetentionCell = memo(function RetentionCell({
   locale,
   labels,
   messages,
@@ -755,9 +759,9 @@ function RetentionCell({
       </Tooltip>
     </td>
   );
-}
+});
 
-function RetentionMatrix({
+const RetentionMatrix = memo(function RetentionMatrix({
   locale,
   messages,
   labels,
@@ -937,7 +941,7 @@ function RetentionMatrix({
       </CardContent>
     </Card>
   );
-}
+});
 
 export function RetentionClientPage({
   locale,

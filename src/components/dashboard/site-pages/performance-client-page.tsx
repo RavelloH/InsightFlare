@@ -1317,7 +1317,7 @@ function SegmentedThresholdBar({
   );
 }
 
-function PerformanceRail({
+const PerformanceRail = memo(function PerformanceRail({
   activePanel,
   cards,
   onSelect,
@@ -1389,9 +1389,9 @@ function PerformanceRail({
       })}
     </div>
   );
-}
+});
 
-function MetricSummaryCard({
+const MetricSummaryCard = memo(function MetricSummaryCard({
   locale,
   messages,
   activePanel,
@@ -1569,9 +1569,9 @@ function MetricSummaryCard({
       </CardContent>
     </Card>
   );
-}
+});
 
-function PerformanceTrendCard({
+const PerformanceTrendCard = memo(function PerformanceTrendCard({
   locale,
   messages,
   activePanel,
@@ -1805,7 +1805,7 @@ function PerformanceTrendCard({
       </CardContent>
     </Card>
   );
-}
+});
 
 function CountryLabelWithFlag({
   label,
@@ -2061,7 +2061,7 @@ const PerformanceHealthMapVisual = memo(function PerformanceHealthMapVisual({
   );
 });
 
-function PerformanceHealthMapCard({
+const PerformanceHealthMapCard = memo(function PerformanceHealthMapCard({
   locale,
   messages,
   activePanel,
@@ -2206,9 +2206,9 @@ function PerformanceHealthMapCard({
       </CardContent>
     </Card>
   );
-}
+});
 
-function CountryStatusColumn({
+const CountryStatusColumn = memo(function CountryStatusColumn({
   locale,
   messages,
   activePanel,
@@ -2343,7 +2343,7 @@ function CountryStatusColumn({
       </div>
     </div>
   );
-}
+});
 
 function pathStatusRangeLabel(
   locale: Locale,
@@ -2372,7 +2372,7 @@ function pathStatusRangeLabel(
   return `<=${formatMetricValue(locale, messages, activePanel, thresholds.good)}`;
 }
 
-function PathStatusColumn({
+const PathStatusColumn = memo(function PathStatusColumn({
   locale,
   messages,
   activePanel,
@@ -2507,9 +2507,9 @@ function PathStatusColumn({
       </div>
     </div>
   );
-}
+});
 
-function PathPerformanceTable({
+const PathPerformanceTable = memo(function PathPerformanceTable({
   locale,
   messages,
   activePanel,
@@ -2596,7 +2596,7 @@ function PathPerformanceTable({
       </CardContent>
     </Card>
   );
-}
+});
 
 export function PerformanceClientPage({
   locale,
