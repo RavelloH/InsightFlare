@@ -73,16 +73,24 @@
             "bundles": [
               {
                 "task": "Read analytics for one known site",
-                "select": ["analytics:read"],
+                "select": [
+                  "analytics:read"
+                ],
                 "note": "Add site:read only when site discovery or site metadata is also required."
               },
               {
                 "task": "Discover sites and then read analytics",
-                "select": ["site:read", "analytics:read"]
+                "select": [
+                  "site:read",
+                  "analytics:read"
+                ]
               },
               {
                 "task": "Manage funnels or other analysis definitions",
-                "select": ["analysis:read", "analysis:write"],
+                "select": [
+                  "analysis:read",
+                  "analysis:write"
+                ],
                 "note": "Include analysis:read for inspection and add analysis:write only for requested mutations."
               }
             ]
@@ -177,7 +185,9 @@
       "id": "connect_and_authorize",
       "intent": "Connect an Agent, inspect its API key, and establish accessible scope.",
       "scope": "team",
-      "requiredContext": ["user-provided API key"],
+      "requiredContext": [
+        "user-provided API key"
+      ],
       "preparation": [],
       "operations": [
         "wellKnown.skills",
@@ -201,7 +211,9 @@
       "scope": "integration",
       "requiredContext": [],
       "preparation": [],
-      "operations": ["wellKnown.health"],
+      "operations": [
+        "wellKnown.health"
+      ],
       "decisionBranches": [
         "If health is unavailable, report the observed response and do not diagnose internal causes without evidence."
       ],
@@ -212,8 +224,13 @@
       "intent": "Inspect team-level product usage or limits.",
       "scope": "team",
       "requiredContext": [],
-      "preparation": ["core.token.get", "core.team.get"],
-      "operations": ["core.team.usage"],
+      "preparation": [
+        "core.token.get",
+        "core.team.get"
+      ],
+      "operations": [
+        "core.team.usage"
+      ],
       "decisionBranches": [
         "If the token lacks the required scope, explain the missing permission."
       ],
@@ -223,9 +240,16 @@
       "id": "site_inventory",
       "intent": "List or inspect accessible sites before analysis or management.",
       "scope": "site",
-      "requiredContext": ["site identifier when inspecting one site"],
-      "preparation": ["core.token.get"],
-      "operations": ["sites.list", "sites.get"],
+      "requiredContext": [
+        "site identifier when inspecting one site"
+      ],
+      "preparation": [
+        "core.token.get"
+      ],
+      "operations": [
+        "sites.list",
+        "sites.get"
+      ],
       "decisionBranches": [
         "Use sites.list first when the user has not named an accessible site."
       ],
@@ -239,8 +263,13 @@
         "site identifier",
         "time range when not using the default"
       ],
-      "preparation": ["site.analytics.schema"],
-      "operations": ["site.analytics.overview", "site.analytics.timeseries"],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.overview",
+        "site.analytics.timeseries"
+      ],
       "decisionBranches": [
         "Use the overview for aggregate metrics and timeseries when trend context is requested or needed to explain the aggregate."
       ],
@@ -250,8 +279,12 @@
       "id": "team_traffic_overview",
       "intent": "Summarize traffic across a team or compare its sites.",
       "scope": "team",
-      "requiredContext": ["time range when not using the default"],
-      "preparation": ["team.analytics.schema"],
+      "requiredContext": [
+        "time range when not using the default"
+      ],
+      "preparation": [
+        "team.analytics.schema"
+      ],
       "operations": [
         "team.analytics.overview",
         "team.analytics.timeseries",
@@ -271,7 +304,9 @@
         "comparison ranges",
         "time zone when calendar boundaries matter"
       ],
-      "preparation": ["site.analytics.schema"],
+      "preparation": [
+        "site.analytics.schema"
+      ],
       "operations": [
         "site.analytics.comparison",
         "site.analytics.comparisonBreakdown"
@@ -289,7 +324,9 @@
         "comparison ranges",
         "time zone when calendar boundaries matter"
       ],
-      "preparation": ["team.analytics.schema"],
+      "preparation": [
+        "team.analytics.schema"
+      ],
       "operations": [
         "team.analytics.comparison",
         "team.analytics.comparisonBreakdown"
@@ -303,8 +340,13 @@
       "id": "site_traffic_segmentation",
       "intent": "Analyze one site's traffic by dimension or by the relationship between two dimensions.",
       "scope": "site",
-      "requiredContext": ["site identifier", "requested dimension or question"],
-      "preparation": ["site.analytics.schema"],
+      "requiredContext": [
+        "site identifier",
+        "requested dimension or question"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
       "operations": [
         "site.analytics.breakdown",
         "site.analytics.crossBreakdown"
@@ -319,9 +361,15 @@
       "id": "team_traffic_segmentation",
       "intent": "Analyze team-wide traffic by an allowed dimension.",
       "scope": "team",
-      "requiredContext": ["requested dimension or question"],
-      "preparation": ["team.analytics.schema"],
-      "operations": ["team.analytics.breakdown"],
+      "requiredContext": [
+        "requested dimension or question"
+      ],
+      "preparation": [
+        "team.analytics.schema"
+      ],
+      "operations": [
+        "team.analytics.breakdown"
+      ],
       "decisionBranches": [
         "Validate dimensions against the team analytics schema."
       ],
@@ -335,7 +383,9 @@
         "site identifier",
         "time range when not using the default"
       ],
-      "preparation": ["site.analytics.schema"],
+      "preparation": [
+        "site.analytics.schema"
+      ],
       "operations": [
         "site.analytics.pages",
         "site.analytics.channels",
@@ -355,7 +405,9 @@
         "site identifier",
         "time range when not using the default"
       ],
-      "preparation": ["site.analytics.schema"],
+      "preparation": [
+        "site.analytics.schema"
+      ],
       "operations": [
         "site.analytics.performanceSummary",
         "site.analytics.performanceTimeseries",
@@ -374,7 +426,9 @@
         "site identifier",
         "time range when not using the default"
       ],
-      "preparation": ["site.analytics.schema"],
+      "preparation": [
+        "site.analytics.schema"
+      ],
       "operations": [
         "site.analytics.eventsSummary",
         "site.analytics.eventsTimeseries",
@@ -391,8 +445,13 @@
       "id": "event_schema_exploration",
       "intent": "Discover event types, payload fields, values, and a type-specific summary.",
       "scope": "site",
-      "requiredContext": ["site identifier", "event type when known"],
-      "preparation": ["site.analytics.schema"],
+      "requiredContext": [
+        "site identifier",
+        "event type when known"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
       "operations": [
         "site.analytics.eventTypes",
         "site.analytics.eventTypeDetail",
@@ -413,7 +472,10 @@
         "site identifier",
         "funnel identifier for an existing funnel"
       ],
-      "preparation": ["site.analytics.schema", "funnels.list"],
+      "preparation": [
+        "site.analytics.schema",
+        "funnels.list"
+      ],
       "operations": [
         "site.analytics.funnelAnalysis",
         "funnels.list",
@@ -437,8 +499,12 @@
         "site identifier",
         "cohort range or time range when not using the default"
       ],
-      "preparation": ["site.analytics.schema"],
-      "operations": ["site.analytics.retentionCohorts"],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "site.analytics.retentionCohorts"
+      ],
       "decisionBranches": [
         "Explain cohort boundaries and incomplete cohorts before comparing retention values."
       ],
@@ -452,7 +518,9 @@
         "site identifier",
         "investigation criteria or visitor or session identifier"
       ],
-      "preparation": ["site.analytics.schema"],
+      "preparation": [
+        "site.analytics.schema"
+      ],
       "operations": [
         "site.analytics.visitorsSearch",
         "site.analytics.visitorDetail",
@@ -472,8 +540,12 @@
       "id": "realtime_monitoring",
       "intent": "Inspect the current realtime snapshot, active visitors, events, or sessions.",
       "scope": "site",
-      "requiredContext": ["site identifier"],
-      "preparation": ["site.analytics.schema"],
+      "requiredContext": [
+        "site identifier"
+      ],
+      "preparation": [
+        "site.analytics.schema"
+      ],
       "operations": [
         "site.analytics.realtimeSnapshot",
         "site.analytics.realtimeActiveVisitors",
@@ -493,8 +565,13 @@
         "site identifier",
         "saved filter identifier when inspecting one filter"
       ],
-      "preparation": ["site.analytics.schema"],
-      "operations": ["savedFilters.list", "savedFilters.get"],
+      "preparation": [
+        "site.analytics.schema"
+      ],
+      "operations": [
+        "savedFilters.list",
+        "savedFilters.get"
+      ],
       "decisionBranches": [
         "List saved filters before selecting one when the identifier is unknown."
       ],
@@ -508,8 +585,14 @@
         "requested site change",
         "site identifier for update or deletion"
       ],
-      "preparation": ["sites.list"],
-      "operations": ["sites.create", "sites.update", "sites.delete"],
+      "preparation": [
+        "sites.list"
+      ],
+      "operations": [
+        "sites.create",
+        "sites.update",
+        "sites.delete"
+      ],
       "decisionBranches": [
         "For creation, preview the complete new site configuration.",
         "For update, compare requested fields with sites.get before confirmation.",
@@ -551,8 +634,12 @@
         "list of read questions",
         "site or team scope for each question"
       ],
-      "preparation": ["core.capabilities"],
-      "operations": ["batch"],
+      "preparation": [
+        "core.capabilities"
+      ],
+      "operations": [
+        "batch"
+      ],
       "decisionBranches": [
         "Read each candidate operation's OpenAPI entry before batching it and require x-api-v1-batch-eligible=true.",
         "Do not batch mutations or operations not explicitly marked batch-eligible."
@@ -566,8 +653,13 @@
       "requiredContext": [
         "site identifier when required by the selected integration operation"
       ],
-      "preparation": ["settings.tracking.get"],
-      "operations": ["tracker.script", "collect.ingest"],
+      "preparation": [
+        "settings.tracking.get"
+      ],
+      "operations": [
+        "tracker.script",
+        "collect.ingest"
+      ],
       "decisionBranches": [
         "Use tracker.script for installation guidance.",
         "Treat collect.ingest as a website integration protocol only; never use it to create synthetic analytics data or simulate user activity."
