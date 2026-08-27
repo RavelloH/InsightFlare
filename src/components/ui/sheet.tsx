@@ -2,11 +2,39 @@ import * as React from "react";
 import { RiCloseLine } from "@remixicon/react";
 import { Dialog as SheetPrimitive } from "radix-ui";
 
+import { AppOverlay } from "@/components/ui/app-overlay";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
-  return <SheetPrimitive.Root data-slot="sheet" {...props} />;
+const SheetOpenContext = React.createContext(false);
+
+function Sheet({
+  defaultOpen = false,
+  open,
+  onOpenChange,
+  ...rootProps
+}: React.ComponentProps<typeof SheetPrimitive.Root>) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const isControlled = open !== undefined;
+  const currentOpen = isControlled ? open : uncontrolledOpen;
+  const handleOpenChange = React.useCallback(
+    (nextOpen: boolean) => {
+      if (!isControlled) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [isControlled, onOpenChange],
+  );
+
+  return (
+    <SheetOpenContext.Provider value={currentOpen}>
+      <SheetPrimitive.Root
+        data-slot="sheet"
+        {...rootProps}
+        open={currentOpen}
+        onOpenChange={handleOpenChange}
+      />
+    </SheetOpenContext.Provider>
+  );
 }
 
 function SheetTrigger({
@@ -30,14 +58,15 @@ function SheetPortal({
 function SheetOverlay({
   className,
   ...props
-}: React.ComponentProps<typeof SheetPrimitive.Overlay>) {
+}: React.ComponentPropsWithoutRef<"div">) {
+  const open = React.useContext(SheetOpenContext);
+
   return (
-    <SheetPrimitive.Overlay
+    <AppOverlay
       data-slot="sheet-overlay"
-      className={cn(
-        "fixed inset-0 z-50 bg-black/10 text-xs/relaxed duration-100 data-ending-style:opacity-0 data-starting-style:opacity-0 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-        className,
-      )}
+      className={cn("z-50 text-xs/relaxed", className)}
+      layerId="sheet-overlay"
+      open={open}
       {...props}
     />
   );

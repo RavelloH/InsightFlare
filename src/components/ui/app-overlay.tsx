@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 
 export { overlayZIndexFor } from "@/components/ui/floating-layer";
 
-export const MODAL_OVERLAY_FADE_MS = 160;
+export const APP_OVERLAY_FADE_MS = 100;
 
 interface ControllableOpenProps {
   open?: boolean;
@@ -22,20 +22,20 @@ interface ControllableOpenProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-export interface ModalRootState {
+export interface AppOverlayRootState {
   layerId: string;
   modal: boolean;
   open: boolean;
 }
 
-interface ModalOverlayProps extends React.ComponentPropsWithoutRef<"div"> {
+interface AppOverlayProps extends React.ComponentPropsWithoutRef<"div"> {
   layerId: string;
   open: boolean;
   portal?: boolean;
   zIndex?: number;
 }
 
-interface ModalLayerOptions {
+interface OverlayLayerOptions {
   baseZIndex?: number;
   enabled?: boolean;
   layerId: string;
@@ -72,17 +72,17 @@ export function useControllableOpen({
   return [currentOpen, handleOpenChange] as const;
 }
 
-export function useModalLayerId(prefix: string) {
+export function useOverlayLayerId(prefix: string) {
   const reactId = React.useId();
   return `${prefix}-${reactId}`;
 }
 
-export function useModalLayerZIndex({
+export function useOverlayLayerZIndex({
   baseZIndex = MODAL_LAYER_Z_INDEX,
   enabled = true,
   layerId,
   open,
-}: ModalLayerOptions) {
+}: OverlayLayerOptions) {
   const shouldRegister = enabled && open;
 
   React.useEffect(() => {
@@ -107,7 +107,7 @@ export function useModalLayerZIndex({
   );
 }
 
-export function ModalOverlay({
+export function AppOverlay({
   className,
   layerId,
   open,
@@ -115,7 +115,7 @@ export function ModalOverlay({
   style,
   zIndex,
   ...props
-}: ModalOverlayProps) {
+}: AppOverlayProps) {
   const floatingLayerZIndex =
     zIndex ?? parseZIndex(style?.zIndex) ?? MODAL_LAYER_Z_INDEX;
   const motionProps = props as HTMLMotionProps<"div">;
@@ -125,18 +125,20 @@ export function ModalOverlay({
       {open ? (
         <motion.div
           {...motionProps}
+          key={`${layerId}-overlay`}
           aria-hidden="true"
+          data-slot="app-overlay"
           data-dashboard-floating-layer={`${layerId}-overlay`}
           {...{ [FLOATING_LAYER_Z_ATTR]: floatingLayerZIndex }}
           className={cn(
-            "pointer-events-auto fixed inset-0 bg-black/10 supports-backdrop-filter:backdrop-blur-xs",
+            "pointer-events-auto fixed inset-0 isolate z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs",
             className,
           )}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{
-            duration: MODAL_OVERLAY_FADE_MS / 1000,
+            duration: APP_OVERLAY_FADE_MS / 1000,
             ease: "easeOut",
           }}
           style={{ ...style, zIndex: floatingLayerZIndex }}

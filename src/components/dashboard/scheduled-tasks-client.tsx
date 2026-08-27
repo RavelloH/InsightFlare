@@ -24,6 +24,7 @@ import { JsonTreePanel } from "@/components/dashboard/json-tree";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { EVENT_RECORD_DRAWER_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
 import { TableActionButton } from "@/components/dashboard/table-action-button";
+import { AppOverlay, overlayZIndexFor } from "@/components/ui/app-overlay";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +44,6 @@ import {
   DrawerScrollArea,
   DrawerTitle,
 } from "@/components/ui/drawer";
-import { ModalOverlay, overlayZIndexFor } from "@/components/ui/modal-overlay";
 import {
   Select,
   SelectContent,
@@ -585,7 +585,7 @@ function ScheduledTaskRunLogDrawer({
 
   return (
     <>
-      <ModalOverlay
+      <AppOverlay
         layerId="scheduled-task-run-drawer"
         open={open}
         portal

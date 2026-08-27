@@ -2,9 +2,9 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import type { RemixiconComponentType } from "@remixicon/react";
 import { RiCloseLine, RiInformationLine } from "@remixicon/react";
-import { AnimatePresence, motion } from "motion/react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
+import { AppOverlay } from "@/components/ui/app-overlay";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -61,34 +61,6 @@ function DialogClose({
   return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
 }
 
-function DialogOverlay({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
-  const open = React.useContext(DialogOpenContext);
-
-  return (
-    <AnimatePresence>
-      {open ? (
-        <motion.div
-          key="dialog-overlay"
-          data-slot="dialog-overlay"
-          aria-hidden="true"
-          className={cn(
-            "pointer-events-auto fixed inset-0 isolate z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs",
-            className,
-          )}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.1, ease: "easeOut" }}
-          {...(props as unknown as React.ComponentProps<typeof motion.div>)}
-        />
-      ) : null}
-    </AnimatePresence>
-  );
-}
-
 function DialogContent({
   className,
   children,
@@ -99,9 +71,15 @@ function DialogContent({
   overlayClassName?: string;
   showCloseButton?: boolean;
 }) {
+  const open = React.useContext(DialogOpenContext);
+
   return (
     <DialogPortal>
-      <DialogOverlay className={overlayClassName} />
+      <AppOverlay
+        className={overlayClassName}
+        layerId="dialog-overlay"
+        open={open}
+      />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
@@ -216,7 +194,6 @@ export {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogOverlay,
   DialogPortal,
   DialogTitle,
   DialogTrigger,

@@ -3,13 +3,39 @@ import type { RemixiconComponentType } from "@remixicon/react";
 import { RiInformationLine } from "@remixicon/react";
 import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 
+import { AppOverlay } from "@/components/ui/app-overlay";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+const AlertDialogOpenContext = React.createContext(false);
+
 function AlertDialog({
-  ...props
+  defaultOpen = false,
+  open,
+  onOpenChange,
+  ...rootProps
 }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
-  return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const isControlled = open !== undefined;
+  const currentOpen = isControlled ? open : uncontrolledOpen;
+  const handleOpenChange = React.useCallback(
+    (nextOpen: boolean) => {
+      if (!isControlled) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [isControlled, onOpenChange],
+  );
+
+  return (
+    <AlertDialogOpenContext.Provider value={currentOpen}>
+      <AlertDialogPrimitive.Root
+        data-slot="alert-dialog"
+        {...rootProps}
+        open={currentOpen}
+        onOpenChange={handleOpenChange}
+      />
+    </AlertDialogOpenContext.Provider>
+  );
 }
 
 function AlertDialogTrigger({
@@ -31,14 +57,15 @@ function AlertDialogPortal({
 function AlertDialogOverlay({
   className,
   ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Overlay>) {
+}: React.ComponentPropsWithoutRef<"div">) {
+  const open = React.useContext(AlertDialogOpenContext);
+
   return (
-    <AlertDialogPrimitive.Overlay
+    <AppOverlay
+      className={cn("z-50", className)}
       data-slot="alert-dialog-overlay"
-      className={cn(
-        "fixed inset-0 z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-        className,
-      )}
+      layerId="alert-dialog-overlay"
+      open={open}
       {...props}
     />
   );

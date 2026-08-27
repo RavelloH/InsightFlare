@@ -45,6 +45,7 @@ import {
 } from "@/components/dashboard/journey-display";
 import { ShareRadialCard } from "@/components/dashboard/share-radial-card";
 import { EVENT_RECORD_DRAWER_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
+import { AppOverlay, overlayZIndexFor } from "@/components/ui/app-overlay";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -70,7 +71,6 @@ import {
   DrawerScrollArea,
   DrawerTitle,
 } from "@/components/ui/drawer";
-import { ModalOverlay, overlayZIndexFor } from "@/components/ui/modal-overlay";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
@@ -2722,7 +2722,7 @@ function BotRequestDetailDrawer({
 
   return (
     <>
-      <ModalOverlay
+      <AppOverlay
         layerId="request-observation-drawer"
         open={open}
         portal
@@ -3055,7 +3055,7 @@ function NormalRequestDetailDrawer({
 
   return (
     <>
-      <ModalOverlay
+      <AppOverlay
         layerId="request-observation-normal-drawer"
         open={open}
         portal

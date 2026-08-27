@@ -22,7 +22,7 @@ import {
   setDetailDrawerLayer,
   subscribeDetailDrawerLayers,
 } from "@/components/dashboard/site-pages/floating-layer";
-import { ModalOverlay } from "@/components/ui/modal-overlay";
+import { AppOverlay } from "@/components/ui/app-overlay";
 import { shouldUseNativeScrollbars } from "@/components/ui/overlay-scrollbar";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { cn } from "@/lib/utils";
@@ -503,7 +503,7 @@ export function DetailDrawer({
           className={cn("fixed inset-0 z-[96]", rootClassName)}
           style={rootStyle}
         >
-          <ModalOverlay
+          <AppOverlay
             className="z-0 bg-black/50 backdrop-blur-sm"
             layerId={layerId}
             open={!isClosing}

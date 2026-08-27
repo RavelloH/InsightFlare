@@ -2,6 +2,7 @@ import {
   type ComponentPropsWithoutRef,
   type CSSProperties,
   type Key,
+  memo,
   type ReactNode,
 } from "react";
 
@@ -48,6 +49,25 @@ interface AnalyticsDataTableProps<TRow> {
   className?: string;
   enableTimeTooltips?: boolean;
   messages?: AppMessages;
+}
+
+interface AnalyticsDataTableBodyProps<TRow> {
+  rows: readonly TRow[];
+  renderRow: (row: TRow, index: number) => AnalyticsDataTableRow;
+  renderSkeletonRow: (index: number) => ReactNode;
+  getRowKey: (row: TRow, index: number) => Key;
+  skeletonRows: number;
+  columnCount: number;
+  loading: boolean;
+  loadingMore: boolean;
+  error: boolean;
+  errorContent: ReactNode;
+  emptyContent: ReactNode;
+  appendError: boolean;
+  appendErrorContent?: ReactNode;
+  hasMore: boolean;
+  sentinelRef: (node: HTMLElement | null) => void;
+  tableBodyClassName?: string;
 }
 
 const NOOP = () => undefined;
@@ -100,6 +120,127 @@ function renderAppendErrorRow(
   );
 }
 
+const AnalyticsDataTableBody = memo(function AnalyticsDataTableBody<TRow>({
+  rows,
+  renderRow,
+  renderSkeletonRow,
+  getRowKey,
+  skeletonRows,
+  columnCount,
+  loading,
+  loadingMore,
+  error,
+  errorContent,
+  emptyContent,
+  appendError,
+  appendErrorContent,
+  hasMore,
+  sentinelRef,
+  tableBodyClassName,
+}: AnalyticsDataTableBodyProps<TRow>) {
+  const isEmpty = !loading && !error && rows.length === 0 && !hasMore;
+  const tableBodyTransitionKey = loading
+    ? "loading"
+    : error
+      ? "error"
+      : isEmpty
+        ? "empty"
+        : "content";
+
+  return (
+    <AutoTransition
+      as="tbody"
+      initial={false}
+      transitionKey={tableBodyTransitionKey}
+      duration={0.18}
+      type="fade"
+      presenceMode="wait"
+      aria-busy={loading || loadingMore}
+      data-slot="table-body"
+      className={cn("[&_tr:last-child]:border-0", tableBodyClassName)}
+    >
+      {loading
+        ? Array.from({ length: skeletonRows }, (_, index) => (
+            <AutoTransition
+              as="tr"
+              key={`skeleton-${index}`}
+              transitionKey={`skeleton-${index}`}
+              duration={0.18}
+              type="fade"
+              aria-hidden="true"
+              data-slot="table-row"
+              className={TABLE_ROW_CLASS_NAME}
+            >
+              {renderSkeletonRow(index)}
+            </AutoTransition>
+          ))
+        : error
+          ? renderStateRow("error", errorContent, columnCount)
+          : isEmpty
+            ? renderStateRow("empty", emptyContent, columnCount)
+            : [
+                ...rows.map((row, index) => {
+                  const rendered = renderRow(row, index);
+                  const rowKey = String(getRowKey(row, index));
+                  const { className: rowClassName, ...rowProps } =
+                    rendered.props ?? {};
+                  return (
+                    <AutoTransition
+                      as="tr"
+                      key={`row-${rowKey}`}
+                      transitionKey={`row-${rowKey}`}
+                      initial
+                      duration={0.18}
+                      type="fade"
+                      style={
+                        {
+                          "--analytics-data-row-delay": `${
+                            (index % Math.max(skeletonRows, 1)) *
+                            DATA_ROW_STAGGER_MS
+                          }ms`,
+                        } as CSSProperties
+                      }
+                      {...rowProps}
+                      data-slot="table-row"
+                      data-analytics-row-enter=""
+                      className={cn(TABLE_ROW_CLASS_NAME, rowClassName)}
+                    >
+                      {rendered.children}
+                    </AutoTransition>
+                  );
+                }),
+                ...(appendError
+                  ? [
+                      appendErrorContent !== undefined
+                        ? renderAppendErrorRow(appendErrorContent, columnCount)
+                        : renderStateRow(
+                            "append-error",
+                            errorContent,
+                            columnCount,
+                          ),
+                    ]
+                  : hasMore
+                    ? Array.from({ length: skeletonRows }, (_, index) => (
+                        <AutoTransition
+                          as="tr"
+                          key={`skeleton-more-${index}`}
+                          transitionKey={`skeleton-more-${index}`}
+                          duration={0.18}
+                          type="fade"
+                          ref={sentinelRef}
+                          aria-hidden="true"
+                          data-slot="table-row"
+                          className={TABLE_ROW_CLASS_NAME}
+                        >
+                          {renderSkeletonRow(index)}
+                        </AutoTransition>
+                      ))
+                    : []),
+              ]}
+    </AutoTransition>
+  );
+}) as <TRow>(props: AnalyticsDataTableBodyProps<TRow>) => ReactNode;
+
 export function AnalyticsDataTable<TRow>({
   header,
   rows,
@@ -136,117 +277,28 @@ export function AnalyticsDataTable<TRow>({
     onReachEnd: loadMore,
   });
 
-  const isEmpty = !loading && !error && rows.length === 0 && !hasMore;
-  const tableBodyTransitionKey = loading
-    ? "loading"
-    : error
-      ? "error"
-      : isEmpty
-        ? "empty"
-        : "content";
   const table = (
     <AnalyticsTableCard minTableWidth={minTableWidth} className={className}>
       <Table className={tableClassName}>
         <TableHeader>{header}</TableHeader>
-        <AutoTransition
-          as="tbody"
-          initial={false}
-          transitionKey={tableBodyTransitionKey}
-          duration={0.18}
-          type="fade"
-          presenceMode="wait"
-          aria-busy={loading || loadingMore}
-          data-slot="table-body"
-          className={cn("[&_tr:last-child]:border-0", tableBodyClassName)}
-        >
-          {loading
-            ? Array.from({ length: skeletonRows }, (_, index) =>
-                (() => {
-                  return (
-                    <AutoTransition
-                      as="tr"
-                      key={`skeleton-${index}`}
-                      transitionKey={`skeleton-${index}`}
-                      duration={0.18}
-                      type="fade"
-                      aria-hidden="true"
-                      data-slot="table-row"
-                      className={TABLE_ROW_CLASS_NAME}
-                    >
-                      {renderSkeletonRow(index)}
-                    </AutoTransition>
-                  );
-                })(),
-              )
-            : error
-              ? renderStateRow("error", errorContent, columnCount)
-              : isEmpty
-                ? renderStateRow("empty", emptyContent, columnCount)
-                : [
-                    ...rows.map((row, index) => {
-                      const rendered = renderRow(row, index);
-                      const rowKey = String(getRowKey(row, index));
-                      const { className: rowClassName, ...rowProps } =
-                        rendered.props ?? {};
-                      return (
-                        <AutoTransition
-                          as="tr"
-                          key={`row-${rowKey}`}
-                          transitionKey={`row-${rowKey}`}
-                          initial
-                          duration={0.18}
-                          type="fade"
-                          style={
-                            {
-                              "--analytics-data-row-delay": `${
-                                (index % Math.max(skeletonRows, 1)) *
-                                DATA_ROW_STAGGER_MS
-                              }ms`,
-                            } as CSSProperties
-                          }
-                          {...rowProps}
-                          data-slot="table-row"
-                          data-analytics-row-enter=""
-                          className={cn(TABLE_ROW_CLASS_NAME, rowClassName)}
-                        >
-                          {rendered.children}
-                        </AutoTransition>
-                      );
-                    }),
-                    ...(appendError
-                      ? [
-                          appendErrorContent !== undefined
-                            ? renderAppendErrorRow(
-                                appendErrorContent,
-                                columnCount,
-                              )
-                            : renderStateRow(
-                                "append-error",
-                                errorContent,
-                                columnCount,
-                              ),
-                        ]
-                      : hasMore
-                        ? Array.from({ length: skeletonRows }, (_, index) => {
-                            return (
-                              <AutoTransition
-                                as="tr"
-                                key={`skeleton-more-${index}`}
-                                transitionKey={`skeleton-more-${index}`}
-                                duration={0.18}
-                                type="fade"
-                                ref={sentinelRef}
-                                aria-hidden="true"
-                                data-slot="table-row"
-                                className={TABLE_ROW_CLASS_NAME}
-                              >
-                                {renderSkeletonRow(index)}
-                              </AutoTransition>
-                            );
-                          })
-                        : []),
-                  ]}
-        </AutoTransition>
+        <AnalyticsDataTableBody
+          rows={rows}
+          renderRow={renderRow}
+          renderSkeletonRow={renderSkeletonRow}
+          getRowKey={getRowKey}
+          skeletonRows={skeletonRows}
+          columnCount={columnCount}
+          loading={loading}
+          loadingMore={loadingMore}
+          error={error}
+          errorContent={errorContent}
+          emptyContent={emptyContent}
+          appendError={appendError}
+          appendErrorContent={appendErrorContent}
+          hasMore={hasMore}
+          sentinelRef={sentinelRef}
+          tableBodyClassName={tableBodyClassName}
+        />
       </Table>
     </AnalyticsTableCard>
   );

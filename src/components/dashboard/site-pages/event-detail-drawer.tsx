@@ -32,6 +32,7 @@ import {
 } from "@/components/dashboard/site-pages/floating-layer";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitor-detail-client-page";
+import { AppOverlay, overlayZIndexFor } from "@/components/ui/app-overlay";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,6 @@ import {
   DrawerScrollArea,
   DrawerTitle,
 } from "@/components/ui/drawer";
-import { ModalOverlay, overlayZIndexFor } from "@/components/ui/modal-overlay";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { numberFormat } from "@/lib/dashboard/format";
@@ -509,7 +509,7 @@ export function EventDetailDrawer({
 
   return (
     <>
-      <ModalOverlay
+      <AppOverlay
         data-event-record-drawer-overlay=""
         layerId="event-record-drawer"
         open={open}

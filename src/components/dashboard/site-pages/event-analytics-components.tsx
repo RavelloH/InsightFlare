@@ -1051,7 +1051,7 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
   );
 });
 
-function EventRecordsTable({
+const EventRecordsTable = memo(function EventRecordsTable({
   locale,
   messages,
   labels,
@@ -1189,7 +1189,7 @@ function EventRecordsTable({
       messages={messages}
     />
   );
-}
+});
 
 export function EventRecordsSection({
   locale,
@@ -1328,7 +1328,7 @@ export function EventRecordsSection({
   const detailLoading = detailQuery.isPending && !detail;
   const detailError = detailQuery.isError && !detail;
 
-  const toggleSort = (key: EventRecordSortKey) => {
+  const toggleSort = useCallback((key: EventRecordSortKey) => {
     setSort((current) =>
       current.key === key
         ? {
@@ -1337,7 +1337,7 @@ export function EventRecordsSection({
           }
         : { key, direction: "desc" },
     );
-  };
+  }, []);
 
   const openRecord = useCallback((eventId: string) => {
     setSelectedEventId(eventId);

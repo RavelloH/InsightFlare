@@ -566,7 +566,7 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
   );
 });
 
-export function SessionsTableCard({
+export const SessionsTableCard = memo(function SessionsTableCard({
   locale,
   messages,
   labels,
@@ -694,4 +694,6 @@ export function SessionsTableCard({
       messages={messages}
     />
   );
-}
+});
+
+SessionsTableCard.displayName = "SessionsTableCard";

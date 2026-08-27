@@ -195,7 +195,7 @@ export function SessionsClientPage({
     void fetchNextPage();
   }, [appendError, fetchNextPage, hasMore, loadingInitial, loadingMore]);
 
-  const toggleSort = (key: SessionSortKey) => {
+  const toggleSort = useCallback((key: SessionSortKey) => {
     setSort((current) =>
       current.key === key
         ? {
@@ -204,7 +204,7 @@ export function SessionsClientPage({
           }
         : { key, direction: "desc" },
     );
-  };
+  }, []);
 
   const openSessionDetail = useCallback(
     (sessionId: string) => {

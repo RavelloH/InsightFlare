@@ -1,22 +1,22 @@
 import * as React from "react";
 import { Drawer as DrawerPrimitive } from "vaul";
 
-import { FLOATING_LAYER_Z_ATTR } from "@/components/ui/floating-layer";
 import {
-  ModalOverlay,
-  type ModalRootState,
+  AppOverlay,
+  type AppOverlayRootState,
   overlayZIndexFor,
   parseZIndex,
   useControllableOpen,
-  useModalLayerId,
-  useModalLayerZIndex,
-} from "@/components/ui/modal-overlay";
+  useOverlayLayerId,
+  useOverlayLayerZIndex,
+} from "@/components/ui/app-overlay";
+import { FLOATING_LAYER_Z_ATTR } from "@/components/ui/floating-layer";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { cn } from "@/lib/utils";
 
 type DrawerRootProps = React.ComponentProps<typeof DrawerPrimitive.Root>;
 
-interface DrawerRootState extends ModalRootState {
+interface DrawerRootState extends AppOverlayRootState {
   onOpenChange?: (open: boolean) => void;
 }
 
@@ -29,7 +29,7 @@ function Drawer({
   open,
   ...props
 }: DrawerRootProps) {
-  const layerId = useModalLayerId("drawer");
+  const layerId = useOverlayLayerId("drawer");
   const [currentOpen, handleOpenChange] = useControllableOpen({
     defaultOpen,
     onOpenChange,
@@ -88,7 +88,7 @@ function DrawerOverlay({
   const rootState = React.useContext(DrawerRootContext);
 
   return (
-    <ModalOverlay
+    <AppOverlay
       data-slot="drawer-overlay"
       layerId={rootState?.layerId ?? "drawer"}
       open={rootState?.modal !== false && (rootState?.open ?? true)}
@@ -114,10 +114,10 @@ function DrawerContent({
   overlayClassName?: string;
 }) {
   const rootState = React.useContext(DrawerRootContext);
-  const fallbackLayerId = useModalLayerId("drawer-content");
+  const fallbackLayerId = useOverlayLayerId("drawer-content");
   const layerId = rootState?.layerId ?? fallbackLayerId;
   const baseZIndex = parseZIndex(style?.zIndex) ?? 50;
-  const contentZIndex = useModalLayerZIndex({
+  const contentZIndex = useOverlayLayerZIndex({
     baseZIndex,
     enabled: rootState?.modal !== false,
     layerId,
