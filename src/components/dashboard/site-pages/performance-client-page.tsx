@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { Icon } from "@iconify/react";
 import {
   RiCheckboxCircleFill,
@@ -127,6 +127,13 @@ interface CountryMapHover {
   samples: number;
   score: number | null;
   status: PerformanceStatus;
+}
+
+interface PerformanceMapFeature {
+  code: string | null;
+  feature: CountryFeature;
+  hoverKey: string;
+  path: string;
 }
 
 interface ChartPoint {
@@ -1821,6 +1828,237 @@ function CountryLabelWithFlag({
   );
 }
 
+const PerformanceHealthMapVisual = memo(function PerformanceHealthMapVisual({
+  locale,
+  messages,
+  featureCollection,
+  mapFeatures,
+  countryMap,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  featureCollection: CountriesFeatureCollection | null;
+  mapFeatures: PerformanceMapFeature[];
+  countryMap: Map<string, CountryHealthRow>;
+}) {
+  const [hoveredCountry, setHoveredCountry] = useState<CountryMapHover | null>(
+    null,
+  );
+
+  const updateCountryHover = (
+    hoverKey: string,
+    feature: CountryFeature,
+    code: string | null,
+    country: CountryHealthRow | null,
+    status: PerformanceStatus,
+  ) => {
+    const label =
+      country?.label ??
+      resolveCountryLabelFromFeature(
+        feature,
+        code,
+        locale,
+        messages.common.unknown,
+      );
+    const samples = country?.samples ?? 0;
+    const score = country?.score ?? null;
+    setHoveredCountry((current) => {
+      if (
+        current?.key === hoverKey &&
+        current.label === label &&
+        current.samples === samples &&
+        current.score === score &&
+        current.status === status
+      ) {
+        return current;
+      }
+
+      return {
+        key: hoverKey,
+        label,
+        samples,
+        score,
+        status,
+      };
+    });
+  };
+  const hoverScore = roundedScore(hoveredCountry?.score);
+  const hoveredSamplesText = numberFormat(locale, hoveredCountry?.samples ?? 0);
+  const hoveredScoreText =
+    hoverScore == null ? "-" : numberFormat(locale, hoverScore);
+
+  return (
+    <div className="relative overflow-hidden border-t border-border/70 bg-muted/20 p-3">
+      {featureCollection ? (
+        <div
+          className="relative mx-auto aspect-[960/500] w-full"
+          onMouseLeave={() => setHoveredCountry(null)}
+        >
+          <svg
+            role="img"
+            aria-label={messages.performance.countryHealthTitle}
+            className="block h-full w-full"
+            viewBox={`0 0 ${WORLD_MAP_WIDTH} ${WORLD_MAP_HEIGHT}`}
+            preserveAspectRatio="xMidYMid meet"
+          >
+            <rect
+              width={WORLD_MAP_WIDTH}
+              height={WORLD_MAP_HEIGHT}
+              fill="transparent"
+            />
+            {mapFeatures.map(({ code, feature, hoverKey, path }) => {
+              const country = code ? countryMap.get(code) : null;
+              const status = country?.status ?? "none";
+              const isHovered = hoveredCountry?.key === hoverKey;
+              return (
+                <path
+                  key={hoverKey}
+                  d={path}
+                  fill={statusColor(status)}
+                  fillRule="evenodd"
+                  fillOpacity={
+                    isHovered
+                      ? Math.min(
+                          0.82,
+                          countryFillOpacity(status, country?.samples ?? 0) +
+                            0.22,
+                        )
+                      : countryFillOpacity(status, country?.samples ?? 0)
+                  }
+                  stroke={isHovered ? "var(--foreground)" : "var(--border)"}
+                  strokeOpacity={isHovered ? 0.96 : 0.86}
+                  strokeWidth={isHovered ? 1 : 0.65}
+                  vectorEffect="non-scaling-stroke"
+                  className="cursor-default transition-[fill-opacity,stroke,stroke-opacity] duration-150"
+                  onMouseEnter={() =>
+                    updateCountryHover(
+                      hoverKey,
+                      feature,
+                      code,
+                      country ?? null,
+                      status,
+                    )
+                  }
+                  onMouseMove={() =>
+                    updateCountryHover(
+                      hoverKey,
+                      feature,
+                      code,
+                      country ?? null,
+                      status,
+                    )
+                  }
+                />
+              );
+            })}
+          </svg>
+          <AnimatePresence>
+            {hoveredCountry ? (
+              <motion.div
+                key="performance-country-toolbar"
+                className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+              >
+                <div className="inline-flex max-w-full items-center gap-4 rounded-md border border-border/70 bg-background/92 px-3 py-2 text-xs shadow-lg backdrop-blur-sm">
+                  <AutoResizer
+                    initial
+                    animateWidth
+                    animateHeight={false}
+                    className="inline-flex min-w-0 shrink items-center"
+                  >
+                    <AutoTransition
+                      className="inline-block"
+                      duration={0.2}
+                      type="fade"
+                      initial={false}
+                      presenceMode="wait"
+                      customVariants={{
+                        initial: { opacity: 0 },
+                        animate: { opacity: 1 },
+                        exit: { opacity: 0 },
+                      }}
+                    >
+                      <span
+                        key={`country-${hoveredCountry.key}-${hoveredCountry.label}`}
+                        className="inline-flex items-center gap-2 whitespace-nowrap font-medium"
+                      >
+                        <span
+                          className="size-2 rounded-full"
+                          style={{
+                            backgroundColor: statusColor(hoveredCountry.status),
+                          }}
+                        />
+                        {hoveredCountry.label}
+                      </span>
+                    </AutoTransition>
+                  </AutoResizer>
+                  <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+                    <span>{messages.performance.samplesLabel}:</span>
+                    <AutoResizer
+                      initial
+                      animateWidth
+                      animateHeight={false}
+                      className="inline-flex shrink-0 items-center"
+                    >
+                      <AutoTransition
+                        className="inline-block whitespace-nowrap font-mono text-foreground tabular-nums"
+                        duration={0.2}
+                        type="fade"
+                        initial={false}
+                        presenceMode="wait"
+                        customVariants={{
+                          initial: { opacity: 0 },
+                          animate: { opacity: 1 },
+                          exit: { opacity: 0 },
+                        }}
+                      >
+                        <span key={`samples-${hoveredSamplesText}`}>
+                          {hoveredSamplesText}
+                        </span>
+                      </AutoTransition>
+                    </AutoResizer>
+                  </span>
+                  <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+                    <span>{messages.performance.score}:</span>
+                    <AutoResizer
+                      initial
+                      animateWidth
+                      animateHeight={false}
+                      className="inline-flex shrink-0 items-center"
+                    >
+                      <AutoTransition
+                        className="inline-block whitespace-nowrap font-mono text-foreground tabular-nums"
+                        duration={0.2}
+                        type="fade"
+                        initial={false}
+                        presenceMode="wait"
+                        customVariants={{
+                          initial: { opacity: 0 },
+                          animate: { opacity: 1 },
+                          exit: { opacity: 0 },
+                        }}
+                      >
+                        <span key={`score-${hoveredScoreText}`}>
+                          {hoveredScoreText}
+                        </span>
+                      </AutoTransition>
+                    </AutoResizer>
+                  </span>
+                </div>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        </div>
+      ) : (
+        <Skeleton className="mx-auto aspect-[2/1] w-full rounded-none" />
+      )}
+    </div>
+  );
+});
+
 function PerformanceHealthMapCard({
   locale,
   messages,
@@ -1834,9 +2072,6 @@ function PerformanceHealthMapCard({
 }) {
   const [featureCollection, setFeatureCollection] =
     useState<CountriesFeatureCollection | null>(null);
-  const [hoveredCountry, setHoveredCountry] = useState<CountryMapHover | null>(
-    null,
-  );
 
   useEffect(() => {
     let active = true;
@@ -1873,6 +2108,21 @@ function PerformanceHealthMapCard({
     }
     return map;
   }, [countries]);
+  const mapFeatures = useMemo(() => {
+    if (!featureCollection) return [];
+
+    return featureCollection.features
+      .map((feature, index) => {
+        const code = resolveCountryCodeFromFeature(feature);
+        return {
+          code,
+          feature,
+          hoverKey: `${code ?? "country"}-${index}`,
+          path: geometryToPath(feature.geometry),
+        };
+      })
+      .filter((entry) => entry.path.length > 0);
+  }, [featureCollection]);
   const [sort, setSort] = useState<{
     key: PathSortKey;
     direction: SortDirection;
@@ -1912,34 +2162,6 @@ function PerformanceHealthMapCard({
     );
   };
 
-  const updateCountryHover = (
-    hoverKey: string,
-    feature: CountryFeature,
-    code: string | null,
-    country: CountryHealthRow | null,
-    status: PerformanceStatus,
-  ) => {
-    const label =
-      country?.label ??
-      resolveCountryLabelFromFeature(
-        feature,
-        code,
-        locale,
-        messages.common.unknown,
-      );
-    setHoveredCountry({
-      key: hoverKey,
-      label,
-      samples: country?.samples ?? 0,
-      score: country?.score ?? null,
-      status,
-    });
-  };
-  const hoverScore = roundedScore(hoveredCountry?.score);
-  const hoveredSamplesText = numberFormat(locale, hoveredCountry?.samples ?? 0);
-  const hoveredScoreText =
-    hoverScore == null ? "-" : numberFormat(locale, hoverScore);
-
   return (
     <Card className="overflow-hidden">
       <CardHeader className="pb-3">
@@ -1958,182 +2180,13 @@ function PerformanceHealthMapCard({
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="relative overflow-hidden border-t border-border/70 bg-muted/20 p-3">
-          {featureCollection ? (
-            <div
-              className="relative mx-auto aspect-[960/500] w-full"
-              onMouseLeave={() => setHoveredCountry(null)}
-            >
-              <svg
-                role="img"
-                aria-label={messages.performance.countryHealthTitle}
-                className="block h-full w-full"
-                viewBox={`0 0 ${WORLD_MAP_WIDTH} ${WORLD_MAP_HEIGHT}`}
-                preserveAspectRatio="xMidYMid meet"
-              >
-                <rect
-                  width={WORLD_MAP_WIDTH}
-                  height={WORLD_MAP_HEIGHT}
-                  fill="transparent"
-                />
-                {featureCollection.features.map((feature, index) => {
-                  const code = resolveCountryCodeFromFeature(feature);
-                  const country = code ? countryMap.get(code) : null;
-                  const status = country?.status ?? "none";
-                  const path = geometryToPath(feature.geometry);
-                  const hoverKey = `${code ?? "country"}-${index}`;
-                  const isHovered = hoveredCountry?.key === hoverKey;
-                  if (!path) return null;
-                  return (
-                    <path
-                      key={hoverKey}
-                      d={path}
-                      fill={statusColor(status)}
-                      fillRule="evenodd"
-                      fillOpacity={
-                        isHovered
-                          ? Math.min(
-                              0.82,
-                              countryFillOpacity(
-                                status,
-                                country?.samples ?? 0,
-                              ) + 0.22,
-                            )
-                          : countryFillOpacity(status, country?.samples ?? 0)
-                      }
-                      stroke={isHovered ? "var(--foreground)" : "var(--border)"}
-                      strokeOpacity={isHovered ? 0.96 : 0.86}
-                      strokeWidth={isHovered ? 1 : 0.65}
-                      vectorEffect="non-scaling-stroke"
-                      className="cursor-default transition-[fill-opacity,stroke,stroke-opacity] duration-150"
-                      onMouseEnter={() =>
-                        updateCountryHover(
-                          hoverKey,
-                          feature,
-                          code,
-                          country ?? null,
-                          status,
-                        )
-                      }
-                      onMouseMove={() =>
-                        updateCountryHover(
-                          hoverKey,
-                          feature,
-                          code,
-                          country ?? null,
-                          status,
-                        )
-                      }
-                    />
-                  );
-                })}
-              </svg>
-              <AnimatePresence>
-                {hoveredCountry ? (
-                  <motion.div
-                    key="performance-country-toolbar"
-                    className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3"
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 12 }}
-                    transition={{ duration: 0.2, ease: "easeOut" }}
-                  >
-                    <div className="inline-flex max-w-full items-center gap-4 rounded-md border border-border/70 bg-background/92 px-3 py-2 text-xs shadow-lg backdrop-blur-sm">
-                      <AutoResizer
-                        initial
-                        animateWidth
-                        animateHeight={false}
-                        className="inline-flex min-w-0 shrink items-center"
-                      >
-                        <AutoTransition
-                          className="inline-block"
-                          duration={0.2}
-                          type="fade"
-                          initial={false}
-                          presenceMode="wait"
-                          customVariants={{
-                            initial: { opacity: 0 },
-                            animate: { opacity: 1 },
-                            exit: { opacity: 0 },
-                          }}
-                        >
-                          <span
-                            key={`country-${hoveredCountry.key}-${hoveredCountry.label}`}
-                            className="inline-flex items-center gap-2 whitespace-nowrap font-medium"
-                          >
-                            <span
-                              className="size-2 rounded-full"
-                              style={{
-                                backgroundColor: statusColor(
-                                  hoveredCountry.status,
-                                ),
-                              }}
-                            />
-                            {hoveredCountry.label}
-                          </span>
-                        </AutoTransition>
-                      </AutoResizer>
-                      <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
-                        <span>{messages.performance.samplesLabel}:</span>
-                        <AutoResizer
-                          initial
-                          animateWidth
-                          animateHeight={false}
-                          className="inline-flex shrink-0 items-center"
-                        >
-                          <AutoTransition
-                            className="inline-block whitespace-nowrap font-mono text-foreground tabular-nums"
-                            duration={0.2}
-                            type="fade"
-                            initial={false}
-                            presenceMode="wait"
-                            customVariants={{
-                              initial: { opacity: 0 },
-                              animate: { opacity: 1 },
-                              exit: { opacity: 0 },
-                            }}
-                          >
-                            <span key={`samples-${hoveredSamplesText}`}>
-                              {hoveredSamplesText}
-                            </span>
-                          </AutoTransition>
-                        </AutoResizer>
-                      </span>
-                      <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
-                        <span>{messages.performance.score}:</span>
-                        <AutoResizer
-                          initial
-                          animateWidth
-                          animateHeight={false}
-                          className="inline-flex shrink-0 items-center"
-                        >
-                          <AutoTransition
-                            className="inline-block whitespace-nowrap font-mono text-foreground tabular-nums"
-                            duration={0.2}
-                            type="fade"
-                            initial={false}
-                            presenceMode="wait"
-                            customVariants={{
-                              initial: { opacity: 0 },
-                              animate: { opacity: 1 },
-                              exit: { opacity: 0 },
-                            }}
-                          >
-                            <span key={`score-${hoveredScoreText}`}>
-                              {hoveredScoreText}
-                            </span>
-                          </AutoTransition>
-                        </AutoResizer>
-                      </span>
-                    </div>
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
-            </div>
-          ) : (
-            <Skeleton className="mx-auto aspect-[2/1] w-full rounded-none" />
-          )}
-        </div>
+        <PerformanceHealthMapVisual
+          locale={locale}
+          messages={messages}
+          featureCollection={featureCollection}
+          mapFeatures={mapFeatures}
+          countryMap={countryMap}
+        />
         <div className="grid min-h-[18rem] divide-y divide-border/70 border-t border-border/70 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
           {(["poor", "needs-improvement", "great"] as const).map((status) => (
             <CountryStatusColumn
@@ -2550,10 +2603,19 @@ export function PerformanceClientPage({
   };
   const hydrated = data !== undefined;
 
-  const activeSummary = useMemo(() => {
-    if (activePanel === "score") return scoreSummary(performanceData);
-    return performanceData.summaries[activePanel] ?? EMPTY_SUMMARY;
-  }, [activePanel, performanceData]);
+  const summaryByPanel = useMemo(
+    () =>
+      new Map<PerformancePanelKey, PerformanceSummary>(
+        PERFORMANCE_PANELS.map((key) => [
+          key,
+          key === "score"
+            ? scoreSummary(performanceData)
+            : (performanceData.summaries[key] ?? EMPTY_SUMMARY),
+        ]),
+      ),
+    [performanceData],
+  );
+  const activeSummary = summaryByPanel.get(activePanel) ?? EMPTY_SUMMARY;
   const activeValue = activeSummary.p75 ?? activeSummary.avg;
 
   const chartPoints = useMemo(
@@ -2565,14 +2627,6 @@ export function PerformanceClientPage({
   );
 
   const metricCards = useMemo<MetricCardModel[]>(() => {
-    const summaryByPanel = new Map<PerformancePanelKey, PerformanceSummary>(
-      PERFORMANCE_PANELS.map((key) => [
-        key,
-        key === "score"
-          ? scoreSummary(performanceData)
-          : (performanceData.summaries[key] ?? EMPTY_SUMMARY),
-      ]),
-    );
     return PERFORMANCE_PANELS.map((key) => {
       const summary = summaryByPanel.get(key) ?? EMPTY_SUMMARY;
       const value = summary.p75 ?? summary.avg;
@@ -2589,7 +2643,7 @@ export function PerformanceClientPage({
         score,
       };
     });
-  }, [locale, messages, performanceData]);
+  }, [locale, messages, summaryByPanel]);
 
   const pathRows = useMemo<PathPerformanceRow[]>(
     () =>

@@ -1,5 +1,6 @@
 import type { Feature, FeatureCollection, Geometry, Position } from "geojson";
-import isoCountries from "i18n-iso-countries";
+import isoCountries from "i18n-iso-countries/index.js";
+import englishCountryNames from "i18n-iso-countries/langs/en.json";
 
 import { resolveCountryLabel } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
@@ -12,6 +13,8 @@ export type CountriesFeatureCollection = FeatureCollection<
 
 export const WORLD_MAP_WIDTH = 960;
 export const WORLD_MAP_HEIGHT = 500;
+
+isoCountries.registerLocale(englishCountryNames);
 
 const WORLD_MAP_PADDING = 16;
 
