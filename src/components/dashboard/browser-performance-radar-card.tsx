@@ -82,7 +82,7 @@ export function BrowserPerformanceRadarCard({
   filters,
 }: BrowserPerformanceRadarCardProps) {
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
-  const { data: response, isFetching: loading } = useQuery({
+  const { data: response, isPending: loading } = useQuery({
     queryKey: [
       "dashboard",
       "browser-radar",
@@ -98,7 +98,7 @@ export function BrowserPerformanceRadarCard({
           Array.isArray(result.data) ? result.data : ([] as BrowserRadarItem[]),
         )
         .catch(emptyRadarUnlessAborted),
-    enabled: typeof window !== "undefined",
+    enabled: !import.meta.env.SSR,
   });
   const data = response ?? [];
 

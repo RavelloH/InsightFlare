@@ -387,7 +387,7 @@ export function BrowserCrossBreakdownGrid({
   filters,
 }: BrowserCrossBreakdownGridProps) {
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
-  const { data, isFetching } = useQuery({
+  const { data, isFetching, isPending } = useQuery({
     queryKey: [
       "dashboard",
       "browser-cross-breakdown",
@@ -401,13 +401,13 @@ export function BrowserCrossBreakdownGrid({
       fetchBrowserCrossBreakdown(siteId, window, filters, { signal }).catch(
         emptyBreakdownUnlessAborted,
       ),
-    enabled: typeof window !== "undefined",
+    enabled: !import.meta.env.SSR,
   });
   const breakdownData = useMemo(
     () => data ?? emptyBrowserCrossBreakdown(),
     [data],
   );
-  const loading = isFetching;
+  const loading = isPending || isFetching;
   const hydrated = data !== undefined;
 
   const operatingSystem = useMemo(

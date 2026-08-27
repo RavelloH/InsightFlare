@@ -45,7 +45,7 @@ export function DeviceShareOverview({
   filters,
 }: DeviceShareOverviewProps) {
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
-  const { data, isFetching } = useQuery({
+  const { data, isFetching, isPending } = useQuery({
     queryKey: [
       "dashboard",
       "device-share-overview",
@@ -69,7 +69,7 @@ export function DeviceShareOverview({
       ]);
       return { deviceTrend, osTrend };
     },
-    enabled: typeof window !== "undefined",
+    enabled: !import.meta.env.SSR,
   });
   const deviceTrend = useMemo(
     () => data?.deviceTrend ?? emptyTrend(),
@@ -110,7 +110,7 @@ export function DeviceShareOverview({
     [messages, osTrend.series],
   );
   const showOverlayLoading = isFetching && data !== undefined;
-  const showInitialLoading = isFetching && data === undefined;
+  const showInitialLoading = isPending;
 
   return (
     <div className="relative">

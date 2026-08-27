@@ -229,7 +229,7 @@ export function BrowserVersionBreakdownGrid({
   filters,
 }: BrowserVersionBreakdownGridProps) {
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
-  const { data, isFetching } = useQuery({
+  const { data, isFetching, isPending } = useQuery({
     queryKey: [
       "dashboard",
       "browser-version-breakdown",
@@ -245,7 +245,7 @@ export function BrowserVersionBreakdownGrid({
         versionLimit: 5,
         signal,
       }).catch(emptyBreakdownUnlessAborted),
-    enabled: typeof window !== "undefined",
+    enabled: !import.meta.env.SSR,
   });
   const breakdownData = useMemo(
     () => data ?? emptyBrowserVersionBreakdown(),
@@ -268,7 +268,7 @@ export function BrowserVersionBreakdownGrid({
       </div>
 
       <ContentSwitch
-        loading={isFetching && data === undefined}
+        loading={isPending}
         hasContent={browsers.length > 0}
         loadingLabel={messages.common.loading}
         emptyContent={<p>{messages.common.noData}</p>}

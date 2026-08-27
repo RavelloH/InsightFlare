@@ -198,7 +198,7 @@ export function CanIUseCompatCard({
       ]);
       return { searchIndex, hotFeatures, trendingFeatures };
     },
-    enabled: typeof window !== "undefined",
+    enabled: !import.meta.env.SSR,
     retry: false,
     staleTime: Infinity,
   });
@@ -230,7 +230,7 @@ export function CanIUseCompatCard({
         return emptyBreakdown();
       }
     },
-    enabled: typeof window !== "undefined",
+    enabled: !import.meta.env.SSR,
   });
   const browserData = browserDataQuery.data ?? emptyBreakdown();
   const browserLoading = browserDataQuery.isPending;
@@ -249,7 +249,7 @@ export function CanIUseCompatCard({
       fetch(`${CANIUSE_BASE}/feature/${selectedId}/`, { signal }).then(
         (response) => response.json() as Promise<CaniuseFeatureDetail>,
       ),
-    enabled: typeof window !== "undefined" && Boolean(selectedId),
+    enabled: !import.meta.env.SSR && Boolean(selectedId),
     retry: false,
     staleTime: Infinity,
   });
@@ -286,7 +286,7 @@ export function CanIUseCompatCard({
         ),
       );
     },
-    enabled: typeof window !== "undefined" && previewIds.length > 0,
+    enabled: !import.meta.env.SSR && previewIds.length > 0,
     retry: false,
     staleTime: Infinity,
   });

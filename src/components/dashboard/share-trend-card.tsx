@@ -314,7 +314,7 @@ export const ShareTrendCard = memo(function ShareTrendCard({
       ),
       dataWindow: currentDataWindow,
     }),
-    enabled: typeof window !== "undefined",
+    enabled: !import.meta.env.SSR,
     placeholderData: keepPreviousData,
   });
   const loading = isPending || isFetching;

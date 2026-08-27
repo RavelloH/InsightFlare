@@ -348,7 +348,7 @@ export function DeviceCrossBreakdownGrid({
         return { browserData: emptyDimension(), osData: emptyDimension() };
       }
     },
-    enabled: typeof window !== "undefined",
+    enabled: !import.meta.env.SSR,
   });
   const browserData = useMemo(
     () => crossBreakdownQuery.data?.browserData ?? emptyDimension(),

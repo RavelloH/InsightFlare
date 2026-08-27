@@ -39,7 +39,7 @@ export function BrowserShareOverview({
   filters,
 }: BrowserShareOverviewProps) {
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
-  const { data, isFetching } = useQuery({
+  const { data, isFetching, isPending } = useQuery({
     queryKey: [
       "dashboard",
       "browser-share-overview",
@@ -62,7 +62,7 @@ export function BrowserShareOverview({
       ]);
       return { browserTrend, engineTrend };
     },
-    enabled: typeof window !== "undefined",
+    enabled: !import.meta.env.SSR,
   });
   const browserTrend = useMemo(
     () => data?.browserTrend ?? emptyTrend(),
@@ -93,7 +93,7 @@ export function BrowserShareOverview({
     [engineTrend.series],
   );
   const showOverlayLoading = isFetching && data !== undefined;
-  const showInitialLoading = isFetching && data === undefined;
+  const showInitialLoading = isPending;
 
   return (
     <div className="relative">
