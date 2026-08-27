@@ -971,6 +971,7 @@ export function RetentionClientPage({
     data: payload,
     isError: error,
     isFetching: loading,
+    isPending,
   } = useQuery({
     queryKey: [
       "dashboard",
@@ -987,6 +988,8 @@ export function RetentionClientPage({
       fetchRetention(siteId, timeWindow, filters, { granularity, signal }),
     enabled: typeof window !== "undefined",
   });
+  const initialLoading = isPending && payload === undefined;
+  const resolvedLoading = loading || initialLoading;
 
   const viewModel = useMemo(
     () =>
@@ -1000,8 +1003,8 @@ export function RetentionClientPage({
       ),
     [payload, locale, messages, labels, granularity, timeWindow],
   );
-  const isEmpty = !loading && !error && viewModel.cohorts.length === 0;
-  const bodyState = loading
+  const isEmpty = !resolvedLoading && !error && viewModel.cohorts.length === 0;
+  const bodyState = resolvedLoading
     ? "loading"
     : error
       ? "error"
@@ -1016,12 +1019,12 @@ export function RetentionClientPage({
         subtitle={messages.retention.subtitle}
       />
 
-      {loading || (!error && !isEmpty) ? (
+      {resolvedLoading || (!error && !isEmpty) ? (
         <RetentionSummaryGrid
           locale={locale}
           labels={labels}
           viewModel={viewModel}
-          loading={loading}
+          loading={resolvedLoading}
         />
       ) : null}
 
@@ -1031,7 +1034,7 @@ export function RetentionClientPage({
         type="fade"
         presenceMode="wait"
       >
-        {loading ? (
+        {resolvedLoading ? (
           <RetentionLoading shape={loadingShape} />
         ) : error ? (
           <RetentionStateCard
