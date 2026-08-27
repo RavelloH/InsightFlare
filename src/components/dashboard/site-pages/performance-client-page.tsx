@@ -982,6 +982,7 @@ function createIsolatedTrendDot(
         : points.findIndex(
             (point) => point.timestampMs === payload?.timestampMs,
           );
+    const dotKey = `${seriesKey}-${typeof index === "number" ? index : (payload?.timestampMs ?? "unknown")}`;
 
     if (
       pointIndex < 0 ||
@@ -989,10 +990,10 @@ function createIsolatedTrendDot(
       !Number.isFinite(cx) ||
       !Number.isFinite(cy)
     ) {
-      return <g />;
+      return <g key={dotKey} />;
     }
 
-    return <circle cx={cx} cy={cy} r={3.2} fill={color} />;
+    return <circle key={dotKey} cx={cx} cy={cy} r={3.2} fill={color} />;
   };
 }
 
