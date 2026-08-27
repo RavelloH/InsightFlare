@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { RiShareForwardLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -316,168 +316,171 @@ interface ReferrerPerformanceRadarCardProps {
   filters: FilterDocument;
 }
 
-export function ReferrerPerformanceRadarCard({
-  locale,
-  messages,
-  siteId,
-  window: tw,
-  filters,
-}: ReferrerPerformanceRadarCardProps) {
-  const [metadataByReferrer, setMetadataByReferrer] = useState<
-    Record<string, ReferrerMetadata | null | undefined>
-  >({});
-  const radarQuery = useQuery({
-    queryKey: [
-      "dashboard",
-      "referrer-performance-radar",
-      siteId,
-      tw.from,
-      tw.to,
-      tw.timeZone,
-      filters,
-    ],
-    queryFn: async ({ signal }) => {
-      try {
-        const response = await fetchReferrerRadar(siteId, tw, filters, {
-          limit: 24,
-          signal,
-        });
-        return Array.isArray(response.data) ? response.data.slice(0, 24) : [];
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") throw error;
-        return [] as ReferrerRadarItem[];
+export const ReferrerPerformanceRadarCard = memo(
+  function ReferrerPerformanceRadarCard({
+    locale,
+    messages,
+    siteId,
+    window: tw,
+    filters,
+  }: ReferrerPerformanceRadarCardProps) {
+    const [metadataByReferrer, setMetadataByReferrer] = useState<
+      Record<string, ReferrerMetadata | null | undefined>
+    >({});
+    const radarQuery = useQuery({
+      queryKey: [
+        "dashboard",
+        "referrer-performance-radar",
+        siteId,
+        tw.from,
+        tw.to,
+        tw.timeZone,
+        filters,
+      ],
+      queryFn: async ({ signal }) => {
+        try {
+          const response = await fetchReferrerRadar(siteId, tw, filters, {
+            limit: 24,
+            signal,
+          });
+          return Array.isArray(response.data) ? response.data.slice(0, 24) : [];
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError")
+            throw error;
+          return [] as ReferrerRadarItem[];
+        }
+      },
+      enabled: typeof window !== "undefined",
+    });
+    const data = radarQuery.data ?? [];
+    const loading = radarQuery.isPending;
+
+    useEffect(() => {
+      let active = true;
+      const nextMetadataState: Record<
+        string,
+        ReferrerMetadata | null | undefined
+      > = {};
+
+      for (const item of data) {
+        const normalized = normalizeReferrerLabel(item.referrer, "").trim();
+        if (!normalized) {
+          nextMetadataState[item.referrer] = null;
+          continue;
+        }
+        nextMetadataState[item.referrer] = referrerMetadataCache.has(normalized)
+          ? referrerMetadataCache.get(normalized)
+          : undefined;
       }
-    },
-    enabled: typeof window !== "undefined",
-  });
-  const data = radarQuery.data ?? [];
-  const loading = radarQuery.isPending;
 
-  useEffect(() => {
-    let active = true;
-    const nextMetadataState: Record<
-      string,
-      ReferrerMetadata | null | undefined
-    > = {};
+      setMetadataByReferrer(nextMetadataState);
 
-    for (const item of data) {
-      const normalized = normalizeReferrerLabel(item.referrer, "").trim();
-      if (!normalized) {
-        nextMetadataState[item.referrer] = null;
-        continue;
-      }
-      nextMetadataState[item.referrer] = referrerMetadataCache.has(normalized)
-        ? referrerMetadataCache.get(normalized)
-        : undefined;
-    }
-
-    setMetadataByReferrer(nextMetadataState);
-
-    for (const item of data) {
-      const normalized = normalizeReferrerLabel(item.referrer, "").trim();
-      if (!normalized || referrerMetadataCache.has(normalized)) continue;
-      void fetchReferrerMetadata(item.referrer).then((metadata) => {
-        if (!active) return;
-        setMetadataByReferrer((current) => {
-          if (!(item.referrer in current)) return current;
-          return {
-            ...current,
-            [item.referrer]: metadata,
-          };
+      for (const item of data) {
+        const normalized = normalizeReferrerLabel(item.referrer, "").trim();
+        if (!normalized || referrerMetadataCache.has(normalized)) continue;
+        void fetchReferrerMetadata(item.referrer).then((metadata) => {
+          if (!active) return;
+          setMetadataByReferrer((current) => {
+            if (!(item.referrer in current)) return current;
+            return {
+              ...current,
+              [item.referrer]: metadata,
+            };
+          });
         });
-      });
-    }
+      }
 
-    return () => {
-      active = false;
-    };
-  }, [data]);
+      return () => {
+        active = false;
+      };
+    }, [data]);
 
-  const metricLabels = useMemo(
-    () => ({
-      duration: messages.referrers.radarDuration,
-      engagement: messages.referrers.radarEngagement,
-      depth: messages.referrers.radarDepth,
-      loyalty: messages.referrers.radarLoyalty,
-      frequency: messages.referrers.radarFrequency,
-      traffic: messages.referrers.radarTraffic,
-    }),
-    [messages],
-  );
+    const metricLabels = useMemo(
+      () => ({
+        duration: messages.referrers.radarDuration,
+        engagement: messages.referrers.radarEngagement,
+        depth: messages.referrers.radarDepth,
+        loyalty: messages.referrers.radarLoyalty,
+        frequency: messages.referrers.radarFrequency,
+        traffic: messages.referrers.radarTraffic,
+      }),
+      [messages],
+    );
 
-  const maxByMetric = useMemo(() => {
-    const result = {} as Record<PerformanceRadarMetricKey, number>;
-    for (const key of PERFORMANCE_RADAR_METRIC_KEYS) {
-      result[key] = Math.max(...data.map((item) => item.metrics[key]), 0);
-    }
-    return result;
-  }, [data]);
+    const maxByMetric = useMemo(() => {
+      const result = {} as Record<PerformanceRadarMetricKey, number>;
+      for (const key of PERFORMANCE_RADAR_METRIC_KEYS) {
+        result[key] = Math.max(...data.map((item) => item.metrics[key]), 0);
+      }
+      return result;
+    }, [data]);
 
-  const hasContent = data.length > 0;
+    const hasContent = data.length > 0;
 
-  return (
-    <section className="space-y-4">
-      <div className="space-y-1">
-        <CardTitle className="inline-flex items-center gap-2">
-          <RiShareForwardLine className="size-4" />
-          {messages.referrers.radarTitle}
-        </CardTitle>
-        <p className="text-sm text-muted-foreground">
-          {messages.referrers.radarSubtitle}
-        </p>
-      </div>
-
-      <ContentSwitch
-        loading={loading}
-        hasContent={hasContent}
-        loadingLabel={messages.common.loading}
-        emptyContent={<p>{messages.common.noData}</p>}
-        minHeightClassName="min-h-[320px]"
-      >
-        <div className="grid gap-4 md:grid-cols-2">
-          {data.map((item, index) => {
-            const color = CHART_COLORS[index % CHART_COLORS.length];
-            const label = normalizeReferrerLabel(
-              item.referrer,
-              messages.overview.direct,
-            );
-            const metadata = metadataByReferrer[item.referrer];
-            const metadataLoading =
-              item.referrer.trim().length > 0 && metadata === undefined;
-
-            return (
-              <Card
-                key={`${item.referrer || "__direct__"}-${index}`}
-                size="sm"
-                className="h-full"
-              >
-                <CardContent className="grid min-w-0 grid-cols-[minmax(0,1fr)_152px] items-stretch gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
-                  <ReferrerMetadataPanel
-                    label={label}
-                    metadata={metadata}
-                    loading={metadataLoading}
-                    direct={item.referrer.trim().length === 0}
-                    locale={locale}
-                    messages={messages}
-                  />
-                  <div className="flex min-w-0 items-center justify-center">
-                    <div className="size-[152px] max-w-full sm:size-[220px]">
-                      <PerformanceRadarChart
-                        itemLabel={label}
-                        metrics={item.metrics}
-                        maxByMetric={maxByMetric}
-                        metricLabels={metricLabels}
-                        color={color}
-                        locale={locale}
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+    return (
+      <section className="space-y-4">
+        <div className="space-y-1">
+          <CardTitle className="inline-flex items-center gap-2">
+            <RiShareForwardLine className="size-4" />
+            {messages.referrers.radarTitle}
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            {messages.referrers.radarSubtitle}
+          </p>
         </div>
-      </ContentSwitch>
-    </section>
-  );
-}
+
+        <ContentSwitch
+          loading={loading}
+          hasContent={hasContent}
+          loadingLabel={messages.common.loading}
+          emptyContent={<p>{messages.common.noData}</p>}
+          minHeightClassName="min-h-[320px]"
+        >
+          <div className="grid gap-4 md:grid-cols-2">
+            {data.map((item, index) => {
+              const color = CHART_COLORS[index % CHART_COLORS.length];
+              const label = normalizeReferrerLabel(
+                item.referrer,
+                messages.overview.direct,
+              );
+              const metadata = metadataByReferrer[item.referrer];
+              const metadataLoading =
+                item.referrer.trim().length > 0 && metadata === undefined;
+
+              return (
+                <Card
+                  key={`${item.referrer || "__direct__"}-${index}`}
+                  size="sm"
+                  className="h-full"
+                >
+                  <CardContent className="grid min-w-0 grid-cols-[minmax(0,1fr)_152px] items-stretch gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
+                    <ReferrerMetadataPanel
+                      label={label}
+                      metadata={metadata}
+                      loading={metadataLoading}
+                      direct={item.referrer.trim().length === 0}
+                      locale={locale}
+                      messages={messages}
+                    />
+                    <div className="flex min-w-0 items-center justify-center">
+                      <div className="size-[152px] max-w-full sm:size-[220px]">
+                        <PerformanceRadarChart
+                          itemLabel={label}
+                          metrics={item.metrics}
+                          maxByMetric={maxByMetric}
+                          metricLabels={metricLabels}
+                          color={color}
+                          locale={locale}
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </ContentSwitch>
+      </section>
+    );
+  },
+);

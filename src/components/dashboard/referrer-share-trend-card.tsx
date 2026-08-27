@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { DIRECT_REFERRER_FILTER_VALUE } from "@/components/dashboard/referrer-utils";
@@ -153,6 +153,8 @@ function ReferrerTrendPanel({
   );
 }
 
-export function ReferrerShareTrendCard(props: ReferrerShareTrendCardProps) {
+export const ReferrerShareTrendCard = memo(function ReferrerShareTrendCard(
+  props: ReferrerShareTrendCardProps,
+) {
   return <ReferrerTrendPanel {...props} />;
-}
+});

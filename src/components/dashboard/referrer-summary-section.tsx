@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { RiShareForwardLine } from "@remixicon/react";
 
 import { ContentSwitch } from "@/components/dashboard/content-switch";
@@ -28,7 +28,7 @@ function SummaryMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function ReferrerSummarySection({
+export const ReferrerSummarySection = memo(function ReferrerSummarySection({
   locale,
   messages,
   rowsByTab,
@@ -231,4 +231,4 @@ export function ReferrerSummarySection({
       </ContentSwitch>
     </section>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { RiPriceTag3Line } from "@remixicon/react";
 
 import {
@@ -45,7 +45,7 @@ const CAMPAIGN_BREAKDOWN_GROUPS: Array<{
   },
 ];
 
-export function CampaignBreakdownCard({
+export const CampaignBreakdownCard = memo(function CampaignBreakdownCard({
   locale,
   messages,
   loadRows,
@@ -220,4 +220,4 @@ export function CampaignBreakdownCard({
       </div>
     </section>
   );
-}
+});

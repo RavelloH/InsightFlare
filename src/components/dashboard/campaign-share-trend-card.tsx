@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 
 import { type CampaignTab } from "@/components/dashboard/campaign-utils";
 import {
@@ -53,7 +53,9 @@ function CampaignTrendPanel({
   );
 }
 
-export function CampaignShareTrendCard(props: CampaignShareTrendCardProps) {
+export const CampaignShareTrendCard = memo(function CampaignShareTrendCard(
+  props: CampaignShareTrendCardProps,
+) {
   const panels: Array<{
     tab: CampaignTab;
     title: string;
@@ -91,4 +93,4 @@ export function CampaignShareTrendCard(props: CampaignShareTrendCardProps) {
       ))}
     </div>
   );
-}
+});

@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { ShareTrendCard } from "@/components/dashboard/share-trend-card";
 import { fetchPagesShareTrend } from "@/lib/dashboard/client-data";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -13,7 +15,7 @@ interface PagesShareTrendCardProps {
   filters: FilterDocument;
 }
 
-export function PagesShareTrendCard({
+export const PagesShareTrendCard = memo(function PagesShareTrendCard({
   locale,
   messages,
   siteId,
@@ -34,4 +36,4 @@ export function PagesShareTrendCard({
       otherLabel={messages.pages.otherPages}
     />
   );
-}
+});

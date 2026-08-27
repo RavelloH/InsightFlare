@@ -1,4 +1,4 @@
-import { type MouseEvent, useMemo } from "react";
+import { memo, type MouseEvent, useMemo } from "react";
 import {
   RiArrowRightUpLine,
   RiSearchLine,
@@ -50,7 +50,7 @@ interface ReferrerBreakdownCardProps {
   showSourceLinkTab?: boolean;
 }
 
-export function ReferrerBreakdownCard({
+export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
   locale,
   messages,
   pathname,
@@ -294,4 +294,4 @@ export function ReferrerBreakdownCard({
       </div>
     </section>
   );
-}
+});

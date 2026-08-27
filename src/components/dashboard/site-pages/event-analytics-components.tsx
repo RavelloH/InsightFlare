@@ -555,7 +555,7 @@ function EventMetricCell({
   );
 }
 
-export function EventMetricGrid({
+export const EventMetricGrid = memo(function EventMetricGrid({
   locale,
   labels,
   summary,
@@ -624,9 +624,9 @@ export function EventMetricGrid({
       </CardContent>
     </Card>
   );
-}
+});
 
-export function EventTrendStackedBarCard({
+export const EventTrendStackedBarCard = memo(function EventTrendStackedBarCard({
   locale,
   labels,
   trend,
@@ -684,7 +684,7 @@ export function EventTrendStackedBarCard({
       </CardContent>
     </Card>
   );
-}
+});
 
 function SortIndicator({
   active,
@@ -1204,7 +1204,7 @@ const EventRecordsTable = memo(function EventRecordsTable({
   );
 });
 
-export function EventRecordsSection({
+export const EventRecordsSection = memo(function EventRecordsSection({
   locale,
   messages,
   labels,
@@ -1420,7 +1420,7 @@ export function EventRecordsSection({
       />
     </section>
   );
-}
+});
 
 export function EventFieldsCard({
   locale,
