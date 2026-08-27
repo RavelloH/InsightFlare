@@ -649,7 +649,6 @@ export const InlineMeta = memo(function InlineMeta({
         "inline-flex min-h-5 min-w-0 max-w-full items-center gap-1.5 align-middle leading-5",
         className,
       )}
-      title={label}
     >
       <span className="inline-flex size-4 shrink-0 items-center justify-center self-center [&>svg]:block">
         {icon}

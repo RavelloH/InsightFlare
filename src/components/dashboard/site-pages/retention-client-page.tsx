@@ -748,7 +748,6 @@ const RetentionCell = memo(function RetentionCell({
             className="flex h-8 w-16 items-center justify-center font-mono text-[11px] tabular-nums outline-none ring-0 transition-transform hover:scale-[1.035] focus-visible:ring-2 focus-visible:ring-ring/70"
             style={retentionCellStyle(cell.rate, cell.available)}
             aria-label={tooltip}
-            title={tooltip}
           >
             {percentFormat(locale, cell.rate)}
           </button>
