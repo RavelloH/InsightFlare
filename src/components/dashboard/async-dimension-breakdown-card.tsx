@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { Icon } from "@iconify/react";
 
 import {
@@ -9,7 +9,9 @@ import { LabelWithOptionalIcon } from "@/components/dashboard/referrer-utils";
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
+  type TabbedDataTableRowAdapter,
   type TabbedDataTableRowBase,
+  type TabbedDataTableSortState,
   type TabbedDataTableTab,
 } from "@/components/dashboard/tabbed-data-table-card";
 import { numberFormat } from "@/lib/dashboard/format";
@@ -219,6 +221,61 @@ export function AsyncDimensionBreakdownCard<T extends string>({
   const resolvedEmptyLabel = emptyLabel ?? messages.common.noData;
   const resolvedSecondaryMetricLabel =
     secondaryMetricLabel ?? messages.common.visitors;
+  const rowAdapter = useMemo<
+    TabbedDataTableRowAdapter<AsyncDimensionBreakdownRow, T, SortKey>
+  >(
+    () => ({
+      renderLabel: (row) => (
+        <AsyncDimensionRowLabel
+          locale={locale}
+          row={row}
+          emptyLabel={resolvedEmptyLabel}
+        />
+      ),
+      getSearchText: (row) => row.label,
+      getExportLabel: (row) => row.label,
+      getClassName: () => "hover:brightness-95",
+    }),
+    [locale, resolvedEmptyLabel],
+  );
+  const compareRows = useCallback(
+    (
+      left: AsyncDimensionBreakdownRow,
+      right: AsyncDimensionBreakdownRow,
+      { sort }: { sort: TabbedDataTableSortState<SortKey> },
+    ) => {
+      const primary =
+        (left[sort.key] - right[sort.key]) *
+        (sort.direction === "asc" ? 1 : -1);
+      if (primary !== 0) return primary;
+      if (right.views !== left.views) return right.views - left.views;
+      if (right.visitors !== left.visitors) {
+        return right.visitors - left.visitors;
+      }
+      return left.label.localeCompare(right.label);
+    },
+    [],
+  );
+  const labelColumnLabel = useCallback(
+    (tab: TabbedDataTableTab<T>) => tab.columnLabel ?? tab.label,
+    [],
+  );
+  const search = useMemo(
+    () => ({
+      actionLabel: messages.common.search,
+      placeholder: (tab: TabbedDataTableTab<T>) =>
+        formatI18nTemplate(messages.overview.searchInTab, {
+          tab: tab.label,
+        }),
+    }),
+    [messages.common.search, messages.overview.searchInTab],
+  );
+  const exportConfig = useMemo(
+    () => ({
+      labels: messages.common.tableExport,
+    }),
+    [messages.common.tableExport],
+  );
   const columns = useMemo<
     (
       tab: T,
@@ -264,45 +321,16 @@ export function AsyncDimensionBreakdownCard<T extends string>({
       requestKey={requestKey}
       rowsByTab={rowsByTab}
       loadingByTab={loadingByTab}
-      loadRows={loadRows ? (tab, signal) => loadRows(tab, signal) : undefined}
+      loadRows={loadRows}
       normalizeRows={normalizeRows}
-      rowAdapter={{
-        renderLabel: (row) => (
-          <AsyncDimensionRowLabel
-            locale={locale}
-            row={row}
-            emptyLabel={resolvedEmptyLabel}
-          />
-        ),
-        getSearchText: (row) => row.label,
-        getExportLabel: (row) => row.label,
-        getClassName: () => "hover:brightness-95",
-      }}
-      compareRows={(left, right, { sort }) => {
-        const primary =
-          (left[sort.key] - right[sort.key]) *
-          (sort.direction === "asc" ? 1 : -1);
-        if (primary !== 0) return primary;
-        if (right.views !== left.views) return right.views - left.views;
-        if (right.visitors !== left.visitors) {
-          return right.visitors - left.visitors;
-        }
-        return left.label.localeCompare(right.label);
-      }}
-      labelColumnLabel={(tab) => tab.columnLabel ?? tab.label}
+      rowAdapter={rowAdapter}
+      compareRows={compareRows}
+      labelColumnLabel={labelColumnLabel}
       loadingLabel={messages.common.loading}
       emptyLabel={resolvedEmptyLabel}
       className={className}
-      search={{
-        actionLabel: messages.common.search,
-        placeholder: (tab) =>
-          formatI18nTemplate(messages.overview.searchInTab, {
-            tab: tab.label,
-          }),
-      }}
-      export={{
-        labels: messages.common.tableExport,
-      }}
+      search={search}
+      export={exportConfig}
     />
   );
 }

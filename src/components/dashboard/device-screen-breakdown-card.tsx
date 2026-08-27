@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   RiArrowDownSLine,
   RiComputerLine,
@@ -11,6 +11,7 @@ import { ContentSwitch } from "@/components/dashboard/content-switch";
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
+  type TabbedDataTableSortState,
 } from "@/components/dashboard/tabbed-data-table-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,9 +62,12 @@ interface ScreenListItem extends BrowserTrendSeries {
   bucket: ScreenBucketKey;
 }
 
-function emptyTrend(): BrowserTrendData {
-  return { ok: true, interval: "day", series: [], data: [] };
-}
+const EMPTY_TREND: BrowserTrendData = {
+  ok: true,
+  interval: "day",
+  series: [],
+  data: [],
+};
 
 function formatScreenLabel(label: string): string {
   const parsed = parseScreenSizeLabel(label);
@@ -257,41 +261,58 @@ function ScreenValueListCard({
   );
   const rowsByTab = useMemo(() => ({ screenSize: items }), [items]);
   const loadingByTab = useMemo(() => ({ screenSize: loading }), [loading]);
+  const tabs = useMemo(
+    () =>
+      [
+        {
+          value: "screenSize" as const,
+          label: messages.common.screenSize,
+          columnLabel: messages.common.screenSize,
+          defaultSort: { key: "visitors" as const, direction: "desc" as const },
+        },
+      ] as const,
+    [messages.common.screenSize],
+  );
+  const rowAdapter = useMemo(
+    () => ({
+      renderLabel: (item: ScreenListItem) => (
+        <span className="font-mono break-words text-foreground">
+          {item.displayLabel}
+        </span>
+      ),
+      getSearchText: (item: ScreenListItem) => item.label,
+      getExportLabel: (item: ScreenListItem) => item.label,
+      getClassName: () => "hover:brightness-95",
+    }),
+    [],
+  );
+  const compareRows = useCallback(
+    (
+      left: ScreenListItem,
+      right: ScreenListItem,
+      { sort }: { sort: TabbedDataTableSortState<ScreenSortKey> },
+    ) => {
+      const primary =
+        (left[sort.key] - right[sort.key]) *
+        (sort.direction === "asc" ? 1 : -1);
+      if (primary !== 0) return primary;
+      if (right.views !== left.views) return right.views - left.views;
+      if (right.sessions !== left.sessions) {
+        return right.sessions - left.sessions;
+      }
+      return left.displayLabel.localeCompare(right.displayLabel);
+    },
+    [],
+  );
 
   return (
     <TabbedDataTableCard<ScreenListTab, ScreenListItem, ScreenSortKey>
-      tabs={[
-        {
-          value: "screenSize",
-          label: messages.common.screenSize,
-          columnLabel: messages.common.screenSize,
-          defaultSort: { key: "visitors", direction: "desc" },
-        },
-      ]}
+      tabs={tabs}
       rowsByTab={rowsByTab}
       loadingByTab={loadingByTab}
       columns={columns}
-      rowAdapter={{
-        renderLabel: (item) => (
-          <span className="font-mono break-words text-foreground">
-            {item.displayLabel}
-          </span>
-        ),
-        getSearchText: (item) => item.label,
-        getExportLabel: (item) => item.label,
-        getClassName: () => "hover:brightness-95",
-      }}
-      compareRows={(left, right, { sort }) => {
-        const primary =
-          (left[sort.key] - right[sort.key]) *
-          (sort.direction === "asc" ? 1 : -1);
-        if (primary !== 0) return primary;
-        if (right.views !== left.views) return right.views - left.views;
-        if (right.sessions !== left.sessions) {
-          return right.sessions - left.sessions;
-        }
-        return left.displayLabel.localeCompare(right.displayLabel);
-      }}
+      rowAdapter={rowAdapter}
+      compareRows={compareRows}
       loadingLabel={messages.common.loading}
       emptyLabel={messages.common.noData}
       headerHidden
@@ -511,12 +532,12 @@ export function DeviceScreenBreakdownCard({
         );
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") throw error;
-        return emptyTrend();
+        return EMPTY_TREND;
       }
     },
     enabled: typeof window !== "undefined",
   });
-  const screenTrend = screenTrendQuery.data ?? emptyTrend();
+  const screenTrend = screenTrendQuery.data ?? EMPTY_TREND;
   const loading = screenTrendQuery.isPending;
 
   const totalVisitors = useMemo(

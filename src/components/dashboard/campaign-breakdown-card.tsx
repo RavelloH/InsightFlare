@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { RiPriceTag3Line } from "@remixicon/react";
 
 import {
@@ -8,6 +8,8 @@ import {
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
+  type TabbedDataTableRowAdapter,
+  type TabbedDataTableSortState,
   type TabbedDataTableTab,
 } from "@/components/dashboard/tabbed-data-table-card";
 import { numberFormat } from "@/lib/dashboard/format";
@@ -108,6 +110,79 @@ export function CampaignBreakdownCard({
     ],
     [locale, messages.common.sessions, messages.common.views],
   );
+  const groupTabsByKey = useMemo(
+    () =>
+      Object.fromEntries(
+        CAMPAIGN_BREAKDOWN_GROUPS.map((group) => [
+          group.key,
+          group.tabs.map((tab) => tabMeta[tab]) as [
+            TabbedDataTableTab<CampaignTab>,
+            ...TabbedDataTableTab<CampaignTab>[],
+          ],
+        ]),
+      ) as Record<
+        CampaignBreakdownGroupKey,
+        [TabbedDataTableTab<CampaignTab>, ...TabbedDataTableTab<CampaignTab>[]]
+      >,
+    [tabMeta],
+  );
+  const rowAdapter = useMemo<
+    TabbedDataTableRowAdapter<
+      CampaignBreakdownRow,
+      CampaignTab,
+      CampaignSortKey
+    >
+  >(
+    () => ({
+      renderLabel: (row) => (
+        <span className={cn("break-words", row.mono && "font-mono")}>
+          {row.label}
+        </span>
+      ),
+      getSearchText: (row) => row.label,
+      getExportLabel: (row) => row.label,
+      getClassName: () => "hover:brightness-95",
+    }),
+    [],
+  );
+  const compareRows = useCallback(
+    (
+      left: CampaignBreakdownRow,
+      right: CampaignBreakdownRow,
+      { sort }: { sort: TabbedDataTableSortState<CampaignSortKey> },
+    ) => {
+      const primary =
+        (left[sort.key] - right[sort.key]) *
+        (sort.direction === "asc" ? 1 : -1);
+      if (primary !== 0) return primary;
+      if (right.views !== left.views) return right.views - left.views;
+      if (right.sessions !== left.sessions) {
+        return right.sessions - left.sessions;
+      }
+      return left.label.localeCompare(right.label);
+    },
+    [],
+  );
+  const labelColumnLabel = useCallback(
+    (tab: TabbedDataTableTab<CampaignTab>) => tab.columnLabel ?? tab.label,
+    [],
+  );
+  const search = useMemo(
+    () => ({
+      actionLabel: messages.common.search,
+      placeholder: (tab: TabbedDataTableTab<CampaignTab>) =>
+        formatI18nTemplate(messages.overview.searchInTab, {
+          tab: tab.label,
+        }),
+    }),
+    [messages.common.search, messages.overview.searchInTab],
+  );
+  const exportConfig = useMemo(
+    () => ({
+      labels: messages.common.tableExport,
+    }),
+    [messages.common.tableExport],
+  );
   return (
     <section className="space-y-3">
       <div className="space-y-1">
@@ -119,11 +194,6 @@ export function CampaignBreakdownCard({
 
       <div className="grid items-stretch gap-6 lg:grid-cols-2">
         {CAMPAIGN_BREAKDOWN_GROUPS.map((group) => {
-          const groupTabs = group.tabs.map((tab) => tabMeta[tab]) as [
-            TabbedDataTableTab<CampaignTab>,
-            ...TabbedDataTableTab<CampaignTab>[],
-          ];
-
           return (
             <div key={group.key} className="h-full min-w-0">
               <TabbedDataTableCard<
@@ -131,47 +201,18 @@ export function CampaignBreakdownCard({
                 CampaignBreakdownRow,
                 CampaignSortKey
               >
-                tabs={groupTabs}
+                tabs={groupTabsByKey[group.key]}
                 loadRows={loadRows}
                 requestKey={`${requestKey}:${group.key}`}
                 columns={columns}
-                rowAdapter={{
-                  renderLabel: (row) => (
-                    <span
-                      className={cn("break-words", row.mono && "font-mono")}
-                    >
-                      {row.label}
-                    </span>
-                  ),
-                  getSearchText: (row) => row.label,
-                  getExportLabel: (row) => row.label,
-                  getClassName: () => "hover:brightness-95",
-                }}
-                compareRows={(left, right, { sort }) => {
-                  const primary =
-                    (left[sort.key] - right[sort.key]) *
-                    (sort.direction === "asc" ? 1 : -1);
-                  if (primary !== 0) return primary;
-                  if (right.views !== left.views)
-                    return right.views - left.views;
-                  if (right.sessions !== left.sessions) {
-                    return right.sessions - left.sessions;
-                  }
-                  return left.label.localeCompare(right.label);
-                }}
+                rowAdapter={rowAdapter}
+                compareRows={compareRows}
+                labelColumnLabel={labelColumnLabel}
                 loadingLabel={messages.common.loading}
                 emptyLabel={messages.campaigns.noTaggedTraffic}
                 className="h-full min-h-[420px]"
-                search={{
-                  actionLabel: messages.common.search,
-                  placeholder: (tab) =>
-                    formatI18nTemplate(messages.overview.searchInTab, {
-                      tab: tab.label,
-                    }),
-                }}
-                export={{
-                  labels: messages.common.tableExport,
-                }}
+                search={search}
+                export={exportConfig}
               />
             </div>
           );
