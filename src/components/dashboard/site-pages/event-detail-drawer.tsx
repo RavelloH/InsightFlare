@@ -1,4 +1,5 @@
 import {
+  memo,
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
@@ -119,7 +120,7 @@ const EVENT_DETAIL_SKELETON_DATA: EventRecordDetail = {
   eventData: null,
 };
 
-function DetailItem({
+const DetailItem = memo(function DetailItem({
   label,
   value,
   loading = false,
@@ -159,7 +160,7 @@ function DetailItem({
       </dd>
     </div>
   );
-}
+});
 
 function hasValidEventCoordinate(
   latitude: number | null | undefined,
@@ -171,7 +172,7 @@ function hasValidEventCoordinate(
   return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
 }
 
-function EventRecordPayloadState({
+const EventRecordPayloadState = memo(function EventRecordPayloadState({
   detail,
   labels,
   loading,
@@ -209,9 +210,9 @@ function EventRecordPayloadState({
       </AutoTransition>
     </AutoResizer>
   );
-}
+});
 
-function EventRecordLocationMap({
+const EventRecordLocationMap = memo(function EventRecordLocationMap({
   locale,
   messages,
   context,
@@ -269,7 +270,7 @@ function EventRecordLocationMap({
       </AutoTransition>
     </AutoResizer>
   );
-}
+});
 
 function isInsideDetailDrawer(target: EventTarget | null) {
   return (
@@ -415,7 +416,7 @@ export interface EventDetailDrawerProps {
   zIndex?: number;
 }
 
-export function EventDetailDrawer({
+export const EventDetailDrawer = memo(function EventDetailDrawer({
   locale,
   messages,
   labels,
@@ -1302,7 +1303,7 @@ export function EventDetailDrawer({
       ))}
     </>
   );
-}
+});
 
 /** Backwards-compatible name used by the events analytics page. */
 export const EventRecordDetailDrawer = EventDetailDrawer;
