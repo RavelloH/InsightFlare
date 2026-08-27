@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import Map, { useControl } from "react-map-gl/maplibre";
 import { ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
@@ -59,7 +59,7 @@ function DeckOverlay(props: MapboxOverlayProps) {
   return null;
 }
 
-export function VisitorDetailMapStage({
+export const VisitorDetailMapStage = memo(function VisitorDetailMapStage({
   locale,
   theme,
   points,
@@ -115,4 +115,4 @@ export function VisitorDetailMapStage({
       </Map>
     </div>
   );
-}
+});

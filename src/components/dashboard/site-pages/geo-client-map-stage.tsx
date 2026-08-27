@@ -415,7 +415,7 @@ const DeckOverlay = memo(function DeckOverlay(props: MapboxOverlayProps) {
   return null;
 });
 
-export function GeoClientMapStage({
+export const GeoClientMapStage = memo(function GeoClientMapStage({
   locale,
   isMobile,
   points,
@@ -873,4 +873,4 @@ export function GeoClientMapStage({
       </AnimatePresence>
     </>
   );
-}
+});

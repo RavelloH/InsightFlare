@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { AsyncDimensionBreakdownCard } from "@/components/dashboard/async-dimension-breakdown-card";
@@ -67,7 +67,7 @@ function mapOverviewRows(
   });
 }
 
-export function PageDetailClientPage({
+export const PageDetailClientPage = memo(function PageDetailClientPage({
   locale,
   messages,
   siteId,
@@ -355,4 +355,4 @@ export function PageDetailClientPage({
       />
     </div>
   );
-}
+});

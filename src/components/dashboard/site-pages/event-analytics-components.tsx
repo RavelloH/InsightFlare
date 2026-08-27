@@ -1422,7 +1422,7 @@ export const EventRecordsSection = memo(function EventRecordsSection({
   );
 });
 
-export function EventFieldsCard({
+export const EventFieldsCard = memo(function EventFieldsCard({
   locale,
   labels,
   siteId,
@@ -2110,9 +2110,9 @@ export function EventFieldsCard({
       </ResponsiveDialog>
     </>
   );
-}
+});
 
-export function EventPageHeader({
+export const EventPageHeader = memo(function EventPageHeader({
   messages,
   title,
   subtitle,
@@ -2153,4 +2153,4 @@ export function EventPageHeader({
       }
     />
   );
-}
+});

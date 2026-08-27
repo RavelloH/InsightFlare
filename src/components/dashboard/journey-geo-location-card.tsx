@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   RiExternalLinkLine,
   RiInformationLine,
@@ -793,7 +793,7 @@ function JourneyGeoSelector({
   );
 }
 
-export function JourneyGeoLocationCard({
+export const JourneyGeoLocationCard = memo(function JourneyGeoLocationCard({
   locale,
   messages,
   title,
@@ -1019,4 +1019,4 @@ export function JourneyGeoLocationCard({
       </CardContent>
     </Card>
   );
-}
+});
