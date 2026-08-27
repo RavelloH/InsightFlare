@@ -34,6 +34,8 @@ const CLOSE_SCROLL_TOP_THRESHOLD = 2;
 const CLOSE_SCROLL_MAX_WAIT_MS = 900;
 const STACK_LIFT_PX = 28;
 const MAX_STACK_LIFT_DEPTH = 3;
+const POINTER_DRAG_THRESHOLD_PX = 6;
+const POINTER_GESTURE_RESET_MS = 500;
 
 let nextDetailDrawerInstanceId = 0;
 
@@ -113,6 +115,13 @@ export function DetailDrawer({
   const closeAnimationFrameRef = useRef<number | null>(null);
   const closeScrollFrameRef = useRef<number | null>(null);
   const closeScrollTimeoutRef = useRef<number | null>(null);
+  const pointerGestureRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+  const pointerGestureResetTimerRef = useRef<number | null>(null);
   const isPreparingCloseRef = useRef(false);
   const layerIdRef = useRef<string | null>(null);
   if (layerIdRef.current === null) {
@@ -355,75 +364,91 @@ export function DetailDrawer({
   }, [handleClose, isCloseInteractionDisabled, layerZIndex, rendered]);
 
   useEffect(() => {
-    if (
-      !rendered ||
-      isCloseInteractionDisabled ||
-      hasHigherFloatingLayer(layerZIndex)
-    ) {
-      return;
-    }
+    if (!rendered || isCloseInteractionDisabled) return;
 
-    let shouldSuppressClick = false;
-    let clickSuppressTimer: number | null = null;
-
-    const clearClickSuppression = () => {
-      if (clickSuppressTimer !== null) {
-        window.clearTimeout(clickSuppressTimer);
+    const clearPointerGesture = () => {
+      pointerGestureRef.current = null;
+      if (pointerGestureResetTimerRef.current !== null) {
+        window.clearTimeout(pointerGestureResetTimerRef.current);
+        pointerGestureResetTimerRef.current = null;
       }
-      clickSuppressTimer = window.setTimeout(() => {
-        shouldSuppressClick = false;
-        clickSuppressTimer = null;
-      }, 0);
     };
 
-    const isInsideContent = (target: EventTarget | null) => {
-      const content = contentRef.current;
-      return target instanceof Node && Boolean(content?.contains(target));
+    const handlePointerDown = (event: PointerEvent) => {
+      clearPointerGesture();
+      pointerGestureRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+      };
     };
 
-    const stopOutsideEvent = (event: Event) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      event.stopPropagation();
-    };
+    const handlePointerMove = (event: PointerEvent) => {
+      const gesture = pointerGestureRef.current;
+      if (!gesture || gesture.pointerId !== event.pointerId) return;
 
-    const handleOutsidePointerDown = (event: PointerEvent) => {
-      if (isInsideContent(event.target)) return;
-      if (hasHigherFloatingLayer(layerZIndex)) return;
-      shouldSuppressClick = true;
-      clearClickSuppression();
-      stopOutsideEvent(event);
-      handleClose();
-    };
-
-    const handleOutsideClick = (event: MouseEvent) => {
-      if (isInsideContent(event.target)) return;
-      if (hasHigherFloatingLayer(layerZIndex)) return;
-      if (shouldSuppressClick) {
-        stopOutsideEvent(event);
-        return;
+      const deltaX = event.clientX - gesture.startX;
+      const deltaY = event.clientY - gesture.startY;
+      if (
+        deltaX * deltaX + deltaY * deltaY >
+        POINTER_DRAG_THRESHOLD_PX * POINTER_DRAG_THRESHOLD_PX
+      ) {
+        gesture.moved = true;
       }
-      stopOutsideEvent(event);
-      handleClose();
     };
 
-    window.addEventListener("pointerdown", handleOutsidePointerDown, true);
-    window.addEventListener("click", handleOutsideClick, true);
+    const schedulePointerGestureReset = (pointerId: number) => {
+      if (pointerGestureResetTimerRef.current !== null) {
+        window.clearTimeout(pointerGestureResetTimerRef.current);
+      }
+
+      pointerGestureResetTimerRef.current = window.setTimeout(() => {
+        if (pointerGestureRef.current?.pointerId === pointerId) {
+          pointerGestureRef.current = null;
+        }
+        pointerGestureResetTimerRef.current = null;
+      }, POINTER_GESTURE_RESET_MS);
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const gesture = pointerGestureRef.current;
+      if (!gesture || gesture.pointerId !== event.pointerId) return;
+
+      schedulePointerGestureReset(event.pointerId);
+    };
+
+    const handlePointerCancel = (event: PointerEvent) => {
+      const gesture = pointerGestureRef.current;
+      if (!gesture || gesture.pointerId !== event.pointerId) return;
+
+      gesture.moved = true;
+      schedulePointerGestureReset(event.pointerId);
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("pointermove", handlePointerMove, true);
+    window.addEventListener("pointerup", handlePointerUp, true);
+    window.addEventListener("pointercancel", handlePointerCancel, true);
 
     return () => {
-      window.removeEventListener("pointerdown", handleOutsidePointerDown, true);
-      window.removeEventListener("click", handleOutsideClick, true);
-      if (clickSuppressTimer !== null) {
-        window.clearTimeout(clickSuppressTimer);
-      }
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("pointermove", handlePointerMove, true);
+      window.removeEventListener("pointerup", handlePointerUp, true);
+      window.removeEventListener("pointercancel", handlePointerCancel, true);
+      clearPointerGesture();
     };
-  }, [
-    detailDrawerLayers,
-    handleClose,
-    isCloseInteractionDisabled,
-    layerZIndex,
-    rendered,
-  ]);
+  }, [isCloseInteractionDisabled, rendered]);
+
+  const handleCloseFromOutside = useCallback(() => {
+    if (hasHigherFloatingLayer(layerZIndex)) return;
+    if (pointerGestureRef.current?.moved) {
+      pointerGestureRef.current = null;
+      return;
+    }
+    pointerGestureRef.current = null;
+    handleClose();
+  }, [handleClose, layerZIndex]);
 
   useEffect(() => {
     if (!isClosing) return;
@@ -483,7 +508,7 @@ export function DetailDrawer({
             layerId={layerId}
             open={!isClosing}
             zIndex={0}
-            onClick={handleClose}
+            onClick={handleCloseFromOutside}
           />
 
           <div className="fixed inset-y-0 z-10" style={contentAreaStyle}>
@@ -492,7 +517,7 @@ export function DetailDrawer({
               className="h-full min-h-0"
               contentClassName="min-h-0 overscroll-contain"
               scrollbarOptions={DETAIL_DRAWER_SCROLLBAR_OPTIONS}
-              onClick={handleClose}
+              onClick={handleCloseFromOutside}
             >
               <div className="pointer-events-none relative mx-auto flex max-w-[1400px] items-start gap-6 px-4 pb-[4em] pt-[8em] sm:px-5 md:px-6">
                 <motion.div
