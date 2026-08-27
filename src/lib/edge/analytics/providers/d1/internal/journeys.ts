@@ -14,6 +14,7 @@ import { queryGeoPointsFromD1 } from "./journey-geo-queries";
 import { queryVisitorsFromD1 } from "./journey-list-queries";
 
 export {
+  queryJourneyEventDetailFromD1,
   queryJourneyEventsForDetailFromD1,
   querySessionDetailFromD1,
   querySessionsForDetailFromD1,

@@ -10,6 +10,7 @@ import type {
   EventsSummaryData,
   EventsTrendData,
   EventTypeDetailData,
+  JourneyEventDetailData,
   OverviewClientDimensionTabsData as OverviewClientDimensionTabsResponse,
   OverviewData,
   OverviewGeoDimensionTabsData as OverviewGeoDimensionTabsResponse,
@@ -265,6 +266,10 @@ export function emptyEventAnalyticsContextCards(): EventTypeDetailData["cards"] 
 }
 
 export function emptyEventRecordDetail(): EventRecordDetailData {
+  return { ok: true, data: null };
+}
+
+export function emptyJourneyEventDetail(): JourneyEventDetailData {
   return { ok: true, data: null };
 }
 

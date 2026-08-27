@@ -8,6 +8,7 @@ import {
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { mapVisitors } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
 import {
+  queryJourneyEventDetailFromD1,
   querySessionDetailFromD1,
   queryVisitorDetailFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-detail-queries";
@@ -157,6 +158,24 @@ export async function readSiteSessionDetail(
     input.siteId,
     input.sessionId,
     input.window,
+  );
+  if (!result) throw new Error("resource-not-found");
+  return result;
+}
+
+export async function readSiteJourneyEventDetail(input: {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly eventId: string;
+  readonly eventKind?: "pageview" | "session_start" | "leave";
+}) {
+  const result = await queryJourneyEventDetailFromD1(
+    input.env,
+    input.siteId,
+    input.eventId,
+    input.window,
+    input.eventKind,
   );
   if (!result) throw new Error("resource-not-found");
   return result;

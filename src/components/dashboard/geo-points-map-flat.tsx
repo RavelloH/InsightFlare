@@ -47,6 +47,7 @@ interface GeoPointsMapProps {
   countryHoverEnabled?: boolean;
   pointColor?: [number, number, number];
   bordered?: boolean;
+  reuseMaps?: boolean;
   selectedCountryCode?: string | null;
   onCountrySelect?: (countryCode: string | null) => void;
 }
@@ -377,6 +378,7 @@ export function FlatGeoPointsMap({
   countryHoverEnabled = true,
   pointColor = MAP_ACCENT_RGB,
   bordered = true,
+  reuseMaps = false,
   selectedCountryCode,
   onCountrySelect,
 }: GeoPointsMapProps) {
@@ -747,6 +749,7 @@ export function FlatGeoPointsMap({
     >
       <Map
         ref={mapRef}
+        reuseMaps={reuseMaps}
         initialViewState={mapInitialViewState}
         mapStyle={mapStyle}
         attributionControl={false}

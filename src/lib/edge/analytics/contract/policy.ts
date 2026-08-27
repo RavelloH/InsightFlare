@@ -50,6 +50,7 @@ const ALL_OPERATIONS: readonly QueryOperation[] = [
   "event-context",
   "event-records",
   "event-record-detail",
+  "journey-event-detail",
   "visitors",
   "visitor-detail",
   "sessions",

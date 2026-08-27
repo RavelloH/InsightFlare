@@ -456,6 +456,14 @@ export const SiteEventDetailQueryDtoSchema = z
   })
   .strict();
 
+export const SiteJourneyEventDetailQueryDtoSchema = z
+  .object({
+    timeRange: AnalyticsTimeRangeInputDtoSchema,
+    eventId: z.string().min(1).max(512),
+    eventKind: z.enum(["pageview", "session_start", "leave"]).optional(),
+  })
+  .strict();
+
 export const SiteEventTypesQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
     search: z.string().min(1).max(160).optional(),
@@ -718,6 +726,12 @@ export type SiteEventDetailQueryDto = z.infer<
 >;
 export type SiteEventDetailQueryDtoInput = z.input<
   typeof SiteEventDetailQueryDtoSchema
+>;
+export type SiteJourneyEventDetailQueryDto = z.infer<
+  typeof SiteJourneyEventDetailQueryDtoSchema
+>;
+export type SiteJourneyEventDetailQueryDtoInput = z.input<
+  typeof SiteJourneyEventDetailQueryDtoSchema
 >;
 export type SiteEventTypesQueryDto = z.infer<
   typeof SiteEventTypesQueryDtoSchema

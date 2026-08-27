@@ -22,6 +22,7 @@ interface GeoPointsMapIslandProps {
   countryHoverEnabled?: boolean;
   pointColor?: [number, number, number];
   bordered?: boolean;
+  reuseMaps?: boolean;
   projectionMode?: "mercator" | "globe";
   autoRotate?: boolean;
   selectedCountryCode?: string | null;
@@ -50,7 +51,7 @@ type FlatGeoPointsMapProps = Omit<
 
 type GeoPointsMap3DProps = Omit<
   GeoPointsMapIslandProps,
-  "projectionMode" | "initialZoom"
+  "projectionMode" | "initialZoom" | "reuseMaps"
 >;
 
 const FlatGeoPointsMapClient = createIsomorphicFn()
@@ -90,6 +91,7 @@ export function GeoPointsMapIsland({
   initialZoom,
   projectionMode = "mercator",
   autoRotate,
+  reuseMaps,
   collapseOverlappingPointColors,
   pointCrossfadeEnabled,
   ...props
@@ -111,6 +113,7 @@ export function GeoPointsMapIsland({
           {...props}
           heightClassName="h-full"
           initialZoom={initialZoom}
+          reuseMaps={reuseMaps}
         />
       )}
     </div>

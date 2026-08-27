@@ -1297,6 +1297,27 @@ export const AnalyticsJourneyEventsResponseSchema = apiV1SuccessEnvelopeSchema(
   AnalyticsJourneyEventsDataSchema,
   ApiV1AnalyticsResponseMetaSchema,
 );
+const AnalyticsJourneyEventDetailEventSchema = AnalyticsEventRecordSchema.omit({
+  eventKind: true,
+})
+  .extend({
+    eventKind: z.enum(["pageview", "session_start", "leave"]),
+  })
+  .strict();
+export const AnalyticsJourneyEventDetailDataSchema = z
+  .object({
+    event: AnalyticsJourneyEventDetailEventSchema,
+    context: AnalyticsEventDetailDataSchema.shape.context,
+  })
+  .strict();
+export type AnalyticsJourneyEventDetailData = z.infer<
+  typeof AnalyticsJourneyEventDetailDataSchema
+>;
+export const AnalyticsJourneyEventDetailResponseSchema =
+  apiV1SuccessEnvelopeSchema(
+    AnalyticsJourneyEventDetailDataSchema,
+    ApiV1AnalyticsResponseMetaSchema,
+  );
 export const AnalyticsJourneySessionsDataSchema = z
   .object({ items: z.array(AnalyticsSessionSchema) })
   .strict();

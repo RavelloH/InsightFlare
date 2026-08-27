@@ -85,6 +85,7 @@ import {
   generateDemoFunnels,
 } from "@/lib/realtime/mock/funnels";
 import {
+  generateDemoJourneyEventDetail,
   generateDemoSessionDetail,
   generateDemoSessions,
   generateDemoVisitorDetail,
@@ -1081,6 +1082,12 @@ function handleDemoRequestInner(options: {
   }
   if (path.includes("/overview-geo-points")) {
     return generateDemoGeoPoints(siteId, params);
+  }
+  if (
+    path.includes("/journey-event-detail") ||
+    path.includes("/journey-events/detail")
+  ) {
+    return generateDemoJourneyEventDetail(siteId, params);
   }
   if (path.includes("/event-record-detail")) {
     return generateDemoEventRecordDetail(siteId, params);

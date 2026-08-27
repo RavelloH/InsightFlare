@@ -13,6 +13,7 @@ import {
   fetchEventTypeFieldValues,
   fetchFunnelDetail,
   fetchFunnels,
+  fetchJourneyEventDetail,
   fetchPerformance,
   fetchSessionDetail,
   fetchSessions,
@@ -26,6 +27,7 @@ import {
   emptyEventsSummary,
   emptyEventsTrend,
   emptyEventTypeDetail,
+  emptyJourneyEventDetail,
   emptyPerformance,
   emptySessionDetail,
   emptySessions,
@@ -491,6 +493,40 @@ describe("fetchEventRecordDetail", () => {
         signal: aborted.signal,
       }),
     ).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("fetchJourneyEventDetail", () => {
+  it("returns an empty detail without requesting an empty event id", async () => {
+    const result = await fetchJourneyEventDetail("site-1", "  ", "pageview");
+
+    expect(result).toEqual(emptyJourneyEventDetail());
+    expect(fetchPrivateJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards the event kind, time window, and parent identifiers", async () => {
+    fetchPrivateJsonMock.mockResolvedValueOnce(emptyJourneyEventDetail());
+    const controller = new AbortController();
+
+    await fetchJourneyEventDetail("site-1", "visit-1", "pageview", window, {
+      sessionId: "session-1",
+      visitId: "visit-1",
+      signal: controller.signal,
+    });
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/journey-event-detail",
+      {
+        siteId: "site-1",
+        eventId: "visit-1",
+        eventKind: "pageview",
+        from: 1000,
+        to: 2000,
+        sessionId: "session-1",
+        visitId: "visit-1",
+      },
+      { signal: controller.signal },
+    );
   });
 });
 

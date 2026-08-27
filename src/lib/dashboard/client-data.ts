@@ -26,6 +26,7 @@ export {
   fetchEventTypeFieldValues,
   fetchFunnelDetail,
   fetchFunnels,
+  fetchJourneyEventDetail,
   fetchOverview,
   fetchPages,
   fetchPerformance,

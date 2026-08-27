@@ -11,6 +11,7 @@ import {
   serializeVisitorListCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import {
+  queryJourneyEventDetailFromD1,
   querySessionDetailFromD1,
   queryVisitorDetailFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/journeys";
@@ -119,6 +120,21 @@ export function registerJourneyProviders(
                 : null,
             },
           },
+        };
+      }),
+    )
+    .register(
+      "journey-event-detail",
+      typedQueryProvider(async (input) => {
+        const request = query(input!);
+        return {
+          value: await queryJourneyEventDetailFromD1(
+            options.env,
+            options.siteId,
+            stringField(request, "eventId"),
+            timeWindow(request.time),
+            (stringField(request, "eventKind") || undefined) as never,
+          ),
         };
       }),
     )

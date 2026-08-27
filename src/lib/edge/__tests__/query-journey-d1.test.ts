@@ -25,6 +25,7 @@ import {
 import {
   queryGeoPointAggregate,
   queryGeoPointsFromD1,
+  queryJourneyEventDetailFromD1,
   queryJourneyEventsForDetailFromD1,
   queryJourneyEventsFromD1,
   querySessionDetailFromD1,
@@ -406,6 +407,198 @@ describe("edge journey detail D1 queries", () => {
     expect(calls[0]?.bindings).toEqual([siteId, "visitor-1", siteId]);
     expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
     expect(calls[0]?.sql).toContain("event_source AS MATERIALIZED");
+  });
+
+  it("ignores custom events without a session when grouping visitor details", async () => {
+    const { env } = createD1Env([
+      [visitorDetailVisitRow(), visitorDetailCustomEventRow({ sessionId: "" })],
+    ]);
+
+    await expect(
+      queryVisitorDetailFromD1(env, siteId, "visitor-1", "UTC"),
+    ).resolves.toMatchObject({
+      visitor: { visitorId: "visitor-1" },
+      sessions: [{ sessionId: "session-1", events: 0 }],
+      metrics: { totalEvents: 1 },
+    });
+  });
+
+  it("handles multi-view sessions and ties session ordering by id", async () => {
+    const { env } = createD1Env([
+      [
+        visitorDetailVisitRow({
+          visitId: "visit-a-1",
+          sessionId: "session-a",
+          startedAt: baseMs,
+        }),
+        visitorDetailVisitRow({
+          visitId: "visit-a-2",
+          sessionId: "session-a",
+          startedAt: baseMs + 1_000,
+        }),
+        visitorDetailVisitRow({
+          visitId: "visit-b-1",
+          sessionId: "session-b",
+          startedAt: baseMs,
+        }),
+      ],
+    ]);
+
+    const detail = await queryVisitorDetailFromD1(
+      env,
+      siteId,
+      "visitor-1",
+      "UTC",
+    );
+
+    expect(detail?.sessions).toEqual([
+      expect.objectContaining({ sessionId: "session-a", bounce: false }),
+      expect.objectContaining({ sessionId: "session-b", bounce: true }),
+    ]);
+  });
+
+  it("maps a pageview detail without custom event payload fields", async () => {
+    const { env, calls } = createD1Env([
+      [
+        visitorDetailVisitRow({
+          visitId: "visit-detail",
+          startedAt: baseMs + 10_000,
+        }),
+      ],
+    ]);
+
+    const detail = await queryJourneyEventDetailFromD1(
+      env,
+      siteId,
+      "visit-detail",
+      queryWindow(),
+      "pageview",
+    );
+
+    expect(detail).toMatchObject({
+      event: {
+        eventId: "visit-detail",
+        eventName: "pageview",
+        eventKind: "pageview",
+        occurredAt: baseMs + 10_000,
+        visitId: "visit-detail",
+        nodeCount: 0,
+        valueCount: 0,
+      },
+      context: {
+        visitId: "visit-detail",
+        sessionId: "session-1",
+        visitorId: "visitor-1",
+        pathname: "/home",
+        browser: "Chrome",
+      },
+    });
+    expect(detail).not.toHaveProperty("eventData");
+    expect(calls[0]?.bindings).toEqual([
+      siteId,
+      "visit-detail",
+      baseMs,
+      baseMs + 2 * 60 * 60 * 1000,
+    ]);
+  });
+
+  it("resolves session boundary details and rejects mismatched boundary ids", async () => {
+    const startEnv = createD1Env([[visitorDetailVisitRow()]]);
+    await expect(
+      queryJourneyEventDetailFromD1(
+        startEnv.env,
+        siteId,
+        "session-start:session-1",
+        queryWindow(),
+        "session_start",
+      ),
+    ).resolves.toMatchObject({
+      event: {
+        eventId: "session-start:session-1",
+        eventKind: "session_start",
+        visitId: "",
+      },
+      context: {
+        status: "complete",
+        durationMs: 40_000,
+      },
+    });
+
+    const leaveEnv = createD1Env([[visitorDetailVisitRow()]]);
+    await expect(
+      queryJourneyEventDetailFromD1(
+        leaveEnv.env,
+        siteId,
+        "session-leave:session-1",
+        queryWindow(),
+        "leave",
+      ),
+    ).resolves.toMatchObject({
+      event: {
+        eventId: "session-leave:session-1",
+        eventKind: "leave",
+        visitId: "visit-1",
+      },
+    });
+
+    await expect(
+      queryJourneyEventDetailFromD1(
+        createD1Env([[]]).env,
+        siteId,
+        "session-start:missing",
+        queryWindow(),
+        "session_start",
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      queryJourneyEventDetailFromD1(
+        createD1Env([[]]).env,
+        siteId,
+        "session-start:",
+        queryWindow(),
+        "session_start",
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      queryJourneyEventDetailFromD1(
+        createD1Env([[]]).env,
+        siteId,
+        "session-start:session-1",
+        queryWindow(),
+        "leave",
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it("applies the standard event window and active session status", async () => {
+    const activeEnv = createD1Env([
+      [visitorDetailVisitRow({ status: "open", endedAt: null })],
+    ]);
+    await expect(
+      queryJourneyEventDetailFromD1(
+        activeEnv.env,
+        siteId,
+        "session-start:session-1",
+        queryWindow(),
+        "session_start",
+      ),
+    ).resolves.toMatchObject({
+      context: { status: "open" },
+    });
+
+    const outsideWindow = createD1Env([[visitorDetailVisitRow()]]);
+    await expect(
+      queryJourneyEventDetailFromD1(
+        outsideWindow.env,
+        siteId,
+        "session-start:session-1",
+        {
+          ...queryWindow(),
+          endExclusiveMs: baseMs + 5_000,
+        },
+        "session_start",
+      ),
+    ).resolves.toBeNull();
   });
 
   it("returns null visitor detail from an empty shared source", async () => {

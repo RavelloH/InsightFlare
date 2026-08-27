@@ -368,7 +368,7 @@
     },
     {
       "id": "event_analysis",
-      "intent": "Analyze custom event volume, trends, records, and a selected event detail.",
+      "intent": "Analyze custom event volume, trends, records, and a selected event or journey-event detail.",
       "scope": "site",
       "requiredContext": [
         "site identifier",
@@ -379,7 +379,8 @@
         "site.analytics.eventsSummary",
         "site.analytics.eventsTimeseries",
         "site.analytics.eventsSearch",
-        "site.analytics.eventDetail"
+        "site.analytics.eventDetail",
+        "site.analytics.journeyEventDetail"
       ],
       "decisionBranches": [
         "Use summary and timeseries for aggregate questions; use search and detail only when record-level investigation is requested."

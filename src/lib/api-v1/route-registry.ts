@@ -42,6 +42,7 @@ import {
   SiteEventTypesQueryDtoSchema,
   SiteFilterValuesQueryDtoSchema,
   SiteFunnelAnalysisQueryDtoSchema,
+  SiteJourneyEventDetailQueryDtoSchema,
   SiteOverviewQueryDtoSchema,
   SitePagesQueryDtoSchema,
   SitePerformanceBreakdownDimensionSchema,
@@ -87,6 +88,7 @@ import {
   AnalyticsEventTypesResponseSchema,
   AnalyticsFilterValuesResponseSchema,
   AnalyticsFunnelAnalysisResponseSchema,
+  AnalyticsJourneyEventDetailResponseSchema,
   AnalyticsJourneyEventsResponseSchema,
   AnalyticsJourneySessionsResponseSchema,
   AnalyticsOverviewResponseSchema,
@@ -408,14 +410,17 @@ export interface ApiV1AnalyticsJourneyDetailsRouteDescriptor<
   readonly path: string;
   readonly operationId:
     | "site.analytics.visitorDetail"
-    | "site.analytics.sessionDetail";
+    | "site.analytics.sessionDetail"
+    | "site.analytics.journeyEventDetail";
   readonly scopes: readonly string[];
   readonly requestSchema:
     | typeof SiteVisitorDetailQueryDtoSchema
-    | typeof SiteSessionDetailQueryDtoSchema;
+    | typeof SiteSessionDetailQueryDtoSchema
+    | typeof SiteJourneyEventDetailQueryDtoSchema;
   readonly responseSchema:
     | typeof AnalyticsVisitorDetailResponseSchema
-    | typeof AnalyticsSessionDetailResponseSchema;
+    | typeof AnalyticsSessionDetailResponseSchema
+    | typeof AnalyticsJourneyEventDetailResponseSchema;
   readonly declaredErrors: readonly string[];
 }
 
@@ -1389,6 +1394,26 @@ export const apiV1AnalyticsJourneyDetailsRouteRegistry = [
       "unsupported_media_type",
     ],
   },
+  {
+    id: "site.analytics.journeyEventDetail",
+    lifecycle: "exposed",
+    method: "POST",
+    path: "/api/v1/sites/{siteId}/analytics/journey-events/detail",
+    operationId: "site.analytics.journeyEventDetail",
+    scopes: ["analytics:read"],
+    requestSchema: SiteJourneyEventDetailQueryDtoSchema,
+    responseSchema: AnalyticsJourneyEventDetailResponseSchema,
+    declaredErrors: [
+      "validation_failed",
+      "missing_scope",
+      "resource_not_found",
+      "deadline_exceeded",
+      "internal_error",
+      "method_not_allowed",
+      "not_acceptable",
+      "unsupported_media_type",
+    ],
+  },
 ] as const satisfies readonly ApiV1AnalyticsJourneyDetailsRouteDescriptor<string>[];
 
 export const apiV1AnalyticsJourneySearchRouteRegistry = [
@@ -1953,6 +1978,7 @@ export const apiV1BatchEligibleRouteIds = [
   "site.analytics.eventsTimeseries",
   "site.analytics.eventsSearch",
   "site.analytics.eventDetail",
+  "site.analytics.journeyEventDetail",
   "site.analytics.eventTypes",
   "site.analytics.eventTypeDetail",
   "site.analytics.eventFields",

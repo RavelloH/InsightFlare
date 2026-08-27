@@ -27,6 +27,8 @@ import {
   SiteEventTypesQueryDtoSchema,
   type SiteFilterValuesQueryDto,
   SiteFilterValuesQueryDtoSchema,
+  type SiteJourneyEventDetailQueryDto,
+  SiteJourneyEventDetailQueryDtoSchema,
   type SitePagesQueryDto,
   SitePagesQueryDtoSchema,
   type SitePerformanceBreakdownQueryDto,
@@ -160,6 +162,13 @@ export type SiteEventDetailReader = SiteListReader<
     readonly event: unknown;
     readonly context: unknown;
     readonly eventData: unknown;
+  }
+>;
+export type SiteJourneyEventDetailReader = SiteListReader<
+  SiteJourneyEventDetailQueryDto,
+  {
+    readonly event: unknown;
+    readonly context: unknown;
   }
 >;
 export type SiteEventTypesReader = SiteListReader<
@@ -796,6 +805,25 @@ export function handlePlannedSiteEventDetail(
     providerRegistry,
     execution,
     definitions,
+  );
+}
+
+/** Planned JourneyEvent detail adapter; custom events use eventDetail above. */
+export function handlePlannedSiteJourneyEventDetail(
+  request: Request,
+  principal: ApiKeyPrincipal,
+  siteId: string,
+  providerRegistry: AnalyticsProviderRegistry,
+  execution?: ExecutionContext,
+): Promise<Response> {
+  return handlePlannedSiteList(
+    request,
+    principal,
+    siteId,
+    SiteJourneyEventDetailQueryDtoSchema,
+    "site.analytics.journeyEventDetail",
+    providerRegistry,
+    execution,
   );
 }
 

@@ -24,6 +24,7 @@ import {
   handlePlannedSiteEventTypeDetail,
   handlePlannedSiteEventTypes,
   handlePlannedSiteFilterValues,
+  handlePlannedSiteJourneyEventDetail,
   handlePlannedSitePages,
   handlePlannedSitePerformanceBreakdown,
   handlePlannedSitePerformanceSummary,
@@ -402,6 +403,17 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       providerRegistry(c, "site.analytics.eventDetail"),
+      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+    );
+  });
+  routes.post("/sites/:siteId/analytics/journey-events/detail", (c) => {
+    const siteId = c.req.param("siteId");
+    if (!siteId) return deps.resourceNotFound(c);
+    return handlePlannedSiteJourneyEventDetail(
+      c.req.raw,
+      deps.resolvePrincipal(c),
+      siteId,
+      providerRegistry(c, "site.analytics.journeyEventDetail"),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });

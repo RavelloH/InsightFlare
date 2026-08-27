@@ -77,6 +77,7 @@ export type QueryOperation =
   | "event-context"
   | "event-records"
   | "event-record-detail"
+  | "journey-event-detail"
   | "visitors"
   | "visitor-detail"
   | "sessions"

@@ -345,6 +345,18 @@ export function executePrivateQuery(
         ),
     );
   }
+  if (input.pathname === "journey-event-detail") {
+    return import("../composition/protocol/journeys-contract-adapter").then(
+      ({ handleJourneyEventDetailContract }) =>
+        handleJourneyEventDetailContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
   if (input.pathname === "visitors") {
     return import("../composition/protocol/journeys-contract-adapter").then(
       ({ handleVisitorsContract }) =>

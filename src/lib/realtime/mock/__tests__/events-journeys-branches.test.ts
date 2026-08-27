@@ -7,6 +7,7 @@ import {
 } from "@/lib/realtime/mock/events";
 import type * as FactBuilder from "@/lib/realtime/mock/fact-builder";
 import {
+  generateDemoJourneyEventDetail,
   generateDemoSessionDetail,
   generateDemoSessions,
   generateDemoVisitorDetail,
@@ -277,6 +278,245 @@ describe("mock events and journeys branch coverage", () => {
     });
     expect(
       generateDemoSessionDetail("site", { sessionId: "missing-session" }),
+    ).toEqual({ ok: true, data: null });
+
+    expect(
+      generateDemoSessionDetail("demo-site-001", {
+        sessionId: "demo-site-001-demo-v-001-000001",
+        from: Date.now() - 60_000,
+        to: Date.now() + 60_000,
+      }),
+    ).toMatchObject({
+      ok: true,
+      data: {
+        session: { sessionId: "demo-site-001-demo-v-001-000001" },
+      },
+    });
+  });
+
+  it("builds standard journey event details without custom payload data", () => {
+    setFacts([
+      makeVisit({
+        visitId: "pageview-1",
+        sessionId: "session-1",
+        visitorId: "visitor-1",
+        startedAt: 1_000,
+        durationMs: 5_000,
+      }),
+    ]);
+
+    const result = generateDemoJourneyEventDetail("site", {
+      eventId: "pageview-1",
+      eventKind: "pageview",
+      from: 0,
+      to: 10_000,
+      sessionId: "session-1",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        event: {
+          eventId: "pageview-1",
+          eventName: "pageview",
+          eventKind: "pageview",
+          visitId: "pageview-1",
+          sessionId: "session-1",
+          nodeCount: 0,
+          valueCount: 0,
+        },
+        context: {
+          visitId: "pageview-1",
+          sessionId: "session-1",
+          visitorId: "visitor-1",
+          pathname: "/home",
+          durationMs: 5_000,
+        },
+      },
+    });
+    expect(result.data).not.toHaveProperty("eventData");
+  });
+
+  it("resolves boundary events and handles standard detail misses", () => {
+    setFacts([
+      makeVisit({
+        visitId: "pageview-older",
+        sessionId: "session-boundary",
+        startedAt: 1_000,
+        durationMs: 1_000,
+      }),
+      makeVisit({
+        visitId: "pageview-latest",
+        sessionId: "session-boundary",
+        startedAt: 3_000,
+        durationMs: 5_000,
+      }),
+    ]);
+
+    expect(generateDemoJourneyEventDetail("site", { eventId: "" })).toEqual({
+      ok: true,
+      data: null,
+    });
+    expect(
+      generateDemoJourneyEventDetail("site", {
+        eventId: undefined,
+      } as unknown as Record<string, string | number>),
+    ).toEqual({ ok: true, data: null });
+    expect(
+      generateDemoJourneyEventDetail("site", {
+        eventId: "pageview-latest",
+        eventKind: "custom",
+        from: 0,
+        to: 10_000,
+      }),
+    ).toEqual({ ok: true, data: null });
+    expect(
+      generateDemoJourneyEventDetail("site", {
+        eventId: "missing",
+        eventKind: "pageview",
+        from: 0,
+        to: 10_000,
+      }),
+    ).toEqual({ ok: true, data: null });
+    expect(
+      generateDemoJourneyEventDetail("site", {
+        eventId: "pageview-latest",
+        eventKind: "pageview",
+        from: 0,
+        to: 3_000,
+      }),
+    ).toEqual({ ok: true, data: null });
+
+    const pageview = generateDemoJourneyEventDetail("site", {
+      eventId: "pageview-latest",
+      from: 0,
+      to: 10_000,
+    });
+    expect(pageview).toMatchObject({
+      data: {
+        context: {
+          previousVisitId: "pageview-older",
+          previousVisitStartedAt: 1_000,
+        },
+      },
+    });
+
+    const start = generateDemoJourneyEventDetail("site", {
+      eventId: "session-start:session-boundary",
+      eventKind: "session_start",
+      from: 0,
+      to: 10_000,
+      sessionId: "session-boundary",
+    });
+    expect(start).toMatchObject({
+      data: {
+        event: { eventKind: "session_start", visitId: "" },
+        context: { status: "complete", durationMs: 6_000 },
+      },
+    });
+
+    const leave = generateDemoJourneyEventDetail("site", {
+      eventId: "session-leave:session-boundary",
+      eventKind: "leave",
+      from: 0,
+      to: 10_000,
+      sessionId: "session-boundary",
+    });
+    expect(leave).toMatchObject({
+      data: {
+        event: { eventKind: "leave", visitId: "pageview-latest" },
+        context: { status: "complete", durationMs: 6_000 },
+      },
+    });
+
+    const fallbackFrom = Date.now() - 60_000;
+    const fallback = generateDemoJourneyEventDetail("demo-site-001", {
+      eventId: "session-start:demo-site-001-demo-v-001-000001",
+      eventKind: "session_start",
+      from: fallbackFrom,
+      to: Date.now() + 60_000,
+      sessionId: "demo-site-001-demo-v-001-000001",
+    });
+    expect(fallback).toMatchObject({
+      ok: true,
+      data: { event: { eventKind: "session_start" } },
+    });
+  });
+
+  it("keeps standard details readable when optional visit fields are absent", () => {
+    const sparseVisit = {
+      ...makeVisit({
+        visitId: "sparse-pageview",
+        sessionId: "sparse-session",
+        startedAt: 1_000,
+        durationMs: 0,
+      }),
+      visitorId: undefined,
+      pathname: undefined,
+      title: undefined,
+      hostname: undefined,
+      referrerHost: undefined,
+      referrerUrl: undefined,
+      browser: undefined,
+      browserVersion: undefined,
+      osVersion: undefined,
+      deviceType: undefined,
+      language: undefined,
+      screenSize: undefined,
+      country: undefined,
+      regionCode: undefined,
+      regionName: undefined,
+      region: undefined,
+      cityName: undefined,
+      city: undefined,
+      continent: undefined,
+      timezone: undefined,
+      organization: undefined,
+      latitude: undefined,
+      longitude: undefined,
+      utmSource: undefined,
+      utmMedium: undefined,
+      utmCampaign: undefined,
+    } as unknown as DemoVisitFact;
+    setFacts([sparseVisit]);
+
+    expect(
+      generateDemoJourneyEventDetail("site", {
+        eventId: "sparse-pageview",
+        from: 0,
+        to: 10_000,
+      }),
+    ).toMatchObject({
+      ok: true,
+      data: {
+        event: {
+          eventId: "sparse-pageview",
+          visitorId: "",
+          pathname: "",
+          title: "",
+          hostname: "",
+          country: "",
+        },
+        context: {
+          visitorId: "",
+          userId: "",
+          userName: "",
+          screenWidth: null,
+          screenHeight: null,
+          previousVisitId: "",
+          previousVisitStartedAt: null,
+          postalCode: "undefined-global",
+        },
+      },
+    });
+
+    expect(
+      generateDemoJourneyEventDetail("site", {
+        eventId: "sparse-pageview",
+        eventKind: "leave",
+        from: 0,
+        to: 10_000,
+      }),
     ).toEqual({ ok: true, data: null });
   });
 

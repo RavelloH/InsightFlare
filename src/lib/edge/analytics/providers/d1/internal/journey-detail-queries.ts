@@ -1,3 +1,4 @@
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -172,6 +173,292 @@ ORDER BY occurredAt DESC, id DESC
       ...detailCustomEventSourceBindings(siteId),
     ])
   ).map(mapJourneyEventRow);
+}
+
+type JourneyEventDetailKind = Exclude<JourneyEventRow["kind"], "custom">;
+
+function nullableDetailNumber(
+  row: Record<string, unknown>,
+  key: string,
+): number | null {
+  if (row[key] === null || row[key] === undefined) return null;
+  const value = Number(row[key]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function detailBoolean(value: unknown): boolean {
+  return value === true || value === 1 || value === "1";
+}
+
+function journeyEventDetailContext(
+  event: JourneyEventRow,
+  row: Record<string, unknown> = {},
+  session?: SessionRow,
+) {
+  const text = (key: string, fallback: string): string => {
+    const value = row[key];
+    return value === null || value === undefined || value === ""
+      ? fallback
+      : String(value);
+  };
+  const number = (key: string, fallback: number): number => {
+    const value = Number(row[key]);
+    return Number.isFinite(value) ? value : fallback;
+  };
+
+  return {
+    visitId: text("visitId", event.visitId),
+    sessionId: text("sessionId", event.sessionId),
+    visitorId: text("visitorId", event.visitorId),
+    userId: text("userId", ""),
+    userName: text("userName", ""),
+    pathname: text("pathname", event.pathname),
+    queryString: text("queryString", ""),
+    hash: text("hash", event.hash),
+    title: text("title", event.title),
+    hostname: text("hostname", event.hostname),
+    referrerUrl: text("referrerUrl", event.referrerUrl),
+    referrerHost: text("referrerHost", event.referrerHost),
+    utmSource: text("utmSource", ""),
+    utmMedium: text("utmMedium", ""),
+    utmCampaign: text("utmCampaign", ""),
+    utmTerm: text("utmTerm", ""),
+    utmContent: text("utmContent", ""),
+    isEU: detailBoolean(row.isEU),
+    country: text("country", event.country),
+    region: text("region", event.region),
+    regionCode: text("regionCode", ""),
+    city: text("city", event.city),
+    continent: text("continent", ""),
+    latitude: nullableDetailNumber(row, "latitude"),
+    longitude: nullableDetailNumber(row, "longitude"),
+    postalCode: text("postalCode", ""),
+    metroCode: text("metroCode", ""),
+    timezone: text("timezone", ""),
+    organization: text("organization", ""),
+    browser: text("browser", event.browser),
+    browserVersion: text("browserVersion", event.browserVersion),
+    os: text("os", event.os),
+    osVersion: text("osVersion", event.osVersion),
+    deviceType: text("deviceType", event.deviceType),
+    userAgent: text("userAgent", ""),
+    language: text("language", ""),
+    screenWidth: event.screenWidth,
+    screenHeight: event.screenHeight,
+    status: session
+      ? session.active
+        ? "open"
+        : "complete"
+      : text("status", ""),
+    startedAt: session?.startedAt ?? number("startedAt", event.occurredAt),
+    previousVisitId: text("previousVisitId", ""),
+    previousVisitStartedAt: nullableDetailNumber(row, "previousVisitStartedAt"),
+    lastActivityAt:
+      session?.endedAt ?? number("lastActivityAt", event.occurredAt),
+    endedAt: session?.endedAt ?? nullableDetailNumber(row, "endedAt"),
+    finalizedAt: nullableDetailNumber(row, "finalizedAt"),
+    durationMs: session?.durationMs ?? nullableDetailNumber(row, "durationMs"),
+    durationSource: text("durationSource", ""),
+    exitReason: text("exitReason", ""),
+    performance: event.performance,
+  };
+}
+
+function journeyEventDetailRecord(event: JourneyEventRow) {
+  return {
+    eventId: event.id,
+    eventName: event.eventType,
+    eventKind: event.kind,
+    occurredAt: event.occurredAt,
+    receivedAt: event.occurredAt,
+    sequence: 0,
+    visitId: event.visitId,
+    sessionId: event.sessionId,
+    visitorId: event.visitorId,
+    pathname: event.pathname,
+    title: event.title,
+    hostname: event.hostname,
+    referrerHost: event.referrerHost,
+    country: event.country,
+    region: event.region,
+    browser: event.browser,
+    browserVersion: event.browserVersion,
+    os: event.os,
+    osVersion: event.osVersion,
+    deviceType: event.deviceType,
+    nodeCount: 0,
+    valueCount: 0,
+  };
+}
+
+function mapJourneyPageviewDetail(row: Record<string, unknown>): {
+  event: ReturnType<typeof journeyEventDetailRecord>;
+  context: ReturnType<typeof journeyEventDetailContext>;
+} {
+  const event = mapJourneyEventRow({
+    id: String(row.visitId ?? ""),
+    kind: "pageview",
+    eventType: "pageview",
+    occurredAt: Number(row.startedAt ?? 0),
+    visitId: row.visitId,
+    sessionId: row.sessionId,
+    visitorId: row.visitorId,
+    pathname: row.pathname,
+    hash: row.hash,
+    title: row.title,
+    hostname: row.hostname,
+    referrerHost: row.referrerHost,
+    referrerUrl: row.referrerUrl,
+    country: row.country,
+    region: row.region,
+    city: row.city,
+    browser: row.browser,
+    browserVersion: row.browserVersion,
+    os: row.os,
+    osVersion: row.osVersion,
+    deviceType: row.deviceType,
+    screenWidth: row.screenWidth,
+    screenHeight: row.screenHeight,
+    durationMs: row.durationMs,
+    perfTtfbMs: row.perfTtfbMs,
+    perfFcpMs: row.perfFcpMs,
+    perfLcpMs: row.perfLcpMs,
+    perfCls: row.perfCls,
+    perfInpMs: row.perfInpMs,
+  });
+  return {
+    event: journeyEventDetailRecord(event),
+    context: journeyEventDetailContext(event, row),
+  };
+}
+
+/**
+ * Resolve one standard JourneyEvent without touching custom event payloads.
+ * Pageviews use their visit id; session boundary events use the stable ids
+ * emitted by sessionStartEvent/sessionLeaveEvent.
+ */
+export async function queryJourneyEventDetailFromD1(
+  env: Env,
+  siteId: string,
+  eventId: string,
+  window: QueryWindow,
+  eventKind?: JourneyEventDetailKind,
+) {
+  if (!eventKind || eventKind === "pageview") {
+    const rows = await queryD1All<Record<string, unknown>>(
+      env,
+      `
+SELECT
+  v.visit_id AS visitId,
+  v.session_id AS sessionId,
+  v.visitor_id AS visitorId,
+  COALESCE(v.user_id, '') AS userId,
+  COALESCE(v.user_name, '') AS userName,
+  COALESCE(
+    (
+      SELECT pv.visit_id
+      FROM visits pv
+      WHERE pv.site_pk = v.site_pk
+        AND pv.session_id = v.session_id
+        AND pv.started_at < v.started_at
+      ORDER BY pv.started_at DESC, pv.visit_id DESC
+      LIMIT 1
+    ),
+    ''
+  ) AS previousVisitId,
+  (
+    SELECT pv.started_at
+    FROM visits pv
+    WHERE pv.site_pk = v.site_pk
+      AND pv.session_id = v.session_id
+      AND pv.started_at < v.started_at
+    ORDER BY pv.started_at DESC, pv.visit_id DESC
+    LIMIT 1
+  ) AS previousVisitStartedAt,
+  v.started_at AS startedAt,
+  v.last_activity_at AS lastActivityAt,
+  v.ended_at AS endedAt,
+  v.finalized_at AS finalizedAt,
+  v.duration_ms AS durationMs,
+  COALESCE(v.duration_source, '') AS durationSource,
+  COALESCE(v.exit_reason, '') AS exitReason,
+  v.pathname,
+  v.query_string AS queryString,
+  v.hash_fragment AS hash,
+  v.title,
+  v.hostname,
+  v.referrer_url AS referrerUrl,
+  v.referrer_host AS referrerHost,
+  v.utm_source AS utmSource,
+  v.utm_medium AS utmMedium,
+  v.utm_campaign AS utmCampaign,
+  v.utm_term AS utmTerm,
+  v.utm_content AS utmContent,
+  v.is_eu AS isEU,
+  v.country,
+  v.region,
+  v.region_code AS regionCode,
+  v.city,
+  v.continent,
+  v.latitude,
+  v.longitude,
+  v.postal_code AS postalCode,
+  v.metro_code AS metroCode,
+  v.timezone,
+  v.as_organization AS organization,
+  v.browser,
+  v.browser_version AS browserVersion,
+  v.os,
+  v.os_version AS osVersion,
+  v.device_type AS deviceType,
+  v.ua_raw AS userAgent,
+  v.language,
+  v.screen_width AS screenWidth,
+  v.screen_height AS screenHeight,
+  v.status,
+  v.perf_ttfb_ms AS perfTtfbMs,
+  v.perf_fcp_ms AS perfFcpMs,
+  v.perf_lcp_ms AS perfLcpMs,
+  v.perf_cls AS perfCls,
+  v.perf_inp_ms AS perfInpMs
+FROM visits v
+WHERE v.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+  AND v.visit_id = ?
+  AND v.started_at >= ?
+  AND v.started_at < ?
+LIMIT 1
+`,
+      [siteId, eventId, window.startMs, window.endExclusiveMs],
+    );
+    const pageview = rows[0];
+    if (pageview) return mapJourneyPageviewDetail(pageview);
+    if (eventKind === "pageview") return null;
+  }
+
+  const boundary = eventId.startsWith("session-start:")
+    ? { kind: "session_start" as const, prefix: "session-start:" }
+    : eventId.startsWith("session-leave:")
+      ? { kind: "leave" as const, prefix: "session-leave:" }
+      : null;
+  if (!boundary || (eventKind && eventKind !== boundary.kind)) return null;
+  const sessionId = eventId.slice(boundary.prefix.length);
+  if (!sessionId) return null;
+
+  const detail = await querySessionDetailFromD1(env, siteId, sessionId, window);
+  const event = detail?.events.find((candidate) => candidate.id === eventId);
+  if (
+    !detail ||
+    !event ||
+    event.kind === "custom" ||
+    event.occurredAt < window.startMs ||
+    event.occurredAt >= window.endExclusiveMs
+  ) {
+    return null;
+  }
+  return {
+    event: journeyEventDetailRecord(event),
+    context: journeyEventDetailContext(event, {}, detail.session),
+  };
 }
 
 type VisitorDetailSourceRow = Record<string, unknown> & {

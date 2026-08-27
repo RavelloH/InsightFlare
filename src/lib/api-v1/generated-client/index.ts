@@ -74,6 +74,8 @@ import {
   SiteFilterValuesQueryDtoSchema,
   type SiteFunnelAnalysisQueryDtoInput,
   SiteFunnelAnalysisQueryDtoSchema,
+  type SiteJourneyEventDetailQueryDtoInput,
+  SiteJourneyEventDetailQueryDtoSchema,
   type SiteOverviewQueryDto,
   SiteOverviewQueryDtoSchema,
   type SitePagesQueryDtoInput,
@@ -164,6 +166,8 @@ import {
   AnalyticsFilterValuesResponseSchema,
   type AnalyticsFunnelAnalysisData,
   AnalyticsFunnelAnalysisResponseSchema,
+  type AnalyticsJourneyEventDetailData,
+  AnalyticsJourneyEventDetailResponseSchema,
   type AnalyticsJourneyEventsData,
   AnalyticsJourneyEventsResponseSchema,
   type AnalyticsJourneySessionsData,
@@ -629,6 +633,11 @@ export interface ApiV1GeneratedClient {
     input: SiteEventDetailQueryDtoInput,
     options?: ApiV1GeneratedRequestOptions,
   ): Promise<ApiV1GeneratedResult<AnalyticsEventDetailData>>;
+  siteAnalyticsJourneyEventDetail(
+    siteId: string,
+    input: SiteJourneyEventDetailQueryDtoInput,
+    options?: ApiV1GeneratedRequestOptions,
+  ): Promise<ApiV1GeneratedResult<AnalyticsJourneyEventDetailData>>;
   siteAnalyticsEventTypes(
     siteId: string,
     input: SiteEventTypesQueryDtoInput,
@@ -1242,6 +1251,18 @@ export function createApiV1GeneratedClient(
         method: apiV1GeneratedRouteMethod("site.analytics.eventDetail"),
         body: parsed,
         responseSchema: AnalyticsEventDetailResponseSchema,
+        signal: options?.signal,
+      });
+    },
+    siteAnalyticsJourneyEventDetail(siteId, input, options) {
+      const parsed = SiteJourneyEventDetailQueryDtoSchema.parse(input);
+      return request(transport, {
+        path: apiV1GeneratedRoutePath("site.analytics.journeyEventDetail", {
+          siteId: siteId,
+        }),
+        method: apiV1GeneratedRouteMethod("site.analytics.journeyEventDetail"),
+        body: parsed,
+        responseSchema: AnalyticsJourneyEventDetailResponseSchema,
         signal: options?.signal,
       });
     },

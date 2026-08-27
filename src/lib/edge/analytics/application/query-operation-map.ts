@@ -32,6 +32,7 @@ export const API_V1_QUERY_OPERATION_MAP = {
   "site.analytics.eventsTimeseries": "event-trend",
   "site.analytics.eventsSearch": "event-records",
   "site.analytics.eventDetail": "event-record-detail",
+  "site.analytics.journeyEventDetail": "journey-event-detail",
   "site.analytics.eventTypes": "event-types",
   "site.analytics.eventTypeDetail": "event-type-detail",
   "site.analytics.eventFields": "event-fields",

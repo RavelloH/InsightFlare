@@ -34579,6 +34579,987 @@ paths:
         - analytics:read
       x-required-scopes: *a47
       x-api-v1-batch-eligible: true
+  /api/v1/sites/{siteId}/analytics/journey-events/detail:
+    post:
+      operationId: site.analytics.journeyEventDetail
+      summary: API v1 site analytics journeyEventDetail operation
+      description: Typed API v1 operation. Authenticate with an API key through the
+        BearerAuth security scheme.
+      tags:
+        - Analytics
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: siteId path parameter.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timeRange:
+                  oneOf:
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: absolute
+                        from:
+                          type: string
+                          maxLength: 64
+                          format: date-time
+                          pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                        to:
+                          type: string
+                          maxLength: 64
+                          format: date-time
+                          pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                        timeZone:
+                          type: string
+                          minLength: 1
+                          maxLength: 80
+                      required:
+                        - kind
+                        - from
+                        - to
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: preset
+                        preset:
+                          type: string
+                          enum:
+                            - today
+                            - yesterday
+                            - last_7_days
+                            - last_30_days
+                            - this_week
+                            - last_week
+                            - this_month
+                            - last_month
+                        timeZone:
+                          type: string
+                          minLength: 1
+                          maxLength: 80
+                      required:
+                        - kind
+                        - preset
+                      additionalProperties: false
+                eventId:
+                  type: string
+                  minLength: 1
+                  maxLength: 512
+                eventKind:
+                  type: string
+                  enum:
+                    - pageview
+                    - session_start
+                    - leave
+              required:
+                - timeRange
+                - eventId
+              additionalProperties: false
+            example:
+              timeRange:
+                kind: absolute
+                from: 2026-01-01T00:00:00Z
+                to: 2026-01-01T00:00:00Z
+                timeZone: example
+              eventId: example
+              eventKind: pageview
+      responses:
+        "200":
+          description: Successful response.
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      event:
+                        type: object
+                        properties:
+                          eventId:
+                            type: string
+                          eventName:
+                            type: string
+                          occurredAt:
+                            type: number
+                          receivedAt:
+                            type: number
+                          sequence:
+                            type: number
+                          visitId:
+                            type: string
+                          sessionId:
+                            type: string
+                          visitorId:
+                            type: string
+                          pathname:
+                            type: string
+                          title:
+                            type: string
+                          hostname:
+                            type: string
+                          referrerHost:
+                            type: string
+                          country:
+                            type: string
+                          region:
+                            type: string
+                          browser:
+                            type: string
+                          browserVersion:
+                            type: string
+                          os:
+                            type: string
+                          osVersion:
+                            type: string
+                          deviceType:
+                            type: string
+                          nodeCount:
+                            type: number
+                          valueCount:
+                            type: number
+                          eventKind:
+                            type: string
+                            enum:
+                              - pageview
+                              - session_start
+                              - leave
+                        required:
+                          - eventId
+                          - eventName
+                          - occurredAt
+                          - receivedAt
+                          - sequence
+                          - visitId
+                          - sessionId
+                          - visitorId
+                          - pathname
+                          - title
+                          - hostname
+                          - referrerHost
+                          - country
+                          - region
+                          - browser
+                          - browserVersion
+                          - os
+                          - osVersion
+                          - deviceType
+                          - nodeCount
+                          - valueCount
+                          - eventKind
+                        additionalProperties: false
+                      context:
+                        type: object
+                        properties:
+                          visitId:
+                            type: string
+                          sessionId:
+                            type: string
+                          visitorId:
+                            type: string
+                          userId:
+                            type: string
+                          userName:
+                            type: string
+                          pathname:
+                            type: string
+                          queryString:
+                            type: string
+                          hash:
+                            type: string
+                          title:
+                            type: string
+                          hostname:
+                            type: string
+                          referrerUrl:
+                            type: string
+                          referrerHost:
+                            type: string
+                          utmSource:
+                            type: string
+                          utmMedium:
+                            type: string
+                          utmCampaign:
+                            type: string
+                          utmTerm:
+                            type: string
+                          utmContent:
+                            type: string
+                          country:
+                            type: string
+                          region:
+                            type: string
+                          regionCode:
+                            type: string
+                          city:
+                            type: string
+                          continent:
+                            type: string
+                          latitude:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                          longitude:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                          postalCode:
+                            type: string
+                          metroCode:
+                            type: string
+                          timezone:
+                            type: string
+                          organization:
+                            type: string
+                          isEU:
+                            type: boolean
+                          browser:
+                            type: string
+                          browserVersion:
+                            type: string
+                          os:
+                            type: string
+                          osVersion:
+                            type: string
+                          deviceType:
+                            type: string
+                          userAgent:
+                            type: string
+                          language:
+                            type: string
+                          screenWidth:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                          screenHeight:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                          status:
+                            type: string
+                          startedAt:
+                            type: number
+                          previousVisitId:
+                            type: string
+                          previousVisitStartedAt:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                          lastActivityAt:
+                            type: number
+                          endedAt:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                          finalizedAt:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                          durationMs:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                          durationSource:
+                            type: string
+                          exitReason:
+                            type: string
+                          performance:
+                            type: object
+                            properties:
+                              ttfb:
+                                anyOf:
+                                  - type: number
+                                  - type: "null"
+                              fcp:
+                                anyOf:
+                                  - type: number
+                                  - type: "null"
+                              lcp:
+                                anyOf:
+                                  - type: number
+                                  - type: "null"
+                              cls:
+                                anyOf:
+                                  - type: number
+                                  - type: "null"
+                              inp:
+                                anyOf:
+                                  - type: number
+                                  - type: "null"
+                            required:
+                              - ttfb
+                              - fcp
+                              - lcp
+                              - cls
+                              - inp
+                            additionalProperties: false
+                        required:
+                          - visitId
+                          - sessionId
+                          - visitorId
+                          - pathname
+                          - title
+                          - hostname
+                          - referrerHost
+                          - country
+                          - region
+                          - browser
+                          - browserVersion
+                          - os
+                          - osVersion
+                          - deviceType
+                        additionalProperties: false
+                    required:
+                      - event
+                      - context
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                      generatedAt:
+                        type: string
+                        format: date-time
+                        pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                      timeRange:
+                        type: object
+                        properties:
+                          from:
+                            type: string
+                            format: date-time
+                            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                          to:
+                            type: string
+                            format: date-time
+                            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                          timeZone:
+                            type: string
+                            minLength: 1
+                        required:
+                          - from
+                          - to
+                          - timeZone
+                        additionalProperties: false
+                      source:
+                        type: string
+                        enum:
+                          - raw
+                          - rollup
+                          - realtime
+                          - mixed
+                          - mock
+                      accuracy:
+                        type: string
+                        enum:
+                          - exact
+                          - approximate
+                    required:
+                      - requestId
+                      - generatedAt
+                      - timeRange
+                      - source
+                      - accuracy
+                    additionalProperties: false
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+              example:
+                data:
+                  event:
+                    eventId: example
+                    eventName: example
+                    occurredAt: 0
+                    receivedAt: 0
+                    sequence: 0
+                    visitId: example
+                    sessionId: example
+                    visitorId: example
+                    pathname: example
+                    title: example
+                    hostname: example
+                    referrerHost: example
+                    country: example
+                    region: example
+                    browser: example
+                    browserVersion: example
+                    os: example
+                    osVersion: example
+                    deviceType: example
+                    nodeCount: 0
+                    valueCount: 0
+                    eventKind: pageview
+                  context:
+                    visitId: example
+                    sessionId: example
+                    visitorId: example
+                    userId: example
+                    userName: example
+                    pathname: example
+                    queryString: example
+                    hash: example
+                    title: example
+                    hostname: example
+                    referrerUrl: example
+                    referrerHost: example
+                    utmSource: example
+                    utmMedium: example
+                    utmCampaign: example
+                    utmTerm: example
+                    utmContent: example
+                    country: example
+                    region: example
+                    regionCode: example
+                    city: example
+                    continent: example
+                    latitude: 0
+                    longitude: 0
+                    postalCode: example
+                    metroCode: example
+                    timezone: example
+                    organization: example
+                    isEU: false
+                    browser: example
+                    browserVersion: example
+                    os: example
+                    osVersion: example
+                    deviceType: example
+                    userAgent: example
+                    language: example
+                    screenWidth: 0
+                    screenHeight: 0
+                    status: example
+                    startedAt: 0
+                    previousVisitId: example
+                    previousVisitStartedAt: 0
+                    lastActivityAt: 0
+                    endedAt: 0
+                    finalizedAt: 0
+                    durationMs: 0
+                    durationSource: example
+                    exitReason: example
+                    performance:
+                      ttfb: 0
+                      fcp: 0
+                      lcp: 0
+                      cls: 0
+                      inp: 0
+                meta:
+                  requestId: example
+                  generatedAt: 2026-01-01T00:00:00Z
+                  timeRange:
+                    from: 2026-01-01T00:00:00Z
+                    to: 2026-01-01T00:00:00Z
+                    timeZone: example
+                  source: raw
+                  accuracy: exact
+        "400":
+          description: "API v1 error: validation_failed."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: validation_failed
+                  message: Request validation failed.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "403":
+          description: "API v1 error: missing_scope."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: missing_scope
+                  message: The API key lacks the required scope.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "404":
+          description: "API v1 error: resource_not_found."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: resource_not_found
+                  message: Resource not found.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "405":
+          description: "API v1 error: method_not_allowed."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: method_not_allowed
+                  message: The HTTP method is not allowed for this route.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "406":
+          description: "API v1 error: not_acceptable."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: not_acceptable
+                  message: The requested response media type is not acceptable.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "415":
+          description: "API v1 error: unsupported_media_type."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: unsupported_media_type
+                  message: The request media type is unsupported.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "500":
+          description: "API v1 error: internal_error."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: internal_error
+                  message: An internal error occurred.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "504":
+          description: "API v1 error: deadline_exceeded."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                      retryable:
+                        type: boolean
+                      issues:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            path:
+                              type: string
+                            code:
+                              type: string
+                          required:
+                            - path
+                            - code
+                          additionalProperties: false
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  meta:
+                    type: object
+                    properties:
+                      requestId:
+                        type: string
+                        minLength: 1
+                    required:
+                      - requestId
+                    additionalProperties: false
+                required:
+                  - error
+                  - meta
+                additionalProperties: false
+              example:
+                error:
+                  code: deadline_exceeded
+                  message: The analytics query exceeded its deadline.
+                  retryable: true
+                meta:
+                  requestId: req_01J7EXAMPLE
+      x-api-v1-lifecycle: exposed
+      x-api-v1-scopes: &a48
+        - analytics:read
+      x-required-scopes: *a48
+      x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/visitors/search:
     post:
       operationId: site.analytics.visitorsSearch
@@ -34689,7 +35670,7 @@ paths:
                   minLength: 1
                   maxLength: 160
                 sort:
-                  default: &a48
+                  default: &a49
                     field: lastSeenAt
                     direction: desc
                   type: object
@@ -34711,7 +35692,7 @@ paths:
                     - direction
                   additionalProperties: false
                 page:
-                  default: &a49
+                  default: &a50
                     limit: 80
                   type: object
                   properties:
@@ -34860,8 +35841,8 @@ paths:
                   operator: example
                   value: example
               search: example
-              sort: *a48
-              page: *a49
+              sort: *a49
+              page: *a50
       responses:
         "200":
           description: Successful response.
@@ -35542,9 +36523,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a50
+      x-api-v1-scopes: &a51
         - analytics:read
-      x-required-scopes: *a50
+      x-required-scopes: *a51
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -35661,7 +36642,7 @@ paths:
                   minLength: 1
                   maxLength: 160
                 sort:
-                  default: &a51
+                  default: &a52
                     field: startedAt
                     direction: desc
                   type: object
@@ -35682,7 +36663,7 @@ paths:
                     - direction
                   additionalProperties: false
                 page:
-                  default: &a52
+                  default: &a53
                     limit: 80
                   type: object
                   properties:
@@ -35831,8 +36812,8 @@ paths:
                   operator: example
                   value: example
               search: example
-              sort: *a51
-              page: *a52
+              sort: *a52
+              page: *a53
       responses:
         "200":
           description: Successful response.
@@ -36578,9 +37559,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a53
+      x-api-v1-scopes: &a54
         - analytics:read
-      x-required-scopes: *a53
+      x-required-scopes: *a54
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -37548,9 +38529,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a54
+      x-api-v1-scopes: &a55
         - analytics:read
-      x-required-scopes: *a54
+      x-required-scopes: *a55
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -38525,9 +39506,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a55
+      x-api-v1-scopes: &a56
         - analytics:read
-      x-required-scopes: *a55
+      x-required-scopes: *a56
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -39495,9 +40476,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a56
+      x-api-v1-scopes: &a57
         - analytics:read
-      x-required-scopes: *a56
+      x-required-scopes: *a57
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -40689,9 +41670,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a57
+      x-api-v1-scopes: &a58
         - analytics:read
-      x-required-scopes: *a57
+      x-required-scopes: *a58
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/active-visitors:
     post:
@@ -41348,9 +42329,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a58
+      x-api-v1-scopes: &a59
         - analytics:read
-      x-required-scopes: *a58
+      x-required-scopes: *a59
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/events:
     post:
@@ -42311,9 +43292,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a59
+      x-api-v1-scopes: &a60
         - analytics:read
-      x-required-scopes: *a59
+      x-required-scopes: *a60
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/sessions:
     post:
@@ -43188,9 +44169,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a60
+      x-api-v1-scopes: &a61
         - analytics:read
-      x-required-scopes: *a60
+      x-required-scopes: *a61
       x-api-v1-batch-eligible: true
   /api/v1/sites:
     get:
@@ -43457,9 +44438,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a61
+      x-api-v1-scopes: &a62
         - site:read
-      x-required-scopes: *a61
+      x-required-scopes: *a62
       x-api-v1-batch-eligible: false
     post:
       operationId: sites.create
@@ -44054,9 +45035,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a62
+      x-api-v1-scopes: &a63
         - site:write
-      x-required-scopes: *a62
+      x-required-scopes: *a63
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}:
     get:
@@ -44390,9 +45371,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a63
+      x-api-v1-scopes: &a64
         - site:read
-      x-required-scopes: *a63
+      x-required-scopes: *a64
       x-api-v1-batch-eligible: false
     patch:
       operationId: sites.update
@@ -45051,9 +46032,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a64
+      x-api-v1-scopes: &a65
         - site:write
-      x-required-scopes: *a64
+      x-required-scopes: *a65
       x-api-v1-batch-eligible: false
     delete:
       operationId: sites.delete
@@ -45317,9 +46298,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a65
+      x-api-v1-scopes: &a66
         - site:write
-      x-required-scopes: *a65
+      x-required-scopes: *a66
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/tracking:
     get:
@@ -45651,9 +46632,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a66
+      x-api-v1-scopes: &a67
         - site_config:read
-      x-required-scopes: *a66
+      x-required-scopes: *a67
       x-api-v1-batch-eligible: false
     patch:
       operationId: settings.tracking.update
@@ -46264,9 +47245,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a67
+      x-api-v1-scopes: &a68
         - site_config:write
-      x-required-scopes: *a67
+      x-required-scopes: *a68
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/privacy:
     get:
@@ -46568,9 +47549,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a68
+      x-api-v1-scopes: &a69
         - site_config:read
-      x-required-scopes: *a68
+      x-required-scopes: *a69
       x-api-v1-batch-eligible: false
     patch:
       operationId: settings.privacy.update
@@ -47126,9 +48107,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a69
+      x-api-v1-scopes: &a70
         - site_config:write
-      x-required-scopes: *a69
+      x-required-scopes: *a70
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/sharing:
     get:
@@ -47417,9 +48398,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a70
+      x-api-v1-scopes: &a71
         - site_config:read
-      x-required-scopes: *a70
+      x-required-scopes: *a71
       x-api-v1-batch-eligible: false
     patch:
       operationId: settings.sharing.update
@@ -48024,9 +49005,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a71
+      x-api-v1-scopes: &a72
         - site_config:write
-      x-required-scopes: *a71
+      x-required-scopes: *a72
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/tracking-script:
     get:
@@ -48320,9 +49301,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a72
+      x-api-v1-scopes: &a73
         - site_config:read
-      x-required-scopes: *a72
+      x-required-scopes: *a73
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/funnels:
     get:
@@ -48666,9 +49647,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a73
+      x-api-v1-scopes: &a74
         - analysis:read
-      x-required-scopes: *a73
+      x-required-scopes: *a74
       x-api-v1-batch-eligible: false
     post:
       operationId: funnels.create
@@ -49292,9 +50273,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a74
+      x-api-v1-scopes: &a75
         - analysis:write
-      x-required-scopes: *a74
+      x-required-scopes: *a75
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/funnels/{funnelId}:
     get:
@@ -49644,9 +50625,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a75
+      x-api-v1-scopes: &a76
         - analysis:read
-      x-required-scopes: *a75
+      x-required-scopes: *a76
       x-api-v1-batch-eligible: false
     patch:
       operationId: funnels.update
@@ -50275,9 +51256,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a76
+      x-api-v1-scopes: &a77
         - analysis:write
-      x-required-scopes: *a76
+      x-required-scopes: *a77
       x-api-v1-batch-eligible: false
     delete:
       operationId: funnels.delete
@@ -50549,9 +51530,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a77
+      x-api-v1-scopes: &a78
         - analysis:write
-      x-required-scopes: *a77
+      x-required-scopes: *a78
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/saved-filters:
     get:
@@ -51088,9 +52069,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a78
+      x-api-v1-scopes: &a79
         - analysis:read
-      x-required-scopes: *a78
+      x-required-scopes: *a79
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/saved-filters/{savedFilterId}:
     get:
@@ -51586,9 +52567,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a79
+      x-api-v1-scopes: &a80
         - analysis:read
-      x-required-scopes: *a79
+      x-required-scopes: *a80
       x-api-v1-batch-eligible: true
   /api/v1/batch:
     post:
@@ -52135,9 +53116,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a80
+      x-api-v1-scopes: &a81
         - analytics:read
-      x-required-scopes: *a80
+      x-required-scopes: *a81
       x-api-v1-batch-eligible: false
   /collect:
     post:
@@ -52147,7 +53128,7 @@ paths:
       tags:
         - Ingestion
       x-required-scopes: []
-      security: &a81 []
+      security: &a82 []
       requestBody:
         description: Tracker event payload. The tracker SDK is the authoritative
           producer for this ingestion protocol.
@@ -52158,7 +53139,7 @@ paths:
               additionalProperties: true
             example: {}
       responses:
-        "200": &a82
+        "200": &a83
           description: JSON response. The response shape is owned by the dashboard
             protocol and is not part of the public API v1 contract.
           content:
@@ -52166,7 +53147,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-        "400": &a83
+        "400": &a84
           description: Error response.
           content:
             application/json:
@@ -52180,7 +53161,7 @@ paths:
       tags:
         - Ingestion
       x-required-scopes: []
-      security: *a81
+      security: *a82
       parameters:
         - name: siteId
           in: query
@@ -52228,10 +53209,10 @@ paths:
       tags:
         - Discovery
       x-required-scopes: []
-      security: *a81
+      security: *a82
       responses:
-        "200": *a82
-        "400": *a83
+        "200": *a83
+        "400": *a84
   /.well-known/skills.json:
     get:
       operationId: wellKnown.skills
@@ -52240,10 +53221,10 @@ paths:
       tags:
         - Discovery
       x-required-scopes: []
-      security: *a81
+      security: *a82
       responses:
-        "200": *a82
-        "400": *a83
+        "200": *a83
+        "400": *a84
   /.well-known/health:
     get:
       operationId: wellKnown.health
@@ -52252,10 +53233,10 @@ paths:
       tags:
         - Health
       x-required-scopes: []
-      security: *a81
+      security: *a82
       responses:
-        "200": *a82
-        "400": *a83
+        "200": *a83
+        "400": *a84
 components:
   schemas:
     Meta:

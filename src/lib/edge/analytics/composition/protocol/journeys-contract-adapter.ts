@@ -6,6 +6,7 @@ import type { mapVisitors } from "@/lib/edge/analytics/providers/d1/internal/cor
 import {
   badRequest,
   jsonResponseWith,
+  parseEventId,
   parseLimit,
   parseListSearch,
   parseQueryLimit,
@@ -148,6 +149,41 @@ export async function handleSessionDetailContract(
     time: toQueryTime(window),
     filters: { version: 1, root: null },
     sessionId,
+  });
+  if (!result.ok) return queryErrorResponse(result.error);
+  return jsonResponseWith(ctx!, { ok: true, data: result.data });
+}
+
+export async function handleJourneyEventDetailContract(
+  env: Env,
+  siteId: string,
+  url: URL,
+  ctx?: ResponseContext,
+  queryContext = siteQueryContext(siteId, "private-dashboard"),
+): Promise<Response> {
+  const eventId = parseEventId(url);
+  if (!eventId) return badRequest("Missing eventId");
+  const rawEventKind = url.searchParams.get("eventKind")?.trim();
+  const eventKind =
+    rawEventKind === "pageview" ||
+    rawEventKind === "session_start" ||
+    rawEventKind === "leave"
+      ? rawEventKind
+      : rawEventKind
+        ? null
+        : undefined;
+  if (eventKind === null) return badRequest("Invalid eventKind");
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const result = await createD1SiteQueryRuntime({ env, siteId }).execute<Record<
+    string,
+    unknown
+  > | null>("journey-event-detail", {
+    context: queryContext,
+    time: toQueryTime(window),
+    filters: { version: 1, root: null },
+    eventId,
+    ...(eventKind ? { eventKind } : {}),
   });
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });

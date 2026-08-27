@@ -1397,6 +1397,14 @@ describe("edge query handlers", () => {
       privatePath("event-record-detail", "eventId=evt-1"),
       env,
     );
+    const pages = await privateQuery(privatePath("pages"), env);
+    const referrers = await privateQuery(privatePath("referrers"), env);
+    const eventTypes = await privateQuery(privatePath("event-types"), env);
+    const eventContext = await privateQuery(
+      privatePath("event-type-context", "eventName=Signup"),
+      env,
+    );
+    const funnels = await privateQuery(privatePath("funnels"), env);
 
     expect(await summary.json()).toMatchObject({
       ok: true,
@@ -1501,6 +1509,11 @@ describe("edge query handlers", () => {
         },
       },
     });
+    expect(
+      [pages, referrers, eventTypes, eventContext, funnels].every(
+        (response) => response instanceof Response,
+      ),
+    ).toBe(true);
   });
 
   it("validates event detail request parameters before querying event aggregates", async () => {
@@ -1762,6 +1775,10 @@ describe("edge query handlers", () => {
       privatePath("session-detail"),
       env,
     );
+    const missingJourneyEvent = await privateQuery(
+      privatePath("journey-event-detail"),
+      env,
+    );
 
     expect(missingVisitor.status).toBe(400);
     expect(await missingVisitor.json()).toMatchObject({
@@ -1772,6 +1789,11 @@ describe("edge query handlers", () => {
     expect(await missingSession.json()).toMatchObject({
       ok: false,
       error: { message: "Missing sessionId" },
+    });
+    expect(missingJourneyEvent.status).toBe(400);
+    expect(await missingJourneyEvent.json()).toMatchObject({
+      ok: false,
+      error: { message: "Missing eventId" },
     });
   });
 

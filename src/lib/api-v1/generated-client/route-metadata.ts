@@ -232,6 +232,13 @@ export const apiV1GeneratedRouteMetadata = {
     path: "/api/v1/sites/{siteId}/analytics/events/detail",
     lifecycle: "exposed",
   },
+  "site.analytics.journeyEventDetail": {
+    id: "site.analytics.journeyEventDetail",
+    operationId: "site.analytics.journeyEventDetail",
+    method: "POST",
+    path: "/api/v1/sites/{siteId}/analytics/journey-events/detail",
+    lifecycle: "exposed",
+  },
   "site.analytics.eventTypes": {
     id: "site.analytics.eventTypes",
     operationId: "site.analytics.eventTypes",

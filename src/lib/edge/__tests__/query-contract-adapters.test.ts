@@ -14,6 +14,7 @@ import {
 import { handleFilterValuesContract } from "@/lib/edge/analytics/composition/protocol/filter-values-contract-adapter";
 import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/composition/protocol/funnels-contract-adapter";
 import {
+  handleJourneyEventDetailContract,
   handleSessionDetailContract,
   handleSessionsContract,
   handleVisitorDetailContract,
@@ -69,10 +70,11 @@ describe("typed query adapter validation branches", () => {
       handleSessionsContract(env, siteId, invalidWindow, context),
       handleVisitorDetailContract(env, siteId, invalidWindow, context),
       handleSessionDetailContract(env, siteId, invalidWindow, context),
+      handleJourneyEventDetailContract(env, siteId, invalidWindow, context),
       handleFunnelAnalysisContract(env, siteId, invalidWindow, context),
     ]);
 
-    expect(responses).toHaveLength(14);
+    expect(responses).toHaveLength(15);
     expect(responses.every((response) => response instanceof Response)).toBe(
       true,
     );
@@ -101,10 +103,11 @@ describe("typed query adapter validation branches", () => {
       handleSessionsContract(env, siteId, valid),
       handleVisitorDetailContract(env, siteId, valid),
       handleSessionDetailContract(env, siteId, valid),
+      handleJourneyEventDetailContract(env, siteId, valid),
       handleFunnelAnalysisContract(env, siteId, valid),
     ]);
 
-    expect(responses).toHaveLength(14);
+    expect(responses).toHaveLength(15);
     expect(responses.every((response) => response instanceof Response)).toBe(
       true,
     );
@@ -119,6 +122,16 @@ describe("typed query adapter validation branches", () => {
       handleSessionsContract(env, siteId, new URL(base)),
       handleVisitorsContract(env, siteId, new URL(`${base}&cursor=invalid`)),
       handleSessionsContract(env, siteId, new URL(`${base}&cursor=invalid`)),
+      handleJourneyEventDetailContract(
+        env,
+        siteId,
+        new URL(`${base}&eventKind=custom`),
+      ),
+      handleJourneyEventDetailContract(
+        env,
+        siteId,
+        new URL(`${base}&eventKind=pageview`),
+      ),
       handleEventTypeContextContract(
         env,
         siteId,
@@ -128,7 +141,7 @@ describe("typed query adapter validation branches", () => {
       handleFunnelAnalysisContract(env, siteId, new URL(`${base}&id=missing`)),
     ]);
 
-    expect(responses).toHaveLength(7);
+    expect(responses).toHaveLength(9);
     expect(responses.map((response) => response.status)).toEqual(
       expect.arrayContaining([400, 404]),
     );

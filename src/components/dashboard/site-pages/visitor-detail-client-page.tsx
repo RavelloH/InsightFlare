@@ -51,6 +51,8 @@ import {
   useDetailDrawerClose,
   useDetailDrawerReady,
 } from "@/components/dashboard/site-pages/detail-drawer";
+import { EventDetailDrawer } from "@/components/dashboard/site-pages/event-detail-drawer";
+import { NESTED_DETAIL_DRAWER_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
 import {
   OverviewPagesSection,
   type OverviewPagesSectionCardData,
@@ -72,6 +74,8 @@ import {
 import { Clickable } from "@/components/ui/clickable";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  fetchEventRecordDetail,
+  fetchJourneyEventDetail,
   fetchVisitorDetail,
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
@@ -82,6 +86,7 @@ import {
   numberFormat,
   percentFormat,
 } from "@/lib/dashboard/format";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { zonedParts } from "@/lib/dashboard/time-zone";
 import dynamic from "@/lib/dynamic";
 import type {
@@ -1690,6 +1695,7 @@ function VisitorEventCard({
   siteBasePath,
   timeZone,
   onOpenSession,
+  onOpenEvent,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -1699,6 +1705,7 @@ function VisitorEventCard({
   siteBasePath: string;
   timeZone: string;
   onOpenSession?: (sessionId: string) => void;
+  onOpenEvent: (event: JourneyEvent) => void;
 }) {
   const sessionId = event.sessionId.trim();
   const sessionHref = `${siteBasePath}/sessions?detail=${encodeURIComponent(
@@ -1706,62 +1713,82 @@ function VisitorEventCard({
   )}`;
 
   return (
-    <Card size="sm" className="border border-foreground/10 py-0 ring-0">
-      <CardContent className="p-0">
-        <div className="flex items-center gap-2 px-1.5 py-1">
-          <EventIcon event={event} />
-          <div className="flex min-w-0 flex-1 items-stretch justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="min-w-0 truncate text-sm font-medium leading-5 text-foreground">
-                {eventDisplayTitle(labels, event)}
-              </p>
-              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-[11px] leading-[14px] text-muted-foreground">
-                <span className="min-w-0 truncate leading-[14px]">
-                  {eventSubtitle(
-                    locale,
-                    event,
-                    messages.common.unknown,
-                    timeZone,
-                  )}
-                </span>
-              </div>
-            </div>
-            <div className="flex h-[34px] min-w-0 w-[42%] shrink-0 flex-col items-end justify-between text-right sm:w-auto sm:max-w-[24rem]">
-              <p className="font-mono text-[11px] leading-[14px] text-foreground">
-                {formatShortDateTime(locale, event.occurredAt, timeZone)}
-              </p>
-              <div className="max-w-full truncate font-mono text-[10px] leading-[13px] text-muted-foreground">
-                {deltaMs !== null && deltaMs > 0 ? (
-                  <span>
-                    {labels.sincePrevious}: {formatDuration(locale, deltaMs)}
+    <Clickable
+      className="block w-full rounded-none text-left focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={() => onOpenEvent(event)}
+      enableHoverScale={false}
+      tapScale={0.985}
+      duration={0.14}
+      aria-label={eventDisplayTitle(labels, event)}
+      title={eventDisplayTitle(labels, event)}
+    >
+      <Card size="sm" className="border border-foreground/10 py-0 ring-0">
+        <CardContent className="p-0">
+          <div className="flex items-center gap-2 px-1.5 py-1">
+            <EventIcon event={event} />
+            <div className="flex min-w-0 flex-1 items-stretch justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="min-w-0 truncate text-sm font-medium leading-5 text-foreground">
+                  {eventDisplayTitle(labels, event)}
+                </p>
+                <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-[11px] leading-[14px] text-muted-foreground">
+                  <span className="min-w-0 truncate leading-[14px]">
+                    {eventSubtitle(
+                      locale,
+                      event,
+                      messages.common.unknown,
+                      timeZone,
+                    )}
                   </span>
-                ) : sessionId ? (
-                  onOpenSession ? (
-                    <button
-                      type="button"
-                      className="bg-transparent p-0 text-left hover:text-foreground hover:underline"
-                      onClick={() => onOpenSession(sessionId)}
-                    >
-                      {labels.sessionId}: {event.sessionId}
-                    </button>
+                </div>
+              </div>
+              <div className="flex h-[34px] min-w-0 w-[42%] shrink-0 flex-col items-end justify-between text-right sm:w-auto sm:max-w-[24rem]">
+                <p className="font-mono text-[11px] leading-[14px] text-foreground">
+                  {formatShortDateTime(locale, event.occurredAt, timeZone)}
+                </p>
+                <div className="max-w-full truncate font-mono text-[10px] leading-[13px] text-muted-foreground">
+                  {deltaMs !== null && deltaMs > 0 ? (
+                    <span>
+                      {labels.sincePrevious}: {formatDuration(locale, deltaMs)}
+                    </span>
+                  ) : sessionId ? (
+                    onOpenSession ? (
+                      <button
+                        type="button"
+                        className="bg-transparent p-0 text-left hover:text-foreground hover:underline"
+                        onClick={(clickEvent) => {
+                          clickEvent.stopPropagation();
+                          onOpenSession(sessionId);
+                        }}
+                        onKeyDown={(keyboardEvent) =>
+                          keyboardEvent.stopPropagation()
+                        }
+                      >
+                        {labels.sessionId}: {event.sessionId}
+                      </button>
+                    ) : (
+                      <Link
+                        href={sessionHref}
+                        data-skip-page-transition=""
+                        className="hover:text-foreground hover:underline"
+                        onClick={(clickEvent) => clickEvent.stopPropagation()}
+                        onKeyDown={(keyboardEvent) =>
+                          keyboardEvent.stopPropagation()
+                        }
+                      >
+                        {labels.sessionId}: {event.sessionId}
+                      </Link>
+                    )
                   ) : (
-                    <Link
-                      href={sessionHref}
-                      data-skip-page-transition=""
-                      className="hover:text-foreground hover:underline"
-                    >
-                      {labels.sessionId}: {event.sessionId}
-                    </Link>
-                  )
-                ) : (
-                  <span aria-hidden="true">--</span>
-                )}
+                    <span aria-hidden="true">--</span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </Clickable>
   );
 }
 
@@ -1795,6 +1822,7 @@ function VisitDetailsCard({
   siteBasePath,
   timeZone,
   onOpenSession,
+  onOpenEvent,
   loading = false,
 }: {
   locale: Locale;
@@ -1804,6 +1832,7 @@ function VisitDetailsCard({
   siteBasePath: string;
   timeZone: string;
   onOpenSession?: (sessionId: string) => void;
+  onOpenEvent: (event: JourneyEvent) => void;
   loading?: boolean;
 }) {
   const chronologicalEvents = useMemo(
@@ -1865,6 +1894,7 @@ function VisitDetailsCard({
                     siteBasePath={siteBasePath}
                     timeZone={timeZone}
                     onOpenSession={onOpenSession}
+                    onOpenEvent={onOpenEvent}
                     deltaMs={
                       index > 0
                         ? event.occurredAt -
@@ -2264,6 +2294,7 @@ function DetailContent({
   siteId,
   pathname,
   timeZone,
+  timeWindow,
   onOpenSession,
   loading = false,
 }: {
@@ -2274,6 +2305,7 @@ function DetailContent({
   siteId: string;
   pathname: string;
   timeZone: string;
+  timeWindow: TimeWindow;
   onOpenSession?: (sessionId: string) => void;
   loading?: boolean;
 }) {
@@ -2289,6 +2321,46 @@ function DetailContent({
     () => visitorGeoLocationInputs(detail),
     [detail],
   );
+  const [selectedEvent, setSelectedEvent] = useState<JourneyEvent | null>(null);
+  const eventDetailQuery = useQuery({
+    queryKey: [
+      "dashboard",
+      "journey-event-detail",
+      siteId,
+      selectedEvent?.id ?? "",
+      selectedEvent?.kind ?? "",
+      selectedEvent?.sessionId ?? "",
+      selectedEvent?.visitId ?? "",
+      timeWindow.from,
+      timeWindow.to,
+      timeWindow.timeZone,
+    ],
+    queryFn: ({ signal }) => {
+      if (!selectedEvent) throw new Error("Event selection is required");
+      if (selectedEvent.kind === "custom") {
+        return fetchEventRecordDetail(siteId, selectedEvent.id, timeWindow, {
+          signal,
+          preserveErrors: true,
+        });
+      }
+      return fetchJourneyEventDetail(
+        siteId,
+        selectedEvent.id,
+        selectedEvent.kind,
+        timeWindow,
+        {
+          sessionId: selectedEvent.sessionId,
+          visitId: selectedEvent.visitId,
+          signal,
+          preserveErrors: true,
+        },
+      );
+    },
+    enabled: typeof window !== "undefined" && Boolean(selectedEvent),
+  });
+  const eventDetail = eventDetailQuery.data?.data ?? null;
+  const eventDetailLoading = eventDetailQuery.isPending && !eventDetail;
+  const eventDetailError = eventDetailQuery.isError && !eventDetail;
 
   return (
     <div className="pb-6">
@@ -2332,6 +2404,7 @@ function DetailContent({
           siteBasePath={siteBasePath}
           timeZone={timeZone}
           onOpenSession={onOpenSession}
+          onOpenEvent={setSelectedEvent}
           loading={loading}
         />
 
@@ -2360,6 +2433,24 @@ function DetailContent({
           labels={labels}
           performance={detail.performance}
           loading={loading}
+        />
+
+        <EventDetailDrawer
+          locale={locale}
+          messages={messages}
+          labels={messages.events}
+          siteId={siteId}
+          pathname={pathname}
+          siteBasePath={siteBasePath}
+          open={Boolean(selectedEvent)}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setSelectedEvent(null);
+          }}
+          detail={eventDetail}
+          loading={eventDetailLoading}
+          error={eventDetailError}
+          eventKind={selectedEvent?.kind ?? "pageview"}
+          zIndex={NESTED_DETAIL_DRAWER_Z_INDEX + 100}
         />
       </div>
     </div>
@@ -2436,6 +2527,7 @@ export const VisitorDetailClientPage = memo(function VisitorDetailClientPage({
       siteId={siteId}
       pathname={pathname}
       timeZone={timeZone}
+      timeWindow={window}
       onOpenSession={onOpenSession}
       loading={loading}
     />

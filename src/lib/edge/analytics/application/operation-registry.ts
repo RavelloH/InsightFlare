@@ -311,6 +311,20 @@ export const analyticsOperationRegistry = [
     ) => undefined,
   }),
   operation({
+    id: "site.analytics.journeyEventDetail",
+    subjectKinds: ["site"],
+    audiences: ["api-v1", "private-dashboard"],
+    cache: "bypass",
+    operationRevision: "1",
+    schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
+    result: (
+      _result: AnalyticsResult<{
+        event: unknown;
+        context: unknown;
+      }>,
+    ) => undefined,
+  }),
+  operation({
     id: "site.analytics.eventTypes",
     subjectKinds: ["site"],
     audiences: ["api-v1", "private-dashboard"],

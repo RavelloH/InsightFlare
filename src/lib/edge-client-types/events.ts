@@ -104,7 +104,7 @@ export interface EventsTrendData {
 export interface EventRecord {
   eventId: string;
   eventName: string;
-  eventKind?: "custom_event";
+  eventKind?: "custom_event" | "pageview" | "session_start" | "leave";
   occurredAt: number;
   receivedAt: number;
   sequence: number;
@@ -193,6 +193,14 @@ export interface EventRecordDetailData {
     event: EventRecord;
     context: EventRecordDetailContext;
     eventData: unknown;
+  } | null;
+}
+
+export interface JourneyEventDetailData {
+  ok: boolean;
+  data: {
+    event: EventRecord;
+    context: EventRecordDetailContext;
   } | null;
 }
 

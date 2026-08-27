@@ -12,6 +12,7 @@ import {
   emptyEventsSummary,
   emptyEventsTrend,
   emptyEventTypeDetail,
+  emptyJourneyEventDetail,
   emptyPerformance,
   emptySessionDetail,
   emptySessions,
@@ -32,6 +33,8 @@ import type {
   FunnelListData,
   FunnelMutationData,
   FunnelStep,
+  JourneyEvent,
+  JourneyEventDetailData,
   OverviewData,
   PagesData,
   PerformanceData,
@@ -603,6 +606,43 @@ export async function fetchEventRecordDetail(
     ? request
     : request.catch((error) =>
         fallbackUnlessAborted(error, emptyEventRecordDetail),
+      );
+}
+
+export async function fetchJourneyEventDetail(
+  siteId: string,
+  eventId: string,
+  eventKind: Exclude<JourneyEvent["kind"], "custom">,
+  window?: TimeWindow,
+  options?: {
+    sessionId?: string;
+    visitId?: string;
+    signal?: AbortSignal;
+    preserveErrors?: boolean;
+  },
+): Promise<JourneyEventDetailData> {
+  const normalizedEventId = eventId.trim();
+  if (!normalizedEventId) return emptyJourneyEventDetail();
+
+  const params = {
+    siteId,
+    eventId: normalizedEventId,
+    eventKind,
+    ...(window ? { from: window.from, to: window.to } : {}),
+    ...(options?.sessionId?.trim()
+      ? { sessionId: options.sessionId.trim() }
+      : {}),
+    ...(options?.visitId?.trim() ? { visitId: options.visitId.trim() } : {}),
+  };
+  const request = fetchPrivateJson<JourneyEventDetailData>(
+    "/api/private/journey-event-detail",
+    params,
+    { signal: options?.signal },
+  );
+  return options?.preserveErrors
+    ? request
+    : request.catch((error) =>
+        fallbackUnlessAborted(error, emptyJourneyEventDetail),
       );
 }
 

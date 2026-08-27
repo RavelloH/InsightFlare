@@ -59,6 +59,7 @@ export const DASHBOARD_QUERY_PATHS = [
   "event-type-context",
   "event-type-detail",
   "event-record-detail",
+  "journey-event-detail",
   "sessions",
   "session-detail",
   "visitor-detail",
@@ -139,6 +140,7 @@ export function operationForQueryRoute(pathname: string): QueryOperation {
   if (pathname === "event-type-context") return "event-context";
   if (pathname === "events-records") return "event-records";
   if (pathname === "event-record-detail") return "event-record-detail";
+  if (pathname === "journey-event-detail") return "journey-event-detail";
   if (pathname === "visitors") return "visitors";
   if (pathname === "visitor-detail") return "visitor-detail";
   if (pathname === "sessions") return "sessions";

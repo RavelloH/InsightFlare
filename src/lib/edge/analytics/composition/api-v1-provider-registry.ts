@@ -32,6 +32,7 @@ import {
 import { readSiteFilterValues } from "@/lib/edge/analytics/providers/d1/operations/site-filter-values";
 import { readSiteFunnelAnalysis } from "@/lib/edge/analytics/providers/d1/operations/site-funnel-analysis";
 import {
+  readSiteJourneyEventDetail,
   readSiteSessionDetail,
   readSiteSessionEvents,
   readSiteSessions,
@@ -459,6 +460,24 @@ function registerSiteOperation(
             env,
             siteId: siteId(input, configuredSiteId),
             sessionId: stringField(input, "sessionId"),
+            window: timeWindow(input.time),
+          }),
+        ),
+      );
+      return;
+    case "site.analytics.journeyEventDetail":
+      registry.register(
+        operation,
+        provider((input) =>
+          readSiteJourneyEventDetail({
+            env,
+            siteId: siteId(input, configuredSiteId),
+            eventId: stringField(input, "eventId"),
+            eventKind: stringField(input, "eventKind") as
+              | "pageview"
+              | "session_start"
+              | "leave"
+              | undefined,
             window: timeWindow(input.time),
           }),
         ),

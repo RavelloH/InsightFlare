@@ -720,6 +720,26 @@ describe("mock — handleDemoRequest", () => {
       expect(res).toBeDefined();
     });
 
+    it("routes standard journey event detail for private and API v1 paths", () => {
+      const params = {
+        ...baseParams,
+        eventId: "missing-event",
+        eventKind: "pageview",
+      };
+      expect(
+        handleDemoRequest({
+          path: "/api/private/journey-event-detail",
+          params,
+        }),
+      ).toMatchObject({ ok: true, data: null });
+      expect(
+        handleDemoRequest({
+          path: `/api/v1/sites/${SITE_ID}/analytics/journey-events/detail`,
+          params,
+        }),
+      ).toMatchObject({ ok: true, data: null });
+    });
+
     it("returns visitor detail", () => {
       const res = handleDemoRequest({
         path: "/api/private/visitor-detail",
