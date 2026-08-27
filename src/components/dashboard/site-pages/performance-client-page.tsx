@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "@iconify/react";
 import {
   RiCheckboxCircleFill,
@@ -37,6 +37,8 @@ import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboa
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
+  type TabbedDataTableRowAdapter,
+  type TabbedDataTableSortState,
 } from "@/components/dashboard/tabbed-data-table-card";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -2151,7 +2153,7 @@ function PerformanceHealthMapCard({
     [sortedCountries],
   );
 
-  const updateSort = (key: PathSortKey) => {
+  const updateSort = useCallback((key: PathSortKey) => {
     setSort((current) =>
       current.key === key
         ? {
@@ -2160,7 +2162,7 @@ function PerformanceHealthMapCard({
           }
         : { key, direction: "desc" },
     );
-  };
+  }, []);
 
   return (
     <Card className="overflow-hidden">
@@ -2261,6 +2263,46 @@ function CountryStatusColumn({
       messages.performance.score,
     ],
   );
+  const tabs = useMemo(
+    () =>
+      [
+        {
+          value: status,
+          label: statusLabel(messages, status),
+          columnLabel: messages.common.country,
+          defaultSort: sort,
+        },
+      ] as const,
+    [messages, sort, status],
+  );
+  const rowsByTab = useMemo(
+    () => ({ [status]: rows }) as Record<typeof status, CountryHealthRow[]>,
+    [rows, status],
+  );
+  const sortByTab = useMemo(
+    () => ({ [status]: sort }) as Record<typeof status, typeof sort>,
+    [sort, status],
+  );
+  const handleSortChange = useCallback(
+    (_tab: typeof status, next: TabbedDataTableSortState<PathSortKey>) =>
+      onSort(next.key),
+    [onSort],
+  );
+  const rowAdapter = useMemo<
+    TabbedDataTableRowAdapter<CountryHealthRow, typeof status, PathSortKey>
+  >(
+    () => ({
+      renderLabel: (row) => (
+        <span className="max-w-[18rem]">
+          <CountryLabelWithFlag label={row.label} iconName={row.iconName} />
+        </span>
+      ),
+      getSearchText: (row) => row.label,
+      getExportLabel: (row) => row.label,
+      getClassName: () => "hover:brightness-[0.98] dark:hover:brightness-125",
+    }),
+    [],
+  );
 
   return (
     <div className="min-w-0">
@@ -2285,35 +2327,13 @@ function CountryStatusColumn({
       </div>
       <div className="pb-4">
         <TabbedDataTableCard<typeof status, CountryHealthRow, PathSortKey>
-          tabs={[
-            {
-              value: status,
-              label: statusLabel(messages, status),
-              columnLabel: messages.common.country,
-              defaultSort: sort,
-            },
-          ]}
-          rowsByTab={
-            { [status]: rows } as Record<typeof status, CountryHealthRow[]>
-          }
+          tabs={tabs}
+          rowsByTab={rowsByTab}
           columns={columns}
           value={status}
-          sortByTab={{ [status]: sort } as Record<typeof status, typeof sort>}
-          onSortChange={(_tab, next) => onSort(next.key)}
-          rowAdapter={{
-            renderLabel: (row) => (
-              <span className="max-w-[18rem]">
-                <CountryLabelWithFlag
-                  label={row.label}
-                  iconName={row.iconName}
-                />
-              </span>
-            ),
-            getSearchText: (row) => row.label,
-            getExportLabel: (row) => row.label,
-            getClassName: () =>
-              "hover:brightness-[0.98] dark:hover:brightness-125",
-          }}
+          sortByTab={sortByTab}
+          onSortChange={handleSortChange}
+          rowAdapter={rowAdapter}
           loadingLabel={messages.common.loading}
           emptyLabel={messages.common.noData}
           headerHidden
@@ -2407,6 +2427,46 @@ function PathStatusColumn({
       messages.performance.score,
     ],
   );
+  const tabs = useMemo(
+    () =>
+      [
+        {
+          value: status,
+          label: statusLabel(messages, status),
+          columnLabel: messages.common.path,
+          defaultSort: sort,
+        },
+      ] as const,
+    [messages, sort, status],
+  );
+  const rowsByTab = useMemo(
+    () => ({ [status]: rows }) as Record<typeof status, PathPerformanceRow[]>,
+    [rows, status],
+  );
+  const sortByTab = useMemo(
+    () => ({ [status]: sort }) as Record<typeof status, typeof sort>,
+    [sort, status],
+  );
+  const handleSortChange = useCallback(
+    (_tab: typeof status, next: TabbedDataTableSortState<PathSortKey>) =>
+      onSort(next.key),
+    [onSort],
+  );
+  const rowAdapter = useMemo<
+    TabbedDataTableRowAdapter<PathPerformanceRow, typeof status, PathSortKey>
+  >(
+    () => ({
+      renderLabel: (row) => (
+        <span className="max-w-[18rem] font-mono break-words">
+          {decodeUrlDisplayValue(row.pathname || "/")}
+        </span>
+      ),
+      getSearchText: (row) => row.pathname || "/",
+      getExportLabel: (row) => row.pathname || "/",
+      getClassName: () => "hover:brightness-[0.98] dark:hover:brightness-125",
+    }),
+    [],
+  );
 
   return (
     <div className="min-w-0">
@@ -2431,32 +2491,13 @@ function PathStatusColumn({
       </div>
       <div className="pb-4">
         <TabbedDataTableCard<typeof status, PathPerformanceRow, PathSortKey>
-          tabs={[
-            {
-              value: status,
-              label: statusLabel(messages, status),
-              columnLabel: messages.common.path,
-              defaultSort: sort,
-            },
-          ]}
-          rowsByTab={
-            { [status]: rows } as Record<typeof status, PathPerformanceRow[]>
-          }
+          tabs={tabs}
+          rowsByTab={rowsByTab}
           columns={columns}
           value={status}
-          sortByTab={{ [status]: sort } as Record<typeof status, typeof sort>}
-          onSortChange={(_tab, next) => onSort(next.key)}
-          rowAdapter={{
-            renderLabel: (row) => (
-              <span className="max-w-[18rem] font-mono break-words">
-                {decodeUrlDisplayValue(row.pathname || "/")}
-              </span>
-            ),
-            getSearchText: (row) => row.pathname || "/",
-            getExportLabel: (row) => row.pathname || "/",
-            getClassName: () =>
-              "hover:brightness-[0.98] dark:hover:brightness-125",
-          }}
+          sortByTab={sortByTab}
+          onSortChange={handleSortChange}
+          rowAdapter={rowAdapter}
           loadingLabel={messages.common.loading}
           emptyLabel={messages.common.noData}
           headerHidden
@@ -2507,7 +2548,7 @@ function PathPerformanceTable({
     [sortedRows],
   );
 
-  const updateSort = (key: PathSortKey) => {
+  const updateSort = useCallback((key: PathSortKey) => {
     setSort((current) =>
       current.key === key
         ? {
@@ -2516,7 +2557,7 @@ function PathPerformanceTable({
           }
         : { key, direction: "desc" },
     );
-  };
+  }, []);
 
   return (
     <Card className="overflow-hidden">
