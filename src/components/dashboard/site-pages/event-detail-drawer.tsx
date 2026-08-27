@@ -86,6 +86,7 @@ const EVENT_DETAIL_SKELETON_DATA: EventRecordDetail = {
     referrerHost: "",
     country: "",
     region: "",
+    city: "",
     browser: "",
     browserVersion: "",
     os: "",

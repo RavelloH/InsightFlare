@@ -2035,6 +2035,7 @@ requestObservation:
   city: 都市
   colo: データセンター
   userAgentLengthBucket: User-Agent 長
+  userAgentLength: User-Agent 長（正確）
   ipPrefix: IP プレフィックス
   botReasonLabels:
     missing_ua: User-Agent なし
@@ -2054,6 +2055,8 @@ requestObservation:
     pageview: ページビュー
     custom_event: カスタムイベント
     request: リクエスト
+    visibility: 可視性
+    leave: 離脱
   overviewLabels:
     totalRequests: 総リクエスト数
     normalRequests: 通常リクエスト

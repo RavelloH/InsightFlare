@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   NORMAL_ANALYTICS_BLOBS,
@@ -73,6 +73,10 @@ describe("normal request Analytics Engine writes", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("keeps the normal request schema within AE data point limits", () => {
     expect(NORMAL_ANALYTICS_BLOBS).toHaveLength(16);
     expect(NORMAL_ANALYTICS_DOUBLES.length).toBeLessThanOrEqual(20);
@@ -81,6 +85,7 @@ describe("normal request Analytics Engine writes", () => {
   it("writes normalized pageview data points", () => {
     const writeDataPoint = analyticsWriter();
     const testEnv = env(writeDataPoint);
+    vi.spyOn(Date, "now").mockReturnValue(1_000_045);
 
     writeNormalAnalyticsEvent(testEnv, {
       request: request(
@@ -139,7 +144,7 @@ describe("normal request Analytics Engine writes", () => {
     expect(point.doubles).toEqual([
       1_000_000,
       999_900,
-      100,
+      45,
       13335,
       37.7749,
       -122.4194,
@@ -187,6 +192,7 @@ describe("normal request Analytics Engine writes", () => {
     });
 
     const invocationLogger = logger();
+    vi.spyOn(Date, "now").mockReturnValue(2_050);
     writeNormalAnalyticsEvent(
       env(writeDataPoint),
       {
@@ -224,7 +230,7 @@ describe("normal request Analytics Engine writes", () => {
     expect(point.blobs[3]).toBe("");
     expect(point.blobs[4]).toBe("");
     expect(point.doubles[1]).toBe(2_000);
-    expect(point.doubles[2]).toBe(0);
+    expect(point.doubles[2]).toBe(1_050);
     expect(point.doubles[3]).toBe(0);
     expect(point.doubles[4]).toBe(0);
     expect(point.doubles[5]).toBe(0);
@@ -236,6 +242,7 @@ describe("normal request Analytics Engine writes", () => {
 
   it("normalizes relative paths, fallback timestamps, and missing request metadata", () => {
     const writeDataPoint = analyticsWriter();
+    vi.spyOn(Date, "now").mockReturnValue(3_025);
 
     const invocationLogger = logger();
     writeNormalAnalyticsEvent(
@@ -262,7 +269,7 @@ describe("normal request Analytics Engine writes", () => {
     expect(point.blobs[4]).toBe("/docs");
     expect(point.blobs[12]).toBe("");
     expect(point.doubles[1]).toBe(3_000);
-    expect(point.doubles[2]).toBe(0);
+    expect(point.doubles[2]).toBe(25);
   });
 
   it("normalizes blank pathnames and non-Error write failures", () => {

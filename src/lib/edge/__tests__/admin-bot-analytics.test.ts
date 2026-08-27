@@ -400,7 +400,11 @@ describe("admin bot analytics handlers", () => {
       rayId: "normal-ray-1",
       traceId: "normal-trace-1",
       requestMethod: "GET",
-      metadataJson: "{}",
+      metadataJson: JSON.stringify({
+        eventId: "event-1",
+        visitId: "visit-1",
+        visibilityState: "visible",
+      }),
       receivedAt: 1_799_999_900_000,
       eventAt: 1_799_999_899_960,
       edgeLatencyMs: 40,
@@ -565,6 +569,13 @@ describe("admin bot analytics handlers", () => {
       latitude: 35.6895,
       longitude: 139.6917,
       reasons: ["hosting_asn"],
+    });
+    expect(body.normalEvents[0]).toMatchObject({
+      metadataJson: JSON.stringify({
+        eventId: "event-1",
+        visitId: "visit-1",
+        visibilityState: "visible",
+      }),
     });
     expect(body.mapPoints[0]).toMatchObject({
       country: "JP",
@@ -1072,7 +1083,10 @@ describe("admin bot analytics handlers", () => {
               verifiedBotCategory: "",
               rayId: "ray-detail",
               traceId: "trace-detail",
-              metadataJson: "{}",
+              metadataJson: JSON.stringify({
+                requestMethod: "GET",
+                referer: "https://example.test/",
+              }),
             },
           ]),
           { status: 200 },
@@ -1098,6 +1112,10 @@ describe("admin bot analytics handlers", () => {
       rayId: "ray-detail",
       traceId: "trace-detail",
       receivedAt: Date.UTC(2026, 6, 3, 10, 0, 0),
+      metadataJson: JSON.stringify({
+        requestMethod: "GET",
+        referer: "https://example.test/",
+      }),
     });
     const firstDetailSql = String(
       (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body || "",

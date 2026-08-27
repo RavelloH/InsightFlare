@@ -925,6 +925,7 @@ describe("API v1 generated client", () => {
       referrerHost: "",
       country: "",
       region: "",
+      city: "",
       browser: "",
       browserVersion: "",
       os: "",

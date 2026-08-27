@@ -1,4 +1,5 @@
 import {
+  Fragment,
   type KeyboardEvent,
   memo,
   type MouseEvent,
@@ -32,6 +33,15 @@ import {
 import { toast } from "sonner";
 
 import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
+import {
+  type AnalyticsTableColumnDefinition,
+  AnalyticsTableColumnSettings,
+  useAnalyticsTableColumns,
+} from "@/components/dashboard/analytics-table-column-settings";
+import {
+  AnalyticsDetailsTooltipTarget,
+  AnalyticsTimeTooltipTarget,
+} from "@/components/dashboard/analytics-time-tooltip";
 import {
   AsyncDimensionBreakdownCard,
   type AsyncDimensionBreakdownLabelAppearance,
@@ -155,10 +165,42 @@ interface NormalRequestEvent {
   rayId: string;
   traceId: string;
   requestMethod: string;
+  metadataJson?: string;
   latitude: number | null;
   longitude: number | null;
   userAgentLength: number;
 }
+
+const BOT_EVENT_DETAIL_SKELETON_DATA: BotEvent = {
+  timestamp: "",
+  receivedAt: 0,
+  siteId: "",
+  siteName: "",
+  siteDomain: "",
+  kind: "",
+  confidence: "",
+  reasons: [],
+  ip: "",
+  userAgent: "",
+  origin: "",
+  hostname: "",
+  pathname: "",
+  country: "",
+  region: "",
+  city: "",
+  continent: "",
+  colo: "",
+  asn: 0,
+  asOrganization: "",
+  verifiedBotCategory: "",
+  rayId: "",
+  traceId: "",
+  metadataJson: "",
+  latitude: null,
+  longitude: null,
+  botScore: null,
+  userAgentLength: 0,
+};
 
 interface RequestMapPoint {
   latitude: number;
@@ -325,31 +367,101 @@ interface RequestObservationDetailData {
 
 const DIMENSION_ROW_LIMIT = 30;
 const BOT_EVENT_FETCH_LIMIT = 50;
-const BOT_EVENT_SKELETON_WIDTHS = [
-  "w-24",
-  "w-28",
-  "w-24",
-  "w-28",
-  "w-32",
-  "w-40",
-  "w-24",
-  "w-28",
-  "w-24",
-  "w-24",
-  "w-20",
-] as const;
-const NORMAL_REQUEST_SKELETON_WIDTHS = [
-  "w-24",
-  "w-28",
-  "w-24",
-  "w-16",
-  "w-24",
-  "w-40",
-  "w-24",
-  "w-28",
-  "w-24",
-  "w-20",
-] as const;
+type AbnormalRequestTableColumnId =
+  | "id"
+  | "time"
+  | "site"
+  | "kind"
+  | "reason"
+  | "confidence"
+  | "botScore"
+  | "verifiedBotCategory"
+  | "network"
+  | "ip"
+  | "location"
+  | "pathname"
+  | "userAgent";
+
+type NormalRequestTableColumnId =
+  | "id"
+  | "time"
+  | "site"
+  | "kind"
+  | "requestMethod"
+  | "hostname"
+  | "network"
+  | "location"
+  | "colo"
+  | "pathname"
+  | "edgeLatency";
+
+const BOT_EVENT_SKELETON_WIDTHS: Record<AbnormalRequestTableColumnId, string> =
+  {
+    id: "w-24",
+    time: "w-28",
+    site: "w-24",
+    kind: "w-20",
+    reason: "w-28",
+    confidence: "w-32",
+    botScore: "w-24",
+    verifiedBotCategory: "w-36",
+    network: "w-40",
+    ip: "w-28",
+    location: "w-24",
+    pathname: "w-24",
+    userAgent: "w-20",
+  };
+const NORMAL_REQUEST_SKELETON_WIDTHS: Record<
+  NormalRequestTableColumnId,
+  string
+> = {
+  id: "w-24",
+  time: "w-28",
+  site: "w-24",
+  kind: "w-16",
+  requestMethod: "w-24",
+  hostname: "w-36",
+  network: "w-40",
+  location: "w-28",
+  colo: "w-24",
+  pathname: "w-24",
+  edgeLatency: "w-20",
+};
+type RequestObservationColumnAlignment = "left" | "center" | "right";
+const BOT_EVENT_COLUMN_ALIGNMENTS: Record<
+  AbnormalRequestTableColumnId,
+  RequestObservationColumnAlignment
+> = {
+  id: "left",
+  time: "center",
+  site: "left",
+  kind: "left",
+  reason: "left",
+  confidence: "center",
+  botScore: "right",
+  verifiedBotCategory: "left",
+  network: "left",
+  ip: "left",
+  location: "left",
+  pathname: "left",
+  userAgent: "left",
+};
+const NORMAL_REQUEST_COLUMN_ALIGNMENTS: Record<
+  NormalRequestTableColumnId,
+  RequestObservationColumnAlignment
+> = {
+  id: "left",
+  time: "center",
+  site: "left",
+  kind: "left",
+  requestMethod: "center",
+  hostname: "left",
+  network: "left",
+  location: "left",
+  colo: "left",
+  pathname: "left",
+  edgeLatency: "right",
+};
 const ABNORMAL_POINT_COLOR: [number, number, number] = [239, 68, 68];
 const NORMAL_POINT_COLOR: [number, number, number] = [34, 197, 154];
 const PERFORMANCE_WARNING_COLOR = "oklch(0.75 0.16 80)";
@@ -2626,14 +2738,125 @@ function metadataEntries(
   }
 }
 
-function DetailItem({ label, value }: { label: string; value: ReactNode }) {
+const RequestDetailLocationMap = memo(function RequestDetailLocationMap({
+  locale,
+  messages,
+  country,
+  latitude,
+  longitude,
+  loading,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  country: string;
+  latitude: number | null;
+  longitude: number | null;
+  loading: boolean;
+}) {
+  const hasLocation =
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    Number(latitude) >= -90 &&
+    Number(latitude) <= 90 &&
+    Number(longitude) >= -180 &&
+    Number(longitude) <= 180;
+  const points = useMemo(
+    () =>
+      hasLocation
+        ? [
+            {
+              latitude: Number(latitude),
+              longitude: Number(longitude),
+              country,
+            },
+          ]
+        : [],
+    [country, hasLocation, latitude, longitude],
+  );
+
   return (
-    <div className="min-w-0 space-y-1">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0">{value}</dd>
+    <AutoResizer className="w-full" duration={0.24}>
+      <AutoTransition
+        initial={false}
+        transitionKey={loading ? "loading" : "ready"}
+        duration={0.22}
+        type="fade"
+        presenceMode="wait"
+        className="w-full"
+      >
+        {loading ? (
+          <Skeleton key="loading" className="h-[11rem] w-full sm:h-[13rem]" />
+        ) : (
+          <div key="ready" className="w-full">
+            <GeoPointsMapIsland
+              locale={locale}
+              messages={messages}
+              points={points}
+              emptyLabel={messages.realtime.visitorMapUnavailable}
+              heightClassName="h-[11rem] sm:h-[13rem]"
+              initialZoom={0.3}
+              countryHoverEnabled={false}
+              reuseMaps
+            />
+          </div>
+        )}
+      </AutoTransition>
+    </AutoResizer>
+  );
+});
+
+const DetailItem = memo(function DetailItem({
+  label,
+  value,
+  loading = false,
+  wide = false,
+  inline = false,
+}: {
+  label: string;
+  value: ReactNode;
+  loading?: boolean;
+  wide?: boolean;
+  inline?: boolean;
+}) {
+  const skeletonClassName = wide
+    ? "my-1 h-3 w-[min(20rem,88%)]"
+    : "my-1 h-3 w-[min(11rem,78%)]";
+
+  return (
+    <div
+      className={cn(
+        "min-w-0 space-y-1",
+        wide && "sm:col-span-2",
+        inline &&
+          "grid grid-cols-[minmax(7rem,auto)_minmax(0,1fr)] items-baseline gap-x-3 space-y-0",
+      )}
+    >
+      <dt className={cn("text-muted-foreground", inline && "min-w-0 truncate")}>
+        {label}
+      </dt>
+      <dd className={cn("min-w-0", inline && "min-h-5")}>
+        <AutoResizer className="min-w-0" duration={0.2}>
+          <AutoTransition
+            initial={false}
+            transitionKey={loading ? "loading" : "ready"}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="flex min-h-5 min-w-0 items-center"
+          >
+            {loading ? (
+              <Skeleton key="loading" className={skeletonClassName} />
+            ) : (
+              <div key="ready" className="min-h-5 min-w-0 leading-5">
+                {value}
+              </div>
+            )}
+          </AutoTransition>
+        </AutoResizer>
+      </dd>
     </div>
   );
-}
+});
 
 function ConfidenceBlocks({
   confidence,
@@ -2681,19 +2904,41 @@ function ConfidenceBlocks({
 
 function RequestObservationRowSkeletonContent({
   index,
+  columns,
   widths,
+  alignments,
 }: {
   index: number;
-  widths: readonly string[];
+  columns: readonly string[];
+  widths: Readonly<Record<string, string>>;
+  alignments: Readonly<Record<string, RequestObservationColumnAlignment>>;
 }) {
   return (
     <>
-      {widths.map((width, cellIndex) => (
+      {columns.map((columnId) => (
         <TableCell
-          key={`${index}:${cellIndex}`}
-          className={cellIndex === 0 ? "pl-4" : undefined}
+          key={`${index}:${columnId}`}
+          className={cn(
+            columnId === "id" && "pl-4",
+            alignments[columnId] === "center" && "text-center",
+            alignments[columnId] === "right" && "text-right",
+          )}
         >
-          <Skeleton className={cn("h-4", width)} />
+          {columnId === "id" ? (
+            <div className="flex w-28 min-w-0 items-center gap-2">
+              <Skeleton className="size-6 shrink-0 rounded-full" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+          ) : (
+            <Skeleton
+              className={cn(
+                "h-4",
+                widths[columnId],
+                alignments[columnId] === "center" && "mx-auto",
+                alignments[columnId] === "right" && "ml-auto",
+              )}
+            />
+          )}
         </TableCell>
       ))}
     </>
@@ -2722,16 +2967,12 @@ function BotRequestDetailDrawer({
   onOpenChange: (open: boolean) => void;
 }) {
   const empty = copy.emptyValue;
-  const event = detailEvent ?? previewEvent;
+  const preview = detailEvent ?? previewEvent;
+  const event = preview ?? BOT_EVENT_DETAIL_SKELETON_DATA;
+  const hasEvent = Boolean(preview);
   const metadata = event ? metadataEntries(event.metadataJson) : [];
   const eventId = event ? event.traceId || event.rayId : "";
-  const contentKey = loading
-    ? "loading"
-    : error
-      ? "error"
-      : event
-        ? "detail"
-        : "empty";
+  const subtitle = eventId || copy.detailSubtitle;
 
   const stopSideDrawerOverlayEvent = (
     event: PointerEvent<HTMLDivElement> | MouseEvent<HTMLDivElement>,
@@ -2780,258 +3021,358 @@ function BotRequestDetailDrawer({
         >
           <DrawerHeader className="border-b">
             <DrawerTitle>{copy.detailTitle}</DrawerTitle>
-            <DrawerDescription>
-              {previewEvent?.pathname ||
-                detailEvent?.pathname ||
-                copy.detailSubtitle}
-            </DrawerDescription>
+            <AutoTransition
+              initial={false}
+              transitionKey={loading ? "loading" : subtitle}
+              duration={0.18}
+              type="fade"
+              presenceMode="wait"
+              className="h-5"
+            >
+              {loading ? (
+                <Skeleton key="loading" className="h-4 w-44" />
+              ) : (
+                <DrawerDescription key="ready">{subtitle}</DrawerDescription>
+              )}
+            </AutoTransition>
           </DrawerHeader>
           <DrawerScrollArea contentClassName="p-4">
-            <AutoResizer initial duration={0.2} ease={[0.22, 1, 0.36, 1]}>
-              <AutoTransition
-                transitionKey={contentKey}
-                initial={false}
-                duration={0.18}
-                type="fade"
-                presenceMode="wait"
-              >
-                {loading ? (
-                  <div className="flex h-64 items-center justify-center text-muted-foreground">
-                    <Spinner className="size-5" />
-                  </div>
-                ) : error ? (
-                  <div className="flex h-64 items-center justify-center text-center text-sm text-muted-foreground">
-                    {error}
-                  </div>
-                ) : !event ? (
-                  <div className="flex h-64 items-center justify-center text-muted-foreground">
-                    {copy.noData}
-                  </div>
-                ) : (
-                  <div className="space-y-5">
-                    <section className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">
-                          <ConfidenceBlocks
-                            confidence={event.confidence}
-                            label={displayValue(event.confidence, empty)}
-                          />
-                        </Badge>
-                        {event.reasons.map((reason) => (
-                          <Badge key={reason} variant="outline">
-                            {botReasonLabel(copy, reason)}
-                          </Badge>
-                        ))}
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {displayValue(eventId, empty)}
-                        </span>
-                      </div>
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <DetailItem
-                          label={copy.time}
-                          value={shortDateTimeWithSeconds(
-                            locale,
-                            event.receivedAt,
-                          )}
-                        />
-                        <DetailItem
-                          label={copy.kind}
-                          value={displayValue(event.kind, empty)}
-                        />
-                        <DetailItem
-                          label={copy.botScoreBucket}
-                          value={botScoreBucket(event.botScore)}
-                        />
-                        <DetailItem
-                          label={copy.verifiedBotCategory}
-                          value={displayValue(event.verifiedBotCategory, empty)}
-                        />
-                      </dl>
-                    </section>
-
-                    <Separator />
-
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-medium">{copy.request}</h3>
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <DetailItem
-                          label={copy.site}
-                          value={
-                            <div className="min-w-0">
-                              <div className="truncate font-medium">
-                                {displayValue(event.siteName, empty)}
-                              </div>
-                              <div className="truncate font-mono text-xs text-muted-foreground">
-                                {displayValue(
-                                  event.siteDomain || event.siteId,
-                                  empty,
-                                )}
-                              </div>
-                            </div>
-                          }
-                        />
-                        <DetailItem
-                          label={copy.origin}
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(event.origin, empty)}
-                            </span>
-                          }
-                        />
-                        <DetailItem
-                          label={copy.hostname}
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(event.hostname, empty)}
-                            </span>
-                          }
-                        />
-                        <DetailItem
-                          label={copy.pathname}
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(event.pathname || "/", empty)}
-                            </span>
-                          }
-                        />
-                      </dl>
-                    </section>
-
-                    <Separator />
-
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-medium">{copy.edge}</h3>
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <DetailItem
-                          label={copy.location}
-                          value={
-                            <CountryRegionMeta
-                              locale={locale}
-                              messages={messages}
-                              country={event.country || ""}
-                              region={event.region}
+            {error ? (
+              <div className="flex h-64 items-center justify-center text-center text-sm text-muted-foreground">
+                {error}
+              </div>
+            ) : !hasEvent && !loading ? (
+              <div className="flex h-64 items-center justify-center text-muted-foreground">
+                {copy.noData}
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">{copy.detailTitle}</h3>
+                  <AutoResizer className="w-full" duration={0.2}>
+                    <AutoTransition
+                      initial={false}
+                      transitionKey={loading ? "loading" : "ready"}
+                      duration={0.18}
+                      type="fade"
+                      presenceMode="wait"
+                      className="w-full"
+                    >
+                      {loading ? (
+                        <div
+                          key="loading"
+                          className="flex flex-wrap items-center gap-2"
+                        >
+                          <Skeleton className="h-5 w-20" />
+                          <Skeleton className="h-5 w-28" />
+                          <Skeleton className="h-4 w-32" />
+                        </div>
+                      ) : (
+                        <div
+                          key="ready"
+                          className="flex flex-wrap items-center gap-2"
+                        >
+                          <Badge variant="outline">
+                            <ConfidenceBlocks
+                              confidence={event.confidence}
+                              label={displayValue(event.confidence, empty)}
                             />
-                          }
-                        />
-                        <DetailItem
-                          label={copy.colo}
-                          value={displayValue(event.colo, empty)}
-                        />
-                        <DetailItem
-                          label={copy.network}
-                          value={displayValue(formatAsn(event), empty)}
-                        />
-                        <DetailItem
-                          label={copy.ip}
-                          value={
-                            <span className="font-mono">
-                              {displayValue(event.ip, empty)}
-                            </span>
-                          }
-                        />
-                      </dl>
-                    </section>
-
-                    <Separator />
-
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-medium">{copy.client}</h3>
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <DetailItem
-                          label={copy.userAgentLengthBucket}
-                          value={
-                            event.userAgentLength
-                              ? userAgentLengthBucket(event.userAgentLength)
-                              : empty
-                          }
-                        />
-                        <DetailItem
-                          label={copy.ipPrefix}
-                          value={ipPrefix(event.ip)}
-                        />
-                      </dl>
-                      <div className="space-y-1">
-                        <div className="text-muted-foreground">
-                          {copy.fullUserAgent}
+                          </Badge>
+                          {event.reasons.map((reason) => (
+                            <Badge key={reason} variant="outline">
+                              {botReasonLabel(copy, reason)}
+                            </Badge>
+                          ))}
                         </div>
-                        <div className="break-all rounded-none border bg-muted/30 p-3 font-mono text-xs text-muted-foreground">
-                          {displayValue(event.userAgent, empty)}
+                      )}
+                    </AutoTransition>
+                  </AutoResizer>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      loading={loading}
+                      label={copy.time}
+                      value={shortDateTimeWithSeconds(locale, event.receivedAt)}
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.kind}
+                      value={displayValue(event.kind, empty)}
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.botScoreBucket}
+                      value={botScoreBucket(event.botScore)}
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.botScore}
+                      value={
+                        event.botScore === null ||
+                        !Number.isFinite(event.botScore)
+                          ? empty
+                          : numberFormat(locale, event.botScore)
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.verifiedBotCategory}
+                      value={displayValue(event.verifiedBotCategory, empty)}
+                    />
+                  </dl>
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">{copy.request}</h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      loading={loading}
+                      label={copy.site}
+                      value={
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">
+                            {displayValue(event.siteName, empty)}
+                          </div>
+                          <div className="truncate font-mono text-xs text-muted-foreground">
+                            {displayValue(
+                              event.siteDomain || event.siteId,
+                              empty,
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </section>
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={messages.realtime.siteId}
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.siteId, empty)}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.normalDetail.requestMethod}
+                      value={displayValue(
+                        metadata.find(([key]) => key === "requestMethod")?.[1],
+                        empty,
+                      )}
+                    />
+                    <DetailItem
+                      loading={loading}
+                      wide
+                      label={copy.origin}
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.origin, empty)}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      wide
+                      label={copy.hostname}
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.hostname, empty)}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      wide
+                      label={copy.pathname}
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.pathname || "/", empty)}
+                        </span>
+                      }
+                    />
+                  </dl>
+                </section>
 
-                    <Separator />
+                <Separator />
 
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-medium">
-                        {copy.identifiers}
-                      </h3>
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <DetailItem
-                          label={copy.id}
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(eventId, empty)}
-                            </span>
-                          }
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">{copy.edge}</h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      loading={loading}
+                      wide
+                      label={copy.location}
+                      value={
+                        <CountryRegionMeta
+                          locale={locale}
+                          messages={messages}
+                          country={event.country || ""}
+                          region={event.region}
+                          city={event.city}
                         />
-                        <DetailItem
-                          label="Trace ID"
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(event.traceId, empty)}
-                            </span>
-                          }
-                        />
-                        <DetailItem
-                          label="Ray ID"
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(event.rayId, empty)}
-                            </span>
-                          }
-                        />
-                        <DetailItem
-                          label={copy.country}
-                          value={displayValue(event.country, empty)}
-                        />
-                        <DetailItem
-                          label={copy.asn}
-                          value={displayValue(
-                            event.asn ? `AS${event.asn}` : "",
-                            empty,
-                          )}
-                        />
-                      </dl>
-                    </section>
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.colo}
+                      value={displayValue(event.colo, empty)}
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.network}
+                      value={displayValue(formatAsn(event), empty)}
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={messages.common.continent}
+                      value={displayValue(event.continent, empty)}
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={messages.common.latitude}
+                      value={
+                        event.latitude === null ||
+                        !Number.isFinite(event.latitude)
+                          ? empty
+                          : numberFormat(locale, event.latitude)
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={messages.common.longitude}
+                      value={
+                        event.longitude === null ||
+                        !Number.isFinite(event.longitude)
+                          ? empty
+                          : numberFormat(locale, event.longitude)
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.ip}
+                      value={
+                        <span className="font-mono">
+                          {displayValue(event.ip, empty)}
+                        </span>
+                      }
+                    />
+                  </dl>
+                </section>
 
-                    {metadata.length > 0 ? (
-                      <>
-                        <Separator />
-                        <section className="space-y-3">
-                          <h3 className="text-sm font-medium">
-                            {copy.metadata}
-                          </h3>
-                          <dl className="grid gap-3">
-                            {metadata.map(([key, value]) => (
-                              <DetailItem
-                                key={key}
-                                label={key}
-                                value={
-                                  <span className="break-all font-mono text-xs text-muted-foreground">
-                                    {displayValue(value, empty)}
-                                  </span>
-                                }
-                              />
-                            ))}
-                          </dl>
-                        </section>
-                      </>
-                    ) : null}
+                <RequestDetailLocationMap
+                  locale={locale}
+                  messages={messages}
+                  country={event.country || ""}
+                  latitude={event.latitude}
+                  longitude={event.longitude}
+                  loading={loading}
+                />
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">{copy.client}</h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      loading={loading}
+                      label={copy.userAgentLengthBucket}
+                      value={
+                        event.userAgentLength
+                          ? userAgentLengthBucket(event.userAgentLength)
+                          : empty
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.userAgentLength}
+                      value={
+                        event.userAgentLength > 0
+                          ? numberFormat(locale, event.userAgentLength)
+                          : empty
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.ipPrefix}
+                      value={ipPrefix(event.ip)}
+                    />
+                  </dl>
+                  <div className="space-y-1">
+                    <div className="text-muted-foreground">
+                      {copy.fullUserAgent}
+                    </div>
+                    <div className="break-all rounded-none border bg-muted/30 p-3 font-mono text-xs text-muted-foreground">
+                      {displayValue(event.userAgent, empty)}
+                    </div>
                   </div>
-                )}
-              </AutoTransition>
-            </AutoResizer>
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">{copy.identifiers}</h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      loading={loading}
+                      wide
+                      label="Trace ID"
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.traceId, empty)}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      wide
+                      label="Ray ID"
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.rayId, empty)}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.country}
+                      value={displayValue(event.country, empty)}
+                    />
+                    <DetailItem
+                      loading={loading}
+                      label={copy.asn}
+                      value={displayValue(
+                        event.asn ? `AS${event.asn}` : "",
+                        empty,
+                      )}
+                    />
+                  </dl>
+                </section>
+
+                {metadata.length > 0 ? (
+                  <>
+                    <Separator />
+                    <section className="space-y-3">
+                      <h3 className="text-sm font-medium">{copy.metadata}</h3>
+                      <dl className="grid gap-3">
+                        {metadata.map(([key, value]) => (
+                          <DetailItem
+                            key={key}
+                            loading={loading}
+                            inline
+                            label={key}
+                            value={
+                              <span className="break-all font-mono text-xs text-muted-foreground">
+                                {displayValue(value, empty)}
+                              </span>
+                            }
+                          />
+                        ))}
+                      </dl>
+                    </section>
+                  </>
+                ) : null}
+              </div>
+            )}
           </DrawerScrollArea>
         </DrawerContent>
       </Drawer>
@@ -3057,14 +3398,13 @@ function NormalRequestDetailDrawer({
   const empty = copy.emptyValue;
   const eventId = event ? event.traceId || event.rayId : "";
   const title = copy.normalDetail.title;
-  const subtitle = event?.pathname || copy.normalDetail.subtitle;
+  const subtitle = eventId || copy.normalDetail.subtitle;
   const requestMethodLabel = copy.normalDetail.requestMethod;
   const edgeLatencyLabel = copy.normalDetail.edgeLatency;
   const eventAtLabel = copy.normalDetail.eventAt;
   const receivedAtLabel = copy.normalDetail.receivedAt;
-  const coordinatesLabel = copy.normalDetail.coordinates;
   const continentLabel = copy.normalDetail.continent;
-  const contentKey = event ? "detail" : "empty";
+  const metadata = event ? metadataEntries(event.metadataJson) : [];
 
   const stopSideDrawerOverlayEvent = (
     event: PointerEvent<HTMLDivElement> | MouseEvent<HTMLDivElement>,
@@ -3113,224 +3453,263 @@ function NormalRequestDetailDrawer({
         >
           <DrawerHeader className="border-b">
             <DrawerTitle>{title}</DrawerTitle>
-            <DrawerDescription>{subtitle}</DrawerDescription>
+            <AutoTransition
+              initial={false}
+              transitionKey={eventId || "ready"}
+              duration={0.18}
+              type="fade"
+              presenceMode="wait"
+              className="h-5"
+            >
+              <DrawerDescription key="ready">{subtitle}</DrawerDescription>
+            </AutoTransition>
           </DrawerHeader>
           <DrawerScrollArea contentClassName="p-4">
-            <AutoResizer initial duration={0.2} ease={[0.22, 1, 0.36, 1]}>
-              <AutoTransition
-                transitionKey={contentKey}
-                initial={false}
-                duration={0.18}
-                type="fade"
-                presenceMode="wait"
-              >
-                {!event ? (
-                  <div className="flex h-64 items-center justify-center text-muted-foreground">
-                    {copy.noData}
-                  </div>
-                ) : (
-                  <div className="space-y-5">
-                    <section className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">
-                          {requestKindLabel(copy, event.kind)}
-                        </Badge>
-                        <Badge variant="outline">
-                          {event.requestMethod || empty}
-                        </Badge>
-                        <span className="font-mono text-xs text-muted-foreground">
+            {!event ? (
+              <div className="flex h-64 items-center justify-center text-muted-foreground">
+                {copy.noData}
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">{title}</h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      label={receivedAtLabel}
+                      value={shortDateTimeWithSeconds(locale, event.receivedAt)}
+                    />
+                    <DetailItem
+                      label={eventAtLabel}
+                      value={shortDateTimeWithSeconds(locale, event.eventAt)}
+                    />
+                    <DetailItem
+                      label={copy.kind}
+                      value={requestKindLabel(copy, event.kind)}
+                    />
+                    <DetailItem
+                      label={requestMethodLabel}
+                      value={displayValue(event.requestMethod, empty)}
+                    />
+                  </dl>
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">{copy.request}</h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      label={copy.site}
+                      value={
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">
+                            {displayValue(event.siteName, empty)}
+                          </div>
+                          <div className="truncate font-mono text-xs text-muted-foreground">
+                            {displayValue(
+                              event.siteDomain || event.siteId,
+                              empty,
+                            )}
+                          </div>
+                        </div>
+                      }
+                    />
+                    <DetailItem
+                      label={messages.realtime.siteId}
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.siteId, empty)}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      wide
+                      label={copy.origin}
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.origin, empty)}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      wide
+                      label={copy.hostname}
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.hostname, empty)}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      wide
+                      label={copy.pathname}
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.pathname || "/", empty)}
+                        </span>
+                      }
+                    />
+                  </dl>
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">{copy.edge}</h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      label={edgeLatencyLabel}
+                      value={latencyFormat(locale, copy, event.edgeLatencyMs)}
+                    />
+                    <DetailItem
+                      wide
+                      label={copy.location}
+                      value={
+                        <CountryRegionMeta
+                          locale={locale}
+                          messages={messages}
+                          country={event.country || ""}
+                          region={event.region}
+                          city={event.city}
+                        />
+                      }
+                    />
+                    <DetailItem
+                      label={copy.colo}
+                      value={displayValue(event.colo, empty)}
+                    />
+                    <DetailItem
+                      label={copy.network}
+                      value={displayValue(formatNormalAsn(event), empty)}
+                    />
+                    <DetailItem
+                      label={messages.common.latitude}
+                      value={
+                        event.latitude === null ||
+                        !Number.isFinite(event.latitude)
+                          ? empty
+                          : numberFormat(locale, event.latitude)
+                      }
+                    />
+                    <DetailItem
+                      label={messages.common.longitude}
+                      value={
+                        event.longitude === null ||
+                        !Number.isFinite(event.longitude)
+                          ? empty
+                          : numberFormat(locale, event.longitude)
+                      }
+                    />
+                    <DetailItem
+                      label={continentLabel}
+                      value={displayValue(event.continent, empty)}
+                    />
+                  </dl>
+                </section>
+
+                <RequestDetailLocationMap
+                  locale={locale}
+                  messages={messages}
+                  country={event.country || ""}
+                  latitude={event.latitude}
+                  longitude={event.longitude}
+                  loading={false}
+                />
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">{copy.client}</h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      label={copy.userAgentLengthBucket}
+                      value={
+                        event.userAgentLength
+                          ? userAgentLengthBucket(event.userAgentLength)
+                          : empty
+                      }
+                    />
+                    <DetailItem
+                      label={copy.userAgentLength}
+                      value={
+                        event.userAgentLength > 0
+                          ? numberFormat(locale, event.userAgentLength)
+                          : empty
+                      }
+                    />
+                  </dl>
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium">{copy.identifiers}</h3>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailItem
+                      wide
+                      label={copy.id}
+                      value={
+                        <span className="break-all font-mono text-xs">
                           {displayValue(eventId, empty)}
                         </span>
-                      </div>
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <DetailItem
-                          label={receivedAtLabel}
-                          value={shortDateTimeWithSeconds(
-                            locale,
-                            event.receivedAt,
-                          )}
-                        />
-                        <DetailItem
-                          label={eventAtLabel}
-                          value={shortDateTimeWithSeconds(
-                            locale,
-                            event.eventAt,
-                          )}
-                        />
-                        <DetailItem
-                          label={copy.kind}
-                          value={requestKindLabel(copy, event.kind)}
-                        />
-                        <DetailItem
-                          label={requestMethodLabel}
-                          value={displayValue(event.requestMethod, empty)}
-                        />
-                      </dl>
-                    </section>
+                      }
+                    />
+                    <DetailItem
+                      wide
+                      label="Trace ID"
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.traceId, empty)}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      wide
+                      label="Ray ID"
+                      value={
+                        <span className="break-all font-mono text-xs">
+                          {displayValue(event.rayId, empty)}
+                        </span>
+                      }
+                    />
+                    <DetailItem
+                      label={copy.country}
+                      value={displayValue(event.country, empty)}
+                    />
+                    <DetailItem
+                      label={copy.asn}
+                      value={displayValue(
+                        event.asn ? `AS${event.asn}` : "",
+                        empty,
+                      )}
+                    />
+                  </dl>
+                </section>
 
+                {metadata.length > 0 ? (
+                  <>
                     <Separator />
-
                     <section className="space-y-3">
-                      <h3 className="text-sm font-medium">{copy.request}</h3>
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <DetailItem
-                          label={copy.site}
-                          value={
-                            <div className="min-w-0">
-                              <div className="truncate font-medium">
-                                {displayValue(event.siteName, empty)}
-                              </div>
-                              <div className="truncate font-mono text-xs text-muted-foreground">
-                                {displayValue(
-                                  event.siteDomain || event.siteId,
-                                  empty,
-                                )}
-                              </div>
-                            </div>
-                          }
-                        />
-                        <DetailItem
-                          label={copy.origin}
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(event.origin, empty)}
-                            </span>
-                          }
-                        />
-                        <DetailItem
-                          label={copy.hostname}
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(event.hostname, empty)}
-                            </span>
-                          }
-                        />
-                        <DetailItem
-                          label={copy.pathname}
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(event.pathname || "/", empty)}
-                            </span>
-                          }
-                        />
+                      <h3 className="text-sm font-medium">{copy.metadata}</h3>
+                      <dl className="grid gap-3">
+                        {metadata.map(([key, value]) => (
+                          <DetailItem
+                            key={key}
+                            inline
+                            label={key}
+                            value={
+                              <span className="break-all font-mono text-xs text-muted-foreground">
+                                {displayValue(value, empty)}
+                              </span>
+                            }
+                          />
+                        ))}
                       </dl>
                     </section>
-
-                    <Separator />
-
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-medium">{copy.edge}</h3>
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <DetailItem
-                          label={edgeLatencyLabel}
-                          value={latencyFormat(
-                            locale,
-                            copy,
-                            event.edgeLatencyMs,
-                          )}
-                        />
-                        <DetailItem
-                          label={copy.location}
-                          value={
-                            <CountryRegionMeta
-                              locale={locale}
-                              messages={messages}
-                              country={event.country || ""}
-                              region={event.region}
-                            />
-                          }
-                        />
-                        <DetailItem
-                          label={copy.colo}
-                          value={displayValue(event.colo, empty)}
-                        />
-                        <DetailItem
-                          label={copy.network}
-                          value={displayValue(formatNormalAsn(event), empty)}
-                        />
-                        <DetailItem
-                          label={coordinatesLabel}
-                          value={
-                            event.latitude !== null && event.longitude !== null
-                              ? `${event.latitude.toFixed(5)}, ${event.longitude.toFixed(5)}`
-                              : empty
-                          }
-                        />
-                        <DetailItem
-                          label={continentLabel}
-                          value={displayValue(event.continent, empty)}
-                        />
-                      </dl>
-                    </section>
-
-                    <Separator />
-
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-medium">{copy.client}</h3>
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <DetailItem
-                          label={copy.userAgentLengthBucket}
-                          value={
-                            event.userAgentLength
-                              ? userAgentLengthBucket(event.userAgentLength)
-                              : empty
-                          }
-                        />
-                        <DetailItem
-                          label={copy.userAgent}
-                          value={numberFormat(locale, event.userAgentLength)}
-                        />
-                      </dl>
-                    </section>
-
-                    <Separator />
-
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-medium">
-                        {copy.identifiers}
-                      </h3>
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <DetailItem
-                          label={copy.id}
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(eventId, empty)}
-                            </span>
-                          }
-                        />
-                        <DetailItem
-                          label="Trace ID"
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(event.traceId, empty)}
-                            </span>
-                          }
-                        />
-                        <DetailItem
-                          label="Ray ID"
-                          value={
-                            <span className="break-all font-mono text-xs">
-                              {displayValue(event.rayId, empty)}
-                            </span>
-                          }
-                        />
-                        <DetailItem
-                          label={copy.country}
-                          value={displayValue(event.country, empty)}
-                        />
-                        <DetailItem
-                          label={copy.asn}
-                          value={displayValue(
-                            event.asn ? `AS${event.asn}` : "",
-                            empty,
-                          )}
-                        />
-                      </dl>
-                    </section>
-                  </div>
-                )}
-              </AutoTransition>
-            </AutoResizer>
+                  </>
+                ) : null}
+              </div>
+            )}
           </DrawerScrollArea>
         </DrawerContent>
       </Drawer>
@@ -3484,23 +3863,60 @@ const BotEventsTable = memo(function BotEventsTable({
     [openEvent],
   );
 
+  const columnDefinitions = useMemo<
+    readonly AnalyticsTableColumnDefinition<AbnormalRequestTableColumnId>[]
+  >(
+    () => [
+      { id: "id", label: copy.id, required: true },
+      { id: "time", label: copy.time, required: true },
+      { id: "site", label: copy.site, required: true },
+      { id: "kind", label: copy.kind },
+      { id: "reason", label: copy.reason },
+      { id: "confidence", label: copy.confidence },
+      { id: "network", label: copy.network },
+      { id: "ip", label: copy.ip },
+      { id: "location", label: copy.location },
+      { id: "pathname", label: copy.pathname },
+      { id: "userAgent", label: copy.userAgent },
+      { id: "botScore", label: copy.botScore },
+      { id: "verifiedBotCategory", label: copy.verifiedBotCategory },
+    ],
+    [copy],
+  );
+  const tableColumns = useAnalyticsTableColumns({
+    storageKey:
+      "insightflare:analytics-table-columns:request-observation-abnormal",
+    columns: columnDefinitions,
+  });
+  const headers = useMemo<Record<AbnormalRequestTableColumnId, ReactNode>>(
+    () => ({
+      id: <TableHead className="pl-4">{copy.id}</TableHead>,
+      time: <TableHead className="text-center">{copy.time}</TableHead>,
+      site: <TableHead>{copy.site}</TableHead>,
+      kind: <TableHead>{copy.kind}</TableHead>,
+      reason: <TableHead>{copy.reason}</TableHead>,
+      confidence: (
+        <TableHead className="text-center">{copy.confidence}</TableHead>
+      ),
+      botScore: <TableHead className="text-right">{copy.botScore}</TableHead>,
+      verifiedBotCategory: <TableHead>{copy.verifiedBotCategory}</TableHead>,
+      network: <TableHead>{copy.network}</TableHead>,
+      ip: <TableHead>{copy.ip}</TableHead>,
+      location: <TableHead>{copy.location}</TableHead>,
+      pathname: <TableHead>{copy.pathname}</TableHead>,
+      userAgent: <TableHead className="pr-4">{copy.userAgent}</TableHead>,
+    }),
+    [copy],
+  );
   const tableHeader = useMemo(
     () => (
       <TableRow>
-        <TableHead className="pl-4">{copy.id}</TableHead>
-        <TableHead>{copy.time}</TableHead>
-        <TableHead>{copy.site}</TableHead>
-        <TableHead>{copy.reason}</TableHead>
-        <TableHead>{copy.confidence}</TableHead>
-        <TableHead>{copy.network}</TableHead>
-        <TableHead>{copy.asn}</TableHead>
-        <TableHead>{copy.ip}</TableHead>
-        <TableHead>{copy.location}</TableHead>
-        <TableHead>{copy.pathname}</TableHead>
-        <TableHead className="pr-4">{copy.userAgent}</TableHead>
+        {tableColumns.visibleIds.map((columnId) => (
+          <Fragment key={columnId}>{headers[columnId]}</Fragment>
+        ))}
       </TableRow>
     ),
-    [copy],
+    [headers, tableColumns.visibleIds],
   );
   const renderRow = useCallback(
     (event: BotEvent) => {
@@ -3508,64 +3924,261 @@ const BotEventsTable = memo(function BotEventsTable({
         copy,
         event.reasons[0] || event.confidence || "",
       );
+      const reasonItems =
+        event.reasons.length > 0
+          ? event.reasons.map((reason, index) => {
+              const value = botReasonLabel(copy, reason);
+              return {
+                label: `${copy.reason}#${index + 1}`,
+                value,
+                copyValue: value,
+              };
+            })
+          : [
+              {
+                label: copy.reason,
+                value: reasonLabel || emptyValue(copy),
+                copyValue: reasonLabel || undefined,
+              },
+            ];
       const eventId = event.traceId || event.rayId || "";
-      return {
-        children: (
-          <>
-            <TableCell className="pl-4 max-w-36">
-              <div className="flex w-28 min-w-0 items-center gap-2">
-                <VisitorAvatar seed={eventId || "unknown"} className="size-6" />
-                <span
-                  className="min-w-0 truncate font-mono"
-                  title={eventId || undefined}
-                >
+      const kindLabel = requestKindLabel(copy, event.kind);
+      const confidenceLabel = event.confidence || emptyValue(copy);
+      const siteLabel =
+        event.siteName || event.siteDomain || event.siteId || emptyValue(copy);
+      const siteCopyValue =
+        event.siteName || event.siteDomain || event.siteId || undefined;
+      const hostnameLabel = event.hostname || emptyValue(copy);
+      const hostnameCopyValue = event.hostname || undefined;
+      const networkLabel = event.asOrganization || emptyValue(copy);
+      const networkCopyValue = event.asOrganization || undefined;
+      const asnLabel = event.asn ? `AS${event.asn}` : emptyValue(copy);
+      const asnCopyValue = event.asn ? `AS${event.asn}` : undefined;
+      const botScoreLabel =
+        event.botScore === null || !Number.isFinite(event.botScore)
+          ? emptyValue(copy)
+          : numberFormat(locale, event.botScore);
+      const verifiedBotCategoryLabel =
+        event.verifiedBotCategory || emptyValue(copy);
+      const verifiedBotCategoryCopyValue =
+        event.verifiedBotCategory || undefined;
+      const pathnameLabel = event.pathname || "/";
+      const userAgentLabel = event.userAgent || emptyValue(copy);
+      const cells: Record<AbnormalRequestTableColumnId, ReactNode> = {
+        id: (
+          <TableCell className="pl-4 max-w-36">
+            <div className="flex w-28 min-w-0 items-center gap-2">
+              <VisitorAvatar seed={eventId || "unknown"} className="size-6" />
+              <AnalyticsDetailsTooltipTarget
+                className="min-w-0 flex-1 truncate"
+                locale={locale}
+                request={{
+                  key: `request-observation-abnormal-id:${eventId}:${event.receivedAt}`,
+                  items: [
+                    {
+                      label: copy.id,
+                      value: eventId || emptyValue(copy),
+                      copyValue: eventId || undefined,
+                    },
+                  ],
+                }}
+              >
+                <span className="truncate font-mono">
                   {eventId ? shortId(eventId) : "--"}
                 </span>
-              </div>
-            </TableCell>
-            <TableCell className="max-w-36 font-mono text-muted-foreground">
-              <span className="block truncate">
-                {formatRelativeTime(locale, event.receivedAt, now)}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-48">
-              <span
-                className="block truncate font-medium"
-                title={event.siteName}
-              >
-                {event.siteName}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-48">
-              <span className="block truncate font-medium" title={reasonLabel}>
-                {reasonLabel}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-36">
+              </AnalyticsDetailsTooltipTarget>
+            </div>
+          </TableCell>
+        ),
+        time: (
+          <TableCell className="max-w-36 text-center font-mono text-muted-foreground">
+            <AnalyticsTimeTooltipTarget
+              className="block truncate"
+              locale={locale}
+              timestamp={event.receivedAt}
+            >
+              {formatRelativeTime(locale, event.receivedAt, now)}
+            </AnalyticsTimeTooltipTarget>
+          </TableCell>
+        ),
+        site: (
+          <TableCell className="max-w-48">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate font-medium"
+              locale={locale}
+              request={{
+                key: `request-observation-abnormal-site:${event.siteId}:${event.siteName}:${event.siteDomain}`,
+                items: [
+                  {
+                    label: copy.site,
+                    value: siteLabel,
+                    copyValue: siteCopyValue,
+                  },
+                  {
+                    label: copy.hostname,
+                    value: hostnameLabel,
+                    copyValue: hostnameCopyValue,
+                  },
+                ],
+              }}
+            >
+              {event.siteName}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        kind: (
+          <TableCell className="max-w-36">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate"
+              locale={locale}
+              request={{
+                key: `request-observation-abnormal-kind:${eventId}:${event.kind}`,
+                items: [
+                  {
+                    label: copy.kind,
+                    value: kindLabel,
+                    copyValue: event.kind || undefined,
+                  },
+                ],
+              }}
+            >
+              {kindLabel}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        reason: (
+          <TableCell className="max-w-48">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate font-medium"
+              locale={locale}
+              request={{
+                key: `request-observation-abnormal-reason:${eventId}:${event.reasons.join(",")}:${reasonLabel}`,
+                items: reasonItems,
+              }}
+            >
+              {reasonLabel}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        confidence: (
+          <TableCell className="max-w-36 text-center">
+            <AnalyticsDetailsTooltipTarget
+              className="inline-flex"
+              locale={locale}
+              request={{
+                key: `request-observation-abnormal-confidence:${eventId}:${event.confidence}`,
+                items: [
+                  {
+                    label: copy.confidence,
+                    value: confidenceLabel,
+                    copyValue: event.confidence || undefined,
+                  },
+                ],
+              }}
+            >
               <ConfidenceBlocks
                 confidence={event.confidence}
                 label={event.confidence || "--"}
               />
-            </TableCell>
-            <TableCell className="max-w-44">
-              <span
-                className="block truncate"
-                title={event.asOrganization || undefined}
-              >
-                {event.asOrganization || "--"}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-24">
-              <span className="block truncate font-mono">
-                {event.asn ? `AS${event.asn}` : "--"}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-36">
-              <span className="block truncate font-mono text-muted-foreground">
-                {event.ip || "--"}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-52">
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        botScore: (
+          <TableCell className="max-w-24 text-right">
+            <span className="block truncate font-mono tabular-nums">
+              {botScoreLabel}
+            </span>
+          </TableCell>
+        ),
+        verifiedBotCategory: (
+          <TableCell className="max-w-44">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate"
+              locale={locale}
+              request={{
+                key: `request-observation-abnormal-verified-bot:${eventId}:${event.verifiedBotCategory}`,
+                items: [
+                  {
+                    label: copy.verifiedBotCategory,
+                    value: verifiedBotCategoryLabel,
+                    copyValue: verifiedBotCategoryCopyValue,
+                  },
+                ],
+              }}
+            >
+              {event.verifiedBotCategory || "--"}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        network: (
+          <TableCell className="max-w-44">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate"
+              locale={locale}
+              request={{
+                key: `request-observation-abnormal-network:${eventId}:${event.asOrganization}:${event.asn}`,
+                items: [
+                  {
+                    label: copy.network,
+                    value: networkLabel,
+                    copyValue: networkCopyValue,
+                  },
+                  {
+                    label: copy.asn,
+                    value: asnLabel,
+                    copyValue: asnCopyValue,
+                  },
+                ],
+              }}
+            >
+              {event.asOrganization || "--"}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        ip: (
+          <TableCell className="max-w-36">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate font-mono text-muted-foreground"
+              locale={locale}
+              request={{
+                key: `request-observation-abnormal-ip:${eventId}:${event.ip}`,
+                items: [
+                  {
+                    label: copy.ip,
+                    value: event.ip || emptyValue(copy),
+                    copyValue: event.ip || undefined,
+                  },
+                ],
+              }}
+            >
+              {event.ip || "--"}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        location: (
+          <TableCell className="max-w-52">
+            <AnalyticsDetailsTooltipTarget
+              className="block min-w-0"
+              locale={locale}
+              request={{
+                key: `request-observation-abnormal-location:${eventId}:${event.country}:${event.region}:${event.city}`,
+                items: [
+                  {
+                    label: copy.location,
+                    value: (
+                      <CountryRegionMeta
+                        locale={locale}
+                        messages={messages}
+                        country={event.country || ""}
+                        region={event.region}
+                        city={event.city}
+                        className="max-w-none text-background [&_.text-foreground]:text-background"
+                      />
+                    ),
+                  },
+                ],
+              }}
+            >
               <CountryRegionMeta
                 locale={locale}
                 messages={messages}
@@ -3573,23 +4186,56 @@ const BotEventsTable = memo(function BotEventsTable({
                 region={event.region}
                 className="w-full"
               />
-            </TableCell>
-            <TableCell className="max-w-64">
-              <span
-                className="block truncate font-mono"
-                title={event.pathname || "/"}
-              >
-                {event.pathname || "/"}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-80 pr-4">
-              <span
-                className="block truncate font-mono text-muted-foreground"
-                title={event.userAgent || undefined}
-              >
-                {event.userAgent || "--"}
-              </span>
-            </TableCell>
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        pathname: (
+          <TableCell className="max-w-64">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate font-mono"
+              locale={locale}
+              request={{
+                key: `request-observation-abnormal-pathname:${eventId}:${pathnameLabel}`,
+                items: [
+                  {
+                    label: copy.pathname,
+                    value: pathnameLabel,
+                    copyValue: pathnameLabel,
+                  },
+                ],
+              }}
+            >
+              {pathnameLabel}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        userAgent: (
+          <TableCell className="max-w-80 pr-4">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate font-mono text-muted-foreground"
+              locale={locale}
+              request={{
+                key: `request-observation-abnormal-user-agent:${eventId}:${event.userAgent}`,
+                items: [
+                  {
+                    label: copy.userAgent,
+                    value: userAgentLabel,
+                    copyValue: event.userAgent || undefined,
+                  },
+                ],
+              }}
+            >
+              {event.userAgent || "--"}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+      };
+      return {
+        children: (
+          <>
+            {tableColumns.visibleIds.map((columnId) => (
+              <Fragment key={columnId}>{cells[columnId]}</Fragment>
+            ))}
           </>
         ),
         props: {
@@ -3603,16 +4249,26 @@ const BotEventsTable = memo(function BotEventsTable({
         },
       };
     },
-    [copy, handleKeyDown, locale, messages, now, openEvent],
+    [
+      copy,
+      handleKeyDown,
+      locale,
+      messages,
+      now,
+      openEvent,
+      tableColumns.visibleIds,
+    ],
   );
   const renderSkeletonRow = useCallback(
     (index: number) => (
       <RequestObservationRowSkeletonContent
         index={index}
+        columns={tableColumns.visibleIds}
         widths={BOT_EVENT_SKELETON_WIDTHS}
+        alignments={BOT_EVENT_COLUMN_ALIGNMENTS}
       />
     ),
-    [],
+    [tableColumns.visibleIds],
   );
   const getRowKey = useCallback(
     (event: BotEvent, index: number) =>
@@ -3635,12 +4291,21 @@ const BotEventsTable = memo(function BotEventsTable({
               {copy.recentDescription}
             </p>
           </div>
-          <div className="shrink-0 text-xs text-muted-foreground">
-            {!loading && events.length > 0
-              ? hasMore
-                ? `${copy.recentShowing} ${numberFormat(locale, events.length)}`
-                : copy.recentLoadedAll
-              : ""}
+          <div className="flex shrink-0 items-center gap-2">
+            <AnalyticsTableColumnSettings
+              columns={columnDefinitions}
+              orderedIds={tableColumns.orderedIds}
+              visibleIds={tableColumns.visibleIds}
+              onOrderChange={tableColumns.setOrder}
+              onVisibilityChange={tableColumns.setVisible}
+              onReset={tableColumns.reset}
+              labels={messages.common.tableColumns}
+            />
+            <div className="text-xs text-muted-foreground">
+              {!loading && events.length > 0 && !hasMore
+                ? copy.recentLoadedAll
+                : ""}
+            </div>
           </div>
         </div>
 
@@ -3653,13 +4318,15 @@ const BotEventsTable = memo(function BotEventsTable({
           renderSkeletonRow={renderSkeletonRow}
           getRowKey={getRowKey}
           skeletonRows={BOT_EVENT_FETCH_LIMIT}
-          columnCount={11}
+          columnCount={tableColumns.visibleIds.length}
           loading={loading}
           loadingMore={loadingMore}
           errorContent={copy.loadFailed}
           emptyContent={copy.noData}
           hasMore={hasMore}
           onLoadMore={onLoadMore}
+          enableTimeTooltips
+          messages={messages}
         />
       </section>
 
@@ -3801,77 +4468,261 @@ const NormalRequestsTable = memo(function NormalRequestsTable({
     },
     [openEvent],
   );
+  const columnDefinitions = useMemo<
+    readonly AnalyticsTableColumnDefinition<NormalRequestTableColumnId>[]
+  >(
+    () => [
+      { id: "id", label: copy.id, required: true },
+      { id: "time", label: copy.time, required: true },
+      { id: "site", label: copy.site, required: true },
+      { id: "kind", label: copy.kind },
+      { id: "requestMethod", label: copy.normalDetail.requestMethod },
+      { id: "hostname", label: copy.hostname },
+      { id: "network", label: copy.network },
+      { id: "location", label: copy.location },
+      { id: "colo", label: copy.colo },
+      { id: "pathname", label: copy.pathname },
+      { id: "edgeLatency", label: copy.normalDetail.edgeLatency },
+    ],
+    [copy],
+  );
+  const tableColumns = useAnalyticsTableColumns({
+    storageKey:
+      "insightflare:analytics-table-columns:request-observation-normal",
+    columns: columnDefinitions,
+  });
+  const headers = useMemo<Record<NormalRequestTableColumnId, ReactNode>>(
+    () => ({
+      id: <TableHead className="pl-4">{copy.id}</TableHead>,
+      time: <TableHead className="text-center">{copy.time}</TableHead>,
+      site: <TableHead>{copy.site}</TableHead>,
+      kind: <TableHead>{copy.kind}</TableHead>,
+      requestMethod: (
+        <TableHead className="text-center">
+          {copy.normalDetail.requestMethod}
+        </TableHead>
+      ),
+      hostname: <TableHead>{copy.hostname}</TableHead>,
+      network: <TableHead>{copy.network}</TableHead>,
+      location: <TableHead>{copy.location}</TableHead>,
+      colo: <TableHead>{copy.colo}</TableHead>,
+      pathname: <TableHead>{copy.pathname}</TableHead>,
+      edgeLatency: (
+        <TableHead className="pr-4 text-right">
+          {copy.normalDetail.edgeLatency}
+        </TableHead>
+      ),
+    }),
+    [copy],
+  );
   const tableHeader = useMemo(
     () => (
       <TableRow>
-        <TableHead className="pl-4">{copy.id}</TableHead>
-        <TableHead>{copy.time}</TableHead>
-        <TableHead>{copy.site}</TableHead>
-        <TableHead>{copy.kind}</TableHead>
-        <TableHead>{copy.normalDetail.requestMethod}</TableHead>
-        <TableHead>{copy.network}</TableHead>
-        <TableHead>{copy.asn}</TableHead>
-        <TableHead>{copy.location}</TableHead>
-        <TableHead>{copy.pathname}</TableHead>
-        <TableHead className="pr-4">{copy.normalDetail.edgeLatency}</TableHead>
+        {tableColumns.visibleIds.map((columnId) => (
+          <Fragment key={columnId}>{headers[columnId]}</Fragment>
+        ))}
       </TableRow>
     ),
-    [copy],
+    [headers, tableColumns.visibleIds],
   );
   const renderRow = useCallback(
     (event: NormalRequestEvent) => {
       const eventId = event.traceId || event.rayId || "";
-      return {
-        children: (
-          <>
-            <TableCell className="pl-4 max-w-36">
-              <div className="flex w-28 min-w-0 items-center gap-2">
-                <VisitorAvatar seed={eventId || "normal"} className="size-6" />
-                <span
-                  className="min-w-0 truncate font-mono"
-                  title={eventId || undefined}
-                >
+      const kindLabel = requestKindLabel(copy, event.kind);
+      const requestMethodLabel = event.requestMethod || emptyValue(copy);
+      const siteLabel =
+        event.siteName || event.siteDomain || event.siteId || emptyValue(copy);
+      const siteCopyValue =
+        event.siteName || event.siteDomain || event.siteId || undefined;
+      const networkLabel = event.asOrganization || emptyValue(copy);
+      const networkCopyValue = event.asOrganization || undefined;
+      const hostnameLabel = event.hostname || emptyValue(copy);
+      const hostnameCopyValue = event.hostname || undefined;
+      const asnLabel = event.asn ? `AS${event.asn}` : emptyValue(copy);
+      const asnCopyValue = event.asn ? `AS${event.asn}` : undefined;
+      const coloLabel = event.colo || emptyValue(copy);
+      const coloCopyValue = event.colo || undefined;
+      const pathnameLabel = event.pathname || "/";
+      const edgeLatencyLabel = latencyFormat(locale, copy, event.edgeLatencyMs);
+      const edgeLatencyCopyValue =
+        event.edgeLatencyMs === null ||
+        event.edgeLatencyMs === undefined ||
+        !Number.isFinite(event.edgeLatencyMs)
+          ? undefined
+          : edgeLatencyLabel;
+      const cells: Record<NormalRequestTableColumnId, ReactNode> = {
+        id: (
+          <TableCell className="pl-4 max-w-36">
+            <div className="flex w-28 min-w-0 items-center gap-2">
+              <VisitorAvatar seed={eventId || "normal"} className="size-6" />
+              <AnalyticsDetailsTooltipTarget
+                className="min-w-0 flex-1 truncate"
+                locale={locale}
+                request={{
+                  key: `request-observation-normal-id:${eventId}:${event.receivedAt}`,
+                  items: [
+                    {
+                      label: copy.id,
+                      value: eventId || emptyValue(copy),
+                      copyValue: eventId || undefined,
+                    },
+                  ],
+                }}
+              >
+                <span className="truncate font-mono">
                   {eventId ? shortId(eventId) : "--"}
                 </span>
-              </div>
-            </TableCell>
-            <TableCell className="max-w-36 font-mono text-muted-foreground">
-              <span className="block truncate">
-                {formatRelativeTime(locale, event.receivedAt, now)}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-48">
-              <span
-                className="block truncate font-medium"
-                title={event.siteName}
-              >
-                {event.siteName || event.siteDomain || event.siteId}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-28">
-              <Badge variant="outline">
-                {requestKindLabel(copy, event.kind)}
-              </Badge>
-            </TableCell>
-            <TableCell className="max-w-24">
-              <span className="block truncate font-mono">
+              </AnalyticsDetailsTooltipTarget>
+            </div>
+          </TableCell>
+        ),
+        time: (
+          <TableCell className="max-w-36 text-center font-mono text-muted-foreground">
+            <AnalyticsTimeTooltipTarget
+              className="block truncate"
+              locale={locale}
+              timestamp={event.receivedAt}
+            >
+              {formatRelativeTime(locale, event.receivedAt, now)}
+            </AnalyticsTimeTooltipTarget>
+          </TableCell>
+        ),
+        site: (
+          <TableCell className="max-w-48">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate font-medium"
+              locale={locale}
+              request={{
+                key: `request-observation-normal-site:${event.siteId}:${event.siteName}:${event.siteDomain}`,
+                items: [
+                  {
+                    label: copy.site,
+                    value: siteLabel,
+                    copyValue: siteCopyValue,
+                  },
+                  {
+                    label: copy.hostname,
+                    value: hostnameLabel,
+                    copyValue: hostnameCopyValue,
+                  },
+                ],
+              }}
+            >
+              {event.siteName || event.siteDomain || event.siteId}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        kind: (
+          <TableCell className="max-w-28">
+            <AnalyticsDetailsTooltipTarget
+              className="inline-flex"
+              locale={locale}
+              request={{
+                key: `request-observation-normal-kind:${eventId}:${event.kind}`,
+                items: [
+                  {
+                    label: copy.kind,
+                    value: kindLabel,
+                    copyValue: event.kind || undefined,
+                  },
+                ],
+              }}
+            >
+              <span className="truncate">{kindLabel}</span>
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        requestMethod: (
+          <TableCell className="max-w-24 text-center">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate text-center"
+              locale={locale}
+              request={{
+                key: `request-observation-normal-method:${eventId}:${event.requestMethod}`,
+                items: [
+                  {
+                    label: copy.normalDetail.requestMethod,
+                    value: requestMethodLabel,
+                    copyValue: event.requestMethod || undefined,
+                  },
+                ],
+              }}
+            >
+              <span className="block truncate text-center font-mono">
                 {event.requestMethod || "--"}
               </span>
-            </TableCell>
-            <TableCell className="max-w-44">
-              <span
-                className="block truncate"
-                title={event.asOrganization || undefined}
-              >
-                {event.asOrganization || "--"}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-24">
-              <span className="block truncate font-mono">
-                {event.asn ? `AS${event.asn}` : "--"}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-52">
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        hostname: (
+          <TableCell className="max-w-44">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate font-mono"
+              locale={locale}
+              request={{
+                key: `request-observation-normal-hostname:${eventId}:${event.hostname}`,
+                items: [
+                  {
+                    label: copy.hostname,
+                    value: hostnameLabel,
+                    copyValue: event.hostname || undefined,
+                  },
+                ],
+              }}
+            >
+              {event.hostname || "--"}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        network: (
+          <TableCell className="max-w-44">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate"
+              locale={locale}
+              request={{
+                key: `request-observation-normal-network:${eventId}:${event.asOrganization}:${event.asn}`,
+                items: [
+                  {
+                    label: copy.network,
+                    value: networkLabel,
+                    copyValue: networkCopyValue,
+                  },
+                  {
+                    label: copy.asn,
+                    value: asnLabel,
+                    copyValue: asnCopyValue,
+                  },
+                ],
+              }}
+            >
+              {event.asOrganization || "--"}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        location: (
+          <TableCell className="max-w-52">
+            <AnalyticsDetailsTooltipTarget
+              className="block min-w-0"
+              locale={locale}
+              request={{
+                key: `request-observation-normal-location:${eventId}:${event.country}:${event.region}:${event.city}`,
+                items: [
+                  {
+                    label: copy.location,
+                    value: (
+                      <CountryRegionMeta
+                        locale={locale}
+                        messages={messages}
+                        country={event.country || ""}
+                        region={event.region}
+                        city={event.city}
+                        className="max-w-none text-background [&_.text-foreground]:text-background"
+                      />
+                    ),
+                  },
+                ],
+              }}
+            >
               <CountryRegionMeta
                 locale={locale}
                 messages={messages}
@@ -3879,20 +4730,78 @@ const NormalRequestsTable = memo(function NormalRequestsTable({
                 region={event.region}
                 className="w-full"
               />
-            </TableCell>
-            <TableCell className="max-w-64">
-              <span
-                className="block truncate font-mono"
-                title={event.pathname || "/"}
-              >
-                {event.pathname || "/"}
-              </span>
-            </TableCell>
-            <TableCell className="max-w-28 pr-4">
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        colo: (
+          <TableCell className="max-w-32">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate"
+              locale={locale}
+              request={{
+                key: `request-observation-normal-colo:${eventId}:${event.colo}`,
+                items: [
+                  {
+                    label: copy.colo,
+                    value: coloLabel,
+                    copyValue: coloCopyValue,
+                  },
+                ],
+              }}
+            >
+              {event.colo || "--"}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        pathname: (
+          <TableCell className="max-w-64">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate font-mono"
+              locale={locale}
+              request={{
+                key: `request-observation-normal-pathname:${eventId}:${pathnameLabel}`,
+                items: [
+                  {
+                    label: copy.pathname,
+                    value: pathnameLabel,
+                    copyValue: pathnameLabel,
+                  },
+                ],
+              }}
+            >
+              {pathnameLabel}
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+        edgeLatency: (
+          <TableCell className="max-w-28 pr-4 text-right">
+            <AnalyticsDetailsTooltipTarget
+              className="block truncate"
+              locale={locale}
+              request={{
+                key: `request-observation-normal-edge-latency:${eventId}:${event.edgeLatencyMs}`,
+                items: [
+                  {
+                    label: copy.normalDetail.edgeLatency,
+                    value: edgeLatencyLabel,
+                    copyValue: edgeLatencyCopyValue,
+                  },
+                ],
+              }}
+            >
               <span className="block truncate font-mono tabular-nums text-muted-foreground">
-                {latencyFormat(locale, copy, event.edgeLatencyMs)}
+                {edgeLatencyLabel}
               </span>
-            </TableCell>
+            </AnalyticsDetailsTooltipTarget>
+          </TableCell>
+        ),
+      };
+      return {
+        children: (
+          <>
+            {tableColumns.visibleIds.map((columnId) => (
+              <Fragment key={columnId}>{cells[columnId]}</Fragment>
+            ))}
           </>
         ),
         props: {
@@ -3906,16 +4815,26 @@ const NormalRequestsTable = memo(function NormalRequestsTable({
         },
       };
     },
-    [copy, handleKeyDown, locale, messages, now, openEvent],
+    [
+      copy,
+      handleKeyDown,
+      locale,
+      messages,
+      now,
+      openEvent,
+      tableColumns.visibleIds,
+    ],
   );
   const renderSkeletonRow = useCallback(
     (index: number) => (
       <RequestObservationRowSkeletonContent
         index={index}
+        columns={tableColumns.visibleIds}
         widths={NORMAL_REQUEST_SKELETON_WIDTHS}
+        alignments={NORMAL_REQUEST_COLUMN_ALIGNMENTS}
       />
     ),
-    [],
+    [tableColumns.visibleIds],
   );
   const getRowKey = useCallback(
     (event: NormalRequestEvent, index: number) =>
@@ -3936,12 +4855,21 @@ const NormalRequestsTable = memo(function NormalRequestsTable({
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">{description}</p>
           </div>
-          <div className="shrink-0 text-xs text-muted-foreground">
-            {!loading && events.length > 0
-              ? hasMore
-                ? `${copy.recentShowing} ${numberFormat(locale, events.length)}`
-                : copy.recentLoadedAll
-              : ""}
+          <div className="flex shrink-0 items-center gap-2">
+            <AnalyticsTableColumnSettings
+              columns={columnDefinitions}
+              orderedIds={tableColumns.orderedIds}
+              visibleIds={tableColumns.visibleIds}
+              onOrderChange={tableColumns.setOrder}
+              onVisibilityChange={tableColumns.setVisible}
+              onReset={tableColumns.reset}
+              labels={messages.common.tableColumns}
+            />
+            <div className="text-xs text-muted-foreground">
+              {!loading && events.length > 0 && !hasMore
+                ? copy.recentLoadedAll
+                : ""}
+            </div>
           </div>
         </div>
 
@@ -3953,13 +4881,15 @@ const NormalRequestsTable = memo(function NormalRequestsTable({
           renderSkeletonRow={renderSkeletonRow}
           getRowKey={getRowKey}
           skeletonRows={BOT_EVENT_FETCH_LIMIT}
-          columnCount={10}
+          columnCount={tableColumns.visibleIds.length}
           loading={loading}
           loadingMore={loadingMore}
           errorContent={copy.loadFailed}
           emptyContent={copy.noData}
           hasMore={hasMore}
           onLoadMore={onLoadMore}
+          enableTimeTooltips
+          messages={messages}
         />
       </section>
 

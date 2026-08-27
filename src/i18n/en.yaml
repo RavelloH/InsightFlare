@@ -2097,6 +2097,7 @@ requestObservation:
   city: City
   colo: Colo
   userAgentLengthBucket: User-Agent Length
+  userAgentLength: User-Agent Length (exact)
   ipPrefix: IP Prefix
   botReasonLabels:
     missing_ua: Missing User-Agent
@@ -2116,6 +2117,8 @@ requestObservation:
     pageview: Pageview
     custom_event: Custom Event
     request: Request
+    visibility: Visibility
+    leave: Leave
   overviewLabels:
     totalRequests: Total requests
     normalRequests: Normal requests

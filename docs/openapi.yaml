@@ -26118,6 +26118,8 @@ paths:
                               type: string
                             region:
                               type: string
+                            city:
+                              type: string
                             browser:
                               type: string
                             browserVersion:
@@ -26147,6 +26149,7 @@ paths:
                             - referrerHost
                             - country
                             - region
+                            - city
                             - browser
                             - browserVersion
                             - os
@@ -26248,6 +26251,7 @@ paths:
                       referrerHost: example
                       country: example
                       region: example
+                      city: example
                       browser: example
                       browserVersion: example
                       os: example
@@ -26899,6 +26903,8 @@ paths:
                             type: string
                           region:
                             type: string
+                          city:
+                            type: string
                           browser:
                             type: string
                           browserVersion:
@@ -26928,6 +26934,7 @@ paths:
                           - referrerHost
                           - country
                           - region
+                          - city
                           - browser
                           - browserVersion
                           - os
@@ -27178,6 +27185,7 @@ paths:
                     referrerHost: example
                     country: example
                     region: example
+                    city: example
                     browser: example
                     browserVersion: example
                     os: example
@@ -34724,6 +34732,8 @@ paths:
                             type: string
                           region:
                             type: string
+                          city:
+                            type: string
                           browser:
                             type: string
                           browserVersion:
@@ -34759,6 +34769,7 @@ paths:
                           - referrerHost
                           - country
                           - region
+                          - city
                           - browser
                           - browserVersion
                           - os
@@ -35003,6 +35014,7 @@ paths:
                     referrerHost: example
                     country: example
                     region: example
+                    city: example
                     browser: example
                     browserVersion: example
                     os: example

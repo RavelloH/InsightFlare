@@ -34,6 +34,7 @@ interface DemoBotEvent {
   verifiedBotCategory: string;
   rayId: string;
   traceId: string;
+  metadataJson: string;
   latitude: number | null;
   longitude: number | null;
   botScore: number | null;
@@ -62,6 +63,7 @@ interface DemoNormalEvent {
   rayId: string;
   traceId: string;
   requestMethod: string;
+  metadataJson: string;
   latitude: number | null;
   longitude: number | null;
   userAgentLength: number;
@@ -650,6 +652,8 @@ export function generateDemoRequestObservationData(
             reasons.includes("cf_bot_score_low")
           ? "high"
           : "medium";
+    const rayId = `${sInt(rng, 100000, 999999).toString(16)}${index.toString(16)}demo`;
+    const traceId = `demo-bot-${index.toString(36).padStart(4, "0")}`;
 
     events.push({
       timestamp: new Date(receivedAt).toISOString(),
@@ -675,8 +679,27 @@ export function generateDemoRequestObservationData(
       verifiedBotCategory: userAgent.toLowerCase().includes("bot")
         ? sPick(rng, ["Search Engine Crawler", "Monitoring", "SEO"])
         : "",
-      rayId: `${sInt(rng, 100000, 999999).toString(16)}${index.toString(16)}demo`,
-      traceId: `demo-bot-${index.toString(36).padStart(4, "0")}`,
+      rayId,
+      traceId,
+      metadataJson: JSON.stringify({
+        rayId,
+        requestUrl: `https://${site.domain}${pathname}`,
+        requestPathname: pathname,
+        requestMethod: "POST",
+        referer: index % 3 === 0 ? "https://www.google.com/" : "",
+        secFetchSite: "same-origin",
+        secFetchMode: "cors",
+        secFetchDest: "empty",
+        httpProtocol: "h2",
+        tlsVersion: "TLSv1.3",
+        requestPriority: "u=1",
+        clientTcpRtt: sInt(rng, 12, 96),
+        eventId: `demo-event-${index.toString(36).padStart(5, "0")}`,
+        previousVisitId:
+          index % 4 === 0
+            ? `demo-previous-visit-${(index % 12).toString(36).padStart(3, "0")}`
+            : "",
+      }),
       latitude: geo.latitude,
       longitude: geo.longitude,
       botScore: confidence === "high" ? sInt(rng, 1, 28) : sInt(rng, 30, 54),
@@ -737,6 +760,22 @@ export function generateDemoRequestObservationData(
       rayId: `${sInt(rng, 100000, 999999).toString(16)}${index.toString(16)}ok`,
       traceId: `demo-normal-${index.toString(36).padStart(5, "0")}`,
       requestMethod: isCustomEvent ? "POST" : "GET",
+      metadataJson: JSON.stringify({
+        eventId: `demo-event-${index.toString(36).padStart(5, "0")}`,
+        visitId: `demo-visit-${(index % 24).toString(36).padStart(3, "0")}`,
+        previousVisitId:
+          index % 4 === 0
+            ? `demo-previous-visit-${(index % 12).toString(36).padStart(3, "0")}`
+            : "",
+        hasVisitorId: true,
+        hasUserId: index % 3 === 0,
+        eventName: isCustomEvent ? `demo_event_${index % 5}` : "",
+        visibilityState: isCustomEvent ? "visible" : "",
+        secFetchSite: "same-origin",
+        secFetchMode: "cors",
+        secFetchDest: "empty",
+        httpProtocol: "h2",
+      }),
       latitude: geo.latitude,
       longitude: geo.longitude,
       userAgentLength: sInt(rng, 72, 156),

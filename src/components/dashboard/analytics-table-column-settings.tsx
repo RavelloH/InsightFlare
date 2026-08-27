@@ -19,6 +19,11 @@ import {
   ResponsiveDialogTitle,
   ResponsiveDialogTrigger,
 } from "@/components/ui/responsive-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 const STORAGE_VERSION = 1;
@@ -303,16 +308,23 @@ export function AnalyticsTableColumnSettings<TId extends string = string>({
 
   return (
     <ResponsiveDialog open={open} onOpenChange={setOpen}>
-      <ResponsiveDialogTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label={labels.action}
-        >
-          <RiLayoutColumnLine />
-        </Button>
-      </ResponsiveDialogTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <ResponsiveDialogTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label={labels.action}
+              >
+                <RiLayoutColumnLine />
+              </Button>
+            </ResponsiveDialogTrigger>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top">{labels.action}</TooltipContent>
+      </Tooltip>
       <ResponsiveDialogContent
         desktopClassName="max-w-md"
         drawerClassName="max-h-[85dvh]"

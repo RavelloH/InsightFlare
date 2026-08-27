@@ -18,6 +18,7 @@ export function demoEventRecordFromFact(event: DemoCustomEventFact) {
     referrerHost: visit.referrerHost,
     country: visit.country,
     region: visit.regionName || visit.region,
+    city: visit.cityName || visit.city,
     browser: visit.browser,
     browserVersion: visit.browserVersion,
     os: demoOperatingSystemLabel(visit.osVersion),

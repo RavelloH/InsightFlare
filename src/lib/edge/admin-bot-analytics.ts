@@ -573,6 +573,7 @@ function buildBotAnalyticsDetailSql(input: {
   traceId?: string;
   rayId?: string;
   includeDoubles?: boolean;
+  includeExtendedIdentity?: boolean;
 }) {
   const dataset = analyticsDatasetIdentifier(input.dataset);
   const sinceSeconds = Math.floor(input.since / 1000);
@@ -585,6 +586,11 @@ function buildBotAnalyticsDetailSql(input: {
       double5 AS botScore,
       double6 AS userAgentLength`
     : "";
+  const extendedIdentitySelect = input.includeExtendedIdentity
+    ? `blob19 AS traceId,
+      blob20 AS metadataJson`
+    : `'' AS traceId,
+      '' AS metadataJson`;
   // Existing datasets may have been created before traceId and metadataJson
   // were added, so blob19/blob20 are not guaranteed to exist. rayId is the
   // last compatible identity field in the original layout.
@@ -612,8 +618,7 @@ function buildBotAnalyticsDetailSql(input: {
       blob16 AS asOrganization,
       blob17 AS verifiedBotCategory,
       blob18 AS rayId,
-      '' AS traceId,
-      '' AS metadataJson${doubleSelect}
+      ${extendedIdentitySelect}${doubleSelect ? `,${doubleSelect.slice(1)}` : ""}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${sinceSeconds})
       AND (${identityFilters.join(" OR ") || "0"})
@@ -852,8 +857,9 @@ function serializeBotListEvent(event: BotAnalyticsEvent) {
 }
 
 function serializeNormalListEvent(event: NormalAnalyticsEvent) {
-  const { metadataJson: _metadataJson, ...listEvent } = event;
-  return listEvent;
+  // Normal requests open their Drawer from the selected list row, so retain
+  // the compact metadata payload instead of requiring a second detail query.
+  return event;
 }
 
 function detailCursorForEvent(
@@ -873,6 +879,17 @@ function shouldRetryBotAnalyticsWithoutDoubles(result: {
   const body = result.body.toLowerCase();
   return (
     body.includes("unable to find type of column") && /double\d+/.test(body)
+  );
+}
+
+function shouldRetryBotAnalyticsWithoutExtendedIdentity(result: {
+  status: number;
+  body: string;
+}): boolean {
+  if (result.status !== 422) return false;
+  const body = result.body.toLowerCase();
+  return (
+    body.includes("unable to find type of column") && /blob(?:19|20)/.test(body)
   );
 }
 
@@ -1408,6 +1425,7 @@ export async function handleBotAnalyticsAdmin(
       traceId: detailTraceId,
       rayId: detailRayId,
       includeDoubles: true,
+      includeExtendedIdentity: true,
     });
     let detailResult = await queryCloudflareAnalyticsEngine({
       apiUrl: analyticsApiUrl,
@@ -1415,6 +1433,24 @@ export async function handleBotAnalyticsAdmin(
       token,
       sql: detailSql,
     });
+    if (
+      !detailResult.ok &&
+      shouldRetryBotAnalyticsWithoutExtendedIdentity(detailResult)
+    ) {
+      detailResult = await queryCloudflareAnalyticsEngine({
+        apiUrl: analyticsApiUrl,
+        accountId: config.accountId,
+        token,
+        sql: buildBotAnalyticsDetailSql({
+          dataset: config.dataset,
+          since: from,
+          traceId: detailTraceId,
+          rayId: detailRayId,
+          includeDoubles: true,
+          includeExtendedIdentity: false,
+        }),
+      });
+    }
     if (
       !detailResult.ok &&
       shouldRetryBotAnalyticsWithoutDoubles(detailResult)
@@ -1429,6 +1465,7 @@ export async function handleBotAnalyticsAdmin(
           traceId: detailTraceId,
           rayId: detailRayId,
           includeDoubles: false,
+          includeExtendedIdentity: false,
         }),
       });
     }

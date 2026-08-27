@@ -2073,6 +2073,7 @@ export interface AppMessages {
     city: string;
     colo: string;
     userAgentLengthBucket: string;
+    userAgentLength: string;
     ipPrefix: string;
     botReasonLabels: {
       missing_ua: string;
@@ -2093,6 +2094,8 @@ export interface AppMessages {
       pageview: string;
       custom_event: string;
       request: string;
+      visibility: string;
+      leave: string;
     };
     overviewLabels: {
       totalRequests: string;
@@ -4596,6 +4599,7 @@ const enMessages = {
     city: "City",
     colo: "Colo",
     userAgentLengthBucket: "User-Agent Length",
+    userAgentLength: "User-Agent Length (exact)",
     ipPrefix: "IP Prefix",
     botReasonLabels: {
       missing_ua: "Missing User-Agent",
@@ -4616,6 +4620,8 @@ const enMessages = {
       pageview: "Pageview",
       custom_event: "Custom Event",
       request: "Request",
+      visibility: "Visibility",
+      leave: "Leave",
     },
     overviewLabels: {
       totalRequests: "Total requests",
@@ -7092,6 +7098,7 @@ const zhMessages = {
     city: "城市",
     colo: "数据中心",
     userAgentLengthBucket: "User-Agent 长度",
+    userAgentLength: "User-Agent 长度（精确）",
     ipPrefix: "IP 前缀",
     botReasonLabels: {
       missing_ua: "缺少 User-Agent",
@@ -7112,6 +7119,8 @@ const zhMessages = {
       pageview: "页面浏览",
       custom_event: "自定义事件",
       request: "请求",
+      visibility: "可见性",
+      leave: "离开",
     },
     overviewLabels: {
       totalRequests: "总请求数",
@@ -9657,6 +9666,7 @@ const jaMessages = {
     city: "都市",
     colo: "データセンター",
     userAgentLengthBucket: "User-Agent 長",
+    userAgentLength: "User-Agent 長（正確）",
     ipPrefix: "IP プレフィックス",
     botReasonLabels: {
       missing_ua: "User-Agent なし",
@@ -9677,6 +9687,8 @@ const jaMessages = {
       pageview: "ページビュー",
       custom_event: "カスタムイベント",
       request: "リクエスト",
+      visibility: "可視性",
+      leave: "離脱",
     },
     overviewLabels: {
       totalRequests: "総リクエスト数",

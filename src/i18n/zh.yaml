@@ -2027,6 +2027,7 @@ requestObservation:
   city: 城市
   colo: 数据中心
   userAgentLengthBucket: User-Agent 长度
+  userAgentLength: User-Agent 长度（精确）
   ipPrefix: IP 前缀
   botReasonLabels:
     missing_ua: 缺少 User-Agent
@@ -2046,6 +2047,8 @@ requestObservation:
     pageview: 页面浏览
     custom_event: 自定义事件
     request: 请求
+    visibility: 可见性
+    leave: 离开
   overviewLabels:
     totalRequests: 总请求数
     normalRequests: 正常请求

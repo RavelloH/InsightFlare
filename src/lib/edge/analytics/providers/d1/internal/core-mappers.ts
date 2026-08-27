@@ -176,6 +176,7 @@ export function mapEventRecord(row: EventRecordRow) {
     referrerHost: row.referrerHost,
     country: row.country,
     region: row.region,
+    city: row.city,
     browser: row.browser,
     browserVersion: row.browserVersion,
     os: row.os,

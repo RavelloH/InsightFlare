@@ -117,6 +117,7 @@ export interface EventRecord {
   referrerHost: string;
   country: string;
   region: string;
+  city: string;
   browser: string;
   browserVersion: string;
   os: string;

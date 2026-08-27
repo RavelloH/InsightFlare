@@ -308,6 +308,7 @@ describe("planned site list analytics adapters", () => {
       referrerHost: "",
       country: "",
       region: "",
+      city: "",
       browser: "",
       browserVersion: "",
       os: "",

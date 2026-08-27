@@ -769,6 +769,7 @@ const AnalyticsEventRecordSchema = z
     referrerHost: z.string(),
     country: z.string(),
     region: z.string(),
+    city: z.string(),
     browser: z.string(),
     browserVersion: z.string(),
     os: z.string(),

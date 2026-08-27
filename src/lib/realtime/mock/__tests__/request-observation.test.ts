@@ -22,6 +22,7 @@ describe("mock/request-observation", () => {
     expect(data.reasons.length).toBeGreaterThan(0);
     expect(data.asns.length).toBeGreaterThan(0);
     expect(data.mapPoints.length).toBeGreaterThan(0);
+    expect(data.events[0]?.metadataJson).toContain('"requestMethod":"POST"');
   });
 
   it.each([60, 10080, 43200] as const)(

@@ -124,7 +124,6 @@ export function writeNormalAnalyticsEvent(
   const asn = coerceNumber(cf.asn, 0) ?? 0;
   const rayId = requestHeader(request, "cf-ray", 120);
   const eventAt = payloadEventAt(input.payload, input.receivedAt);
-  const edgeLatencyMs = Math.max(0, input.receivedAt - eventAt);
   const metadata = {
     eventId: clampString(coerceString(input.payload.eventId || ""), 128),
     visitId: clampString(coerceString(input.payload.visitId || ""), 128),
@@ -144,6 +143,10 @@ export function writeNormalAnalyticsEvent(
     secFetchDest: requestHeader(request, "sec-fetch-dest", 40),
     httpProtocol: clampString(coerceString(cf.httpProtocol || ""), 40),
   };
+  // Client event timestamps use the browser clock, which may be ahead of the
+  // worker clock. Measure the collector's server-side processing time instead
+  // so clock skew cannot turn every latency value into zero.
+  const edgeLatencyMs = Math.max(0, Date.now() - input.receivedAt);
 
   try {
     dataset.writeDataPoint({

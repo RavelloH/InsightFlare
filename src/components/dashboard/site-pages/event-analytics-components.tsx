@@ -976,7 +976,7 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
           className="block"
           locale={locale}
           request={{
-            key: `event-location:${row.eventId}:${row.country}:${row.region}`,
+            key: `event-location:${row.eventId}:${row.country}:${row.region}:${row.city}`,
             items: [
               {
                 label: messages.common.location,
@@ -986,6 +986,7 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
                     messages={messages}
                     country={row.country || ""}
                     region={row.region}
+                    city={row.city}
                     className="max-w-none text-background [&_.text-foreground]:text-background"
                   />
                 ),

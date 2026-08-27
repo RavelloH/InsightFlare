@@ -134,6 +134,7 @@ function eventRecord(overrides: Partial<EventRecordRow> = {}): EventRecordRow {
     referrerHost: "news.example",
     country: "US",
     region: "US::CA::California",
+    city: "US::CA::California::San Francisco",
     browser: "Chrome",
     browserVersion: "124",
     os: "Windows",
