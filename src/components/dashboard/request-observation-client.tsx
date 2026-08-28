@@ -21,15 +21,6 @@ import {
 } from "@remixicon/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, useAnimationControls } from "motion/react";
-import {
-  Area,
-  Bar,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { toast } from "sonner";
 
 import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
@@ -48,6 +39,7 @@ import {
   type AsyncDimensionBreakdownRow,
   type AsyncDimensionBreakdownTab,
 } from "@/components/dashboard/async-dimension-breakdown-card";
+import { RequestObservationTrendChart } from "@/components/dashboard/charts/request-observation-trend-chart";
 import { useDashboardQuery } from "@/components/dashboard/dashboard-query-provider";
 import { GeoPointsMapIsland } from "@/components/dashboard/geo-points-map-island";
 import {
@@ -69,12 +61,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@/components/ui/chart";
 import {
   Drawer,
   DrawerContent,
@@ -106,6 +92,8 @@ import { formatI18nTemplate } from "@/lib/i18n/template";
 import Link from "@/lib/router";
 import { usePathname, useSearchParams } from "@/lib/router";
 import { cn } from "@/lib/utils";
+
+import type { RequestObservationTrendPoint } from "./charts/request-observation-trend-chart";
 
 interface RequestObservationClientProps {
   locale: Locale;
@@ -211,25 +199,6 @@ interface RequestMapPoint {
   color?: [number, number, number];
 }
 
-interface RequestTrendPoint {
-  timestampMs: number;
-  count: number;
-  baselineCount: number;
-  normalCount: number;
-  abnormalCount: number;
-  totalCount: number;
-  botRatio: number;
-  abnormalRatio: number;
-  normalRatio: number;
-  pageviews: number;
-  customEvents: number;
-  avgLatencyMs: number | null;
-  p50LatencyMs: number | null;
-  p75LatencyMs: number | null;
-  p95LatencyMs: number | null;
-  p99LatencyMs: number | null;
-}
-
 interface RequestNetworkDimensionRow {
   key: string;
   label: string;
@@ -288,7 +257,7 @@ interface RequestObservationData {
     uniqueCountries: number;
   };
   mapPoints: RequestMapPoint[];
-  trend: RequestTrendPoint[];
+  trend: RequestObservationTrendPoint[];
   reasons: Array<{ reason: string; count: number }>;
   countries?: Array<{ country: string; count: number }>;
   asns: Array<{ asn: number; asOrganization: string; count: number }>;
@@ -809,19 +778,6 @@ export function RequestObservationClient({
     void loadMoreEvents("normal");
   }, [loadMoreEvents]);
 
-  const formatter = useMemo(
-    () => new Intl.NumberFormat(intlLocale(locale)),
-    [locale],
-  );
-  const trendTickFormatter = useMemo(
-    () => trendTickDateFormat(locale, spanMs),
-    [locale, spanMs],
-  );
-  const trendTooltipFormatter = useMemo(
-    () => trendTooltipDateFormat(locale, spanMs),
-    [locale, spanMs],
-  );
-
   const trend = data?.trend ?? [];
   const abnormalEvents = data?.abnormal?.events ?? data?.events ?? [];
   const normalEvents = data?.normal?.events ?? data?.normalEvents ?? [];
@@ -959,100 +915,6 @@ export function RequestObservationClient({
         {copy.openSettings}
       </Link>
     </Button>
-  );
-
-  const trendConfig = useMemo(
-    () =>
-      ({
-        normalCount: {
-          label: labels.normalRequests,
-          color: NORMAL_TRAFFIC_SHARE_COLOR,
-        },
-        abnormalCount: {
-          label: labels.abnormalRequests,
-          color: "var(--color-destructive)",
-        },
-        totalCount: {
-          label: labels.totalRequests,
-          color: "var(--color-chart-1)",
-        },
-        pageviews: {
-          label: labels.pageviews,
-          color: NORMAL_TRAFFIC_SHARE_COLOR,
-        },
-        customEvents: {
-          label: labels.customEvents,
-          color: PERFORMANCE_WARNING_COLOR,
-        },
-        abnormalRatio: {
-          label: labels.abnormalRatio,
-          color: "var(--color-destructive)",
-        },
-        avgLatencyMs: {
-          label: labels.avgLatency,
-          color: "var(--color-chart-1)",
-        },
-        p50LatencyMs: {
-          label: labels.p50Latency,
-          color: "var(--color-chart-1)",
-        },
-        p75LatencyMs: {
-          label: labels.p75Latency,
-          color: "var(--color-chart-4)",
-        },
-        p95LatencyMs: {
-          label: labels.p95Latency,
-          color: "var(--color-chart-5)",
-        },
-        p99LatencyMs: {
-          label: labels.p99Latency,
-          color: "var(--color-destructive)",
-        },
-        normalTrafficShare: {
-          label: labels.normalTrafficShare,
-          color: NORMAL_TRAFFIC_SHARE_COLOR,
-        },
-        lowConfidenceTraffic: {
-          label: labels.lowConfidenceTraffic,
-          color: LOW_CONFIDENCE_TRAFFIC_COLOR,
-        },
-        mediumConfidenceTraffic: {
-          label: labels.mediumConfidenceTraffic,
-          color: MEDIUM_CONFIDENCE_TRAFFIC_COLOR,
-        },
-        highConfidenceTraffic: {
-          label: labels.highConfidenceTraffic,
-          color: HIGH_CONFIDENCE_TRAFFIC_COLOR,
-        },
-      }) satisfies ChartConfig,
-    [labels],
-  );
-  const formatTrendTooltipValue = useMemo(
-    () =>
-      createTrendTooltipFormatter({
-        botRequestsLabel: labels.requests,
-        botTrafficRatioLabel: labels.abnormalRatio,
-        countFormatter: formatter,
-        locale,
-        labels: {
-          normalCount: labels.normalRequests,
-          abnormalCount: labels.abnormalRequests,
-          totalCount: labels.totalRequests,
-          pageviews: labels.pageviews,
-          customEvents: labels.customEvents,
-          abnormalRatio: labels.abnormalRatio,
-          avgLatencyMs: labels.avgLatency,
-          p50LatencyMs: labels.p50Latency,
-          p75LatencyMs: labels.p75Latency,
-          p95LatencyMs: labels.p95Latency,
-          p99LatencyMs: labels.p99Latency,
-          normalTrafficShare: labels.normalTrafficShare,
-          lowConfidenceTraffic: labels.lowConfidenceTraffic,
-          mediumConfidenceTraffic: labels.mediumConfidenceTraffic,
-          highConfidenceTraffic: labels.highConfidenceTraffic,
-        },
-      }),
-    [formatter, labels, locale],
   );
 
   const detectionTabs = useMemo(
@@ -1445,79 +1307,14 @@ export function RequestObservationClient({
             <CardDescription>{labels.overviewTrendDescription}</CardDescription>
           </CardHeader>
           <CardContent>
-            <ChartContainer config={trendConfig} className="h-[320px] w-full">
-              <ComposedChart data={trend}>
-                <CartesianGrid vertical={false} />
-                <XAxis
-                  dataKey="timestampMs"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  tickFormatter={(value) =>
-                    trendTickFormatter.format(new Date(Number(value ?? 0)))
-                  }
-                  minTickGap={14}
-                />
-                <YAxis
-                  yAxisId="requests"
-                  width={52}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => formatter.format(Number(value))}
-                />
-                <YAxis
-                  yAxisId="ratio"
-                  orientation="right"
-                  width={44}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) =>
-                    percentFormat(locale, Number(value))
-                  }
-                />
-                <ChartTooltip
-                  allowEscapeViewBox={{ x: false, y: true }}
-                  wrapperStyle={{ zIndex: 20 }}
-                  content={
-                    <ChartTooltipContent
-                      indicator="dot"
-                      labelFormatter={(value, payload) => {
-                        const timestamp = Number(
-                          payload?.[0]?.payload?.timestampMs ?? value ?? 0,
-                        );
-                        return trendTooltipFormatter.format(
-                          new Date(timestamp),
-                        );
-                      }}
-                      formatter={formatTrendTooltipValue}
-                    />
-                  }
-                />
-                <Bar
-                  yAxisId="requests"
-                  dataKey="normalCount"
-                  stackId="requests"
-                  fill="var(--color-normalCount)"
-                  radius={[0, 0, 0, 0]}
-                />
-                <Bar
-                  yAxisId="requests"
-                  dataKey="abnormalCount"
-                  stackId="requests"
-                  fill="var(--color-abnormalCount)"
-                  radius={[0, 0, 0, 0]}
-                />
-                <Line
-                  yAxisId="ratio"
-                  type="linear"
-                  dataKey="abnormalRatio"
-                  stroke="var(--color-abnormalRatio)"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-              </ComposedChart>
-            </ChartContainer>
+            <RequestObservationTrendChart
+              data={trend}
+              labels={labels}
+              locale={locale}
+              spanMs={spanMs}
+              variant="overview"
+              className="h-[320px]"
+            />
           </CardContent>
         </Card>
 
@@ -1541,88 +1338,14 @@ export function RequestObservationClient({
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <ChartContainer config={trendConfig} className="h-[280px] w-full">
-                <ComposedChart data={trend}>
-                  <defs>
-                    <linearGradient
-                      id="request-observability-total-fill"
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
-                      <stop
-                        offset="5%"
-                        stopColor="var(--color-totalCount)"
-                        stopOpacity={0.3}
-                      />
-                      <stop
-                        offset="95%"
-                        stopColor="var(--color-totalCount)"
-                        stopOpacity={0.02}
-                      />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid vertical={false} />
-                  <XAxis
-                    dataKey="timestampMs"
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                    tickFormatter={(value) =>
-                      trendTickFormatter.format(new Date(Number(value ?? 0)))
-                    }
-                    minTickGap={14}
-                  />
-                  <YAxis
-                    width={52}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(value) => formatter.format(Number(value))}
-                  />
-                  <ChartTooltip
-                    allowEscapeViewBox={{ x: false, y: true }}
-                    wrapperStyle={{ zIndex: 20 }}
-                    content={
-                      <ChartTooltipContent
-                        indicator="dot"
-                        labelFormatter={(value, payload) => {
-                          const timestamp = Number(
-                            payload?.[0]?.payload?.timestampMs ?? value ?? 0,
-                          );
-                          return trendTooltipFormatter.format(
-                            new Date(timestamp),
-                          );
-                        }}
-                        formatter={formatTrendTooltipValue}
-                      />
-                    }
-                  />
-                  <Area
-                    type="linear"
-                    dataKey="totalCount"
-                    stroke="var(--color-totalCount)"
-                    fill="url(#request-observability-total-fill)"
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                  <Line
-                    type="linear"
-                    dataKey="pageviews"
-                    stroke="var(--color-pageviews)"
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                  <Line
-                    type="linear"
-                    dataKey="customEvents"
-                    stroke="var(--color-customEvents)"
-                    strokeWidth={2}
-                    strokeDasharray="4 4"
-                    dot={false}
-                  />
-                </ComposedChart>
-              </ChartContainer>
+              <RequestObservationTrendChart
+                data={trend}
+                labels={labels}
+                locale={locale}
+                spanMs={spanMs}
+                variant="traffic-composition"
+                className="h-[280px]"
+              />
             </CardContent>
           </Card>
 
@@ -1632,80 +1355,17 @@ export function RequestObservationClient({
               <CardDescription>{labels.latencyDescription}</CardDescription>
             </CardHeader>
             <CardContent>
-              <ChartContainer config={trendConfig} className="h-[280px] w-full">
-                <ComposedChart data={trend}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis
-                    dataKey="timestampMs"
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                    tickFormatter={(value) =>
-                      trendTickFormatter.format(new Date(Number(value ?? 0)))
-                    }
-                    minTickGap={14}
-                  />
-                  <YAxis
-                    width={60}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(value) =>
-                      latencyFormat(locale, copy, Number(value))
-                    }
-                  />
-                  <ChartTooltip
-                    allowEscapeViewBox={{ x: false, y: true }}
-                    wrapperStyle={{ zIndex: 20 }}
-                    content={
-                      <ChartTooltipContent
-                        indicator="dot"
-                        labelFormatter={(value, payload) => {
-                          const timestamp = Number(
-                            payload?.[0]?.payload?.timestampMs ?? value ?? 0,
-                          );
-                          return trendTooltipFormatter.format(
-                            new Date(timestamp),
-                          );
-                        }}
-                        formatter={formatTrendTooltipValue}
-                      />
-                    }
-                  />
-                  <Line
-                    type="linear"
-                    dataKey="p50LatencyMs"
-                    stroke="var(--color-p50LatencyMs)"
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls
-                  />
-                  <Line
-                    type="linear"
-                    dataKey="p75LatencyMs"
-                    stroke="var(--color-p75LatencyMs)"
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls
-                  />
-                  <Line
-                    type="linear"
-                    dataKey="p95LatencyMs"
-                    stroke="var(--color-p95LatencyMs)"
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls
-                  />
-                  <Line
-                    type="linear"
-                    dataKey="p99LatencyMs"
-                    stroke="var(--color-p99LatencyMs)"
-                    strokeWidth={2}
-                    strokeDasharray="4 4"
-                    dot={false}
-                    connectNulls
-                  />
-                </ComposedChart>
-              </ChartContainer>
+              <RequestObservationTrendChart
+                data={trend}
+                labels={labels}
+                locale={locale}
+                spanMs={spanMs}
+                variant="latency"
+                latencyFormatter={(valueMs) =>
+                  latencyFormat(locale, copy, valueMs)
+                }
+                className="h-[280px]"
+              />
             </CardContent>
           </Card>
         </section>
@@ -1802,80 +1462,14 @@ export function RequestObservationClient({
                           </CardDescription>
                         </CardHeader>
                         <CardContent>
-                          <ChartContainer
-                            config={trendConfig}
-                            className="h-[320px] w-full"
-                          >
-                            <ComposedChart data={trend}>
-                              <CartesianGrid vertical={false} />
-                              <XAxis
-                                dataKey="timestampMs"
-                                tickLine={false}
-                                axisLine={false}
-                                tickMargin={8}
-                                tickFormatter={(value) =>
-                                  trendTickFormatter.format(
-                                    new Date(Number(value ?? 0)),
-                                  )
-                                }
-                                minTickGap={14}
-                              />
-                              <YAxis
-                                yAxisId="requests"
-                                width={52}
-                                tickLine={false}
-                                axisLine={false}
-                                tickFormatter={(value) =>
-                                  formatter.format(Number(value))
-                                }
-                              />
-                              <YAxis
-                                yAxisId="ratio"
-                                orientation="right"
-                                width={44}
-                                tickLine={false}
-                                axisLine={false}
-                                tickFormatter={(value) =>
-                                  percentFormat(locale, Number(value))
-                                }
-                              />
-                              <ChartTooltip
-                                allowEscapeViewBox={{ x: false, y: true }}
-                                wrapperStyle={{ zIndex: 20 }}
-                                content={
-                                  <ChartTooltipContent
-                                    indicator="dot"
-                                    labelFormatter={(value, payload) => {
-                                      const timestamp = Number(
-                                        payload?.[0]?.payload?.timestampMs ??
-                                          value ??
-                                          0,
-                                      );
-                                      return trendTooltipFormatter.format(
-                                        new Date(timestamp),
-                                      );
-                                    }}
-                                    formatter={formatTrendTooltipValue}
-                                  />
-                                }
-                              />
-                              <Bar
-                                yAxisId="requests"
-                                dataKey="abnormalCount"
-                                fill="var(--color-abnormalCount)"
-                                radius={[3, 3, 0, 0]}
-                              />
-                              <Line
-                                yAxisId="ratio"
-                                type="linear"
-                                dataKey="abnormalRatio"
-                                stroke="var(--color-abnormalRatio)"
-                                strokeWidth={2}
-                                dot={false}
-                                activeDot={{ r: 4 }}
-                              />
-                            </ComposedChart>
-                          </ChartContainer>
+                          <RequestObservationTrendChart
+                            data={trend}
+                            labels={labels}
+                            locale={locale}
+                            spanMs={spanMs}
+                            variant="abnormal"
+                            className="h-[320px]"
+                          />
                         </CardContent>
                       </Card>
 
@@ -2160,44 +1754,6 @@ async function fetchRequestObservationDetail(
   return payload.detail;
 }
 
-function trendTickDateFormat(
-  locale: Locale,
-  spanMs: number,
-): Intl.DateTimeFormat {
-  if (spanMs <= 14 * 24 * 60 * 60 * 1000) {
-    return new Intl.DateTimeFormat(intlLocale(locale), {
-      month: "numeric",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  return new Intl.DateTimeFormat(intlLocale(locale), {
-    month: "numeric",
-    day: "numeric",
-  });
-}
-
-function trendTooltipDateFormat(
-  locale: Locale,
-  spanMs: number,
-): Intl.DateTimeFormat {
-  if (spanMs <= 14 * 24 * 60 * 60 * 1000) {
-    return new Intl.DateTimeFormat(intlLocale(locale), {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  return new Intl.DateTimeFormat(intlLocale(locale), {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
 function compactReason(reason: string): string {
   return reason.replace(/_/g, " ");
 }
@@ -2423,99 +1979,6 @@ function MetricTile({
       </p>
     </div>
   );
-}
-
-function TrendTooltipValue({
-  color,
-  label,
-  value,
-}: {
-  color: string;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex min-w-36 items-center justify-between gap-3">
-      <span className="inline-flex items-center gap-2">
-        <span
-          className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
-          style={{ backgroundColor: color }}
-        />
-        <span className="text-muted-foreground">{label}</span>
-      </span>
-      <span className="font-mono text-foreground tabular-nums">{value}</span>
-    </div>
-  );
-}
-
-function createTrendTooltipFormatter(input: {
-  botRequestsLabel: string;
-  botTrafficRatioLabel: string;
-  countFormatter: Intl.NumberFormat;
-  locale: Locale;
-  labels?: Record<string, string>;
-}) {
-  return function formatTrendTooltipValue(
-    value: unknown,
-    name: unknown,
-    _item: unknown,
-    _index: number,
-    payload: unknown,
-  ) {
-    const key = String(name || "");
-    const row = (payload ?? null) as Record<string, unknown> | null;
-    const isRatio = key === "botRatio" || key.endsWith("Ratio");
-    const isLatency = key.toLowerCase().includes("latency");
-    const numeric = Number(value);
-    const displayValue = Number(row?.[key] ?? numeric ?? 0);
-    const formatted = isLatency
-      ? durationFormat(
-          input.locale,
-          Number.isFinite(displayValue) ? displayValue : 0,
-        )
-      : isRatio
-        ? percentFormat(
-            input.locale,
-            Number.isFinite(displayValue) ? displayValue : 0,
-          )
-        : input.countFormatter.format(
-            Math.max(
-              0,
-              Math.round(Number.isFinite(displayValue) ? displayValue : 0),
-            ),
-          );
-    const label =
-      input.labels?.[key] ??
-      (isRatio ? input.botTrafficRatioLabel : input.botRequestsLabel);
-    const indicatorColor =
-      key === "normalCount"
-        ? "var(--color-normalCount)"
-        : key === "totalCount"
-          ? "var(--color-totalCount)"
-          : key === "pageviews"
-            ? "var(--color-pageviews)"
-            : key === "customEvents"
-              ? "var(--color-customEvents)"
-              : key === "p50LatencyMs"
-                ? "var(--color-p50LatencyMs)"
-                : key === "p75LatencyMs"
-                  ? "var(--color-p75LatencyMs)"
-                  : key === "p95LatencyMs"
-                    ? "var(--color-p95LatencyMs)"
-                    : key === "p99LatencyMs"
-                      ? "var(--color-p99LatencyMs)"
-                      : isRatio
-                        ? "var(--color-abnormalRatio, var(--color-botRatio))"
-                        : "var(--color-abnormalCount, var(--color-count))";
-
-    return (
-      <TrendTooltipValue
-        color={indicatorColor}
-        label={label}
-        value={formatted}
-      />
-    );
-  };
 }
 
 function faviconLabelForEvent(
@@ -4904,592 +4367,3 @@ const NormalRequestsTable = memo(function NormalRequestsTable({
     </>
   );
 });
-
-/*
-function LegacyRequestObservationClient({
-  locale,
-  messages,
-}: RequestObservationClientProps) {
-  const copy = messages.requestObservation;
-  const [minutes, setMinutes] = useState<WindowMinutes>(43200);
-  const [data, setData] = useState<RequestObservationData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const load = useMemo(
-    () => async (nextMinutes: WindowMinutes, mode: "initial" | "refresh") => {
-      if (mode === "initial") setLoading(true);
-      else setRefreshing(true);
-      try {
-        const next = await fetchRequestObservation(nextMinutes);
-        setData(next);
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : copy.loadFailed);
-      } finally {
-        if (mode === "initial") setLoading(false);
-        else setRefreshing(false);
-      }
-    },
-    [copy.loadFailed],
-  );
-
-  useEffect(() => {
-    void load(minutes, "initial");
-  }, [load, minutes]);
-
-  const formatter = useMemo(
-    () => new Intl.NumberFormat(intlLocale(locale)),
-    [locale],
-  );
-  const trendTickFormatter = useMemo(
-    () => trendTickDateFormat(locale, minutes),
-    [locale, minutes],
-  );
-  const trendTooltipFormatter = useMemo(
-    () => trendTooltipDateFormat(locale, minutes),
-    [locale, minutes],
-  );
-  const trend = data?.trend ?? [];
-  const events = data?.events ?? [];
-  const analyticsEngineDisabled =
-    data?.config?.analyticsEngineDisabled === true;
-  const configured = !analyticsEngineDisabled && data?.configured !== false;
-  const showDemoOverlay =
-    Boolean(data) && !loading && (analyticsEngineDisabled || !configured);
-  const overlayTitle = analyticsEngineDisabled
-    ? copy.analyticsEngineDisabledTitle
-    : copy.notConfiguredTitle;
-  const overlayDescription = analyticsEngineDisabled
-    ? copy.analyticsEngineDisabledDescription
-    : copy.notConfiguredDescription;
-  const overlayAction = analyticsEngineDisabled ? (
-    <Button asChild>
-      <a
-        href={data?.config?.analyticsEngineEnableUrl || "#"}
-        target="_blank"
-        rel="noreferrer"
-      >
-        {copy.openAnalyticsEngine}
-      </a>
-    </Button>
-  ) : (
-    <Button asChild>
-      <Link href={`/${locale}/app/manage/system-settings`}>
-        {copy.openSettings}
-      </Link>
-    </Button>
-  );
-  const trendConfig = useMemo(() => trendChartConfig(copy), [copy]);
-  const formatTrendTooltipValue = useMemo(
-    () =>
-      createTrendTooltipFormatter({
-        botRequestsLabel: copy.botRequests,
-        botTrafficRatioLabel: copy.botTrafficRatio,
-        countFormatter: formatter,
-        locale,
-      }),
-    [copy.botRequests, copy.botTrafficRatio, formatter, locale],
-  );
-  const detectionTabs = useMemo(
-    () =>
-      [
-        {
-          value: "reason",
-          label: copy.reason,
-          columnLabel: copy.reason,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "confidence",
-          label: copy.confidence,
-          columnLabel: copy.confidence,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "kind",
-          label: copy.kind,
-          columnLabel: copy.kind,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "botScoreBucket",
-          label: copy.botScoreBucket,
-          columnLabel: copy.botScoreBucket,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "verifiedBotCategory",
-          label: copy.verifiedBotCategory,
-          columnLabel: copy.verifiedBotCategory,
-          primaryMetricLabel: copy.blocked,
-        },
-      ] satisfies [
-        AsyncDimensionBreakdownTab<DetectionDimensionTab>,
-        ...AsyncDimensionBreakdownTab<DetectionDimensionTab>[],
-      ],
-    [copy],
-  );
-  const targetTabs = useMemo(
-    () =>
-      [
-        {
-          value: "site",
-          label: copy.site,
-          columnLabel: copy.site,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "hostname",
-          label: copy.hostname,
-          columnLabel: copy.hostname,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "pathname",
-          label: copy.pathname,
-          columnLabel: copy.pathname,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "origin",
-          label: copy.origin,
-          columnLabel: copy.origin,
-          primaryMetricLabel: copy.blocked,
-        },
-      ] satisfies [
-        AsyncDimensionBreakdownTab<TargetDimensionTab>,
-        ...AsyncDimensionBreakdownTab<TargetDimensionTab>[],
-      ],
-    [copy],
-  );
-  const networkTabs = useMemo(
-    () =>
-      [
-        {
-          value: "asOrganization",
-          label: copy.asOrganization,
-          columnLabel: copy.asOrganization,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "asn",
-          label: copy.asn,
-          columnLabel: copy.asn,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "country",
-          label: copy.country,
-          columnLabel: copy.country,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "region",
-          label: copy.region,
-          columnLabel: copy.region,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "city",
-          label: copy.city,
-          columnLabel: copy.city,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "colo",
-          label: copy.colo,
-          columnLabel: copy.colo,
-          primaryMetricLabel: copy.blocked,
-        },
-      ] satisfies [
-        AsyncDimensionBreakdownTab<NetworkDimensionTab>,
-        ...AsyncDimensionBreakdownTab<NetworkDimensionTab>[],
-      ],
-    [copy],
-  );
-  const clientTabs = useMemo(
-    () =>
-      [
-        {
-          value: "ip",
-          label: copy.ip,
-          columnLabel: copy.ip,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "userAgent",
-          label: copy.userAgent,
-          columnLabel: copy.userAgent,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "userAgentLengthBucket",
-          label: copy.userAgentLengthBucket,
-          columnLabel: copy.userAgentLengthBucket,
-          primaryMetricLabel: copy.blocked,
-        },
-        {
-          value: "ipPrefix",
-          label: copy.ipPrefix,
-          columnLabel: copy.ipPrefix,
-          primaryMetricLabel: copy.blocked,
-        },
-      ] satisfies [
-        AsyncDimensionBreakdownTab<ClientDimensionTab>,
-        ...AsyncDimensionBreakdownTab<ClientDimensionTab>[],
-      ],
-    [copy],
-  );
-  const loadDetectionRows = useMemo(
-    () => async (tab: DetectionDimensionTab) =>
-      toAsyncDimensionRows(
-        aggregateDimensionRows(events, copy, (event) =>
-          valuesForDetectionTab(event, tab, copy),
-        ),
-      ),
-    [copy, events],
-  );
-  const loadTargetRows = useMemo(
-    () => async (tab: TargetDimensionTab) =>
-      toAsyncDimensionRows(
-        aggregateDimensionRows(events, copy, (event) =>
-          valuesForTargetTab(event, tab),
-        ),
-        { targetTab: tab },
-      ),
-    [copy, events],
-  );
-  const loadNetworkRows = useMemo(
-    () => async (tab: NetworkDimensionTab) =>
-      toAsyncDimensionRows(
-        aggregateDimensionRows(events, copy, (event) =>
-          valuesForNetworkTab(event, tab),
-        ),
-        {
-          networkTab: tab,
-          locale,
-          unknownLabel: copy.emptyValue,
-        },
-      ),
-    [copy, events, locale],
-  );
-  const loadClientRows = useMemo(
-    () => async (tab: ClientDimensionTab) =>
-      toAsyncDimensionRows(
-        aggregateDimensionRows(events, copy, (event) =>
-          valuesForClientTab(event, tab),
-        ),
-      ),
-    [copy, events],
-  );
-
-  return (
-    <div className="space-y-6 pb-6">
-      <div className="pointer-events-none relative z-20 mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-4 pt-4 md:px-6 lg:flex-row lg:items-start lg:justify-between">
-        <div className="max-w-2xl space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {copy.title}
-          </h1>
-          <p className="max-w-prose text-sm text-foreground/75">
-            {copy.subtitle}
-          </p>
-        </div>
-        <div className="pointer-events-auto flex flex-wrap items-center gap-2">
-          <Select
-            value={String(minutes)}
-            onValueChange={(value) =>
-              setMinutes(Number(value) as WindowMinutes)
-            }
-          >
-            <SelectTrigger className="w-[160px] bg-background/90 backdrop-blur">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {WINDOW_OPTIONS.map((option) => (
-                <SelectItem key={option} value={String(option)}>
-                  {windowLabel(messages, option)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            type="button"
-            variant="outline"
-            className="bg-background/90 backdrop-blur"
-            onClick={() => load(minutes, "refresh")}
-            disabled={loading || refreshing}
-          >
-            {refreshing ? (
-              <Spinner className="size-4" />
-            ) : (
-              <RiRefreshLine className="size-4" />
-            )}
-            {copy.refresh}
-          </Button>
-        </div>
-      </div>
-
-      <div className="relative">
-        <div
-          aria-hidden={showDemoOverlay}
-          className={cn(
-            "space-y-6 transition duration-200",
-            showDemoOverlay && "pointer-events-none select-none blur-sm",
-          )}
-        >
-          <div className="relative h-[min(72svh,calc(100svh-10.5rem))] min-h-[18rem] overflow-hidden bg-background sm:min-h-[22rem]">
-            <GeoPointsMapIsland
-              locale={locale}
-              messages={messages}
-              points={data?.mapPoints ?? []}
-              loading={loading}
-              emptyLabel={copy.noData}
-              heightClassName="h-full"
-              countryHoverEnabled={false}
-              pointColor={[239, 68, 68]}
-              projectionMode="globe"
-              autoRotate
-            />
-
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-gradient-to-b from-background via-background/65 to-transparent" />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-background via-background/70 to-transparent" />
-          </div>
-
-          <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6">
-            <div className="space-y-6">
-              <Card className="py-0">
-                <CardContent className="p-0">
-                  <div className="grid gap-px overflow-hidden bg-border/70 md:grid-cols-2 xl:grid-cols-4">
-                    <MetricTile
-                      icon={RiRobot2Line}
-                      label={copy.botRequests}
-                      value={numberFormat(locale, data?.summary.total ?? 0)}
-                      detail={windowLabel(messages, minutes)}
-                      loading={loading}
-                    />
-                    <MetricTile
-                      icon={RiRadarLine}
-                      label={copy.botRequestRatio}
-                      value={percentFormat(
-                        locale,
-                        data?.summary.botRequestRatio ?? 0,
-                      )}
-                      detail={copy.rollupBaseline}
-                      loading={loading}
-                    />
-                    <MetricTile
-                      icon={RiShieldCheckLine}
-                      label={copy.highConfidenceBots}
-                      value={numberFormat(
-                        locale,
-                        data?.summary.highConfidence ?? 0,
-                      )}
-                      detail={copy.confidence}
-                      loading={loading}
-                    />
-                    <MetricTile
-                      icon={RiGlobalLine}
-                      label={copy.affectedSites}
-                      value={numberFormat(
-                        locale,
-                        data?.summary.affectedSites ?? 0,
-                      )}
-                      detail={copy.site}
-                      loading={loading}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>{copy.trendTitle}</CardTitle>
-                  <CardDescription>{copy.trendDescription}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ChartContainer
-                    config={trendConfig}
-                    className="h-[320px] w-full"
-                  >
-                    <ComposedChart data={trend}>
-                      <defs>
-                        <linearGradient
-                          id="request-observation-count-fill"
-                          x1="0"
-                          y1="0"
-                          x2="0"
-                          y2="1"
-                        >
-                          <stop
-                            offset="5%"
-                            stopColor="var(--color-count)"
-                            stopOpacity={0.35}
-                          />
-                          <stop
-                            offset="95%"
-                            stopColor="var(--color-count)"
-                            stopOpacity={0.03}
-                          />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid vertical={false} />
-                      <XAxis
-                        dataKey="timestampMs"
-                        tickLine={false}
-                        axisLine={false}
-                        tickMargin={8}
-                        tickFormatter={(value) =>
-                          trendTickFormatter.format(
-                            new Date(Number(value ?? 0)),
-                          )
-                        }
-                        minTickGap={14}
-                      />
-                      <YAxis
-                        yAxisId="bots"
-                        width={52}
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={(value) =>
-                          formatter.format(Number(value))
-                        }
-                      />
-                      <YAxis
-                        yAxisId="ratio"
-                        orientation="right"
-                        width={44}
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={(value) =>
-                          percentFormat(locale, Number(value))
-                        }
-                      />
-                      <ChartTooltip
-                        allowEscapeViewBox={{ x: false, y: true }}
-                        wrapperStyle={{ zIndex: 20 }}
-                        content={
-                          <ChartTooltipContent
-                            indicator="dot"
-                            labelFormatter={(value, payload) => {
-                              const timestamp = Number(
-                                payload?.[0]?.payload?.timestampMs ??
-                                  value ??
-                                  0,
-                              );
-                              return trendTooltipFormatter.format(
-                                new Date(timestamp),
-                              );
-                            }}
-                            formatter={formatTrendTooltipValue}
-                          />
-                        }
-                      />
-                      <Area
-                        yAxisId="bots"
-                        type="monotone"
-                        dataKey="count"
-                        stroke="var(--color-count)"
-                        fill="url(#request-observation-count-fill)"
-                        strokeWidth={2}
-                        dot={false}
-                        activeDot={{ r: 4 }}
-                      />
-                      <Line
-                        yAxisId="ratio"
-                        type="monotone"
-                        dataKey="botRatio"
-                        stroke="var(--color-botRatio)"
-                        strokeWidth={2}
-                        strokeDasharray="4 4"
-                        dot={false}
-                        activeDot={{ r: 4 }}
-                      />
-                    </ComposedChart>
-                  </ChartContainer>
-                </CardContent>
-              </Card>
-
-              <section className="grid gap-4 xl:grid-cols-2">
-                <AsyncDimensionBreakdownCard
-                  locale={locale}
-                  messages={messages}
-                  tabs={detectionTabs}
-                  loadRows={loadDetectionRows}
-                  requestKey={`${minutes}:${events.length}:detection`}
-                  className="h-full"
-                  secondaryMetricLabel={copy.highConfidenceRequests}
-                  emptyLabel={copy.noData}
-                />
-                <AsyncDimensionBreakdownCard
-                  locale={locale}
-                  messages={messages}
-                  tabs={targetTabs}
-                  loadRows={loadTargetRows}
-                  requestKey={`${minutes}:${events.length}:target`}
-                  className="h-full"
-                  secondaryMetricLabel={copy.highConfidenceRequests}
-                  emptyLabel={copy.noData}
-                />
-                <AsyncDimensionBreakdownCard
-                  locale={locale}
-                  messages={messages}
-                  tabs={networkTabs}
-                  loadRows={loadNetworkRows}
-                  requestKey={`${minutes}:${events.length}:network`}
-                  className="h-full"
-                  secondaryMetricLabel={copy.highConfidenceRequests}
-                  emptyLabel={copy.noData}
-                />
-                <AsyncDimensionBreakdownCard
-                  locale={locale}
-                  messages={messages}
-                  tabs={clientTabs}
-                  loadRows={loadClientRows}
-                  requestKey={`${minutes}:${events.length}:client`}
-                  className="h-full"
-                  secondaryMetricLabel={copy.highConfidenceRequests}
-                  emptyLabel={copy.noData}
-                />
-              </section>
-
-              <BotEventsTable
-                locale={locale}
-                messages={messages}
-                copy={copy}
-                events={events}
-                loading={loading}
-                requestKey={`${minutes}:${data?.generatedAt ?? 0}:${events.length}`}
-                minutes={minutes}
-              />
-            </div>
-          </div>
-        </div>
-
-        {showDemoOverlay ? (
-          <div className="absolute inset-0 z-30 bg-background/30 px-4">
-            <div className="sticky top-[calc(50svh-8rem)] mx-auto flex w-full max-w-lg justify-center py-10">
-              <Card
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="request-observation-overlay-title"
-                aria-describedby="request-observation-overlay-description"
-                className="w-full border-border/80 bg-background/95 shadow-2xl backdrop-blur"
-              >
-                <CardHeader>
-                  <CardTitle id="request-observation-overlay-title">
-                    {overlayTitle}
-                  </CardTitle>
-                  <CardDescription id="request-observation-overlay-description">
-                    {overlayDescription}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>{overlayAction}</CardContent>
-              </Card>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-*/
