@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   type RemixiconComponentType,
   RiAlarmWarningLine,
@@ -10,9 +10,12 @@ import {
   RiTimeLine,
 } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 
+import {
+  LatencyPercentileChart,
+  type LatencyPercentileChartPoint,
+} from "@/components/dashboard/charts/latency-percentile-chart";
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { PageHeading } from "@/components/dashboard/page-heading";
@@ -27,14 +30,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@/components/ui/chart";
 import {
   Select,
   SelectContent,
@@ -71,12 +66,6 @@ interface SystemPerformanceClientProps {
 const WINDOW_OPTIONS: readonly SystemPerformanceWindowMinutes[] = [
   15, 60, 360, 1440,
 ] as const;
-const LATENCY_SERIES_COLORS = {
-  p50: "var(--color-chart-1)",
-  p75: "var(--color-chart-4)",
-  p95: "var(--color-chart-5)",
-} as const;
-
 async function fetchSystemPerformance(
   minutes: SystemPerformanceWindowMinutes,
   signal?: AbortSignal,
@@ -207,198 +196,6 @@ function SystemMetricCell({
         {detail}
       </p>
     </div>
-  );
-}
-
-function LatencyPercentileChart({
-  locale,
-  messages,
-  timeZone,
-  data,
-  loading,
-}: {
-  locale: Locale;
-  messages: AppMessages;
-  timeZone: string;
-  data: SystemPerformanceData | null;
-  loading: boolean;
-}) {
-  const t = messages.systemPerformance;
-  const chartData = useMemo(
-    () =>
-      (data?.trend ?? []).map((point) => ({
-        timestampMs: point.timestampMs,
-        p50: point.p50LatencyMs,
-        p75: point.p75LatencyMs,
-        p95: point.p95LatencyMs,
-      })),
-    [data?.trend],
-  );
-  const hasLatencyData = chartData.some(
-    (point) => point.p50 !== null || point.p75 !== null || point.p95 !== null,
-  );
-  const bucketFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(intlLocale(locale), {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone,
-      }),
-    [locale, timeZone],
-  );
-  const tooltipFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(intlLocale(locale), {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone,
-      }),
-    [locale, timeZone],
-  );
-  const chartConfig = useMemo(
-    () =>
-      ({
-        p50: {
-          label: t.p50Label,
-          color: LATENCY_SERIES_COLORS.p50,
-        },
-        p75: {
-          label: t.p75Label,
-          color: LATENCY_SERIES_COLORS.p75,
-        },
-        p95: {
-          label: t.p95Label,
-          color: LATENCY_SERIES_COLORS.p95,
-        },
-      }) satisfies ChartConfig,
-    [t.p50Label, t.p75Label, t.p95Label],
-  );
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="inline-flex items-center gap-2">
-          <RiSpeedUpLine className="size-4" />
-          {t.latencyPercentileTrend}
-        </CardTitle>
-        <CardDescription>{t.latencyPercentileTrendDescription}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <AutoResizer initial>
-          <AutoTransition
-            transitionKey={
-              hasLatencyData ? "chart" : loading ? "loading" : "empty"
-            }
-            initial={false}
-            duration={0.2}
-            type="fade"
-          >
-            {hasLatencyData ? (
-              <ChartContainer
-                key="chart"
-                className="h-[320px] w-full aspect-auto"
-                config={chartConfig}
-              >
-                <LineChart
-                  accessibilityLayer
-                  data={chartData}
-                  margin={{ left: 12, right: 12, top: 12, bottom: 4 }}
-                >
-                  <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="timestampMs"
-                    tickFormatter={(value) =>
-                      bucketFormatter.format(new Date(Number(value ?? 0)))
-                    }
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                    minTickGap={12}
-                  />
-                  <YAxis
-                    tickFormatter={(value) =>
-                      formatLatency(locale, Number(value ?? 0))
-                    }
-                    tickLine={false}
-                    axisLine={false}
-                    width={74}
-                  />
-                  <ChartTooltip
-                    cursor={false}
-                    content={
-                      <ChartTooltipContent
-                        className="min-w-[14rem]"
-                        indicator="line"
-                        labelFormatter={(value, payload) => {
-                          const timestamp = Number(
-                            payload?.[0]?.payload?.timestampMs ?? value ?? 0,
-                          );
-                          return tooltipFormatter.format(new Date(timestamp));
-                        }}
-                        formatter={(value, name) => (
-                          <div className="flex w-full items-center justify-between gap-3">
-                            <span className="text-muted-foreground">
-                              {String(name ?? "")}
-                            </span>
-                            <span className="font-mono text-foreground tabular-nums">
-                              {formatLatency(locale, Number(value ?? 0))}
-                            </span>
-                          </div>
-                        )}
-                      />
-                    }
-                  />
-                  <ChartLegend
-                    content={
-                      <ChartLegendContent className="pt-6 flex-wrap justify-center gap-x-4 gap-y-2" />
-                    }
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="p50"
-                    name={t.p50Label}
-                    stroke={LATENCY_SERIES_COLORS.p50}
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                    connectNulls={false}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="p75"
-                    name={t.p75Label}
-                    stroke={LATENCY_SERIES_COLORS.p75}
-                    strokeWidth={2.4}
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                    connectNulls={false}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="p95"
-                    name={t.p95Label}
-                    stroke={LATENCY_SERIES_COLORS.p95}
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                    connectNulls={false}
-                  />
-                </LineChart>
-              </ChartContainer>
-            ) : (
-              <div
-                key={loading ? "loading" : "empty"}
-                className="flex h-[320px] items-center justify-center text-sm text-muted-foreground"
-              >
-                {loading ? messages.common.loading : t.noData}
-              </div>
-            )}
-          </AutoTransition>
-        </AutoResizer>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -924,6 +721,28 @@ export function SystemPerformanceClient({
     1,
     ...(data?.trend.map((point) => point.totalEvents) ?? []),
   );
+  const latencyChartData = useMemo<LatencyPercentileChartPoint[]>(
+    () =>
+      (data?.trend ?? []).map((point) => ({
+        timestampMs: point.timestampMs,
+        p50: point.p50LatencyMs,
+        p75: point.p75LatencyMs,
+        p95: point.p95LatencyMs,
+      })),
+    [data?.trend],
+  );
+  const latencyChartLabels = useMemo(
+    () => ({
+      p50: t.p50Label,
+      p75: t.p75Label,
+      p95: t.p95Label,
+    }),
+    [t.p50Label, t.p75Label, t.p95Label],
+  );
+  const formatLatencyValue = useCallback(
+    (value: number | null) => formatLatency(locale, value),
+    [locale],
+  );
   const summary = data?.summary;
   const openVisits = data?.openVisits;
   const anomalyTone =
@@ -1078,13 +897,29 @@ export function SystemPerformanceClient({
         </CardContent>
       </Card>
 
-      <LatencyPercentileChart
-        locale={locale}
-        messages={messages}
-        timeZone={timeZone}
-        data={data}
-        loading={loading}
-      />
+      <Card>
+        <CardHeader>
+          <CardTitle className="inline-flex items-center gap-2">
+            <RiSpeedUpLine className="size-4" />
+            {t.latencyPercentileTrend}
+          </CardTitle>
+          <CardDescription>
+            {t.latencyPercentileTrendDescription}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LatencyPercentileChart
+            data={latencyChartData}
+            labels={latencyChartLabels}
+            locale={locale}
+            timeZone={timeZone}
+            formatValue={formatLatencyValue}
+            loading={loading}
+            loadingLabel={messages.common.loading}
+            emptyLabel={t.noData}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
