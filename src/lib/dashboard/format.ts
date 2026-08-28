@@ -37,6 +37,7 @@ const DURATION_UNITS: Record<
 
 const NUMBER_FORMATTERS = new Map<string, Intl.NumberFormat>();
 const PERCENT_FORMATTERS = new Map<string, Intl.NumberFormat>();
+const PERCENT_ONE_DECIMAL_FORMATTERS = new Map<string, Intl.NumberFormat>();
 
 function getNumberFormatter(locale: Locale): Intl.NumberFormat {
   const key = intlLocale(locale);
@@ -61,6 +62,20 @@ function getPercentFormatter(locale: Locale): Intl.NumberFormat {
   return formatter;
 }
 
+function getPercentOneDecimalFormatter(locale: Locale): Intl.NumberFormat {
+  const key = intlLocale(locale);
+  const cached = PERCENT_ONE_DECIMAL_FORMATTERS.get(key);
+  if (cached) return cached;
+
+  const formatter = new Intl.NumberFormat(key, {
+    style: "percent",
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+  PERCENT_ONE_DECIMAL_FORMATTERS.set(key, formatter);
+  return formatter;
+}
+
 export function intlLocale(locale: Locale): string {
   return INTL_LOCALE[locale];
 }
@@ -71,6 +86,13 @@ export function numberFormat(locale: Locale, value: number): string {
 
 export function percentFormat(locale: Locale, value: number): string {
   return getPercentFormatter(locale).format(value);
+}
+
+export function percentFormatWithOneDecimal(
+  locale: Locale,
+  value: number,
+): string {
+  return getPercentOneDecimalFormatter(locale).format(value);
 }
 
 type DateValue = number | string | Date | null | undefined;

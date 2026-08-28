@@ -1,20 +1,16 @@
 import { memo, useMemo } from "react";
 import { RiBarChartBoxLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
+import {
+  StackedBreakdownBarChart,
+  type StackedBreakdownBarRow,
+  type StackedBreakdownBarSeries,
+} from "@/components/dashboard/charts/stacked-breakdown-bar-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journey-display";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-} from "@/components/ui/chart";
 import { fetchClientCrossBreakdown } from "@/lib/dashboard/client-data";
-import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   BrowserCrossBreakdownDimensionData,
@@ -60,12 +56,6 @@ interface CrossDisplayDimension {
   totalVisitors: number;
 }
 
-interface CrossChartRow {
-  segment: string;
-  segmentFullLabel: string;
-  [key: string]: string | number;
-}
-
 function emptyDimension(): BrowserCrossBreakdownDimensionData {
   return {
     columns: [],
@@ -82,10 +72,6 @@ function crossLabel(
   if (item.isOther) return messages.devices.otherLabel;
   if (item.isUnknown) return messages.common.unknown;
   return formatLabel ? formatLabel(item.label) : item.label;
-}
-
-function shortenLabel(label: string, maxLength = 18): string {
-  return label.length > maxLength ? `${label.slice(0, maxLength)}...` : label;
 }
 
 function buildDisplayDimension(
@@ -139,39 +125,28 @@ const CrossBreakdownCard = memo(function CrossBreakdownCard({
   dimension: CrossDisplayDimension;
   loading: boolean;
 }) {
-  const chartConfig = useMemo(
-    () =>
-      dimension.columns.reduce((config, column) => {
-        config[column.key] = {
-          label: column.displayLabel,
-          color: column.color,
-        };
-        return config;
-      }, {} as ChartConfig),
-    [dimension.columns],
-  );
-  const chartData = useMemo(
+  const chartRows = useMemo<StackedBreakdownBarRow[]>(
     () =>
       dimension.rows.map((row) => {
-        const entry: CrossChartRow = {
-          segment: shortenLabel(row.displayLabel),
-          segmentFullLabel: row.displayLabel,
-        };
-        const rowVisitors = row.cells.reduce(
-          (sum, cell) => sum + cell.visitors,
-          0,
+        const values = row.cells.reduce<Record<string, number>>(
+          (result, cell) => {
+            result[cell.key] = cell.visitors;
+            return result;
+          },
+          {},
         );
-        for (const cell of row.cells) {
-          entry[cell.key] = rowVisitors > 0 ? cell.visitors / rowVisitors : 0;
-          entry[`${cell.key}Visitors`] = cell.visitors;
-        }
-        return entry;
+        return { key: row.key, label: row.displayLabel, values };
       }),
     [dimension.rows],
   );
-  const chartHeight = useMemo(
-    () => Math.max(300, dimension.rows.length * 56 + 40),
-    [dimension.rows.length],
+  const chartSeries = useMemo<StackedBreakdownBarSeries[]>(
+    () =>
+      dimension.columns.map((column) => ({
+        key: column.key,
+        label: column.displayLabel,
+        color: column.color,
+      })),
+    [dimension.columns],
   );
 
   return (
@@ -190,118 +165,13 @@ const CrossBreakdownCard = memo(function CrossBreakdownCard({
           emptyContent={<p>{messages.common.noData}</p>}
           minHeightClassName="min-h-[320px]"
         >
-          <ChartContainer
+          <StackedBreakdownBarChart
+            rows={chartRows}
+            series={chartSeries}
+            locale={locale}
+            stackId={title}
             className="w-full aspect-auto"
-            config={chartConfig}
-            style={{ height: chartHeight }}
-          >
-            <BarChart
-              accessibilityLayer
-              data={chartData}
-              layout="vertical"
-              margin={{ top: 8, right: 12, bottom: 8, left: 12 }}
-              barCategoryGap={12}
-            >
-              <CartesianGrid horizontal={false} />
-              <XAxis
-                type="number"
-                domain={[0, 1]}
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                minTickGap={24}
-                tickFormatter={(value) =>
-                  percentFormat(locale, Number(value ?? 0))
-                }
-              />
-              <YAxis
-                type="category"
-                dataKey="segment"
-                tickLine={false}
-                axisLine={false}
-                width={104}
-              />
-              <ChartTooltip
-                cursor={false}
-                content={({ active, payload }) => {
-                  const row = payload?.[0]?.payload as
-                    | CrossChartRow
-                    | undefined;
-                  if (!active || !payload?.length || !row) return null;
-                  const payloadByKey = new Map(
-                    payload.map((item) => [String(item.dataKey ?? ""), item]),
-                  );
-                  const visibleItems = dimension.columns.flatMap((column) => {
-                    const item = payloadByKey.get(column.key);
-                    return item && Number(item.value ?? 0) > 0 ? [item] : [];
-                  });
-
-                  return (
-                    <div className="grid min-w-[18rem] gap-2 rounded-none border border-border/50 bg-background px-2.5 py-2 text-xs shadow-xl">
-                      <div className="font-medium">
-                        {String(row.segmentFullLabel || "")}
-                      </div>
-                      <div className="grid gap-1.5">
-                        {visibleItems.map((item) => {
-                          const seriesKey = String(item.dataKey ?? "");
-                          const currentSeries = dimension.columns.find(
-                            (column) => column.key === seriesKey,
-                          );
-                          const share = Math.max(0, Number(item.value ?? 0));
-                          const visitors = Math.max(
-                            0,
-                            Number(row[`${seriesKey}Visitors`] ?? 0),
-                          );
-
-                          return (
-                            <div
-                              key={`${row.segmentFullLabel}-${seriesKey}`}
-                              className="flex items-center gap-3"
-                            >
-                              <span className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                                <span
-                                  className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
-                                  style={{
-                                    backgroundColor: currentSeries?.color,
-                                  }}
-                                />
-                                <span
-                                  className="truncate text-muted-foreground"
-                                  title={
-                                    currentSeries?.displayLabel ?? seriesKey
-                                  }
-                                >
-                                  {currentSeries?.displayLabel ?? seriesKey}
-                                </span>
-                              </span>
-                              <span className="ml-auto min-w-[7.5rem] shrink-0 whitespace-nowrap text-right font-mono text-foreground tabular-nums">
-                                {numberFormat(locale, visitors)} ·{" "}
-                                {percentFormat(locale, share)}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                }}
-              />
-              <ChartLegend
-                content={
-                  <ChartLegendContent className="pt-4 flex-wrap justify-start gap-x-4 gap-y-2" />
-                }
-              />
-              {dimension.columns.map((column) => (
-                <Bar
-                  key={column.key}
-                  dataKey={column.key}
-                  stackId={title}
-                  fill={`var(--color-${column.key})`}
-                  radius={0}
-                />
-              ))}
-            </BarChart>
-          </ChartContainer>
+          />
         </ContentSwitch>
       </CardContent>
     </Card>

@@ -5,6 +5,7 @@ import {
   intlLocale,
   numberFormat,
   percentFormat,
+  percentFormatWithOneDecimal,
   shortDate,
   shortDateTime,
   shortDateTimeWithSeconds,
@@ -41,6 +42,13 @@ describe("Dashboard Format Utilities", () => {
       expect(percentFormat("zh", 0.88)).toMatch(/88\s*%/);
       expect(percentFormat("en", 0.0005)).toMatch(/0\.1\s*%/);
       expect(percentFormat("en", 0)).toMatch(/0\s*%/);
+    });
+  });
+
+  describe("percentFormatWithOneDecimal", () => {
+    it("should always include one fraction digit", () => {
+      expect(percentFormatWithOneDecimal("en", 0.05)).toMatch(/5\.0\s*%/);
+      expect(percentFormatWithOneDecimal("en", 0)).toMatch(/0\.0\s*%/);
     });
   });
 

@@ -1,8 +1,8 @@
 import { Fragment, memo, useMemo } from "react";
 import { RiGlobalLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
-import { Cell, Pie, PieChart } from "recharts";
 
+import { DonutChart } from "@/components/dashboard/charts/donut-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import {
@@ -12,11 +12,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-} from "@/components/ui/chart";
 import { Spinner } from "@/components/ui/spinner";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client-data";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
@@ -101,15 +96,15 @@ const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
   messages: AppMessages;
   browser: BrowserVersionBrowserDisplay;
 }) {
-  const chartConfig = useMemo(
+  const chartData = useMemo(
     () =>
-      browser.versions.reduce((config, version) => {
-        config[version.key] = {
-          label: version.displayLabel,
-          color: version.color,
-        };
-        return config;
-      }, {} as ChartConfig),
+      browser.versions.map((version) => ({
+        key: version.key,
+        label: version.displayLabel,
+        value: version.visitors,
+        share: version.share,
+        color: version.color,
+      })),
     [browser.versions],
   );
 
@@ -126,53 +121,14 @@ const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
       <CardContent>
         <div className="grid gap-4 sm:grid-cols-[156px_minmax(0,1fr)] sm:items-center">
           <div className="relative mx-auto flex size-[156px] items-center justify-center">
-            <ChartContainer
-              className="size-[156px] [&_.recharts-tooltip-wrapper]:z-20"
-              config={chartConfig}
-            >
-              <PieChart accessibilityLayer>
-                <ChartTooltip
-                  cursor={false}
-                  content={({ active, payload }) => {
-                    const item = payload?.[0]?.payload as
-                      | BrowserVersionSliceDisplay
-                      | undefined;
-                    if (!active || !item) return null;
-
-                    return (
-                      <div className="grid min-w-[12rem] gap-1.5 rounded-none border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-                        <div className="font-medium">{item.displayLabel}</div>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-muted-foreground">
-                            {numberFormat(locale, item.visitors)}{" "}
-                            {messages.common.visitors}
-                          </span>
-                          <span className="font-mono font-medium tabular-nums text-foreground">
-                            {percentFormat(locale, item.share)}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  }}
-                />
-                <Pie
-                  data={browser.versions}
-                  dataKey="visitors"
-                  nameKey="displayLabel"
-                  innerRadius={44}
-                  outerRadius={66}
-                  paddingAngle={2}
-                  stroke="var(--background)"
-                  strokeWidth={1}
-                  startAngle={90}
-                  endAngle={-270}
-                >
-                  {browser.versions.map((version) => (
-                    <Cell key={version.key} fill={version.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ChartContainer>
+            <DonutChart
+              data={chartData}
+              locale={locale}
+              valueLabel={messages.common.visitors}
+              innerRadius={44}
+              outerRadius={66}
+              className="size-[156px]"
+            />
 
             <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center">
               <span className="text-base font-medium tabular-nums text-foreground">

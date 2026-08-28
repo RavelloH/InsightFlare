@@ -5,8 +5,8 @@ import {
   RiExternalLinkLine,
 } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
-import { Cell, Pie, PieChart } from "recharts";
 
+import { DonutChart } from "@/components/dashboard/charts/donut-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import {
   TabbedDataTableCard,
@@ -15,11 +15,6 @@ import {
 } from "@/components/dashboard/tabbed-data-table-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-} from "@/components/ui/chart";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -120,22 +115,13 @@ function ScreenCategoryPieCard({
   const chartData = useMemo(
     () =>
       bucketSummary.map((bucket, index) => ({
-        ...bucket,
+        key: bucket.key,
         label: bucketLabel(bucket.key, messages),
-        fill: CHART_COLORS[index % CHART_COLORS.length],
+        value: bucket.visitors,
+        share: bucket.share,
+        color: CHART_COLORS[index % CHART_COLORS.length],
       })),
     [bucketSummary, messages],
-  );
-  const chartConfig = useMemo(
-    () =>
-      chartData.reduce((config, item) => {
-        config[item.key] = {
-          label: item.label,
-          color: item.fill,
-        };
-        return config;
-      }, {} as ChartConfig),
-    [chartData],
   );
 
   return (
@@ -147,60 +133,19 @@ function ScreenCategoryPieCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col items-center justify-center gap-6">
-        <ChartContainer
-          className="aspect-square w-full max-w-[18rem]"
-          config={chartConfig}
-        >
-          <PieChart accessibilityLayer>
-            <ChartTooltip
-              cursor={false}
-              content={({ active, payload }) => {
-                const item = payload?.[0]?.payload as
-                  | (typeof chartData)[number]
-                  | undefined;
-                if (!active || !item) return null;
-
-                return (
-                  <div className="grid min-w-[11rem] gap-1.5 rounded-none border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-                    <div className="font-medium">{item.label}</div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-muted-foreground">
-                        {numberFormat(locale, item.visitors)}{" "}
-                        {messages.common.visitors}
-                      </span>
-                      <span className="font-mono font-medium tabular-nums text-foreground">
-                        {percentFormat(locale, item.share)}
-                      </span>
-                    </div>
-                  </div>
-                );
-              }}
-            />
-            <Pie
-              data={chartData}
-              dataKey="visitors"
-              nameKey="label"
-              innerRadius={54}
-              outerRadius={90}
-              paddingAngle={2}
-              stroke="var(--background)"
-              strokeWidth={1}
-              startAngle={90}
-              endAngle={-270}
-            >
-              {chartData.map((item) => (
-                <Cell key={item.key} fill={item.fill} />
-              ))}
-            </Pie>
-          </PieChart>
-        </ChartContainer>
+        <DonutChart
+          data={chartData}
+          locale={locale}
+          valueLabel={messages.common.visitors}
+          className="max-w-[18rem]"
+        />
 
         <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
           {chartData.map((item) => (
             <div key={item.key} className="flex items-center gap-1.5 text-xs">
               <span
                 className="size-2.5 shrink-0 rounded-[2px]"
-                style={{ backgroundColor: item.fill }}
+                style={{ backgroundColor: item.color }}
               />
               <span className="text-muted-foreground">{item.label}</span>
               <span className="font-mono tabular-nums text-foreground">
