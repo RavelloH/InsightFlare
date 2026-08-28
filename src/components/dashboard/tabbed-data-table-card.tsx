@@ -1212,6 +1212,7 @@ function TabbedDataTableCardImpl<
     ) : null;
 
   const syncKey = [
+    requestKey ?? "",
     activeTab,
     activeLoading ? "loading" : "idle",
     effectiveSortByTab[activeTab].key,
@@ -1249,7 +1250,7 @@ function TabbedDataTableCardImpl<
           colSpan={colSpan}
           header={renderTableHeader(activeTab, activeColumns)}
           rows={renderRows(activeTab, activeRows, activeColumns, "card")}
-          contentKey={`card-${activeTab}-${activeRows.length}`}
+          contentKey={`card-${requestKey ?? ""}-${activeTab}-${activeRows.length}`}
         />
       </TabbedScrollMaskCard>
       {searchPanel}

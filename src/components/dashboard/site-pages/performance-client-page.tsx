@@ -1,4 +1,11 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Icon } from "@iconify/react";
 import {
   RiCheckboxCircleFill,
@@ -41,6 +48,7 @@ import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clickable } from "@/components/ui/clickable";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { fetchPerformance } from "@/lib/dashboard/client-data";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -748,181 +756,153 @@ function buildMetricTrend(
   return filled;
 }
 
-function PerformanceSkeleton() {
+const PERFORMANCE_TABLE_SKELETON_ROWS = 4;
+const PATH_TABLE_SKELETON_ROWS: PathPerformanceRow[] = Array.from(
+  { length: PERFORMANCE_TABLE_SKELETON_ROWS },
+  (_, index) => ({
+    key: `performance-path-skeleton-${index}`,
+    pathname: "",
+    views: 0,
+    samples: 0,
+    value: null,
+    score: null,
+    status: "none",
+  }),
+);
+const COUNTRY_TABLE_SKELETON_ROWS: CountryHealthRow[] = Array.from(
+  { length: PERFORMANCE_TABLE_SKELETON_ROWS },
+  (_, index) => ({
+    key: `performance-country-skeleton-${index}`,
+    country: "",
+    label: "",
+    iconName: null,
+    views: 0,
+    samples: 0,
+    value: null,
+    score: null,
+    status: "none",
+  }),
+);
+
+const PerformanceDynamicValue = memo(function PerformanceDynamicValue({
+  children,
+  loading,
+  skeletonClassName,
+  className,
+  transitionKey,
+}: {
+  children: ReactNode;
+  loading: boolean;
+  skeletonClassName: string;
+  className?: string;
+  transitionKey?: string | number;
+}) {
   return (
-    <div className="grid items-start gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
-      <div className="space-y-3 self-start">
-        {Array.from({ length: 6 }, (_, index) => (
-          <Card
-            key={`performance-rail-skeleton-${index}`}
-            className="overflow-hidden"
-          >
-            <CardContent className="space-y-3 p-4">
-              <Skeleton className="h-3 w-32" />
-              <Skeleton className="h-8 w-24" />
-              <Skeleton className="h-1.5 w-full" />
-            </CardContent>
-          </Card>
+    <AutoResizer className={cn("min-w-0", className)} duration={0.2}>
+      <AutoTransition
+        initial={false}
+        transitionKey={loading ? "loading" : (transitionKey ?? "ready")}
+        duration={0.18}
+        type="fade"
+        presenceMode="wait"
+        className="flex min-h-5 min-w-0 items-center"
+      >
+        {loading ? (
+          <Skeleton key="loading" className={skeletonClassName} />
+        ) : (
+          <div key="ready" className="min-h-5 min-w-0">
+            {children}
+          </div>
+        )}
+      </AutoTransition>
+    </AutoResizer>
+  );
+});
+
+const PerformancePanelText = memo(function PerformancePanelText({
+  children,
+  transitionKey,
+  className,
+  resizerClassName,
+  animateWidth = false,
+}: {
+  children: ReactNode;
+  transitionKey: string | number;
+  className?: string;
+  resizerClassName?: string;
+  animateWidth?: boolean;
+}) {
+  return (
+    <AutoResizer
+      className={cn("min-w-0", resizerClassName)}
+      duration={0.2}
+      animateWidth={animateWidth}
+      animateHeight={!animateWidth}
+    >
+      <AutoTransition
+        className={cn("min-w-0", className)}
+        initial={false}
+        transitionKey={transitionKey}
+        duration={0.18}
+        type="fade"
+        presenceMode="wait"
+      >
+        {children}
+      </AutoTransition>
+    </AutoResizer>
+  );
+});
+
+const PerformanceSpinnerValue = memo(function PerformanceSpinnerValue({
+  children,
+  loading,
+  transitionKey,
+}: {
+  children: ReactNode;
+  loading: boolean;
+  transitionKey?: string | number;
+}) {
+  return (
+    <AutoResizer initial animateHeight={false} className="mt-2 h-7">
+      <AutoTransition
+        className="h-7"
+        transitionKey={loading ? "loading" : (transitionKey ?? "ready")}
+        initial={false}
+        duration={0.2}
+        type="fade"
+        presenceMode="wait"
+      >
+        {loading ? (
+          <div key="loading" className="flex h-7 items-center">
+            <Spinner className="size-5" />
+          </div>
+        ) : (
+          <div key="ready" className="h-7 min-w-0">
+            {children}
+          </div>
+        )}
+      </AutoTransition>
+    </AutoResizer>
+  );
+});
+
+function PerformanceTrendLoadingState({ messages }: { messages: AppMessages }) {
+  const legend = [
+    messages.performance.p50Label,
+    messages.performance.p75Label,
+    messages.performance.p95Label,
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Skeleton className="h-[360px] w-full rounded-none" />
+      <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+        {legend.map((label) => (
+          <span key={label} className="inline-flex items-center gap-2">
+            <span className="size-2.5 shrink-0 rounded-none bg-muted" />
+            {label}
+          </span>
         ))}
-      </div>
-      <div className="min-w-0 space-y-4">
-        <Card className="overflow-hidden">
-          <CardContent className="grid gap-5 p-5 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
-            <div className="flex min-w-0 flex-col gap-4">
-              <div className="space-y-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 space-y-2">
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="h-9 w-16" />
-                    <div className="flex items-center gap-2">
-                      <Skeleton className="size-5 rounded-full" />
-                      <Skeleton className="h-5 w-12" />
-                    </div>
-                  </div>
-                  <Skeleton className="size-[4.5rem] shrink-0 rounded-full" />
-                </div>
-                <div className="max-w-xl space-y-2">
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-4 w-10/12" />
-                </div>
-              </div>
-              <div className="mt-auto grid grid-cols-2 gap-3">
-                {Array.from({ length: 2 }, (_, index) => (
-                  <div
-                    key={`performance-summary-stat-skeleton-${index}`}
-                    className="flex min-h-[4.75rem] flex-col justify-between rounded-none bg-muted/45 p-3"
-                  >
-                    <Skeleton className="h-3 w-20 bg-background/70" />
-                    <Skeleton className="h-6 w-12 bg-background/70" />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex min-w-0 flex-col gap-4">
-              <div className="space-y-2">
-                <Skeleton className="h-5 w-24" />
-                <div className="space-y-2">
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-4 w-11/12" />
-                  <Skeleton className="h-4 w-7/12" />
-                </div>
-              </div>
-              <div className="rounded-none bg-muted/45 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <Skeleton className="size-4 bg-background/70" />
-                  <Skeleton className="h-5 w-28 bg-background/70" />
-                </div>
-                <div className="space-y-2">
-                  <Skeleton className="h-4 w-full bg-background/70" />
-                  <Skeleton className="h-4 w-10/12 bg-background/70" />
-                </div>
-              </div>
-
-              <div className="mt-auto grid gap-3 sm:grid-cols-3">
-                {Array.from({ length: 3 }, (_, index) => (
-                  <div
-                    key={`performance-percentile-skeleton-${index}`}
-                    className="flex min-h-[4.75rem] flex-col justify-between rounded-none bg-muted/45 p-3"
-                  >
-                    <Skeleton className="h-3 w-10 bg-background/70" />
-                    <Skeleton className="h-5 w-12 bg-background/70" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-4 w-24" />
-          </CardHeader>
-          <CardContent className="p-6">
-            <Skeleton className="h-[360px] w-full rounded-none" />
-            <div className="mt-4 flex justify-center gap-4">
-              <Skeleton className="h-3 w-16" />
-              <Skeleton className="h-3 w-16" />
-              <Skeleton className="h-3 w-16" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="overflow-hidden">
-          <CardHeader className="pb-3">
-            <Skeleton className="h-5 w-44" />
-            <Skeleton className="h-4 w-64 max-w-full" />
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="border-t border-border/70 bg-muted/20 p-3">
-              <Skeleton className="mx-auto aspect-[960/500] w-full rounded-none" />
-            </div>
-            <div className="grid min-h-[18rem] divide-y divide-border/70 border-t border-border/70 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-              {Array.from({ length: 3 }, (_, columnIndex) => (
-                <div
-                  key={`performance-country-table-skeleton-${columnIndex}`}
-                  className="space-y-3 p-4"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-2">
-                      <Skeleton className="h-4 w-24" />
-                      <Skeleton className="h-3 w-20" />
-                    </div>
-                    <Skeleton className="h-4 w-8" />
-                  </div>
-                  {Array.from({ length: 4 }, (_, rowIndex) => (
-                    <div
-                      key={`performance-country-row-skeleton-${columnIndex}-${rowIndex}`}
-                      className="grid grid-cols-[minmax(0,1fr)_3rem_4rem] gap-3"
-                    >
-                      <Skeleton className="h-4 w-full" />
-                      <Skeleton className="h-4 w-full" />
-                      <Skeleton className="h-4 w-full" />
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="overflow-hidden">
-          <CardHeader className="pb-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-2">
-                <Skeleton className="h-5 w-40" />
-                <Skeleton className="h-4 w-20" />
-              </div>
-              <Skeleton className="h-4 w-32" />
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="grid min-h-[18rem] divide-y divide-border/70 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-              {Array.from({ length: 3 }, (_, columnIndex) => (
-                <div
-                  key={`performance-path-table-skeleton-${columnIndex}`}
-                  className="space-y-3 p-4"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-2">
-                      <Skeleton className="h-4 w-24" />
-                      <Skeleton className="h-3 w-20" />
-                    </div>
-                    <Skeleton className="h-4 w-8" />
-                  </div>
-                  {Array.from({ length: 4 }, (_, rowIndex) => (
-                    <div
-                      key={`performance-path-row-skeleton-${columnIndex}-${rowIndex}`}
-                      className="grid grid-cols-[minmax(0,1fr)_3rem_4rem] gap-3"
-                    >
-                      <Skeleton className="h-4 w-full" />
-                      <Skeleton className="h-4 w-full" />
-                      <Skeleton className="h-4 w-full" />
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );
@@ -932,11 +912,21 @@ function SegmentedThresholdBar({
   panelKey,
   summary,
   status,
+  loading = false,
 }: {
   panelKey: PerformancePanelKey;
   summary: PerformanceSummary;
   status: PerformanceStatus;
+  loading?: boolean;
 }) {
+  if (loading) {
+    return (
+      <div className="relative h-5">
+        <Skeleton className="absolute inset-x-0 top-1/2 h-2 w-full -translate-y-1/2 rounded-full" />
+      </div>
+    );
+  }
+
   const marker = summary.p75 == null ? null : 75;
   const segments = railSegments(panelKey, summary);
 
@@ -971,10 +961,12 @@ const PerformanceRail = memo(function PerformanceRail({
   activePanel,
   cards,
   onSelect,
+  loading = false,
 }: {
   activePanel: PerformancePanelKey;
   cards: MetricCardModel[];
   onSelect: (key: PerformancePanelKey) => void;
+  loading?: boolean;
 }) {
   return (
     <div className="space-y-3 self-start lg:sticky lg:top-[7.5rem]">
@@ -1009,28 +1001,34 @@ const PerformanceRail = memo(function PerformanceRail({
                     <div className="truncate text-sm font-medium text-muted-foreground">
                       {card.label}
                     </div>
-                    <AutoTransition className="mt-2" duration={0.18}>
-                      <div
-                        key={`${card.key}-${card.valueLabel}`}
-                        className="text-2xl font-semibold tracking-tight"
-                      >
+                    <PerformanceDynamicValue
+                      loading={loading}
+                      skeletonClassName="h-8 w-24"
+                      className="mt-2"
+                    >
+                      <div className="text-2xl font-semibold tracking-tight">
                         {card.valueLabel}
                       </div>
-                    </AutoTransition>
+                    </PerformanceDynamicValue>
                   </div>
-                  <div
-                    className={cn(
-                      "flex size-9 shrink-0 items-center justify-center rounded-full",
-                      statusStyle.softClassName,
-                    )}
-                  >
-                    <StatusIcon className="size-4" />
-                  </div>
+                  {loading ? (
+                    <Skeleton className="size-9 shrink-0 rounded-full" />
+                  ) : (
+                    <div
+                      className={cn(
+                        "flex size-9 shrink-0 items-center justify-center rounded-full",
+                        statusStyle.softClassName,
+                      )}
+                    >
+                      <StatusIcon className="size-4" />
+                    </div>
+                  )}
                 </div>
                 <SegmentedThresholdBar
                   panelKey={card.key}
                   summary={card.summary}
                   status={card.status}
+                  loading={loading}
                 />
               </div>
             </div>
@@ -1048,6 +1046,7 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
   activeSummary,
   activeValue,
   pathCount,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -1055,6 +1054,7 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
   activeSummary: PerformanceSummary;
   activeValue: number | null;
   pathCount: number;
+  loading?: boolean;
 }) {
   const activeStatus =
     activePanel === "score"
@@ -1104,94 +1104,178 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
   const ringPercent =
     scoreValue == null ? 0 : Math.max(0, Math.min(100, scoreValue));
   const ringColor = statusColor(activeStatus);
+  const activeStatusLabel = statusLabel(messages, activeStatus);
 
   return (
     <Card className="overflow-hidden">
-      <CardContent className="grid gap-5 p-5 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
-        <div className="flex min-w-0 flex-col gap-4">
-          <AutoTransition duration={0.2}>
-            <div key={`${activePanel}-${displayValue}`} className="space-y-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 space-y-2">
-                  <div className="text-sm text-muted-foreground">
-                    {panelLabel(messages, activePanel)}
-                  </div>
-                  <div className="text-3xl font-semibold tracking-tight">
-                    {displayValue}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <StatusIcon
-                      className={cn("size-5", statusStyle.labelClassName)}
-                    />
-                    <span
-                      className={cn("font-medium", statusStyle.labelClassName)}
+      <CardContent className="space-y-5 p-5">
+        <AutoResizer className="w-full" duration={0.24}>
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+            <div className="min-w-0">
+              <div className="space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 space-y-2">
+                    <PerformancePanelText
+                      transitionKey={activePanel}
+                      className="text-sm text-muted-foreground"
                     >
-                      {statusLabel(messages, activeStatus)}
-                    </span>
+                      {panelLabel(messages, activePanel)}
+                    </PerformancePanelText>
+                    <PerformanceDynamicValue
+                      loading={loading}
+                      skeletonClassName="h-9 w-24"
+                      transitionKey={displayValue}
+                    >
+                      <div className="text-3xl font-semibold tracking-tight">
+                        {displayValue}
+                      </div>
+                    </PerformanceDynamicValue>
+                    <PerformanceDynamicValue
+                      loading={loading}
+                      skeletonClassName="h-5 w-24"
+                      transitionKey={activeStatusLabel}
+                    >
+                      <div className="flex items-center gap-2">
+                        <StatusIcon
+                          className={cn("size-5", statusStyle.labelClassName)}
+                        />
+                        <span
+                          className={cn(
+                            "font-medium",
+                            statusStyle.labelClassName,
+                          )}
+                        >
+                          {activeStatusLabel}
+                        </span>
+                      </div>
+                    </PerformanceDynamicValue>
                   </div>
-                </div>
-                <div
-                  className="relative flex size-[4.5rem] shrink-0 items-center justify-center rounded-full"
-                  style={{
-                    background: `conic-gradient(${ringColor} ${ringPercent * 3.6}deg, var(--muted) 0deg)`,
-                  }}
-                >
-                  <div className="absolute inset-[6px] rounded-full bg-card" />
-                  <div className="relative z-10 flex items-baseline">
-                    <span className="text-xl font-semibold tracking-tight">
-                      {scoreValue ?? "--"}
-                    </span>
-                    {scoreValue == null ? null : (
-                      <span className="ml-0.5 text-[0.65rem] font-medium text-muted-foreground">
-                        %
-                      </span>
+                  <AutoTransition
+                    initial={false}
+                    transitionKey={
+                      loading
+                        ? "loading"
+                        : `${activePanel}:${scoreValue ?? "--"}`
+                    }
+                    duration={0.2}
+                    type="fade"
+                    presenceMode="wait"
+                    className="size-[4.5rem] shrink-0"
+                  >
+                    {loading ? (
+                      <Skeleton
+                        key="loading"
+                        className="size-[4.5rem] rounded-full"
+                      />
+                    ) : (
+                      <div
+                        key="ready"
+                        className="relative flex size-[4.5rem] items-center justify-center rounded-full"
+                        style={{
+                          background: `conic-gradient(${ringColor} ${ringPercent * 3.6}deg, var(--muted) 0deg)`,
+                        }}
+                      >
+                        <div className="absolute inset-[6px] rounded-full bg-card" />
+                        <div className="relative z-10 flex items-baseline">
+                          <span className="text-xl font-semibold tracking-tight">
+                            {scoreValue ?? "--"}
+                          </span>
+                          {scoreValue == null ? null : (
+                            <span className="ml-0.5 text-[0.65rem] font-medium text-muted-foreground">
+                              %
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     )}
-                  </div>
+                  </AutoTransition>
                 </div>
+                <PerformancePanelText
+                  transitionKey={description}
+                  className="max-w-xl text-sm leading-6 text-muted-foreground"
+                >
+                  {description}
+                </PerformancePanelText>
               </div>
-              <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                {description}
-              </p>
             </div>
-          </AutoTransition>
-          <div className="mt-auto grid grid-cols-2 gap-3">
+
+            <div className="flex min-w-0 flex-col gap-4">
+              <div className="space-y-1">
+                <div className="text-sm font-medium">
+                  {messages.performance.interpretationTitle}
+                </div>
+                <AutoResizer className="max-w-xl" duration={0.2}>
+                  <AutoTransition
+                    initial={false}
+                    transitionKey={loading ? "loading" : reading}
+                    duration={0.18}
+                    type="fade"
+                    presenceMode="wait"
+                    className="space-y-2"
+                  >
+                    {loading ? (
+                      <div key="loading" className="space-y-2">
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-4 w-7/12" />
+                      </div>
+                    ) : (
+                      <p
+                        key="ready"
+                        className="text-sm leading-6 text-muted-foreground"
+                      >
+                        {reading}
+                      </p>
+                    )}
+                  </AutoTransition>
+                </AutoResizer>
+              </div>
+              <div className="rounded-none bg-muted/45 p-4">
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                  <RiSpeedUpLine className="size-4 text-muted-foreground" />
+                  {messages.performance.datasetTitle}
+                </div>
+                <PerformancePanelText
+                  transitionKey={thresholdText}
+                  className="text-sm leading-6 text-muted-foreground"
+                >
+                  {thresholdText}
+                </PerformancePanelText>
+              </div>
+            </div>
+          </div>
+        </AutoResizer>
+
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+          <div className="grid grid-cols-2 gap-3">
             <div className="flex min-h-[4.75rem] flex-col justify-between rounded-none bg-muted/45 p-3">
               <div className="text-xs text-muted-foreground">
                 {messages.performance.pathsAnalyzedLabel}
               </div>
-              <div className="font-mono text-lg font-semibold tabular-nums">
-                {numberFormat(locale, pathCount)}
-              </div>
+              <PerformanceSpinnerValue
+                loading={loading}
+                transitionKey={pathCount}
+              >
+                <div className="font-mono text-lg font-semibold tabular-nums">
+                  {numberFormat(locale, pathCount)}
+                </div>
+              </PerformanceSpinnerValue>
             </div>
             <div className="flex min-h-[4.75rem] flex-col justify-between rounded-none bg-muted/45 p-3">
               <div className="text-xs text-muted-foreground">
                 {messages.performance.samplesLabel}
               </div>
-              <div className="font-mono text-lg font-semibold tabular-nums">
-                {numberFormat(locale, activeSummary.samples)}
-              </div>
+              <PerformanceSpinnerValue
+                loading={loading}
+                transitionKey={activeSummary.samples}
+              >
+                <div className="font-mono text-lg font-semibold tabular-nums">
+                  {numberFormat(locale, activeSummary.samples)}
+                </div>
+              </PerformanceSpinnerValue>
             </div>
-          </div>
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-4">
-          <div className="space-y-1">
-            <div className="text-sm font-medium">
-              {messages.performance.interpretationTitle}
-            </div>
-            <p className="text-sm leading-6 text-muted-foreground">{reading}</p>
-          </div>
-          <div className="rounded-none bg-muted/45 p-4">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-              <RiSpeedUpLine className="size-4 text-muted-foreground" />
-              {messages.performance.datasetTitle}
-            </div>
-            <p className="text-sm leading-6 text-muted-foreground">
-              {thresholdText}
-            </p>
           </div>
 
-          <div className="mt-auto grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-3">
             {[
               ["p50", messages.performance.p50Label, activeSummary.p50],
               ["p75", messages.performance.p75Label, activeSummary.p75],
@@ -1204,14 +1288,24 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
                 <div className="text-xs text-muted-foreground">
                   {label as string}
                 </div>
-                <div className="font-mono text-sm font-medium tabular-nums">
-                  {formatPanelValue(
+                <PerformanceSpinnerValue
+                  loading={loading}
+                  transitionKey={formatPanelValue(
                     locale,
                     messages,
                     activePanel,
                     value as number | null,
                   )}
-                </div>
+                >
+                  <div className="font-mono text-lg font-semibold tabular-nums">
+                    {formatPanelValue(
+                      locale,
+                      messages,
+                      activePanel,
+                      value as number | null,
+                    )}
+                  </div>
+                </PerformanceSpinnerValue>
               </div>
             ))}
           </div>
@@ -1247,19 +1341,27 @@ function CountryLabelWithFlag({
 const PerformanceHealthMapVisual = memo(function PerformanceHealthMapVisual({
   locale,
   messages,
+  activePanel,
   featureCollection,
   mapFeatures,
   countryMap,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
+  activePanel: PerformancePanelKey;
   featureCollection: CountriesFeatureCollection | null;
   mapFeatures: PerformanceMapFeature[];
   countryMap: Map<string, CountryHealthRow>;
+  loading?: boolean;
 }) {
   const [hoveredCountry, setHoveredCountry] = useState<CountryMapHover | null>(
     null,
   );
+
+  useEffect(() => {
+    setHoveredCountry(null);
+  }, [activePanel]);
 
   const updateCountryHover = (
     hoverKey: string,
@@ -1302,175 +1404,199 @@ const PerformanceHealthMapVisual = memo(function PerformanceHealthMapVisual({
   const hoveredSamplesText = numberFormat(locale, hoveredCountry?.samples ?? 0);
   const hoveredScoreText =
     hoverScore == null ? "-" : numberFormat(locale, hoverScore);
+  const mapTransitionKey = loading
+    ? "loading"
+    : featureCollection
+      ? activePanel
+      : "resource-loading";
 
   return (
     <div className="relative overflow-hidden border-t border-border/70 bg-muted/20 p-3">
-      {featureCollection ? (
-        <div
-          className="relative mx-auto aspect-[960/500] w-full"
-          onMouseLeave={() => setHoveredCountry(null)}
+      <AutoResizer className="w-full" duration={0.24}>
+        <AutoTransition
+          initial={false}
+          transitionKey={mapTransitionKey}
+          duration={0.22}
+          type="fade"
+          presenceMode="wait"
+          className="w-full"
         >
-          <svg
-            role="img"
-            aria-label={messages.performance.countryHealthTitle}
-            className="block h-full w-full"
-            viewBox={`0 0 ${WORLD_MAP_WIDTH} ${WORLD_MAP_HEIGHT}`}
-            preserveAspectRatio="xMidYMid meet"
-          >
-            <rect
-              width={WORLD_MAP_WIDTH}
-              height={WORLD_MAP_HEIGHT}
-              fill="transparent"
-            />
-            {mapFeatures.map(({ code, feature, hoverKey, path }) => {
-              const country = code ? countryMap.get(code) : null;
-              const status = country?.status ?? "none";
-              const isHovered = hoveredCountry?.key === hoverKey;
-              return (
-                <path
-                  key={hoverKey}
-                  d={path}
-                  fill={statusColor(status)}
-                  fillRule="evenodd"
-                  fillOpacity={
-                    isHovered
-                      ? Math.min(
-                          0.82,
-                          countryFillOpacity(status, country?.samples ?? 0) +
-                            0.22,
-                        )
-                      : countryFillOpacity(status, country?.samples ?? 0)
-                  }
-                  stroke={isHovered ? "var(--foreground)" : "var(--border)"}
-                  strokeOpacity={isHovered ? 0.96 : 0.86}
-                  strokeWidth={isHovered ? 1 : 0.65}
-                  vectorEffect="non-scaling-stroke"
-                  className="cursor-default transition-[fill-opacity,stroke,stroke-opacity] duration-150"
-                  onMouseEnter={() =>
-                    updateCountryHover(
-                      hoverKey,
-                      feature,
-                      code,
-                      country ?? null,
-                      status,
-                    )
-                  }
-                  onMouseMove={() =>
-                    updateCountryHover(
-                      hoverKey,
-                      feature,
-                      code,
-                      country ?? null,
-                      status,
-                    )
-                  }
-                />
-              );
-            })}
-          </svg>
-          <AnimatePresence>
-            {hoveredCountry ? (
-              <motion.div
-                key="performance-country-toolbar"
-                className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3"
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 12 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
+          {featureCollection && !loading ? (
+            <div
+              key={`map-${activePanel}`}
+              className="relative mx-auto aspect-[960/500] w-full"
+              onMouseLeave={() => setHoveredCountry(null)}
+            >
+              <svg
+                role="img"
+                aria-label={messages.performance.countryHealthTitle}
+                className="block h-full w-full"
+                viewBox={`0 0 ${WORLD_MAP_WIDTH} ${WORLD_MAP_HEIGHT}`}
+                preserveAspectRatio="xMidYMid meet"
               >
-                <div className="inline-flex max-w-full items-center gap-4 rounded-md border border-border/70 bg-background/92 px-3 py-2 text-xs shadow-lg backdrop-blur-sm">
-                  <AutoResizer
-                    initial
-                    animateWidth
-                    animateHeight={false}
-                    className="inline-flex min-w-0 shrink items-center"
+                <rect
+                  width={WORLD_MAP_WIDTH}
+                  height={WORLD_MAP_HEIGHT}
+                  fill="transparent"
+                />
+                {mapFeatures.map(({ code, feature, hoverKey, path }) => {
+                  const country = code ? countryMap.get(code) : null;
+                  const status = country?.status ?? "none";
+                  const isHovered = hoveredCountry?.key === hoverKey;
+                  return (
+                    <path
+                      key={hoverKey}
+                      d={path}
+                      fill={statusColor(status)}
+                      fillRule="evenodd"
+                      fillOpacity={
+                        isHovered
+                          ? Math.min(
+                              0.82,
+                              countryFillOpacity(
+                                status,
+                                country?.samples ?? 0,
+                              ) + 0.22,
+                            )
+                          : countryFillOpacity(status, country?.samples ?? 0)
+                      }
+                      stroke={isHovered ? "var(--foreground)" : "var(--border)"}
+                      strokeOpacity={isHovered ? 0.96 : 0.86}
+                      strokeWidth={isHovered ? 1 : 0.65}
+                      vectorEffect="non-scaling-stroke"
+                      className="cursor-default transition-[fill-opacity,stroke,stroke-opacity] duration-150"
+                      onMouseEnter={() =>
+                        updateCountryHover(
+                          hoverKey,
+                          feature,
+                          code,
+                          country ?? null,
+                          status,
+                        )
+                      }
+                      onMouseMove={() =>
+                        updateCountryHover(
+                          hoverKey,
+                          feature,
+                          code,
+                          country ?? null,
+                          status,
+                        )
+                      }
+                    />
+                  );
+                })}
+              </svg>
+              <AnimatePresence>
+                {hoveredCountry ? (
+                  <motion.div
+                    key="performance-country-toolbar"
+                    className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3"
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 12 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
                   >
-                    <AutoTransition
-                      className="inline-block"
-                      duration={0.2}
-                      type="fade"
-                      initial={false}
-                      presenceMode="wait"
-                      customVariants={{
-                        initial: { opacity: 0 },
-                        animate: { opacity: 1 },
-                        exit: { opacity: 0 },
-                      }}
-                    >
-                      <span
-                        key={`country-${hoveredCountry.key}-${hoveredCountry.label}`}
-                        className="inline-flex items-center gap-2 whitespace-nowrap font-medium"
+                    <div className="inline-flex max-w-full items-center gap-4 rounded-md border border-border/70 bg-background/92 px-3 py-2 text-xs shadow-lg backdrop-blur-sm">
+                      <AutoResizer
+                        initial
+                        animateWidth
+                        animateHeight={false}
+                        className="inline-flex min-w-0 shrink items-center"
                       >
-                        <span
-                          className="size-2 rounded-full"
-                          style={{
-                            backgroundColor: statusColor(hoveredCountry.status),
+                        <AutoTransition
+                          className="inline-block"
+                          duration={0.2}
+                          type="fade"
+                          initial={false}
+                          presenceMode="wait"
+                          customVariants={{
+                            initial: { opacity: 0 },
+                            animate: { opacity: 1 },
+                            exit: { opacity: 0 },
                           }}
-                        />
-                        {hoveredCountry.label}
+                        >
+                          <span
+                            key={`country-${hoveredCountry.key}-${hoveredCountry.label}`}
+                            className="inline-flex items-center gap-2 whitespace-nowrap font-medium"
+                          >
+                            <span
+                              className="size-2 rounded-full"
+                              style={{
+                                backgroundColor: statusColor(
+                                  hoveredCountry.status,
+                                ),
+                              }}
+                            />
+                            {hoveredCountry.label}
+                          </span>
+                        </AutoTransition>
+                      </AutoResizer>
+                      <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+                        <span>{messages.performance.samplesLabel}:</span>
+                        <AutoResizer
+                          initial
+                          animateWidth
+                          animateHeight={false}
+                          className="inline-flex shrink-0 items-center"
+                        >
+                          <AutoTransition
+                            className="inline-block whitespace-nowrap font-mono text-foreground tabular-nums"
+                            duration={0.2}
+                            type="fade"
+                            initial={false}
+                            presenceMode="wait"
+                            customVariants={{
+                              initial: { opacity: 0 },
+                              animate: { opacity: 1 },
+                              exit: { opacity: 0 },
+                            }}
+                          >
+                            <span key={`samples-${hoveredSamplesText}`}>
+                              {hoveredSamplesText}
+                            </span>
+                          </AutoTransition>
+                        </AutoResizer>
                       </span>
-                    </AutoTransition>
-                  </AutoResizer>
-                  <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
-                    <span>{messages.performance.samplesLabel}:</span>
-                    <AutoResizer
-                      initial
-                      animateWidth
-                      animateHeight={false}
-                      className="inline-flex shrink-0 items-center"
-                    >
-                      <AutoTransition
-                        className="inline-block whitespace-nowrap font-mono text-foreground tabular-nums"
-                        duration={0.2}
-                        type="fade"
-                        initial={false}
-                        presenceMode="wait"
-                        customVariants={{
-                          initial: { opacity: 0 },
-                          animate: { opacity: 1 },
-                          exit: { opacity: 0 },
-                        }}
-                      >
-                        <span key={`samples-${hoveredSamplesText}`}>
-                          {hoveredSamplesText}
-                        </span>
-                      </AutoTransition>
-                    </AutoResizer>
-                  </span>
-                  <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
-                    <span>{messages.performance.score}:</span>
-                    <AutoResizer
-                      initial
-                      animateWidth
-                      animateHeight={false}
-                      className="inline-flex shrink-0 items-center"
-                    >
-                      <AutoTransition
-                        className="inline-block whitespace-nowrap font-mono text-foreground tabular-nums"
-                        duration={0.2}
-                        type="fade"
-                        initial={false}
-                        presenceMode="wait"
-                        customVariants={{
-                          initial: { opacity: 0 },
-                          animate: { opacity: 1 },
-                          exit: { opacity: 0 },
-                        }}
-                      >
-                        <span key={`score-${hoveredScoreText}`}>
-                          {hoveredScoreText}
-                        </span>
-                      </AutoTransition>
-                    </AutoResizer>
-                  </span>
-                </div>
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
-        </div>
-      ) : (
-        <Skeleton className="mx-auto aspect-[2/1] w-full rounded-none" />
-      )}
+                      <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+                        <span>{messages.performance.score}:</span>
+                        <AutoResizer
+                          initial
+                          animateWidth
+                          animateHeight={false}
+                          className="inline-flex shrink-0 items-center"
+                        >
+                          <AutoTransition
+                            className="inline-block whitespace-nowrap font-mono text-foreground tabular-nums"
+                            duration={0.2}
+                            type="fade"
+                            initial={false}
+                            presenceMode="wait"
+                            customVariants={{
+                              initial: { opacity: 0 },
+                              animate: { opacity: 1 },
+                              exit: { opacity: 0 },
+                            }}
+                          >
+                            <span key={`score-${hoveredScoreText}`}>
+                              {hoveredScoreText}
+                            </span>
+                          </AutoTransition>
+                        </AutoResizer>
+                      </span>
+                    </div>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+            </div>
+          ) : (
+            <Skeleton
+              key={loading ? "loading" : "resource-loading"}
+              className="mx-auto aspect-[2/1] w-full rounded-none"
+            />
+          )}
+        </AutoTransition>
+      </AutoResizer>
     </div>
   );
 });
@@ -1480,11 +1606,13 @@ const PerformanceHealthMapCard = memo(function PerformanceHealthMapCard({
   messages,
   activePanel,
   countries,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
   activePanel: PerformancePanelKey;
   countries: CountryHealthRow[];
+  loading?: boolean;
 }) {
   const [featureCollection, setFeatureCollection] =
     useState<CountriesFeatureCollection | null>(null);
@@ -1566,6 +1694,10 @@ const PerformanceHealthMapCard = memo(function PerformanceHealthMapCard({
     }),
     [sortedCountries],
   );
+  const countryHealthSubtitle = formatI18nTemplate(
+    messages.performance.countryHealthSubtitle,
+    { metric: panelLabel(messages, activePanel) },
+  );
 
   const updateSort = useCallback((key: PathSortKey) => {
     setSort((current) =>
@@ -1587,11 +1719,12 @@ const PerformanceHealthMapCard = memo(function PerformanceHealthMapCard({
               <RiMapPin2Line className="size-4" />
               {messages.performance.countryHealthTitle}
             </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              {formatI18nTemplate(messages.performance.countryHealthSubtitle, {
-                metric: panelLabel(messages, activePanel),
-              })}
-            </p>
+            <PerformancePanelText
+              transitionKey={countryHealthSubtitle}
+              className="text-sm text-muted-foreground"
+            >
+              {countryHealthSubtitle}
+            </PerformancePanelText>
           </div>
         </div>
       </CardHeader>
@@ -1599,9 +1732,11 @@ const PerformanceHealthMapCard = memo(function PerformanceHealthMapCard({
         <PerformanceHealthMapVisual
           locale={locale}
           messages={messages}
+          activePanel={activePanel}
           featureCollection={featureCollection}
           mapFeatures={mapFeatures}
           countryMap={countryMap}
+          loading={loading}
         />
         <div className="grid min-h-[18rem] divide-y divide-border/70 border-t border-border/70 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
           {(["poor", "needs-improvement", "great"] as const).map((status) => (
@@ -1614,6 +1749,7 @@ const PerformanceHealthMapCard = memo(function PerformanceHealthMapCard({
               rows={groupedRows[status]}
               sort={sort}
               onSort={updateSort}
+              loading={loading}
             />
           ))}
         </div>
@@ -1630,6 +1766,7 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
   rows,
   sort,
   onSort,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -1638,9 +1775,17 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
   rows: CountryHealthRow[];
   sort: { key: PathSortKey; direction: SortDirection };
   onSort: (key: PathSortKey) => void;
+  loading?: boolean;
 }) {
   const statusStyle = STATUS_STYLE[status];
   const StatusIcon = statusStyle.icon;
+  const displayRows = loading ? COUNTRY_TABLE_SKELETON_ROWS : rows;
+  const rangeLabel = pathStatusRangeLabel(
+    locale,
+    messages,
+    activePanel,
+    status,
+  );
   const columns = useMemo<
     readonly TabbedDataTableColumn<
       CountryHealthRow,
@@ -1653,7 +1798,12 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
         key: "samples",
         label: messages.performance.samplesLabel,
         getValue: (row) => row.samples,
-        format: (value) => numberFormat(locale, value),
+        format: (value) =>
+          loading ? (
+            <Skeleton className="ml-auto h-4 w-12" />
+          ) : (
+            numberFormat(locale, value)
+          ),
         className: "font-mono tabular-nums",
       },
       {
@@ -1664,12 +1814,17 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
             : messages.performance.metricValueColumn,
         getValue: (row) => row.value ?? row.score ?? 0,
         format: (_value, row) =>
-          formatPanelValue(locale, messages, activePanel, row.value),
+          loading ? (
+            <Skeleton className="ml-auto h-4 w-14" />
+          ) : (
+            formatPanelValue(locale, messages, activePanel, row.value)
+          ),
         className: "font-mono tabular-nums",
       },
     ],
     [
       activePanel,
+      loading,
       locale,
       messages,
       messages.performance.metricValueColumn,
@@ -1690,8 +1845,9 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
     [messages, sort, status],
   );
   const rowsByTab = useMemo(
-    () => ({ [status]: rows }) as Record<typeof status, CountryHealthRow[]>,
-    [rows, status],
+    () =>
+      ({ [status]: displayRows }) as Record<typeof status, CountryHealthRow[]>,
+    [displayRows, status],
   );
   const sortByTab = useMemo(
     () => ({ [status]: sort }) as Record<typeof status, typeof sort>,
@@ -1706,16 +1862,19 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
     TabbedDataTableRowAdapter<CountryHealthRow, typeof status, PathSortKey>
   >(
     () => ({
-      renderLabel: (row) => (
-        <span className="max-w-[18rem]">
-          <CountryLabelWithFlag label={row.label} iconName={row.iconName} />
-        </span>
-      ),
+      renderLabel: (row) =>
+        loading ? (
+          <Skeleton className="h-4 w-[min(12rem,78%)]" />
+        ) : (
+          <span className="max-w-[18rem]">
+            <CountryLabelWithFlag label={row.label} iconName={row.iconName} />
+          </span>
+        ),
       getSearchText: (row) => row.label,
       getExportLabel: (row) => row.label,
       getClassName: () => "hover:brightness-[0.98] dark:hover:brightness-125",
     }),
-    [],
+    [loading],
   );
 
   return (
@@ -1731,13 +1890,23 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
             <StatusIcon className="size-4" />
             {statusLabel(messages, status)}
           </div>
-          <div className="text-xs text-muted-foreground">
-            {pathStatusRangeLabel(locale, messages, activePanel, status)}
+          <PerformancePanelText
+            transitionKey={rangeLabel}
+            className="text-xs text-muted-foreground"
+          >
+            {rangeLabel}
+          </PerformancePanelText>
+        </div>
+        <PerformanceDynamicValue
+          loading={loading}
+          skeletonClassName="h-4 w-8"
+          className="shrink-0"
+          transitionKey={rows.length}
+        >
+          <div className="font-mono text-sm text-muted-foreground tabular-nums">
+            {numberFormat(locale, rows.length)}
           </div>
-        </div>
-        <div className="font-mono text-sm text-muted-foreground tabular-nums">
-          {numberFormat(locale, rows.length)}
-        </div>
+        </PerformanceDynamicValue>
       </div>
       <div className="pb-4">
         <TabbedDataTableCard<typeof status, CountryHealthRow, PathSortKey>
@@ -1748,6 +1917,7 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
           sortByTab={sortByTab}
           onSortChange={handleSortChange}
           rowAdapter={rowAdapter}
+          requestKey={activePanel}
           loadingLabel={messages.common.loading}
           emptyLabel={messages.common.noData}
           headerHidden
@@ -1794,6 +1964,7 @@ const PathStatusColumn = memo(function PathStatusColumn({
   rows,
   sort,
   onSort,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -1802,9 +1973,17 @@ const PathStatusColumn = memo(function PathStatusColumn({
   rows: PathPerformanceRow[];
   sort: { key: PathSortKey; direction: SortDirection };
   onSort: (key: PathSortKey) => void;
+  loading?: boolean;
 }) {
   const statusStyle = STATUS_STYLE[status];
   const StatusIcon = statusStyle.icon;
+  const displayRows = loading ? PATH_TABLE_SKELETON_ROWS : rows;
+  const rangeLabel = pathStatusRangeLabel(
+    locale,
+    messages,
+    activePanel,
+    status,
+  );
   const columns = useMemo<
     readonly TabbedDataTableColumn<
       PathPerformanceRow,
@@ -1817,7 +1996,12 @@ const PathStatusColumn = memo(function PathStatusColumn({
         key: "samples",
         label: messages.performance.samplesLabel,
         getValue: (row) => row.samples,
-        format: (value) => numberFormat(locale, value),
+        format: (value) =>
+          loading ? (
+            <Skeleton className="ml-auto h-4 w-12" />
+          ) : (
+            numberFormat(locale, value)
+          ),
         className: "font-mono tabular-nums",
       },
       {
@@ -1828,12 +2012,17 @@ const PathStatusColumn = memo(function PathStatusColumn({
             : messages.performance.metricValueColumn,
         getValue: (row) => row.value ?? row.score ?? 0,
         format: (_value, row) =>
-          formatPanelValue(locale, messages, activePanel, row.value),
+          loading ? (
+            <Skeleton className="ml-auto h-4 w-14" />
+          ) : (
+            formatPanelValue(locale, messages, activePanel, row.value)
+          ),
         className: "font-mono tabular-nums",
       },
     ],
     [
       activePanel,
+      loading,
       locale,
       messages,
       messages.performance.metricValueColumn,
@@ -1854,8 +2043,12 @@ const PathStatusColumn = memo(function PathStatusColumn({
     [messages, sort, status],
   );
   const rowsByTab = useMemo(
-    () => ({ [status]: rows }) as Record<typeof status, PathPerformanceRow[]>,
-    [rows, status],
+    () =>
+      ({ [status]: displayRows }) as Record<
+        typeof status,
+        PathPerformanceRow[]
+      >,
+    [displayRows, status],
   );
   const sortByTab = useMemo(
     () => ({ [status]: sort }) as Record<typeof status, typeof sort>,
@@ -1870,16 +2063,19 @@ const PathStatusColumn = memo(function PathStatusColumn({
     TabbedDataTableRowAdapter<PathPerformanceRow, typeof status, PathSortKey>
   >(
     () => ({
-      renderLabel: (row) => (
-        <span className="max-w-[18rem] font-mono break-words">
-          {decodeUrlDisplayValue(row.pathname || "/")}
-        </span>
-      ),
+      renderLabel: (row) =>
+        loading ? (
+          <Skeleton className="h-4 w-[min(14rem,82%)]" />
+        ) : (
+          <span className="max-w-[18rem] font-mono break-words">
+            {decodeUrlDisplayValue(row.pathname || "/")}
+          </span>
+        ),
       getSearchText: (row) => row.pathname || "/",
       getExportLabel: (row) => row.pathname || "/",
       getClassName: () => "hover:brightness-[0.98] dark:hover:brightness-125",
     }),
-    [],
+    [loading],
   );
 
   return (
@@ -1895,13 +2091,19 @@ const PathStatusColumn = memo(function PathStatusColumn({
             <StatusIcon className="size-4" />
             {statusLabel(messages, status)}
           </div>
-          <div className="text-xs text-muted-foreground">
-            {pathStatusRangeLabel(locale, messages, activePanel, status)}
-          </div>
+          <PerformancePanelText
+            transitionKey={rangeLabel}
+            className="text-xs text-muted-foreground"
+          >
+            {rangeLabel}
+          </PerformancePanelText>
         </div>
-        <div className="font-mono text-sm text-muted-foreground tabular-nums">
+        <PerformancePanelText
+          transitionKey={rows.length}
+          className="font-mono text-sm text-muted-foreground tabular-nums"
+        >
           {numberFormat(locale, rows.length)}
-        </div>
+        </PerformancePanelText>
       </div>
       <div className="pb-4">
         <TabbedDataTableCard<typeof status, PathPerformanceRow, PathSortKey>
@@ -1912,6 +2114,7 @@ const PathStatusColumn = memo(function PathStatusColumn({
           sortByTab={sortByTab}
           onSortChange={handleSortChange}
           rowAdapter={rowAdapter}
+          requestKey={activePanel}
           loadingLabel={messages.common.loading}
           emptyLabel={messages.common.noData}
           headerHidden
@@ -1928,11 +2131,13 @@ const PathPerformanceTable = memo(function PathPerformanceTable({
   messages,
   activePanel,
   rows,
+  loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
   activePanel: PerformancePanelKey;
   rows: PathPerformanceRow[];
+  loading?: boolean;
 }) {
   const [sort, setSort] = useState<{
     key: PathSortKey;
@@ -1982,13 +2187,24 @@ const PathPerformanceTable = memo(function PathPerformanceTable({
               <RiRouteLine className="size-4" />
               {messages.performance.pathsTitle}
             </CardTitle>
-            <p className="text-sm text-muted-foreground">
+            <PerformancePanelText
+              transitionKey={activePanel}
+              className="text-sm text-muted-foreground"
+            >
               {panelLabel(messages, activePanel)}
-            </p>
+            </PerformancePanelText>
           </div>
-          <div className="text-sm text-muted-foreground">
+          <div className="inline-flex items-center gap-1 text-sm text-muted-foreground">
             {messages.performance.pathsAnalyzedLabel}:{" "}
-            {numberFormat(locale, rows.length)}
+            <PerformanceDynamicValue
+              loading={loading}
+              skeletonClassName="h-4 w-8"
+              className="shrink-0"
+            >
+              <span className="font-mono tabular-nums">
+                {numberFormat(locale, rows.length)}
+              </span>
+            </PerformanceDynamicValue>
           </div>
         </div>
       </CardHeader>
@@ -2004,6 +2220,7 @@ const PathPerformanceTable = memo(function PathPerformanceTable({
               rows={groupedRows[status]}
               sort={sort}
               onSort={updateSort}
+              loading={loading}
             />
           ))}
         </div>
@@ -2017,46 +2234,46 @@ export function PerformanceClientPage({
   messages,
   siteId,
 }: PerformanceClientPageProps) {
-  const { filters, window } = useDashboardQuery() as {
+  const { filters, window: timeWindow } = useDashboardQuery() as {
     filters: FilterDocument;
     window: TimeWindow;
   };
   const [activePanel, setActivePanel] = useState<PerformancePanelKey>("score");
   const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
-  const { data, isFetching: loading } = useQuery({
+  const { data, isPending, isPlaceholderData } = useQuery({
     queryKey: [
       "dashboard",
       "performance",
       siteId,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
+      timeWindow.from,
+      timeWindow.to,
+      timeWindow.interval,
+      timeWindow.timeZone,
       filtersKey,
     ],
     queryFn: async ({ signal }) => ({
-      performanceData: await fetchPerformance(siteId, window, filters, {
+      performanceData: await fetchPerformance(siteId, timeWindow, filters, {
         signal,
       }),
       dataWindow: {
-        from: window.from,
-        to: window.to,
-        interval: window.interval,
-        timeZone: window.timeZone,
+        from: timeWindow.from,
+        to: timeWindow.to,
+        interval: timeWindow.interval,
+        timeZone: timeWindow.timeZone,
       },
     }),
     placeholderData: keepPreviousData,
     enabled: typeof window !== "undefined",
   });
+  const loading = isPending || isPlaceholderData;
   const performanceData =
-    data?.performanceData ?? emptyPerformance(window.interval);
+    data?.performanceData ?? emptyPerformance(timeWindow.interval);
   const dataWindow = data?.dataWindow ?? {
-    from: window.from,
-    to: window.to,
-    interval: window.interval,
-    timeZone: window.timeZone,
+    from: timeWindow.from,
+    to: timeWindow.to,
+    interval: timeWindow.interval,
+    timeZone: timeWindow.timeZone,
   };
-  const hydrated = data !== undefined;
 
   const summaryByPanel = useMemo(
     () =>
@@ -2172,6 +2389,7 @@ export function PerformanceClientPage({
     metricCards.some((card) => card.valueLabel !== "--") ||
     pathRows.length > 0 ||
     countryRows.length > 0;
+  const showContent = loading || hasContent;
 
   return (
     <div className="space-y-6">
@@ -2180,83 +2398,95 @@ export function PerformanceClientPage({
         subtitle={messages.performance.subtitle}
       />
 
-      <AutoTransition initial duration={0.22}>
-        {loading && !hydrated ? (
-          <div key="loading">
-            <PerformanceSkeleton />
-          </div>
-        ) : hasContent ? (
-          <div
-            key="content"
-            className="grid items-start gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]"
-          >
-            <PerformanceRail
-              activePanel={activePanel}
-              cards={metricCards}
-              onSelect={setActivePanel}
-            />
-            <div className="min-w-0">
-              <AutoTransition initial={false} duration={0.22}>
-                <div key={activePanel} className="space-y-4">
-                  <MetricSummaryCard
-                    locale={locale}
-                    messages={messages}
-                    activePanel={activePanel}
-                    activeSummary={activeSummary}
-                    activeValue={activeValue}
-                    pathCount={pathRows.length}
-                  />
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="space-y-1">
-                          <CardTitle className="inline-flex items-center gap-2">
-                            <RiSpeedUpLine className="size-4" />
-                            {messages.performance.chartTitle}
-                          </CardTitle>
-                          <p className="text-sm text-muted-foreground">
-                            {panelLabel(messages, activePanel)}
-                          </p>
+      {showContent ? (
+        <div className="grid items-start gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
+          <PerformanceRail
+            activePanel={activePanel}
+            cards={metricCards}
+            onSelect={setActivePanel}
+            loading={loading}
+          />
+          <div className="min-w-0">
+            <div className="space-y-4">
+              <MetricSummaryCard
+                locale={locale}
+                messages={messages}
+                activePanel={activePanel}
+                activeSummary={activeSummary}
+                activeValue={activeValue}
+                pathCount={pathRows.length}
+                loading={loading}
+              />
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="space-y-1">
+                      <CardTitle className="inline-flex items-center gap-2">
+                        <RiSpeedUpLine className="size-4" />
+                        {messages.performance.chartTitle}
+                      </CardTitle>
+                      <PerformancePanelText
+                        transitionKey={activePanel}
+                        className="text-sm text-muted-foreground"
+                      >
+                        {panelLabel(messages, activePanel)}
+                      </PerformancePanelText>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <AutoResizer className="w-full" duration={0.24}>
+                    <AutoTransition
+                      initial={false}
+                      transitionKey={loading ? "loading" : activePanel}
+                      duration={0.22}
+                      type="fade"
+                      presenceMode="wait"
+                      className="w-full"
+                    >
+                      {loading ? (
+                        <div key="loading" className="w-full">
+                          <PerformanceTrendLoadingState messages={messages} />
                         </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <PerformanceTrendChart
-                        locale={locale}
-                        activePanel={activePanel}
-                        dataWindow={dataWindow}
-                        points={chartPoints}
-                        labels={performanceTrendLabels}
-                        metricThresholds={METRIC_THRESHOLDS}
-                        formatValue={formatPerformanceTrendValue}
-                      />
-                    </CardContent>
-                  </Card>
-                  <PerformanceHealthMapCard
-                    locale={locale}
-                    messages={messages}
-                    activePanel={activePanel}
-                    countries={countryRows}
-                  />
-                  <PathPerformanceTable
-                    locale={locale}
-                    messages={messages}
-                    activePanel={activePanel}
-                    rows={pathRows}
-                  />
-                </div>
-              </AutoTransition>
+                      ) : (
+                        <div key={`chart-${activePanel}`} className="w-full">
+                          <PerformanceTrendChart
+                            locale={locale}
+                            activePanel={activePanel}
+                            dataWindow={dataWindow}
+                            points={chartPoints}
+                            labels={performanceTrendLabels}
+                            metricThresholds={METRIC_THRESHOLDS}
+                            formatValue={formatPerformanceTrendValue}
+                          />
+                        </div>
+                      )}
+                    </AutoTransition>
+                  </AutoResizer>
+                </CardContent>
+              </Card>
+              <PerformanceHealthMapCard
+                locale={locale}
+                messages={messages}
+                activePanel={activePanel}
+                countries={countryRows}
+                loading={loading}
+              />
+              <PathPerformanceTable
+                locale={locale}
+                messages={messages}
+                activePanel={activePanel}
+                rows={pathRows}
+                loading={loading}
+              />
             </div>
           </div>
-        ) : (
-          <div
-            key="empty"
-            className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground"
-          >
-            {messages.common.noData}
-          </div>
-        )}
-      </AutoTransition>
+        </div>
+      ) : (
+        <div className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">
+          {messages.common.noData}
+        </div>
+      )}
     </div>
   );
 }

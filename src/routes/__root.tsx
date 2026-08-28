@@ -27,7 +27,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_NAME } from "@/lib/constants";
-import { resolveLocale } from "@/lib/i18n/config";
+import { localeToHtmlLang, resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 import Link from "@/lib/router";
 
@@ -57,8 +57,15 @@ export const Route = createRootRoute({
 });
 
 function RootDocument() {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const locale = resolveLocale(pathname.split("/")[1]);
+
   return (
-    <html lang="en" suppressHydrationWarning data-overlayscrollbars-initialize>
+    <html
+      lang={localeToHtmlLang(locale)}
+      suppressHydrationWarning
+      data-overlayscrollbars-initialize
+    >
       <head>
         <link
           rel="preload"

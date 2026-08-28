@@ -304,6 +304,39 @@ html[data-native-scrollbars="true"]::-webkit-scrollbar {
   }
 }
 
+.skeleton-loading {
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in oklch, var(--muted-foreground) 10%, transparent) 45%,
+    color-mix(in oklch, var(--muted-foreground) 10%, transparent) 55%,
+    transparent 100%
+  );
+  background-position: 100% 0;
+  background-size: 220% 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton-loading {
+    animation: skeleton-loading 3.2s linear infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-loading {
+    background-image: none;
+  }
+}
+
+@keyframes skeleton-loading {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
 @keyframes page-transition-enter {
   from {
     opacity: 0;

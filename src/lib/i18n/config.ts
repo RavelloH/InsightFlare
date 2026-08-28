@@ -14,3 +14,7 @@ export function isValidLocale(
 export function resolveLocale(value: string | null | undefined): Locale {
   return isValidLocale(value) ? value : DEFAULT_LOCALE;
 }
+
+export function localeToHtmlLang(locale: Locale): string {
+  return locale === "zh" ? "zh-CN" : locale;
+}
