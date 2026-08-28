@@ -114,6 +114,7 @@ export interface GeoStateTranslationBundle {
   stateCode: string;
   stateName: string;
   cities: GeoTranslationCity[];
+  apiLocale?: string;
 }
 
 export interface GeoStateTranslationResolution {
@@ -125,7 +126,7 @@ export interface GeoStateTranslationResolution {
   localityMatchesCountry: boolean;
 }
 
-let geoCountryCodesCache: Promise<string[] | null> | null = null;
+const geoCountryCodesCache = new Map<string, Promise<string[] | null>>();
 const geoCountryTranslationCache = new Map<
   string,
   Promise<GeoCountryTranslationPayload | null>
@@ -192,10 +193,20 @@ function pickReadableZhGeoLabel(record: LocaleGeoLabelRecord): string {
   return name || nativeName || asTrimmedString(record.name_default);
 }
 
-function pickDataLocaleGeoLabel(
+function pickApiLocaleGeoLabel(
   record: LocaleGeoLabelRecord | null | undefined,
+  apiLocale: string,
 ): string {
-  return record ? pickReadableZhGeoLabel(record) : "";
+  if (!record) return "";
+  if (apiLocale === GEO_TRANSLATION_DATA_LOCALE) {
+    return pickReadableZhGeoLabel(record);
+  }
+
+  return (
+    asTrimmedString(record.name) ||
+    asTrimmedString(record.native) ||
+    asTrimmedString(record.name_default)
+  );
 }
 
 export function normalizeGeoTranslationLookupValue(value: string): string {
@@ -382,11 +393,12 @@ export function parseGeoStateTranslationPayload(
 
 export function parseGeoStateTranslationBundle(
   payload: unknown,
+  apiLocale = GEO_TRANSLATION_DATA_LOCALE,
 ): GeoStateTranslationBundle | null {
   const record = parseGeoStateTranslationPayload(payload);
   if (!record) return null;
 
-  const stateName = pickDataLocaleGeoLabel(record.state);
+  const stateName = pickApiLocaleGeoLabel(record.state, apiLocale);
   const stateCode = normalizeStateCode(
     asTrimmedString(record.state?.code) || asTrimmedString(record.state?.iso2),
   );
@@ -404,15 +416,18 @@ export function parseGeoStateTranslationBundle(
     stateCode,
     stateName,
     cities,
+    apiLocale,
   };
 }
 
 export async function fetchGeoCountryCodes(
   apiLocale: string,
 ): Promise<string[] | null> {
-  if (geoCountryCodesCache) return geoCountryCodesCache;
+  const cacheKey = apiLocale.trim();
+  const cached = geoCountryCodesCache.get(cacheKey);
+  if (cached) return cached;
 
-  geoCountryCodesCache = fetch(buildGeoTranslationApiUrl(apiLocale), {
+  const request = fetch(buildGeoTranslationApiUrl(apiLocale), {
     method: "GET",
     cache: "force-cache",
   })
@@ -426,7 +441,8 @@ export async function fetchGeoCountryCodes(
     })
     .catch(() => null);
 
-  return geoCountryCodesCache;
+  geoCountryCodesCache.set(cacheKey, request);
+  return request;
 }
 
 export async function fetchGeoCountryTranslationPayload(
@@ -520,7 +536,7 @@ export async function fetchGeoStateTranslationBundle(
     normalizedState,
   )
     .then((payload) =>
-      payload ? parseGeoStateTranslationBundle(payload) : null,
+      payload ? parseGeoStateTranslationBundle(payload, apiLocale) : null,
     )
     .catch(() => null);
 
@@ -616,14 +632,19 @@ export async function resolveGeoStateTranslation(
   const normalizedState = normalizeStateCode(stateCode);
   if (!normalizedCountry) return null;
 
+  let directStatePayload: GeoStateTranslationPayload | null = null;
   if (normalizedState && GEO_STATE_CODE_PATTERN.test(normalizedState)) {
-    const directStatePayload = await fetchGeoStateTranslationPayload(
+    directStatePayload = await fetchGeoStateTranslationPayload(
       apiLocale,
       normalizedCountry,
       normalizedState,
     );
-    if (directStatePayload?.state) {
-      const bundle = parseGeoStateTranslationBundle(directStatePayload);
+
+    if (directStatePayload?.state && !(options.regionLabel ?? "").trim()) {
+      const bundle = parseGeoStateTranslationBundle(
+        directStatePayload,
+        apiLocale,
+      );
       return {
         countryPayload: directStatePayload.country
           ? { country: directStatePayload.country }
@@ -637,25 +658,56 @@ export async function resolveGeoStateTranslation(
     }
   }
 
-  const countryPayload = await fetchGeoCountryTranslationPayload(
-    apiLocale,
-    normalizedCountry,
+  const regionLabel = (options.regionLabel ?? "").trim();
+  const directCountryPayload = directStatePayload?.country
+    ? { country: directStatePayload.country }
+    : null;
+  const fetchedCountryPayload =
+    regionLabel || !directStatePayload?.state || !directCountryPayload
+      ? await fetchGeoCountryTranslationPayload(apiLocale, normalizedCountry)
+      : null;
+  const countryPayload = fetchedCountryPayload ?? directCountryPayload;
+  const regionLookupValues = [regionLabel || normalizedState].filter(
+    (value) => value.length > 0,
   );
-  const regionLookupValues = [normalizedState, options.regionLabel ?? ""]
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
-  const regionMatchesCountry = regionLookupValues.some((lookupValue) =>
-    isGeoRegionCountryMatch({
-      countryLabel: options.countryLabel ?? "",
-      countryPayload,
-      regionLabel: lookupValue,
-    }),
-  );
+  const regionMatchesCountry = regionLabel
+    ? isGeoRegionCountryMatch({
+        countryLabel: options.countryLabel ?? "",
+        countryPayload,
+        regionLabel,
+      })
+    : regionLookupValues.some((lookupValue) =>
+        isGeoRegionCountryMatch({
+          countryLabel: options.countryLabel ?? "",
+          countryPayload,
+          regionLabel: lookupValue,
+        }),
+      );
   const localityMatchesCountry = isGeoLabelCountryMatch({
     countryLabel: options.countryLabel ?? "",
     countryPayload,
     label: options.localityLabel ?? "",
   });
+
+  if (
+    directStatePayload?.state &&
+    regionLabel &&
+    !regionMatchesCountry &&
+    matchesGeoLabelRecord(directStatePayload.state, regionLabel)
+  ) {
+    const bundle = parseGeoStateTranslationBundle(
+      directStatePayload,
+      apiLocale,
+    );
+    return {
+      countryPayload,
+      statePayload: directStatePayload,
+      bundle,
+      stateCode: getStatePayloadCode(directStatePayload) || normalizedState,
+      regionMatchesCountry: false,
+      localityMatchesCountry,
+    };
+  }
 
   const statePayloads =
     localityMatchesCountry && regionLookupValues.length === 0
@@ -666,12 +718,14 @@ export async function resolveGeoStateTranslation(
           countryPayload,
         );
   const matchedStatePayload =
-    findStatePayloadByRegionLabel(statePayloads, regionLookupValues) ??
+    (!regionMatchesCountry
+      ? findStatePayloadByRegionLabel(statePayloads, regionLookupValues)
+      : null) ??
     (!localityMatchesCountry && options.localityLabel
       ? findStatePayloadByLocalityLabel(statePayloads, options.localityLabel)
       : null);
   const bundle = matchedStatePayload
-    ? parseGeoStateTranslationBundle(matchedStatePayload)
+    ? parseGeoStateTranslationBundle(matchedStatePayload, apiLocale)
     : null;
 
   return {
@@ -686,9 +740,12 @@ export async function resolveGeoStateTranslation(
   };
 }
 
-function pickLocalizedCityRecordLabel(city: GeoTranslationCity): string {
+function pickLocalizedCityRecordLabel(
+  city: GeoTranslationCity,
+  apiLocale = GEO_TRANSLATION_DATA_LOCALE,
+): string {
   return (
-    pickDataLocaleGeoLabel(city.record) ||
+    pickApiLocaleGeoLabel(city.record, apiLocale) ||
     city.name ||
     city.nameDefault ||
     city.nativeName
@@ -705,7 +762,7 @@ export function resolveLocalizedCityName(
 
   for (const city of bundle.cities) {
     if (matchesGeoLabelRecord(city.record, target)) {
-      return pickLocalizedCityRecordLabel(city) || null;
+      return pickLocalizedCityRecordLabel(city, bundle.apiLocale) || null;
     }
   }
 

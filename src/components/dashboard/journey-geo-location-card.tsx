@@ -30,6 +30,7 @@ import {
   matchesGeoLabelRecord,
   pickLocaleGeoLabel,
   resolveGeoStateTranslation,
+  resolveGeoTranslationApiLocale,
 } from "@/lib/dashboard/geo-translation";
 import { resolveCountryLabel } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
@@ -516,9 +517,10 @@ function matchesLocalityRecord(
 
 async function fetchLocaleCountryPayload(
   countryCode: string,
+  locale: Locale,
 ): Promise<LocaleCountryPayload | null> {
   return fetchGeoCountryTranslationPayload(
-    GEO_TRANSLATION_DATA_LOCALE,
+    resolveGeoTranslationApiLocale(locale) ?? GEO_TRANSLATION_DATA_LOCALE,
     countryCode,
   );
 }
@@ -526,9 +528,10 @@ async function fetchLocaleCountryPayload(
 async function fetchLocaleStatePayload(
   countryCode: string,
   stateCode: string,
+  locale: Locale,
 ): Promise<LocaleStatePayload | null> {
   return fetchGeoStateTranslationPayload(
-    GEO_TRANSLATION_DATA_LOCALE,
+    resolveGeoTranslationApiLocale(locale) ?? GEO_TRANSLATION_DATA_LOCALE,
     countryCode,
     stateCode,
   );
@@ -595,12 +598,13 @@ async function fetchJourneyGeoInvestigation(
   if (location.level === "country") {
     const countryPayload = await fetchLocaleCountryPayload(
       location.countryCode,
+      locale,
     );
     return buildCountryGeoInvestigation(countryPayload, locale, messages);
   }
 
   const stateResolution = await resolveGeoStateTranslation(
-    GEO_TRANSLATION_DATA_LOCALE,
+    resolveGeoTranslationApiLocale(locale) ?? GEO_TRANSLATION_DATA_LOCALE,
     location.countryCode,
     location.regionCode ?? "",
     {
@@ -615,8 +619,12 @@ async function fetchJourneyGeoInvestigation(
   );
   const statePayload =
     stateResolution?.statePayload ??
-    (location.regionCode
-      ? await fetchLocaleStatePayload(location.countryCode, location.regionCode)
+    (!stateResolution && location.regionCode
+      ? await fetchLocaleStatePayload(
+          location.countryCode,
+          location.regionCode,
+          locale,
+        )
       : null);
 
   if (!statePayload) return null;

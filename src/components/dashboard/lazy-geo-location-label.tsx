@@ -303,6 +303,8 @@ export function LazyGeoCityBreadcrumbLabel({
   const shouldHideCity =
     hideCity ||
     Boolean(translationResolution?.localityMatchesCountry) ||
+    isSameGeoLabel(regionLabel, cityNameDefault) ||
+    isSameGeoLabel(regionLabel, cityLabel) ||
     (!shouldHideRegion &&
       isSameGeoLabel(localizedRegionLabel, localizedCityLabel)) ||
     (shouldHideRegion &&

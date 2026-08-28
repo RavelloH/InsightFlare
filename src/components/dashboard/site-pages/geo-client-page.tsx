@@ -41,6 +41,7 @@ import {
   matchesGeoLabelRecord,
   pickLocaleGeoLabel,
   resolveGeoStateTranslation,
+  resolveGeoTranslationApiLocale,
 } from "@/lib/dashboard/geo-translation";
 import dynamic from "@/lib/dynamic";
 import type { OverviewGeoPointsData } from "@/lib/edge-client";
@@ -727,15 +728,22 @@ function buildLocalityGeoInvestigation(
   };
 }
 
-async function fetchLocaleCountryCodes(): Promise<string[] | null> {
-  return fetchGeoCountryCodes(GEO_TRANSLATION_DATA_LOCALE);
+function resolveGeoDataLocale(locale: Locale): string {
+  return resolveGeoTranslationApiLocale(locale) ?? GEO_TRANSLATION_DATA_LOCALE;
+}
+
+async function fetchLocaleCountryCodes(
+  locale: Locale,
+): Promise<string[] | null> {
+  return fetchGeoCountryCodes(resolveGeoDataLocale(locale));
 }
 
 async function fetchLocaleCountryPayload(
   countryCode: string,
+  locale: Locale,
 ): Promise<LocaleCountryPayload | null> {
   return fetchGeoCountryTranslationPayload(
-    GEO_TRANSLATION_DATA_LOCALE,
+    resolveGeoDataLocale(locale),
     countryCode,
   );
 }
@@ -743,9 +751,10 @@ async function fetchLocaleCountryPayload(
 async function fetchLocaleStatePayload(
   countryCode: string,
   stateCode: string,
+  locale: Locale,
 ): Promise<LocaleStatePayload | null> {
   return fetchGeoStateTranslationPayload(
-    GEO_TRANSLATION_DATA_LOCALE,
+    resolveGeoDataLocale(locale),
     countryCode,
     stateCode,
   );
@@ -925,8 +934,10 @@ async function fetchGeoLocaleBundle(
   directoryEntries: GeoDirectoryEntry[];
   investigation: GeoInvestigationInfo | null;
 }> {
+  const apiLocale = resolveGeoDataLocale(locale);
+
   if (!location) {
-    const countryCodes = await fetchLocaleCountryCodes();
+    const countryCodes = await fetchLocaleCountryCodes(locale);
     return {
       focus: null,
       directoryEntries: dedupeGeoDirectoryEntries(
@@ -942,6 +953,7 @@ async function fetchGeoLocaleBundle(
   if (location.level === "country") {
     const countryPayload = await fetchLocaleCountryPayload(
       location.countryCode,
+      locale,
     );
     const stateCodes = Array.isArray(countryPayload?.states)
       ? countryPayload.states
@@ -954,7 +966,7 @@ async function fetchGeoLocaleBundle(
       : [];
     const statePayloads = await Promise.all(
       stateCodes.map((stateCode) =>
-        fetchLocaleStatePayload(location.countryCode, stateCode),
+        fetchLocaleStatePayload(location.countryCode, stateCode, locale),
       ),
     );
 
@@ -990,7 +1002,7 @@ async function fetchGeoLocaleBundle(
   }
 
   const stateResolution = await resolveGeoStateTranslation(
-    GEO_TRANSLATION_DATA_LOCALE,
+    apiLocale,
     location.countryCode,
     location.regionCode ?? "",
     {
@@ -1005,8 +1017,12 @@ async function fetchGeoLocaleBundle(
   );
   const statePayload =
     stateResolution?.statePayload ??
-    (location.regionCode
-      ? await fetchLocaleStatePayload(location.countryCode, location.regionCode)
+    (!stateResolution && location.regionCode
+      ? await fetchLocaleStatePayload(
+          location.countryCode,
+          location.regionCode,
+          locale,
+        )
       : null);
 
   if (!statePayload) {

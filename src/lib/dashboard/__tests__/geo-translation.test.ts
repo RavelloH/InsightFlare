@@ -271,6 +271,29 @@ describe("Geographic Translation Utilities", () => {
       expect(bundle?.cities[0].name).toBe("Shenzhen");
     });
 
+    it("should use the requested API locale for state and city labels", () => {
+      const bundle = parseGeoStateTranslationBundle(
+        {
+          state: {
+            name: "東京都",
+            name_default: "Tokyo",
+            code: "13",
+          },
+          cities: [
+            {
+              name: "新宿区",
+              name_default: "Shinjuku",
+              native: "新宿区",
+            },
+          ],
+        },
+        "ja",
+      );
+
+      expect(bundle?.stateName).toBe("東京都");
+      expect(resolveLocalizedCityName(bundle, "Shinjuku")).toBe("新宿区");
+    });
+
     it("should parse bundles with missing state and city fallback labels", () => {
       const bundle = parseGeoStateTranslationBundle({
         cities: [
@@ -416,6 +439,22 @@ describe("Geographic Translation Utilities", () => {
       const codes2 = await fetchGeoCountryCodes("zh-CN");
       expect(codes2).toEqual(["CN", "US"]);
       expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("should keep country code caches separate for each API locale", async () => {
+      const mockFetch = vi.fn().mockImplementation((url: string) =>
+        Promise.resolve({
+          ok: true,
+          json: async () => (url.includes("codes-ja") ? ["JP"] : ["CN"]),
+        }),
+      );
+      vi.stubGlobal("fetch", mockFetch);
+
+      await expect(fetchGeoCountryCodes("codes-zh")).resolves.toEqual(["CN"]);
+      await expect(fetchGeoCountryCodes("codes-ja")).resolves.toEqual(["JP"]);
+      await expect(fetchGeoCountryCodes("codes-zh")).resolves.toEqual(["CN"]);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
     it("should return null when country code fetch rejects", async () => {
@@ -761,6 +800,103 @@ describe("Geographic Translation Utilities", () => {
           stateName: "Direct Fallback State",
         },
       });
+    });
+
+    it("should revalidate a direct state code against the raw region label", async () => {
+      const mockFetch = vi.fn().mockImplementation((url: string) => {
+        if (url.endsWith("/VN/26/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              country: { name: "Vietnam", code: "VN" },
+              state: { name: "Thua Thien-Hue", code: "26" },
+              cities: [],
+            }),
+          });
+        }
+        if (url.endsWith("/VN/33/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              country: { name: "Vietnam", code: "VN" },
+              state: { name: "Dak Lak", code: "33" },
+              cities: [],
+            }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            country: { name: "Vietnam", code: "VN" },
+            states: ["26", "33"],
+          }),
+        });
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const resolution = await resolveGeoStateTranslation(
+        "direct-region-validation",
+        "VN",
+        "26",
+        { regionLabel: "Dak Lak" },
+      );
+
+      expect(resolution).toMatchObject({
+        stateCode: "33",
+        bundle: { stateName: "Dak Lak" },
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("should ignore a direct state when the raw region is the country label", async () => {
+      const mockFetch = vi.fn().mockImplementation((url: string) => {
+        if (url.endsWith("/TW/04/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              country: { name: "Taiwan", code: "TW" },
+              state: { name: "Taiwan", code: "04" },
+              cities: [],
+            }),
+          });
+        }
+        if (url.endsWith("/TW/TPE/")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              country: { name: "Taiwan", code: "TW" },
+              state: { name: "Taipei", code: "TPE" },
+              cities: [{ name: "Taipei", name_default: "Taipei" }],
+            }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            country: { name: "Taiwan", code: "TW" },
+            states: ["04", "TPE"],
+          }),
+        });
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const resolution = await resolveGeoStateTranslation(
+        "country-region-validation",
+        "TW",
+        "04",
+        {
+          countryLabel: "Taiwan",
+          regionLabel: "Taiwan",
+          localityLabel: "Taipei",
+        },
+      );
+
+      expect(resolution).toMatchObject({
+        stateCode: "TPE",
+        bundle: { stateName: "Taipei" },
+        regionMatchesCountry: true,
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(3);
     });
 
     it("should resolve missing mapping with default options", async () => {

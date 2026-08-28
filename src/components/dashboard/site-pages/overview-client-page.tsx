@@ -755,12 +755,61 @@ function resolveGeoCityBreadcrumbData(
     .split(GEO_REGION_VALUE_SEPARATOR)
     .map((segment) => segment.trim());
 
-  if (segments.length < 3) {
+  if (segments.length < 2) {
     const cityLabel = normalizeDimensionLabel(normalized, unknownLabel);
     return {
       displayLabel: cityLabel,
       filterValue: cityLabel,
       breadcrumb: null,
+    };
+  }
+
+  if (segments.length === 2) {
+    const rawCountry = segments[0] || "";
+    const rawCity = segments[1] || "";
+    const countryCode = rawCountry.toUpperCase();
+    if (!/^[A-Z]{2}$/.test(countryCode) || !rawCity) {
+      const cityLabel = normalizeDimensionLabel(normalized, unknownLabel);
+      return {
+        displayLabel: cityLabel,
+        filterValue: cityLabel,
+        breadcrumb: null,
+      };
+    }
+
+    const cityLabel = normalizeDimensionLabel(rawCity, unknownLabel);
+    const { label: countryLabel, code } = resolveCountryLabel(
+      rawCountry,
+      locale,
+      unknownLabel,
+    );
+    const flagCode = resolveCountryFlagCode(code, locale);
+    const countryIconName = flagCode
+      ? `flagpack:${flagCode.toLowerCase()}`
+      : null;
+    const englishCountryLabel = resolveCountryLabel(
+      rawCountry,
+      "en",
+      unknownLabel,
+    ).label;
+    const hideCity =
+      isSameGeoLabel(countryLabel, cityLabel) ||
+      isSameGeoLabel(englishCountryLabel, cityLabel);
+
+    return {
+      displayLabel: hideCity ? countryLabel : `${countryLabel} > ${cityLabel}`,
+      filterValue: buildLocalityLocationValue(countryCode, "", "", rawCity),
+      breadcrumb: {
+        countryLabel,
+        countryIconName,
+        regionLabel: "",
+        cityLabel,
+        countryCode,
+        stateCode: "",
+        cityNameDefault: rawCity,
+        hideRegion: true,
+        hideCity,
+      },
     };
   }
 
