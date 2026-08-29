@@ -24,7 +24,7 @@ import {
 } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { PublicNotificationEmailConfig } from "@/lib/notifications/email-config";
-import type { SiteScriptSettings } from "@/lib/site-settings";
+import type { SiteSettingsConfig } from "@/lib/site-settings";
 
 import { getSessionToken } from "./auth";
 import { DEFAULT_EDGE_BASE_URL } from "./constants";
@@ -450,7 +450,7 @@ export async function removeAdminMember(input: {
 
 export async function fetchAdminSiteConfig(
   siteId: string,
-): Promise<SiteScriptSettings> {
+): Promise<SiteSettingsConfig> {
   const res = await fetchEdgeJson<SiteConfigData>({
     path: adminServicePath("site-config"),
     params: { siteId },
@@ -460,8 +460,9 @@ export async function fetchAdminSiteConfig(
 
 export async function upsertAdminSiteConfig(input: {
   siteId: string;
-  config: SiteScriptSettings | Record<string, unknown>;
-}): Promise<SiteScriptSettings> {
+  config: SiteSettingsConfig | Record<string, unknown>;
+  blockingPatch?: Record<string, unknown>;
+}): Promise<SiteSettingsConfig> {
   const res = await fetchEdgeJson<SiteConfigData>({
     method: "POST",
     path: adminServicePath("site-config"),

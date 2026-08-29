@@ -7,7 +7,10 @@ import {
 import { issueCollectToken } from "@/lib/edge/collect-token";
 import type * as SiteSettingsStoreModule from "@/lib/edge/site-settings-store";
 import { readSiteTrackingConfig } from "@/lib/edge/site-settings-store";
-import type { SiteTrackingConfig } from "@/lib/site-settings";
+import type {
+  SiteSettingsJsonValue,
+  SiteTrackingConfig,
+} from "@/lib/site-settings";
 
 vi.mock("@/lib/edge/site-settings-store", async () => {
   const actual = await vi.importActual<typeof SiteSettingsStoreModule>(
@@ -123,6 +126,14 @@ function makeRuntimeRequest(input: {
 
   return request;
 }
+
+type BlockingCollectorCase = {
+  name: string;
+  rules: Record<string, string[]>;
+  payload: Record<string, unknown>;
+  headers?: Record<string, string>;
+  cf?: Record<string, unknown>;
+};
 
 async function readForwardedEnvelope() {
   const waitUntilPromise = ctx.waitUntil.mock.calls.at(-1)?.[0];
@@ -549,6 +560,119 @@ describe("collect route", () => {
 
     expect(response.status).toBe(204);
     expect(ctx.waitUntil).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "domains",
+      rules: { domains: ["blocked.example"] },
+      payload: { hostname: "blocked.example" },
+    },
+    {
+      name: "paths",
+      rules: { paths: ["/private/*"] },
+      payload: { pathname: "/private/account" },
+    },
+    {
+      name: "query parameters",
+      rules: { queryParameters: ["utm_*"] },
+      payload: { query: "?utm_source=campaign" },
+    },
+    {
+      name: "referrers",
+      rules: { referrers: ["ads.example"] },
+      payload: { referrerUrl: "https://ads.example/landing" },
+      headers: { referer: "https://ads.example/landing" },
+    },
+    {
+      name: "user agents",
+      rules: { userAgents: ["*crawler*"] },
+      payload: {},
+      headers: { "user-agent": "ExampleCrawler/1.0" },
+    },
+    {
+      name: "IP ranges",
+      rules: { ips: ["203.0.113.0/24"] },
+      payload: {},
+    },
+    {
+      name: "ASNs",
+      rules: { asns: ["4837"] },
+      payload: {},
+      cf: { asn: 4837 },
+    },
+    {
+      name: "countries",
+      rules: { countries: ["CN"] },
+      payload: {},
+      cf: { country: "CN" },
+    },
+    {
+      name: "regions",
+      rules: { regions: ["CN-SD"] },
+      payload: {},
+      cf: { country: "CN", regionCode: "SD" },
+    },
+  ] satisfies BlockingCollectorCase[])(
+    "applies v2 $name rules to collector request context",
+    async (item) => {
+      readSiteTrackingConfigMock.mockResolvedValue({
+        ...baseSettings,
+        blockingRules: [
+          {
+            version: 2,
+            data: item.rules as unknown as Record<
+              string,
+              SiteSettingsJsonValue
+            >,
+          },
+        ],
+      });
+      const request = makeRuntimeRequest({
+        origin: "https://example.com",
+        headers: item.headers as unknown as HeadersInit,
+        cf: item.cf,
+        body: await makePayload(item.payload),
+      });
+
+      const response = await handleCollectRequest(
+        request,
+        env as never,
+        ctx as never,
+        new URL(request.url),
+      );
+
+      expect(response.status).toBe(204);
+      expect(ctx.waitUntil).not.toHaveBeenCalled();
+      expect(env.INGEST_DO.idFromName).not.toHaveBeenCalled();
+    },
+  );
+
+  it("allows a later negative v2 rule to override a blocking IP range", async () => {
+    readSiteTrackingConfigMock.mockResolvedValue({
+      ...baseSettings,
+      blockingRules: [
+        {
+          version: 2,
+          data: { ips: ["203.0.113.0/24", "-203.0.113.10"] },
+        },
+      ],
+    });
+    const request = makeRuntimeRequest({
+      origin: "https://example.com",
+      body: await makePayload(),
+    });
+
+    const response = await handleCollectRequest(
+      request,
+      env as never,
+      ctx as never,
+      new URL(request.url),
+    );
+
+    expect(response.status).toBe(204);
+    expect(env.INGEST_DO.idFromName).toHaveBeenCalledWith("site-1");
+    expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
   });
 
   it("forwards normalized pageview payloads to the ingest Durable Object", async () => {

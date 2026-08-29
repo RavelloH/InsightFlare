@@ -1,3 +1,4 @@
+import { BlockingRulesValidationError } from "@/lib/blocking-rules";
 import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
 
 import {
@@ -23,8 +24,9 @@ import {
 import { SITE_PK_FROM_SITE_ID_SQL } from "./site-identity-sql";
 import {
   deleteSiteScriptSettings,
-  readSiteScriptSettings,
+  readSiteTrackingConfig,
   upsertSiteScriptSettings,
+  upsertSiteTrackingConfig,
 } from "./site-settings-store";
 import type { Env } from "./types";
 import { clampString } from "./utils";
@@ -303,10 +305,15 @@ export async function handleSiteConfigAdmin(
     if (!(await canReadSite(env, a, siteId)))
       return forb("Site access denied", undefined, req);
     try {
-      const settings = await readSiteScriptSettings(env, siteId);
+      const settings = await readSiteTrackingConfig(env, siteId);
       return jsonResponseFor(req, {
         ok: true,
-        data: settings ?? DEFAULT_SITE_SCRIPT_SETTINGS,
+        data: settings ?? {
+          siteId,
+          siteDomain: "",
+          allowedHostnames: [],
+          ...DEFAULT_SITE_SCRIPT_SETTINGS,
+        },
       });
     } catch (error) {
       const message =
@@ -330,15 +337,22 @@ export async function handleSiteConfigAdmin(
         .bind(siteId)
         .first<{ domain: string }>();
       if (!site?.domain) return nf("Site not found", undefined, req);
-      const next = await upsertSiteScriptSettings(env, siteId, {
+      const next = await upsertSiteTrackingConfig(env, siteId, {
         siteDomain: site.domain,
         settings: cfg,
+        ...(body.blockingPatch !== undefined
+          ? { blockingPatch: body.blockingPatch }
+          : {}),
       });
       return jsonResponseFor(req, { ok: true, data: next });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "save_site_config_failed";
-      return jsonResponseFor(req, { ok: false, error: message }, 500);
+      return jsonResponseFor(
+        req,
+        { ok: false, error: message },
+        error instanceof BlockingRulesValidationError ? 422 : 500,
+      );
     }
   }
   return na(req);

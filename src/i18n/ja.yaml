@@ -948,6 +948,19 @@ share: {}
 siteSettings:
   title: サイト設定
   subtitle: このサイトの基本情報とライフサイクルを設定します。
+  sections:
+    basic:
+      title: 基本情報
+      description: サイト情報と公開共有を管理します。
+    tracking:
+      title: トラッキング設定
+      description: 訪問とパフォーマンスデータの収集方法を設定します。
+    blocking:
+      title: ブロックルール
+      description: イベントを保存する前に、リクエストのコンテキストで収集を絞り込みます。
+    danger:
+      title: 危険な操作
+      description: 破壊的な操作や慎重な取り扱いが必要な設定です。
   editTitle: サイト情報を更新
   editSubtitle: 表示名とドメインを最新に保ちます。
   nameLabel: サイト名
@@ -975,20 +988,237 @@ siteSettings:
   queryHashGroupDescription: クエリ文字列、URL ハッシュ、Do Not Track の扱いを制御します。
   trackQueryParamsLabel: クエリパラメータを追跡
   trackHashLabel: URL ハッシュを追跡
-  domainWhitelistTitle: ドメイン許可リスト
-  domainWhitelistDescription: 現在のホスト名がこのリストに含まれる場合のみイベントを送信します。
-  domainWhitelistLabel: ドメイン許可リスト（1 行に 1 件）
-  domainWhitelistPlaceholder: |
-    example.com
-    www.example.com
-  domainWhitelistHint: 空にするとすべてのドメインを許可します。完全一致のみで、サブドメインは含みません。
-  pathBlacklistTitle: パスブロックリスト
-  pathBlacklistDescription: 現在のパス名がブロック対象プレフィックスに一致するとイベントを送信しません。
-  pathBlacklistLabel: パスブロックリスト（1 行に 1 件）
-  pathBlacklistPlaceholder: |
-    /admin
-    /private
-  pathBlacklistHint: startsWith プレフィックス一致を使います。一致したパスは報告されません。
+  blockingRulesSave: ブロックルールを保存
+  blockingRulesSaving: ブロックルールを保存中...
+  blockingRulesDialogs:
+    testButton: テスト
+    helpButton: ヘルプ
+    helpTitle: ルール構文
+    helpDescription: このフィールドの構文、例、優先順位を確認します。
+    syntaxTitle: 構文
+    examplesTitle: 設定例
+    actionsTitle: ルールの動作
+    actionsDescription: 通常の行は一致をブロックします。ルールの先頭に - を付けると許可します。複数の行が一致した場合は、最後に一致した行が結果を決めます。
+    actionBlock: "{example} に一致した場合はブロック"
+    actionAllow: "{example} に一致した場合は許可"
+    statusEmpty: "{field} に対するブロックルールは現在ありません。"
+    statusValid: 現在のルールは有効です。
+    statusInvalid: 現在のルールは無効です。詳しくは右側の「ヘルプ」をクリックしてください。
+    errorInvalidRule: 無効なルールです。
+    errorInvalidLines: "{field} のルールは 1 行に 1 件のテキストで指定してください。"
+    errorInvalidLine: "{line} 行目は有効なテキストルールではありません。"
+    errorLineTooLong: "{line} 行目が長すぎます。"
+    errorTooManyLines: ルールの行数が多すぎます。
+    errorInvalidPattern: "{line} 行目のルール形式が無効です。"
+    testTitle: ルールをテスト
+    testDescription: この Card の現在のルールに対してリクエスト値をテストします。未保存の編集内容も使用されます。
+    testRun: テストを実行
+    testClose: 閉じる
+    testInvalidRules: テストする前に無効なルールを修正してください。
+    testInvalidRule: 無効なルールです。
+    testBlocked: ブロック
+    testAllowed: 許可
+    testNoMatch: 一致するルールがないため、このフィールドでは値が許可されます。
+    testMatchedRules: 一致したルール
+    testActionBlock: ブロック
+    testActionAllow: 許可
+    testLine: 行
+  blockingRulesFields:
+    domains:
+      title: ドメイン
+      label: ドメインルール（1 行に 1 件）
+      placeholder: |
+        *
+        -example.com
+        -*.example.com
+        admin.example.com
+      hint: ページの hostname に一致します。* と -ドメインで許可リストを作れます。
+      syntax: |
+        各行: [ - ] hostname-glob
+        # で始まる行はコメントとして扱われ、無視されます。
+        * をワイルドカードとして使います。先頭の - は許可ルールを作ります。
+        大文字と小文字を区別せず、ページの hostname に一致します。
+      examples:
+        - "*"
+        - "-example.com"
+        - "-*.example.com"
+        - "admin.example.com"
+      exampleDescription: この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する admin.example.com を再びブロックします。
+      testLabel: Hostname
+      testPlaceholder: www.example.com
+      testHint: スキームやパスを含めず、ページの hostname を入力します。
+    paths:
+      title: パス
+      label: パスルール（1 行に 1 件）
+      placeholder: |
+        /admin/*
+        /checkout/*/confirm
+        -/admin/health
+      hint: glob 構文で正規化された URL パスに一致します。
+      syntax: |
+        各行: [ - ] /path-glob
+        # で始まる行はコメントとして扱われ、無視されます。
+        パスは / で始まり、* は任意の文字に一致します。
+        URL パスの正規化後、大文字と小文字を区別して一致します。
+      examples:
+        - "/admin/*"
+        - "/checkout/*/confirm"
+        - "-/admin/health"
+      exampleDescription: この設定は /admin/ 配下と /checkout/*/confirm に一致するパスをブロックし、/admin/health を許可します。
+      testLabel: URL パス
+      testPlaceholder: /admin/settings
+      testHint: 先頭のスラッシュを含む pathname のみを入力します。
+    queryParameters:
+      title: クエリパラメータ
+      label: クエリルール（1 行に 1 件）
+      placeholder: |
+        utm_*
+        utm_source=*
+        -utm_source=trusted
+      hint: key または key=value を指定でき、キーと値で * が使えます。
+      syntax: |
+        各行: [ - ] key-glob[=value-glob]
+        # で始まる行はコメントとして扱われ、無視されます。
+        = を省略すると、そのキーの任意の値に一致します。
+        大文字と小文字を区別し、キーと値で * を使用できます。
+      examples:
+        - "utm_*"
+        - "utm_source=*"
+        - "-utm_source=trusted"
+      exampleDescription: この設定は utm_ で始まるキーと utm_source の任意の値をブロックし、utm_source=trusted を許可します。
+      testLabel: クエリ文字列
+      testPlaceholder: utm_source=internal&utm_campaign=spring
+      testHint: 先頭の ? はあってもなくてもかまいません。
+    referrers:
+      title: リファラー
+      label: リファラールール（1 行に 1 件）
+      placeholder: |
+        *.example.com
+        social.example.com
+        -trusted.example.com
+      hint: リファラーの hostname に一致します。
+      syntax: |
+        各行: [ - ] hostname-glob
+        # で始まる行はコメントとして扱われ、無視されます。
+        URL は hostname に変換してから一致させます。
+        大文字と小文字を区別せず、* を使用できます。
+      examples:
+        - "*.example.com"
+        - "social.example.com"
+        - "-trusted.example.com"
+      exampleDescription: この設定は example.com の参照元ドメインと social.example.com をブロックし、trusted.example.com を許可します。
+      testLabel: 参照元
+      testPlaceholder: https://social.example.com/article
+      testHint: 参照元の URL または hostname を入力します。
+    userAgents:
+      title: User-Agent
+      label: User-Agent ルール（1 行に 1 件）
+      placeholder: |
+        *bot*
+        Mozilla/*
+        -Googlebot
+      hint: 大文字と小文字を区別せず、glob 構文でリクエストの User-Agent に一致します。
+      syntax: |
+        各行: [ - ] text-glob
+        # で始まる行はコメントとして扱われ、無視されます。
+        * はリクエスト User-Agent 内の任意の文字に一致します。
+        大文字と小文字を区別しません。
+      examples:
+        - "*bot*"
+        - "Mozilla/*"
+        - "-Googlebot"
+      exampleDescription: この設定は bot を含む User-Agent と Mozilla/ で始まる値をブロックし、Googlebot を許可します。
+      testLabel: User-Agent
+      testPlaceholder: Mozilla/5.0 (compatible; ExampleBot/1.0)
+      testHint: リクエスト User-Agent の全体または一部を入力します。
+    ips:
+      title: IP アドレス
+      label: IP ルール（1 行に 1 件）
+      placeholder: |
+        203.0.113.15
+        2001:db8::1
+        203.0.113.0/24
+        2001:db8::/32
+        -203.0.113.10..203.0.113.20
+      hint: IPv4/IPv6 アドレス、CIDR、開始..終了の範囲に対応します。
+      syntax: |
+        各行: [ - ] address | CIDR | start..end
+        # で始まる行はコメントとして扱われ、無視されます。
+        IPv4 と IPv6 のアドレスに対応します。
+        範囲の両端は同じアドレスファミリーで、開始値以下にします。
+      examples:
+        - "203.0.113.15"
+        - "2001:db8::1"
+        - "203.0.113.0/24"
+        - "2001:db8::/32"
+        - "-203.0.113.10..203.0.113.20"
+      exampleDescription: この設定は IPv4/IPv6 の単一アドレス、CIDR 範囲、start..end 範囲を示します。- 付きの範囲は許可されます。
+      testLabel: IP アドレス
+      testPlaceholder: 203.0.113.15
+      testHint: テストする IPv4 または IPv6 アドレスを入力します。
+    asns:
+      title: ASN
+      label: ASN ルール（1 行に 1 件）
+      placeholder: |
+        64500
+        *
+        -64501
+      hint: Cloudflare metadata の数値 ASN に一致します。
+      syntax: |
+        各行: [ - ] ASN-number
+        # で始まる行はコメントとして扱われ、無視されます。
+        * で任意の ASN に一致します。
+        メタデータ値のテストでは、任意の AS プレフィックスも使用できます。
+      examples:
+        - "64500"
+        - "*"
+        - "-64501"
+      exampleDescription: この設定は ASN 64500 と任意の ASN をブロックし、最後のルールで ASN 64501 を許可します。
+      testLabel: ASN
+      testPlaceholder: "64500"
+      testHint: 数値の自律システム番号を入力します。
+    countries:
+      title: 国 / 地域
+      label: 国ルール（1 行に 1 件）
+      placeholder: |
+        DE
+        *
+        -US
+      hint: ISO 3166-1 alpha-2 国コードを使用します。
+      syntax: |
+        各行: [ - ] ISO-3166-alpha-2
+        # で始まる行はコメントとして扱われ、無視されます。
+        * で任意の国に一致します。
+        国コードは大文字と小文字を区別しません。
+      examples:
+        - "DE"
+        - "*"
+        - "-US"
+      exampleDescription: この設定は DE と任意の国をブロックし、最後のルールで US を許可します。
+      testLabel: 国コード
+      testPlaceholder: DE
+      testHint: ISO 3166-1 alpha-2 の国コードを入力します。
+    regions:
+      title: 州 / 省
+      label: 地域ルール（1 行に 1 件）
+      placeholder: |
+        DE-BE
+        *
+        -US-CA
+      hint: Cloudflare metadata の COUNTRY-REGION_CODE 形式を使用します。
+      syntax: |
+        各行: [ - ] COUNTRY-REGION_CODE
+        # で始まる行はコメントとして扱われ、無視されます。
+        * で任意の地域に一致します。
+        地域の値は大文字と小文字を区別しません。
+      examples:
+        - "DE-BE"
+        - "*"
+        - "-US-CA"
+      exampleDescription: この設定は DE-BE と任意の地域をブロックし、最後のルールで US-CA を許可します。
+      testLabel: 地域コード
+      testPlaceholder: US-CA
+      testHint: メタデータの COUNTRY-REGION_CODE 値を入力します。
   ignoreDoNotTrackLabel: ブラウザーの Do Not Track を無視
   autoTrackGroupTitle: 自動トラッキング
   autoTrackGroupDescription: 自動イベント取得の挙動を制御します。

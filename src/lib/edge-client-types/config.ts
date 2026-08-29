@@ -1,8 +1,8 @@
-import type { SiteScriptSettings } from "@/lib/site-settings";
+import type { SiteSettingsConfig } from "@/lib/site-settings";
 
 export interface SiteConfigData {
   ok: boolean;
-  data: SiteScriptSettings;
+  data: SiteSettingsConfig;
 }
 
 export interface ScriptSnippetData {

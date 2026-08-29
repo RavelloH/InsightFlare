@@ -944,6 +944,19 @@ share: {}
 siteSettings:
   title: 站点设置
   subtitle: 管理当前站点的基础信息与生命周期。
+  sections:
+    basic:
+      title: 基本信息
+      description: 管理站点身份信息与公开分享设置。
+    tracking:
+      title: 跟踪设置
+      description: 配置跟踪器如何采集访问与性能数据。
+    blocking:
+      title: 屏蔽规则
+      description: 在事件写入存储前，按请求上下文过滤采集数据。
+    danger:
+      title: 危险区域
+      description: 包含破坏性操作和需要谨慎处理的设置。
   editTitle: 修改站点信息
   editSubtitle: 更新站点名称和域名。
   nameLabel: 站点名称
@@ -971,20 +984,237 @@ siteSettings:
   queryHashGroupDescription: 控制 URL 查询参数、Hash 与 Do Not Track 的处理方式。
   trackQueryParamsLabel: 开启查询参数跟踪
   trackHashLabel: 开启 Hash 跟踪
-  domainWhitelistTitle: 域名白名单
-  domainWhitelistDescription: 仅当当前域名命中白名单时才会上报事件。
-  domainWhitelistLabel: 域名白名单（每行一个）
-  domainWhitelistPlaceholder: |
-    example.com
-    www.example.com
-  domainWhitelistHint: 留空表示不限制域名；仅支持精确匹配，不匹配子域名。
-  pathBlacklistTitle: 路径黑名单
-  pathBlacklistDescription: 当前路径命中前缀规则时将阻止事件上报。
-  pathBlacklistLabel: 路径黑名单（每行一个）
-  pathBlacklistPlaceholder: |
-    /admin
-    /private
-  pathBlacklistHint: 采用 startsWith 前缀匹配；命中后不发送采集事件。
+  blockingRulesSave: 保存屏蔽规则
+  blockingRulesSaving: 正在保存屏蔽规则...
+  blockingRulesDialogs:
+    testButton: 测试
+    helpButton: 帮助
+    helpTitle: 规则语法
+    helpDescription: 查看此字段的语法、示例和优先级规则。
+    syntaxTitle: 语法
+    examplesTitle: 示例配置
+    actionsTitle: 规则动作
+    actionsDescription: 普通行表示屏蔽；在规则前加 - 表示允许。如果多行同时匹配，则最后一条匹配行决定结果。
+    actionBlock: 匹配 {example} 时屏蔽
+    actionAllow: 匹配 {example} 时允许
+    statusEmpty: 当前无任何针对 {field} 的屏蔽规则。
+    statusValid: 当前规则有效。
+    statusInvalid: 当前规则无效，请点击右侧“帮助”获取详细信息。
+    errorInvalidRule: 无效规则。
+    errorInvalidLines: "{field} 的规则必须按行填写。"
+    errorInvalidLine: "第 {line} 行不是有效的文本规则。"
+    errorLineTooLong: "第 {line} 行过长。"
+    errorTooManyLines: 规则行数过多。
+    errorInvalidPattern: "第 {line} 行的规则格式无效。"
+    testTitle: 测试规则
+    testDescription: 输入请求值以测试当前 Card 中的规则，未保存的编辑内容也会参与测试。
+    testRun: 执行测试
+    testClose: 关闭
+    testInvalidRules: 请先修复无效规则，然后再进行测试。
+    testInvalidRule: 无效规则。
+    testBlocked: 已屏蔽
+    testAllowed: 已允许
+    testNoMatch: 没有规则匹配，此字段允许该值通过。
+    testMatchedRules: 匹配的规则
+    testActionBlock: 屏蔽
+    testActionAllow: 允许
+    testLine: 第
+  blockingRulesFields:
+    domains:
+      title: 域名
+      label: 域名规则（每行一条）
+      placeholder: |
+        *
+        -example.com
+        -*.example.com
+        admin.example.com
+      hint: 匹配页面 hostname；使用 * 和 -域名 可以实现白名单。
+      syntax: |
+        每行格式：[ - ] hostname-glob
+        以 # 开头的行将被视为注释并忽略。
+        使用 * 作为通配符；以 - 开头表示允许规则。
+        匹配不区分大小写，并使用页面 hostname。
+      examples:
+        - "*"
+        - "-example.com"
+        - "-*.example.com"
+        - "admin.example.com"
+      exampleDescription: 这段配置先屏蔽所有域名，再允许 example.com 及其子域名，最后重新屏蔽精确匹配的 admin.example.com。
+      testLabel: Hostname
+      testPlaceholder: www.example.com
+      testHint: 输入页面 hostname，不要包含协议或路径。
+    paths:
+      title: 路径
+      label: 路径规则（每行一条）
+      placeholder: |
+        /admin/*
+        /checkout/*/confirm
+        -/admin/health
+      hint: 使用 glob 语法匹配规范化后的 URL 路径。
+      syntax: |
+        每行格式：[ - ] /path-glob
+        以 # 开头的行将被视为注释并忽略。
+        路径必须以 / 开头，* 可以匹配任意字符。
+        URL 路径规范化后按区分大小写的方式匹配。
+      examples:
+        - "/admin/*"
+        - "/checkout/*/confirm"
+        - "-/admin/health"
+      exampleDescription: 这段配置屏蔽 /admin/ 下的路径和符合 /checkout/*/confirm 的路径，但允许 /admin/health。
+      testLabel: URL 路径
+      testPlaceholder: /admin/settings
+      testHint: 只输入 pathname，并保留开头的斜杠。
+    queryParameters:
+      title: 查询参数
+      label: 查询参数规则（每行一条）
+      placeholder: |
+        utm_*
+        utm_source=*
+        -utm_source=trusted
+      hint: 支持 key 或 key=value，键和值都支持 * 通配符。
+      syntax: |
+        每行格式：[ - ] key-glob[=value-glob]
+        以 # 开头的行将被视为注释并忽略。
+        省略 = 时，表示匹配该键的任意值。
+        区分大小写，键和值都支持 * 通配符。
+      examples:
+        - "utm_*"
+        - "utm_source=*"
+        - "-utm_source=trusted"
+      exampleDescription: 这段配置屏蔽所有以 utm_ 开头的参数以及 utm_source 的任意值，但允许 utm_source=trusted。
+      testLabel: 查询字符串
+      testPlaceholder: utm_source=internal&utm_campaign=spring
+      testHint: 输入查询字符串，可带或不带开头的 ?。
+    referrers:
+      title: 来源
+      label: 来源规则（每行一条）
+      placeholder: |
+        *.example.com
+        social.example.com
+        -trusted.example.com
+      hint: 匹配来源页面的 hostname。
+      syntax: |
+        每行格式：[ - ] hostname-glob
+        以 # 开头的行将被视为注释并忽略。
+        URL 会先转换为 hostname，然后再进行匹配。
+        匹配不区分大小写，并支持 * 通配符。
+      examples:
+        - "*.example.com"
+        - "social.example.com"
+        - "-trusted.example.com"
+      exampleDescription: 这段配置屏蔽 example.com 的来源域名和 social.example.com，但允许 trusted.example.com。
+      testLabel: 来源
+      testPlaceholder: https://social.example.com/article
+      testHint: 输入来源 URL 或 hostname。
+    userAgents:
+      title: User-Agent
+      label: User-Agent 规则（每行一条）
+      placeholder: |
+        *bot*
+        Mozilla/*
+        -Googlebot
+      hint: 不区分大小写地使用 glob 语法匹配请求 User-Agent。
+      syntax: |
+        每行格式：[ - ] text-glob
+        以 # 开头的行将被视为注释并忽略。
+        * 可以匹配请求 User-Agent 中的任意字符。
+        匹配不区分大小写。
+      examples:
+        - "*bot*"
+        - "Mozilla/*"
+        - "-Googlebot"
+      exampleDescription: 这段配置屏蔽包含 bot 的 User-Agent 和以 Mozilla/ 开头的值，但允许 Googlebot。
+      testLabel: User-Agent
+      testPlaceholder: Mozilla/5.0 (compatible; ExampleBot/1.0)
+      testHint: 输入完整或部分请求 User-Agent。
+    ips:
+      title: IP 地址
+      label: IP 规则（每行一条）
+      placeholder: |
+        203.0.113.15
+        2001:db8::1
+        203.0.113.0/24
+        2001:db8::/32
+        -203.0.113.10..203.0.113.20
+      hint: 支持 IPv4/IPv6、CIDR 网段以及起始..结束范围。
+      syntax: |
+        每行格式：[ - ] address | CIDR | start..end
+        以 # 开头的行将被视为注释并忽略。
+        支持 IPv4 和 IPv6 地址。
+        范围两端必须使用相同地址族，且起点不能大于终点。
+      examples:
+        - "203.0.113.15"
+        - "2001:db8::1"
+        - "203.0.113.0/24"
+        - "2001:db8::/32"
+        - "-203.0.113.10..203.0.113.20"
+      exampleDescription: 这段配置演示 IPv4/IPv6 单个地址、CIDR 网段和 start..end 范围；范围前的 - 表示允许该范围。
+      testLabel: IP 地址
+      testPlaceholder: 203.0.113.15
+      testHint: 输入一个 IPv4 或 IPv6 地址进行测试。
+    asns:
+      title: ASN
+      label: ASN 规则（每行一条）
+      placeholder: |
+        64500
+        *
+        -64501
+      hint: 匹配 Cloudflare metadata 中的数字自治系统编号。
+      syntax: |
+        每行格式：[ - ] ASN-number
+        以 # 开头的行将被视为注释并忽略。
+        使用 * 匹配任意 ASN。
+        测试 metadata 值时也接受可选的 AS 前缀。
+      examples:
+        - "64500"
+        - "*"
+        - "-64501"
+      exampleDescription: 这段配置屏蔽 ASN 64500 和任意 ASN，但通过最后一条规则允许 ASN 64501。
+      testLabel: ASN
+      testPlaceholder: "64500"
+      testHint: 输入数字自治系统编号。
+    countries:
+      title: 国家 / 地区
+      label: 国家规则（每行一条）
+      placeholder: |
+        DE
+        *
+        -US
+      hint: 使用 ISO 3166-1 alpha-2 国家代码。
+      syntax: |
+        每行格式：[ - ] ISO-3166-alpha-2
+        以 # 开头的行将被视为注释并忽略。
+        使用 * 匹配任意国家。
+        国家代码匹配时不区分大小写。
+      examples:
+        - "DE"
+        - "*"
+        - "-US"
+      exampleDescription: 这段配置屏蔽 DE 和任意国家，但通过最后一条规则允许 US。
+      testLabel: 国家代码
+      testPlaceholder: DE
+      testHint: 输入 ISO 3166-1 alpha-2 国家代码。
+    regions:
+      title: 州 / 省
+      label: 地区规则（每行一条）
+      placeholder: |
+        DE-BE
+        *
+        -US-CA
+      hint: 使用 Cloudflare metadata 中的 COUNTRY-REGION_CODE 格式。
+      syntax: |
+        每行格式：[ - ] COUNTRY-REGION_CODE
+        以 # 开头的行将被视为注释并忽略。
+        使用 * 匹配任意地区。
+        地区值匹配时不区分大小写。
+      examples:
+        - "DE-BE"
+        - "*"
+        - "-US-CA"
+      exampleDescription: 这段配置屏蔽 DE-BE 和任意地区，但通过最后一条规则允许 US-CA。
+      testLabel: 地区代码
+      testPlaceholder: US-CA
+      testHint: 输入 metadata 中的 COUNTRY-REGION_CODE 值。
   ignoreDoNotTrackLabel: 忽略浏览器 Do Not Track
   autoTrackGroupTitle: 自动跟踪
   autoTrackGroupDescription: 控制自动事件捕获行为。

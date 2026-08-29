@@ -190,6 +190,41 @@ describe("edge site settings store", () => {
     );
   });
 
+  it("stores blocking field patches in one canonical v2 layer", async () => {
+    const kv = {
+      get: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          siteDomain: "example.com",
+          domainWhitelist: ["old.example.com"],
+          pathBlacklist: ["/private"],
+          blockingRules: [
+            { version: 2, data: { domains: ["old-v2.example.com"] } },
+          ],
+        }),
+      ),
+      put: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const config = await upsertSiteTrackingConfig(envWithKv(kv), "site-1", {
+      blockingPatch: {
+        domains: ["*", "-new.example.com"],
+      },
+    });
+
+    expect(config.blockingRules).toEqual([
+      { version: 2, data: { domains: ["*", "-new.example.com"] } },
+    ]);
+    const stored = JSON.parse(kv.put.mock.calls[0]![1] as string) as Record<
+      string,
+      unknown
+    >;
+    expect(stored.domainWhitelist).toBeUndefined();
+    expect(stored.pathBlacklist).toEqual(["/private"]);
+    expect(stored.blockingRules).toEqual([
+      { version: 2, data: { domains: ["*", "-new.example.com"] } },
+    ]);
+  });
+
   it("deletes KV and cache entries for non-empty site IDs", async () => {
     const cache = cacheWithResponse();
     vi.stubGlobal("caches", {

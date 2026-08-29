@@ -218,7 +218,7 @@ export const loadSiteSettingsInitialData = createServerFn({ method: "GET" })
     ]);
     if (!config || !snippet) return null;
     return {
-      config: normalizeSiteScriptSettings(config),
+      config: { ...config, ...normalizeSiteScriptSettings(config) },
       scriptSnippet: snippet.snippet,
       origin: new URL(getRequest().url).origin,
       fetchedAt: Date.now(),

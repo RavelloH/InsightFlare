@@ -11,7 +11,20 @@ export interface SiteScriptSettings {
   performanceSampleRate: number;
 }
 
-export interface SiteTrackingConfig extends SiteScriptSettings {
+export type SiteSettingsJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | SiteSettingsJsonValue[]
+  | { [key: string]: SiteSettingsJsonValue };
+
+export interface SiteSettingsConfig extends SiteScriptSettings {
+  /** Raw versioned rules are kept for the shared blocking-rules parser. */
+  blockingRules?: SiteSettingsJsonValue;
+}
+
+export interface SiteTrackingConfig extends SiteSettingsConfig {
   siteId: string;
   siteDomain: string;
   allowedHostnames: string[];
@@ -245,5 +258,8 @@ export function normalizeSiteTrackingConfig(
       settings.domainWhitelist,
     ),
     ...settings,
+    ...(source.blockingRules !== undefined
+      ? { blockingRules: source.blockingRules as SiteSettingsJsonValue }
+      : {}),
   };
 }

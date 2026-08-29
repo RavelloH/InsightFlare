@@ -18,7 +18,7 @@ import type {
   ScheduledTasksData,
   ScheduledTaskSummary,
 } from "@/lib/scheduled-tasks";
-import type { SiteScriptSettings } from "@/lib/site-settings";
+import type { SiteSettingsConfig } from "@/lib/site-settings";
 import type { SystemPerformanceData } from "@/lib/system-performance";
 
 export type ManagementJsonValue =
@@ -120,7 +120,7 @@ export interface ScriptSnippetData {
 }
 
 export interface SiteSettingsInitialData {
-  config: SiteScriptSettings;
+  config: SiteSettingsConfig;
   scriptSnippet: string;
   origin: string;
   fetchedAt: number;

@@ -15,7 +15,7 @@ import type {
 } from "@/lib/edge-client-types";
 import type { PublicNotificationEmailConfig } from "@/lib/notifications/email-config";
 import type { ScheduledTasksData } from "@/lib/scheduled-tasks";
-import type { SiteScriptSettings } from "@/lib/site-settings";
+import type { SiteSettingsConfig } from "@/lib/site-settings";
 import type { SystemPerformanceData } from "@/lib/system-performance";
 
 export {
@@ -63,7 +63,7 @@ export interface AdminServiceReadMap {
   "team-invites": TeamInviteData[];
   users: AccountUserData[];
   notifications: AdminNotificationsData;
-  "site-config": SiteScriptSettings;
+  "site-config": SiteSettingsConfig;
   "script-snippet": ScriptSnippetData;
   "api-keys": ApiKeyData[];
   "notification-rules": NotificationRuleData[];

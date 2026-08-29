@@ -917,6 +917,24 @@ export interface AppMessages {
   siteSettings: {
     title: string;
     subtitle: string;
+    sections: {
+      basic: {
+        title: string;
+        description: string;
+      };
+      tracking: {
+        title: string;
+        description: string;
+      };
+      blocking: {
+        title: string;
+        description: string;
+      };
+      danger: {
+        title: string;
+        description: string;
+      };
+    };
     editTitle: string;
     editSubtitle: string;
     nameLabel: string;
@@ -944,16 +962,152 @@ export interface AppMessages {
     queryHashGroupDescription: string;
     trackQueryParamsLabel: string;
     trackHashLabel: string;
-    domainWhitelistTitle: string;
-    domainWhitelistDescription: string;
-    domainWhitelistLabel: string;
-    domainWhitelistPlaceholder: string;
-    domainWhitelistHint: string;
-    pathBlacklistTitle: string;
-    pathBlacklistDescription: string;
-    pathBlacklistLabel: string;
-    pathBlacklistPlaceholder: string;
-    pathBlacklistHint: string;
+    blockingRulesSave: string;
+    blockingRulesSaving: string;
+    blockingRulesDialogs: {
+      testButton: string;
+      helpButton: string;
+      helpTitle: string;
+      helpDescription: string;
+      syntaxTitle: string;
+      examplesTitle: string;
+      actionsTitle: string;
+      actionsDescription: string;
+      actionBlock: string;
+      actionAllow: string;
+      statusEmpty: string;
+      statusValid: string;
+      statusInvalid: string;
+      errorInvalidRule: string;
+      errorInvalidLines: string;
+      errorInvalidLine: string;
+      errorLineTooLong: string;
+      errorTooManyLines: string;
+      errorInvalidPattern: string;
+      testTitle: string;
+      testDescription: string;
+      testRun: string;
+      testClose: string;
+      testInvalidRules: string;
+      testInvalidRule: string;
+      testBlocked: string;
+      testAllowed: string;
+      testNoMatch: string;
+      testMatchedRules: string;
+      testActionBlock: string;
+      testActionAllow: string;
+      testLine: string;
+    };
+    blockingRulesFields: {
+      domains: {
+        title: string;
+        label: string;
+        placeholder: string;
+        hint: string;
+        syntax: string;
+        examples: string[];
+        exampleDescription: string;
+        testLabel: string;
+        testPlaceholder: string;
+        testHint: string;
+      };
+      paths: {
+        title: string;
+        label: string;
+        placeholder: string;
+        hint: string;
+        syntax: string;
+        examples: string[];
+        exampleDescription: string;
+        testLabel: string;
+        testPlaceholder: string;
+        testHint: string;
+      };
+      queryParameters: {
+        title: string;
+        label: string;
+        placeholder: string;
+        hint: string;
+        syntax: string;
+        examples: string[];
+        exampleDescription: string;
+        testLabel: string;
+        testPlaceholder: string;
+        testHint: string;
+      };
+      referrers: {
+        title: string;
+        label: string;
+        placeholder: string;
+        hint: string;
+        syntax: string;
+        examples: string[];
+        exampleDescription: string;
+        testLabel: string;
+        testPlaceholder: string;
+        testHint: string;
+      };
+      userAgents: {
+        title: string;
+        label: string;
+        placeholder: string;
+        hint: string;
+        syntax: string;
+        examples: string[];
+        exampleDescription: string;
+        testLabel: string;
+        testPlaceholder: string;
+        testHint: string;
+      };
+      ips: {
+        title: string;
+        label: string;
+        placeholder: string;
+        hint: string;
+        syntax: string;
+        examples: string[];
+        exampleDescription: string;
+        testLabel: string;
+        testPlaceholder: string;
+        testHint: string;
+      };
+      asns: {
+        title: string;
+        label: string;
+        placeholder: string;
+        hint: string;
+        syntax: string;
+        examples: string[];
+        exampleDescription: string;
+        testLabel: string;
+        testPlaceholder: string;
+        testHint: string;
+      };
+      countries: {
+        title: string;
+        label: string;
+        placeholder: string;
+        hint: string;
+        syntax: string;
+        examples: string[];
+        exampleDescription: string;
+        testLabel: string;
+        testPlaceholder: string;
+        testHint: string;
+      };
+      regions: {
+        title: string;
+        label: string;
+        placeholder: string;
+        hint: string;
+        syntax: string;
+        examples: string[];
+        exampleDescription: string;
+        testLabel: string;
+        testPlaceholder: string;
+        testHint: string;
+      };
+    };
     ignoreDoNotTrackLabel: string;
     autoTrackGroupTitle: string;
     autoTrackGroupDescription: string;
@@ -3373,6 +3527,27 @@ const enMessages = {
   siteSettings: {
     title: "Site Settings",
     subtitle: "Configure this site's basic information and lifecycle.",
+    sections: {
+      basic: {
+        title: "Basic Information",
+        description: "Manage site identity and public sharing.",
+      },
+      tracking: {
+        title: "Tracking Settings",
+        description:
+          "Configure how the tracker captures visits and performance data.",
+      },
+      blocking: {
+        title: "Blocking Rules",
+        description:
+          "Filter collection by request context before events reach storage.",
+      },
+      danger: {
+        title: "Danger Zone",
+        description:
+          "Destructive actions and operationally sensitive settings.",
+      },
+    },
     editTitle: "Update Site Info",
     editSubtitle: "Keep display name and domain up to date.",
     nameLabel: "Site Name",
@@ -3409,20 +3584,186 @@ const enMessages = {
       "Control how query strings, URL hashes, and Do Not Track are handled.",
     trackQueryParamsLabel: "Track Query Parameters",
     trackHashLabel: "Track URL Hash",
-    domainWhitelistTitle: "Domain Whitelist",
-    domainWhitelistDescription:
-      "Events are sent only when the current hostname is in this list.",
-    domainWhitelistLabel: "Domain Whitelist (one per line)",
-    domainWhitelistPlaceholder: "example.com\nwww.example.com\n",
-    domainWhitelistHint:
-      "Leave empty to allow all domains; exact matches only (no subdomains).",
-    pathBlacklistTitle: "Path Blacklist",
-    pathBlacklistDescription:
-      "Events are blocked when the current pathname matches a blocked prefix.",
-    pathBlacklistLabel: "Path Blacklist (one per line)",
-    pathBlacklistPlaceholder: "/admin\n/private\n",
-    pathBlacklistHint:
-      "Uses startsWith prefix matching; matched paths are not reported.",
+    blockingRulesSave: "Save Blocking Rules",
+    blockingRulesSaving: "Saving Blocking Rules...",
+    blockingRulesDialogs: {
+      testButton: "Test",
+      helpButton: "Help",
+      helpTitle: "Rule Syntax",
+      helpDescription:
+        "Review the syntax, examples, and precedence for this field.",
+      syntaxTitle: "Syntax",
+      examplesTitle: "Example configuration",
+      actionsTitle: "Rule actions",
+      actionsDescription:
+        "A normal line blocks a match. Prefix a rule with - to allow it. If multiple lines match, the last matching line wins.",
+      actionBlock: "Blocks when {example} matches",
+      actionAllow: "Allows when {example} matches",
+      statusEmpty: "No blocking rules are currently set for {field}.",
+      statusValid: "The current rules are valid.",
+      statusInvalid:
+        "The current rules are invalid. Click Help on the right for details.",
+      errorInvalidRule: "Invalid rule.",
+      errorInvalidLines: "Rules for {field} must be provided one per line.",
+      errorInvalidLine: "Line {line} is not a valid text rule.",
+      errorLineTooLong: "Line {line} is too long.",
+      errorTooManyLines: "Too many rule lines.",
+      errorInvalidPattern: "Line {line} has an invalid rule pattern.",
+      testTitle: "Test Rules",
+      testDescription:
+        "Enter a request value to evaluate the current contents of this card. Unsaved edits are included.",
+      testRun: "Run Test",
+      testClose: "Close",
+      testInvalidRules: "Fix invalid rules before testing.",
+      testInvalidRule: "Invalid rule.",
+      testBlocked: "Blocked",
+      testAllowed: "Allowed",
+      testNoMatch: "No rule matched; this field allows the value.",
+      testMatchedRules: "Matched rules",
+      testActionBlock: "blocks",
+      testActionAllow: "allows",
+      testLine: "Line",
+    },
+    blockingRulesFields: {
+      domains: {
+        title: "Domains",
+        label: "Domain rules (one per line)",
+        placeholder: "*\n-example.com\n-*.example.com\nadmin.example.com\n",
+        hint: "Matches the page hostname. Use * with -domain.com for an allowlist.",
+        syntax:
+          "Each line: [ - ] hostname-glob\nLines starting with # are treated as comments and ignored.\nUse * as a wildcard. A leading - creates an allow rule.\nMatching is case-insensitive and uses the page hostname.\n",
+        examples: ["*", "-example.com", "-*.example.com", "admin.example.com"],
+        exampleDescription:
+          "This configuration first blocks every domain, then allows example.com and its subdomains, and finally blocks the exact admin.example.com domain again.",
+        testLabel: "Hostname",
+        testPlaceholder: "www.example.com",
+        testHint: "Enter the page hostname without a scheme or path.",
+      },
+      paths: {
+        title: "Paths",
+        label: "Path rules (one per line)",
+        placeholder: "/admin/*\n/checkout/*/confirm\n-/admin/health\n",
+        hint: "Matches normalized URL paths with glob syntax.",
+        syntax:
+          "Each line: [ - ] /path-glob\nLines starting with # are treated as comments and ignored.\nPaths start with / and * matches any characters.\nMatching is case-sensitive after URL path normalization.\n",
+        examples: ["/admin/*", "/checkout/*/confirm", "-/admin/health"],
+        exampleDescription:
+          "This configuration blocks paths under /admin/ and paths matching /checkout/*/confirm, while allowing /admin/health.",
+        testLabel: "URL path",
+        testPlaceholder: "/admin/settings",
+        testHint: "Enter the pathname only, including its leading slash.",
+      },
+      queryParameters: {
+        title: "Query Parameters",
+        label: "Query rules (one per line)",
+        placeholder: "utm_*\nutm_source=*\n-utm_source=trusted\n",
+        hint: "Use key or key=value patterns; * is supported in keys and values.",
+        syntax:
+          "Each line: [ - ] key-glob[=value-glob]\nLines starting with # are treated as comments and ignored.\nOmitting = matches any value for the key.\nMatching is case-sensitive and supports * in keys and values.\n",
+        examples: ["utm_*", "utm_source=*", "-utm_source=trusted"],
+        exampleDescription:
+          "This configuration blocks keys beginning with utm_ and any value of utm_source, while allowing utm_source=trusted.",
+        testLabel: "Query string",
+        testPlaceholder: "utm_source=internal&utm_campaign=spring",
+        testHint: "Enter a query string with or without the leading ?.",
+      },
+      referrers: {
+        title: "Referrers",
+        label: "Referrer rules (one per line)",
+        placeholder:
+          "*.example.com\nsocial.example.com\n-trusted.example.com\n",
+        hint: "Matches the referrer hostname.",
+        syntax:
+          "Each line: [ - ] hostname-glob\nLines starting with # are treated as comments and ignored.\nA URL is reduced to its hostname before matching.\nMatching is case-insensitive and supports *.\n",
+        examples: [
+          "*.example.com",
+          "social.example.com",
+          "-trusted.example.com",
+        ],
+        exampleDescription:
+          "This configuration blocks example.com referrers and social.example.com, while allowing trusted.example.com.",
+        testLabel: "Referrer",
+        testPlaceholder: "https://social.example.com/article",
+        testHint: "Enter a referrer URL or hostname.",
+      },
+      userAgents: {
+        title: "User Agents",
+        label: "User-agent rules (one per line)",
+        placeholder: "*bot*\nMozilla/*\n-Googlebot\n",
+        hint: "Case-insensitive glob matching against the request User-Agent.",
+        syntax:
+          "Each line: [ - ] text-glob\nLines starting with # are treated as comments and ignored.\n* matches any characters in the request User-Agent.\nMatching is case-insensitive.\n",
+        examples: ["*bot*", "Mozilla/*", "-Googlebot"],
+        exampleDescription:
+          "This configuration blocks User-Agent values containing bot and values beginning with Mozilla/, while allowing Googlebot.",
+        testLabel: "User-Agent",
+        testPlaceholder: "Mozilla/5.0 (compatible; ExampleBot/1.0)",
+        testHint: "Enter the complete or partial request User-Agent.",
+      },
+      ips: {
+        title: "IP Addresses",
+        label: "IP rules (one per line)",
+        placeholder:
+          "203.0.113.15\n2001:db8::1\n203.0.113.0/24\n2001:db8::/32\n-203.0.113.10..203.0.113.20\n",
+        hint: "Supports IPv4/IPv6 addresses, CIDR ranges, and start..end ranges.",
+        syntax:
+          "Each line: [ - ] address | CIDR | start..end\nLines starting with # are treated as comments and ignored.\nIPv4 and IPv6 addresses are supported.\nRanges must use the same address family and be ordered.\n",
+        examples: [
+          "203.0.113.15",
+          "2001:db8::1",
+          "203.0.113.0/24",
+          "2001:db8::/32",
+          "-203.0.113.10..203.0.113.20",
+        ],
+        exampleDescription:
+          "This configuration demonstrates individual IPv4/IPv6 addresses, CIDR ranges, and start..end ranges; the prefixed range is allowed.",
+        testLabel: "IP address",
+        testPlaceholder: "203.0.113.15",
+        testHint: "Enter one IPv4 or IPv6 address to test.",
+      },
+      asns: {
+        title: "ASNs",
+        label: "ASN rules (one per line)",
+        placeholder: "64500\n*\n-64501\n",
+        hint: "Match the numeric autonomous system number from Cloudflare metadata.",
+        syntax:
+          "Each line: [ - ] ASN-number\nLines starting with # are treated as comments and ignored.\nUse * to match any ASN.\nThe optional AS prefix is accepted when testing metadata values.\n",
+        examples: ["64500", "*", "-64501"],
+        exampleDescription:
+          "This configuration blocks ASN 64500 and any ASN, while the final rule allows ASN 64501.",
+        testLabel: "ASN",
+        testPlaceholder: "64500",
+        testHint: "Enter the numeric autonomous system number.",
+      },
+      countries: {
+        title: "Countries / Regions",
+        label: "Country rules (one per line)",
+        placeholder: "DE\n*\n-US\n",
+        hint: "Use ISO 3166-1 alpha-2 country codes.",
+        syntax:
+          "Each line: [ - ] ISO-3166-alpha-2\nLines starting with # are treated as comments and ignored.\nUse * to match any country.\nCountry codes are matched case-insensitively.\n",
+        examples: ["DE", "*", "-US"],
+        exampleDescription:
+          "This configuration blocks DE and any country, while the final rule allows US.",
+        testLabel: "Country code",
+        testPlaceholder: "DE",
+        testHint: "Enter an ISO 3166-1 alpha-2 country code.",
+      },
+      regions: {
+        title: "States / Provinces",
+        label: "Region rules (one per line)",
+        placeholder: "DE-BE\n*\n-US-CA\n",
+        hint: "Use COUNTRY-REGION_CODE values from Cloudflare metadata.",
+        syntax:
+          "Each line: [ - ] COUNTRY-REGION_CODE\nLines starting with # are treated as comments and ignored.\nUse * to match any region.\nRegion values are matched case-insensitively.\n",
+        examples: ["DE-BE", "*", "-US-CA"],
+        exampleDescription:
+          "This configuration blocks DE-BE and any region, while the final rule allows US-CA.",
+        testLabel: "Region code",
+        testPlaceholder: "US-CA",
+        testHint: "Enter the COUNTRY-REGION_CODE value from metadata.",
+      },
+    },
     ignoreDoNotTrackLabel: "Ignore Browser Do Not Track",
     autoTrackGroupTitle: "Auto Tracking",
     autoTrackGroupDescription: "Control automatic event capture behavior.",
@@ -5920,6 +6261,24 @@ const zhMessages = {
   siteSettings: {
     title: "站点设置",
     subtitle: "管理当前站点的基础信息与生命周期。",
+    sections: {
+      basic: {
+        title: "基本信息",
+        description: "管理站点身份信息与公开分享设置。",
+      },
+      tracking: {
+        title: "跟踪设置",
+        description: "配置跟踪器如何采集访问与性能数据。",
+      },
+      blocking: {
+        title: "屏蔽规则",
+        description: "在事件写入存储前，按请求上下文过滤采集数据。",
+      },
+      danger: {
+        title: "危险区域",
+        description: "包含破坏性操作和需要谨慎处理的设置。",
+      },
+    },
     editTitle: "修改站点信息",
     editSubtitle: "更新站点名称和域名。",
     nameLabel: "站点名称",
@@ -5951,16 +6310,184 @@ const zhMessages = {
       "控制 URL 查询参数、Hash 与 Do Not Track 的处理方式。",
     trackQueryParamsLabel: "开启查询参数跟踪",
     trackHashLabel: "开启 Hash 跟踪",
-    domainWhitelistTitle: "域名白名单",
-    domainWhitelistDescription: "仅当当前域名命中白名单时才会上报事件。",
-    domainWhitelistLabel: "域名白名单（每行一个）",
-    domainWhitelistPlaceholder: "example.com\nwww.example.com\n",
-    domainWhitelistHint: "留空表示不限制域名；仅支持精确匹配，不匹配子域名。",
-    pathBlacklistTitle: "路径黑名单",
-    pathBlacklistDescription: "当前路径命中前缀规则时将阻止事件上报。",
-    pathBlacklistLabel: "路径黑名单（每行一个）",
-    pathBlacklistPlaceholder: "/admin\n/private\n",
-    pathBlacklistHint: "采用 startsWith 前缀匹配；命中后不发送采集事件。",
+    blockingRulesSave: "保存屏蔽规则",
+    blockingRulesSaving: "正在保存屏蔽规则...",
+    blockingRulesDialogs: {
+      testButton: "测试",
+      helpButton: "帮助",
+      helpTitle: "规则语法",
+      helpDescription: "查看此字段的语法、示例和优先级规则。",
+      syntaxTitle: "语法",
+      examplesTitle: "示例配置",
+      actionsTitle: "规则动作",
+      actionsDescription:
+        "普通行表示屏蔽；在规则前加 - 表示允许。如果多行同时匹配，则最后一条匹配行决定结果。",
+      actionBlock: "匹配 {example} 时屏蔽",
+      actionAllow: "匹配 {example} 时允许",
+      statusEmpty: "当前无任何针对 {field} 的屏蔽规则。",
+      statusValid: "当前规则有效。",
+      statusInvalid: "当前规则无效，请点击右侧“帮助”获取详细信息。",
+      errorInvalidRule: "无效规则。",
+      errorInvalidLines: "{field} 的规则必须按行填写。",
+      errorInvalidLine: "第 {line} 行不是有效的文本规则。",
+      errorLineTooLong: "第 {line} 行过长。",
+      errorTooManyLines: "规则行数过多。",
+      errorInvalidPattern: "第 {line} 行的规则格式无效。",
+      testTitle: "测试规则",
+      testDescription:
+        "输入请求值以测试当前 Card 中的规则，未保存的编辑内容也会参与测试。",
+      testRun: "执行测试",
+      testClose: "关闭",
+      testInvalidRules: "请先修复无效规则，然后再进行测试。",
+      testInvalidRule: "无效规则。",
+      testBlocked: "已屏蔽",
+      testAllowed: "已允许",
+      testNoMatch: "没有规则匹配，此字段允许该值通过。",
+      testMatchedRules: "匹配的规则",
+      testActionBlock: "屏蔽",
+      testActionAllow: "允许",
+      testLine: "第",
+    },
+    blockingRulesFields: {
+      domains: {
+        title: "域名",
+        label: "域名规则（每行一条）",
+        placeholder: "*\n-example.com\n-*.example.com\nadmin.example.com\n",
+        hint: "匹配页面 hostname；使用 * 和 -域名 可以实现白名单。",
+        syntax:
+          "每行格式：[ - ] hostname-glob\n以 # 开头的行将被视为注释并忽略。\n使用 * 作为通配符；以 - 开头表示允许规则。\n匹配不区分大小写，并使用页面 hostname。\n",
+        examples: ["*", "-example.com", "-*.example.com", "admin.example.com"],
+        exampleDescription:
+          "这段配置先屏蔽所有域名，再允许 example.com 及其子域名，最后重新屏蔽精确匹配的 admin.example.com。",
+        testLabel: "Hostname",
+        testPlaceholder: "www.example.com",
+        testHint: "输入页面 hostname，不要包含协议或路径。",
+      },
+      paths: {
+        title: "路径",
+        label: "路径规则（每行一条）",
+        placeholder: "/admin/*\n/checkout/*/confirm\n-/admin/health\n",
+        hint: "使用 glob 语法匹配规范化后的 URL 路径。",
+        syntax:
+          "每行格式：[ - ] /path-glob\n以 # 开头的行将被视为注释并忽略。\n路径必须以 / 开头，* 可以匹配任意字符。\nURL 路径规范化后按区分大小写的方式匹配。\n",
+        examples: ["/admin/*", "/checkout/*/confirm", "-/admin/health"],
+        exampleDescription:
+          "这段配置屏蔽 /admin/ 下的路径和符合 /checkout/*/confirm 的路径，但允许 /admin/health。",
+        testLabel: "URL 路径",
+        testPlaceholder: "/admin/settings",
+        testHint: "只输入 pathname，并保留开头的斜杠。",
+      },
+      queryParameters: {
+        title: "查询参数",
+        label: "查询参数规则（每行一条）",
+        placeholder: "utm_*\nutm_source=*\n-utm_source=trusted\n",
+        hint: "支持 key 或 key=value，键和值都支持 * 通配符。",
+        syntax:
+          "每行格式：[ - ] key-glob[=value-glob]\n以 # 开头的行将被视为注释并忽略。\n省略 = 时，表示匹配该键的任意值。\n区分大小写，键和值都支持 * 通配符。\n",
+        examples: ["utm_*", "utm_source=*", "-utm_source=trusted"],
+        exampleDescription:
+          "这段配置屏蔽所有以 utm_ 开头的参数以及 utm_source 的任意值，但允许 utm_source=trusted。",
+        testLabel: "查询字符串",
+        testPlaceholder: "utm_source=internal&utm_campaign=spring",
+        testHint: "输入查询字符串，可带或不带开头的 ?。",
+      },
+      referrers: {
+        title: "来源",
+        label: "来源规则（每行一条）",
+        placeholder:
+          "*.example.com\nsocial.example.com\n-trusted.example.com\n",
+        hint: "匹配来源页面的 hostname。",
+        syntax:
+          "每行格式：[ - ] hostname-glob\n以 # 开头的行将被视为注释并忽略。\nURL 会先转换为 hostname，然后再进行匹配。\n匹配不区分大小写，并支持 * 通配符。\n",
+        examples: [
+          "*.example.com",
+          "social.example.com",
+          "-trusted.example.com",
+        ],
+        exampleDescription:
+          "这段配置屏蔽 example.com 的来源域名和 social.example.com，但允许 trusted.example.com。",
+        testLabel: "来源",
+        testPlaceholder: "https://social.example.com/article",
+        testHint: "输入来源 URL 或 hostname。",
+      },
+      userAgents: {
+        title: "User-Agent",
+        label: "User-Agent 规则（每行一条）",
+        placeholder: "*bot*\nMozilla/*\n-Googlebot\n",
+        hint: "不区分大小写地使用 glob 语法匹配请求 User-Agent。",
+        syntax:
+          "每行格式：[ - ] text-glob\n以 # 开头的行将被视为注释并忽略。\n* 可以匹配请求 User-Agent 中的任意字符。\n匹配不区分大小写。\n",
+        examples: ["*bot*", "Mozilla/*", "-Googlebot"],
+        exampleDescription:
+          "这段配置屏蔽包含 bot 的 User-Agent 和以 Mozilla/ 开头的值，但允许 Googlebot。",
+        testLabel: "User-Agent",
+        testPlaceholder: "Mozilla/5.0 (compatible; ExampleBot/1.0)",
+        testHint: "输入完整或部分请求 User-Agent。",
+      },
+      ips: {
+        title: "IP 地址",
+        label: "IP 规则（每行一条）",
+        placeholder:
+          "203.0.113.15\n2001:db8::1\n203.0.113.0/24\n2001:db8::/32\n-203.0.113.10..203.0.113.20\n",
+        hint: "支持 IPv4/IPv6、CIDR 网段以及起始..结束范围。",
+        syntax:
+          "每行格式：[ - ] address | CIDR | start..end\n以 # 开头的行将被视为注释并忽略。\n支持 IPv4 和 IPv6 地址。\n范围两端必须使用相同地址族，且起点不能大于终点。\n",
+        examples: [
+          "203.0.113.15",
+          "2001:db8::1",
+          "203.0.113.0/24",
+          "2001:db8::/32",
+          "-203.0.113.10..203.0.113.20",
+        ],
+        exampleDescription:
+          "这段配置演示 IPv4/IPv6 单个地址、CIDR 网段和 start..end 范围；范围前的 - 表示允许该范围。",
+        testLabel: "IP 地址",
+        testPlaceholder: "203.0.113.15",
+        testHint: "输入一个 IPv4 或 IPv6 地址进行测试。",
+      },
+      asns: {
+        title: "ASN",
+        label: "ASN 规则（每行一条）",
+        placeholder: "64500\n*\n-64501\n",
+        hint: "匹配 Cloudflare metadata 中的数字自治系统编号。",
+        syntax:
+          "每行格式：[ - ] ASN-number\n以 # 开头的行将被视为注释并忽略。\n使用 * 匹配任意 ASN。\n测试 metadata 值时也接受可选的 AS 前缀。\n",
+        examples: ["64500", "*", "-64501"],
+        exampleDescription:
+          "这段配置屏蔽 ASN 64500 和任意 ASN，但通过最后一条规则允许 ASN 64501。",
+        testLabel: "ASN",
+        testPlaceholder: "64500",
+        testHint: "输入数字自治系统编号。",
+      },
+      countries: {
+        title: "国家 / 地区",
+        label: "国家规则（每行一条）",
+        placeholder: "DE\n*\n-US\n",
+        hint: "使用 ISO 3166-1 alpha-2 国家代码。",
+        syntax:
+          "每行格式：[ - ] ISO-3166-alpha-2\n以 # 开头的行将被视为注释并忽略。\n使用 * 匹配任意国家。\n国家代码匹配时不区分大小写。\n",
+        examples: ["DE", "*", "-US"],
+        exampleDescription:
+          "这段配置屏蔽 DE 和任意国家，但通过最后一条规则允许 US。",
+        testLabel: "国家代码",
+        testPlaceholder: "DE",
+        testHint: "输入 ISO 3166-1 alpha-2 国家代码。",
+      },
+      regions: {
+        title: "州 / 省",
+        label: "地区规则（每行一条）",
+        placeholder: "DE-BE\n*\n-US-CA\n",
+        hint: "使用 Cloudflare metadata 中的 COUNTRY-REGION_CODE 格式。",
+        syntax:
+          "每行格式：[ - ] COUNTRY-REGION_CODE\n以 # 开头的行将被视为注释并忽略。\n使用 * 匹配任意地区。\n地区值匹配时不区分大小写。\n",
+        examples: ["DE-BE", "*", "-US-CA"],
+        exampleDescription:
+          "这段配置屏蔽 DE-BE 和任意地区，但通过最后一条规则允许 US-CA。",
+        testLabel: "地区代码",
+        testPlaceholder: "US-CA",
+        testHint: "输入 metadata 中的 COUNTRY-REGION_CODE 值。",
+      },
+    },
     ignoreDoNotTrackLabel: "忽略浏览器 Do Not Track",
     autoTrackGroupTitle: "自动跟踪",
     autoTrackGroupDescription: "控制自动事件捕获行为。",
@@ -8440,6 +8967,25 @@ const jaMessages = {
   siteSettings: {
     title: "サイト設定",
     subtitle: "このサイトの基本情報とライフサイクルを設定します。",
+    sections: {
+      basic: {
+        title: "基本情報",
+        description: "サイト情報と公開共有を管理します。",
+      },
+      tracking: {
+        title: "トラッキング設定",
+        description: "訪問とパフォーマンスデータの収集方法を設定します。",
+      },
+      blocking: {
+        title: "ブロックルール",
+        description:
+          "イベントを保存する前に、リクエストのコンテキストで収集を絞り込みます。",
+      },
+      danger: {
+        title: "危険な操作",
+        description: "破壊的な操作や慎重な取り扱いが必要な設定です。",
+      },
+    },
     editTitle: "サイト情報を更新",
     editSubtitle: "表示名とドメインを最新に保ちます。",
     nameLabel: "サイト名",
@@ -8475,20 +9021,187 @@ const jaMessages = {
       "クエリ文字列、URL ハッシュ、Do Not Track の扱いを制御します。",
     trackQueryParamsLabel: "クエリパラメータを追跡",
     trackHashLabel: "URL ハッシュを追跡",
-    domainWhitelistTitle: "ドメイン許可リスト",
-    domainWhitelistDescription:
-      "現在のホスト名がこのリストに含まれる場合のみイベントを送信します。",
-    domainWhitelistLabel: "ドメイン許可リスト（1 行に 1 件）",
-    domainWhitelistPlaceholder: "example.com\nwww.example.com\n",
-    domainWhitelistHint:
-      "空にするとすべてのドメインを許可します。完全一致のみで、サブドメインは含みません。",
-    pathBlacklistTitle: "パスブロックリスト",
-    pathBlacklistDescription:
-      "現在のパス名がブロック対象プレフィックスに一致するとイベントを送信しません。",
-    pathBlacklistLabel: "パスブロックリスト（1 行に 1 件）",
-    pathBlacklistPlaceholder: "/admin\n/private\n",
-    pathBlacklistHint:
-      "startsWith プレフィックス一致を使います。一致したパスは報告されません。",
+    blockingRulesSave: "ブロックルールを保存",
+    blockingRulesSaving: "ブロックルールを保存中...",
+    blockingRulesDialogs: {
+      testButton: "テスト",
+      helpButton: "ヘルプ",
+      helpTitle: "ルール構文",
+      helpDescription: "このフィールドの構文、例、優先順位を確認します。",
+      syntaxTitle: "構文",
+      examplesTitle: "設定例",
+      actionsTitle: "ルールの動作",
+      actionsDescription:
+        "通常の行は一致をブロックします。ルールの先頭に - を付けると許可します。複数の行が一致した場合は、最後に一致した行が結果を決めます。",
+      actionBlock: "{example} に一致した場合はブロック",
+      actionAllow: "{example} に一致した場合は許可",
+      statusEmpty: "{field} に対するブロックルールは現在ありません。",
+      statusValid: "現在のルールは有効です。",
+      statusInvalid:
+        "現在のルールは無効です。詳しくは右側の「ヘルプ」をクリックしてください。",
+      errorInvalidRule: "無効なルールです。",
+      errorInvalidLines:
+        "{field} のルールは 1 行に 1 件のテキストで指定してください。",
+      errorInvalidLine: "{line} 行目は有効なテキストルールではありません。",
+      errorLineTooLong: "{line} 行目が長すぎます。",
+      errorTooManyLines: "ルールの行数が多すぎます。",
+      errorInvalidPattern: "{line} 行目のルール形式が無効です。",
+      testTitle: "ルールをテスト",
+      testDescription:
+        "この Card の現在のルールに対してリクエスト値をテストします。未保存の編集内容も使用されます。",
+      testRun: "テストを実行",
+      testClose: "閉じる",
+      testInvalidRules: "テストする前に無効なルールを修正してください。",
+      testInvalidRule: "無効なルールです。",
+      testBlocked: "ブロック",
+      testAllowed: "許可",
+      testNoMatch:
+        "一致するルールがないため、このフィールドでは値が許可されます。",
+      testMatchedRules: "一致したルール",
+      testActionBlock: "ブロック",
+      testActionAllow: "許可",
+      testLine: "行",
+    },
+    blockingRulesFields: {
+      domains: {
+        title: "ドメイン",
+        label: "ドメインルール（1 行に 1 件）",
+        placeholder: "*\n-example.com\n-*.example.com\nadmin.example.com\n",
+        hint: "ページの hostname に一致します。* と -ドメインで許可リストを作れます。",
+        syntax:
+          "各行: [ - ] hostname-glob\n# で始まる行はコメントとして扱われ、無視されます。\n* をワイルドカードとして使います。先頭の - は許可ルールを作ります。\n大文字と小文字を区別せず、ページの hostname に一致します。\n",
+        examples: ["*", "-example.com", "-*.example.com", "admin.example.com"],
+        exampleDescription:
+          "この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する admin.example.com を再びブロックします。",
+        testLabel: "Hostname",
+        testPlaceholder: "www.example.com",
+        testHint: "スキームやパスを含めず、ページの hostname を入力します。",
+      },
+      paths: {
+        title: "パス",
+        label: "パスルール（1 行に 1 件）",
+        placeholder: "/admin/*\n/checkout/*/confirm\n-/admin/health\n",
+        hint: "glob 構文で正規化された URL パスに一致します。",
+        syntax:
+          "各行: [ - ] /path-glob\n# で始まる行はコメントとして扱われ、無視されます。\nパスは / で始まり、* は任意の文字に一致します。\nURL パスの正規化後、大文字と小文字を区別して一致します。\n",
+        examples: ["/admin/*", "/checkout/*/confirm", "-/admin/health"],
+        exampleDescription:
+          "この設定は /admin/ 配下と /checkout/*/confirm に一致するパスをブロックし、/admin/health を許可します。",
+        testLabel: "URL パス",
+        testPlaceholder: "/admin/settings",
+        testHint: "先頭のスラッシュを含む pathname のみを入力します。",
+      },
+      queryParameters: {
+        title: "クエリパラメータ",
+        label: "クエリルール（1 行に 1 件）",
+        placeholder: "utm_*\nutm_source=*\n-utm_source=trusted\n",
+        hint: "key または key=value を指定でき、キーと値で * が使えます。",
+        syntax:
+          "各行: [ - ] key-glob[=value-glob]\n# で始まる行はコメントとして扱われ、無視されます。\n= を省略すると、そのキーの任意の値に一致します。\n大文字と小文字を区別し、キーと値で * を使用できます。\n",
+        examples: ["utm_*", "utm_source=*", "-utm_source=trusted"],
+        exampleDescription:
+          "この設定は utm_ で始まるキーと utm_source の任意の値をブロックし、utm_source=trusted を許可します。",
+        testLabel: "クエリ文字列",
+        testPlaceholder: "utm_source=internal&utm_campaign=spring",
+        testHint: "先頭の ? はあってもなくてもかまいません。",
+      },
+      referrers: {
+        title: "リファラー",
+        label: "リファラールール（1 行に 1 件）",
+        placeholder:
+          "*.example.com\nsocial.example.com\n-trusted.example.com\n",
+        hint: "リファラーの hostname に一致します。",
+        syntax:
+          "各行: [ - ] hostname-glob\n# で始まる行はコメントとして扱われ、無視されます。\nURL は hostname に変換してから一致させます。\n大文字と小文字を区別せず、* を使用できます。\n",
+        examples: [
+          "*.example.com",
+          "social.example.com",
+          "-trusted.example.com",
+        ],
+        exampleDescription:
+          "この設定は example.com の参照元ドメインと social.example.com をブロックし、trusted.example.com を許可します。",
+        testLabel: "参照元",
+        testPlaceholder: "https://social.example.com/article",
+        testHint: "参照元の URL または hostname を入力します。",
+      },
+      userAgents: {
+        title: "User-Agent",
+        label: "User-Agent ルール（1 行に 1 件）",
+        placeholder: "*bot*\nMozilla/*\n-Googlebot\n",
+        hint: "大文字と小文字を区別せず、glob 構文でリクエストの User-Agent に一致します。",
+        syntax:
+          "各行: [ - ] text-glob\n# で始まる行はコメントとして扱われ、無視されます。\n* はリクエスト User-Agent 内の任意の文字に一致します。\n大文字と小文字を区別しません。\n",
+        examples: ["*bot*", "Mozilla/*", "-Googlebot"],
+        exampleDescription:
+          "この設定は bot を含む User-Agent と Mozilla/ で始まる値をブロックし、Googlebot を許可します。",
+        testLabel: "User-Agent",
+        testPlaceholder: "Mozilla/5.0 (compatible; ExampleBot/1.0)",
+        testHint: "リクエスト User-Agent の全体または一部を入力します。",
+      },
+      ips: {
+        title: "IP アドレス",
+        label: "IP ルール（1 行に 1 件）",
+        placeholder:
+          "203.0.113.15\n2001:db8::1\n203.0.113.0/24\n2001:db8::/32\n-203.0.113.10..203.0.113.20\n",
+        hint: "IPv4/IPv6 アドレス、CIDR、開始..終了の範囲に対応します。",
+        syntax:
+          "各行: [ - ] address | CIDR | start..end\n# で始まる行はコメントとして扱われ、無視されます。\nIPv4 と IPv6 のアドレスに対応します。\n範囲の両端は同じアドレスファミリーで、開始値以下にします。\n",
+        examples: [
+          "203.0.113.15",
+          "2001:db8::1",
+          "203.0.113.0/24",
+          "2001:db8::/32",
+          "-203.0.113.10..203.0.113.20",
+        ],
+        exampleDescription:
+          "この設定は IPv4/IPv6 の単一アドレス、CIDR 範囲、start..end 範囲を示します。- 付きの範囲は許可されます。",
+        testLabel: "IP アドレス",
+        testPlaceholder: "203.0.113.15",
+        testHint: "テストする IPv4 または IPv6 アドレスを入力します。",
+      },
+      asns: {
+        title: "ASN",
+        label: "ASN ルール（1 行に 1 件）",
+        placeholder: "64500\n*\n-64501\n",
+        hint: "Cloudflare metadata の数値 ASN に一致します。",
+        syntax:
+          "各行: [ - ] ASN-number\n# で始まる行はコメントとして扱われ、無視されます。\n* で任意の ASN に一致します。\nメタデータ値のテストでは、任意の AS プレフィックスも使用できます。\n",
+        examples: ["64500", "*", "-64501"],
+        exampleDescription:
+          "この設定は ASN 64500 と任意の ASN をブロックし、最後のルールで ASN 64501 を許可します。",
+        testLabel: "ASN",
+        testPlaceholder: "64500",
+        testHint: "数値の自律システム番号を入力します。",
+      },
+      countries: {
+        title: "国 / 地域",
+        label: "国ルール（1 行に 1 件）",
+        placeholder: "DE\n*\n-US\n",
+        hint: "ISO 3166-1 alpha-2 国コードを使用します。",
+        syntax:
+          "各行: [ - ] ISO-3166-alpha-2\n# で始まる行はコメントとして扱われ、無視されます。\n* で任意の国に一致します。\n国コードは大文字と小文字を区別しません。\n",
+        examples: ["DE", "*", "-US"],
+        exampleDescription:
+          "この設定は DE と任意の国をブロックし、最後のルールで US を許可します。",
+        testLabel: "国コード",
+        testPlaceholder: "DE",
+        testHint: "ISO 3166-1 alpha-2 の国コードを入力します。",
+      },
+      regions: {
+        title: "州 / 省",
+        label: "地域ルール（1 行に 1 件）",
+        placeholder: "DE-BE\n*\n-US-CA\n",
+        hint: "Cloudflare metadata の COUNTRY-REGION_CODE 形式を使用します。",
+        syntax:
+          "各行: [ - ] COUNTRY-REGION_CODE\n# で始まる行はコメントとして扱われ、無視されます。\n* で任意の地域に一致します。\n地域の値は大文字と小文字を区別しません。\n",
+        examples: ["DE-BE", "*", "-US-CA"],
+        exampleDescription:
+          "この設定は DE-BE と任意の地域をブロックし、最後のルールで US-CA を許可します。",
+        testLabel: "地域コード",
+        testPlaceholder: "US-CA",
+        testHint: "メタデータの COUNTRY-REGION_CODE 値を入力します。",
+      },
+    },
     ignoreDoNotTrackLabel: "ブラウザーの Do Not Track を無視",
     autoTrackGroupTitle: "自動トラッキング",
     autoTrackGroupDescription: "自動イベント取得の挙動を制御します。",

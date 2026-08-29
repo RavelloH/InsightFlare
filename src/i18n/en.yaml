@@ -970,6 +970,19 @@ share: {}
 siteSettings:
   title: Site Settings
   subtitle: Configure this site's basic information and lifecycle.
+  sections:
+    basic:
+      title: Basic Information
+      description: Manage site identity and public sharing.
+    tracking:
+      title: Tracking Settings
+      description: Configure how the tracker captures visits and performance data.
+    blocking:
+      title: Blocking Rules
+      description: Filter collection by request context before events reach storage.
+    danger:
+      title: Danger Zone
+      description: Destructive actions and operationally sensitive settings.
   editTitle: Update Site Info
   editSubtitle: Keep display name and domain up to date.
   nameLabel: Site Name
@@ -1001,20 +1014,237 @@ siteSettings:
   queryHashGroupDescription: Control how query strings, URL hashes, and Do Not Track are handled.
   trackQueryParamsLabel: Track Query Parameters
   trackHashLabel: Track URL Hash
-  domainWhitelistTitle: Domain Whitelist
-  domainWhitelistDescription: Events are sent only when the current hostname is in this list.
-  domainWhitelistLabel: Domain Whitelist (one per line)
-  domainWhitelistPlaceholder: |
-    example.com
-    www.example.com
-  domainWhitelistHint: Leave empty to allow all domains; exact matches only (no subdomains).
-  pathBlacklistTitle: Path Blacklist
-  pathBlacklistDescription: Events are blocked when the current pathname matches a blocked prefix.
-  pathBlacklistLabel: Path Blacklist (one per line)
-  pathBlacklistPlaceholder: |
-    /admin
-    /private
-  pathBlacklistHint: Uses startsWith prefix matching; matched paths are not reported.
+  blockingRulesSave: Save Blocking Rules
+  blockingRulesSaving: Saving Blocking Rules...
+  blockingRulesDialogs:
+    testButton: Test
+    helpButton: Help
+    helpTitle: Rule Syntax
+    helpDescription: Review the syntax, examples, and precedence for this field.
+    syntaxTitle: Syntax
+    examplesTitle: Example configuration
+    actionsTitle: Rule actions
+    actionsDescription: A normal line blocks a match. Prefix a rule with - to allow it. If multiple lines match, the last matching line wins.
+    actionBlock: Blocks when {example} matches
+    actionAllow: Allows when {example} matches
+    statusEmpty: No blocking rules are currently set for {field}.
+    statusValid: The current rules are valid.
+    statusInvalid: The current rules are invalid. Click Help on the right for details.
+    errorInvalidRule: Invalid rule.
+    errorInvalidLines: Rules for {field} must be provided one per line.
+    errorInvalidLine: Line {line} is not a valid text rule.
+    errorLineTooLong: Line {line} is too long.
+    errorTooManyLines: Too many rule lines.
+    errorInvalidPattern: Line {line} has an invalid rule pattern.
+    testTitle: Test Rules
+    testDescription: Enter a request value to evaluate the current contents of this card. Unsaved edits are included.
+    testRun: Run Test
+    testClose: Close
+    testInvalidRules: Fix invalid rules before testing.
+    testInvalidRule: Invalid rule.
+    testBlocked: Blocked
+    testAllowed: Allowed
+    testNoMatch: No rule matched; this field allows the value.
+    testMatchedRules: Matched rules
+    testActionBlock: blocks
+    testActionAllow: allows
+    testLine: Line
+  blockingRulesFields:
+    domains:
+      title: Domains
+      label: Domain rules (one per line)
+      placeholder: |
+        *
+        -example.com
+        -*.example.com
+        admin.example.com
+      hint: Matches the page hostname. Use * with -domain.com for an allowlist.
+      syntax: |
+        Each line: [ - ] hostname-glob
+        Lines starting with # are treated as comments and ignored.
+        Use * as a wildcard. A leading - creates an allow rule.
+        Matching is case-insensitive and uses the page hostname.
+      examples:
+        - "*"
+        - "-example.com"
+        - "-*.example.com"
+        - "admin.example.com"
+      exampleDescription: This configuration first blocks every domain, then allows example.com and its subdomains, and finally blocks the exact admin.example.com domain again.
+      testLabel: Hostname
+      testPlaceholder: www.example.com
+      testHint: Enter the page hostname without a scheme or path.
+    paths:
+      title: Paths
+      label: Path rules (one per line)
+      placeholder: |
+        /admin/*
+        /checkout/*/confirm
+        -/admin/health
+      hint: Matches normalized URL paths with glob syntax.
+      syntax: |
+        Each line: [ - ] /path-glob
+        Lines starting with # are treated as comments and ignored.
+        Paths start with / and * matches any characters.
+        Matching is case-sensitive after URL path normalization.
+      examples:
+        - "/admin/*"
+        - "/checkout/*/confirm"
+        - "-/admin/health"
+      exampleDescription: This configuration blocks paths under /admin/ and paths matching /checkout/*/confirm, while allowing /admin/health.
+      testLabel: URL path
+      testPlaceholder: /admin/settings
+      testHint: Enter the pathname only, including its leading slash.
+    queryParameters:
+      title: Query Parameters
+      label: Query rules (one per line)
+      placeholder: |
+        utm_*
+        utm_source=*
+        -utm_source=trusted
+      hint: Use key or key=value patterns; * is supported in keys and values.
+      syntax: |
+        Each line: [ - ] key-glob[=value-glob]
+        Lines starting with # are treated as comments and ignored.
+        Omitting = matches any value for the key.
+        Matching is case-sensitive and supports * in keys and values.
+      examples:
+        - "utm_*"
+        - "utm_source=*"
+        - "-utm_source=trusted"
+      exampleDescription: This configuration blocks keys beginning with utm_ and any value of utm_source, while allowing utm_source=trusted.
+      testLabel: Query string
+      testPlaceholder: utm_source=internal&utm_campaign=spring
+      testHint: Enter a query string with or without the leading ?.
+    referrers:
+      title: Referrers
+      label: Referrer rules (one per line)
+      placeholder: |
+        *.example.com
+        social.example.com
+        -trusted.example.com
+      hint: Matches the referrer hostname.
+      syntax: |
+        Each line: [ - ] hostname-glob
+        Lines starting with # are treated as comments and ignored.
+        A URL is reduced to its hostname before matching.
+        Matching is case-insensitive and supports *.
+      examples:
+        - "*.example.com"
+        - "social.example.com"
+        - "-trusted.example.com"
+      exampleDescription: This configuration blocks example.com referrers and social.example.com, while allowing trusted.example.com.
+      testLabel: Referrer
+      testPlaceholder: https://social.example.com/article
+      testHint: Enter a referrer URL or hostname.
+    userAgents:
+      title: User Agents
+      label: User-agent rules (one per line)
+      placeholder: |
+        *bot*
+        Mozilla/*
+        -Googlebot
+      hint: Case-insensitive glob matching against the request User-Agent.
+      syntax: |
+        Each line: [ - ] text-glob
+        Lines starting with # are treated as comments and ignored.
+        * matches any characters in the request User-Agent.
+        Matching is case-insensitive.
+      examples:
+        - "*bot*"
+        - "Mozilla/*"
+        - "-Googlebot"
+      exampleDescription: This configuration blocks User-Agent values containing bot and values beginning with Mozilla/, while allowing Googlebot.
+      testLabel: User-Agent
+      testPlaceholder: Mozilla/5.0 (compatible; ExampleBot/1.0)
+      testHint: Enter the complete or partial request User-Agent.
+    ips:
+      title: IP Addresses
+      label: IP rules (one per line)
+      placeholder: |
+        203.0.113.15
+        2001:db8::1
+        203.0.113.0/24
+        2001:db8::/32
+        -203.0.113.10..203.0.113.20
+      hint: Supports IPv4/IPv6 addresses, CIDR ranges, and start..end ranges.
+      syntax: |
+        Each line: [ - ] address | CIDR | start..end
+        Lines starting with # are treated as comments and ignored.
+        IPv4 and IPv6 addresses are supported.
+        Ranges must use the same address family and be ordered.
+      examples:
+        - "203.0.113.15"
+        - "2001:db8::1"
+        - "203.0.113.0/24"
+        - "2001:db8::/32"
+        - "-203.0.113.10..203.0.113.20"
+      exampleDescription: This configuration demonstrates individual IPv4/IPv6 addresses, CIDR ranges, and start..end ranges; the prefixed range is allowed.
+      testLabel: IP address
+      testPlaceholder: 203.0.113.15
+      testHint: Enter one IPv4 or IPv6 address to test.
+    asns:
+      title: ASNs
+      label: ASN rules (one per line)
+      placeholder: |
+        64500
+        *
+        -64501
+      hint: Match the numeric autonomous system number from Cloudflare metadata.
+      syntax: |
+        Each line: [ - ] ASN-number
+        Lines starting with # are treated as comments and ignored.
+        Use * to match any ASN.
+        The optional AS prefix is accepted when testing metadata values.
+      examples:
+        - "64500"
+        - "*"
+        - "-64501"
+      exampleDescription: This configuration blocks ASN 64500 and any ASN, while the final rule allows ASN 64501.
+      testLabel: ASN
+      testPlaceholder: "64500"
+      testHint: Enter the numeric autonomous system number.
+    countries:
+      title: Countries / Regions
+      label: Country rules (one per line)
+      placeholder: |
+        DE
+        *
+        -US
+      hint: Use ISO 3166-1 alpha-2 country codes.
+      syntax: |
+        Each line: [ - ] ISO-3166-alpha-2
+        Lines starting with # are treated as comments and ignored.
+        Use * to match any country.
+        Country codes are matched case-insensitively.
+      examples:
+        - "DE"
+        - "*"
+        - "-US"
+      exampleDescription: This configuration blocks DE and any country, while the final rule allows US.
+      testLabel: Country code
+      testPlaceholder: DE
+      testHint: Enter an ISO 3166-1 alpha-2 country code.
+    regions:
+      title: States / Provinces
+      label: Region rules (one per line)
+      placeholder: |
+        DE-BE
+        *
+        -US-CA
+      hint: Use COUNTRY-REGION_CODE values from Cloudflare metadata.
+      syntax: |
+        Each line: [ - ] COUNTRY-REGION_CODE
+        Lines starting with # are treated as comments and ignored.
+        Use * to match any region.
+        Region values are matched case-insensitively.
+      examples:
+        - "DE-BE"
+        - "*"
+        - "-US-CA"
+      exampleDescription: This configuration blocks DE-BE and any region, while the final rule allows US-CA.
+      testLabel: Region code
+      testPlaceholder: US-CA
+      testHint: Enter the COUNTRY-REGION_CODE value from metadata.
   ignoreDoNotTrackLabel: Ignore Browser Do Not Track
   autoTrackGroupTitle: Auto Tracking
   autoTrackGroupDescription: Control automatic event capture behavior.

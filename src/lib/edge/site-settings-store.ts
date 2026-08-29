@@ -1,4 +1,8 @@
 import {
+  applyBlockingRulesPatch,
+  parseBlockingRules,
+} from "@/lib/blocking-rules";
+import {
   DEFAULT_SITE_SCRIPT_SETTINGS,
   normalizeSiteScriptSettings,
   normalizeSiteTrackingConfig,
@@ -104,10 +108,19 @@ function serializeSiteTrackingConfig(
     trackQueryParams: settings.trackQueryParams,
     trackHash: settings.trackHash,
     autoTrackOutboundLinks: settings.autoTrackOutboundLinks,
-    domainWhitelist: settings.domainWhitelist,
-    pathBlacklist: settings.pathBlacklist,
     ignoreDoNotTrack: settings.ignoreDoNotTrack,
   };
+
+  const parsedBlockingRules = parseBlockingRules(settings);
+  if (parsedBlockingRules.fields.domains.source !== "versioned") {
+    payload.domainWhitelist = settings.domainWhitelist;
+  }
+  if (parsedBlockingRules.fields.paths.source !== "versioned") {
+    payload.pathBlacklist = settings.pathBlacklist;
+  }
+  if (settings.blockingRules !== undefined) {
+    payload.blockingRules = settings.blockingRules;
+  }
 
   if (
     settings.performanceSampleRate !==
@@ -165,6 +178,7 @@ export async function upsertSiteTrackingConfig(
   input: {
     siteDomain?: unknown;
     settings?: unknown;
+    blockingPatch?: unknown;
   },
 ): Promise<SiteTrackingConfig> {
   const normalizedSiteId = normalizeSiteSettingsKey(siteId);
@@ -173,14 +187,18 @@ export async function upsertSiteTrackingConfig(
   }
 
   const existing = await readSiteTrackingConfig(env, normalizedSiteId);
-  const normalized = normalizeSiteTrackingConfig({
+  let source: Record<string, unknown> = {
     ...(existing ?? {}),
     ...(input.settings && typeof input.settings === "object"
       ? (input.settings as Record<string, unknown>)
       : {}),
     siteId: normalizedSiteId,
     siteDomain: input.siteDomain ?? existing?.siteDomain ?? "",
-  });
+  };
+  if (input.blockingPatch !== undefined) {
+    source = applyBlockingRulesPatch(source, input.blockingPatch);
+  }
+  const normalized = normalizeSiteTrackingConfig(source);
   if (!normalized.siteDomain) {
     throw new Error("siteDomain is required");
   }
@@ -199,6 +217,7 @@ export async function upsertSiteScriptSettings(
   input: {
     siteDomain: unknown;
     settings?: unknown;
+    blockingPatch?: unknown;
   },
 ): Promise<SiteScriptSettings> {
   const normalized = await upsertSiteTrackingConfig(env, siteId, input);

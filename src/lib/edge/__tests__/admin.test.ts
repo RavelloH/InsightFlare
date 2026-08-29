@@ -16,7 +16,9 @@ import {
 import {
   deleteSiteScriptSettings,
   readSiteScriptSettings,
+  readSiteTrackingConfig,
   upsertSiteScriptSettings,
+  upsertSiteTrackingConfig,
 } from "@/lib/edge/site-settings-store";
 import type { Env } from "@/lib/edge/types";
 import { privateAdminRoutes } from "@/lib/hono/routes/private/admin";
@@ -56,7 +58,9 @@ vi.mock("@/lib/edge/session-auth", () => ({
 
 vi.mock("@/lib/edge/site-settings-store", () => ({
   deleteSiteScriptSettings: vi.fn(),
+  readSiteTrackingConfig: vi.fn(),
   readSiteScriptSettings: vi.fn(),
+  upsertSiteTrackingConfig: vi.fn(),
   upsertSiteScriptSettings: vi.fn(),
 }));
 
@@ -101,6 +105,8 @@ type ActualSessionAuth = {
 const requireSessionMock = vi.mocked(requireSession);
 const readSiteScriptSettingsMock = vi.mocked(readSiteScriptSettings);
 const upsertSiteScriptSettingsMock = vi.mocked(upsertSiteScriptSettings);
+const readSiteTrackingConfigMock = vi.mocked(readSiteTrackingConfig);
+const upsertSiteTrackingConfigMock = vi.mocked(upsertSiteTrackingConfig);
 const deleteSiteScriptSettingsMock = vi.mocked(deleteSiteScriptSettings);
 
 const adminSession: EdgeSessionClaims = {
@@ -420,7 +426,9 @@ function diagnosticPayload(
 describe("private admin edge handler", () => {
   beforeEach(() => {
     requireSessionMock.mockReset();
+    readSiteTrackingConfigMock.mockReset();
     readSiteScriptSettingsMock.mockReset();
+    upsertSiteTrackingConfigMock.mockReset();
     upsertSiteScriptSettingsMock.mockReset();
     deleteSiteScriptSettingsMock.mockReset();
   });
@@ -3230,7 +3238,7 @@ describe("private admin edge handler", () => {
   describe("site config and script snippet routes", () => {
     it("loads default script settings for readable sites", async () => {
       setSession(userSession);
-      readSiteScriptSettingsMock.mockResolvedValue(null);
+      readSiteTrackingConfigMock.mockResolvedValue(null);
       const { env } = createEnv([
         statement({ first: userRow({ id: "user-1", system_role: "user" }) }),
         statement({ first: { team_id: "team-1" } }),
@@ -3248,12 +3256,12 @@ describe("private admin edge handler", () => {
         ok: true,
         data: DEFAULT_SITE_SCRIPT_SETTINGS,
       });
-      expect(readSiteScriptSettingsMock).toHaveBeenCalledWith(env, "site-1");
+      expect(readSiteTrackingConfigMock).toHaveBeenCalledWith(env, "site-1");
     });
 
     it("returns read and write site config storage errors as 500 responses", async () => {
       setSession(adminSession);
-      readSiteScriptSettingsMock.mockRejectedValue(new Error("read failed"));
+      readSiteTrackingConfigMock.mockRejectedValue(new Error("read failed"));
       const readEnv = createEnv([
         statement({ first: userRow() }),
         statement({ first: { team_id: "team-1" } }),
@@ -3263,7 +3271,7 @@ describe("private admin edge handler", () => {
         readEnv,
       );
 
-      upsertSiteScriptSettingsMock.mockRejectedValue(new Error("write failed"));
+      upsertSiteTrackingConfigMock.mockRejectedValue(new Error("write failed"));
       const writeEnv = createEnv([
         statement({ first: userRow() }),
         statement({ first: { team_id: "team-1" } }),
@@ -3325,7 +3333,7 @@ describe("private admin edge handler", () => {
         jsonInit({ siteId: "missing-1" }),
       );
 
-      upsertSiteScriptSettingsMock.mockRejectedValue("kv failed");
+      upsertSiteTrackingConfigMock.mockRejectedValue("kv failed");
       const fallbackWriteError = await dispatch(
         "/api/private/admin/site-config",
         createEnv([
@@ -3361,7 +3369,7 @@ describe("private admin edge handler", () => {
         ok: false,
         error: "save_site_config_failed",
       });
-      expect(upsertSiteScriptSettingsMock).toHaveBeenLastCalledWith(
+      expect(upsertSiteTrackingConfigMock).toHaveBeenLastCalledWith(
         expect.anything(),
         "site-1",
         {
@@ -3374,7 +3382,12 @@ describe("private admin edge handler", () => {
     it("saves site config after confirming site ownership and domain", async () => {
       setSession(userSession);
       const saved = { ...DEFAULT_SITE_SCRIPT_SETTINGS, trackHash: false };
-      upsertSiteScriptSettingsMock.mockResolvedValue(saved);
+      upsertSiteTrackingConfigMock.mockResolvedValue({
+        siteId: "site-1",
+        siteDomain: "site.example.test",
+        allowedHostnames: [],
+        ...saved,
+      });
       const { env } = createEnv([
         statement({ first: userRow({ id: "user-1", system_role: "user" }) }),
         statement({ first: { team_id: "team-1" } }),
@@ -3390,7 +3403,7 @@ describe("private admin edge handler", () => {
 
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ ok: true, data: saved });
-      expect(upsertSiteScriptSettingsMock).toHaveBeenCalledWith(env, "site-1", {
+      expect(upsertSiteTrackingConfigMock).toHaveBeenCalledWith(env, "site-1", {
         siteDomain: "site.example.test",
         settings: { trackHash: false },
       });

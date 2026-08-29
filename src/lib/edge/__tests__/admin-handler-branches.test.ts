@@ -29,7 +29,9 @@ import { handleProfileAdmin, handleUsersAdmin } from "@/lib/edge/admin-users";
 import {
   deleteSiteScriptSettings,
   readSiteScriptSettings,
+  readSiteTrackingConfig,
   upsertSiteScriptSettings,
+  upsertSiteTrackingConfig,
 } from "@/lib/edge/site-settings-store";
 import type { Env } from "@/lib/edge/types";
 import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
@@ -85,7 +87,9 @@ vi.mock("@/lib/edge/admin-access", () => ({
 
 vi.mock("@/lib/edge/site-settings-store", () => ({
   deleteSiteScriptSettings: vi.fn(),
+  readSiteTrackingConfig: vi.fn(),
   readSiteScriptSettings: vi.fn(),
+  upsertSiteTrackingConfig: vi.fn(),
   upsertSiteScriptSettings: vi.fn(),
 }));
 
@@ -155,7 +159,9 @@ const teamGroupsForSessionMock = vi.mocked(teamGroupsForSession);
 const teamsForMock = vi.mocked(teamsFor);
 const verifyPasswordMock = vi.mocked(verifyPassword);
 const deleteSiteScriptSettingsMock = vi.mocked(deleteSiteScriptSettings);
+const readSiteTrackingConfigMock = vi.mocked(readSiteTrackingConfig);
 const readSiteScriptSettingsMock = vi.mocked(readSiteScriptSettings);
+const upsertSiteTrackingConfigMock = vi.mocked(upsertSiteTrackingConfig);
 const upsertSiteScriptSettingsMock = vi.mocked(upsertSiteScriptSettings);
 
 function statement(
@@ -243,7 +249,14 @@ describe("admin handler low branches", () => {
     teamsForMock.mockResolvedValue([]);
     verifyPasswordMock.mockResolvedValue(true);
     deleteSiteScriptSettingsMock.mockResolvedValue(undefined);
+    readSiteTrackingConfigMock.mockResolvedValue(null);
     readSiteScriptSettingsMock.mockResolvedValue(null);
+    upsertSiteTrackingConfigMock.mockResolvedValue({
+      siteId: "site-1",
+      siteDomain: "example.com",
+      allowedHostnames: [],
+      ...DEFAULT_SITE_SCRIPT_SETTINGS,
+    });
     upsertSiteScriptSettingsMock.mockResolvedValue(
       DEFAULT_SITE_SCRIPT_SETTINGS,
     );
@@ -629,7 +642,7 @@ describe("admin handler low branches", () => {
     const { handleSiteConfigAdmin, handleScriptSnippetAdmin } =
       await import("@/lib/edge/admin-sites");
 
-    readSiteScriptSettingsMock.mockResolvedValueOnce(null);
+    readSiteTrackingConfigMock.mockResolvedValueOnce(null);
     const config = await handleSiteConfigAdmin(
       request("/admin/site-config?siteId=site-1", { method: "GET" }),
       createEnv().env,
@@ -638,7 +651,7 @@ describe("admin handler low branches", () => {
     expect(config.status).toBe(200);
     await expect(jsonOf(config)).resolves.toMatchObject({
       ok: true,
-      data: DEFAULT_SITE_SCRIPT_SETTINGS,
+      data: expect.objectContaining(DEFAULT_SITE_SCRIPT_SETTINGS),
     });
 
     const snippet = await handleScriptSnippetAdmin(
