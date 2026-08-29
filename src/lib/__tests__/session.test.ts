@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveSecret, SECRET_PURPOSES } from "@/lib/secrets";
@@ -190,7 +192,7 @@ describe("Session Authentication (Web Crypto HMAC)", () => {
     hmac.update(payloadPart);
     const signature = hmac.digest();
 
-    const signaturePart = signature
+    const signaturePart = Buffer.from(signature)
       .toString("base64")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
