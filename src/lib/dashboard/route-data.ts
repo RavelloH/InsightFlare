@@ -25,6 +25,7 @@ import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   getDashboardRootContext,
   getDashboardTeamContext,
+  getDashboardTeamSites,
   getTeamSiteContext,
   readDashboardAdmin,
 } from "@/lib/dashboard/server";
@@ -114,6 +115,8 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
     });
     if (resolved instanceof Response) return null;
 
+    const preloadedSites = await getDashboardTeamSites(data.teamId);
+
     const window = resolveDashboardInitialWindow(request.headers.get("cookie"));
     const teamDashboardRuntime = createTeamDashboardQueryRuntime({
       env: resolved.env,
@@ -126,6 +129,10 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
       },
       interval: window.interval,
       allowedSiteIds: resolved.allowedSiteIds,
+      preloadedSites: preloadedSites.map(({ slug: _slug, ...site }) => ({
+        ...site,
+        publicEnabled: Number(Boolean(site.publicEnabled)),
+      })),
     });
     const result = await teamDashboardRuntime.execute<SsrTeamDashboardData>(
       "team-dashboard",

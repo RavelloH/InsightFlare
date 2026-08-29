@@ -54,6 +54,7 @@ vi.mock("@tanstack/react-start/server", async (importOriginal) => {
 
 vi.mock("@/lib/dashboard/server", () => ({
   getDashboardRootContext: vi.fn(),
+  getDashboardTeamSites: vi.fn(),
   getDashboardTeamContext: vi.fn(),
   getTeamSiteContext: vi.fn(),
   readDashboardAdmin: vi.fn(),
@@ -112,7 +113,10 @@ import {
   loadTeamNotificationsInitialData,
   loadVersionReleases,
 } from "@/lib/dashboard/route-data";
-import { readDashboardAdmin } from "@/lib/dashboard/server";
+import {
+  getDashboardTeamSites,
+  readDashboardAdmin,
+} from "@/lib/dashboard/server";
 import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
 import { readTeamDashboard } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
@@ -173,6 +177,7 @@ describe("Dashboard route data loaders", () => {
       data: { sites: [], trend: [] },
       source: "raw",
     } as never);
+    vi.mocked(getDashboardTeamSites).mockResolvedValue([]);
   });
 
   describe("loadRequestOrigin", () => {
@@ -304,6 +309,7 @@ describe("Dashboard route data loaders", () => {
         },
         interval: "day",
         allowedSiteIds: ["site-1"],
+        preloadedSites: [],
       });
     });
 

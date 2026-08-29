@@ -543,6 +543,9 @@ export function DashboardShell({
     hasActiveSite && liveActiveTeamSlug
       ? buildSitePath(locale, liveActiveTeamSlug, resolvedActiveSiteSlug)
       : null;
+  const canManageActiveTeam = Boolean(
+    activeTeam && canManageTeam(activeTeam.membershipRole, user.systemRole),
+  );
 
   const analyticsSections = useMemo<
     Array<{
@@ -571,10 +574,17 @@ export function DashboardShell({
             { key: "devices", href: `${activeSiteBase}/devices` },
             { key: "browsers", href: `${activeSiteBase}/browsers` },
             { key: "performance", href: `${activeSiteBase}/performance` },
-            { key: "settings", href: `${activeSiteBase}/settings` },
+            ...(canManageActiveTeam
+              ? [
+                  {
+                    key: "settings" as const,
+                    href: `${activeSiteBase}/settings`,
+                  },
+                ]
+              : []),
           ]
         : [],
-    [activeSiteBase, hasActiveSite],
+    [activeSiteBase, canManageActiveTeam, hasActiveSite],
   );
   const localeSuffix = normalizeLocalePath(livePathname);
   const switchToEn = `/en${localeSuffix}`;

@@ -85,6 +85,11 @@ const getMe = cache(async () => {
   }
 });
 
+const getUnreadAttentionCount = cache(async (): Promise<number> => {
+  const notifications = await readAdmin("notifications", { limit: 1 });
+  return notifications?.unreadAttentionCount ?? 0;
+});
+
 const getAdminRuntime = cache(async () => {
   const runtime = await resolveEdgeRuntime(getRequest());
   return {
@@ -147,8 +152,7 @@ export const getDashboardRootContext = cache(
     const me = await getMe();
     if (!me) return null;
 
-    const notifications = await readAdmin("notifications", { limit: 1 });
-    const unreadAttentionCount = notifications?.unreadAttentionCount ?? 0;
+    const unreadAttentionCount = await getUnreadAttentionCount();
 
     return {
       user: me.user,
@@ -159,7 +163,7 @@ export const getDashboardRootContext = cache(
   },
 );
 
-const getSitesForTeam = cache(
+export const getDashboardTeamSites = cache(
   async (teamId: string): Promise<SiteWithSlug[]> => {
     try {
       const sites = await readAdmin("sites", { teamId });
@@ -179,9 +183,10 @@ export const getDashboardTeamContext = cache(
     const activeTeam = me.teams.find((team) => team.slug === teamSlug);
     if (!activeTeam) return null;
 
-    const sites = await getSitesForTeam(activeTeam.id);
-    const notifications = await readAdmin("notifications", { limit: 1 });
-    const unreadAttentionCount = notifications?.unreadAttentionCount ?? 0;
+    const [sites, unreadAttentionCount] = await Promise.all([
+      getDashboardTeamSites(activeTeam.id),
+      getUnreadAttentionCount(),
+    ]);
 
     return {
       user: me.user,
@@ -222,7 +227,7 @@ export const getDefaultTeamSite = cache(
     if (!me || me.teams.length === 0) return null;
 
     const firstTeam = me.teams[0];
-    const sites = await getSitesForTeam(firstTeam.id);
+    const sites = await getDashboardTeamSites(firstTeam.id);
     if (sites.length === 0) {
       return null;
     }
@@ -244,7 +249,7 @@ export const getTeamDefaultSite = cache(
     const activeTeam = me.teams.find((team) => team.slug === teamSlug);
     if (!activeTeam) return null;
 
-    const sites = await getSitesForTeam(activeTeam.id);
+    const sites = await getDashboardTeamSites(activeTeam.id);
     if (sites.length === 0) return null;
 
     return {

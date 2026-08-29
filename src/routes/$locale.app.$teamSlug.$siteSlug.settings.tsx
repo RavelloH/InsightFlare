@@ -1,17 +1,24 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, notFound } from "@tanstack/react-router";
 
 import { SettingsClientPage } from "@/components/dashboard/site-pages/settings-client-page";
+import { canManageTeam } from "@/lib/dashboard/permissions";
 import { loadSiteSettingsInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute(
   "/$locale/app/$teamSlug/$siteSlug/settings",
 )({
-  beforeLoad: async ({ context }) => ({
-    siteSettingsInitialData: await loadSiteSettingsInitialData({
-      data: { siteId: context.siteContext.activeSite.id },
-    }),
-  }),
+  beforeLoad: async ({ context }) => {
+    const c = context.siteContext;
+    if (!canManageTeam(c.activeTeam.membershipRole, c.user.systemRole)) {
+      throw notFound();
+    }
+    return {
+      siteSettingsInitialData: await loadSiteSettingsInitialData({
+        data: { siteId: c.activeSite.id },
+      }),
+    };
+  },
   head: ({ match }) => ({
     meta: [
       {

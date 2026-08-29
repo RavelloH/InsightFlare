@@ -360,8 +360,11 @@ export async function queryTeamDashboardForTeam(
   interval: Interval,
   allowedSiteIds?: string[],
   diagnostics = createD1ReadDiagnostics(),
+  preloadedSites?: readonly TeamSiteRow[],
 ): Promise<TeamDashboardQueryResult> {
-  const allSites = await listTeamSites(env, teamId, diagnostics);
+  const allSites = preloadedSites
+    ? [...preloadedSites]
+    : await listTeamSites(env, teamId, diagnostics);
   const allowed =
     allowedSiteIds && allowedSiteIds.length > 0
       ? new Set(allowedSiteIds)
