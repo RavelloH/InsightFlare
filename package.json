@@ -105,8 +105,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.52.1",
-    "@cloudflare/workers-types": "5.20260708.1",
+    "@cloudflare/vite-plugin": "^1.54.2",
+    "@cloudflare/workers-types": "5.20260829.1",
     "@eslint/js": "~9.39.4",
     "@playwright/test": "1.61.1",
     "@tailwindcss/postcss": "^4.3.0",
@@ -136,7 +136,7 @@
     "typescript-eslint": "^8.59.4",
     "vite": "8.1.4",
     "vitest": "^4.1.7",
-    "wrangler": "^4.123.0",
+    "wrangler": "^4.127.1",
     "yaml": "^2.9.0"
   },
   "cloudflare": {

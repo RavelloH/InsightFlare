@@ -1,5 +1,6 @@
 #!/usr/bin/env tsx
 
+import { Buffer } from "node:buffer";
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
@@ -263,15 +264,15 @@ async function createEnvironment(options: Options): Promise<Environment> {
   ]);
 
   const environment: Environment = {
-    adminPassword: `e2e-${randomBytes(24).toString("hex")}`,
+    adminPassword: `e2e-${Buffer.from(randomBytes(24)).toString("hex")}`,
     archiveBucketName: `${workerName(id)}-archive`,
     baseURL: "",
     configPath: path.join(configDirectory, "wrangler.e2e.toml"),
-    controlToken: randomBytes(32).toString("hex"),
+    controlToken: Buffer.from(randomBytes(32)).toString("hex"),
     directory,
     id,
-    mainSecret: randomBytes(32).toString("hex"),
-    mockControlToken: randomBytes(32).toString("hex"),
+    mainSecret: Buffer.from(randomBytes(32)).toString("hex"),
+    mockControlToken: Buffer.from(randomBytes(32)).toString("hex"),
     nowMs: E2E_INITIAL_NOW_MS,
     persistencePath,
     port: await findOpenPort(),
