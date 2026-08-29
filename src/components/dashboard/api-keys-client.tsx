@@ -12,6 +12,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { PageHeading } from "@/components/dashboard/page-heading";
 import { TableActionButton } from "@/components/dashboard/table-action-button";
 import {
   AlertDialog,
@@ -320,14 +321,17 @@ export function ApiKeysClient({
   }
 
   return (
-    <>
-      <div className="flex justify-end">
-        <Button onClick={() => setCreateOpen(true)}>
-          <RiAddLine />
-          {copy.create}
-        </Button>
-      </div>
-
+    <div className="space-y-4">
+      <PageHeading
+        title={copy.title}
+        subtitle={copy.subtitle}
+        actions={
+          <Button type="button" onClick={() => setCreateOpen(true)}>
+            <RiAddLine />
+            <span>{copy.create}</span>
+          </Button>
+        }
+      />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
@@ -674,6 +678,6 @@ export function ApiKeysClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }

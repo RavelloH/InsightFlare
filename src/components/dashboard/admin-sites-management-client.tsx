@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
+import { PageHeading } from "@/components/dashboard/page-heading";
 import { TableActionButton } from "@/components/dashboard/table-action-button";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
@@ -135,10 +136,7 @@ export function AdminSitesManagementClient({
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1">
-        <h2 className="text-base font-semibold tracking-tight">{t.title}</h2>
-        <p className="text-sm text-muted-foreground">{t.subtitle}</p>
-      </div>
+      <PageHeading title={t.title} subtitle={t.subtitle} />
 
       <Card className="max-w-3xl">
         <CardHeader>
