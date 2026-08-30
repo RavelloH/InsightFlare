@@ -2520,6 +2520,10 @@ systemPerformance:
   doDiagnosticSiteAlarm: アラーム
   doDiagnosticSiteAlarmNone: なし
   doDiagnosticSiteAlarmDue: 期限到来
+  doDiagnosticSiteNextDue: 次回期限
+  doDiagnosticSiteNextDueFlush: フラッシュ
+  doDiagnosticSiteNextDueHidden: 非表示フォールバック
+  doDiagnosticSiteNextDueTimeout: 訪問タイムアウト
   doDiagnosticSiteResponseMs: 応答時間
   doDiagnosticThresholdsHint:
     "しきい値：stale {stale}、timeout {timeout}、hardAged

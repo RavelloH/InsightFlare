@@ -58,7 +58,6 @@ interface NormalizeRecordContext {
     routePreviousHashFragment?: string;
   }): Promise<RecentVisitorSession | null>;
   insertBufferedCustomEvent(record: BufferedCustomEventInput): boolean;
-  ensureAlarm(): Promise<void>;
 }
 
 function parseUtmFromQuery(queryString: string): {
@@ -375,9 +374,6 @@ export async function normalizeIngestRecord(
         eventDataJson: eventDataResult.data.json,
         userId: clampString(coerceString(client.userId || ""), 255),
       });
-      if (inserted) {
-        await context.ensureAlarm();
-      }
       return {
         record: null,
         reason: "waiting_for_visit",

@@ -64,6 +64,10 @@ export interface BufferedVisitRow extends VisitRow, VisitBindingRow {
   exitReason: string;
   dirty: number;
   flushAttempts: number;
+  lastFlushError?: string | null;
+  nextDueAt?: number | null;
+  flushDueAt?: number | null;
+  bufferRevision?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -80,6 +84,10 @@ export interface BufferedCustomEventRow {
   userId: string;
   dirty: number;
   flushAttempts: number;
+  lastFlushError?: string | null;
+  nextDueAt?: number | null;
+  flushDueAt?: number | null;
+  bufferRevision?: number;
   createdAt: number;
 }
 

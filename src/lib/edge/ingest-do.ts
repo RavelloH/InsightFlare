@@ -15,6 +15,7 @@ import {
   ACTIVE_NOW_WINDOW_MS,
   D1_FLUSH_INTERVAL_MS,
   HIDDEN_LEAVE_GRACE_MS,
+  VISIT_TIMEOUT_MS,
   WS_PRESENCE_LEAVE_EVENT,
 } from "./ingest-constants";
 import { handleIngestDiagnostic } from "./ingest-diagnostic";
@@ -32,6 +33,7 @@ import {
   snapshotQueryParams,
 } from "./ingest-realtime";
 import { normalizeIngestRecord } from "./ingest-record-normalize";
+import { getEarliestDueWork } from "./ingest-scheduler";
 import { initializeIngestSqlSchema } from "./ingest-schema";
 import type { SqlBinding } from "./ingest-sql";
 import { toUnixSeconds } from "./ingest-time";
@@ -142,6 +144,7 @@ export class IngestDurableObject extends DurableObject {
     if (url.pathname === "/flush" && request.method === "POST") {
       logger.info("do.flush.manual_started");
       await this.runMaintenance(logger);
+      await this.reconcileAlarm(logger, true);
       logger.info("do.flush.manual_completed");
       return jsonResponse({ ok: true });
     }
@@ -149,23 +152,23 @@ export class IngestDurableObject extends DurableObject {
     return new Response("Not Found", { status: 404 });
   }
 
-  async alarm(): Promise<void> {
+  async alarm(alarmInfo?: {
+    retryCount?: number;
+    isRetry?: boolean;
+  }): Promise<void> {
     const logger = createInvocationLogger({ source: "do", trigger: "alarm" });
     logger.info("do.alarm.started");
     try {
       await runWithInvocationLogger(logger, async () => {
         await logger.measure("do.schema_ready", () => this.schemaReady);
+        logger.info("do.alarm.invocation", {
+          retryCount: alarmInfo?.retryCount ?? 0,
+          isRetry: Boolean(alarmInfo?.isRetry),
+        });
         await logger.measure("do.maintenance", () =>
           this.runMaintenance(logger),
         );
-        if ((await this.hasOpenVisits()) || this.hasDirtyRows()) {
-          const scheduledAt = Date.now() + D1_FLUSH_INTERVAL_MS;
-          await this.doState.storage.setAlarm(scheduledAt);
-          logger.info("do.alarm.rescheduled");
-          return;
-        }
-        await this.doState.storage.deleteAlarm();
-        logger.info("do.alarm.cleared");
+        await this.reconcileAlarm(logger, true, alarmInfo);
       });
     } catch (error) {
       logger.error("do.alarm.failed");
@@ -199,6 +202,14 @@ export class IngestDurableObject extends DurableObject {
     );
     const record = normalized.record;
     if (!record) {
+      if (
+        normalized.reason === "waiting_for_visit" &&
+        normalized.detail?.buffered === true
+      ) {
+        await logger.measure("do.alarm.reconcile_waiting", () =>
+          this.reconcileAlarm(logger),
+        );
+      }
       logger.warn(`do.ingest.ignored.${normalized.reason || "unknown"}`);
       return new Response(`ignored:${normalized.reason || "unknown"}`, {
         status: 202,
@@ -227,7 +238,9 @@ export class IngestDurableObject extends DurableObject {
       );
     }
 
-    await logger.measure("do.alarm.ensure", () => this.ensureAlarm(logger));
+    await logger.measure("do.alarm.reconcile", () =>
+      this.reconcileAlarm(logger),
+    );
     logger.info("do.ingest.completed");
     return new Response("ok", { status: 202 });
   }
@@ -497,16 +510,6 @@ export class IngestDurableObject extends DurableObject {
     };
   }
 
-  private hasDirtyRows(): boolean {
-    const visits = this.sqlOne<{ ok: number }>(
-      "SELECT 1 AS ok FROM buffered_visits WHERE dirty = 1 LIMIT 1",
-    );
-    if (visits) return true;
-    const events = this.sqlOne<{ ok: number }>(
-      "SELECT 1 AS ok FROM buffered_custom_events WHERE dirty = 1 LIMIT 1",
-    );
-    return Boolean(events);
-  }
   private async normalizeRecord(
     envelope: IngestEnvelopePayload,
   ): Promise<NormalizeResult> {
@@ -515,7 +518,6 @@ export class IngestDurableObject extends DurableObject {
       getVisitContext: this.getVisitContext.bind(this),
       findRecentVisitorSession: this.findRecentVisitorSession.bind(this),
       insertBufferedCustomEvent: this.insertBufferedCustomEvent.bind(this),
-      ensureAlarm: this.ensureAlarm.bind(this),
     });
   }
 
@@ -526,6 +528,7 @@ export class IngestDurableObject extends DurableObject {
     const now = toUnixSeconds(record.receivedAt);
 
     if (record.previousVisitId && record.previousVisitStartedAt !== null) {
+      const flushDueAt = record.receivedAt + D1_FLUSH_INTERVAL_MS;
       const durationMs = Math.max(
         0,
         record.startedAt - record.previousVisitStartedAt,
@@ -541,6 +544,15 @@ export class IngestDurableObject extends DurableObject {
               duration_ms = ?,
               duration_source = 'server',
               dirty = 1,
+              buffer_revision = buffer_revision + 1,
+              flush_due_at = CASE
+                WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                ELSE flush_due_at
+              END,
+              next_due_at = CASE
+                WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                ELSE flush_due_at
+              END,
               updated_at = ?
           WHERE visit_id = ? AND status IN ('open', 'hidden_pending')
         `,
@@ -548,6 +560,10 @@ export class IngestDurableObject extends DurableObject {
         record.startedAt,
         record.startedAt,
         durationMs,
+        flushDueAt,
+        flushDueAt,
+        flushDueAt,
+        flushDueAt,
         now,
         record.previousVisitId,
       );
@@ -562,6 +578,7 @@ export class IngestDurableObject extends DurableObject {
       return;
     }
     logger.info("do.ingest.pageview_buffered");
+    await this.advanceWaitingCustomEvents(record.siteId, record.visitId);
     await this.pushRealtimeRecord({
       id: record.visitId,
       eventType: "visit",
@@ -615,6 +632,49 @@ export class IngestDurableObject extends DurableObject {
       longitude: record.longitude,
     });
     await this.pushBufferedCustomEventsForVisit(record);
+  }
+
+  private async advanceWaitingCustomEvents(
+    siteId: string,
+    visitId: string,
+  ): Promise<void> {
+    const visit = this.sqlOne<{ flushDueAt: number | null }>(
+      `
+        SELECT flush_due_at AS flushDueAt
+        FROM buffered_visits
+        WHERE site_id = ? AND visit_id = ?
+        LIMIT 1
+      `,
+      siteId,
+      visitId,
+    );
+    if (!visit || visit.flushDueAt === null) return;
+
+    this.sqlRun(
+      `
+        UPDATE buffered_custom_events
+        SET flush_due_at = CASE
+              WHEN flush_due_at IS NULL OR flush_due_at > ? THEN ?
+              ELSE flush_due_at
+            END,
+            next_due_at = CASE
+              WHEN next_due_at IS NULL OR next_due_at > ? THEN ?
+              ELSE next_due_at
+            END,
+            flush_attempts = 0,
+            last_flush_error = NULL
+        WHERE site_id = ?
+          AND visit_id = ?
+          AND dirty = 1
+          AND last_flush_error = 'waiting_for_visit'
+      `,
+      visit.flushDueAt,
+      visit.flushDueAt,
+      visit.flushDueAt,
+      visit.flushDueAt,
+      siteId,
+      visitId,
+    );
   }
 
   private async pushBufferedCustomEventsForVisit(
@@ -812,6 +872,7 @@ export class IngestDurableObject extends DurableObject {
       const exitReason = useHiddenFallback
         ? "hidden_timeout"
         : record.exitReason || "pagehide";
+      const flushDueAt = record.receivedAt + D1_FLUSH_INTERVAL_MS;
       closedDurationMs = durationMs;
       closedDurationSource = durationSource;
       closedExitReason = exitReason;
@@ -828,6 +889,15 @@ export class IngestDurableObject extends DurableObject {
               duration_source = ?,
               exit_reason = ?,
               dirty = 1,
+              buffer_revision = buffer_revision + 1,
+              flush_due_at = CASE
+                WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                ELSE flush_due_at
+              END,
+              next_due_at = CASE
+                WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                ELSE flush_due_at
+              END,
               updated_at = ?
           WHERE visit_id = ? AND status IN ('open', 'hidden_pending')
         `,
@@ -837,6 +907,10 @@ export class IngestDurableObject extends DurableObject {
         durationMs,
         durationSource,
         exitReason,
+        flushDueAt,
+        flushDueAt,
+        flushDueAt,
+        flushDueAt,
         toUnixSeconds(record.receivedAt),
         visit.visitId,
       );
@@ -926,6 +1000,7 @@ export class IngestDurableObject extends DurableObject {
     logger: InvocationLogger,
   ): Promise<void> {
     const updatedAt = toUnixSeconds(record.receivedAt);
+    const flushDueAt = record.receivedAt + D1_FLUSH_INTERVAL_MS;
     if (record.visibilityState === "hidden") {
       let rowsWritten = this.sqlRun(
         `
@@ -934,6 +1009,18 @@ export class IngestDurableObject extends DurableObject {
               hidden_at = ?,
               last_activity_at = CASE WHEN last_activity_at > ? THEN last_activity_at ELSE ? END,
               dirty = 1,
+              buffer_revision = buffer_revision + 1,
+              flush_due_at = CASE
+                WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                ELSE flush_due_at
+              END,
+              next_due_at = MIN(
+                CASE
+                  WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                  ELSE flush_due_at
+                END,
+                ?
+              ),
               updated_at = ?
           WHERE site_id = ?
             AND visit_id = ?
@@ -942,6 +1029,11 @@ export class IngestDurableObject extends DurableObject {
         record.eventAt,
         record.eventAt,
         record.eventAt,
+        flushDueAt,
+        flushDueAt,
+        flushDueAt,
+        flushDueAt,
+        record.eventAt + HIDDEN_LEAVE_GRACE_MS,
         updatedAt,
         record.siteId,
         record.visitId,
@@ -953,6 +1045,18 @@ export class IngestDurableObject extends DurableObject {
             SET hidden_at = COALESCE(hidden_at, ?),
                 last_activity_at = CASE WHEN last_activity_at > ? THEN last_activity_at ELSE ? END,
                 dirty = 1,
+                buffer_revision = buffer_revision + 1,
+                flush_due_at = CASE
+                  WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                  ELSE flush_due_at
+                END,
+                next_due_at = MIN(
+                  CASE
+                    WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                    ELSE flush_due_at
+                  END,
+                  COALESCE(hidden_at, ?) + ?
+                ),
                 updated_at = ?
             WHERE site_id = ?
               AND visit_id = ?
@@ -961,6 +1065,12 @@ export class IngestDurableObject extends DurableObject {
           record.eventAt,
           record.eventAt,
           record.eventAt,
+          flushDueAt,
+          flushDueAt,
+          flushDueAt,
+          flushDueAt,
+          record.eventAt,
+          HIDDEN_LEAVE_GRACE_MS,
           updatedAt,
           record.siteId,
           record.visitId,
@@ -984,6 +1094,18 @@ export class IngestDurableObject extends DurableObject {
             hidden_at = NULL,
             last_activity_at = CASE WHEN last_activity_at > ? THEN last_activity_at ELSE ? END,
             dirty = 1,
+            buffer_revision = buffer_revision + 1,
+            flush_due_at = CASE
+              WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+              ELSE flush_due_at
+            END,
+            next_due_at = MIN(
+              CASE
+                WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                ELSE flush_due_at
+              END,
+              ?
+            ),
             updated_at = ?
         WHERE site_id = ?
           AND visit_id = ?
@@ -992,6 +1114,11 @@ export class IngestDurableObject extends DurableObject {
       `,
       record.eventAt,
       record.eventAt,
+      flushDueAt,
+      flushDueAt,
+      flushDueAt,
+      flushDueAt,
+      record.eventAt + VISIT_TIMEOUT_MS,
       updatedAt,
       record.siteId,
       record.visitId,
@@ -1154,6 +1281,7 @@ export class IngestDurableObject extends DurableObject {
     logger: InvocationLogger,
   ): Promise<void> {
     const updatedAt = toUnixSeconds(Date.now());
+    const flushDueAt = Date.now() + D1_FLUSH_INTERVAL_MS;
     let serverSessionId =
       this.sqlOne<{ sessionId: string }>(
         `
@@ -1169,11 +1297,47 @@ export class IngestDurableObject extends DurableObject {
     const rowsUpdated = this.sqlRun(
       `
         UPDATE buffered_visits
-        SET user_id = ?, user_name = ?, dirty = 1, updated_at = ?
+        SET user_id = ?, user_name = ?, dirty = 1,
+            buffer_revision = buffer_revision + 1,
+            flush_due_at = CASE
+              WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+              ELSE flush_due_at
+            END,
+            next_due_at = CASE
+              WHEN status = 'open' THEN MIN(
+                CASE
+                  WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                  ELSE flush_due_at
+                END,
+                last_activity_at + ?
+              )
+              WHEN status = 'hidden_pending' THEN MIN(
+                CASE
+                  WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                  ELSE flush_due_at
+                END,
+                COALESCE(hidden_at, last_activity_at) + ?
+              )
+              ELSE CASE
+                WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                ELSE flush_due_at
+              END
+            END,
+            updated_at = ?
         WHERE visit_id = ? AND site_id = ?
       `,
       record.userId,
       record.userName || null,
+      flushDueAt,
+      flushDueAt,
+      flushDueAt,
+      flushDueAt,
+      VISIT_TIMEOUT_MS,
+      flushDueAt,
+      flushDueAt,
+      HIDDEN_LEAVE_GRACE_MS,
+      flushDueAt,
+      flushDueAt,
       updatedAt,
       record.visitId,
       record.siteId,
@@ -1183,10 +1347,23 @@ export class IngestDurableObject extends DurableObject {
     this.sqlRun(
       `
         UPDATE buffered_custom_events
-        SET user_id = ?, dirty = 1
+        SET user_id = ?, dirty = 1,
+            flush_due_at = CASE
+              WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+              ELSE flush_due_at
+            END,
+            next_due_at = CASE
+              WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+              ELSE flush_due_at
+            END,
+            buffer_revision = buffer_revision + 1
         WHERE visit_id = ? AND site_id = ?
       `,
       record.userId,
+      flushDueAt,
+      flushDueAt,
+      flushDueAt,
+      flushDueAt,
       record.visitId,
       record.siteId,
     );
@@ -1227,11 +1404,47 @@ export class IngestDurableObject extends DurableObject {
       this.sqlRun(
         `
           UPDATE buffered_visits
-          SET user_id = ?, user_name = ?, dirty = 1, updated_at = ?
+          SET user_id = ?, user_name = ?, dirty = 1,
+              buffer_revision = buffer_revision + 1,
+              flush_due_at = CASE
+                WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                ELSE flush_due_at
+              END,
+              next_due_at = CASE
+                WHEN status = 'open' THEN MIN(
+                  CASE
+                    WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                    ELSE flush_due_at
+                  END,
+                  last_activity_at + ?
+                )
+                WHEN status = 'hidden_pending' THEN MIN(
+                  CASE
+                    WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                    ELSE flush_due_at
+                  END,
+                  COALESCE(hidden_at, last_activity_at) + ?
+                )
+                ELSE CASE
+                  WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
+                  ELSE flush_due_at
+                END
+              END,
+              updated_at = ?
           WHERE session_id = ? AND site_id = ? AND visit_id != ? AND (user_id = '' OR user_id IS NULL)
         `,
         record.userId,
         record.userName || null,
+        flushDueAt,
+        flushDueAt,
+        flushDueAt,
+        flushDueAt,
+        VISIT_TIMEOUT_MS,
+        flushDueAt,
+        flushDueAt,
+        HIDDEN_LEAVE_GRACE_MS,
+        flushDueAt,
+        flushDueAt,
         updatedAt,
         serverSessionId,
         record.siteId,
@@ -1356,22 +1569,91 @@ export class IngestDurableObject extends DurableObject {
     await pushRealtimeRecordToSockets(this.sockets, record);
   }
 
-  private async ensureAlarm(logger?: InvocationLogger): Promise<void> {
+  private async reconcileAlarm(
+    logger: InvocationLogger,
+    afterMaintenance = false,
+    alarmInfo?: { retryCount?: number; isRetry?: boolean },
+  ): Promise<void> {
     const now = Date.now();
-    const existing = await this.doState.storage.getAlarm();
-    if (!existing || existing <= now) {
-      const scheduledAt = now + D1_FLUSH_INTERVAL_MS;
-      await this.doState.storage.setAlarm(scheduledAt);
-      logger?.info("do.alarm.scheduled");
-    }
-  }
+    const nextDue = getEarliestDueWork({
+      sqlOne: <T>(query: string, ...bindings: SqlBinding[]) =>
+        this.sqlOne<T>(query, ...bindings),
+    });
+    const current = await this.doState.storage.getAlarm();
 
-  private async hasOpenVisits(): Promise<boolean> {
-    return (
-      this.sqlOne<{ ok: number }>(
-        "SELECT 1 AS ok FROM buffered_visits WHERE status IN ('open', 'hidden_pending') LIMIT 1",
-      ) !== null
-    );
+    if (nextDue.nextDueAt === null) {
+      if (current !== null) {
+        await this.doState.storage.deleteAlarm();
+        logger.info("do.alarm.reconciled", {
+          action: "deleted",
+          previousAlarmAt: current,
+          targetAlarmAt: null,
+          nextDueAt: null,
+          nextDueKind: null,
+          nextDueEntity: null,
+          afterMaintenance,
+          isOverdueRetry: false,
+          retryCount: alarmInfo?.retryCount ?? 0,
+          isRetry: Boolean(alarmInfo?.isRetry),
+        });
+      }
+      return;
+    }
+
+    const isOverdue = nextDue.nextDueAt <= now;
+    const target =
+      isOverdue && afterMaintenance
+        ? now + D1_FLUSH_INTERVAL_MS
+        : isOverdue
+          ? now
+          : nextDue.nextDueAt;
+
+    if (current === null) {
+      await this.doState.storage.setAlarm(target);
+      logger.info("do.alarm.reconciled", {
+        action: "set",
+        previousAlarmAt: null,
+        targetAlarmAt: target,
+        nextDueAt: nextDue.nextDueAt,
+        nextDueKind: nextDue.reason,
+        nextDueEntity: nextDue.entity,
+        afterMaintenance,
+        isOverdueRetry: isOverdue && afterMaintenance,
+        retryCount: alarmInfo?.retryCount ?? 0,
+        isRetry: Boolean(alarmInfo?.isRetry),
+      });
+      return;
+    }
+
+    if (current > target) {
+      await this.doState.storage.setAlarm(target);
+      logger.info("do.alarm.reconciled", {
+        action: "set",
+        previousAlarmAt: current,
+        targetAlarmAt: target,
+        nextDueAt: nextDue.nextDueAt,
+        nextDueKind: nextDue.reason,
+        nextDueEntity: nextDue.entity,
+        afterMaintenance,
+        isOverdueRetry: isOverdue && afterMaintenance,
+        retryCount: alarmInfo?.retryCount ?? 0,
+        isRetry: Boolean(alarmInfo?.isRetry),
+      });
+      return;
+    }
+
+    logger.info("do.alarm.reconciled", {
+      action: "kept",
+      previousAlarmAt: current,
+      targetAlarmAt: target,
+      nextDueAt: nextDue.nextDueAt,
+      nextDueKind: nextDue.reason,
+      nextDueEntity: nextDue.entity,
+      afterMaintenance,
+      isOverdueRetry: isOverdue && afterMaintenance,
+      retryCount: alarmInfo?.retryCount ?? 0,
+      isRetry: Boolean(alarmInfo?.isRetry),
+    });
   }
 
   private hasOpenVisitsForVisitor(siteId: string, visitorId: string): boolean {

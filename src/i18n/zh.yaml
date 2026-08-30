@@ -2506,6 +2506,10 @@ systemPerformance:
   doDiagnosticSiteAlarm: Alarm 状态
   doDiagnosticSiteAlarmNone: 无
   doDiagnosticSiteAlarmDue: 到期
+  doDiagnosticSiteNextDue: 下一次到期
+  doDiagnosticSiteNextDueFlush: Flush
+  doDiagnosticSiteNextDueHidden: 隐藏回退
+  doDiagnosticSiteNextDueTimeout: 访问超时
   doDiagnosticSiteResponseMs: 响应耗时
   doDiagnosticThresholdsHint: 阈值：stale {stale}，timeout {timeout}，hardAged
     {hardAged}，stuck flush_attempts ≥ {stuck}

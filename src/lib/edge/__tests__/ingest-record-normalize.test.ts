@@ -822,7 +822,7 @@ describe("normalizeIngestRecord custom event records", () => {
         buffered: true,
       },
     });
-    expect(state.alarmCount).toBe(1);
+    expect(state.alarmCount).toBe(0);
     expect(state.buffered).toEqual([
       {
         eventId: "event-1",

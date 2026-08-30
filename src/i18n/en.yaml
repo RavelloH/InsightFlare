@@ -2601,6 +2601,10 @@ systemPerformance:
   doDiagnosticSiteAlarm: Alarm
   doDiagnosticSiteAlarmNone: None
   doDiagnosticSiteAlarmDue: Due
+  doDiagnosticSiteNextDue: Next due
+  doDiagnosticSiteNextDueFlush: Flush
+  doDiagnosticSiteNextDueHidden: Hidden fallback
+  doDiagnosticSiteNextDueTimeout: Visit timeout
   doDiagnosticSiteResponseMs: Response time
   doDiagnosticThresholdsHint: Thresholds — stale {stale}, timeout {timeout},
     hardAged {hardAged}, stuck flush_attempts ≥ {stuck}

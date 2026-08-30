@@ -6,6 +6,7 @@ import {
   VISIT_TIMEOUT_MS,
 } from "./ingest-constants";
 import { jsonResponse } from "./ingest-normalize";
+import { getEarliestDueWork } from "./ingest-scheduler";
 import type { SqlReader } from "./ingest-types";
 
 interface DiagnosticContext extends SqlReader {
@@ -115,6 +116,7 @@ export async function handleIngestDiagnostic(
   } catch {
     alarmAt = null;
   }
+  const nextDue = getEarliestDueWork(context);
 
   return jsonResponse({
     ok: true,
@@ -154,6 +156,9 @@ export async function handleIngestDiagnostic(
     },
     alarm: {
       scheduledAt: alarmAt,
+      nextDueAt: nextDue.nextDueAt,
+      nextDueKind: nextDue.reason,
+      nextDueEntity: nextDue.entity,
     },
   });
 }

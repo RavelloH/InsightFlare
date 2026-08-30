@@ -1657,6 +1657,12 @@ export function generateDemoDoDiagnostic(): DoDiagnosticAggregate {
               openTotal > 0
                 ? generatedAt + Math.floor(rng() * 60 * 1000)
                 : null,
+            nextDueAt:
+              openTotal > 0
+                ? generatedAt + Math.floor(rng() * 60 * 1000)
+                : null,
+            nextDueKind: openTotal > 0 ? "visit_timeout" : null,
+            nextDueEntity: openTotal > 0 ? "visit" : null,
           },
         },
       };

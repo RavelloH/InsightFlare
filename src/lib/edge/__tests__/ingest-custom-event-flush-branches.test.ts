@@ -30,6 +30,9 @@ function bufferedCustomEvent(
     userId: "",
     dirty: 1,
     flushAttempts: 0,
+    flushDueAt: NOW,
+    nextDueAt: NOW,
+    bufferRevision: 1,
     createdAt: Math.floor(NOW / 1000),
     ...overrides,
   };
@@ -125,7 +128,7 @@ describe("custom event individual flush branch coverage", () => {
     vi.restoreAllMocks();
   });
 
-  it("deletes buffered custom events while waiting for their visit", async () => {
+  it("backs off buffered custom events while waiting for their visit", async () => {
     const context = createFlushContext({ visitExists: false });
 
     await expect(
@@ -134,8 +137,14 @@ describe("custom event individual flush branch coverage", () => {
 
     expect(context.batch).not.toHaveBeenCalled();
     expect(context.sqlRun).toHaveBeenCalledWith(
-      "DELETE FROM buffered_custom_events WHERE event_id IN (?)",
+      "UPDATE buffered_custom_events SET flush_attempts = ?, last_flush_error = 'waiting_for_visit', flush_due_at = ?, next_due_at = ? WHERE event_id = ? AND buffer_revision = ? AND flush_attempts = ? AND last_flush_error IS ?",
+      1,
+      NOW + 60_000,
+      NOW + 60_000,
       "event-1",
+      1,
+      0,
+      null,
     );
     expect(context.observability.warn).toHaveBeenCalledWith(
       "do.flush.custom_event_waiting_for_visit",
@@ -184,13 +193,15 @@ describe("custom event individual flush branch coverage", () => {
     );
     expect(context.sqlRun).toHaveBeenNthCalledWith(
       1,
-      "UPDATE buffered_custom_events SET dirty = 0, flush_attempts = 0, last_flush_error = NULL WHERE event_id IN (?)",
+      "UPDATE buffered_custom_events SET dirty = 0, flush_attempts = 0, last_flush_error = NULL, flush_due_at = NULL, next_due_at = NULL WHERE (event_id = ? AND buffer_revision = ?)",
       "event-1",
+      1,
     );
     expect(context.sqlRun).toHaveBeenNthCalledWith(
       2,
-      "DELETE FROM buffered_custom_events WHERE event_id IN (?)",
+      "DELETE FROM buffered_custom_events WHERE (event_id = ? AND buffer_revision = ?)",
       "event-1",
+      1,
     );
     const d1Statements = context.observability.increment.mock.calls
       .filter(([counter]) => counter === "d1Statements")
@@ -211,11 +222,39 @@ describe("custom event individual flush branch coverage", () => {
 
     expect(context.batch).toHaveBeenCalledTimes(1);
     expect(context.sqlRun).toHaveBeenCalledWith(
-      "DELETE FROM buffered_custom_events WHERE event_id IN (?)",
+      "UPDATE buffered_custom_events SET flush_attempts = ?, last_flush_error = ?, flush_due_at = ?, next_due_at = ? WHERE event_id = ? AND buffer_revision = ? AND flush_attempts = ? AND last_flush_error IS ?",
+      1,
+      "insert_did_not_create_event",
+      NOW + 60_000,
+      NOW + 60_000,
       "event-1",
+      1,
+      0,
+      null,
     );
     expect(context.observability.warn).toHaveBeenCalledWith(
       "do.flush.custom_event_insert_not_confirmed",
+    );
+  });
+
+  it("normalizes non-Error D1 failures before scheduling a retry", async () => {
+    const context = createFlushContext({});
+    context.batch.mockRejectedValue("string failure");
+
+    await expect(
+      flushCustomEventRowIndividually(context, bufferedCustomEvent()),
+    ).resolves.toBe(false);
+
+    expect(context.sqlRun).toHaveBeenCalledWith(
+      "UPDATE buffered_custom_events SET flush_attempts = ?, last_flush_error = ?, flush_due_at = ?, next_due_at = ? WHERE event_id = ? AND buffer_revision = ? AND flush_attempts = ? AND last_flush_error IS ?",
+      1,
+      "string failure",
+      NOW + 60_000,
+      NOW + 60_000,
+      "event-1",
+      1,
+      0,
+      null,
     );
   });
 
@@ -237,5 +276,31 @@ describe("custom event individual flush branch coverage", () => {
       context.calls.some((call) => call.sql.includes("custom_event_json_keys")),
     ).toBe(false);
     expect(context.batch).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the documented exponential retry sequence", async () => {
+    const delays = [60_000, 120_000, 240_000, 480_000, 900_000, 900_000];
+
+    for (const [previousAttempts, delay] of delays.entries()) {
+      const context = createFlushContext({ visitExists: false });
+      const row = bufferedCustomEvent({
+        flushAttempts: previousAttempts,
+        flushDueAt: NOW,
+        nextDueAt: NOW,
+      });
+
+      await flushCustomEventRowIndividually(context, row);
+
+      expect(context.sqlRun).toHaveBeenCalledWith(
+        "UPDATE buffered_custom_events SET flush_attempts = ?, last_flush_error = 'waiting_for_visit', flush_due_at = ?, next_due_at = ? WHERE event_id = ? AND buffer_revision = ? AND flush_attempts = ? AND last_flush_error IS ?",
+        previousAttempts + 1,
+        NOW + delay,
+        NOW + delay,
+        "event-1",
+        1,
+        previousAttempts,
+        null,
+      );
+    }
   });
 });

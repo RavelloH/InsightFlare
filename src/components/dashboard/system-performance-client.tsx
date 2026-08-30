@@ -600,12 +600,30 @@ function DoDiagnosticSiteRow({
   const d = site.diagnostic;
   const o = d.visits.open;
   const stuckTotal = d.visits.dirty.stuck + d.customEvents.stuck;
+  const nextDueKindLabel =
+    d.alarm.nextDueKind === "flush"
+      ? t.doDiagnosticSiteNextDueFlush
+      : d.alarm.nextDueKind === "hidden_fallback"
+        ? t.doDiagnosticSiteNextDueHidden
+        : d.alarm.nextDueKind === "visit_timeout"
+          ? t.doDiagnosticSiteNextDueTimeout
+          : null;
   const alarmText =
     d.alarm.scheduledAt === null
       ? t.doDiagnosticSiteAlarmNone
       : d.alarm.scheduledAt <= d.snapshotAt
         ? t.doDiagnosticSiteAlarmDue
         : `+${formatAge(locale, d.alarm.scheduledAt - d.snapshotAt)}`;
+  const nextDueText =
+    d.alarm.nextDueAt === null
+      ? `${t.doDiagnosticSiteNextDue}: —`
+      : d.alarm.nextDueAt <= d.snapshotAt
+        ? `${t.doDiagnosticSiteNextDue}: due`
+        : `${t.doDiagnosticSiteNextDue}: +${formatAge(locale, d.alarm.nextDueAt - d.snapshotAt)}`;
+  const alarmIsLate =
+    d.alarm.scheduledAt !== null &&
+    d.alarm.nextDueAt !== null &&
+    d.alarm.scheduledAt > d.alarm.nextDueAt;
   return (
     <TableRow key={site.siteId}>
       <TableCell>
@@ -643,8 +661,18 @@ function DoDiagnosticSiteRow({
       >
         {formatMetricNumber(locale, stuckTotal)}
       </TableCell>
-      <TableCell className="text-right font-mono text-xs">
-        {alarmText}
+      <TableCell
+        className={cn(
+          "text-right font-mono text-xs",
+          alarmIsLate && "text-destructive",
+        )}
+        title={nextDueKindLabel ?? undefined}
+      >
+        <div>{alarmText}</div>
+        <div className="text-[10px] text-muted-foreground">
+          {nextDueText}
+          {nextDueKindLabel ? ` · ${nextDueKindLabel}` : ""}
+        </div>
       </TableCell>
       <TableCell className="text-right font-mono text-xs">
         {formatMetricNumber(locale, site.durationMs)} ms

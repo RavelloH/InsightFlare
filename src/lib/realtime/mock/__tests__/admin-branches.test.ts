@@ -133,6 +133,9 @@ function makeDiagnosticPayload(
     },
     alarm: {
       scheduledAt: null,
+      nextDueAt: null,
+      nextDueKind: null,
+      nextDueEntity: null,
     },
   };
 }

@@ -2464,6 +2464,10 @@ export interface AppMessages {
     doDiagnosticSiteAlarm: string;
     doDiagnosticSiteAlarmNone: string;
     doDiagnosticSiteAlarmDue: string;
+    doDiagnosticSiteNextDue: string;
+    doDiagnosticSiteNextDueFlush: string;
+    doDiagnosticSiteNextDueHidden: string;
+    doDiagnosticSiteNextDueTimeout: string;
     doDiagnosticSiteResponseMs: string;
     doDiagnosticThresholdsHint: string;
     doDiagnosticHealthy: string;
@@ -5239,6 +5243,10 @@ const enMessages = {
     doDiagnosticSiteAlarm: "Alarm",
     doDiagnosticSiteAlarmNone: "None",
     doDiagnosticSiteAlarmDue: "Due",
+    doDiagnosticSiteNextDue: "Next due",
+    doDiagnosticSiteNextDueFlush: "Flush",
+    doDiagnosticSiteNextDueHidden: "Hidden fallback",
+    doDiagnosticSiteNextDueTimeout: "Visit timeout",
     doDiagnosticSiteResponseMs: "Response time",
     doDiagnosticThresholdsHint:
       "Thresholds — stale {stale}, timeout {timeout}, hardAged {hardAged}, stuck flush_attempts ≥ {stuck}",
@@ -7927,6 +7935,10 @@ const zhMessages = {
     doDiagnosticSiteAlarm: "Alarm 状态",
     doDiagnosticSiteAlarmNone: "无",
     doDiagnosticSiteAlarmDue: "到期",
+    doDiagnosticSiteNextDue: "下一次到期",
+    doDiagnosticSiteNextDueFlush: "Flush",
+    doDiagnosticSiteNextDueHidden: "隐藏回退",
+    doDiagnosticSiteNextDueTimeout: "访问超时",
     doDiagnosticSiteResponseMs: "响应耗时",
     doDiagnosticThresholdsHint:
       "阈值：stale {stale}，timeout {timeout}，hardAged {hardAged}，stuck flush_attempts ≥ {stuck}",
@@ -10701,6 +10713,10 @@ const jaMessages = {
     doDiagnosticSiteAlarm: "アラーム",
     doDiagnosticSiteAlarmNone: "なし",
     doDiagnosticSiteAlarmDue: "期限到来",
+    doDiagnosticSiteNextDue: "次回期限",
+    doDiagnosticSiteNextDueFlush: "フラッシュ",
+    doDiagnosticSiteNextDueHidden: "非表示フォールバック",
+    doDiagnosticSiteNextDueTimeout: "訪問タイムアウト",
     doDiagnosticSiteResponseMs: "応答時間",
     doDiagnosticThresholdsHint:
       "しきい値：stale {stale}、timeout {timeout}、hardAged {hardAged}、stuck flush_attempts ≥ {stuck}",

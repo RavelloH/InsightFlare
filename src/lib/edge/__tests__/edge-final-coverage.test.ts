@@ -143,6 +143,9 @@ function bufferedVisit(
     perfInpMs: null,
     dirty: 1,
     flushAttempts: 0,
+    flushDueAt: NOW,
+    nextDueAt: NOW,
+    bufferRevision: 1,
     createdAt: Math.floor((NOW - 31 * 60 * 1000) / 1000),
     updatedAt: Math.floor((NOW - 30 * 60 * 1000) / 1000),
     ...overrides,
@@ -164,6 +167,9 @@ function bufferedCustomEvent(
     userId: "",
     dirty: 1,
     flushAttempts: 0,
+    flushDueAt: NOW,
+    nextDueAt: NOW,
+    bufferRevision: 1,
     createdAt: Math.floor(NOW / 1000),
     ...overrides,
   };
@@ -337,8 +343,15 @@ describe("edge ingest flush edge coverage", () => {
     ).resolves.toBe(false);
 
     expect(context.sqlRun).toHaveBeenCalledWith(
-      "DELETE FROM buffered_custom_events WHERE event_id IN (?)",
+      "UPDATE buffered_custom_events SET flush_attempts = ?, last_flush_error = ?, flush_due_at = ?, next_due_at = ? WHERE event_id = ? AND buffer_revision = ? AND flush_attempts = ? AND last_flush_error IS ?",
+      1,
+      "Failed to resolve custom event name dictionary id",
+      NOW + 60_000,
+      NOW + 60_000,
       "event-1",
+      1,
+      0,
+      null,
     );
     expect(observability.increment).toHaveBeenCalledWith("failedStatements", 1);
     expect(observability.error).toHaveBeenCalledWith(
@@ -352,9 +365,11 @@ describe("edge ingest flush edge coverage", () => {
     await flushPendingToD1(context);
 
     expect(context.env.DB.batch).toHaveBeenCalledTimes(1);
-    expect(context.sqlRun).toHaveBeenCalledWith(
-      "DELETE FROM buffered_visits WHERE visit_id IN (?)",
+    expect(context.sqlRun).toHaveBeenNthCalledWith(
+      2,
+      "DELETE FROM buffered_visits WHERE (visit_id = ? AND buffer_revision = ?)",
       "visit-1",
+      1,
     );
   });
 });

@@ -128,6 +128,9 @@ export interface DoDiagnosticPayload {
   customEvents: DoDiagnosticCustomEvents;
   alarm: {
     scheduledAt: number | null;
+    nextDueAt: number | null;
+    nextDueKind: "flush" | "hidden_fallback" | "visit_timeout" | null;
+    nextDueEntity: "visit" | "custom_event" | null;
   };
 }
 

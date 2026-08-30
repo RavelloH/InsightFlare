@@ -160,6 +160,9 @@ function diagnosticPayload(
     },
     alarm: {
       scheduledAt: null,
+      nextDueAt: null,
+      nextDueKind: null,
+      nextDueEntity: null,
     },
     ...overrides,
   };
