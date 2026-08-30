@@ -340,6 +340,9 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
         avgLatencyMs: normal ? 42 : undefined,
         count: normal ? 3 : 2,
         customEvents: normal ? 1 : 0,
+        customBlockedCount: normal ? 0 : 0,
+        highThreatCount: normal ? 0 : 2,
+        mediumThreatCount: 0,
         p50LatencyMs: normal ? 40 : undefined,
         p75LatencyMs: normal ? 45 : undefined,
         p95LatencyMs: normal ? 50 : undefined,
@@ -365,8 +368,9 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
         ? { affectedSites: 1, total: 3, uniqueAsns: 1, uniqueCountries: 1 }
         : {
             affectedSites: 1,
-            highConfidence: 2,
-            mediumConfidence: 0,
+            customBlocked: 0,
+            highThreat: 2,
+            mediumThreat: 0,
             total: 2,
             uniqueAsns: 1,
             uniqueCountries: 1,
@@ -377,19 +381,19 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
     return [
       {
         count: normal ? 3 : 2,
-        highConfidence: normal ? 0 : 2,
+        highThreat: normal ? 0 : 2,
         label: normal ? "E2E Normal Network" : "E2E Bot Network",
       },
     ];
   }
-  if (sql.includes("blob3 AS confidence")) {
+  if (sql.includes("blob3 AS category")) {
     return [
       {
         asn: 64512,
         asOrganization: "E2E Bot Network",
         botScore: 5,
         city: "Beijing",
-        confidence: "high",
+        category: "high_threat",
         continent: "AS",
         country: "CN",
         hostname: "app.example.test",

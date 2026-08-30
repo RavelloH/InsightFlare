@@ -2196,7 +2196,7 @@ export interface AppMessages {
     analyticsEngineDisabledDescription: string;
     openAnalyticsEngine: string;
     openSettings: string;
-    highConfidenceBots: string;
+    highThreatBots: string;
     affectedSites: string;
     uniqueCountries: string;
     noData: string;
@@ -2221,9 +2221,9 @@ export interface AppMessages {
     request: string;
     ip: string;
     userAgent: string;
-    confidence: string;
+    category: string;
     blocked: string;
-    highConfidenceRequests: string;
+    highThreatRequests: string;
     emptyValue: string;
     kind: string;
     botScore: string;
@@ -2254,7 +2254,16 @@ export interface AppMessages {
       access_asn: string;
       missing_browser_provenance: string;
       origin_hostname_mismatch: string;
-      blocked_pathname: string;
+      custom_block: string;
+      blocked_domains: string;
+      blocked_paths: string;
+      blocked_query_parameters: string;
+      blocked_referrers: string;
+      blocked_user_agents: string;
+      blocked_ips: string;
+      blocked_asns: string;
+      blocked_countries: string;
+      blocked_regions: string;
     };
     requestKindLabels: {
       pageview: string;
@@ -2279,11 +2288,11 @@ export interface AppMessages {
       overviewTrendDescription: string;
       trafficCompositionTitle: string;
       trafficCompositionDescription: string;
-      confidenceShareTitle: string;
+      categoryShareTitle: string;
       normalTrafficShare: string;
-      lowConfidenceTraffic: string;
-      mediumConfidenceTraffic: string;
-      highConfidenceTraffic: string;
+      mediumThreatTraffic: string;
+      highThreatTraffic: string;
+      customBlockedTraffic: string;
       latencyTitle: string;
       latencyDescription: string;
       abnormalSubtitle: string;
@@ -4923,20 +4932,20 @@ const enMessages = {
       "This deployment was published without the Analytics Engine binding because the Cloudflare account has not enabled Analytics Engine. Enable it in Cloudflare, then redeploy to collect request-observation data.",
     openAnalyticsEngine: "Open Analytics Engine",
     openSettings: "Open settings",
-    highConfidenceBots: "High-confidence Bots",
+    highThreatBots: "High-threat Bots",
     affectedSites: "Affected Sites",
     uniqueCountries: "Countries",
     noData: "No request data in this window.",
     trendTitle: "Routing Trend",
     trendDescription:
       "Normal requests, abnormal requests, and diversion ratio by interval.",
-    recentTitle: "Recent Bot Requests",
+    recentTitle: "Recent Abnormal Requests",
     recentDescription:
-      "Detailed records written only to the bot Analytics Engine dataset.",
+      "Detailed records written only to the abnormal Analytics Engine dataset.",
     recentLoadedAll: "All records loaded",
-    detailTitle: "Bot Request Detail",
+    detailTitle: "Abnormal Request Detail",
     detailSubtitle:
-      "Inspect detection signals, network context, and client data for this diverted request.",
+      "Inspect detection signals, network context, and client data for this abnormal request.",
     client: "Client",
     edge: "Edge",
     identifiers: "Identifiers",
@@ -4951,9 +4960,9 @@ const enMessages = {
     request: "Request",
     ip: "IP",
     userAgent: "User agent",
-    confidence: "Confidence",
+    category: "Category",
     blocked: "Blocked",
-    highConfidenceRequests: "High-confidence Requests",
+    highThreatRequests: "High-threat Requests",
     emptyValue: "Unknown",
     kind: "Type",
     botScore: "Bot Score",
@@ -4984,7 +4993,16 @@ const enMessages = {
       access_asn: "Access ASN",
       missing_browser_provenance: "Missing browser provenance",
       origin_hostname_mismatch: "Origin and hostname mismatch",
-      blocked_pathname: "Blocked pathname",
+      custom_block: "Custom block rule matched",
+      blocked_domains: "Blocked domains",
+      blocked_paths: "Blocked paths",
+      blocked_query_parameters: "Blocked query parameters",
+      blocked_referrers: "Blocked referrers",
+      blocked_user_agents: "Blocked User-Agents",
+      blocked_ips: "Blocked IPs",
+      blocked_asns: "Blocked ASNs",
+      blocked_countries: "Blocked countries",
+      blocked_regions: "Blocked regions",
     },
     requestKindLabels: {
       pageview: "Pageview",
@@ -5011,16 +5029,16 @@ const enMessages = {
       trafficCompositionTitle: "Request composition",
       trafficCompositionDescription:
         "Normal requests, abnormal requests, and page events on the same timeline.",
-      confidenceShareTitle: "Request confidence breakdown",
+      categoryShareTitle: "Request category breakdown",
       normalTrafficShare: "Normal traffic",
-      lowConfidenceTraffic: "Low-confidence traffic",
-      mediumConfidenceTraffic: "Medium-confidence traffic",
-      highConfidenceTraffic: "High-confidence traffic",
+      mediumThreatTraffic: "Medium-threat traffic",
+      highThreatTraffic: "High-threat traffic",
+      customBlockedTraffic: "Custom-blocked traffic",
       latencyTitle: "Edge latency trend",
       latencyDescription:
         "P50 / P75 / P95 / P99 edge latency recorded when normal requests are written to AE.",
       abnormalSubtitle:
-        "Focus on diverted abnormal requests. Maps and tables show only red abnormal traffic.",
+        "Focus on abnormal requests. Maps and tables include medium-threat, high-threat, and custom-blocked traffic.",
       normalSubtitle:
         "Focus on requests that entered the normal collection pipeline. Maps and tables show only normal traffic.",
       requests: "Requests",
@@ -7627,17 +7645,17 @@ const zhMessages = {
       "当前部署未绑定 Analytics Engine，因为 Cloudflare 账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用，然后重新部署以采集请求观测数据。",
     openAnalyticsEngine: "打开 Analytics Engine",
     openSettings: "打开设置",
-    highConfidenceBots: "高置信机器人",
+    highThreatBots: "高威胁机器人",
     affectedSites: "受影响站点",
     uniqueCountries: "国家/地区",
     noData: "当前时间窗口内没有请求数据。",
     trendTitle: "分流趋势",
     trendDescription: "按时间间隔显示正常请求、异常请求与分流比例。",
-    recentTitle: "最近机器人请求",
-    recentDescription: "这些详细记录只写入机器人 Analytics Engine 数据集。",
+    recentTitle: "最近异常请求",
+    recentDescription: "这些详细记录只写入异常 Analytics Engine 数据集。",
     recentLoadedAll: "已加载全部记录",
-    detailTitle: "机器人请求详情",
-    detailSubtitle: "查看这次分流请求的检测信号、网络和客户端上下文。",
+    detailTitle: "异常请求详情",
+    detailSubtitle: "查看这次异常请求的检测信号、网络和客户端上下文。",
     client: "客户端",
     edge: "边缘",
     identifiers: "标识符",
@@ -7652,9 +7670,9 @@ const zhMessages = {
     request: "请求",
     ip: "IP",
     userAgent: "User-Agent",
-    confidence: "置信度",
+    category: "分类",
     blocked: "拦截",
-    highConfidenceRequests: "高置信请求",
+    highThreatRequests: "高威胁请求",
     emptyValue: "未知",
     kind: "类型",
     botScore: "Bot 分数",
@@ -7685,7 +7703,16 @@ const zhMessages = {
       access_asn: "接入网络 ASN",
       missing_browser_provenance: "缺少浏览器来源信号",
       origin_hostname_mismatch: "Origin 与主机名不匹配",
-      blocked_pathname: "命中路径黑名单",
+      custom_block: "命中自定义屏蔽规则",
+      blocked_domains: "命中域名屏蔽规则",
+      blocked_paths: "命中路径屏蔽规则",
+      blocked_query_parameters: "命中查询参数屏蔽规则",
+      blocked_referrers: "命中引荐来源屏蔽规则",
+      blocked_user_agents: "命中 User-Agent 屏蔽规则",
+      blocked_ips: "命中 IP 屏蔽规则",
+      blocked_asns: "命中 ASN 屏蔽规则",
+      blocked_countries: "命中国家/地区屏蔽规则",
+      blocked_regions: "命中区域屏蔽规则",
     },
     requestKindLabels: {
       pageview: "页面浏览",
@@ -7712,16 +7739,16 @@ const zhMessages = {
       trafficCompositionTitle: "请求构成",
       trafficCompositionDescription:
         "正常请求、异常请求和页面事件在同一时间轴上的变化。",
-      confidenceShareTitle: "请求置信度占比",
+      categoryShareTitle: "请求分类占比",
       normalTrafficShare: "正常流量",
-      lowConfidenceTraffic: "低置信度流量",
-      mediumConfidenceTraffic: "中置信度流量",
-      highConfidenceTraffic: "高置信度流量",
+      mediumThreatTraffic: "中威胁流量",
+      highThreatTraffic: "高威胁流量",
+      customBlockedTraffic: "自定义屏蔽流量",
       latencyTitle: "边缘耗时趋势",
       latencyDescription:
         "正常请求写入 AE 时记录的 P50 / P75 / P95 / P99 边缘耗时。",
       abnormalSubtitle:
-        "聚焦已分流的异常请求，地图和统计表只显示红色异常流量。",
+        "聚焦异常请求，地图和统计表包含中威胁、高威胁和自定义屏蔽流量。",
       normalSubtitle:
         "聚焦进入正常采集链路的请求，地图和统计表只显示绿色正常流量。",
       requests: "请求数",
@@ -10396,20 +10423,20 @@ const jaMessages = {
       "Cloudflare アカウントで Analytics Engine が有効化されていないため、このデプロイは Analytics Engine バインディングなしで公開されました。Cloudflare で有効化してから再デプロイすると、リクエスト監視データを収集できます。",
     openAnalyticsEngine: "Analytics Engine を開く",
     openSettings: "設定を開く",
-    highConfidenceBots: "高信頼度 Bot",
+    highThreatBots: "高脅威 Bot",
     affectedSites: "影響サイト",
     uniqueCountries: "国",
     noData: "この期間にリクエストデータはありません。",
     trendTitle: "ルーティング推移",
     trendDescription:
       "通常リクエスト、異常リクエスト、分流比率を間隔ごとに表示します。",
-    recentTitle: "最近の Bot リクエスト",
+    recentTitle: "最近の異常リクエスト",
     recentDescription:
-      "Bot 用 Analytics Engine データセットにのみ書き込まれた詳細記録です。",
+      "異常 Analytics Engine データセットにのみ書き込まれた詳細記録です。",
     recentLoadedAll: "すべての記録を読み込みました",
-    detailTitle: "Bot リクエスト詳細",
+    detailTitle: "異常リクエスト詳細",
     detailSubtitle:
-      "この分流リクエストの検出シグナル、ネットワークコンテキスト、クライアントデータを確認します。",
+      "この異常リクエストの検出シグナル、ネットワークコンテキスト、クライアントデータを確認します。",
     client: "クライアント",
     edge: "エッジ",
     identifiers: "識別子",
@@ -10424,9 +10451,9 @@ const jaMessages = {
     request: "リクエスト",
     ip: "IP",
     userAgent: "User-Agent",
-    confidence: "信頼度",
+    category: "カテゴリ",
     blocked: "ブロック済み",
-    highConfidenceRequests: "高信頼度リクエスト",
+    highThreatRequests: "高脅威リクエスト",
     emptyValue: "不明",
     kind: "種別",
     botScore: "Bot スコア",
@@ -10457,7 +10484,16 @@ const jaMessages = {
       access_asn: "アクセス ASN",
       missing_browser_provenance: "ブラウザー由来情報なし",
       origin_hostname_mismatch: "オリジンとホスト名の不一致",
-      blocked_pathname: "ブロック対象パス",
+      custom_block: "カスタムブロックルールに一致",
+      blocked_domains: "ブロック対象ドメイン",
+      blocked_paths: "ブロック対象パス",
+      blocked_query_parameters: "ブロック対象クエリパラメータ",
+      blocked_referrers: "ブロック対象リファラー",
+      blocked_user_agents: "ブロック対象 User-Agent",
+      blocked_ips: "ブロック対象 IP",
+      blocked_asns: "ブロック対象 ASN",
+      blocked_countries: "ブロック対象国",
+      blocked_regions: "ブロック対象地域",
     },
     requestKindLabels: {
       pageview: "ページビュー",
@@ -10484,16 +10520,16 @@ const jaMessages = {
       trafficCompositionTitle: "リクエスト構成",
       trafficCompositionDescription:
         "通常リクエスト、異常リクエスト、ページイベントを同じ時系列で表示します。",
-      confidenceShareTitle: "リクエスト信頼度の内訳",
+      categoryShareTitle: "リクエストカテゴリの内訳",
       normalTrafficShare: "通常トラフィック",
-      lowConfidenceTraffic: "低信頼度トラフィック",
-      mediumConfidenceTraffic: "中信頼度トラフィック",
-      highConfidenceTraffic: "高信頼度トラフィック",
+      mediumThreatTraffic: "中脅威トラフィック",
+      highThreatTraffic: "高脅威トラフィック",
+      customBlockedTraffic: "カスタムブロックトラフィック",
       latencyTitle: "エッジ遅延推移",
       latencyDescription:
         "通常リクエストが AE に書き込まれる際に記録された P50 / P75 / P95 / P99 エッジ遅延です。",
       abnormalSubtitle:
-        "分流された異常リクエストに絞り込み、マップと表には赤色の異常トラフィックのみを表示します。",
+        "異常リクエストに絞り込み、マップと表には中脅威・高脅威・カスタムブロックのトラフィックを表示します。",
       normalSubtitle:
         "通常の収集経路に入ったリクエストに絞り込み、マップと表には通常リクエストのみを表示します。",
       requests: "リクエスト数",

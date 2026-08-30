@@ -15,6 +15,7 @@ import {
   startOfZonedInterval,
   timeZoneOffsetMinutes,
 } from "@/lib/dashboard/time-zone";
+import type { RequestObservationCategory } from "@/lib/edge/bot-protection";
 
 import { requireActor } from "./admin-auth";
 import { bad, forb, jsonResponseFor, na, parseJson } from "./admin-response";
@@ -35,6 +36,8 @@ const WINDOW_OPTIONS_MINUTES = new Set([60, 1440, 10080, 43200]);
 const MAX_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 const CF_ANALYTICS_ENGINE_SQL_ENDPOINT =
   "https://api.cloudflare.com/client/v4/accounts";
+const ABNORMAL_CATEGORY_SQL_FILTER =
+  "blob3 IN ('medium', 'high', 'medium_threat', 'high_threat', 'custom_block')";
 
 function analyticsEngineSqlEndpoint(env: Env): string | null {
   if (env.INSIGHTFLARE_E2E === "1") {
@@ -64,7 +67,7 @@ interface DetailCursor {
 const DIMENSION_TABS: Record<DimensionGroup, readonly string[]> = {
   detection: [
     "reason",
-    "confidence",
+    "category",
     "kind",
     "botScoreBucket",
     "verifiedBotCategory",
@@ -81,7 +84,7 @@ interface BotAnalyticsEvent {
   siteName: string;
   siteDomain: string;
   kind: string;
-  confidence: string;
+  category: RequestObservationCategory;
   reasons: string[];
   ip: string;
   userAgent: string;
@@ -230,6 +233,22 @@ function analyticsSqlString(value: string): string {
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
 }
 
+function normalizeObservationCategory(
+  value: unknown,
+): RequestObservationCategory | null {
+  const category = String(value || "");
+  if (category === "high" || category === "high_threat") {
+    return "high_threat";
+  }
+  if (category === "medium" || category === "medium_threat") {
+    return "medium_threat";
+  }
+  if (category === "custom_block") {
+    return category;
+  }
+  return null;
+}
+
 function buildBotAnalyticsSql(input: {
   dataset: string;
   from: number;
@@ -269,7 +288,7 @@ function buildBotAnalyticsSql(input: {
       timestamp,
       blob1 AS siteId,
       blob2 AS kind,
-      blob3 AS confidence,
+      blob3 AS category,
       blob4 AS reasons,
       blob5 AS ip,
       blob6 AS userAgent,
@@ -289,7 +308,8 @@ function buildBotAnalyticsSql(input: {
       '' AS metadataJson${doubleSelect}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
-      AND timestamp <= toDateTime(${toSeconds})${cursorFilter}
+      AND timestamp <= toDateTime(${toSeconds})
+      AND ${ABNORMAL_CATEGORY_SQL_FILTER}${cursorFilter}
     ORDER BY timestamp DESC${input.includeDoubles ? ", double1 DESC" : ""}
     LIMIT ${input.limit}
     FORMAT JSONEachRow
@@ -386,15 +406,31 @@ function buildCountByBucketSql(input: {
       quantileExactWeighted(0.95)(double3, _sample_interval) AS p95LatencyMs,
       quantileExactWeighted(0.99)(double3, _sample_interval) AS p99LatencyMs`
       : "";
+  const categoryFilter =
+    input.source === "abnormal"
+      ? `
+      AND ${ABNORMAL_CATEGORY_SQL_FILTER}`
+      : "";
+  const categorySelect =
+    input.source === "abnormal"
+      ? `,
+      countIf(blob3 IN ('medium', 'medium_threat')) AS mediumThreatCount,
+      countIf(blob3 IN ('high', 'high_threat')) AS highThreatCount,
+      countIf(blob3 = 'custom_block') AS customBlockedCount`
+      : `,
+      0 AS mediumThreatCount,
+      0 AS highThreatCount,
+      0 AS customBlockedCount`;
   return `
     SELECT
       ${bucketExpression} AS timestampMs,
       count() AS count,
       countIf(blob2 = 'pageview') AS pageviews,
-      countIf(blob2 = 'custom_event') AS customEvents${latencySelect}
+      countIf(blob2 = 'custom_event') AS customEvents${categorySelect}${latencySelect}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
+      ${categoryFilter}
     GROUP BY timestampMs
     ORDER BY timestampMs ASC
     FORMAT JSONEachRow
@@ -414,6 +450,11 @@ function buildMapPointsSql(input: {
   const latColumn = input.source === "normal" ? "double5" : "double3";
   const lonColumn = input.source === "normal" ? "double6" : "double4";
   const countryBlob = input.source === "normal" ? "blob6" : "blob10";
+  const categoryFilter =
+    input.source === "abnormal"
+      ? `
+      AND ${ABNORMAL_CATEGORY_SQL_FILTER}`
+      : "";
   return `
     SELECT
       round(${latColumn}, 3) AS latitude,
@@ -425,6 +466,7 @@ function buildMapPointsSql(input: {
       AND timestamp <= toDateTime(${toSeconds})
       AND ${latColumn} != 0
       AND ${lonColumn} != 0
+      ${categoryFilter}
     GROUP BY latitude, longitude, country
     ORDER BY pointCount DESC
     LIMIT ${input.limit}
@@ -461,17 +503,22 @@ function buildNetworkDimensionSql(input: {
           colo: ["blob10 AS label"],
         };
   const groupColumns = columns[input.dimension];
-  const highConfidenceSelect =
+  const threatSelect =
     input.source === "abnormal"
-      ? ",\n      countIf(blob3 = 'high') AS highConfidence"
-      : ",\n      0 AS highConfidence";
+      ? ",\n      countIf(blob3 IN ('high', 'high_threat')) AS highThreat"
+      : ",\n      0 AS highThreat";
+  const categoryFilter =
+    input.source === "abnormal"
+      ? `\n      AND ${ABNORMAL_CATEGORY_SQL_FILTER}`
+      : "";
   return `
     SELECT
       ${groupColumns.join(",\n      ")},
-      count() AS count${highConfidenceSelect}
+      count() AS count${threatSelect}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
+      ${categoryFilter}
     GROUP BY ${groupColumns.map((column) => column.split(" AS ")[1]).join(", ")}
     ORDER BY count DESC
     LIMIT ${NETWORK_DIMENSION_LIMIT}
@@ -491,8 +538,9 @@ function buildSourceSummarySql(input: {
   const columns =
     input.source === "abnormal"
       ? `
-      countIf(blob3 = 'high') AS highConfidence,
-      countIf(blob3 = 'medium') AS mediumConfidence,
+      countIf(blob3 IN ('high', 'high_threat')) AS highThreat,
+      countIf(blob3 IN ('medium', 'medium_threat')) AS mediumThreat,
+      countIf(blob3 = 'custom_block') AS customBlocked,
       count(DISTINCT blob1) AS affectedSites,
       count(DISTINCT blob15) AS uniqueAsns,
       count(DISTINCT blob10) AS uniqueCountries`
@@ -506,6 +554,7 @@ function buildSourceSummarySql(input: {
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
+      ${input.source === "abnormal" ? `AND ${ABNORMAL_CATEGORY_SQL_FILTER}` : ""}
     FORMAT JSONEachRow
   `;
 }
@@ -525,7 +574,9 @@ function buildDimensionSql(input: {
   const fields: Record<string, string[]> = abnormal
     ? {
         reason: ["blob4 AS label"],
-        confidence: ["blob3 AS label"],
+        category: [
+          "multiIf(blob3 IN ('high', 'high_threat'), 'high_threat', blob3 IN ('medium', 'medium_threat'), 'medium_threat', 'custom_block') AS label",
+        ],
         kind: ["blob2 AS label"],
         botScoreBucket: [
           "if(double5 <= 0, '', if(double5 < 20, '1-19', if(double5 < 40, '20-39', if(double5 < 60, '40-59', if(double5 < 80, '60-79', '80-99'))))) AS label",
@@ -564,7 +615,7 @@ function buildDimensionSql(input: {
   if (!columns || !DIMENSION_TABS[input.group].includes(input.tab))
     throw new Error("Invalid analytics dimension");
   const groupBy = columns.map((column) => column.split(" AS ")[1]).join(", ");
-  return `SELECT ${columns.join(", ")}, count() AS count${abnormal ? ", countIf(blob3 = 'high') AS highConfidence" : ", 0 AS highConfidence"} FROM ${dataset} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds}) GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
+  return `SELECT ${columns.join(", ")}, count() AS count${abnormal ? ", countIf(blob3 IN ('high', 'high_threat')) AS highThreat" : ", 0 AS highThreat"} FROM ${dataset} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds})${abnormal ? ` AND ${ABNORMAL_CATEGORY_SQL_FILTER}` : ""} GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
 }
 
 function buildBotAnalyticsDetailSql(input: {
@@ -602,7 +653,7 @@ function buildBotAnalyticsDetailSql(input: {
       timestamp,
       blob1 AS siteId,
       blob2 AS kind,
-      blob3 AS confidence,
+      blob3 AS category,
       blob4 AS reasons,
       blob5 AS ip,
       blob6 AS userAgent,
@@ -621,6 +672,7 @@ function buildBotAnalyticsDetailSql(input: {
       ${extendedIdentitySelect}${doubleSelect ? `,${doubleSelect.slice(1)}` : ""}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${sinceSeconds})
+      AND ${ABNORMAL_CATEGORY_SQL_FILTER}
       AND (${identityFilters.join(" OR ") || "0"})
     ORDER BY timestamp DESC
     LIMIT 1
@@ -679,8 +731,9 @@ function emptyBotAnalyticsResponse(
       total: 0,
       baselineRequests: 0,
       botRequestRatio: 0,
-      highConfidence: 0,
-      mediumConfidence: 0,
+      highThreat: 0,
+      mediumThreat: 0,
+      customBlocked: 0,
       affectedSites: 0,
       uniqueAsns: 0,
       uniqueCountries: 0,
@@ -708,8 +761,9 @@ function emptyBotAnalyticsResponse(
       summary: {
         total: 0,
         ratio: 0,
-        highConfidence: 0,
-        mediumConfidence: 0,
+        highThreat: 0,
+        mediumThreat: 0,
+        customBlocked: 0,
         affectedSites: 0,
         uniqueAsns: 0,
         uniqueCountries: 0,
@@ -788,7 +842,7 @@ function normalizeBotRow(
     siteName: clampString(site?.name || siteId || "Unknown site", 160),
     siteDomain: clampString(site?.domain || "", 255),
     kind: clampString(String(row.kind || ""), 40),
-    confidence: clampString(String(row.confidence || ""), 20),
+    category: normalizeObservationCategory(row.category) ?? "medium_threat",
     reasons,
     ip: clampString(String(row.ip || ""), 80),
     userAgent: clampString(String(row.userAgent || ""), 1024),
@@ -1016,10 +1070,7 @@ function normalizeNetworkDimensionRows(rows: Record<string, unknown>[]) {
       key: [label, country, region].join("\u0000"),
       label,
       count: Math.max(0, Math.trunc(toFiniteNumber(row.count))),
-      highConfidence: Math.max(
-        0,
-        Math.trunc(toFiniteNumber(row.highConfidence)),
-      ),
+      highThreat: Math.max(0, Math.trunc(toFiniteNumber(row.highThreat))),
       country,
       region,
     };
@@ -1098,6 +1149,9 @@ function mergeTrendRows(input: {
       botRatio: number;
       abnormalRatio: number;
       normalRatio: number;
+      mediumThreatCount: number;
+      highThreatCount: number;
+      customBlockedCount: number;
       pageviews: number;
       customEvents: number;
       avgLatencyMs: number | null;
@@ -1123,6 +1177,9 @@ function mergeTrendRows(input: {
       botRatio: 0,
       abnormalRatio: 0,
       normalRatio: 0,
+      mediumThreatCount: 0,
+      highThreatCount: 0,
+      customBlockedCount: 0,
       pageviews: 0,
       customEvents: 0,
       avgLatencyMs: null,
@@ -1142,6 +1199,18 @@ function mergeTrendRows(input: {
     if (!current) continue;
     current.abnormalCount = Math.max(0, Math.trunc(toFiniteNumber(row.count)));
     current.count = current.abnormalCount;
+    current.mediumThreatCount = Math.max(
+      0,
+      Math.trunc(toFiniteNumber(row.mediumThreatCount)),
+    );
+    current.highThreatCount = Math.max(
+      0,
+      Math.trunc(toFiniteNumber(row.highThreatCount)),
+    );
+    current.customBlockedCount = Math.max(
+      0,
+      Math.trunc(toFiniteNumber(row.customBlockedCount)),
+    );
     current.pageviews += Math.max(0, Math.trunc(toFiniteNumber(row.pageviews)));
     current.customEvents += Math.max(
       0,
@@ -1913,13 +1982,17 @@ export async function handleBotAnalyticsAdmin(
   const abnormalSummaryRow = abnormalSummaryResult.rows[0] ?? {};
   const normalSummaryRow = normalSummaryResult.rows[0] ?? {};
   const abnormalSummaryValues = {
-    highConfidence: Math.max(
+    highThreat: Math.max(
       0,
-      Math.trunc(toFiniteNumber(abnormalSummaryRow.highConfidence)),
+      Math.trunc(toFiniteNumber(abnormalSummaryRow.highThreat)),
     ),
-    mediumConfidence: Math.max(
+    mediumThreat: Math.max(
       0,
-      Math.trunc(toFiniteNumber(abnormalSummaryRow.mediumConfidence)),
+      Math.trunc(toFiniteNumber(abnormalSummaryRow.mediumThreat)),
+    ),
+    customBlocked: Math.max(
+      0,
+      Math.trunc(toFiniteNumber(abnormalSummaryRow.customBlocked)),
     ),
     affectedSites: Math.max(
       0,

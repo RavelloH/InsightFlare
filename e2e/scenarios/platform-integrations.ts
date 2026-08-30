@@ -46,7 +46,7 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
 
     const observed = await apiRequest<{
       configured: boolean;
-      events: Array<{ confidence: string; rayId: string }>;
+      events: Array<{ category: string; rayId: string }>;
       normalEvents: Array<{ pathname: string; traceId: string }>;
       overview: {
         abnormalRequests: number;
@@ -61,7 +61,7 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     expect(observed.status).toBe(200);
     expect(observed.payload).toMatchObject({
       configured: true,
-      events: [{ confidence: "high", rayId: "e2e-bot-ray" }],
+      events: [{ category: "high_threat", rayId: "e2e-bot-ray" }],
       normalEvents: [{ pathname: "/home", traceId: "e2e-normal-trace" }],
       overview: {
         abnormalRequests: 2,

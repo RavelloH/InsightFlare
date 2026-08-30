@@ -358,7 +358,7 @@ describe("admin bot analytics handlers", () => {
       timestamp: "2026-07-03 10:00:00",
       siteId: "site-1",
       kind: "pageview",
-      confidence: "medium",
+      category: "medium",
       reasons: "hosting_asn",
       ip: "203.0.113.8",
       userAgent: "Mozilla/5.0",
@@ -417,7 +417,7 @@ describe("admin bot analytics handlers", () => {
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (_input, init) => {
         const sql = String((init as RequestInit | undefined)?.body || "");
-        if (sql.includes("blob3 AS confidence")) {
+        if (sql.includes("blob3 AS category")) {
           return new Response(jsonEachRow([botRow]), { status: 200 });
         }
         if (sql.includes("blob3 AS origin")) {
@@ -470,8 +470,9 @@ describe("admin bot analytics handlers", () => {
               sql.includes("blob15) AS uniqueAsns")
                 ? {
                     total: 1,
-                    highConfidence: 0,
-                    mediumConfidence: 1,
+                    highThreat: 0,
+                    mediumThreat: 1,
+                    customBlocked: 0,
                     affectedSites: 1,
                     uniqueAsns: 1,
                     uniqueCountries: 1,
@@ -492,12 +493,12 @@ describe("admin bot analytics handlers", () => {
               {
                 label: "13335",
                 count: 42,
-                highConfidence: 17,
+                highThreat: 17,
               },
               {
                 label: "16509",
                 count: 31,
-                highConfidence: 9,
+                highThreat: 9,
               },
             ]),
             { status: 200 },
@@ -552,7 +553,7 @@ describe("admin bot analytics handlers", () => {
       total: 1,
       baselineRequests: 99,
       botRequestRatio: 0.01,
-      mediumConfidence: 1,
+      mediumThreat: 1,
       affectedSites: 1,
       uniqueAsns: 1,
       uniqueCountries: 1,
@@ -565,11 +566,16 @@ describe("admin bot analytics handlers", () => {
     expect(body.events[0]).toMatchObject({
       siteName: "Blog",
       siteDomain: "example.test",
+      category: "medium_threat",
       asn: 16509,
       latitude: 35.6895,
       longitude: 139.6917,
       reasons: ["hosting_asn"],
     });
+    expect(allSql.join("\n")).toContain(
+      "blob3 IN ('medium', 'high', 'medium_threat', 'high_threat', 'custom_block')",
+    );
+    expect(allSql.join("\n")).not.toContain("'low'");
     expect(body.normalEvents[0]).toMatchObject({
       metadataJson: JSON.stringify({
         eventId: "event-1",
@@ -588,7 +594,7 @@ describe("admin bot analytics handlers", () => {
         key: "13335\u0000\u0000",
         label: "13335",
         count: 42,
-        highConfidence: 17,
+        highThreat: 17,
         country: "",
         region: "",
       },
@@ -596,7 +602,7 @@ describe("admin bot analytics handlers", () => {
         key: "16509\u0000\u0000",
         label: "16509",
         count: 31,
-        highConfidence: 9,
+        highThreat: 9,
         country: "",
         region: "",
       },
@@ -704,7 +710,7 @@ describe("admin bot analytics handlers", () => {
       timestamp: "2026-07-03 10:00:00",
       siteId: "site-1",
       kind: "pageview",
-      confidence: "medium",
+      category: "medium",
       reasons: "hosting_asn",
       ip: "203.0.113.8",
       userAgent: "Mozilla/5.0",
@@ -741,7 +747,7 @@ describe("admin bot analytics handlers", () => {
       .mockImplementation(async (_input, init) => {
         const sql = String((init as RequestInit | undefined)?.body || "");
         if (
-          sql.includes("blob3 AS confidence") ||
+          sql.includes("blob3 AS category") ||
           sql.includes("blob3 AS origin")
         ) {
           return new Response(jsonEachRow([fallbackRow]), { status: 200 });
@@ -770,8 +776,9 @@ describe("admin bot analytics handlers", () => {
               sql.includes("blob15) AS uniqueAsns")
                 ? {
                     total: 1,
-                    highConfidence: 0,
-                    mediumConfidence: 1,
+                    highThreat: 0,
+                    mediumThreat: 1,
+                    customBlocked: 0,
                     affectedSites: 1,
                     uniqueAsns: 1,
                     uniqueCountries: 1,
@@ -825,7 +832,7 @@ describe("admin bot analytics handlers", () => {
       total: 1,
       baselineRequests: 49,
       botRequestRatio: 0.02,
-      mediumConfidence: 1,
+      mediumThreat: 1,
       affectedSites: 1,
       uniqueAsns: 1,
       uniqueCountries: 1,
@@ -854,14 +861,14 @@ describe("admin bot analytics handlers", () => {
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (_input, init) => {
         const sql = String((init as RequestInit | undefined)?.body || "");
-        if (sql.includes("blob3 AS confidence")) {
+        if (sql.includes("blob3 AS category")) {
           return new Response(
             jsonEachRow([
               {
                 timestamp: "not-a-date",
                 siteId: "",
                 kind: "",
-                confidence: "high",
+                category: "high",
                 reasons: "ua_isbot, ,hosting_asn",
                 ip: "",
                 userAgent: "",
@@ -998,7 +1005,7 @@ describe("admin bot analytics handlers", () => {
       total: 0,
       baselineRequests: 0,
       botRequestRatio: 0,
-      highConfidence: 0,
+      highThreat: 0,
       affectedSites: 0,
       uniqueAsns: 0,
       uniqueCountries: 0,
@@ -1066,7 +1073,7 @@ describe("admin bot analytics handlers", () => {
               timestamp: "2026-07-03 10:00:00",
               siteId: "site-2",
               kind: "collect",
-              confidence: "low",
+              category: "custom_block",
               reasons: "",
               ip: "203.0.113.9",
               userAgent: "curl/8",
@@ -1172,7 +1179,7 @@ describe("admin bot analytics handlers", () => {
       timestamp: "2026-07-03 10:00:00",
       siteId: "site-1",
       kind: "pageview",
-      confidence: "high",
+      category: "high",
       reasons: "hosting_asn",
       country: "US",
       region: "CA",
@@ -1194,7 +1201,7 @@ describe("admin bot analytics handlers", () => {
         const sql = String((init as RequestInit | undefined)?.body || "");
         if (sql.includes("blob1 AS label")) {
           return new Response(
-            jsonEachRow([{ label: "site-1", count: 12, highConfidence: 7 }]),
+            jsonEachRow([{ label: "site-1", count: 12, highThreat: 7 }]),
             { status: 200 },
           );
         }
@@ -1205,7 +1212,7 @@ describe("admin bot analytics handlers", () => {
                 label: "Tokyo",
                 country: "JP",
                 count: 12,
-                highConfidence: 7,
+                highThreat: 7,
               },
             ]),
             { status: 200 },
@@ -1213,7 +1220,7 @@ describe("admin bot analytics handlers", () => {
         }
         if (sql.includes("GROUP BY label")) {
           return new Response(
-            jsonEachRow([{ label: "13335", count: 12, highConfidence: 7 }]),
+            jsonEachRow([{ label: "13335", count: 12, highThreat: 7 }]),
             { status: 200 },
           );
         }
@@ -1269,7 +1276,7 @@ describe("admin bot analytics handlers", () => {
     const dimensionBody = await jsonOf(dimensionResponse);
     expect(dimensionResponse.status).toBe(200);
     expect(dimensionBody.dimension.rows).toEqual([
-      expect.objectContaining({ label: "13335", count: 12, highConfidence: 7 }),
+      expect.objectContaining({ label: "13335", count: 12, highThreat: 7 }),
     ]);
     expect(
       fetchMock.mock.calls.some(([, init]) =>
@@ -1329,7 +1336,7 @@ describe("admin bot analytics handlers", () => {
     ]);
 
     for (const [source, group, tab] of [
-      ["abnormal", "detection", "confidence"],
+      ["abnormal", "detection", "category"],
       ["abnormal", "target", "pathname"],
       ["abnormal", "client", "userAgentLengthBucket"],
       ["normal", "target", "hostname"],

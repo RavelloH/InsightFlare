@@ -2294,19 +2294,19 @@ requestObservation:
     request-observation data.
   openAnalyticsEngine: Open Analytics Engine
   openSettings: Open settings
-  highConfidenceBots: High-confidence Bots
+  highThreatBots: High-threat Bots
   affectedSites: Affected Sites
   uniqueCountries: Countries
   noData: No request data in this window.
   trendTitle: Routing Trend
   trendDescription: Normal requests, abnormal requests, and diversion ratio by interval.
-  recentTitle: Recent Bot Requests
-  recentDescription: Detailed records written only to the bot Analytics Engine dataset.
+  recentTitle: Recent Abnormal Requests
+  recentDescription: Detailed records written only to the abnormal Analytics Engine dataset.
   recentLoadedAll: All records loaded
-  detailTitle: Bot Request Detail
+  detailTitle: Abnormal Request Detail
   detailSubtitle:
     Inspect detection signals, network context, and client data for
-    this diverted request.
+    this abnormal request.
   client: Client
   edge: Edge
   identifiers: Identifiers
@@ -2321,9 +2321,9 @@ requestObservation:
   request: Request
   ip: IP
   userAgent: User agent
-  confidence: Confidence
+  category: Category
   blocked: Blocked
-  highConfidenceRequests: High-confidence Requests
+  highThreatRequests: High-threat Requests
   emptyValue: Unknown
   kind: Type
   botScore: Bot Score
@@ -2354,7 +2354,16 @@ requestObservation:
     access_asn: Access ASN
     missing_browser_provenance: Missing browser provenance
     origin_hostname_mismatch: Origin and hostname mismatch
-    blocked_pathname: Blocked pathname
+    custom_block: Custom block rule matched
+    blocked_domains: Blocked domains
+    blocked_paths: Blocked paths
+    blocked_query_parameters: Blocked query parameters
+    blocked_referrers: Blocked referrers
+    blocked_user_agents: Blocked User-Agents
+    blocked_ips: Blocked IPs
+    blocked_asns: Blocked ASNs
+    blocked_countries: Blocked countries
+    blocked_regions: Blocked regions
   requestKindLabels:
     pageview: Pageview
     custom_event: Custom Event
@@ -2379,17 +2388,17 @@ requestObservation:
       bucketed by the top-bar interval.
     trafficCompositionTitle: Request composition
     trafficCompositionDescription: Normal requests, abnormal requests, and page events on the same timeline.
-    confidenceShareTitle: Request confidence breakdown
+    categoryShareTitle: Request category breakdown
     normalTrafficShare: Normal traffic
-    lowConfidenceTraffic: Low-confidence traffic
-    mediumConfidenceTraffic: Medium-confidence traffic
-    highConfidenceTraffic: High-confidence traffic
+    mediumThreatTraffic: Medium-threat traffic
+    highThreatTraffic: High-threat traffic
+    customBlockedTraffic: Custom-blocked traffic
     latencyTitle: Edge latency trend
     latencyDescription: P50 / P75 / P95 / P99 edge latency recorded when normal
       requests are written to AE.
     abnormalSubtitle:
-      Focus on diverted abnormal requests. Maps and tables show only
-      red abnormal traffic.
+      Focus on abnormal requests. Maps and tables include medium-threat,
+      high-threat, and custom-blocked traffic.
     normalSubtitle:
       Focus on requests that entered the normal collection pipeline.
       Maps and tables show only normal traffic.

@@ -17,7 +17,7 @@ interface DemoBotEvent {
   siteName: string;
   siteDomain: string;
   kind: string;
-  confidence: string;
+  category: "medium_threat" | "high_threat" | "custom_block";
   reasons: string[];
   ip: string;
   userAgent: string;
@@ -86,6 +86,9 @@ interface DemoTrendPoint {
   totalCount: number;
   abnormalRatio: number;
   normalRatio: number;
+  mediumThreatCount: number;
+  highThreatCount: number;
+  customBlockedCount: number;
   pageviews: number;
   customEvents: number;
   avgLatencyMs: number | null;
@@ -108,8 +111,9 @@ interface DemoRequestObservationData {
     total: number;
     baselineRequests: number;
     botRequestRatio: number;
-    highConfidence: number;
-    mediumConfidence: number;
+    highThreat: number;
+    mediumThreat: number;
+    customBlocked: number;
     affectedSites: number;
     uniqueAsns: number;
     uniqueCountries: number;
@@ -173,6 +177,18 @@ const BOT_REASON_WEIGHTS = [
   { label: "network_service_asn", weight: 10 },
   { label: "origin_hostname_mismatch", weight: 7 },
   { label: "ua_too_long", weight: 5 },
+] as const;
+
+const CUSTOM_BLOCK_REASON_WEIGHTS = [
+  { label: "blocked_domains", weight: 18 },
+  { label: "blocked_paths", weight: 18 },
+  { label: "blocked_query_parameters", weight: 12 },
+  { label: "blocked_referrers", weight: 10 },
+  { label: "blocked_user_agents", weight: 14 },
+  { label: "blocked_ips", weight: 12 },
+  { label: "blocked_asns", weight: 9 },
+  { label: "blocked_countries", weight: 5 },
+  { label: "blocked_regions", weight: 2 },
 ] as const;
 
 const BOT_ASNS = [
@@ -358,6 +374,23 @@ function pickDemoTrafficCountry(
 }
 
 function pickReasons(rng: () => number): string[] {
+  if (rng() < 0.16) {
+    const reasons = new Set([
+      "custom_block",
+      weightedPickLabel(rng, [...CUSTOM_BLOCK_REASON_WEIGHTS], "blocked_paths"),
+    ]);
+    if (rng() < 0.18) {
+      reasons.add(
+        weightedPickLabel(
+          rng,
+          [...CUSTOM_BLOCK_REASON_WEIGHTS],
+          "blocked_domains",
+        ),
+      );
+    }
+    return [...reasons];
+  }
+
   const first = weightedPickLabel(rng, [...BOT_REASON_WEIGHTS], "ua_isbot");
   const reasons = new Set([first]);
   if (rng() < 0.42) {
@@ -418,6 +451,9 @@ function aggregateEvents(
       totalCount: 0,
       abnormalRatio: 0,
       normalRatio: 0,
+      mediumThreatCount: 0,
+      highThreatCount: 0,
+      customBlockedCount: 0,
       pageviews: 0,
       customEvents: 0,
       avgLatencyMs: null,
@@ -439,6 +475,9 @@ function aggregateEvents(
       totalCount: 0,
       abnormalRatio: 0,
       normalRatio: 0,
+      mediumThreatCount: 0,
+      highThreatCount: 0,
+      customBlockedCount: 0,
       pageviews: 0,
       customEvents: 0,
       avgLatencyMs: null,
@@ -449,6 +488,9 @@ function aggregateEvents(
     };
     point.count += 1;
     point.abnormalCount += 1;
+    if (event.category === "medium_threat") point.mediumThreatCount += 1;
+    if (event.category === "high_threat") point.highThreatCount += 1;
+    if (event.category === "custom_block") point.customBlockedCount += 1;
     trend.set(bucket, point);
 
     for (const reason of event.reasons) {
@@ -644,14 +686,13 @@ export function generateDemoRequestObservationData(
       generatedAt - Math.floor(Math.pow(rng(), 1.35) * minutes * 60 * 1000);
     const pathname = sPick(rng, site.paths) || "/";
     const userAgent = sPick(rng, BOT_USER_AGENTS);
-    const confidence =
-      rng() < 0.12
-        ? "low"
-        : reasons.includes("ua_isbot") ||
-            reasons.includes("script_ua") ||
-            reasons.includes("cf_bot_score_low")
-          ? "high"
-          : "medium";
+    const category = reasons.includes("custom_block")
+      ? "custom_block"
+      : reasons.includes("ua_isbot") ||
+          reasons.includes("script_ua") ||
+          reasons.includes("cf_bot_score_low")
+        ? "high_threat"
+        : "medium_threat";
     const rayId = `${sInt(rng, 100000, 999999).toString(16)}${index.toString(16)}demo`;
     const traceId = `demo-bot-${index.toString(36).padStart(4, "0")}`;
 
@@ -662,7 +703,7 @@ export function generateDemoRequestObservationData(
       siteName: site.name,
       siteDomain: site.domain,
       kind: "collect",
-      confidence,
+      category,
       reasons,
       ip: randomIpv4(rng),
       userAgent,
@@ -702,7 +743,8 @@ export function generateDemoRequestObservationData(
       }),
       latitude: geo.latitude,
       longitude: geo.longitude,
-      botScore: confidence === "high" ? sInt(rng, 1, 28) : sInt(rng, 30, 54),
+      botScore:
+        category === "high_threat" ? sInt(rng, 1, 28) : sInt(rng, 30, 54),
       userAgentLength: userAgent.length,
     });
   }
@@ -866,9 +908,11 @@ export function generateDemoRequestObservationData(
     total: events.length,
     baselineRequests,
     botRequestRatio: abnormalRequestRatio,
-    highConfidence: events.filter((event) => event.confidence === "high")
+    highThreat: events.filter((event) => event.category === "high_threat")
       .length,
-    mediumConfidence: events.filter((event) => event.confidence === "medium")
+    mediumThreat: events.filter((event) => event.category === "medium_threat")
+      .length,
+    customBlocked: events.filter((event) => event.category === "custom_block")
       .length,
     affectedSites: affectedSites.size,
     uniqueAsns: uniqueAsns.size,

@@ -6,28 +6,33 @@ import type { InvocationLogger } from "./observability-logger";
 import type { Env, TrackerClientPayload } from "./types";
 import { clampString, coerceNumber, coerceString, safeHostname } from "./utils";
 
-export type BotConfidence = "high" | "medium" | "low";
+export type BotThreatLevel = "high" | "medium";
+export type RequestObservationCategory =
+  | "high_threat"
+  | "medium_threat"
+  | "custom_block";
 
 export interface BotClassification {
   isBot: boolean;
-  confidence: BotConfidence;
+  threatLevel: BotThreatLevel | null;
   reasons: string[];
 }
 
-export interface BotAnalyticsInput {
+export interface RequestObservationInput {
   request: Request;
   payload: TrackerClientPayload;
   siteId: string;
   origin: string | null;
   traceId: string;
   receivedAt: number;
-  classification: BotClassification;
+  category: RequestObservationCategory;
+  reasons: string[];
 }
 
 export const BOT_ANALYTICS_BLOBS = [
   "siteId",
   "kind",
-  "confidence",
+  "category",
   "reasons",
   "ip",
   "userAgent",
@@ -58,7 +63,7 @@ export const BOT_ANALYTICS_DOUBLES = [
 
 const EMPTY_CLASSIFICATION: BotClassification = {
   isBot: false,
-  confidence: "low",
+  threatLevel: null,
   reasons: [],
 };
 
@@ -198,21 +203,21 @@ export function classifyCollectBotTraffic(input: {
     "cf_verified_bot_category",
   ]);
   if (reasons.some((reason) => highReasons.has(reason))) {
-    return { isBot: true, confidence: "high", reasons };
+    return { isBot: true, threatLevel: "high", reasons };
   }
 
   if (hostedByAsn) {
-    return { isBot: true, confidence: "medium", reasons };
+    return { isBot: true, threatLevel: "medium", reasons };
   }
   if (
     networkServiceAsn &&
     (missingBrowserProvenance || reasons.includes("origin_hostname_mismatch"))
   ) {
-    return { isBot: true, confidence: "medium", reasons };
+    return { isBot: true, threatLevel: "medium", reasons };
   }
 
   return reasons.length > 0
-    ? { isBot: false, confidence: "low", reasons }
+    ? { isBot: false, threatLevel: null, reasons }
     : EMPTY_CLASSIFICATION;
 }
 
@@ -232,9 +237,9 @@ function longitude(cf: Record<string, unknown>): number {
   return coerceNumber(cf.longitude, 0) ?? 0;
 }
 
-export function writeBotAnalyticsEvent(
+export function writeRequestObservationEvent(
   env: Env,
-  input: BotAnalyticsInput,
+  input: RequestObservationInput,
   logger?: Pick<InvocationLogger, "warn" | "error"> &
     Partial<Pick<InvocationLogger, "info">>,
 ): void {
@@ -293,8 +298,8 @@ export function writeBotAnalyticsEvent(
       blobs: [
         input.siteId,
         clampString(coerceString(input.payload.kind || ""), 40),
-        input.classification.confidence,
-        input.classification.reasons.join(","),
+        input.category,
+        input.reasons.join(","),
         requestIp(request),
         userAgent,
         input.origin || "",

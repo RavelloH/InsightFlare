@@ -1,11 +1,13 @@
 import {
+  BLOCKING_FIELD_IDS,
+  type BlockingFieldId,
   type BlockingRequestContext,
   matchBlockingRules,
   parseBlockingRules,
 } from "@/lib/blocking-rules";
 import {
   classifyCollectBotTraffic,
-  writeBotAnalyticsEvent,
+  writeRequestObservationEvent,
 } from "@/lib/edge/bot-protection";
 import { normalizeTrackerUaClientHints } from "@/lib/edge/client-hints";
 import { requestIp, verifyCollectToken } from "@/lib/edge/collect-token";
@@ -42,6 +44,29 @@ const SUPPORTED_KINDS = new Set<TrackerPayloadKind>([
   "custom_event",
   "identify",
 ]);
+
+const CUSTOM_BLOCK_REASON_BY_FIELD: Readonly<Record<BlockingFieldId, string>> =
+  {
+    domains: "blocked_domains",
+    paths: "blocked_paths",
+    queryParameters: "blocked_query_parameters",
+    referrers: "blocked_referrers",
+    userAgents: "blocked_user_agents",
+    ips: "blocked_ips",
+    asns: "blocked_asns",
+    countries: "blocked_countries",
+    regions: "blocked_regions",
+  };
+
+function customBlockReasons(fields: readonly BlockingFieldId[]): string[] {
+  const fieldSet = new Set(fields);
+  return [
+    "custom_block",
+    ...BLOCKING_FIELD_IDS.filter((field) => fieldSet.has(field)).map(
+      (field) => CUSTOM_BLOCK_REASON_BY_FIELD[field],
+    ),
+  ];
+}
 
 function pickSiteIdFromPayload(
   payload: TrackerClientPayload,
@@ -233,6 +258,8 @@ type CollectionDecision =
       allowOrigin: string | null;
       siteId: string;
       payload: null;
+      normalizedPayload?: TrackerClientPayload;
+      blockedFields?: readonly BlockingFieldId[];
       reason: string;
       detail?: Record<string, unknown>;
     }
@@ -337,6 +364,8 @@ async function decideCollectionPolicy(
       allowOrigin: origin,
       siteId,
       payload: null,
+      normalizedPayload: normalizedPayloadResult.payload,
+      blockedFields: ["domains"],
       reason: "origin_not_allowed",
       detail: { origin, originHostname },
     };
@@ -358,6 +387,12 @@ async function decideCollectionPolicy(
       allowOrigin: origin,
       siteId,
       payload: null,
+      normalizedPayload: normalizedPayloadResult.payload,
+      blockedFields: firstBlock
+        ? BLOCKING_FIELD_IDS.filter((field) =>
+            blocking.blockedBy.some((match) => match.field === field),
+          )
+        : undefined,
       reason: firstBlock ? `blocked_${firstBlock.field}` : "blocked_by_rule",
       detail: firstBlock ? { match: firstBlock } : undefined,
     };
@@ -524,30 +559,6 @@ export async function handleCollectRequest(
       logger?.warn(`collect.rejected.${verification.reason}`);
       return noContent(origin);
     }
-
-    const classification = classifyCollectBotTraffic({
-      request: requestWithCf,
-      payload,
-      origin,
-    });
-
-    if (classification.isBot) {
-      logger?.info("collect.bot_diverted");
-      writeBotAnalyticsEvent(
-        env,
-        {
-          request: requestWithCf,
-          payload,
-          siteId,
-          origin,
-          traceId: trace.id,
-          receivedAt: trace.acceptedAt,
-          classification,
-        },
-        logger,
-      );
-      return noContent(origin);
-    }
   }
 
   if (payload?.kind === "custom_event") {
@@ -564,7 +575,56 @@ export async function handleCollectRequest(
     ? await logger.measure("collect.policy", decide)
     : await decide();
   if (!decision.shouldForward) {
+    if (
+      decision.normalizedPayload &&
+      decision.blockedFields &&
+      decision.blockedFields.length > 0
+    ) {
+      logger?.info("collect.custom_blocked");
+      writeRequestObservationEvent(
+        env,
+        {
+          request: requestWithCf,
+          payload: decision.normalizedPayload,
+          siteId: decision.siteId,
+          origin: decision.allowOrigin,
+          traceId: trace.id,
+          receivedAt: trace.acceptedAt,
+          category: "custom_block",
+          reasons: customBlockReasons(decision.blockedFields),
+        },
+        logger,
+      );
+    }
     logger?.warn(`collect.rejected.${decision.reason}`);
+    return noContent(decision.allowOrigin);
+  }
+
+  const classification = classifyCollectBotTraffic({
+    request: requestWithCf,
+    payload: decision.payload,
+    origin,
+  });
+
+  if (classification.isBot && classification.threatLevel) {
+    logger?.info("collect.bot_diverted");
+    writeRequestObservationEvent(
+      env,
+      {
+        request: requestWithCf,
+        payload: decision.payload,
+        siteId: decision.siteId,
+        origin: decision.allowOrigin,
+        traceId: trace.id,
+        receivedAt: trace.acceptedAt,
+        category:
+          classification.threatLevel === "high"
+            ? "high_threat"
+            : "medium_threat",
+        reasons: classification.reasons,
+      },
+      logger,
+    );
     return noContent(decision.allowOrigin);
   }
 

@@ -2234,17 +2234,17 @@ requestObservation:
     で有効化してから再デプロイすると、リクエスト監視データを収集できます。
   openAnalyticsEngine: Analytics Engine を開く
   openSettings: 設定を開く
-  highConfidenceBots: 高信頼度 Bot
+  highThreatBots: 高脅威 Bot
   affectedSites: 影響サイト
   uniqueCountries: 国
   noData: この期間にリクエストデータはありません。
   trendTitle: ルーティング推移
   trendDescription: 通常リクエスト、異常リクエスト、分流比率を間隔ごとに表示します。
-  recentTitle: 最近の Bot リクエスト
-  recentDescription: Bot 用 Analytics Engine データセットにのみ書き込まれた詳細記録です。
+  recentTitle: 最近の異常リクエスト
+  recentDescription: 異常 Analytics Engine データセットにのみ書き込まれた詳細記録です。
   recentLoadedAll: すべての記録を読み込みました
-  detailTitle: Bot リクエスト詳細
-  detailSubtitle: この分流リクエストの検出シグナル、ネットワークコンテキスト、クライアントデータを確認します。
+  detailTitle: 異常リクエスト詳細
+  detailSubtitle: この異常リクエストの検出シグナル、ネットワークコンテキスト、クライアントデータを確認します。
   client: クライアント
   edge: エッジ
   identifiers: 識別子
@@ -2259,9 +2259,9 @@ requestObservation:
   request: リクエスト
   ip: IP
   userAgent: User-Agent
-  confidence: 信頼度
+  category: カテゴリ
   blocked: ブロック済み
-  highConfidenceRequests: 高信頼度リクエスト
+  highThreatRequests: 高脅威リクエスト
   emptyValue: 不明
   kind: 種別
   botScore: Bot スコア
@@ -2292,7 +2292,16 @@ requestObservation:
     access_asn: アクセス ASN
     missing_browser_provenance: ブラウザー由来情報なし
     origin_hostname_mismatch: オリジンとホスト名の不一致
-    blocked_pathname: ブロック対象パス
+    custom_block: カスタムブロックルールに一致
+    blocked_domains: ブロック対象ドメイン
+    blocked_paths: ブロック対象パス
+    blocked_query_parameters: ブロック対象クエリパラメータ
+    blocked_referrers: ブロック対象リファラー
+    blocked_user_agents: ブロック対象 User-Agent
+    blocked_ips: ブロック対象 IP
+    blocked_asns: ブロック対象 ASN
+    blocked_countries: ブロック対象国
+    blocked_regions: ブロック対象地域
   requestKindLabels:
     pageview: ページビュー
     custom_event: カスタムイベント
@@ -2315,14 +2324,14 @@ requestObservation:
     overviewTrendDescription: 通常リクエスト、異常リクエスト、異常比率をトップバーの間隔ごとに集計します。
     trafficCompositionTitle: リクエスト構成
     trafficCompositionDescription: 通常リクエスト、異常リクエスト、ページイベントを同じ時系列で表示します。
-    confidenceShareTitle: リクエスト信頼度の内訳
+    categoryShareTitle: リクエストカテゴリの内訳
     normalTrafficShare: 通常トラフィック
-    lowConfidenceTraffic: 低信頼度トラフィック
-    mediumConfidenceTraffic: 中信頼度トラフィック
-    highConfidenceTraffic: 高信頼度トラフィック
+    mediumThreatTraffic: 中脅威トラフィック
+    highThreatTraffic: 高脅威トラフィック
+    customBlockedTraffic: カスタムブロックトラフィック
     latencyTitle: エッジ遅延推移
     latencyDescription: 通常リクエストが AE に書き込まれる際に記録された P50 / P75 / P95 / P99 エッジ遅延です。
-    abnormalSubtitle: 分流された異常リクエストに絞り込み、マップと表には赤色の異常トラフィックのみを表示します。
+    abnormalSubtitle: 異常リクエストに絞り込み、マップと表には中脅威・高脅威・カスタムブロックのトラフィックを表示します。
     normalSubtitle: 通常の収集経路に入ったリクエストに絞り込み、マップと表には通常リクエストのみを表示します。
     requests: リクエスト数
     windowDays: 過去 {days} 日

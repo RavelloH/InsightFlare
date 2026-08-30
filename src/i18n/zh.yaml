@@ -2226,17 +2226,17 @@ requestObservation:
     账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用，然后重新部署以采集请求观测数据。
   openAnalyticsEngine: 打开 Analytics Engine
   openSettings: 打开设置
-  highConfidenceBots: 高置信机器人
+  highThreatBots: 高威胁机器人
   affectedSites: 受影响站点
   uniqueCountries: 国家/地区
   noData: 当前时间窗口内没有请求数据。
   trendTitle: 分流趋势
   trendDescription: 按时间间隔显示正常请求、异常请求与分流比例。
-  recentTitle: 最近机器人请求
-  recentDescription: 这些详细记录只写入机器人 Analytics Engine 数据集。
+  recentTitle: 最近异常请求
+  recentDescription: 这些详细记录只写入异常 Analytics Engine 数据集。
   recentLoadedAll: 已加载全部记录
-  detailTitle: 机器人请求详情
-  detailSubtitle: 查看这次分流请求的检测信号、网络和客户端上下文。
+  detailTitle: 异常请求详情
+  detailSubtitle: 查看这次异常请求的检测信号、网络和客户端上下文。
   client: 客户端
   edge: 边缘
   identifiers: 标识符
@@ -2251,9 +2251,9 @@ requestObservation:
   request: 请求
   ip: IP
   userAgent: User-Agent
-  confidence: 置信度
+  category: 分类
   blocked: 拦截
-  highConfidenceRequests: 高置信请求
+  highThreatRequests: 高威胁请求
   emptyValue: 未知
   kind: 类型
   botScore: Bot 分数
@@ -2284,7 +2284,16 @@ requestObservation:
     access_asn: 接入网络 ASN
     missing_browser_provenance: 缺少浏览器来源信号
     origin_hostname_mismatch: Origin 与主机名不匹配
-    blocked_pathname: 命中路径黑名单
+    custom_block: 命中自定义屏蔽规则
+    blocked_domains: 命中域名屏蔽规则
+    blocked_paths: 命中路径屏蔽规则
+    blocked_query_parameters: 命中查询参数屏蔽规则
+    blocked_referrers: 命中引荐来源屏蔽规则
+    blocked_user_agents: 命中 User-Agent 屏蔽规则
+    blocked_ips: 命中 IP 屏蔽规则
+    blocked_asns: 命中 ASN 屏蔽规则
+    blocked_countries: 命中国家/地区屏蔽规则
+    blocked_regions: 命中区域屏蔽规则
   requestKindLabels:
     pageview: 页面浏览
     custom_event: 自定义事件
@@ -2307,14 +2316,14 @@ requestObservation:
     overviewTrendDescription: 按顶栏时间间隔分桶显示正常与异常请求，以及异常请求比例。
     trafficCompositionTitle: 请求构成
     trafficCompositionDescription: 正常请求、异常请求和页面事件在同一时间轴上的变化。
-    confidenceShareTitle: 请求置信度占比
+    categoryShareTitle: 请求分类占比
     normalTrafficShare: 正常流量
-    lowConfidenceTraffic: 低置信度流量
-    mediumConfidenceTraffic: 中置信度流量
-    highConfidenceTraffic: 高置信度流量
+    mediumThreatTraffic: 中威胁流量
+    highThreatTraffic: 高威胁流量
+    customBlockedTraffic: 自定义屏蔽流量
     latencyTitle: 边缘耗时趋势
     latencyDescription: 正常请求写入 AE 时记录的 P50 / P75 / P95 / P99 边缘耗时。
-    abnormalSubtitle: 聚焦已分流的异常请求，地图和统计表只显示红色异常流量。
+    abnormalSubtitle: 聚焦异常请求，地图和统计表包含中威胁、高威胁和自定义屏蔽流量。
     normalSubtitle: 聚焦进入正常采集链路的请求，地图和统计表只显示绿色正常流量。
     requests: 请求数
     windowDays: "最近 {days} 天"

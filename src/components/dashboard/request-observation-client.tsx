@@ -100,6 +100,11 @@ interface RequestObservationClientProps {
   messages: AppMessages;
 }
 
+type RequestObservationCategory =
+  | "medium_threat"
+  | "high_threat"
+  | "custom_block";
+
 interface BotEvent {
   timestamp: string;
   receivedAt: number;
@@ -107,7 +112,7 @@ interface BotEvent {
   siteName: string;
   siteDomain: string;
   kind: string;
-  confidence: string;
+  category: RequestObservationCategory | "";
   reasons: string[];
   ip: string;
   userAgent: string;
@@ -166,7 +171,7 @@ const BOT_EVENT_DETAIL_SKELETON_DATA: BotEvent = {
   siteName: "",
   siteDomain: "",
   kind: "",
-  confidence: "",
+  category: "",
   reasons: [],
   ip: "",
   userAgent: "",
@@ -199,11 +204,17 @@ interface RequestMapPoint {
   color?: [number, number, number];
 }
 
+interface RequestObservationTrendDataPoint extends RequestObservationTrendPoint {
+  mediumThreatCount: number;
+  highThreatCount: number;
+  customBlockedCount: number;
+}
+
 interface RequestNetworkDimensionRow {
   key: string;
   label: string;
   count: number;
-  highConfidence: number;
+  highThreat: number;
   country: string;
   region: string;
   iconLabel?: string;
@@ -250,14 +261,15 @@ interface RequestObservationData {
     total: number;
     baselineRequests: number;
     botRequestRatio: number;
-    highConfidence: number;
-    mediumConfidence: number;
+    highThreat: number;
+    mediumThreat: number;
+    customBlocked: number;
     affectedSites: number;
     uniqueAsns: number;
     uniqueCountries: number;
   };
   mapPoints: RequestMapPoint[];
-  trend: RequestObservationTrendPoint[];
+  trend: RequestObservationTrendDataPoint[];
   reasons: Array<{ reason: string; count: number }>;
   countries?: Array<{ country: string; count: number }>;
   asns: Array<{ asn: number; asOrganization: string; count: number }>;
@@ -281,8 +293,9 @@ interface RequestObservationData {
     summary: {
       total: number;
       ratio: number;
-      highConfidence: number;
-      mediumConfidence: number;
+      highThreat: number;
+      mediumThreat: number;
+      customBlocked: number;
       affectedSites: number;
       uniqueAsns: number;
       uniqueCountries: number;
@@ -342,7 +355,7 @@ type AbnormalRequestTableColumnId =
   | "site"
   | "kind"
   | "reason"
-  | "confidence"
+  | "category"
   | "botScore"
   | "verifiedBotCategory"
   | "network"
@@ -371,7 +384,7 @@ const BOT_EVENT_SKELETON_WIDTHS: Record<AbnormalRequestTableColumnId, string> =
     site: "w-24",
     kind: "w-20",
     reason: "w-28",
-    confidence: "w-32",
+    category: "w-32",
     botScore: "w-24",
     verifiedBotCategory: "w-36",
     network: "w-40",
@@ -406,7 +419,7 @@ const BOT_EVENT_COLUMN_ALIGNMENTS: Record<
   site: "left",
   kind: "left",
   reason: "left",
-  confidence: "center",
+  category: "center",
   botScore: "right",
   verifiedBotCategory: "left",
   network: "left",
@@ -435,9 +448,9 @@ const ABNORMAL_POINT_COLOR: [number, number, number] = [239, 68, 68];
 const NORMAL_POINT_COLOR: [number, number, number] = [34, 197, 154];
 const PERFORMANCE_WARNING_COLOR = "oklch(0.75 0.16 80)";
 const NORMAL_TRAFFIC_SHARE_COLOR = "var(--color-chart-4)";
-const LOW_CONFIDENCE_TRAFFIC_COLOR = "var(--color-chart-5)";
-const MEDIUM_CONFIDENCE_TRAFFIC_COLOR = PERFORMANCE_WARNING_COLOR;
-const HIGH_CONFIDENCE_TRAFFIC_COLOR = "var(--color-destructive)";
+const MEDIUM_THREAT_TRAFFIC_COLOR = PERFORMANCE_WARNING_COLOR;
+const HIGH_THREAT_TRAFFIC_COLOR = "var(--color-destructive)";
+const CUSTOM_BLOCKED_TRAFFIC_COLOR = "var(--muted-foreground)";
 
 type RequestObservationTab = "overview" | "abnormal" | "normal";
 interface RequestObservationMapConfig {
@@ -495,7 +508,7 @@ function latencyFormat(
 
 type DetectionDimensionTab =
   | "reason"
-  | "confidence"
+  | "category"
   | "kind"
   | "botScoreBucket"
   | "verifiedBotCategory";
@@ -516,7 +529,7 @@ type ClientDimensionTab =
 interface BotDimensionRow {
   label: string;
   count: number;
-  highConfidence: number;
+  highThreat: number;
   sampleEvent: BotEvent | null;
 }
 
@@ -549,6 +562,9 @@ function withRequestObservabilityDefaults(
           : 0,
       pageviews: Number(point.pageviews ?? normalCount),
       customEvents: Number(point.customEvents ?? 0),
+      mediumThreatCount: Number(point.mediumThreatCount ?? 0),
+      highThreatCount: Number(point.highThreatCount ?? 0),
+      customBlockedCount: Number(point.customBlockedCount ?? 0),
       avgLatencyMs: point.avgLatencyMs ?? null,
       p50LatencyMs: point.p50LatencyMs ?? point.avgLatencyMs ?? null,
       p75LatencyMs: point.p75LatencyMs ?? point.p95LatencyMs ?? null,
@@ -608,8 +624,9 @@ function withRequestObservabilityDefaults(
       summary: {
         total: abnormalRequests,
         ratio: abnormalRequestRatio,
-        highConfidence: data.summary.highConfidence,
-        mediumConfidence: data.summary.mediumConfidence,
+        highThreat: data.summary.highThreat,
+        mediumThreat: data.summary.mediumThreat,
+        customBlocked: data.summary.customBlocked,
         affectedSites: data.summary.affectedSites,
         uniqueAsns: data.summary.uniqueAsns,
         uniqueCountries: data.summary.uniqueCountries,
@@ -876,16 +893,16 @@ export function RequestObservationClient({
       mapAnimationControls.stop();
     };
   }, [activeMap, mapAnimationControls]);
-  const confidenceCounts = useMemo(() => {
-    let low = 0;
-    let medium = 0;
-    let high = 0;
+  const categoryCounts = useMemo(() => {
+    let mediumThreat = 0;
+    let highThreat = 0;
+    let customBlocked = 0;
     for (const event of abnormalEvents) {
-      if (event.confidence === "high") high += 1;
-      else if (event.confidence === "medium") medium += 1;
-      else low += 1;
+      if (event.category === "high_threat") highThreat += 1;
+      else if (event.category === "custom_block") customBlocked += 1;
+      else if (event.category === "medium_threat") mediumThreat += 1;
     }
-    return { low, medium, high };
+    return { mediumThreat, highThreat, customBlocked };
   }, [abnormalEvents]);
 
   const analyticsEngineDisabled =
@@ -927,9 +944,9 @@ export function RequestObservationClient({
           primaryMetricLabel: copy.blocked,
         },
         {
-          value: "confidence",
-          label: copy.confidence,
-          columnLabel: copy.confidence,
+          value: "category",
+          label: copy.category,
+          columnLabel: copy.category,
           primaryMetricLabel: copy.blocked,
         },
         {
@@ -1154,7 +1171,7 @@ export function RequestObservationClient({
   const overview = data?.overview;
   const abnormalSummary = data?.abnormal?.summary;
   const normalSummary = data?.normal?.summary;
-  const confidenceShareItems = useMemo(
+  const categoryShareItems = useMemo(
     () => [
       {
         key: "normal",
@@ -1163,33 +1180,34 @@ export function RequestObservationClient({
         color: NORMAL_TRAFFIC_SHARE_COLOR,
       },
       {
-        key: "low",
-        label: labels.lowConfidenceTraffic,
-        value: confidenceCounts.low,
-        color: LOW_CONFIDENCE_TRAFFIC_COLOR,
+        key: "medium_threat",
+        label: labels.mediumThreatTraffic,
+        value: abnormalSummary?.mediumThreat ?? categoryCounts.mediumThreat,
+        color: MEDIUM_THREAT_TRAFFIC_COLOR,
       },
       {
-        key: "medium",
-        label: labels.mediumConfidenceTraffic,
-        value: abnormalSummary?.mediumConfidence ?? confidenceCounts.medium,
-        color: MEDIUM_CONFIDENCE_TRAFFIC_COLOR,
+        key: "high_threat",
+        label: labels.highThreatTraffic,
+        value: abnormalSummary?.highThreat ?? categoryCounts.highThreat,
+        color: HIGH_THREAT_TRAFFIC_COLOR,
       },
       {
-        key: "high",
-        label: labels.highConfidenceTraffic,
-        value: abnormalSummary?.highConfidence ?? confidenceCounts.high,
-        color: HIGH_CONFIDENCE_TRAFFIC_COLOR,
+        key: "custom_block",
+        label: labels.customBlockedTraffic,
+        value: abnormalSummary?.customBlocked ?? categoryCounts.customBlocked,
+        color: CUSTOM_BLOCKED_TRAFFIC_COLOR,
       },
     ],
     [
-      abnormalSummary?.highConfidence,
-      abnormalSummary?.mediumConfidence,
-      confidenceCounts.high,
-      confidenceCounts.low,
-      confidenceCounts.medium,
-      labels.highConfidenceTraffic,
-      labels.lowConfidenceTraffic,
-      labels.mediumConfidenceTraffic,
+      abnormalSummary?.customBlocked,
+      abnormalSummary?.highThreat,
+      abnormalSummary?.mediumThreat,
+      categoryCounts.customBlocked,
+      categoryCounts.highThreat,
+      categoryCounts.mediumThreat,
+      labels.customBlockedTraffic,
+      labels.highThreatTraffic,
+      labels.mediumThreatTraffic,
       labels.normalTrafficShare,
       overview?.normalRequests,
     ],
@@ -1321,8 +1339,8 @@ export function RequestObservationClient({
         <section className="grid gap-4 xl:grid-cols-2">
           <ShareRadialCard
             className="xl:col-span-2"
-            title={labels.confidenceShareTitle}
-            items={confidenceShareItems}
+            title={labels.categoryShareTitle}
+            items={categoryShareItems}
             maxItems={4}
             locale={locale}
             valueLabel={labels.requests}
@@ -1432,12 +1450,12 @@ export function RequestObservationClient({
                             />
                             <MetricTile
                               icon={RiShieldCheckLine}
-                              label={copy.highConfidenceBots}
+                              label={copy.highThreatBots}
                               value={numberFormat(
                                 locale,
-                                abnormalSummary?.highConfidence ?? 0,
+                                abnormalSummary?.highThreat ?? 0,
                               )}
-                              detail={copy.confidence}
+                              detail={copy.category}
                               loading={loading}
                             />
                             <MetricTile
@@ -1481,7 +1499,7 @@ export function RequestObservationClient({
                           loadRows={loadAbnormalDetectionRows}
                           requestKey={`${requestKey}:detection`}
                           className="h-full"
-                          secondaryMetricLabel={copy.highConfidenceRequests}
+                          secondaryMetricLabel={copy.highThreatRequests}
                           emptyLabel={copy.noData}
                         />
                         <AsyncDimensionBreakdownCard
@@ -1491,7 +1509,7 @@ export function RequestObservationClient({
                           loadRows={loadAbnormalTargetRows}
                           requestKey={`${requestKey}:target`}
                           className="h-full"
-                          secondaryMetricLabel={copy.highConfidenceRequests}
+                          secondaryMetricLabel={copy.highThreatRequests}
                           emptyLabel={copy.noData}
                         />
                         <AsyncDimensionBreakdownCard
@@ -1501,7 +1519,7 @@ export function RequestObservationClient({
                           loadRows={loadAbnormalNetworkRows}
                           requestKey={`${requestKey}:network`}
                           className="h-full"
-                          secondaryMetricLabel={copy.highConfidenceRequests}
+                          secondaryMetricLabel={copy.highThreatRequests}
                           emptyLabel={copy.noData}
                         />
                         <AsyncDimensionBreakdownCard
@@ -1511,7 +1529,7 @@ export function RequestObservationClient({
                           loadRows={loadAbnormalClientRows}
                           requestKey={`${requestKey}:client`}
                           className="h-full"
-                          secondaryMetricLabel={copy.highConfidenceRequests}
+                          secondaryMetricLabel={copy.highThreatRequests}
                           emptyLabel={copy.noData}
                         />
                       </section>
@@ -1766,6 +1784,17 @@ function botReasonLabel(
   return labels[reason] ?? compactReason(reason);
 }
 
+function requestCategoryLabel(
+  copy: AppMessages["requestObservation"],
+  category: string,
+): string {
+  const labels = copy.overviewLabels;
+  if (category === "medium_threat") return labels.mediumThreatTraffic;
+  if (category === "high_threat") return labels.highThreatTraffic;
+  if (category === "custom_block") return labels.customBlockedTraffic;
+  return compactReason(category);
+}
+
 function botReasonCombinationLabel(
   copy: AppMessages["requestObservation"],
   value: string,
@@ -1827,7 +1856,7 @@ function _valuesForDetectionTab(
   if (tab === "reason") {
     return event.reasons.map((reason) => botReasonLabel(copy, reason));
   }
-  if (tab === "confidence") return [event.confidence];
+  if (tab === "category") return [event.category];
   if (tab === "kind") return [event.kind];
   if (tab === "botScoreBucket") return [botScoreBucket(event.botScore)];
   return [event.verifiedBotCategory];
@@ -1876,7 +1905,7 @@ function _aggregateDimensionRows(
 ): BotDimensionRow[] {
   const rowMap = new Map<
     string,
-    { count: number; highConfidence: number; sampleEvent: BotEvent | null }
+    { count: number; highThreat: number; sampleEvent: BotEvent | null }
   >();
 
   for (const event of events) {
@@ -1887,11 +1916,11 @@ function _aggregateDimensionRows(
     for (const value of normalizedValues) {
       const current = rowMap.get(value) ?? {
         count: 0,
-        highConfidence: 0,
+        highThreat: 0,
         sampleEvent: event,
       };
       current.count += 1;
-      if (event.confidence === "high") current.highConfidence += 1;
+      if (event.category === "high_threat") current.highThreat += 1;
       current.sampleEvent ??= event;
       rowMap.set(value, current);
     }
@@ -1901,13 +1930,13 @@ function _aggregateDimensionRows(
     .map(([label, row]) => ({
       label,
       count: row.count,
-      highConfidence: row.highConfidence,
+      highThreat: row.highThreat,
       sampleEvent: row.sampleEvent,
     }))
     .sort(
       (left, right) =>
         right.count - left.count ||
-        right.highConfidence - left.highConfidence ||
+        right.highThreat - left.highThreat ||
         left.label.localeCompare(right.label),
     )
     .slice(0, DIMENSION_ROW_LIMIT);
@@ -2082,7 +2111,7 @@ function toAsyncDimensionRows(
             .label
         : row.label,
     views: row.count,
-    visitors: row.highConfidence,
+    visitors: row.highThreat,
     mono: row.label.includes("/") || row.label.includes(":"),
     labelAppearance:
       options?.targetTab && options.targetTab !== "pathname"
@@ -2127,7 +2156,7 @@ function _toAsyncNetworkDimensionRows(
         ? `AS${row.label}`
         : row.label || options.unknownLabel,
     count: row.count,
-    highConfidence: row.highConfidence,
+    highThreat: row.highThreat,
     sampleEvent: {
       country: row.country,
       region: row.region,
@@ -2153,11 +2182,13 @@ function toAsyncAggregatedDimensionRows(
       label:
         options?.detectionTab === "reason" && options.copy
           ? botReasonCombinationLabel(options.copy, row.label)
-          : options?.networkTab === "asn" && row.label
-            ? `AS${row.label}`
-            : row.label || options?.unknownLabel || "--",
+          : options?.detectionTab === "category" && options.copy
+            ? requestCategoryLabel(options.copy, row.label)
+            : options?.networkTab === "asn" && row.label
+              ? `AS${row.label}`
+              : row.label || options?.unknownLabel || "--",
       count: row.count,
-      highConfidence: row.highConfidence,
+      highThreat: row.highThreat,
       sampleEvent: {
         country: row.country,
         region: options?.networkTab === "region" ? row.label : row.region,
@@ -2321,35 +2352,33 @@ const DetailItem = memo(function DetailItem({
   );
 });
 
-function ConfidenceBlocks({
-  confidence,
+function CategoryBlocks({
+  category,
   label,
 }: {
-  confidence: string;
+  category: string;
   label?: string;
 }) {
-  const normalized = confidence.trim().toLowerCase();
+  const normalized = category.trim().toLowerCase();
   const activeCount =
-    normalized === "low"
-      ? 1
-      : normalized === "medium"
-        ? 2
-        : normalized === "high"
-          ? 3
-          : 0;
+    normalized === "medium_threat"
+      ? 2
+      : normalized === "high_threat" || normalized === "custom_block"
+        ? 3
+        : 0;
   const activeColor =
-    normalized === "low"
-      ? "bg-emerald-500"
-      : normalized === "medium"
-        ? "bg-amber-500"
-        : normalized === "high"
-          ? "bg-red-500"
+    normalized === "medium_threat"
+      ? "bg-amber-500"
+      : normalized === "high_threat"
+        ? "bg-red-500"
+        : normalized === "custom_block"
+          ? "bg-muted-foreground"
           : "";
 
   return (
     <span
       className="inline-flex items-center gap-0.5"
-      aria-label={label || confidence || undefined}
+      aria-label={label || category || undefined}
     >
       {Array.from({ length: 3 }, (_, index) => (
         <span
@@ -2536,9 +2565,13 @@ function BotRequestDetailDrawer({
                           className="flex flex-wrap items-center gap-2"
                         >
                           <Badge variant="outline">
-                            <ConfidenceBlocks
-                              confidence={event.confidence}
-                              label={displayValue(event.confidence, empty)}
+                            <CategoryBlocks
+                              category={event.category}
+                              label={
+                                event.category
+                                  ? requestCategoryLabel(copy, event.category)
+                                  : empty
+                              }
                             />
                           </Badge>
                           {event.reasons.map((reason) => (
@@ -3335,7 +3368,7 @@ const BotEventsTable = memo(function BotEventsTable({
       { id: "site", label: copy.site, required: true },
       { id: "kind", label: copy.kind },
       { id: "reason", label: copy.reason },
-      { id: "confidence", label: copy.confidence },
+      { id: "category", label: copy.category },
       { id: "network", label: copy.network },
       { id: "ip", label: copy.ip },
       { id: "location", label: copy.location },
@@ -3358,9 +3391,7 @@ const BotEventsTable = memo(function BotEventsTable({
       site: <TableHead>{copy.site}</TableHead>,
       kind: <TableHead>{copy.kind}</TableHead>,
       reason: <TableHead>{copy.reason}</TableHead>,
-      confidence: (
-        <TableHead className="text-center">{copy.confidence}</TableHead>
-      ),
+      category: <TableHead className="text-center">{copy.category}</TableHead>,
       botScore: <TableHead className="text-right">{copy.botScore}</TableHead>,
       verifiedBotCategory: <TableHead>{copy.verifiedBotCategory}</TableHead>,
       network: <TableHead>{copy.network}</TableHead>,
@@ -3383,10 +3414,7 @@ const BotEventsTable = memo(function BotEventsTable({
   );
   const renderRow = useCallback(
     (event: BotEvent) => {
-      const reasonLabel = botReasonLabel(
-        copy,
-        event.reasons[0] || event.confidence || "",
-      );
+      const reasonLabel = botReasonLabel(copy, event.reasons[0] || "");
       const reasonItems =
         event.reasons.length > 0
           ? event.reasons.map((reason, index) => {
@@ -3406,7 +3434,9 @@ const BotEventsTable = memo(function BotEventsTable({
             ];
       const eventId = event.traceId || event.rayId || "";
       const kindLabel = requestKindLabel(copy, event.kind);
-      const confidenceLabel = event.confidence || emptyValue(copy);
+      const categoryLabel = event.category
+        ? requestCategoryLabel(copy, event.category)
+        : emptyValue(copy);
       const siteLabel =
         event.siteName || event.siteDomain || event.siteId || emptyValue(copy);
       const siteCopyValue =
@@ -3523,26 +3553,23 @@ const BotEventsTable = memo(function BotEventsTable({
             </AnalyticsDetailsTooltipTarget>
           </TableCell>
         ),
-        confidence: (
+        category: (
           <TableCell className="max-w-36 text-center">
             <AnalyticsDetailsTooltipTarget
               className="inline-flex"
               locale={locale}
               request={{
-                key: `request-observation-abnormal-confidence:${eventId}:${event.confidence}`,
+                key: `request-observation-abnormal-category:${eventId}:${event.category}`,
                 items: [
                   {
-                    label: copy.confidence,
-                    value: confidenceLabel,
-                    copyValue: event.confidence || undefined,
+                    label: copy.category,
+                    value: categoryLabel,
+                    copyValue: event.category || undefined,
                   },
                 ],
               }}
             >
-              <ConfidenceBlocks
-                confidence={event.confidence}
-                label={event.confidence || "--"}
-              />
+              <CategoryBlocks category={event.category} label={categoryLabel} />
             </AnalyticsDetailsTooltipTarget>
           </TableCell>
         ),
@@ -3862,11 +3889,11 @@ function _aggregateNormalDimensionRows(
     .map(([label, row]) => ({
       label,
       count: row.count,
-      highConfidence: 0,
+      highThreat: 0,
       sampleEvent: row.sampleEvent
         ? ({
             ...row.sampleEvent,
-            confidence: "",
+            category: "",
             reasons: [],
             ip: "",
             userAgent: "",

@@ -1371,20 +1371,39 @@ function demoBotAnalyticsResponse(
   }
 
   if (params.dimensionTab) {
-    const key = String(params.dimensionTab);
-    const counts = new Map<string, { count: number; highConfidence: number }>();
+    const group = String(params.dimensionGroup || "");
+    const tab = String(params.dimensionTab);
+    const counts = new Map<
+      string,
+      DemoBotAnalyticsDimensionValue & { count: number; highThreat: number }
+    >();
     for (const event of events) {
-      const value = String(event[key] ?? "Unknown");
-      const current = counts.get(value) ?? { count: 0, highConfidence: 0 };
-      current.count += 1;
-      if (event.confidence === "high") current.highConfidence += 1;
-      counts.set(value, current);
+      for (const value of demoBotAnalyticsDimensionValues(event, group, tab)) {
+        const current = counts.get(value.key) ?? {
+          ...value,
+          count: 0,
+          highThreat: 0,
+        };
+        current.count += 1;
+        if (event.category === "high_threat" || event.category === "high") {
+          current.highThreat += 1;
+        }
+        counts.set(value.key, current);
+      }
     }
     return {
       ok: true,
       dimension: {
         rows: [...counts.entries()]
-          .map(([key, value]) => ({ key, label: key, ...value }))
+          .map(([key, value]) => ({
+            key,
+            label: value.label,
+            count: value.count,
+            highThreat: value.highThreat,
+            ...(value.iconLabel ? { iconLabel: value.iconLabel } : {}),
+            ...(value.country ? { country: value.country } : {}),
+            ...(value.region ? { region: value.region } : {}),
+          }))
           .sort((left, right) => right.count - left.count)
           .slice(0, 30),
       },
@@ -1421,6 +1440,186 @@ function demoBotAnalyticsResponse(
         }
       : data.normal,
   };
+}
+
+interface DemoBotAnalyticsDimensionValue {
+  key: string;
+  label: string;
+  iconLabel?: string;
+  country?: string;
+  region?: string;
+}
+
+function demoDimensionString(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
+function demoBotScoreBucket(value: unknown): string {
+  const score = Number(value);
+  if (!Number.isFinite(score) || score <= 0) return "";
+  if (score < 20) return "1-19";
+  if (score < 40) return "20-39";
+  if (score < 60) return "40-59";
+  if (score < 80) return "60-79";
+  return "80-99";
+}
+
+function demoUserAgentLengthBucket(value: unknown): string {
+  const length = Number(value);
+  if (!Number.isFinite(length) || length <= 0) return "";
+  if (length < 80) return "1-79";
+  if (length < 160) return "80-159";
+  if (length < 256) return "160-255";
+  if (length < 512) return "256-511";
+  return "512+";
+}
+
+function demoIpPrefix(value: unknown): string {
+  const ip = demoDimensionString(value);
+  const ipv4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/);
+  if (ipv4) return `${ipv4[1]}.${ipv4[2]}.${ipv4[3]}.0/24`;
+  if (ip.includes(":")) {
+    const parts = ip.split(":").filter(Boolean);
+    if (parts.length >= 4) return `${parts.slice(0, 4).join(":")}::/64`;
+  }
+  return ip;
+}
+
+function demoBotAnalyticsDimensionValue(
+  value: unknown,
+  options?: Pick<
+    DemoBotAnalyticsDimensionValue,
+    "iconLabel" | "country" | "region"
+  >,
+): DemoBotAnalyticsDimensionValue {
+  const label = demoDimensionString(value) || "Unknown";
+  return {
+    key: label,
+    label,
+    ...options,
+  };
+}
+
+function demoBotAnalyticsDimensionValues(
+  event: Record<string, unknown>,
+  group: string,
+  tab: string,
+): DemoBotAnalyticsDimensionValue[] {
+  if (group === "detection") {
+    if (tab === "reason") {
+      const reasons = Array.isArray(event.reasons)
+        ? event.reasons.map(demoDimensionString).filter(Boolean)
+        : demoDimensionString(event.reasons)
+            .split(",")
+            .map((reason) => reason.trim())
+            .filter(Boolean);
+      return [demoBotAnalyticsDimensionValue(reasons.join(","))];
+    }
+    if (tab === "category") {
+      const category = demoDimensionString(event.category);
+      return [
+        demoBotAnalyticsDimensionValue(
+          category === "high"
+            ? "high_threat"
+            : category === "medium"
+              ? "medium_threat"
+              : category,
+        ),
+      ];
+    }
+    if (tab === "kind") {
+      return [demoBotAnalyticsDimensionValue(event.kind)];
+    }
+    if (tab === "botScoreBucket") {
+      return [
+        demoBotAnalyticsDimensionValue(demoBotScoreBucket(event.botScore)),
+      ];
+    }
+    if (tab === "verifiedBotCategory") {
+      return [demoBotAnalyticsDimensionValue(event.verifiedBotCategory)];
+    }
+  }
+
+  if (group === "target") {
+    if (tab === "site") {
+      const siteId = demoDimensionString(event.siteId);
+      const siteName =
+        demoDimensionString(event.siteName) ||
+        demoDimensionString(event.siteDomain) ||
+        siteId;
+      return [
+        demoBotAnalyticsDimensionValue(siteName, {
+          iconLabel: demoDimensionString(event.siteDomain) || undefined,
+        }),
+      ].map((value) => ({ ...value, key: siteId || value.key }));
+    }
+    if (tab === "hostname") {
+      return [demoBotAnalyticsDimensionValue(event.hostname)];
+    }
+    if (tab === "pathname") {
+      return [
+        demoBotAnalyticsDimensionValue(
+          demoDimensionString(event.pathname) || "/",
+        ),
+      ];
+    }
+    if (tab === "origin") {
+      return [demoBotAnalyticsDimensionValue(event.origin)];
+    }
+  }
+
+  if (group === "network") {
+    if (tab === "asOrganization") {
+      return [demoBotAnalyticsDimensionValue(event.asOrganization)];
+    }
+    if (tab === "asn") {
+      return [demoBotAnalyticsDimensionValue(event.asn)];
+    }
+    if (tab === "country") {
+      return [demoBotAnalyticsDimensionValue(event.country)];
+    }
+    if (tab === "region") {
+      return [
+        demoBotAnalyticsDimensionValue(event.region, {
+          country: demoDimensionString(event.country) || undefined,
+        }),
+      ];
+    }
+    if (tab === "city") {
+      return [
+        demoBotAnalyticsDimensionValue(event.city, {
+          country: demoDimensionString(event.country) || undefined,
+          region: demoDimensionString(event.region) || undefined,
+        }),
+      ];
+    }
+    if (tab === "colo") {
+      return [demoBotAnalyticsDimensionValue(event.colo)];
+    }
+  }
+
+  if (group === "client") {
+    if (tab === "ip") {
+      return [demoBotAnalyticsDimensionValue(event.ip)];
+    }
+    if (tab === "userAgent") {
+      return [demoBotAnalyticsDimensionValue(event.userAgent)];
+    }
+    if (tab === "userAgentLengthBucket") {
+      return [
+        demoBotAnalyticsDimensionValue(
+          demoUserAgentLengthBucket(event.userAgentLength),
+        ),
+      ];
+    }
+    if (tab === "ipPrefix") {
+      return [demoBotAnalyticsDimensionValue(demoIpPrefix(event.ip))];
+    }
+  }
+
+  return [demoBotAnalyticsDimensionValue(event[tab])];
 }
 
 const DEMO_BOT_ANALYTICS_DEFAULT_LIMIT = 50;

@@ -507,6 +507,43 @@ describe("mock — handleDemoRequest", () => {
       expect(nextPage.nextCursor).toEqual(expect.any(Object));
     });
 
+    it("resolves demo bot analytics dimensions from their semantic fields", () => {
+      const path = "/api/private/admin/bot-analytics";
+      const params = {
+        from: FIXED_FROM,
+        to: FIXED_FROM + DAY_MS,
+        dimensionSource: "abnormal",
+      };
+      const dimensionRows = (group: string, tab: string) => {
+        const response = asRecord(
+          handleDemoRequest({
+            path,
+            params: { ...params, dimensionGroup: group, dimensionTab: tab },
+          }),
+        );
+        const dimension = response.dimension as Record<string, unknown>;
+        return dimension.rows as Array<Record<string, unknown>>;
+      };
+
+      const reasonRows = dimensionRows("detection", "reason");
+      expect(reasonRows.length).toBeGreaterThan(0);
+      expect(reasonRows.every((row) => row.label !== "Unknown")).toBe(true);
+
+      const siteRows = dimensionRows("target", "site");
+      expect(siteRows.length).toBeGreaterThan(0);
+      expect(siteRows[0]).toMatchObject({
+        key: expect.stringMatching(/^demo-site-/),
+        label: expect.not.stringMatching(/^Unknown$/),
+        iconLabel: expect.any(String),
+      });
+
+      const ipPrefixRows = dimensionRows("client", "ipPrefix");
+      expect(ipPrefixRows.length).toBeGreaterThan(0);
+      expect(
+        ipPrefixRows.every((row) => String(row.label).endsWith("/24")),
+      ).toBe(true);
+    });
+
     it("returns notification admin lists", () => {
       expect(
         ok(

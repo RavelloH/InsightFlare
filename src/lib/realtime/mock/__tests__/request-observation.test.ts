@@ -12,8 +12,9 @@ describe("mock/request-observation", () => {
     expect(data.summary.baselineRequests).toBeGreaterThan(data.summary.total);
     expect(data.summary.botRequestRatio).toBeGreaterThan(0);
     expect(data.summary.botRequestRatio).toBeLessThan(1);
-    expect(data.summary.highConfidence).toBeGreaterThan(0);
-    expect(data.summary.mediumConfidence).toBeGreaterThan(0);
+    expect(data.summary.highThreat).toBeGreaterThan(0);
+    expect(data.summary.mediumThreat).toBeGreaterThan(0);
+    expect(data.summary.customBlocked).toBeGreaterThan(0);
     expect(data.summary.affectedSites).toBeGreaterThan(0);
     expect(data.summary.uniqueAsns).toBeGreaterThan(0);
     expect(data.summary.uniqueCountries).toBeGreaterThan(0);
@@ -23,6 +24,18 @@ describe("mock/request-observation", () => {
     expect(data.asns.length).toBeGreaterThan(0);
     expect(data.mapPoints.length).toBeGreaterThan(0);
     expect(data.events[0]?.metadataJson).toContain('"requestMethod":"POST"');
+    expect(new Set(data.events.map((event) => event.category))).toEqual(
+      new Set(["medium_threat", "high_threat", "custom_block"]),
+    );
+    expect(
+      data.trend.every(
+        (point) =>
+          point.mediumThreatCount +
+            point.highThreatCount +
+            point.customBlockedCount ===
+          point.abnormalCount,
+      ),
+    ).toBe(true);
   });
 
   it.each([60, 10080, 43200] as const)(

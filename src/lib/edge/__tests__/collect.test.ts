@@ -335,7 +335,7 @@ describe("collect route", () => {
     stringifySpy.mockRestore();
   });
 
-  it("diverts bot traffic to Analytics Engine without looking up settings or forwarding", async () => {
+  it("diverts bot traffic to Analytics Engine without forwarding", async () => {
     const request = makeRuntimeRequest({
       origin: "https://example.com",
       body: await makePayload(),
@@ -361,12 +361,12 @@ describe("collect route", () => {
       expect.arrayContaining([
         "site-1",
         "pageview",
-        "high",
+        "high_threat",
         expect.stringContaining("ua_isbot"),
         "Googlebot/2.1",
       ]),
     );
-    expect(readSiteTrackingConfigMock).not.toHaveBeenCalled();
+    expect(readSiteTrackingConfigMock).toHaveBeenCalledWith(env, "site-1");
     expect(ctx.waitUntil).not.toHaveBeenCalled();
   });
 
@@ -645,8 +645,57 @@ describe("collect route", () => {
       expect(response.status).toBe(204);
       expect(ctx.waitUntil).not.toHaveBeenCalled();
       expect(env.INGEST_DO.idFromName).not.toHaveBeenCalled();
+      expect(env.BOT_ANALYTICS.writeDataPoint).toHaveBeenCalledTimes(1);
+      expect(
+        env.BOT_ANALYTICS.writeDataPoint.mock.calls[0]?.[0]?.blobs,
+      ).toEqual(expect.arrayContaining(["custom_block"]));
     },
   );
+
+  it("records all matching custom-block fields once without storing rule details", async () => {
+    readSiteTrackingConfigMock.mockResolvedValue({
+      ...baseSettings,
+      blockingRules: [
+        {
+          version: 2,
+          data: {
+            domains: ["blocked.example"],
+            paths: ["/private/*"],
+            queryParameters: ["utm_source"],
+          },
+        },
+      ],
+    });
+    const request = makeRuntimeRequest({
+      origin: "https://example.com",
+      body: await makePayload({
+        hostname: "blocked.example",
+        pathname: "/private/account",
+        query: "?utm_source=campaign",
+      }),
+      headers: { "user-agent": "Googlebot/2.1" },
+    });
+
+    const response = await handleCollectRequest(
+      request,
+      env as never,
+      ctx as never,
+      new URL(request.url),
+    );
+
+    expect(response.status).toBe(204);
+    expect(env.BOT_ANALYTICS.writeDataPoint).toHaveBeenCalledTimes(1);
+    expect(env.INGEST_DO.idFromName).not.toHaveBeenCalled();
+    const dataPoint = env.BOT_ANALYTICS.writeDataPoint.mock.calls[0]?.[0];
+    expect(dataPoint?.blobs?.[3]).toBe(
+      "custom_block,blocked_domains,blocked_paths,blocked_query_parameters",
+    );
+    expect(dataPoint?.blobs?.[3]).not.toContain("ua_isbot");
+    expect(JSON.stringify(dataPoint?.blobs?.[19])).not.toContain(
+      "blocked.example",
+    );
+    expect(JSON.stringify(dataPoint?.blobs?.[19])).not.toContain("version");
+  });
 
   it("allows a later negative v2 rule to override a blocking IP range", async () => {
     readSiteTrackingConfigMock.mockResolvedValue({
