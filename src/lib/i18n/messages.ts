@@ -967,6 +967,18 @@ export interface AppMessages {
     blockingRulesDialogs: {
       testButton: string;
       helpButton: string;
+      searchButton: string;
+      searchTitle: string;
+      searchDescription: string;
+      searchInputLabel: string;
+      searchInputPlaceholder: string;
+      searchCountryLabel: string;
+      searchRegionLabel: string;
+      searchBack: string;
+      searchLoading: string;
+      searchNoResults: string;
+      searchLoadError: string;
+      searchClose: string;
       helpTitle: string;
       helpDescription: string;
       syntaxTitle: string;
@@ -3589,6 +3601,19 @@ const enMessages = {
     blockingRulesDialogs: {
       testButton: "Test",
       helpButton: "Help",
+      searchButton: "Search",
+      searchTitle: "Search locations",
+      searchDescription:
+        "Search by name or code, then select a result to add it to this card.",
+      searchInputLabel: "Search",
+      searchInputPlaceholder: "Search by name or code",
+      searchCountryLabel: "Country / region",
+      searchRegionLabel: "State / province",
+      searchBack: "Change country",
+      searchLoading: "Loading locations...",
+      searchNoResults: "No matching locations.",
+      searchLoadError: "Locations could not be loaded. Try again later.",
+      searchClose: "Close",
       helpTitle: "Rule Syntax",
       helpDescription:
         "Review the syntax, examples, and precedence for this field.",
@@ -6315,6 +6340,18 @@ const zhMessages = {
     blockingRulesDialogs: {
       testButton: "测试",
       helpButton: "帮助",
+      searchButton: "搜索",
+      searchTitle: "搜索地区",
+      searchDescription: "按名称或代码搜索，选择结果后将其添加到此 Card。",
+      searchInputLabel: "搜索",
+      searchInputPlaceholder: "按名称或代码搜索",
+      searchCountryLabel: "国家 / 地区",
+      searchRegionLabel: "州 / 省",
+      searchBack: "更换国家 / 地区",
+      searchLoading: "正在加载地区...",
+      searchNoResults: "没有匹配的地区。",
+      searchLoadError: "无法加载地区，请稍后重试。",
+      searchClose: "关闭",
       helpTitle: "规则语法",
       helpDescription: "查看此字段的语法、示例和优先级规则。",
       syntaxTitle: "语法",
@@ -9026,6 +9063,20 @@ const jaMessages = {
     blockingRulesDialogs: {
       testButton: "テスト",
       helpButton: "ヘルプ",
+      searchButton: "検索",
+      searchTitle: "地域を検索",
+      searchDescription:
+        "名前またはコードで検索し、結果を選択してこのカードに追加します。",
+      searchInputLabel: "検索",
+      searchInputPlaceholder: "名前またはコードで検索",
+      searchCountryLabel: "国 / 地域",
+      searchRegionLabel: "州 / 省",
+      searchBack: "国 / 地域を変更",
+      searchLoading: "地域を読み込み中...",
+      searchNoResults: "一致する地域がありません。",
+      searchLoadError:
+        "地域を読み込めません。しばらくしてから再試行してください。",
+      searchClose: "閉じる",
       helpTitle: "ルール構文",
       helpDescription: "このフィールドの構文、例、優先順位を確認します。",
       syntaxTitle: "構文",

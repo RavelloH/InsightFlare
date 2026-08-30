@@ -18,6 +18,7 @@ import {
   resolveGeoTranslationApiLocale,
   resolveLocalizedCityName,
 } from "@/lib/dashboard/geo-translation";
+import { resolveCountryFlagCode } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 
 export function useInViewOnce<TElement extends Element = HTMLSpanElement>(
@@ -175,12 +176,41 @@ interface LazyGeoBreadcrumbBaseProps {
   hideRegion: boolean;
 }
 
-function CountryBreadcrumbItem({
+export function GeoCountryFlag({
+  countryCode,
+  locale,
+  className,
+}: {
+  countryCode: string;
+  locale: Locale;
+  className?: string;
+}) {
+  const flagCode = resolveCountryFlagCode(countryCode, locale);
+  if (!flagCode) return null;
+
+  return (
+    <Icon
+      icon={`flagpack:${flagCode.toLowerCase()}`}
+      style={{
+        width: 16,
+        height: 12,
+      }}
+      className={className ?? "block shrink-0"}
+      aria-hidden="true"
+    />
+  );
+}
+
+export function GeoCountryBreadcrumbItem({
   countryLabel,
   countryIconName,
+  countryCode,
+  locale,
 }: {
   countryLabel: string;
-  countryIconName: string | null;
+  countryIconName?: string | null;
+  countryCode?: string;
+  locale?: Locale;
 }) {
   return (
     <BreadcrumbItem className="min-w-0">
@@ -195,13 +225,16 @@ function CountryBreadcrumbItem({
             className="block shrink-0"
           />
         ) : null}
+        {!countryIconName && countryCode && locale ? (
+          <GeoCountryFlag countryCode={countryCode} locale={locale} />
+        ) : null}
         <span className="truncate leading-5">{countryLabel}</span>
       </BreadcrumbPage>
     </BreadcrumbItem>
   );
 }
 
-function BreadcrumbSeparator() {
+export function GeoBreadcrumbSeparator() {
   return (
     <span className="shrink-0 text-muted-foreground" aria-hidden="true">
       {">"}
@@ -243,13 +276,13 @@ export function LazyGeoRegionBreadcrumbLabel({
     <span ref={visibilityRef} className="block">
       <Breadcrumb className="max-w-full">
         <BreadcrumbList className="flex-nowrap gap-1">
-          <CountryBreadcrumbItem
+          <GeoCountryBreadcrumbItem
             countryLabel={countryLabel}
             countryIconName={countryIconName}
           />
           {shouldHideRegion ? null : (
             <BreadcrumbItem className="min-w-0">
-              <BreadcrumbSeparator />
+              <GeoBreadcrumbSeparator />
               <BreadcrumbPage className="block truncate leading-5">
                 <AutoTransition>{localizedRegionLabel}</AutoTransition>
               </BreadcrumbPage>
@@ -319,14 +352,14 @@ export function LazyGeoCityBreadcrumbLabel({
     <span ref={visibilityRef} className="block">
       <Breadcrumb className="max-w-full">
         <BreadcrumbList className="flex-nowrap gap-1">
-          <CountryBreadcrumbItem
+          <GeoCountryBreadcrumbItem
             countryLabel={countryLabel}
             countryIconName={countryIconName}
           />
           <AutoTransition className="flex gap-1">
             {shouldHideRegion ? null : (
               <BreadcrumbItem className="min-w-0" key={localizedRegionLabel}>
-                <BreadcrumbSeparator />
+                <GeoBreadcrumbSeparator />
                 <BreadcrumbPage className="block truncate leading-5">
                   {localizedRegionLabel}
                 </BreadcrumbPage>
@@ -334,7 +367,7 @@ export function LazyGeoCityBreadcrumbLabel({
             )}
             {shouldHideCity ? null : (
               <BreadcrumbItem className="min-w-0">
-                <BreadcrumbSeparator />
+                <GeoBreadcrumbSeparator />
                 <BreadcrumbPage className="block truncate leading-5">
                   {localizedCityLabel}
                 </BreadcrumbPage>

@@ -14,6 +14,7 @@ import {
   RiQuestionLine,
   RiRouteLine,
   RiSave3Line,
+  RiSearchLine,
   RiSettings3Line,
   RiShareForwardLine,
   RiSpeedUpLine,
@@ -22,6 +23,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { BlockingRuleGeoSearchDialog } from "@/components/dashboard/blocking-rule-geo-search-dialog";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import {
   AlertDialog,
@@ -178,6 +180,18 @@ interface BlockingRuleFieldCopy {
 interface BlockingRuleDialogCopy {
   testButton: string;
   helpButton: string;
+  searchButton: string;
+  searchTitle: string;
+  searchDescription: string;
+  searchInputLabel: string;
+  searchInputPlaceholder: string;
+  searchCountryLabel: string;
+  searchRegionLabel: string;
+  searchBack: string;
+  searchLoading: string;
+  searchNoResults: string;
+  searchLoadError: string;
+  searchClose: string;
   helpTitle: string;
   helpDescription: string;
   syntaxTitle: string;
@@ -620,6 +634,7 @@ function BlockingRuleEditorCard({
   onSave,
   icon: Icon,
   field,
+  locale,
   saveLabel,
   savingLabel,
 }: {
@@ -634,6 +649,7 @@ function BlockingRuleEditorCard({
   onSave: () => void;
   icon: ComponentType<{ className?: string }>;
   field: BlockingFieldId;
+  locale: Locale;
   saveLabel: string;
   savingLabel: string;
 }) {
@@ -642,6 +658,7 @@ function BlockingRuleEditorCard({
   const errorId = `${inputId}-errors`;
   const [testOpen, setTestOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastEmittedValueRef = useRef(value);
 
@@ -752,6 +769,16 @@ function BlockingRuleEditorCard({
             </AutoTransition>
           </Button>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {field === "countries" || field === "regions" ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSearchOpen(true)}
+              >
+                <RiSearchLine className="size-4" />
+                <span>{dialogCopy.searchButton}</span>
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="outline"
@@ -785,6 +812,23 @@ function BlockingRuleEditorCard({
           open={helpOpen}
           onOpenChange={setHelpOpen}
         />
+        {field === "countries" || field === "regions" ? (
+          <BlockingRuleGeoSearchDialog
+            field={field}
+            title={copy.title}
+            locale={locale}
+            copy={dialogCopy}
+            open={searchOpen}
+            onOpenChange={setSearchOpen}
+            onSelect={(selectedValue) => {
+              const lines = blockingEditorLines(value);
+              const nextLines = lines.includes(selectedValue)
+                ? lines
+                : [...lines, selectedValue];
+              onChange(nextLines.join("\n"));
+            }}
+          />
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -2039,6 +2083,7 @@ export function SettingsClientPage({
             key={field}
             field={field}
             icon={icon}
+            locale={locale}
             copy={copy.blockingRulesFields[field]}
             dialogCopy={copy.blockingRulesDialogs}
             value={blockingInputs[field]}

@@ -989,6 +989,18 @@ siteSettings:
   blockingRulesDialogs:
     testButton: 测试
     helpButton: 帮助
+    searchButton: 搜索
+    searchTitle: 搜索地区
+    searchDescription: 按名称或代码搜索，选择结果后将其添加到此 Card。
+    searchInputLabel: 搜索
+    searchInputPlaceholder: 按名称或代码搜索
+    searchCountryLabel: 国家 / 地区
+    searchRegionLabel: 州 / 省
+    searchBack: 更换国家 / 地区
+    searchLoading: 正在加载地区...
+    searchNoResults: 没有匹配的地区。
+    searchLoadError: 无法加载地区，请稍后重试。
+    searchClose: 关闭
     helpTitle: 规则语法
     helpDescription: 查看此字段的语法、示例和优先级规则。
     syntaxTitle: 语法

@@ -993,6 +993,18 @@ siteSettings:
   blockingRulesDialogs:
     testButton: テスト
     helpButton: ヘルプ
+    searchButton: 検索
+    searchTitle: 地域を検索
+    searchDescription: 名前またはコードで検索し、結果を選択してこのカードに追加します。
+    searchInputLabel: 検索
+    searchInputPlaceholder: 名前またはコードで検索
+    searchCountryLabel: 国 / 地域
+    searchRegionLabel: 州 / 省
+    searchBack: 国 / 地域を変更
+    searchLoading: 地域を読み込み中...
+    searchNoResults: 一致する地域がありません。
+    searchLoadError: 地域を読み込めません。しばらくしてから再試行してください。
+    searchClose: 閉じる
     helpTitle: ルール構文
     helpDescription: このフィールドの構文、例、優先順位を確認します。
     syntaxTitle: 構文

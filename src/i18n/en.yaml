@@ -1019,6 +1019,18 @@ siteSettings:
   blockingRulesDialogs:
     testButton: Test
     helpButton: Help
+    searchButton: Search
+    searchTitle: Search locations
+    searchDescription: Search by name or code, then select a result to add it to this card.
+    searchInputLabel: Search
+    searchInputPlaceholder: Search by name or code
+    searchCountryLabel: Country / region
+    searchRegionLabel: State / province
+    searchBack: Change country
+    searchLoading: Loading locations...
+    searchNoResults: No matching locations.
+    searchLoadError: Locations could not be loaded. Try again later.
+    searchClose: Close
     helpTitle: Rule Syntax
     helpDescription: Review the syntax, examples, and precedence for this field.
     syntaxTitle: Syntax
