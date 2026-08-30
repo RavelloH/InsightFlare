@@ -9,6 +9,12 @@ import {
 import { pickDemoGeoContext } from "@/lib/realtime/mock/dimension-pickers";
 
 type WindowMinutes = 60 | 1440 | 10080 | 43200;
+type DemoNormalEventKind =
+  | "pageview"
+  | "leave"
+  | "visibility"
+  | "custom_event"
+  | "identify";
 
 interface DemoBotEvent {
   timestamp: string;
@@ -49,7 +55,7 @@ interface DemoNormalEvent {
   siteId: string;
   siteName: string;
   siteDomain: string;
-  kind: string;
+  kind: DemoNormalEventKind;
   origin: string;
   hostname: string;
   pathname: string;
@@ -91,6 +97,14 @@ interface DemoTrendPoint {
   customBlockedCount: number;
   pageviews: number;
   customEvents: number;
+  pageviewCount: number;
+  leaveCount: number;
+  visibilityCount: number;
+  customEventCount: number;
+  identifyCount: number;
+  weightedRequestCount: number;
+  latencyWeightedSumMs: number;
+  latencySampleWeight: number;
   avgLatencyMs: number | null;
   p50LatencyMs: number | null;
   p75LatencyMs: number | null;
@@ -190,6 +204,37 @@ const CUSTOM_BLOCK_REASON_WEIGHTS = [
   { label: "blocked_countries", weight: 5 },
   { label: "blocked_regions", weight: 2 },
 ] as const;
+
+const NORMAL_EVENT_KIND_WEIGHTS = [
+  { label: "pageview", weight: 48 },
+  { label: "leave", weight: 12 },
+  { label: "visibility", weight: 18 },
+  { label: "custom_event", weight: 18 },
+  { label: "identify", weight: 4 },
+] as const;
+
+const NORMAL_EVENT_KINDS = [
+  "pageview",
+  "leave",
+  "visibility",
+  "custom_event",
+  "identify",
+] as const;
+
+const NORMAL_EVENT_COUNT_KEYS: Record<
+  DemoNormalEventKind,
+  | "pageviewCount"
+  | "leaveCount"
+  | "visibilityCount"
+  | "customEventCount"
+  | "identifyCount"
+> = {
+  pageview: "pageviewCount",
+  leave: "leaveCount",
+  visibility: "visibilityCount",
+  custom_event: "customEventCount",
+  identify: "identifyCount",
+};
 
 const BOT_ASNS = [
   { asn: 15169, organization: "Google LLC", weight: 16 },
@@ -456,6 +501,14 @@ function aggregateEvents(
       customBlockedCount: 0,
       pageviews: 0,
       customEvents: 0,
+      pageviewCount: 0,
+      leaveCount: 0,
+      visibilityCount: 0,
+      customEventCount: 0,
+      identifyCount: 0,
+      weightedRequestCount: 0,
+      latencyWeightedSumMs: 0,
+      latencySampleWeight: 0,
       avgLatencyMs: null,
       p50LatencyMs: null,
       p75LatencyMs: null,
@@ -480,6 +533,14 @@ function aggregateEvents(
       customBlockedCount: 0,
       pageviews: 0,
       customEvents: 0,
+      pageviewCount: 0,
+      leaveCount: 0,
+      visibilityCount: 0,
+      customEventCount: 0,
+      identifyCount: 0,
+      weightedRequestCount: 0,
+      latencyWeightedSumMs: 0,
+      latencySampleWeight: 0,
       avgLatencyMs: null,
       p50LatencyMs: null,
       p75LatencyMs: null,
@@ -487,6 +548,7 @@ function aggregateEvents(
       p99LatencyMs: null,
     };
     point.count += 1;
+    point.weightedRequestCount += 1;
     point.abnormalCount += 1;
     if (event.category === "medium_threat") point.mediumThreatCount += 1;
     if (event.category === "high_threat") point.highThreatCount += 1;
@@ -557,6 +619,11 @@ function aggregateNormalEvents(
       count: number;
       pageviews: number;
       customEvents: number;
+      pageviewCount: number;
+      leaveCount: number;
+      visibilityCount: number;
+      customEventCount: number;
+      identifyCount: number;
       latencyValues: number[];
     }
   >();
@@ -567,6 +634,11 @@ function aggregateNormalEvents(
       count: 0,
       pageviews: 0,
       customEvents: 0,
+      pageviewCount: 0,
+      leaveCount: 0,
+      visibilityCount: 0,
+      customEventCount: 0,
+      identifyCount: 0,
       latencyValues: [],
     });
   }
@@ -577,11 +649,17 @@ function aggregateNormalEvents(
       count: 0,
       pageviews: 0,
       customEvents: 0,
+      pageviewCount: 0,
+      leaveCount: 0,
+      visibilityCount: 0,
+      customEventCount: 0,
+      identifyCount: 0,
       latencyValues: [],
     };
     point.count += 1;
-    if (event.kind === "custom_event") point.customEvents += 1;
-    else point.pageviews += 1;
+    point[NORMAL_EVENT_COUNT_KEYS[event.kind]] += 1;
+    point.pageviews += event.kind === "pageview" ? 1 : 0;
+    point.customEvents += event.kind === "custom_event" ? 1 : 0;
     if (Number.isFinite(event.edgeLatencyMs) && event.edgeLatencyMs >= 0) {
       point.latencyValues.push(event.edgeLatencyMs);
     }
@@ -628,6 +706,17 @@ function aggregateNormalEvents(
           count: point.count,
           pageviews: point.pageviews,
           customEvents: point.customEvents,
+          pageviewCount: point.pageviewCount,
+          leaveCount: point.leaveCount,
+          visibilityCount: point.visibilityCount,
+          customEventCount: point.customEventCount,
+          identifyCount: point.identifyCount,
+          weightedRequestCount: point.count,
+          latencyWeightedSumMs: sortedLatency.reduce(
+            (sum, value) => sum + value,
+            0,
+          ),
+          latencySampleWeight: sortedLatency.length,
           avgLatencyMs,
           p50LatencyMs,
           p75LatencyMs,
@@ -776,7 +865,13 @@ export function generateDemoRequestObservationData(
       generatedAt - Math.floor(Math.pow(rng(), 1.08) * minutes * 60 * 1000);
     const eventAt = receivedAt - sInt(rng, 8, 95);
     const pathname = sPick(rng, site.paths) || "/";
-    const isCustomEvent = rng() < 0.18;
+    const kind = (
+      index < NORMAL_EVENT_KINDS.length
+        ? NORMAL_EVENT_KINDS[index]
+        : weightedPickLabel(rng, [...NORMAL_EVENT_KIND_WEIGHTS], "pageview")
+    ) as DemoNormalEventKind;
+    const isCustomEvent = kind === "custom_event";
+    const isVisibility = kind === "visibility";
     const edgeLatencyMs =
       Math.round((18 + rng() * 44 + (isCustomEvent ? 8 : 0)) * 10) / 10;
 
@@ -788,7 +883,7 @@ export function generateDemoRequestObservationData(
       siteId: site.id,
       siteName: site.name,
       siteDomain: site.domain,
-      kind: isCustomEvent ? "custom_event" : "pageview",
+      kind,
       origin: `https://${site.domain}`,
       hostname: site.domain,
       pathname,
@@ -801,7 +896,7 @@ export function generateDemoRequestObservationData(
       asOrganization: asn.organization,
       rayId: `${sInt(rng, 100000, 999999).toString(16)}${index.toString(16)}ok`,
       traceId: `demo-normal-${index.toString(36).padStart(5, "0")}`,
-      requestMethod: isCustomEvent ? "POST" : "GET",
+      requestMethod: "POST",
       metadataJson: JSON.stringify({
         eventId: `demo-event-${index.toString(36).padStart(5, "0")}`,
         visitId: `demo-visit-${(index % 24).toString(36).padStart(3, "0")}`,
@@ -812,7 +907,11 @@ export function generateDemoRequestObservationData(
         hasVisitorId: true,
         hasUserId: index % 3 === 0,
         eventName: isCustomEvent ? `demo_event_${index % 5}` : "",
-        visibilityState: isCustomEvent ? "visible" : "",
+        visibilityState: isVisibility
+          ? index % 2 === 0
+            ? "visible"
+            : "hidden"
+          : "",
         secFetchSite: "same-origin",
         secFetchMode: "cors",
         secFetchDest: "empty",
@@ -855,8 +954,25 @@ export function generateDemoRequestObservationData(
     normalAggregates.trend.map((point) => [point.timestampMs, point]),
   );
   const trend = aggregates.trend.map((point) => {
-    const normalPoint = normalTrendByBucket.get(point.timestampMs);
-    const normalCount = normalPoint?.count ?? 0;
+    const normalPoint = normalTrendByBucket.get(point.timestampMs) ?? {
+      count: 0,
+      pageviews: 0,
+      customEvents: 0,
+      pageviewCount: 0,
+      leaveCount: 0,
+      visibilityCount: 0,
+      customEventCount: 0,
+      identifyCount: 0,
+      weightedRequestCount: 0,
+      latencyWeightedSumMs: 0,
+      latencySampleWeight: 0,
+      avgLatencyMs: null,
+      p50LatencyMs: null,
+      p75LatencyMs: null,
+      p95LatencyMs: null,
+      p99LatencyMs: null,
+    };
+    const normalCount = normalPoint.count;
     const abnormalCount = point.count;
     const totalCount = normalCount + abnormalCount;
     return {
@@ -868,16 +984,21 @@ export function generateDemoRequestObservationData(
       botRatio: totalCount > 0 ? abnormalCount / totalCount : 0,
       abnormalRatio: totalCount > 0 ? abnormalCount / totalCount : 0,
       normalRatio: totalCount > 0 ? normalCount / totalCount : 0,
-      pageviews: normalPoint?.pageviews ?? 0,
-      customEvents: normalPoint?.customEvents ?? 0,
-      avgLatencyMs: normalPoint?.avgLatencyMs ?? null,
-      p50LatencyMs:
-        normalPoint?.p50LatencyMs ?? normalPoint?.avgLatencyMs ?? null,
-      p75LatencyMs:
-        normalPoint?.p75LatencyMs ?? normalPoint?.p95LatencyMs ?? null,
-      p95LatencyMs: normalPoint?.p95LatencyMs ?? null,
-      p99LatencyMs:
-        normalPoint?.p99LatencyMs ?? normalPoint?.p95LatencyMs ?? null,
+      pageviews: normalPoint.pageviews,
+      customEvents: normalPoint.customEvents,
+      pageviewCount: normalPoint.pageviewCount,
+      leaveCount: normalPoint.leaveCount,
+      visibilityCount: normalPoint.visibilityCount,
+      customEventCount: normalPoint.customEventCount,
+      identifyCount: normalPoint.identifyCount,
+      weightedRequestCount: totalCount,
+      latencyWeightedSumMs: normalPoint.latencyWeightedSumMs,
+      latencySampleWeight: normalPoint.latencySampleWeight,
+      avgLatencyMs: normalPoint.avgLatencyMs,
+      p50LatencyMs: normalPoint.p50LatencyMs ?? normalPoint.avgLatencyMs,
+      p75LatencyMs: normalPoint.p75LatencyMs ?? normalPoint.p95LatencyMs,
+      p95LatencyMs: normalPoint.p95LatencyMs,
+      p99LatencyMs: normalPoint.p99LatencyMs ?? normalPoint.p95LatencyMs,
     };
   });
   const pageviews = normalEvents.filter(

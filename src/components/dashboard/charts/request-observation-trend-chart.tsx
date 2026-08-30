@@ -40,6 +40,14 @@ export interface RequestObservationTrendPoint {
   customBlockedCount: number;
   pageviews: number;
   customEvents: number;
+  pageviewCount: number;
+  leaveCount: number;
+  visibilityCount: number;
+  customEventCount: number;
+  identifyCount: number;
+  weightedRequestCount: number;
+  latencyWeightedSumMs: number;
+  latencySampleWeight: number;
   avgLatencyMs: number | null;
   p50LatencyMs: number | null;
   p75LatencyMs: number | null;
@@ -53,6 +61,11 @@ export interface RequestObservationTrendLabels {
   totalRequests: string;
   pageviews: string;
   customEvents: string;
+  pageview: string;
+  leave: string;
+  visibility: string;
+  customEvent: string;
+  identify: string;
   abnormalRatio: string;
   avgLatency: string;
   p50Latency: string;
@@ -86,6 +99,8 @@ const NORMAL_TRAFFIC_SHARE_COLOR = "var(--color-chart-4)";
 const MEDIUM_THREAT_TRAFFIC_COLOR = PERFORMANCE_WARNING_COLOR;
 const HIGH_THREAT_TRAFFIC_COLOR = "var(--color-destructive)";
 const CUSTOM_BLOCKED_TRAFFIC_COLOR = "var(--muted-foreground)";
+const BUSINESS_CUSTOM_EVENT_COLOR = PERFORMANCE_WARNING_COLOR;
+const BUSINESS_IDENTIFY_COLOR = "oklch(0.7 0.14 250)";
 
 type RequestObservationHoverHighlightProps = Pick<
   CategoricalChartState,
@@ -234,6 +249,11 @@ function createTrendTooltipFormatter({
       totalCount: labels.totalRequests,
       pageviews: labels.pageviews,
       customEvents: labels.customEvents,
+      pageviewCount: labels.pageview,
+      leaveCount: labels.leave,
+      visibilityCount: labels.visibility,
+      customEventCount: labels.customEvent,
+      identifyCount: labels.identify,
       abnormalRatio: labels.abnormalRatio,
       botRatio: labels.abnormalRatio,
       avgLatencyMs: labels.avgLatency,
@@ -261,17 +281,27 @@ function createTrendTooltipFormatter({
                   ? "var(--color-pageviews)"
                   : key === "customEvents"
                     ? "var(--color-customEvents)"
-                    : key === "p50LatencyMs"
-                      ? "var(--color-p50LatencyMs)"
-                      : key === "p75LatencyMs"
-                        ? "var(--color-p75LatencyMs)"
-                        : key === "p95LatencyMs"
-                          ? "var(--color-p95LatencyMs)"
-                          : key === "p99LatencyMs"
-                            ? "var(--color-p99LatencyMs)"
-                            : isRatio
-                              ? "var(--color-abnormalRatio, var(--color-botRatio))"
-                              : "var(--color-abnormalCount, var(--color-count))";
+                    : key === "pageviewCount"
+                      ? "var(--color-pageviewCount)"
+                      : key === "leaveCount"
+                        ? "var(--color-leaveCount)"
+                        : key === "visibilityCount"
+                          ? "var(--color-visibilityCount)"
+                          : key === "customEventCount"
+                            ? "var(--color-customEventCount)"
+                            : key === "identifyCount"
+                              ? "var(--color-identifyCount)"
+                              : key === "p50LatencyMs"
+                                ? "var(--color-p50LatencyMs)"
+                                : key === "p75LatencyMs"
+                                  ? "var(--color-p75LatencyMs)"
+                                  : key === "p95LatencyMs"
+                                    ? "var(--color-p95LatencyMs)"
+                                    : key === "p99LatencyMs"
+                                      ? "var(--color-p99LatencyMs)"
+                                      : isRatio
+                                        ? "var(--color-abnormalRatio, var(--color-botRatio))"
+                                        : "var(--color-abnormalCount, var(--color-count))";
 
     return (
       <TrendTooltipValue
@@ -306,6 +336,26 @@ function createTrendChartConfig(
     customEvents: {
       label: labels.customEvents,
       color: PERFORMANCE_WARNING_COLOR,
+    },
+    pageviewCount: {
+      label: labels.pageview,
+      color: "var(--color-chart-1)",
+    },
+    leaveCount: {
+      label: labels.leave,
+      color: "var(--color-chart-2)",
+    },
+    visibilityCount: {
+      label: labels.visibility,
+      color: "var(--color-chart-3)",
+    },
+    customEventCount: {
+      label: labels.customEvent,
+      color: BUSINESS_CUSTOM_EVENT_COLOR,
+    },
+    identifyCount: {
+      label: labels.identify,
+      color: BUSINESS_IDENTIFY_COLOR,
     },
     abnormalRatio: {
       label: labels.abnormalRatio,
@@ -388,7 +438,7 @@ function RequestObservationTrendChartComponent({
         {variant === "traffic-composition" ? (
           <defs>
             <linearGradient
-              id="request-observability-total-fill"
+              id="request-observability-pageview-fill"
               x1="0"
               y1="0"
               x2="0"
@@ -396,12 +446,84 @@ function RequestObservationTrendChartComponent({
             >
               <stop
                 offset="5%"
-                stopColor="var(--color-totalCount)"
+                stopColor="var(--color-pageviewCount)"
                 stopOpacity={0.3}
               />
               <stop
                 offset="95%"
-                stopColor="var(--color-totalCount)"
+                stopColor="var(--color-pageviewCount)"
+                stopOpacity={0.02}
+              />
+            </linearGradient>
+            <linearGradient
+              id="request-observability-leave-fill"
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="1"
+            >
+              <stop
+                offset="5%"
+                stopColor="var(--color-leaveCount)"
+                stopOpacity={0.3}
+              />
+              <stop
+                offset="95%"
+                stopColor="var(--color-leaveCount)"
+                stopOpacity={0.02}
+              />
+            </linearGradient>
+            <linearGradient
+              id="request-observability-visibility-fill"
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="1"
+            >
+              <stop
+                offset="5%"
+                stopColor="var(--color-visibilityCount)"
+                stopOpacity={0.3}
+              />
+              <stop
+                offset="95%"
+                stopColor="var(--color-visibilityCount)"
+                stopOpacity={0.02}
+              />
+            </linearGradient>
+            <linearGradient
+              id="request-observability-custom-event-fill"
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="1"
+            >
+              <stop
+                offset="5%"
+                stopColor="var(--color-customEventCount)"
+                stopOpacity={0.3}
+              />
+              <stop
+                offset="95%"
+                stopColor="var(--color-customEventCount)"
+                stopOpacity={0.02}
+              />
+            </linearGradient>
+            <linearGradient
+              id="request-observability-identify-fill"
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="1"
+            >
+              <stop
+                offset="5%"
+                stopColor="var(--color-identifyCount)"
+                stopOpacity={0.3}
+              />
+              <stop
+                offset="95%"
+                stopColor="var(--color-identifyCount)"
                 stopOpacity={0.02}
               />
             </linearGradient>
@@ -519,29 +641,50 @@ function RequestObservationTrendChartComponent({
         {variant === "traffic-composition" ? (
           <Area
             type="linear"
-            dataKey="totalCount"
-            stroke="var(--color-totalCount)"
-            fill="url(#request-observability-total-fill)"
+            dataKey="pageviewCount"
+            stroke="var(--color-pageviewCount)"
+            fill="url(#request-observability-pageview-fill)"
             strokeWidth={2}
             dot={false}
           />
         ) : null}
         {variant === "traffic-composition" ? (
-          <Line
+          <Area
             type="linear"
-            dataKey="pageviews"
-            stroke="var(--color-pageviews)"
+            dataKey="leaveCount"
+            stroke="var(--color-leaveCount)"
+            fill="url(#request-observability-leave-fill)"
             strokeWidth={2}
             dot={false}
           />
         ) : null}
         {variant === "traffic-composition" ? (
-          <Line
+          <Area
             type="linear"
-            dataKey="customEvents"
-            stroke="var(--color-customEvents)"
+            dataKey="visibilityCount"
+            stroke="var(--color-visibilityCount)"
+            fill="url(#request-observability-visibility-fill)"
             strokeWidth={2}
-            strokeDasharray="4 4"
+            dot={false}
+          />
+        ) : null}
+        {variant === "traffic-composition" ? (
+          <Area
+            type="linear"
+            dataKey="customEventCount"
+            stroke="var(--color-customEventCount)"
+            fill="url(#request-observability-custom-event-fill)"
+            strokeWidth={2}
+            dot={false}
+          />
+        ) : null}
+        {variant === "traffic-composition" ? (
+          <Area
+            type="linear"
+            dataKey="identifyCount"
+            stroke="var(--color-identifyCount)"
+            fill="url(#request-observability-identify-fill)"
+            strokeWidth={2}
             dot={false}
           />
         ) : null}

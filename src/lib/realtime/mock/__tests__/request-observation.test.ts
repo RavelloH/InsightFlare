@@ -20,13 +20,58 @@ describe("mock/request-observation", () => {
     expect(data.summary.uniqueCountries).toBeGreaterThan(0);
     expect(data.events.length).toBe(data.summary.total);
     expect(data.trend.length).toBeGreaterThan(0);
+    expect(
+      data.trend.every(
+        (point) =>
+          point.weightedRequestCount === point.totalCount &&
+          point.latencySampleWeight >= 0 &&
+          point.latencyWeightedSumMs >= 0,
+      ),
+    ).toBe(true);
     expect(data.reasons.length).toBeGreaterThan(0);
     expect(data.asns.length).toBeGreaterThan(0);
     expect(data.mapPoints.length).toBeGreaterThan(0);
     expect(data.events[0]?.metadataJson).toContain('"requestMethod":"POST"');
+    expect(new Set(data.normalEvents.map((event) => event.kind))).toEqual(
+      new Set(["pageview", "leave", "visibility", "custom_event", "identify"]),
+    );
     expect(new Set(data.events.map((event) => event.category))).toEqual(
       new Set(["medium_threat", "high_threat", "custom_block"]),
     );
+    expect(
+      data.trend.reduce((sum, point) => sum + point.pageviewCount, 0),
+    ).toBe(
+      data.normalEvents.filter((event) => event.kind === "pageview").length,
+    );
+    expect(data.trend.reduce((sum, point) => sum + point.leaveCount, 0)).toBe(
+      data.normalEvents.filter((event) => event.kind === "leave").length,
+    );
+    expect(
+      data.trend.reduce((sum, point) => sum + point.visibilityCount, 0),
+    ).toBe(
+      data.normalEvents.filter((event) => event.kind === "visibility").length,
+    );
+    expect(
+      data.trend.reduce((sum, point) => sum + point.customEventCount, 0),
+    ).toBe(
+      data.normalEvents.filter((event) => event.kind === "custom_event").length,
+    );
+    expect(
+      data.trend.reduce((sum, point) => sum + point.identifyCount, 0),
+    ).toBe(
+      data.normalEvents.filter((event) => event.kind === "identify").length,
+    );
+    expect(
+      data.trend.every(
+        (point) =>
+          point.pageviewCount +
+            point.leaveCount +
+            point.visibilityCount +
+            point.customEventCount +
+            point.identifyCount ===
+          point.normalCount,
+      ),
+    ).toBe(true);
     expect(
       data.trend.every(
         (point) =>

@@ -425,15 +425,26 @@ describe("admin bot analytics handlers", () => {
         }
         if (sql.includes("GROUP BY timestampMs")) {
           const timestampMs = firstBucketTimestampMs(sql);
-          if (sql.includes("avgIf(double3")) {
+          if (sql.includes("latencyWeightedSumMs")) {
             return new Response(
               jsonEachRow([
                 {
                   timestampMs,
+                  weightedRequestCount: 99,
                   count: 99,
                   pageviews: 99,
                   customEvents: 0,
-                  avgLatencyMs: 40,
+                  pageviewCount: 99,
+                  leaveCount: 7,
+                  visibilityCount: 8,
+                  customEventCount: 9,
+                  identifyCount: 10,
+                  latencyWeightedSumMs: 3960,
+                  latencySampleWeight: 99,
+                  p50LatencyMs: 40,
+                  p75LatencyMs: 40,
+                  p95LatencyMs: 40,
+                  p99LatencyMs: 40,
                 },
               ]),
               { status: 200 },
@@ -544,10 +555,15 @@ describe("admin bot analytics handlers", () => {
       allSql.some(
         (statement) =>
           statement.includes("GROUP BY timestampMs") &&
-          statement.includes("avgIf(double3") &&
+          statement.includes("sumIf(_sample_interval * double3") &&
+          statement.includes("latencyWeightedSumMs") &&
+          statement.includes("latencySampleWeight") &&
           /p50LatencyMs|p75LatencyMs|p95LatencyMs|p99LatencyMs/.test(statement),
       ),
     ).toBe(true);
+    expect(allSql.join("\n")).toContain(
+      "sum(_sample_interval) AS weightedRequestCount",
+    );
     expect(body.configured).toBe(true);
     expect(body.summary).toMatchObject({
       total: 1,
@@ -612,12 +628,26 @@ describe("admin bot analytics handlers", () => {
         (statement) =>
           statement.includes("blob15 AS label") &&
           statement.includes("GROUP BY label") &&
-          statement.includes("count() AS count") &&
+          statement.includes("sum(_sample_interval) AS count") &&
           statement.includes("LIMIT 30"),
       ),
     ).toBe(true);
     expect(body.trend.some((point: any) => point.baselineCount === 99)).toBe(
       true,
+    );
+    expect(body.trend).toContainEqual(
+      expect.objectContaining({
+        baselineCount: 99,
+        weightedRequestCount: 100,
+        latencyWeightedSumMs: 3960,
+        latencySampleWeight: 99,
+        avgLatencyMs: 40,
+        pageviewCount: 99,
+        leaveCount: 7,
+        visibilityCount: 8,
+        customEventCount: 9,
+        identifyCount: 10,
+      }),
     );
   });
 
@@ -675,6 +705,110 @@ describe("admin bot analytics handlers", () => {
     );
     expect(allSql.join("\n")).not.toContain("toStartOfInterval");
     expect(body.trend[0]?.timestampMs).toBe(expectedFrom);
+  });
+
+  it("calculates the full-window Worker latency from weighted bucket totals", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    const encrypted = await import("@/lib/edge/secret-encryption").then(
+      ({ encryptBotAnalyticsSecret }) =>
+        encryptBotAnalyticsSecret(
+          { MAIN_SECRET: "main-secret" },
+          "cf_reader_token",
+        ),
+    );
+    const env = createEnv([
+      statement({
+        first: row({
+          apiTokenEncrypted: encrypted,
+          apiTokenHint: "••••oken",
+          configured: true,
+        }),
+      }),
+    ]);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (_input, init) => {
+        const sql = String((init as RequestInit | undefined)?.body || "");
+        if (sql.includes("GROUP BY timestampMs")) {
+          const timestampMs = firstBucketTimestampMs(sql);
+          if (sql.includes("latencyWeightedSumMs")) {
+            return new Response(
+              jsonEachRow([
+                {
+                  timestampMs,
+                  weightedRequestCount: 1,
+                  count: 1,
+                  pageviews: 1,
+                  customEvents: 0,
+                  latencyWeightedSumMs: 10,
+                  latencySampleWeight: 1,
+                  p50LatencyMs: 10,
+                  p75LatencyMs: 10,
+                  p95LatencyMs: 10,
+                  p99LatencyMs: 10,
+                },
+                {
+                  timestampMs: timestampMs + 60 * 60 * 1000,
+                  weightedRequestCount: 9,
+                  count: 9,
+                  pageviews: 9,
+                  customEvents: 0,
+                  latencyWeightedSumMs: 900,
+                  latencySampleWeight: 9,
+                  p50LatencyMs: 100,
+                  p75LatencyMs: 100,
+                  p95LatencyMs: 100,
+                  p99LatencyMs: 100,
+                },
+              ]),
+              { status: 200 },
+            );
+          }
+          return new Response("", { status: 200 });
+        }
+        return new Response("", { status: 200 });
+      });
+
+    const response = await handleBotAnalyticsAdmin(
+      request(
+        "/api/private/admin/bot-analytics?from=1799996400000&to=1800000000000&interval=hour",
+      ),
+      env,
+      new URL(
+        "https://app.test/api/private/admin/bot-analytics?from=1799996400000&to=1800000000000&interval=hour",
+      ),
+    );
+    const body = await jsonOf(response);
+
+    expect(response.status).toBe(200);
+    expect(body.overview).toMatchObject({
+      normalRequests: 10,
+      abnormalRequests: 0,
+      avgLatencyMs: 91,
+    });
+    expect(body.trend).toContainEqual(
+      expect.objectContaining({
+        weightedRequestCount: 1,
+        latencyWeightedSumMs: 10,
+        latencySampleWeight: 1,
+        avgLatencyMs: 10,
+      }),
+    );
+    expect(body.trend).toContainEqual(
+      expect.objectContaining({
+        weightedRequestCount: 9,
+        latencyWeightedSumMs: 900,
+        latencySampleWeight: 9,
+        avgLatencyMs: 100,
+      }),
+    );
+    expect(
+      fetchMock.mock.calls.some(([, init]) =>
+        String((init as RequestInit | undefined)?.body || "").includes(
+          "sumIf(_sample_interval * double3, double3 >= 0)",
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("falls back to blob-only Analytics Engine queries when double columns are unavailable", async () => {
@@ -758,9 +892,18 @@ describe("admin bot analytics handlers", () => {
             jsonEachRow([
               {
                 timestampMs,
-                count: sql.includes("avgIf(double3") ? 49 : 1,
-                pageviews: sql.includes("avgIf(double3") ? 49 : 1,
+                weightedRequestCount: sql.includes("latencyWeightedSumMs")
+                  ? 49
+                  : 1,
+                count: sql.includes("latencyWeightedSumMs") ? 49 : 1,
+                pageviews: sql.includes("latencyWeightedSumMs") ? 49 : 1,
                 customEvents: 0,
+                latencyWeightedSumMs: sql.includes("latencyWeightedSumMs")
+                  ? 0
+                  : undefined,
+                latencySampleWeight: sql.includes("latencyWeightedSumMs")
+                  ? 49
+                  : undefined,
                 avgLatencyMs: 0,
               },
             ]),

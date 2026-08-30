@@ -2300,29 +2300,30 @@ requestObservation:
     request: 请求
     visibility: 可见性
     leave: 离开
+    identify: 用户识别
   overviewLabels:
     totalRequests: 总请求数
     normalRequests: 正常请求
     abnormalRequests: 异常请求
     abnormalRatio: 异常请求比例
-    p50Latency: P50 边缘耗时
-    p75Latency: P75 边缘耗时
-    p95Latency: P95 边缘耗时
-    p99Latency: P99 边缘耗时
-    avgLatency: 平均边缘耗时
+    p50Latency: P50 Worker 处理耗时
+    p75Latency: P75 Worker 处理耗时
+    p95Latency: P95 Worker 处理耗时
+    p99Latency: P99 Worker 处理耗时
+    avgLatency: 平均 Worker 处理耗时
     pageviews: 页面浏览
     customEvents: 自定义事件
     overviewTrendTitle: 请求分流趋势
     overviewTrendDescription: 按顶栏时间间隔分桶显示正常与异常请求，以及异常请求比例。
-    trafficCompositionTitle: 请求构成
-    trafficCompositionDescription: 正常请求、异常请求和页面事件在同一时间轴上的变化。
+    trafficCompositionTitle: 业务请求构成
+    trafficCompositionDescription: 按时间显示正常采集链路中页面浏览、离开、可见性、自定义事件和用户识别的数量。
     categoryShareTitle: 请求分类占比
     normalTrafficShare: 正常流量
     mediumThreatTraffic: 中威胁流量
     highThreatTraffic: 高威胁流量
     customBlockedTraffic: 自定义屏蔽流量
-    latencyTitle: 边缘耗时趋势
-    latencyDescription: 正常请求写入 AE 时记录的 P50 / P75 / P95 / P99 边缘耗时。
+    latencyTitle: Worker 处理耗时趋势
+    latencyDescription: 正常请求写入 AE 时记录的 P50 / P75 / P95 / P99 Worker 处理耗时。
     abnormalSubtitle: 聚焦异常请求，地图和统计表包含中威胁、高威胁和自定义屏蔽流量。
     normalSubtitle: 聚焦进入正常采集链路的请求，地图和统计表只显示绿色正常流量。
     requests: 请求数
@@ -2330,9 +2331,9 @@ requestObservation:
     latencyMilliseconds: "{value} 毫秒"
   normalDetail:
     title: 正常请求详情
-    subtitle: 查看正常请求 AE 记录的链路、位置和耗时字段。
+    subtitle: 查看正常请求 AE 记录的链路、位置和 Worker 处理耗时字段。
     requestMethod: 请求方法
-    edgeLatency: 边缘耗时
+    edgeLatency: Worker 处理耗时
     eventAt: 事件时间
     receivedAt: 接收时间
     coordinates: 坐标

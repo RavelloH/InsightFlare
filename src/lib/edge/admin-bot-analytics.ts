@@ -400,7 +400,8 @@ function buildCountByBucketSql(input: {
   const latencySelect =
     input.includeLatency && input.source === "normal"
       ? `,
-      avgIf(double3, double3 >= 0) AS avgLatencyMs,
+      sumIf(_sample_interval * double3, double3 >= 0) AS latencyWeightedSumMs,
+      sumIf(_sample_interval, double3 >= 0) AS latencySampleWeight,
       quantileExactWeighted(0.5)(double3, _sample_interval) AS p50LatencyMs,
       quantileExactWeighted(0.75)(double3, _sample_interval) AS p75LatencyMs,
       quantileExactWeighted(0.95)(double3, _sample_interval) AS p95LatencyMs,
@@ -414,19 +415,34 @@ function buildCountByBucketSql(input: {
   const categorySelect =
     input.source === "abnormal"
       ? `,
-      countIf(blob3 IN ('medium', 'medium_threat')) AS mediumThreatCount,
-      countIf(blob3 IN ('high', 'high_threat')) AS highThreatCount,
-      countIf(blob3 = 'custom_block') AS customBlockedCount`
+      sumIf(_sample_interval, blob3 IN ('medium', 'medium_threat')) AS mediumThreatCount,
+      sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreatCount,
+      sumIf(_sample_interval, blob3 = 'custom_block') AS customBlockedCount`
       : `,
       0 AS mediumThreatCount,
       0 AS highThreatCount,
       0 AS customBlockedCount`;
+  const businessEventSelect =
+    input.source === "normal"
+      ? `,
+      sumIf(_sample_interval, blob2 = 'pageview') AS pageviewCount,
+      sumIf(_sample_interval, blob2 = 'leave') AS leaveCount,
+      sumIf(_sample_interval, blob2 = 'visibility') AS visibilityCount,
+      sumIf(_sample_interval, blob2 = 'custom_event') AS customEventCount,
+      sumIf(_sample_interval, blob2 = 'identify') AS identifyCount`
+      : `,
+      0 AS pageviewCount,
+      0 AS leaveCount,
+      0 AS visibilityCount,
+      0 AS customEventCount,
+      0 AS identifyCount`;
   return `
     SELECT
       ${bucketExpression} AS timestampMs,
-      count() AS count,
-      countIf(blob2 = 'pageview') AS pageviews,
-      countIf(blob2 = 'custom_event') AS customEvents${categorySelect}${latencySelect}
+      sum(_sample_interval) AS weightedRequestCount,
+      sum(_sample_interval) AS count,
+      sumIf(_sample_interval, blob2 = 'pageview') AS pageviews,
+      sumIf(_sample_interval, blob2 = 'custom_event') AS customEvents${businessEventSelect}${categorySelect}${latencySelect}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
@@ -460,7 +476,7 @@ function buildMapPointsSql(input: {
       round(${latColumn}, 3) AS latitude,
       round(${lonColumn}, 3) AS longitude,
       ${countryBlob} AS country,
-      count() AS pointCount
+      sum(_sample_interval) AS pointCount
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
@@ -505,7 +521,7 @@ function buildNetworkDimensionSql(input: {
   const groupColumns = columns[input.dimension];
   const threatSelect =
     input.source === "abnormal"
-      ? ",\n      countIf(blob3 IN ('high', 'high_threat')) AS highThreat"
+      ? ",\n      sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreat"
       : ",\n      0 AS highThreat";
   const categoryFilter =
     input.source === "abnormal"
@@ -514,7 +530,7 @@ function buildNetworkDimensionSql(input: {
   return `
     SELECT
       ${groupColumns.join(",\n      ")},
-      count() AS count${threatSelect}
+      sum(_sample_interval) AS count${threatSelect}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
@@ -538,9 +554,9 @@ function buildSourceSummarySql(input: {
   const columns =
     input.source === "abnormal"
       ? `
-      countIf(blob3 IN ('high', 'high_threat')) AS highThreat,
-      countIf(blob3 IN ('medium', 'medium_threat')) AS mediumThreat,
-      countIf(blob3 = 'custom_block') AS customBlocked,
+      sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreat,
+      sumIf(_sample_interval, blob3 IN ('medium', 'medium_threat')) AS mediumThreat,
+      sumIf(_sample_interval, blob3 = 'custom_block') AS customBlocked,
       count(DISTINCT blob1) AS affectedSites,
       count(DISTINCT blob15) AS uniqueAsns,
       count(DISTINCT blob10) AS uniqueCountries`
@@ -550,7 +566,7 @@ function buildSourceSummarySql(input: {
       count(DISTINCT blob6) AS uniqueCountries`;
   return `
     SELECT
-      count() AS total,${columns}
+      sum(_sample_interval) AS total,${columns}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
@@ -615,7 +631,7 @@ function buildDimensionSql(input: {
   if (!columns || !DIMENSION_TABS[input.group].includes(input.tab))
     throw new Error("Invalid analytics dimension");
   const groupBy = columns.map((column) => column.split(" AS ")[1]).join(", ");
-  return `SELECT ${columns.join(", ")}, count() AS count${abnormal ? ", countIf(blob3 IN ('high', 'high_threat')) AS highThreat" : ", 0 AS highThreat"} FROM ${dataset} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds})${abnormal ? ` AND ${ABNORMAL_CATEGORY_SQL_FILTER}` : ""} GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
+  return `SELECT ${columns.join(", ")}, sum(_sample_interval) AS count${abnormal ? ", sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreat" : ", 0 AS highThreat"} FROM ${dataset} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds})${abnormal ? ` AND ${ABNORMAL_CATEGORY_SQL_FILTER}` : ""} GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
 }
 
 function buildBotAnalyticsDetailSql(input: {
@@ -1154,6 +1170,14 @@ function mergeTrendRows(input: {
       customBlockedCount: number;
       pageviews: number;
       customEvents: number;
+      pageviewCount: number;
+      leaveCount: number;
+      visibilityCount: number;
+      customEventCount: number;
+      identifyCount: number;
+      weightedRequestCount: number;
+      latencyWeightedSumMs: number;
+      latencySampleWeight: number;
       avgLatencyMs: number | null;
       p50LatencyMs: number | null;
       p75LatencyMs: number | null;
@@ -1182,6 +1206,14 @@ function mergeTrendRows(input: {
       customBlockedCount: 0,
       pageviews: 0,
       customEvents: 0,
+      pageviewCount: 0,
+      leaveCount: 0,
+      visibilityCount: 0,
+      customEventCount: 0,
+      identifyCount: 0,
+      weightedRequestCount: 0,
+      latencyWeightedSumMs: 0,
+      latencySampleWeight: 0,
       avgLatencyMs: null,
       p50LatencyMs: null,
       p75LatencyMs: null,
@@ -1197,25 +1229,24 @@ function mergeTrendRows(input: {
     );
     const current = trend.get(timestampMs);
     if (!current) continue;
-    current.abnormalCount = Math.max(0, Math.trunc(toFiniteNumber(row.count)));
+    const weightedRequestCount = Math.max(
+      0,
+      toFiniteNumber(row.weightedRequestCount, toFiniteNumber(row.count)),
+    );
+    current.abnormalCount = weightedRequestCount;
     current.count = current.abnormalCount;
+    current.weightedRequestCount += weightedRequestCount;
     current.mediumThreatCount = Math.max(
       0,
-      Math.trunc(toFiniteNumber(row.mediumThreatCount)),
+      toFiniteNumber(row.mediumThreatCount),
     );
-    current.highThreatCount = Math.max(
-      0,
-      Math.trunc(toFiniteNumber(row.highThreatCount)),
-    );
+    current.highThreatCount = Math.max(0, toFiniteNumber(row.highThreatCount));
     current.customBlockedCount = Math.max(
       0,
-      Math.trunc(toFiniteNumber(row.customBlockedCount)),
+      toFiniteNumber(row.customBlockedCount),
     );
-    current.pageviews += Math.max(0, Math.trunc(toFiniteNumber(row.pageviews)));
-    current.customEvents += Math.max(
-      0,
-      Math.trunc(toFiniteNumber(row.customEvents)),
-    );
+    current.pageviews += Math.max(0, toFiniteNumber(row.pageviews));
+    current.customEvents += Math.max(0, toFiniteNumber(row.customEvents));
   }
   for (const row of input.normalRows) {
     const timestampMs = bucketTimestamp(
@@ -1225,19 +1256,58 @@ function mergeTrendRows(input: {
     );
     const current = trend.get(timestampMs);
     if (!current) continue;
-    current.normalCount = Math.max(0, Math.trunc(toFiniteNumber(row.count)));
-    current.baselineCount = current.normalCount;
-    current.pageviews += Math.max(0, Math.trunc(toFiniteNumber(row.pageviews)));
-    current.customEvents += Math.max(
+    const weightedRequestCount = Math.max(
       0,
-      Math.trunc(toFiniteNumber(row.customEvents)),
+      toFiniteNumber(row.weightedRequestCount, toFiniteNumber(row.count)),
     );
-    const avgLatencyMs = toFiniteNumber(row.avgLatencyMs, Number.NaN);
+    current.normalCount = weightedRequestCount;
+    current.baselineCount = current.normalCount;
+    current.weightedRequestCount += weightedRequestCount;
+    current.pageviews += Math.max(0, toFiniteNumber(row.pageviews));
+    current.customEvents += Math.max(0, toFiniteNumber(row.customEvents));
+    current.pageviewCount += Math.max(
+      0,
+      toFiniteNumber(row.pageviewCount, toFiniteNumber(row.pageviews)),
+    );
+    current.leaveCount += Math.max(0, toFiniteNumber(row.leaveCount));
+    current.visibilityCount += Math.max(0, toFiniteNumber(row.visibilityCount));
+    current.customEventCount += Math.max(
+      0,
+      toFiniteNumber(row.customEventCount, toFiniteNumber(row.customEvents)),
+    );
+    current.identifyCount += Math.max(0, toFiniteNumber(row.identifyCount));
+    const latencyWeightedSumMs = toFiniteNumber(
+      row.latencyWeightedSumMs,
+      Number.NaN,
+    );
+    const latencySampleWeight = toFiniteNumber(
+      row.latencySampleWeight,
+      Number.NaN,
+    );
+    if (
+      Number.isFinite(latencyWeightedSumMs) &&
+      latencyWeightedSumMs >= 0 &&
+      Number.isFinite(latencySampleWeight) &&
+      latencySampleWeight > 0
+    ) {
+      current.latencyWeightedSumMs = latencyWeightedSumMs;
+      current.latencySampleWeight = latencySampleWeight;
+    } else {
+      const legacyAvgLatencyMs = toFiniteNumber(row.avgLatencyMs, Number.NaN);
+      if (Number.isFinite(legacyAvgLatencyMs) && weightedRequestCount > 0) {
+        current.latencyWeightedSumMs =
+          legacyAvgLatencyMs * weightedRequestCount;
+        current.latencySampleWeight = weightedRequestCount;
+      }
+    }
     const p50LatencyMs = toFiniteNumber(row.p50LatencyMs, Number.NaN);
     const p75LatencyMs = toFiniteNumber(row.p75LatencyMs, Number.NaN);
     const p95LatencyMs = toFiniteNumber(row.p95LatencyMs, Number.NaN);
     const p99LatencyMs = toFiniteNumber(row.p99LatencyMs, Number.NaN);
-    current.avgLatencyMs = Number.isFinite(avgLatencyMs) ? avgLatencyMs : null;
+    current.avgLatencyMs =
+      current.latencySampleWeight > 0
+        ? current.latencyWeightedSumMs / current.latencySampleWeight
+        : null;
     current.p50LatencyMs = Number.isFinite(p50LatencyMs)
       ? p50LatencyMs
       : current.avgLatencyMs;
@@ -1272,9 +1342,15 @@ function mergeTrendRows(input: {
     const current = trend.get(timestampMs);
     if (!current) continue;
     const sortedValues = values.sort((left, right) => left - right);
-    const sampleAvgLatencyMs =
-      sortedValues.reduce((sum, value) => sum + value, 0) / sortedValues.length;
-    current.avgLatencyMs ??= sampleAvgLatencyMs;
+    if (current.latencySampleWeight <= 0) {
+      current.latencyWeightedSumMs = sortedValues.reduce(
+        (sum, value) => sum + value,
+        0,
+      );
+      current.latencySampleWeight = sortedValues.length;
+      current.avgLatencyMs =
+        current.latencyWeightedSumMs / current.latencySampleWeight;
+    }
     current.p50LatencyMs ??= percentile(sortedValues, 0.5);
     current.p75LatencyMs ??= percentile(sortedValues, 0.75);
     current.p95LatencyMs ??= percentile(sortedValues, 0.95);
@@ -1282,6 +1358,10 @@ function mergeTrendRows(input: {
   }
   return [...trend.values()].map((point) => {
     const totalCount = point.normalCount + point.abnormalCount;
+    point.avgLatencyMs =
+      point.latencySampleWeight > 0
+        ? point.latencyWeightedSumMs / point.latencySampleWeight
+        : null;
     return {
       ...point,
       totalCount,
@@ -2134,19 +2214,19 @@ export async function handleBotAnalyticsAdmin(
     0,
   );
   const latencyTrendPoints = trendWithRatio.filter(
-    (point) => point.avgLatencyMs !== null && point.normalCount > 0,
+    (point) => point.latencySampleWeight > 0,
+  );
+  const latencyTotals = latencyTrendPoints.reduce(
+    (totals, point) => {
+      totals.weightedSumMs += point.latencyWeightedSumMs;
+      totals.sampleWeight += point.latencySampleWeight;
+      return totals;
+    },
+    { sampleWeight: 0, weightedSumMs: 0 },
   );
   const avgLatencyMs =
-    latencyTrendPoints.length > 0
-      ? latencyTrendPoints.reduce(
-          (sum, point) =>
-            sum + (point.avgLatencyMs ?? 0) * Math.max(1, point.normalCount),
-          0,
-        ) /
-        latencyTrendPoints.reduce(
-          (sum, point) => sum + Math.max(1, point.normalCount),
-          0,
-        )
+    latencyTotals.sampleWeight > 0
+      ? latencyTotals.weightedSumMs / latencyTotals.sampleWeight
       : null;
   const p95LatencyMs =
     latencyTrendPoints.length > 0

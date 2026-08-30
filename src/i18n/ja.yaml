@@ -2308,29 +2308,30 @@ requestObservation:
     request: リクエスト
     visibility: 可視性
     leave: 離脱
+    identify: ユーザー識別
   overviewLabels:
     totalRequests: 総リクエスト数
     normalRequests: 通常リクエスト
     abnormalRequests: 異常リクエスト
     abnormalRatio: 異常リクエスト比率
-    p50Latency: P50 エッジ遅延
-    p75Latency: P75 エッジ遅延
-    p95Latency: P95 エッジ遅延
-    p99Latency: P99 エッジ遅延
-    avgLatency: 平均エッジ遅延
+    p50Latency: P50 Worker 処理時間
+    p75Latency: P75 Worker 処理時間
+    p95Latency: P95 Worker 処理時間
+    p99Latency: P99 Worker 処理時間
+    avgLatency: 平均 Worker 処理時間
     pageviews: ページビュー
     customEvents: カスタムイベント
     overviewTrendTitle: リクエストルーティング推移
     overviewTrendDescription: 通常リクエスト、異常リクエスト、異常比率をトップバーの間隔ごとに集計します。
-    trafficCompositionTitle: リクエスト構成
-    trafficCompositionDescription: 通常リクエスト、異常リクエスト、ページイベントを同じ時系列で表示します。
+    trafficCompositionTitle: ビジネスリクエスト構成
+    trafficCompositionDescription: ページビュー、離脱、可視性の変化、カスタムイベント、ユーザー識別など、通常の収集イベントを種類別に時系列で表示します。
     categoryShareTitle: リクエストカテゴリの内訳
     normalTrafficShare: 通常トラフィック
     mediumThreatTraffic: 中脅威トラフィック
     highThreatTraffic: 高脅威トラフィック
     customBlockedTraffic: カスタムブロックトラフィック
-    latencyTitle: エッジ遅延推移
-    latencyDescription: 通常リクエストが AE に書き込まれる際に記録された P50 / P75 / P95 / P99 エッジ遅延です。
+    latencyTitle: Worker 処理時間の推移
+    latencyDescription: 通常リクエストが AE に書き込まれる際に記録された P50 / P75 / P95 / P99 Worker 処理時間です。
     abnormalSubtitle: 異常リクエストに絞り込み、マップと表には中脅威・高脅威・カスタムブロックのトラフィックを表示します。
     normalSubtitle: 通常の収集経路に入ったリクエストに絞り込み、マップと表には通常リクエストのみを表示します。
     requests: リクエスト数
@@ -2338,9 +2339,9 @@ requestObservation:
     latencyMilliseconds: "{value} ミリ秒"
   normalDetail:
     title: 通常リクエスト詳細
-    subtitle: 通常リクエストの AE 記録フィールド、地域、遅延を確認します。
+    subtitle: 通常リクエストの AE 記録フィールド、地域、Worker 処理時間を確認します。
     requestMethod: リクエストメソッド
-    edgeLatency: エッジ遅延
+    edgeLatency: Worker 処理時間
     eventAt: イベント時刻
     receivedAt: 受信時刻
     coordinates: 座標

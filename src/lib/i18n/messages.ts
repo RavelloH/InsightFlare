@@ -2271,6 +2271,7 @@ export interface AppMessages {
       request: string;
       visibility: string;
       leave: string;
+      identify: string;
     };
     overviewLabels: {
       totalRequests: string;
@@ -5010,33 +5011,34 @@ const enMessages = {
       request: "Request",
       visibility: "Visibility",
       leave: "Leave",
+      identify: "Identify",
     },
     overviewLabels: {
       totalRequests: "Total requests",
       normalRequests: "Normal requests",
       abnormalRequests: "Abnormal requests",
       abnormalRatio: "Abnormal request ratio",
-      p50Latency: "P50 edge latency",
-      p75Latency: "P75 edge latency",
-      p95Latency: "P95 edge latency",
-      p99Latency: "P99 edge latency",
-      avgLatency: "Average edge latency",
+      p50Latency: "P50 Worker processing time",
+      p75Latency: "P75 Worker processing time",
+      p95Latency: "P95 Worker processing time",
+      p99Latency: "P99 Worker processing time",
+      avgLatency: "Average Worker processing time",
       pageviews: "Pageviews",
       customEvents: "Custom events",
       overviewTrendTitle: "Request routing trend",
       overviewTrendDescription:
         "Normal requests, abnormal requests, and abnormal ratio bucketed by the top-bar interval.",
-      trafficCompositionTitle: "Request composition",
+      trafficCompositionTitle: "Business request composition",
       trafficCompositionDescription:
-        "Normal requests, abnormal requests, and page events on the same timeline.",
+        "Counts normal collection events by type over time, including pageviews, leaves, visibility changes, custom events, and identifications.",
       categoryShareTitle: "Request category breakdown",
       normalTrafficShare: "Normal traffic",
       mediumThreatTraffic: "Medium-threat traffic",
       highThreatTraffic: "High-threat traffic",
       customBlockedTraffic: "Custom-blocked traffic",
-      latencyTitle: "Edge latency trend",
+      latencyTitle: "Worker processing time trend",
       latencyDescription:
-        "P50 / P75 / P95 / P99 edge latency recorded when normal requests are written to AE.",
+        "P50 / P75 / P95 / P99 Worker processing time recorded when normal requests are written to AE.",
       abnormalSubtitle:
         "Focus on abnormal requests. Maps and tables include medium-threat, high-threat, and custom-blocked traffic.",
       normalSubtitle:
@@ -5048,9 +5050,9 @@ const enMessages = {
     normalDetail: {
       title: "Normal Request Detail",
       subtitle:
-        "Inspect pipeline, location, and latency fields recorded for a normal request in AE.",
+        "Inspect pipeline, location, and Worker processing time fields recorded for a normal request in AE.",
       requestMethod: "Request method",
-      edgeLatency: "Edge latency",
+      edgeLatency: "Worker processing time",
       eventAt: "Event time",
       receivedAt: "Received at",
       coordinates: "Coordinates",
@@ -7720,33 +7722,34 @@ const zhMessages = {
       request: "请求",
       visibility: "可见性",
       leave: "离开",
+      identify: "用户识别",
     },
     overviewLabels: {
       totalRequests: "总请求数",
       normalRequests: "正常请求",
       abnormalRequests: "异常请求",
       abnormalRatio: "异常请求比例",
-      p50Latency: "P50 边缘耗时",
-      p75Latency: "P75 边缘耗时",
-      p95Latency: "P95 边缘耗时",
-      p99Latency: "P99 边缘耗时",
-      avgLatency: "平均边缘耗时",
+      p50Latency: "P50 Worker 处理耗时",
+      p75Latency: "P75 Worker 处理耗时",
+      p95Latency: "P95 Worker 处理耗时",
+      p99Latency: "P99 Worker 处理耗时",
+      avgLatency: "平均 Worker 处理耗时",
       pageviews: "页面浏览",
       customEvents: "自定义事件",
       overviewTrendTitle: "请求分流趋势",
       overviewTrendDescription:
         "按顶栏时间间隔分桶显示正常与异常请求，以及异常请求比例。",
-      trafficCompositionTitle: "请求构成",
+      trafficCompositionTitle: "业务请求构成",
       trafficCompositionDescription:
-        "正常请求、异常请求和页面事件在同一时间轴上的变化。",
+        "按时间显示正常采集链路中页面浏览、离开、可见性、自定义事件和用户识别的数量。",
       categoryShareTitle: "请求分类占比",
       normalTrafficShare: "正常流量",
       mediumThreatTraffic: "中威胁流量",
       highThreatTraffic: "高威胁流量",
       customBlockedTraffic: "自定义屏蔽流量",
-      latencyTitle: "边缘耗时趋势",
+      latencyTitle: "Worker 处理耗时趋势",
       latencyDescription:
-        "正常请求写入 AE 时记录的 P50 / P75 / P95 / P99 边缘耗时。",
+        "正常请求写入 AE 时记录的 P50 / P75 / P95 / P99 Worker 处理耗时。",
       abnormalSubtitle:
         "聚焦异常请求，地图和统计表包含中威胁、高威胁和自定义屏蔽流量。",
       normalSubtitle:
@@ -7757,9 +7760,9 @@ const zhMessages = {
     },
     normalDetail: {
       title: "正常请求详情",
-      subtitle: "查看正常请求 AE 记录的链路、位置和耗时字段。",
+      subtitle: "查看正常请求 AE 记录的链路、位置和 Worker 处理耗时字段。",
       requestMethod: "请求方法",
-      edgeLatency: "边缘耗时",
+      edgeLatency: "Worker 处理耗时",
       eventAt: "事件时间",
       receivedAt: "接收时间",
       coordinates: "坐标",
@@ -10501,33 +10504,34 @@ const jaMessages = {
       request: "リクエスト",
       visibility: "可視性",
       leave: "離脱",
+      identify: "ユーザー識別",
     },
     overviewLabels: {
       totalRequests: "総リクエスト数",
       normalRequests: "通常リクエスト",
       abnormalRequests: "異常リクエスト",
       abnormalRatio: "異常リクエスト比率",
-      p50Latency: "P50 エッジ遅延",
-      p75Latency: "P75 エッジ遅延",
-      p95Latency: "P95 エッジ遅延",
-      p99Latency: "P99 エッジ遅延",
-      avgLatency: "平均エッジ遅延",
+      p50Latency: "P50 Worker 処理時間",
+      p75Latency: "P75 Worker 処理時間",
+      p95Latency: "P95 Worker 処理時間",
+      p99Latency: "P99 Worker 処理時間",
+      avgLatency: "平均 Worker 処理時間",
       pageviews: "ページビュー",
       customEvents: "カスタムイベント",
       overviewTrendTitle: "リクエストルーティング推移",
       overviewTrendDescription:
         "通常リクエスト、異常リクエスト、異常比率をトップバーの間隔ごとに集計します。",
-      trafficCompositionTitle: "リクエスト構成",
+      trafficCompositionTitle: "ビジネスリクエスト構成",
       trafficCompositionDescription:
-        "通常リクエスト、異常リクエスト、ページイベントを同じ時系列で表示します。",
+        "ページビュー、離脱、可視性の変化、カスタムイベント、ユーザー識別など、通常の収集イベントを種類別に時系列で表示します。",
       categoryShareTitle: "リクエストカテゴリの内訳",
       normalTrafficShare: "通常トラフィック",
       mediumThreatTraffic: "中脅威トラフィック",
       highThreatTraffic: "高脅威トラフィック",
       customBlockedTraffic: "カスタムブロックトラフィック",
-      latencyTitle: "エッジ遅延推移",
+      latencyTitle: "Worker 処理時間の推移",
       latencyDescription:
-        "通常リクエストが AE に書き込まれる際に記録された P50 / P75 / P95 / P99 エッジ遅延です。",
+        "通常リクエストが AE に書き込まれる際に記録された P50 / P75 / P95 / P99 Worker 処理時間です。",
       abnormalSubtitle:
         "異常リクエストに絞り込み、マップと表には中脅威・高脅威・カスタムブロックのトラフィックを表示します。",
       normalSubtitle:
@@ -10538,9 +10542,10 @@ const jaMessages = {
     },
     normalDetail: {
       title: "通常リクエスト詳細",
-      subtitle: "通常リクエストの AE 記録フィールド、地域、遅延を確認します。",
+      subtitle:
+        "通常リクエストの AE 記録フィールド、地域、Worker 処理時間を確認します。",
       requestMethod: "リクエストメソッド",
-      edgeLatency: "エッジ遅延",
+      edgeLatency: "Worker 処理時間",
       eventAt: "イベント時刻",
       receivedAt: "受信時刻",
       coordinates: "座標",

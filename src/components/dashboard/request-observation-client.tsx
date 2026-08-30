@@ -562,9 +562,27 @@ function withRequestObservabilityDefaults(
           : 0,
       pageviews: Number(point.pageviews ?? normalCount),
       customEvents: Number(point.customEvents ?? 0),
+      pageviewCount: Number(point.pageviewCount ?? point.pageviews ?? 0),
+      leaveCount: Number(point.leaveCount ?? 0),
+      visibilityCount: Number(point.visibilityCount ?? 0),
+      customEventCount: Number(
+        point.customEventCount ?? point.customEvents ?? 0,
+      ),
+      identifyCount: Number(point.identifyCount ?? 0),
       mediumThreatCount: Number(point.mediumThreatCount ?? 0),
       highThreatCount: Number(point.highThreatCount ?? 0),
       customBlockedCount: Number(point.customBlockedCount ?? 0),
+      weightedRequestCount: Number(point.weightedRequestCount ?? totalCount),
+      latencyWeightedSumMs: Number(
+        point.latencyWeightedSumMs ??
+          (point.avgLatencyMs == null
+            ? 0
+            : Number(point.avgLatencyMs) * normalCount),
+      ),
+      latencySampleWeight: Number(
+        point.latencySampleWeight ??
+          (point.avgLatencyMs == null ? 0 : normalCount),
+      ),
       avgLatencyMs: point.avgLatencyMs ?? null,
       p50LatencyMs: point.p50LatencyMs ?? point.avgLatencyMs ?? null,
       p75LatencyMs: point.p75LatencyMs ?? point.p95LatencyMs ?? null,
@@ -718,6 +736,17 @@ export function RequestObservationClient({
     days: Math.max(1, Math.ceil(spanMs / 86400000)),
   });
   const labels = copy.overviewLabels;
+  const trendLabels = useMemo(
+    () => ({
+      ...labels,
+      pageview: copy.requestKindLabels.pageview,
+      leave: copy.requestKindLabels.leave,
+      visibility: copy.requestKindLabels.visibility,
+      customEvent: copy.requestKindLabels.custom_event,
+      identify: copy.requestKindLabels.identify,
+    }),
+    [copy.requestKindLabels, labels],
+  );
 
   useEffect(() => {
     if (!observationQuery.isError) return;
@@ -1327,7 +1356,7 @@ export function RequestObservationClient({
           <CardContent>
             <RequestObservationTrendChart
               data={trend}
-              labels={labels}
+              labels={trendLabels}
               locale={locale}
               spanMs={spanMs}
               variant="overview"
@@ -1358,7 +1387,7 @@ export function RequestObservationClient({
             <CardContent>
               <RequestObservationTrendChart
                 data={trend}
-                labels={labels}
+                labels={trendLabels}
                 locale={locale}
                 spanMs={spanMs}
                 variant="traffic-composition"
@@ -1375,7 +1404,7 @@ export function RequestObservationClient({
             <CardContent>
               <RequestObservationTrendChart
                 data={trend}
-                labels={labels}
+                labels={trendLabels}
                 locale={locale}
                 spanMs={spanMs}
                 variant="latency"
@@ -1482,7 +1511,7 @@ export function RequestObservationClient({
                         <CardContent>
                           <RequestObservationTrendChart
                             data={trend}
-                            labels={labels}
+                            labels={trendLabels}
                             locale={locale}
                             spanMs={spanMs}
                             variant="abnormal"

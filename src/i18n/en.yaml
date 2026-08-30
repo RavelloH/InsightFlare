@@ -2370,31 +2370,32 @@ requestObservation:
     request: Request
     visibility: Visibility
     leave: Leave
+    identify: Identify
   overviewLabels:
     totalRequests: Total requests
     normalRequests: Normal requests
     abnormalRequests: Abnormal requests
     abnormalRatio: Abnormal request ratio
-    p50Latency: P50 edge latency
-    p75Latency: P75 edge latency
-    p95Latency: P95 edge latency
-    p99Latency: P99 edge latency
-    avgLatency: Average edge latency
+    p50Latency: P50 Worker processing time
+    p75Latency: P75 Worker processing time
+    p95Latency: P95 Worker processing time
+    p99Latency: P99 Worker processing time
+    avgLatency: Average Worker processing time
     pageviews: Pageviews
     customEvents: Custom events
     overviewTrendTitle: Request routing trend
     overviewTrendDescription:
       Normal requests, abnormal requests, and abnormal ratio
       bucketed by the top-bar interval.
-    trafficCompositionTitle: Request composition
-    trafficCompositionDescription: Normal requests, abnormal requests, and page events on the same timeline.
+    trafficCompositionTitle: Business request composition
+    trafficCompositionDescription: Counts normal collection events by type over time, including pageviews, leaves, visibility changes, custom events, and identifications.
     categoryShareTitle: Request category breakdown
     normalTrafficShare: Normal traffic
     mediumThreatTraffic: Medium-threat traffic
     highThreatTraffic: High-threat traffic
     customBlockedTraffic: Custom-blocked traffic
-    latencyTitle: Edge latency trend
-    latencyDescription: P50 / P75 / P95 / P99 edge latency recorded when normal
+    latencyTitle: Worker processing time trend
+    latencyDescription: P50 / P75 / P95 / P99 Worker processing time recorded when normal
       requests are written to AE.
     abnormalSubtitle:
       Focus on abnormal requests. Maps and tables include medium-threat,
@@ -2408,10 +2409,10 @@ requestObservation:
   normalDetail:
     title: Normal Request Detail
     subtitle:
-      Inspect pipeline, location, and latency fields recorded for a normal
+      Inspect pipeline, location, and Worker processing time fields recorded for a normal
       request in AE.
     requestMethod: Request method
-    edgeLatency: Edge latency
+    edgeLatency: Worker processing time
     eventAt: Event time
     receivedAt: Received at
     coordinates: Coordinates
