@@ -493,6 +493,12 @@ describe("admin bot analytics handlers", () => {
                     affectedSites: 1,
                     uniqueAsns: 1,
                     uniqueCountries: 1,
+                    latencyWeightedSumMs: 3960,
+                    latencySampleWeight: 99,
+                    p50LatencyMs: 40,
+                    p75LatencyMs: 40,
+                    p95LatencyMs: 40,
+                    p99LatencyMs: 40,
                   },
             ]),
             { status: 200 },
@@ -559,6 +565,14 @@ describe("admin bot analytics handlers", () => {
           statement.includes("latencyWeightedSumMs") &&
           statement.includes("latencySampleWeight") &&
           /p50LatencyMs|p75LatencyMs|p95LatencyMs|p99LatencyMs/.test(statement),
+      ),
+    ).toBe(true);
+    expect(
+      allSql.some(
+        (statement) =>
+          statement.includes("count(DISTINCT blob1)") &&
+          statement.includes("latencyWeightedSumMs") &&
+          !statement.includes("GROUP BY timestampMs"),
       ),
     ).toBe(true);
     expect(allSql.join("\n")).toContain(
@@ -707,7 +721,7 @@ describe("admin bot analytics handlers", () => {
     expect(body.trend[0]?.timestampMs).toBe(expectedFrom);
   });
 
-  it("calculates the full-window Worker latency from weighted bucket totals", async () => {
+  it("calculates full-window Worker latency from global weighted aggregates", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const encrypted = await import("@/lib/edge/secret-encryption").then(
       ({ encryptBotAnalyticsSecret }) =>
@@ -766,6 +780,28 @@ describe("admin bot analytics handlers", () => {
           }
           return new Response("", { status: 200 });
         }
+        if (
+          sql.includes("latencyWeightedSumMs") &&
+          sql.includes("count(DISTINCT blob1)")
+        ) {
+          return new Response(
+            jsonEachRow([
+              {
+                total: 10,
+                affectedSites: 1,
+                uniqueAsns: 1,
+                uniqueCountries: 1,
+                latencyWeightedSumMs: 910,
+                latencySampleWeight: 10,
+                p50LatencyMs: 25,
+                p75LatencyMs: 35,
+                p95LatencyMs: 45,
+                p99LatencyMs: 55,
+              },
+            ]),
+            { status: 200 },
+          );
+        }
         return new Response("", { status: 200 });
       });
 
@@ -785,6 +821,10 @@ describe("admin bot analytics handlers", () => {
       normalRequests: 10,
       abnormalRequests: 0,
       avgLatencyMs: 91,
+      p50LatencyMs: 25,
+      p75LatencyMs: 35,
+      p95LatencyMs: 45,
+      p99LatencyMs: 55,
     });
     expect(body.trend).toContainEqual(
       expect.objectContaining({

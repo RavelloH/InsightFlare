@@ -1334,14 +1334,13 @@ export function RequestObservationClient({
               />
               <MetricTile
                 icon={RiGlobalLine}
-                label={labels.p95Latency}
-                value={
-                  overview?.p95LatencyMs === null ||
-                  overview?.p95LatencyMs === undefined
-                    ? "--"
-                    : latencyFormat(locale, copy, overview.p95LatencyMs)
-                }
-                detail={labels.avgLatency}
+                label={labels.avgLatency}
+                value={latencyFormat(locale, copy, overview?.avgLatencyMs)}
+                detail={`${labels.p95Latency}: ${latencyFormat(
+                  locale,
+                  copy,
+                  overview?.p95LatencyMs,
+                )}`}
                 loading={loading}
               />
             </div>
@@ -1628,18 +1627,17 @@ export function RequestObservationClient({
                             />
                             <MetricTile
                               icon={RiRadarLine}
-                              label={labels.p95Latency}
-                              value={
-                                normalSummary?.p95LatencyMs === null ||
-                                normalSummary?.p95LatencyMs === undefined
-                                  ? "--"
-                                  : latencyFormat(
-                                      locale,
-                                      copy,
-                                      normalSummary.p95LatencyMs,
-                                    )
-                              }
-                              detail={labels.avgLatency}
+                              label={labels.avgLatency}
+                              value={latencyFormat(
+                                locale,
+                                copy,
+                                normalSummary?.avgLatencyMs,
+                              )}
+                              detail={`${labels.p95Latency}: ${latencyFormat(
+                                locale,
+                                copy,
+                                normalSummary?.p95LatencyMs,
+                              )}`}
                               loading={loading}
                             />
                           </div>

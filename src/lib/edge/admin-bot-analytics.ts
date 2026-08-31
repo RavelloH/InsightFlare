@@ -564,9 +564,19 @@ function buildSourceSummarySql(input: {
       count(DISTINCT blob1) AS affectedSites,
       count(DISTINCT blob11) AS uniqueAsns,
       count(DISTINCT blob6) AS uniqueCountries`;
+  const latencyColumns =
+    input.source === "normal"
+      ? `,
+      sumIf(_sample_interval * double3, double3 >= 0) AS latencyWeightedSumMs,
+      sumIf(_sample_interval, double3 >= 0) AS latencySampleWeight,
+      quantileExactWeighted(0.5)(double3, _sample_interval) AS p50LatencyMs,
+      quantileExactWeighted(0.75)(double3, _sample_interval) AS p75LatencyMs,
+      quantileExactWeighted(0.95)(double3, _sample_interval) AS p95LatencyMs,
+      quantileExactWeighted(0.99)(double3, _sample_interval) AS p99LatencyMs`
+      : "";
   return `
     SELECT
-      sum(_sample_interval) AS total,${columns}
+      sum(_sample_interval) AS total,${columns}${latencyColumns}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
@@ -1141,6 +1151,44 @@ function percentile(
       Math.ceil(sortedValues.length * percentileValue) - 1,
     )
   ];
+}
+
+function normalizeLatencySummary(row: Record<string, unknown>) {
+  const latencyWeightedSumMs = toFiniteNumber(
+    row.latencyWeightedSumMs,
+    Number.NaN,
+  );
+  const latencySampleWeight = toFiniteNumber(
+    row.latencySampleWeight,
+    Number.NaN,
+  );
+  const hasWeightedLatency =
+    Number.isFinite(latencyWeightedSumMs) &&
+    latencyWeightedSumMs >= 0 &&
+    Number.isFinite(latencySampleWeight) &&
+    latencySampleWeight > 0;
+  const normalizePercentile = (value: unknown) => {
+    const numeric = toFiniteNumber(value, Number.NaN);
+    return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+  };
+
+  return {
+    avgLatencyMs: hasWeightedLatency
+      ? latencyWeightedSumMs / latencySampleWeight
+      : null,
+    p50LatencyMs: hasWeightedLatency
+      ? normalizePercentile(row.p50LatencyMs)
+      : null,
+    p75LatencyMs: hasWeightedLatency
+      ? normalizePercentile(row.p75LatencyMs)
+      : null,
+    p95LatencyMs: hasWeightedLatency
+      ? normalizePercentile(row.p95LatencyMs)
+      : null,
+    p99LatencyMs: hasWeightedLatency
+      ? normalizePercentile(row.p99LatencyMs)
+      : null,
+  };
 }
 
 function mergeTrendRows(input: {
@@ -2213,10 +2261,10 @@ export async function handleBotAnalyticsAdmin(
     (sum, point) => sum + point.customEvents,
     0,
   );
-  const latencyTrendPoints = trendWithRatio.filter(
+  const trendLatencyPoints = trendWithRatio.filter(
     (point) => point.latencySampleWeight > 0,
   );
-  const latencyTotals = latencyTrendPoints.reduce(
+  const trendLatencyTotals = trendLatencyPoints.reduce(
     (totals, point) => {
       totals.weightedSumMs += point.latencyWeightedSumMs;
       totals.sampleWeight += point.latencySampleWeight;
@@ -2224,26 +2272,16 @@ export async function handleBotAnalyticsAdmin(
     },
     { sampleWeight: 0, weightedSumMs: 0 },
   );
+  const latencySummary = normalizeLatencySummary(normalSummaryRow);
   const avgLatencyMs =
-    latencyTotals.sampleWeight > 0
-      ? latencyTotals.weightedSumMs / latencyTotals.sampleWeight
-      : null;
-  const p95LatencyMs =
-    latencyTrendPoints.length > 0
-      ? Math.max(...latencyTrendPoints.map((point) => point.p95LatencyMs ?? 0))
-      : null;
-  const p50LatencyMs =
-    latencyTrendPoints.length > 0
-      ? Math.max(...latencyTrendPoints.map((point) => point.p50LatencyMs ?? 0))
-      : null;
-  const p75LatencyMs =
-    latencyTrendPoints.length > 0
-      ? Math.max(...latencyTrendPoints.map((point) => point.p75LatencyMs ?? 0))
-      : null;
-  const p99LatencyMs =
-    latencyTrendPoints.length > 0
-      ? Math.max(...latencyTrendPoints.map((point) => point.p99LatencyMs ?? 0))
-      : null;
+    latencySummary.avgLatencyMs ??
+    (trendLatencyTotals.sampleWeight > 0
+      ? trendLatencyTotals.weightedSumMs / trendLatencyTotals.sampleWeight
+      : null);
+  const p50LatencyMs = latencySummary.p50LatencyMs;
+  const p75LatencyMs = latencySummary.p75LatencyMs;
+  const p95LatencyMs = latencySummary.p95LatencyMs;
+  const p99LatencyMs = latencySummary.p99LatencyMs;
   const normalListSummary = aggregateNormalEvents(normalEvents);
   const abnormalMapPoints = normalizeMapRows(abnormalMapResult.rows);
   const normalMapPoints = normalizeMapRows(normalMapResult.rows);
