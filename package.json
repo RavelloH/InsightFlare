@@ -9,6 +9,7 @@
     "dev:ui": "vite dev --mode demo",
     "dev:worker": "vite dev --mode development",
     "generate:openapi": "tsx scripts/generate-openapi.ts",
+    "generate:release-index": "tsx scripts/generate-release-index.ts",
     "generate:skills": "tsx scripts/generate-skills.ts",
     "verify:skills": "tsx scripts/check-skills.ts",
     "generate:schema": "tsx scripts/generate-schema.ts",

@@ -1,0 +1,93 @@
+[
+  {
+    "tagName": "v0.7.0",
+    "name": "Release v0.7.0",
+    "htmlUrl": "https://github.com/RavelloH/InsightFlare/releases/tag/v0.7.0",
+    "changelogPath": "changelog/v0.7.0.md",
+    "publishedAt": "2026-08-31T13:35:25+08:00",
+    "createdAt": "2026-08-31T13:35:25+08:00",
+    "updatedAt": "2026-08-31T13:35:25+08:00",
+    "targetCommitish": "db93f32f7cd5cf4ffb3b7e012ae09f08c21633b2",
+    "authorLogin": "RavelloH",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tagName": "v0.6.0",
+    "name": "Release v0.6.0",
+    "htmlUrl": "https://github.com/RavelloH/InsightFlare/releases/tag/v0.6.0",
+    "changelogPath": "changelog/v0.6.0.md",
+    "publishedAt": "2026-08-16T13:58:30+08:00",
+    "createdAt": "2026-08-16T13:58:30+08:00",
+    "updatedAt": "2026-08-16T13:58:30+08:00",
+    "targetCommitish": "4170e3d9d1839c88dfb8dd394c8fe6e0e18a779d",
+    "authorLogin": "RavelloH",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tagName": "v0.5.0",
+    "name": "Release v0.5.0",
+    "htmlUrl": "https://github.com/RavelloH/InsightFlare/releases/tag/v0.5.0",
+    "changelogPath": "changelog/v0.5.0.md",
+    "publishedAt": "2026-07-07T23:09:59+08:00",
+    "createdAt": "2026-07-07T23:09:59+08:00",
+    "updatedAt": "2026-07-07T23:09:59+08:00",
+    "targetCommitish": "2a3b8a47eeb95569d554f093c4c7d6ec53cf9098",
+    "authorLogin": "RavelloH",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tagName": "v0.4.0",
+    "name": "Release v0.4.0",
+    "htmlUrl": "https://github.com/RavelloH/InsightFlare/releases/tag/v0.4.0",
+    "changelogPath": "changelog/v0.4.0.md",
+    "publishedAt": "2026-07-03T16:45:25+08:00",
+    "createdAt": "2026-07-03T16:45:25+08:00",
+    "updatedAt": "2026-07-03T16:45:25+08:00",
+    "targetCommitish": "3f3f46c3ae38b6033cab6740fa093d87d9645545",
+    "authorLogin": "RavelloH",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tagName": "v0.3.0",
+    "name": "Release v0.3.0",
+    "htmlUrl": "https://github.com/RavelloH/InsightFlare/releases/tag/v0.3.0",
+    "changelogPath": "changelog/v0.3.0.md",
+    "publishedAt": "2026-06-29T17:37:23+08:00",
+    "createdAt": "2026-06-29T17:37:23+08:00",
+    "updatedAt": "2026-06-29T17:37:23+08:00",
+    "targetCommitish": "a36844b69429100f5f9aed1fc34fb5b7901f3e0c",
+    "authorLogin": "RavelloH",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tagName": "v0.2.0",
+    "name": "Release v0.2.0",
+    "htmlUrl": "https://github.com/RavelloH/InsightFlare/releases/tag/v0.2.0",
+    "changelogPath": "changelog/v0.2.0.md",
+    "publishedAt": "2026-06-29T10:46:54+08:00",
+    "createdAt": "2026-06-29T10:46:54+08:00",
+    "updatedAt": "2026-06-29T10:46:54+08:00",
+    "targetCommitish": "4bfcf01eb4bd9af18cc782ba6efc0c9d10ffa698",
+    "authorLogin": "RavelloH",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tagName": "v0.1.0",
+    "name": "Release v0.1.0",
+    "htmlUrl": "https://github.com/RavelloH/InsightFlare/releases/tag/v0.1.0",
+    "changelogPath": "changelog/v0.1.0.md",
+    "publishedAt": "2026-06-25T10:55:41+08:00",
+    "createdAt": "2026-06-25T10:55:41+08:00",
+    "updatedAt": "2026-06-25T10:55:41+08:00",
+    "targetCommitish": "108a5f922b8cb0b21088b4ad4eb2b656d07e02bd",
+    "authorLogin": "RavelloH",
+    "draft": false,
+    "prerelease": false
+  }
+]

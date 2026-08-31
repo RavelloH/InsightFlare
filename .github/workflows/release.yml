@@ -113,10 +113,11 @@ jobs:
           NODE
 
           npm run generate:openapi
+          npm run generate:release-index
           npm run generate:skills
           npx tsx scripts/check-openapi-contract.ts
 
-          git add package.json package-lock.json scripts/skills-template.json docs/openapi.json docs/openapi.yaml docs/skills.json
+          git add package.json package-lock.json .github/releases/version.json scripts/skills-template.json docs/openapi.json docs/openapi.yaml docs/skills.json
 
           if git diff --cached --quiet; then
             echo "Release artifacts are already up to date."
