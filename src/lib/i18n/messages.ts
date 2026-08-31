@@ -4755,7 +4755,7 @@ const enMessages = {
       openCommit: "Open commit",
       commitCount: "Commits",
       source: "Data source",
-      loadFailed: "Failed to load GitHub Releases.",
+      loadFailed: "Failed to load the release index.",
       unknown: "Unknown",
     },
     scheduledTasks: {
@@ -7491,7 +7491,7 @@ const zhMessages = {
       openCommit: "打开提交",
       commitCount: "提交数",
       source: "数据来源",
-      loadFailed: "加载 GitHub Releases 失败。",
+      loadFailed: "加载版本索引失败。",
       unknown: "未知",
     },
     scheduledTasks: {
@@ -10287,7 +10287,7 @@ const jaMessages = {
       openCommit: "コミットを開く",
       commitCount: "コミット",
       source: "データソース",
-      loadFailed: "GitHub Releases を読み込めません。",
+      loadFailed: "リリース一覧を読み込めません。",
       unknown: "不明",
     },
     scheduledTasks: {

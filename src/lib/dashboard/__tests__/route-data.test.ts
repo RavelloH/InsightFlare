@@ -81,10 +81,6 @@ vi.mock("@/lib/edge-client", () => ({
   normalizeNotificationPreferencesData: vi.fn((value: unknown) => value),
 }));
 
-vi.mock("@/lib/github-releases", () => ({
-  fetchGithubReleases: vi.fn(),
-}));
-
 vi.mock("@/lib/dashboard/client-request", () => ({
   publicDashboardSiteId: vi.fn((slug: string) => `public-${slug}`),
 }));
@@ -111,7 +107,6 @@ import {
   loadTeamDashboardSnapshot,
   loadTeamManagementInitialData,
   loadTeamNotificationsInitialData,
-  loadVersionReleases,
 } from "@/lib/dashboard/route-data";
 import {
   getDashboardTeamSites,
@@ -124,7 +119,6 @@ import {
   fetchPublicSite,
   normalizeNotificationPreferencesData,
 } from "@/lib/edge-client";
-import { fetchGithubReleases } from "@/lib/github-releases";
 
 function headersOf(init: Record<string, string>) {
   return {
@@ -155,9 +149,6 @@ describe("Dashboard route data loaders", () => {
       name: "Site",
       domain: "app.test",
     } as never);
-    vi.mocked(fetchGithubReleases).mockResolvedValue([
-      { tag_name: "v1.0.0", name: "v1.0.0", url: "", html_url: "" },
-    ] as never);
     vi.mocked(resolveEdgeRuntime).mockResolvedValue({
       env: { DB: {} },
     } as never);
@@ -232,27 +223,6 @@ describe("Dashboard route data loaders", () => {
       preset: "7d",
       interval: "day",
       timeZone: "Asia/Tokyo",
-    });
-  });
-
-  describe("loadVersionReleases", () => {
-    it("returns releases on success", async () => {
-      await expect(loadVersionReleases()).resolves.toEqual({
-        releases: [
-          { tag_name: "v1.0.0", name: "v1.0.0", url: "", html_url: "" },
-        ],
-        error: null,
-      });
-    });
-
-    it("returns an error message when the fetch throws", async () => {
-      vi.mocked(fetchGithubReleases).mockRejectedValueOnce(new Error("boom"));
-      const result = (await loadVersionReleases()) as {
-        error: string;
-        releases: [];
-      };
-      expect(result.error).toBe("boom");
-      expect(result.releases).toEqual([]);
     });
   });
 

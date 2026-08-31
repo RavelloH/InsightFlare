@@ -2053,7 +2053,7 @@ managementPages:
     openCommit: コミットを開く
     commitCount: コミット
     source: データソース
-    loadFailed: GitHub Releases を読み込めません。
+    loadFailed: リリース一覧を読み込めません。
     unknown: 不明
   scheduledTasks:
     subtitle: システムのスケジュールタスクを表示・管理します。

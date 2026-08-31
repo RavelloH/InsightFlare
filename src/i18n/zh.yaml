@@ -2047,7 +2047,7 @@ managementPages:
     openCommit: 打开提交
     commitCount: 提交数
     source: 数据来源
-    loadFailed: 加载 GitHub Releases 失败。
+    loadFailed: 加载版本索引失败。
     unknown: 未知
   scheduledTasks:
     subtitle: 查看和管理系统定时任务。

@@ -2107,7 +2107,7 @@ managementPages:
     openCommit: Open commit
     commitCount: Commits
     source: Data source
-    loadFailed: Failed to load GitHub Releases.
+    loadFailed: Failed to load the release index.
     unknown: Unknown
   scheduledTasks:
     subtitle: View and manage system scheduled tasks.
@@ -2402,7 +2402,8 @@ requestObservation:
     highThreatTraffic: High-threat traffic
     customBlockedTraffic: Custom-blocked traffic
     latencyTitle: Worker processing time trend
-    latencyDescription: P50 / P75 / P95 / P99 Worker processing time recorded when normal
+    latencyDescription:
+      P50 / P75 / P95 / P99 Worker processing time recorded when normal
       requests are written to AE.
     abnormalSubtitle:
       Focus on abnormal requests. Maps and tables include medium-threat,

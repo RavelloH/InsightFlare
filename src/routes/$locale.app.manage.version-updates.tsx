@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import {
   RiExternalLinkLine,
   RiGitBranchLine,
@@ -5,6 +6,7 @@ import {
   RiPriceTag3Line,
   RiRocketLine,
 } from "@remixicon/react";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
 import { PageHeading } from "@/components/dashboard/page-heading";
@@ -12,12 +14,16 @@ import { VersionUpdateDetailsButton } from "@/components/dashboard/version-updat
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
 import { intlLocale } from "@/lib/dashboard/format";
-import { loadVersionReleases } from "@/lib/dashboard/route-data";
-import { type GithubRelease } from "@/lib/github-releases";
 import { type Locale, resolveLocale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { dashboardPageTitle } from "@/lib/page-title";
+import {
+  fetchReleaseChangelog,
+  fetchReleaseIndex,
+  type ReleaseIndexEntry,
+} from "@/lib/release-index";
 import Link from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -51,7 +57,7 @@ function normalizeVersion(value: string | null | undefined): string {
 }
 
 function releaseDate(
-  release: Pick<GithubRelease, "publishedAt" | "createdAt">,
+  release: Pick<ReleaseIndexEntry, "publishedAt" | "createdAt">,
 ): string {
   return release.publishedAt ?? release.createdAt;
 }
@@ -70,7 +76,7 @@ function formatDateTime(locale: Locale, value: string): string {
 }
 
 function releaseStatus(
-  release: Pick<GithubRelease, "draft" | "prerelease">,
+  release: Pick<ReleaseIndexEntry, "draft" | "prerelease">,
   labels: AppMessages["managementPages"]["versionUpdates"],
 ): { label: string; variant: "default" | "secondary" | "outline" } {
   if (release.draft) {
@@ -88,7 +94,6 @@ export const Route = createFileRoute("/$locale/app/manage/version-updates")({
   beforeLoad: ({ context }) => {
     if (context.dashboardRoot?.user.systemRole !== "admin") throw notFound();
   },
-  loader: () => loadVersionReleases(),
   head: ({ match }) => ({
     meta: [
       {
@@ -104,9 +109,22 @@ export const Route = createFileRoute("/$locale/app/manage/version-updates")({
 
 function Page() {
   const { locale, messages } = Route.useRouteContext();
-  const { releases, error } = Route.useLoaderData();
   const resolvedLocale = resolveLocale(locale);
   const labels = messages.managementPages.versionUpdates;
+  const releasesQuery = useQuery({
+    queryKey: ["dashboard", "release-index"],
+    queryFn: ({ signal }) => fetchReleaseIndex(signal),
+    enabled: typeof window !== "undefined",
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const releases = releasesQuery.data ?? [];
+  const isLoading = releasesQuery.isPending;
+  const error = releasesQuery.isError
+    ? releasesQuery.error instanceof Error
+      ? releasesQuery.error.message
+      : "Unknown error"
+    : null;
   const latestStableRelease =
     releases.find((release) => !release.draft && !release.prerelease) ??
     releases[0] ??
@@ -173,11 +191,20 @@ function Page() {
             <VersionMetric
               icon={<RiGitBranchLine className="size-[11px]" />}
               label={labels.releaseCount}
-              value={String(releases.length)}
+              value={isLoading ? "-" : String(releases.length)}
             />
           </div>
         </CardContent>
       </Card>
+
+      {isLoading ? (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
+            <Spinner className="size-6" />
+            <p>{messages.common.loading}</p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {error ? (
         <Card>
@@ -189,7 +216,7 @@ function Page() {
         </Card>
       ) : null}
 
-      {releases.length === 0 && !error ? (
+      {releases.length === 0 && !error && !isLoading ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center text-sm text-muted-foreground">
             <RiGitBranchLine className="size-8 text-muted-foreground/70" />
@@ -202,7 +229,8 @@ function Page() {
         {releases.map((release) => {
           const status = releaseStatus(release, labels);
           const isCurrent =
-            currentRelease !== null && release.id === currentRelease.id;
+            currentRelease !== null &&
+            release.tagName === currentRelease.tagName;
           const isCurrentDeployment = isCommitMatch(
             release.targetCommitish,
             CURRENT_COMMIT,
@@ -214,10 +242,8 @@ function Page() {
             releaseStableIndex >= 0
               ? stableReleaseTags[releaseStableIndex + 1] || null
               : null;
-          const summary = release.body?.trim() || "";
-
           return (
-            <Card key={release.id}>
+            <Card key={release.tagName}>
               <CardContent
                 className={cn(
                   "space-y-4 p-4 md:p-5",
@@ -283,15 +309,84 @@ function Page() {
                   <div className="mb-2 text-xs font-medium text-muted-foreground">
                     {labels.releaseNotes}
                   </div>
-                  <div className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground/90">
-                    {summary || labels.empty}
-                  </div>
+                  <LazyReleaseNotes
+                    release={release}
+                    locale={resolvedLocale}
+                    labels={labels}
+                  />
                 </div>
               </CardContent>
             </Card>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function LazyReleaseNotes({
+  release,
+  locale,
+  labels,
+}: {
+  release: ReleaseIndexEntry;
+  locale: Locale;
+  labels: AppMessages["managementPages"]["versionUpdates"];
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [shouldLoad, setShouldLoad] = useState(false);
+
+  useEffect(() => {
+    if (shouldLoad) return;
+
+    const target = containerRef.current;
+    if (!target || typeof IntersectionObserver === "undefined") {
+      setShouldLoad(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "320px 0px", threshold: 0.01 },
+    );
+    observer.observe(target);
+
+    return () => observer.disconnect();
+  }, [shouldLoad]);
+
+  const changelogQuery = useQuery({
+    queryKey: ["dashboard", "release-changelog", locale, release.tagName],
+    queryFn: ({ signal }) => fetchReleaseChangelog(release, locale, signal),
+    enabled: shouldLoad && typeof window !== "undefined",
+    staleTime: Infinity,
+    retry: false,
+  });
+
+  let content: string | null = null;
+  if (shouldLoad) {
+    if (changelogQuery.isPending) {
+      content = labels.detailsLoading;
+    } else if (changelogQuery.isError) {
+      content =
+        changelogQuery.error instanceof Error
+          ? changelogQuery.error.message
+          : labels.detailsFailed;
+    } else {
+      content = changelogQuery.data?.trim() || labels.empty;
+    }
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="min-h-12 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/90"
+    >
+      {content}
     </div>
   );
 }

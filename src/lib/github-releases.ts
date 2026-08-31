@@ -3,38 +3,6 @@ import { measureCurrentExternalFetch } from "@/lib/edge/observability-logger";
 const GITHUB_API_BASE =
   import.meta.env.VITE_GITHUB_API_BASE || "https://api.github.com";
 
-type GithubReleaseApiItem = {
-  id: number;
-  tag_name: string;
-  name: string | null;
-  html_url: string;
-  body: string | null;
-  draft: boolean;
-  prerelease: boolean;
-  published_at: string | null;
-  created_at: string;
-  updated_at: string;
-  target_commitish: string;
-  author: {
-    login: string;
-  } | null;
-};
-
-export type GithubRelease = {
-  id: number;
-  tagName: string;
-  name: string;
-  htmlUrl: string;
-  body: string | null;
-  draft: boolean;
-  prerelease: boolean;
-  publishedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  targetCommitish: string;
-  authorLogin: string | null;
-};
-
 type GithubCompareApiCommit = {
   sha: string;
   html_url: string;
@@ -76,66 +44,6 @@ export type GithubCompareResult = {
   totalCommits: number;
   commits: GithubCompareCommit[];
 };
-
-function normalizeRelease(item: GithubReleaseApiItem): GithubRelease {
-  return {
-    id: item.id,
-    tagName: item.tag_name,
-    name: item.name?.trim() || item.tag_name,
-    htmlUrl: item.html_url,
-    body: item.body,
-    draft: item.draft,
-    prerelease: item.prerelease,
-    publishedAt: item.published_at,
-    createdAt: item.created_at,
-    updatedAt: item.updated_at,
-    targetCommitish: item.target_commitish,
-    authorLogin: item.author?.login ?? null,
-  };
-}
-
-function releaseTimestamp(
-  release: Pick<GithubRelease, "publishedAt" | "createdAt">,
-): number {
-  const timestamp = new Date(
-    release.publishedAt ?? release.createdAt,
-  ).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-export async function fetchGithubReleases(
-  owner: string,
-  repo: string,
-): Promise<GithubRelease[]> {
-  const response = await measureCurrentExternalFetch(
-    "external_fetch.github_releases",
-    () =>
-      fetch(
-        `${GITHUB_API_BASE}/repos/${owner}/${repo}/releases?per_page=50&page=1`,
-        {
-          headers: {
-            Accept: "application/vnd.github+json",
-            "User-Agent": "InsightFlare",
-            "X-GitHub-Api-Version": "2022-11-28",
-          },
-          cache: "no-store",
-        },
-      ),
-  );
-
-  if (!response.ok) {
-    throw new Error(`GitHub Releases API failed: HTTP ${response.status}`);
-  }
-
-  const payload = (await response.json()) as unknown;
-  if (!Array.isArray(payload)) {
-    throw new Error("GitHub Releases API returned an unexpected payload.");
-  }
-
-  return (payload as GithubReleaseApiItem[])
-    .map(normalizeRelease)
-    .sort((left, right) => releaseTimestamp(right) - releaseTimestamp(left));
-}
 
 function normalizeCompareCommit(
   commit: GithubCompareApiCommit,

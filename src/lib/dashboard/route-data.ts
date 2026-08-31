@@ -46,7 +46,6 @@ import type {
   NotificationMessageData,
   NotificationRuleData,
 } from "@/lib/edge-client-types";
-import { fetchGithubReleases } from "@/lib/github-releases";
 import type { Locale } from "@/lib/i18n/config";
 import { DEFAULT_RETENTION_CONFIG } from "@/lib/retention";
 import type { ScheduledTasksData } from "@/lib/scheduled-tasks";
@@ -382,21 +381,5 @@ export const loadRequestOrigin = createServerFn({ method: "GET" }).handler(
         ? "http"
         : "https");
     return `${proto}://${host}`;
-  },
-);
-
-export const loadVersionReleases = createServerFn({ method: "GET" }).handler(
-  async () => {
-    try {
-      return {
-        releases: await fetchGithubReleases("RavelloH", "InsightFlare"),
-        error: null,
-      };
-    } catch (error) {
-      return {
-        releases: [],
-        error: error instanceof Error ? error.message : "Unknown error",
-      };
-    }
   },
 );
