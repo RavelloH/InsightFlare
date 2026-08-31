@@ -2,7 +2,6 @@
 
 import { readFileSync, renameSync, writeFileSync } from "fs";
 import { resolve } from "path";
-import { format, resolveConfig } from "prettier";
 import YAML from "yaml";
 
 import { createScriptLogger } from "./shared/logger";
@@ -4585,13 +4584,7 @@ async function main() {
   const jsonPath = resolve(root, "docs", "openapi.json");
 
   writeAtomically(yamlPath, YAML.stringify(spec, { indent: 2 }));
-  const prettierOptions = await resolveConfig(jsonPath);
-  const formattedJson = await format(`${JSON.stringify(spec, null, 2)}\n`, {
-    ...prettierOptions,
-    filepath: jsonPath,
-    parser: "json",
-  });
-  writeAtomically(jsonPath, formattedJson);
+  writeAtomically(jsonPath, `${JSON.stringify(spec, null, 2)}\n`);
 
   rlog.success(`Generated ${yamlPath}`);
   rlog.success(`Generated ${jsonPath}`);
