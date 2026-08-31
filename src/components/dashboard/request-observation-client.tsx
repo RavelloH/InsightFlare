@@ -140,7 +140,7 @@ interface NormalRequestEvent {
   timestamp: string;
   receivedAt: number;
   eventAt: number;
-  edgeLatencyMs: number;
+  edgeLatencyMs: number | null;
   siteId: string;
   siteName: string;
   siteDomain: string;
@@ -1364,9 +1364,9 @@ export function RequestObservationClient({
           </CardContent>
         </Card>
 
-        <section className="grid gap-4 xl:grid-cols-2">
+        <section className="grid min-w-0 gap-4 xl:grid-cols-2">
           <ShareRadialCard
-            className="xl:col-span-2"
+            className="min-w-0 xl:col-span-2"
             title={labels.categoryShareTitle}
             items={categoryShareItems}
             maxItems={4}
@@ -1376,7 +1376,7 @@ export function RequestObservationClient({
             emptyLabel={copy.noData}
           />
 
-          <Card>
+          <Card className="min-w-0">
             <CardHeader>
               <CardTitle>{labels.trafficCompositionTitle}</CardTitle>
               <CardDescription>
@@ -1395,7 +1395,7 @@ export function RequestObservationClient({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="min-w-0">
             <CardHeader>
               <CardTitle>{labels.latencyTitle}</CardTitle>
               <CardDescription>{labels.latencyDescription}</CardDescription>

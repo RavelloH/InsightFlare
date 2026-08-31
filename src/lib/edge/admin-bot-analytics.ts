@@ -20,6 +20,7 @@ import type { RequestObservationCategory } from "@/lib/edge/bot-protection";
 import { requireActor } from "./admin-auth";
 import { bad, forb, jsonResponseFor, na, parseJson } from "./admin-response";
 import { analyticsEngineAvailability } from "./analytics-engine";
+import { NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION } from "./request-analytics";
 import {
   decryptBotAnalyticsSecret,
   encryptBotAnalyticsSecret,
@@ -38,6 +39,8 @@ const CF_ANALYTICS_ENGINE_SQL_ENDPOINT =
   "https://api.cloudflare.com/client/v4/accounts";
 const ABNORMAL_CATEGORY_SQL_FILTER =
   "blob3 IN ('medium', 'high', 'medium_threat', 'high_threat', 'custom_block')";
+const MAX_WORKER_LATENCY_MS = 60_000;
+const NORMAL_LATENCY_SQL_FILTER = `double8 = ${NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION} AND double3 BETWEEN 0 AND ${MAX_WORKER_LATENCY_MS}`;
 
 function analyticsEngineSqlEndpoint(env: Env): string | null {
   if (env.INSIGHTFLARE_E2E === "1") {
@@ -112,7 +115,8 @@ interface NormalAnalyticsEvent {
   timestamp: string;
   receivedAt: number;
   eventAt: number;
-  edgeLatencyMs: number;
+  edgeLatencyMs: number | null;
+  latencySchemaVersion: number;
   siteId: string;
   siteName: string;
   siteDomain: string;
@@ -335,7 +339,8 @@ function buildNormalAnalyticsSql(input: {
       double4 AS asn,
       double5 AS latitude,
       double6 AS longitude,
-      double7 AS userAgentLength`
+      double7 AS userAgentLength,
+      double8 AS latencySchemaVersion`
     : "";
   const cursorFilter = input.cursor
     ? `
@@ -400,12 +405,12 @@ function buildCountByBucketSql(input: {
   const latencySelect =
     input.includeLatency && input.source === "normal"
       ? `,
-      sumIf(_sample_interval * double3, double3 >= 0) AS latencyWeightedSumMs,
-      sumIf(_sample_interval, double3 >= 0) AS latencySampleWeight,
-      quantileExactWeighted(0.5)(double3, _sample_interval) AS p50LatencyMs,
-      quantileExactWeighted(0.75)(double3, _sample_interval) AS p75LatencyMs,
-      quantileExactWeighted(0.95)(double3, _sample_interval) AS p95LatencyMs,
-      quantileExactWeighted(0.99)(double3, _sample_interval) AS p99LatencyMs`
+      sumIf(_sample_interval * double3, ${NORMAL_LATENCY_SQL_FILTER}) AS latencyWeightedSumMs,
+      sumIf(_sample_interval, ${NORMAL_LATENCY_SQL_FILTER}) AS latencySampleWeight,
+      quantileExactWeighted(0.5)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p50LatencyMs,
+      quantileExactWeighted(0.75)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p75LatencyMs,
+      quantileExactWeighted(0.95)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p95LatencyMs,
+      quantileExactWeighted(0.99)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p99LatencyMs`
       : "";
   const categoryFilter =
     input.source === "abnormal"
@@ -547,6 +552,7 @@ function buildSourceSummarySql(input: {
   from: number;
   to: number;
   source: DetailSource;
+  includeLatency?: boolean;
 }) {
   const dataset = analyticsDatasetIdentifier(input.dataset);
   const fromSeconds = Math.floor(input.from / 1000);
@@ -565,14 +571,14 @@ function buildSourceSummarySql(input: {
       count(DISTINCT blob11) AS uniqueAsns,
       count(DISTINCT blob6) AS uniqueCountries`;
   const latencyColumns =
-    input.source === "normal"
+    input.source === "normal" && input.includeLatency !== false
       ? `,
-      sumIf(_sample_interval * double3, double3 >= 0) AS latencyWeightedSumMs,
-      sumIf(_sample_interval, double3 >= 0) AS latencySampleWeight,
-      quantileExactWeighted(0.5)(double3, _sample_interval) AS p50LatencyMs,
-      quantileExactWeighted(0.75)(double3, _sample_interval) AS p75LatencyMs,
-      quantileExactWeighted(0.95)(double3, _sample_interval) AS p95LatencyMs,
-      quantileExactWeighted(0.99)(double3, _sample_interval) AS p99LatencyMs`
+      sumIf(_sample_interval * double3, ${NORMAL_LATENCY_SQL_FILTER}) AS latencyWeightedSumMs,
+      sumIf(_sample_interval, ${NORMAL_LATENCY_SQL_FILTER}) AS latencySampleWeight,
+      quantileExactWeighted(0.5)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p50LatencyMs,
+      quantileExactWeighted(0.75)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p75LatencyMs,
+      quantileExactWeighted(0.95)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p95LatencyMs,
+      quantileExactWeighted(0.99)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p99LatencyMs`
       : "";
   return `
     SELECT
@@ -902,11 +908,23 @@ function normalizeNormalRow(
   const receivedAt =
     toFiniteNumber(row.receivedAt) || parseAnalyticsTimestampMs(row.timestamp);
   const eventAt = toFiniteNumber(row.eventAt) || receivedAt;
+  const latencySchemaVersion = Math.trunc(
+    toFiniteNumber(row.latencySchemaVersion),
+  );
+  const rawEdgeLatencyMs = toFiniteNumber(row.edgeLatencyMs, Number.NaN);
+  const edgeLatencyMs =
+    latencySchemaVersion === NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION &&
+    Number.isFinite(rawEdgeLatencyMs) &&
+    rawEdgeLatencyMs >= 0 &&
+    rawEdgeLatencyMs <= MAX_WORKER_LATENCY_MS
+      ? rawEdgeLatencyMs
+      : null;
   return {
     timestamp: clampString(String(row.timestamp || ""), 64),
     receivedAt,
     eventAt,
-    edgeLatencyMs: Math.max(0, toFiniteNumber(row.edgeLatencyMs)),
+    edgeLatencyMs,
+    latencySchemaVersion,
     siteId,
     siteName: clampString(site?.name || siteId || "Unknown site", 160),
     siteDomain: clampString(site?.domain || "", 255),
@@ -939,7 +957,8 @@ function serializeBotListEvent(event: BotAnalyticsEvent) {
 function serializeNormalListEvent(event: NormalAnalyticsEvent) {
   // Normal requests open their Drawer from the selected list row, so retain
   // the compact metadata payload instead of requiring a second detail query.
-  return event;
+  const { latencySchemaVersion: _latencySchemaVersion, ...listEvent } = event;
+  return listEvent;
 }
 
 function detailCursorForEvent(
@@ -1112,8 +1131,15 @@ function aggregateNormalEvents(events: NormalAnalyticsEvent[]) {
     events.map((event) => event.siteId).filter(Boolean),
   );
   const latencyValues = events
+    .filter(
+      (event) =>
+        event.latencySchemaVersion === NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION,
+    )
     .map((event) => event.edgeLatencyMs)
-    .filter((value) => Number.isFinite(value) && value >= 0)
+    .filter(
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value) && value >= 0,
+    )
     .sort((left, right) => left - right);
   const avgLatencyMs =
     latencyValues.length > 0
@@ -1371,7 +1397,12 @@ function mergeTrendRows(input: {
   }
   const latencyBuckets = new Map<number, number[]>();
   for (const event of input.normalEvents ?? []) {
-    if (!Number.isFinite(event.edgeLatencyMs) || event.edgeLatencyMs < 0) {
+    if (
+      event.latencySchemaVersion !== NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION ||
+      typeof event.edgeLatencyMs !== "number" ||
+      !Number.isFinite(event.edgeLatencyMs) ||
+      event.edgeLatencyMs < 0
+    ) {
       continue;
     }
     const timestamp = event.receivedAt || event.eventAt;
@@ -2008,7 +2039,7 @@ export async function handleBotAnalyticsAdmin(
       req,
     );
   }
-  const normalTrendResult = await queryAnalyticsRows({
+  let normalTrendResult = await queryAnalyticsRows({
     apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
@@ -2023,6 +2054,29 @@ export async function handleBotAnalyticsAdmin(
       includeLatency: true,
     }),
   });
+  // double8 was introduced with the server-side Worker latency semantics.
+  // A dataset may not expose that column until the first new point is written;
+  // keep the dashboard usable and leave latency empty during that transition.
+  if (
+    !normalTrendResult.ok &&
+    shouldRetryBotAnalyticsWithoutDoubles(normalTrendResult)
+  ) {
+    normalTrendResult = await queryAnalyticsRows({
+      apiUrl: analyticsApiUrl,
+      accountId: config.accountId,
+      token,
+      sql: buildCountByBucketSql({
+        dataset: config.normalDataset,
+        from,
+        to,
+        bucketMs,
+        interval,
+        timeZone,
+        source: "normal",
+        includeLatency: false,
+      }),
+    });
+  }
   if (!normalTrendResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(normalTrendResult),
@@ -2069,6 +2123,35 @@ export async function handleBotAnalyticsAdmin(
     );
   }
 
+  const normalSummaryPromise = (async () => {
+    let result = await queryAnalyticsRows({
+      apiUrl: analyticsApiUrl,
+      accountId: config.accountId,
+      token,
+      sql: buildSourceSummarySql({
+        dataset: config.normalDataset,
+        from,
+        to,
+        source: "normal",
+        includeLatency: true,
+      }),
+    });
+    if (!result.ok && shouldRetryBotAnalyticsWithoutDoubles(result)) {
+      result = await queryAnalyticsRows({
+        apiUrl: analyticsApiUrl,
+        accountId: config.accountId,
+        token,
+        sql: buildSourceSummarySql({
+          dataset: config.normalDataset,
+          from,
+          to,
+          source: "normal",
+          includeLatency: false,
+        }),
+      });
+    }
+    return result;
+  })();
   const [abnormalSummaryResult, normalSummaryResult] = await Promise.all([
     queryAnalyticsRows({
       apiUrl: analyticsApiUrl,
@@ -2081,17 +2164,7 @@ export async function handleBotAnalyticsAdmin(
         source: "abnormal",
       }),
     }),
-    queryAnalyticsRows({
-      apiUrl: analyticsApiUrl,
-      accountId: config.accountId,
-      token,
-      sql: buildSourceSummarySql({
-        dataset: config.normalDataset,
-        from,
-        to,
-        source: "normal",
-      }),
-    }),
+    normalSummaryPromise,
   ]);
   if (!abnormalSummaryResult.ok) {
     return bad(

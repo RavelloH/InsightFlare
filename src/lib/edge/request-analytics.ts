@@ -12,6 +12,10 @@ export interface NormalAnalyticsInput {
   receivedAt: number;
 }
 
+// double3 used to contain client-event age. Keep the new server-side latency
+// distinguishable from those historical rows when both are in one AE window.
+export const NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION = 2;
+
 export const NORMAL_ANALYTICS_BLOBS = [
   "siteId",
   "kind",
@@ -39,6 +43,7 @@ export const NORMAL_ANALYTICS_DOUBLES = [
   "latitude",
   "longitude",
   "userAgentLength",
+  "latencySchemaVersion",
 ] as const;
 
 function requestCf(request: Request): Record<string, unknown> {
@@ -177,6 +182,7 @@ export function writeNormalAnalyticsEvent(
         latitude(cf),
         longitude(cf),
         userAgent.length,
+        NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION,
       ],
     });
     logger?.info?.("collect.normal_analytics_written");

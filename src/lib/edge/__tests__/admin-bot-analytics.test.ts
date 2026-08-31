@@ -412,6 +412,7 @@ describe("admin bot analytics handlers", () => {
       latitude: 35.6895,
       longitude: 139.6917,
       userAgentLength: 11,
+      latencySchemaVersion: 2,
     };
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -845,7 +846,7 @@ describe("admin bot analytics handlers", () => {
     expect(
       fetchMock.mock.calls.some(([, init]) =>
         String((init as RequestInit | undefined)?.body || "").includes(
-          "sumIf(_sample_interval * double3, double3 >= 0)",
+          "sumIf(_sample_interval * double3, double8 = 2 AND double3 BETWEEN 0 AND 60000)",
         ),
       ),
     ).toBe(true);
@@ -1108,6 +1109,7 @@ describe("admin bot analytics handlers", () => {
                 latitude: 0,
                 longitude: 0,
                 userAgentLength: "bad",
+                latencySchemaVersion: 0,
               },
             ]),
             { status: 200 },
@@ -1180,7 +1182,7 @@ describe("admin bot analytics handlers", () => {
     });
     expect(body.normalEvents[0]).toMatchObject({
       siteName: "Unknown site",
-      edgeLatencyMs: 0,
+      edgeLatencyMs: null,
       latitude: null,
       longitude: null,
     });

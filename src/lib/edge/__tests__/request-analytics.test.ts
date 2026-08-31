@@ -149,6 +149,7 @@ describe("normal request Analytics Engine writes", () => {
       37.7749,
       -122.4194,
       "Mozilla/5.0".length,
+      2,
     ]);
   });
 
@@ -235,6 +236,7 @@ describe("normal request Analytics Engine writes", () => {
     expect(point.doubles[4]).toBe(0);
     expect(point.doubles[5]).toBe(0);
     expect(point.doubles[6]).toBe(1024);
+    expect(point.doubles[7]).toBe(2);
     expect(invocationLogger.error).toHaveBeenCalledWith(
       "collect.normal_analytics_write_failed",
     );
@@ -270,6 +272,7 @@ describe("normal request Analytics Engine writes", () => {
     expect(point.blobs[12]).toBe("");
     expect(point.doubles[1]).toBe(3_000);
     expect(point.doubles[2]).toBe(25);
+    expect(point.doubles[7]).toBe(2);
   });
 
   it("normalizes blank pathnames and non-Error write failures", () => {

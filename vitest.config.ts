@@ -38,7 +38,13 @@ export default defineConfig({
         "./src/test/shims/cloudflare-workers.ts",
       ),
     },
-    exclude: ["**/node_modules/**", "**/dist/**", "**/.cache/**", "**/e2e/**"],
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/.cache/**",
+      "**/.tmp/**",
+      "**/e2e/**",
+    ],
     coverage: {
       thresholds: {
         statements: 95,
