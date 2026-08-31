@@ -333,7 +333,7 @@ function mockAnalyticsTimestamp(sql: string): number {
 function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
   const timestampMs = mockAnalyticsTimestamp(sql);
   const timestamp = new Date(timestampMs).toISOString();
-  const normal = sql.includes("FROM insightflare_normal_events");
+  const normal = sql.includes("normal_events");
   if (sql.includes("AS timestampMs")) {
     return [
       {
@@ -360,6 +360,32 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
         longitude: normal ? 121.47 : 116.4,
         pointCount: normal ? 3 : 2,
       },
+    ];
+  }
+  if (sql.includes("sum(_sample_interval) AS total")) {
+    return [
+      normal
+        ? {
+            affectedSites: 1,
+            latencySampleWeight: 3,
+            latencyWeightedSumMs: 126,
+            p50LatencyMs: 40,
+            p75LatencyMs: 45,
+            p95LatencyMs: 50,
+            p99LatencyMs: 50,
+            total: 3,
+            uniqueAsns: 1,
+            uniqueCountries: 1,
+          }
+        : {
+            affectedSites: 1,
+            customBlocked: 0,
+            highThreat: 2,
+            mediumThreat: 0,
+            total: 2,
+            uniqueAsns: 1,
+            uniqueCountries: 1,
+          },
     ];
   }
   if (sql.includes("count() AS total")) {

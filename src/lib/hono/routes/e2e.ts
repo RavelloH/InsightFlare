@@ -123,7 +123,7 @@ e2eRoutes.post("/ingest/flush", async (c) => {
   }
   const response = await c.env.INGEST_DO.get(
     c.env.INGEST_DO.idFromName(siteId),
-  ).fetch("https://ingest.internal/flush", { method: "POST" });
+  ).fetch("https://ingest.internal/flush?force=1", { method: "POST" });
   if (!response.ok) return c.json({ ok: false, error: "flush_failed" }, 502);
   return c.json({ ok: true, data: { flushed: true, siteId } });
 });

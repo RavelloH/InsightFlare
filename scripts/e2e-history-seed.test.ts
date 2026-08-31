@@ -14,6 +14,12 @@ describe("history E2E seed", () => {
       totalVisits: 120,
     });
     expect(seed.manifest.fromMs).toBeLessThan(seed.manifest.toMs);
+    expect(seed.sql).toContain(
+      "INSERT OR IGNORE INTO site_identities (site_id) VALUES ('site-1');",
+    );
+    expect(seed.sql).toContain(
+      "(SELECT site_pk FROM site_identities WHERE site_id = 'site-1')",
+    );
     expect(seed.sql).toContain("INSERT INTO visits");
     expect(seed.sql).toContain("run-1-history-visit-0");
     expect(seed.sql).toContain("summer-launch");

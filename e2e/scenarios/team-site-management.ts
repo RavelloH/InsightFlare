@@ -126,7 +126,7 @@ export function registerTeamSiteManagementScenarios(context: E2eContext) {
     await page.goto(`/zh/app/${teamA?.slug}/widgets`, {
       waitUntil: "domcontentloaded",
     });
-    await expect(page.getByText("正在施工中")).toBeVisible();
+    await expect(page.getByText("正在开发中", { exact: true })).toBeVisible();
     await expect(page.locator("body")).toHaveAttribute(
       "data-overlayscrollbars-initialize",
     );

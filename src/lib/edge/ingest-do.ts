@@ -142,8 +142,11 @@ export class IngestDurableObject extends DurableObject {
     }
 
     if (url.pathname === "/flush" && request.method === "POST") {
+      const force =
+        this.doEnv.INSIGHTFLARE_E2E === "1" &&
+        url.searchParams.get("force") === "1";
       logger.info("do.flush.manual_started");
-      await this.runMaintenance(logger);
+      await this.runMaintenance(logger, force);
       await this.reconcileAlarm(logger, true);
       logger.info("do.flush.manual_completed");
       return jsonResponse({ ok: true });
@@ -1708,8 +1711,11 @@ export class IngestDurableObject extends DurableObject {
     };
   }
 
-  private async flushPendingToD1(logger: InvocationLogger): Promise<void> {
-    return flushPendingToD1InFlushStore(this.flushStoreContext(logger));
+  private async flushPendingToD1(
+    logger: InvocationLogger,
+    force = false,
+  ): Promise<void> {
+    return flushPendingToD1InFlushStore(this.flushStoreContext(logger), force);
   }
 
   private async cleanupBufferedRows(logger: InvocationLogger): Promise<void> {
@@ -1720,10 +1726,13 @@ export class IngestDurableObject extends DurableObject {
     return flushTimeoutsInFlushStore(this.flushStoreContext(logger));
   }
 
-  private async runMaintenance(logger: InvocationLogger): Promise<void> {
+  private async runMaintenance(
+    logger: InvocationLogger,
+    forceFlush = false,
+  ): Promise<void> {
     await logger.measure("do.flush_timeouts", () => this.flushTimeouts(logger));
     await logger.measure("do.flush_pending", () =>
-      this.flushPendingToD1(logger),
+      this.flushPendingToD1(logger, forceFlush),
     );
     await logger.measure("do.cleanup", () => this.cleanupBufferedRows(logger));
   }

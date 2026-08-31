@@ -1641,6 +1641,54 @@ describe("IngestDurableObject", () => {
     ).toBe(0);
   });
 
+  it("force flushes pending ingest rows only for E2E flush requests", async () => {
+    const regular = createTestDo();
+    await postIngest(regular.object, envelope());
+
+    const regularFlush = await regular.object.fetch(
+      new Request("https://ingest.internal/flush?force=1", { method: "POST" }),
+    );
+
+    expect(regularFlush.status).toBe(200);
+    expect(
+      regular.d1.all<{ visit_id: string }>(
+        "SELECT visit_id FROM visits WHERE visit_id = ?",
+        "visit-1",
+      ),
+    ).toEqual([]);
+
+    const e2e = createTestDo({ INSIGHTFLARE_E2E: "1" });
+    await postIngest(e2e.object, envelope());
+    await postIngest(
+      e2e.object,
+      envelope({
+        kind: "custom_event",
+        eventId: "event-force",
+        eventName: "Force Flush",
+        eventData: { ok: true },
+        sequence: 1,
+      }),
+    );
+
+    const forced = await e2e.object.fetch(
+      new Request("https://ingest.internal/flush?force=1", { method: "POST" }),
+    );
+
+    expect(forced.status).toBe(200);
+    expect(
+      e2e.d1.all<{ visit_id: string }>(
+        "SELECT visit_id FROM visits WHERE visit_id = ?",
+        "visit-1",
+      ),
+    ).toEqual([{ visit_id: "visit-1" }]);
+    expect(
+      e2e.d1.all<{ event_id: string }>(
+        "SELECT event_id FROM custom_events WHERE event_id = ?",
+        "event-force",
+      ),
+    ).toEqual([{ event_id: "event-force" }]);
+  });
+
   it("hydrates persisted visits when custom events arrive after the buffered row is gone", async () => {
     const ctx = createTestDo();
     ctx.d1.insertVisit({

@@ -647,7 +647,7 @@ export async function handleE2eFlushAdmin(
     .first<{ id: string }>();
   if (!site) return nf("Site not found", undefined, req);
   const stub = env.INGEST_DO.get(env.INGEST_DO.idFromName(siteId));
-  const response = await stub.fetch("https://ingest.internal/flush", {
+  const response = await stub.fetch("https://ingest.internal/flush?force=1", {
     method: "POST",
   });
   if (!response.ok)

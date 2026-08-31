@@ -281,9 +281,10 @@ export function createFlowContext() {
       typeof value === "number"
         ? String(value)
         : `'${value.replaceAll("'", "''")}'`;
+    const sitePk = `(SELECT site_pk FROM site_identities WHERE site_id = ${quote(siteId)})`;
     await writeFile(
       sqlPath,
-      `INSERT INTO archive_objects (archive_key, site_id, start_hour, end_hour, granularity, format, row_count, size_bytes, created_at, updated_at) VALUES (${quote(archiveKey)}, ${quote(siteId)}, ${quote(hour)}, ${quote(hour)}, 'hour', 'parquet', 1, ${quote(content.length)}, ${quote(e2eNowMs)}, ${quote(e2eNowMs)});\n`,
+      `INSERT OR IGNORE INTO site_identities (site_id) VALUES (${quote(siteId)});\nINSERT INTO archive_objects (archive_key, site_id, start_hour, end_hour, granularity, format, row_count, size_bytes, created_at, updated_at, site_pk) VALUES (${quote(archiveKey)}, ${quote(siteId)}, ${quote(hour)}, ${quote(hour)}, 'hour', 'parquet', 1, ${quote(content.length)}, ${quote(e2eNowMs)}, ${quote(e2eNowMs)}, ${sitePk});\n`,
     );
     await execFileAsync(process.execPath, [
       path.join(

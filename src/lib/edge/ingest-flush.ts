@@ -150,11 +150,13 @@ async function pushFinalizedVisitRealtimeEvent(
 
 export async function flushPendingToD1(
   context: IngestFlushContext,
+  force = false,
 ): Promise<void> {
   let batches = 0;
   while (batches < D1_FLUSH_MAX_BATCHES_PER_ALARM) {
     batches += 1;
     const now = Date.now();
+    const dueFilter = force ? "" : "AND flush_due_at <= ?";
     const visitRows = context.sqlAll<BufferedVisitFlushRow>(
       `
         SELECT
@@ -220,11 +222,11 @@ export async function flushPendingToD1(
         FROM buffered_visits
         WHERE dirty = 1
           AND flush_due_at IS NOT NULL
-          AND flush_due_at <= ?
+          ${dueFilter}
         ORDER BY flush_due_at ASC, updated_at ASC, flush_attempts ASC
         LIMIT ?
       `,
-      now,
+      ...(force ? [] : [now]),
       D1_FLUSH_BATCH_SIZE,
     );
     const eventRows = context.sqlAll<BufferedCustomEventFlushRow>(
@@ -249,11 +251,11 @@ export async function flushPendingToD1(
         FROM buffered_custom_events
         WHERE dirty = 1
           AND flush_due_at IS NOT NULL
-          AND flush_due_at <= ?
+          ${dueFilter}
         ORDER BY flush_due_at ASC, created_at ASC, flush_attempts ASC
         LIMIT ?
       `,
-      now,
+      ...(force ? [] : [now]),
       D1_FLUSH_CUSTOM_EVENT_BATCH_SIZE,
     );
 

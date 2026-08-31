@@ -153,6 +153,10 @@ describe("E2E control routes", () => {
     expect(runScheduledTask).toHaveBeenCalledTimes(1);
     expect(invalidFlush.status).toBe(400);
     expect(flushed.status).toBe(200);
+    expect(env.stub.fetch).toHaveBeenCalledWith(
+      "https://ingest.internal/flush?force=1",
+      { method: "POST" },
+    );
     expect(status.status).toBe(200);
     expect(flushFailed.status).toBe(502);
     expect(statusMissing.status).toBe(400);

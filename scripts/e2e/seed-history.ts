@@ -110,16 +110,19 @@ export function buildHistorySeed(input: HistorySeedInput): {
   );
   const pages: Record<string, number> = {};
   for (const row of rows) pages[row.pathname] = (pages[row.pathname] || 0) + 1;
-  const sql = rows
-    .map(
-      (row) =>
-        `INSERT INTO visits (${VISIT_D1_COLUMNS.join(", ")}) VALUES (${visitBindings(
-          row,
-        )
-          .map(sqlLiteral)
-          .join(", ")});`,
-    )
-    .join("\n");
+  const sitePkSql = `(SELECT site_pk FROM site_identities WHERE site_id = ${sqlLiteral(
+    input.siteId,
+  )})`;
+  const sql = [
+    `INSERT OR IGNORE INTO site_identities (site_id) VALUES (${sqlLiteral(input.siteId)});`,
+    ...rows.map((row) => {
+      const bindings = visitBindings(row);
+      const values = VISIT_D1_COLUMNS.map((column, index) =>
+        column === "site_pk" ? sitePkSql : sqlLiteral(bindings[index]),
+      );
+      return `INSERT INTO visits (${VISIT_D1_COLUMNS.join(", ")}) VALUES (${values.join(", ")});`;
+    }),
+  ].join("\n");
   return {
     manifest: {
       fromMs: Math.min(...rows.map((row) => row.startedAt)),
