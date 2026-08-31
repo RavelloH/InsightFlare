@@ -3,9 +3,10 @@ import { expect, type Page } from "@playwright/test";
 export type ApiEnvelope<T> = {
   data?: T;
   error?: string;
+  meta?: unknown;
   message?: string;
   ok?: boolean;
-};
+} & (T extends object ? Partial<T> : unknown);
 
 export type OverviewMetrics = {
   bounces: number;
@@ -16,7 +17,7 @@ export type OverviewMetrics = {
 
 export async function apiRequest<T>(
   page: Page,
-  method: "DELETE" | "GET" | "POST" | "PATCH",
+  method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT",
   path: string,
   body?: Record<string, unknown>,
   cache?: RequestCache,

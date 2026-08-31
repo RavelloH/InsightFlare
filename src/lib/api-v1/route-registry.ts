@@ -881,6 +881,7 @@ export const apiV1AnalyticsCrossBreakdownRouteRegistry = [
       "validation_failed",
       "missing_scope",
       "resource_not_found",
+      "dimension_not_supported",
       "deadline_exceeded",
       "internal_error",
       "method_not_allowed",

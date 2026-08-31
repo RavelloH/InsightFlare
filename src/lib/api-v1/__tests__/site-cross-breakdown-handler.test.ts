@@ -323,6 +323,20 @@ describe("planned site cross-breakdown HTTP adapter", () => {
         )
       ).status,
     ).toBe(499);
+    const unsupported = vi
+      .fn<SiteCrossBreakdownReader>()
+      .mockRejectedValue(new Error("unsupported-dimension"));
+    const unsupportedResponse = await handlePlannedSiteCrossBreakdown(
+      request(),
+      principal,
+      "site-1",
+      createTestProviderRegistry(unsupported),
+    );
+    expect(unsupportedResponse.status).toBe(422);
+    expect(await unsupportedResponse.json()).toMatchObject({
+      error: { code: "dimension_not_supported" },
+    });
+
     const failing = vi
       .fn<SiteCrossBreakdownReader>()
       .mockRejectedValue(new Error("provider failure"));

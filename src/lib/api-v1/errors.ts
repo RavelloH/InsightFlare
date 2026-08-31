@@ -245,3 +245,21 @@ export function fromAnalyticsDomainError(
     retryable: false,
   };
 }
+
+/**
+ * Provider adapters can still surface a small set of legacy sentinel errors
+ * while the application service intentionally collapses provider failures to
+ * an internal domain result. Keep this mapping at the API boundary so those
+ * errors retain their public contract without exposing provider details.
+ */
+export function apiV1ErrorCodeFromProviderError(
+  error: unknown,
+): ApiV1ErrorCode | undefined {
+  if (
+    error instanceof Error &&
+    /^unsupported-dimension(?::|$)/.test(error.message)
+  ) {
+    return "dimension_not_supported";
+  }
+  return undefined;
+}

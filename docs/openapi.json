@@ -21010,6 +21010,83 @@
               }
             }
           },
+          "422": {
+            "description": "API v1 error: dimension_not_supported.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "code": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["path", "code"],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["requestId"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["error", "meta"],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "error": {
+                    "code": "dimension_not_supported",
+                    "message": "The requested analytics dimension is not supported.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
           "500": {
             "description": "API v1 error: internal_error.",
             "headers": {

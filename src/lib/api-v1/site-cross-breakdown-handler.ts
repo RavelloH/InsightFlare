@@ -7,7 +7,10 @@ import {
   type SiteCrossBreakdownQueryDto,
   SiteCrossBreakdownQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
-import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
+import {
+  apiV1ErrorCodeFromProviderError,
+  apiV1ErrorRegistry,
+} from "@/lib/api-v1/errors";
 import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
@@ -295,8 +298,10 @@ export async function handlePlannedSiteCrossBreakdown(
       },
       requestId,
     );
-  } catch {
+  } catch (error) {
     if (execution.signal?.aborted) return cancelledResponse();
+    const mappedCode = apiV1ErrorCodeFromProviderError(error);
+    if (mappedCode) return errorResponse(mappedCode);
     return errorResponse("internal_error");
   }
 }

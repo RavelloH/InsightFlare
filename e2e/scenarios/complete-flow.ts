@@ -4,6 +4,7 @@ import { createFlowContext } from "../support/flow-context";
 import { registerAccountTopologyScenarios } from "./account-topology";
 import { registerAnalyticsArchiveScenarios } from "./analytics-archive";
 import { registerBootstrapScenarios } from "./bootstrap";
+import { registerNonFunnelCoverageScenarios } from "./non-funnel-coverage";
 import { registerNotificationScenarios } from "./notifications";
 import { registerPlatformIntegrationScenarios } from "./platform-integrations";
 import { registerSystemLifecycleScenarios } from "./system-lifecycle";
@@ -22,5 +23,6 @@ test.describe.serial("InsightFlare E2E", () => {
   registerAnalyticsArchiveScenarios(context);
   registerNotificationScenarios(context);
   registerPlatformIntegrationScenarios(context);
+  registerNonFunnelCoverageScenarios(context);
   registerSystemLifecycleScenarios(context);
 });

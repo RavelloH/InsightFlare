@@ -29,6 +29,18 @@ export function queryErrorResponse(error: AnalyticsDomainError): Response {
   if (error.kind === "internal") {
     return errorResponse(null, 500, "internal", "Internal Server Error");
   }
+  if (error.kind === "range-not-supported") {
+    return errorResponse(
+      null,
+      422,
+      error.reason === "too-many-buckets"
+        ? "too_many_buckets"
+        : "range_too_wide",
+      error.reason === "too-many-buckets"
+        ? "The requested trend contains too many buckets."
+        : "The requested time range is too wide.",
+    );
+  }
   return badRequest(error.kind);
 }
 

@@ -167,6 +167,7 @@ describe("target API v1 route registry", () => {
         path: "/api/v1/sites/{siteId}/analytics/cross-breakdowns",
         lifecycle: "exposed",
         operationId: "site.analytics.crossBreakdown",
+        declaredErrors: expect.arrayContaining(["dimension_not_supported"]),
         conditionalScopes: [
           {
             when: "filter.type=saved",

@@ -2192,6 +2192,30 @@ describe("edge query handlers", () => {
     expect(statements[0].bind).toHaveBeenCalledWith("user-1", "team-1");
   });
 
+  it("rejects oversized team dashboard trends before constructing D1 trend SQL", async () => {
+    const { env, statements } = createEnv({
+      matches: [firstMatch(["SELECT id FROM teams"], { id: "team-1" })],
+    });
+
+    const response = await privateQuery(
+      `/api/private/team-dashboard?teamId=team-1&from=0&to=${to}&interval=day`,
+      env,
+    );
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      error: {
+        code: "too_many_buckets",
+        message: "The requested trend contains too many buckets.",
+      },
+    });
+    // Team ACL resolution is still performed, but no site, rollup, or raw
+    // trend query is allowed to run after the range is rejected.
+    expect(statements).toHaveLength(1);
+    expect(statements[0].sql).toContain("SELECT id FROM teams");
+  });
+
   it("routes team dashboard with team auth, site summaries, trends, and empty teams", async () => {
     const { env } = createEnv({
       matches: [

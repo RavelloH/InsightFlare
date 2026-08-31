@@ -21,7 +21,10 @@ import {
   type SsrTeamDashboardData,
 } from "@/lib/edge/analytics/composition/ssr-query-runtime";
 import {
+  buildCalendarBucketPlan,
   createQueryTime,
+  createTimeRange,
+  normalizeReportingTimeZone,
   siteQueryContext,
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
@@ -502,6 +505,35 @@ function teamResponseContext(
     : undefined;
 }
 
+function teamDashboardBucketError(
+  window: ReturnType<typeof parseWindow> extends infer Window
+    ? Exclude<Window, null>
+    : never,
+  interval: ReturnType<typeof parseInterval>,
+): Response | null {
+  // Keep the HTTP boundary aligned with the D1 provider's 2,000-bucket
+  // calendar plan limit. The provider intentionally truncates plans for
+  // callers that need partial data, but a dashboard trend must reject before
+  // that truncated plan is interpolated into a large SQL CASE expression.
+  if (
+    !Number.isSafeInteger(window.startMs) ||
+    !Number.isSafeInteger(window.endExclusiveMs)
+  ) {
+    return badRequest("Invalid time window");
+  }
+  const plan = buildCalendarBucketPlan({
+    range: createTimeRange(window.startMs, window.endExclusiveMs),
+    granularity: interval,
+    reportingTimeZone: normalizeReportingTimeZone(window.timeZone),
+  });
+  return plan.truncated
+    ? queryErrorResponse({
+        kind: "range-not-supported",
+        reason: "too-many-buckets",
+      })
+    : null;
+}
+
 /** Private team-dashboard adapter after authentication has resolved its team
  * scope. Caching remains at the Hono boundary. */
 export async function executePrivateTeamDashboard(
@@ -509,12 +541,15 @@ export async function executePrivateTeamDashboard(
 ): Promise<Response> {
   const window = parseWindow(input.url);
   if (!window) return badRequest("Invalid time window");
+  const interval = parseInterval(input.url);
+  const bucketError = teamDashboardBucketError(window, interval);
+  if (bucketError) return bucketError;
   const diagnostics = createD1ReadDiagnostics();
   const result = await createTeamDashboardQueryRuntime({
     env: input.env,
     teamId: input.teamId,
     window,
-    interval: parseInterval(input.url),
+    interval,
     allowedSiteIds: input.allowedSiteIds,
     diagnostics,
   }).execute<SsrTeamDashboardData>("team-dashboard", {
