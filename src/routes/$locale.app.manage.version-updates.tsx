@@ -11,6 +11,8 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { VersionUpdateDetailsButton } from "@/components/dashboard/version-update-details-button";
+import { AutoResizer } from "@/components/ui/auto-resizer";
+import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -197,129 +199,154 @@ function Page() {
         </CardContent>
       </Card>
 
-      {isLoading ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
-            <Spinner className="size-6" />
-            <p>{messages.common.loading}</p>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {error ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
-            <RiGitBranchLine className="size-8 text-muted-foreground/70" />
-            <p>{labels.loadFailed}</p>
-            <p className="max-w-xl break-words font-mono text-xs">{error}</p>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {releases.length === 0 && !error && !isLoading ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center text-sm text-muted-foreground">
-            <RiGitBranchLine className="size-8 text-muted-foreground/70" />
-            <p>{labels.empty}</p>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <div className="space-y-3">
-        {releases.map((release) => {
-          const status = releaseStatus(release, labels);
-          const isCurrent =
-            currentRelease !== null &&
-            release.tagName === currentRelease.tagName;
-          const isCurrentDeployment = isCommitMatch(
-            release.targetCommitish,
-            CURRENT_COMMIT,
-          );
-          const releaseStableIndex = stableReleaseTags.findIndex(
-            (tagName) => tagName === release.tagName,
-          );
-          const previousStableTag =
-            releaseStableIndex >= 0
-              ? stableReleaseTags[releaseStableIndex + 1] || null
-              : null;
-          return (
-            <Card key={release.tagName}>
-              <CardContent
-                className={cn(
-                  "space-y-4 p-4 md:p-5",
-                  isCurrentDeployment && "border-l-2 border-l-primary",
-                )}
-              >
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div className="min-w-0 space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-mono text-xl font-semibold">
-                        {release.tagName}
-                      </h2>
-                      <Badge variant={status.variant}>{status.label}</Badge>
-                      {isCurrent ? (
-                        <Badge variant="outline">
-                          {labels.currentVersionBadge}
-                        </Badge>
-                      ) : null}
-                      {isCurrentDeployment ? (
-                        <Badge variant="outline">
-                          {labels.currentCommitBadge}
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                      <span>
-                        {labels.publishedAt}:{" "}
-                        {formatDateTime(resolvedLocale, releaseDate(release))}
-                      </span>
-                      <span>
-                        {labels.author}: {release.authorLogin || labels.unknown}
-                      </span>
-                      <span>
-                        {labels.commit}:{" "}
-                        <span className="font-mono">
-                          {formatCommit(release.targetCommitish)}
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <VersionUpdateDetailsButton
-                      baseTag={previousStableTag}
-                      headRef={release.targetCommitish || release.tagName}
-                      releaseTag={release.tagName}
-                      currentCommit={CURRENT_COMMIT}
-                      labels={detailLabels}
-                    />
-                    <Button variant="outline" asChild>
-                      <Link
-                        href={release.htmlUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <RiExternalLinkLine />
-                        {labels.openRelease}
-                      </Link>
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="border-t pt-4">
-                  <div className="mb-2 text-xs font-medium text-muted-foreground">
-                    {labels.releaseNotes}
-                  </div>
-                  <LazyReleaseNotes
-                    release={release}
-                    locale={resolvedLocale}
-                    labels={labels}
-                  />
+      <AutoResizer duration={0.22}>
+        <AutoTransition
+          initial={false}
+          duration={0.2}
+          transitionKey={
+            isLoading
+              ? "loading"
+              : error
+                ? "error"
+                : releases.length > 0
+                  ? "content"
+                  : "empty"
+          }
+        >
+          {isLoading ? (
+            <Card key="loading">
+              <CardContent className="flex min-h-32 items-center justify-center">
+                <div
+                  className="flex items-center justify-center"
+                  role="status"
+                  aria-label={messages.common.loading}
+                >
+                  <Spinner className="size-6" />
                 </div>
               </CardContent>
             </Card>
-          );
-        })}
-      </div>
+          ) : error ? (
+            <Card key="error">
+              <CardContent className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
+                <RiGitBranchLine className="size-8 text-muted-foreground/70" />
+                <p>{labels.loadFailed}</p>
+                <p className="max-w-xl break-words font-mono text-xs">
+                  {error}
+                </p>
+              </CardContent>
+            </Card>
+          ) : releases.length === 0 ? (
+            <Card key="empty">
+              <CardContent className="flex flex-col items-center gap-3 py-12 text-center text-sm text-muted-foreground">
+                <RiGitBranchLine className="size-8 text-muted-foreground/70" />
+                <p>{labels.empty}</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div key="content" className="space-y-3">
+              {releases.map((release) => {
+                const status = releaseStatus(release, labels);
+                const isCurrent =
+                  currentRelease !== null &&
+                  release.tagName === currentRelease.tagName;
+                const isCurrentDeployment = isCommitMatch(
+                  release.targetCommitish,
+                  CURRENT_COMMIT,
+                );
+                const releaseStableIndex = stableReleaseTags.findIndex(
+                  (tagName) => tagName === release.tagName,
+                );
+                const previousStableTag =
+                  releaseStableIndex >= 0
+                    ? stableReleaseTags[releaseStableIndex + 1] || null
+                    : null;
+                return (
+                  <Card key={release.tagName}>
+                    <CardContent
+                      className={cn(
+                        "space-y-4 p-4 md:p-5",
+                        isCurrentDeployment && "border-l-2 border-l-primary",
+                      )}
+                    >
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="font-mono text-xl font-semibold">
+                              {release.tagName}
+                            </h2>
+                            <Badge variant={status.variant}>
+                              {status.label}
+                            </Badge>
+                            {isCurrent ? (
+                              <Badge variant="outline">
+                                {labels.currentVersionBadge}
+                              </Badge>
+                            ) : null}
+                            {isCurrentDeployment ? (
+                              <Badge variant="outline">
+                                {labels.currentCommitBadge}
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                            <span>
+                              {labels.publishedAt}:{" "}
+                              {formatDateTime(
+                                resolvedLocale,
+                                releaseDate(release),
+                              )}
+                            </span>
+                            <span>
+                              {labels.author}:{" "}
+                              {release.authorLogin || labels.unknown}
+                            </span>
+                            <span>
+                              {labels.commit}:{" "}
+                              <span className="font-mono">
+                                {formatCommit(release.targetCommitish)}
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <VersionUpdateDetailsButton
+                            baseTag={previousStableTag}
+                            headRef={release.targetCommitish || release.tagName}
+                            releaseTag={release.tagName}
+                            currentCommit={CURRENT_COMMIT}
+                            labels={detailLabels}
+                          />
+                          <Button variant="outline" asChild>
+                            <Link
+                              href={release.htmlUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              <RiExternalLinkLine />
+                              {labels.openRelease}
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-4">
+                        <div className="mb-2 text-xs font-medium text-muted-foreground">
+                          {labels.releaseNotes}
+                        </div>
+                        <LazyReleaseNotes
+                          release={release}
+                          locale={resolvedLocale}
+                          labels={labels}
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </AutoTransition>
+      </AutoResizer>
     </div>
   );
 }
@@ -367,26 +394,52 @@ function LazyReleaseNotes({
     retry: false,
   });
 
-  let content: string | null = null;
-  if (shouldLoad) {
-    if (changelogQuery.isPending) {
-      content = labels.detailsLoading;
-    } else if (changelogQuery.isError) {
-      content =
-        changelogQuery.error instanceof Error
-          ? changelogQuery.error.message
-          : labels.detailsFailed;
-    } else {
-      content = changelogQuery.data?.trim() || labels.empty;
-    }
-  }
+  const notesStateKey = !shouldLoad
+    ? "idle"
+    : changelogQuery.isPending
+      ? "loading"
+      : changelogQuery.isError
+        ? "error"
+        : "content";
 
   return (
-    <div
-      ref={containerRef}
-      className="min-h-12 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/90"
-    >
-      {content}
+    <div ref={containerRef} className="min-h-12">
+      <AutoResizer duration={0.2}>
+        <AutoTransition
+          initial={false}
+          duration={0.18}
+          transitionKey={notesStateKey}
+        >
+          {!shouldLoad ? (
+            <div key="idle" className="min-h-12" aria-hidden="true" />
+          ) : changelogQuery.isPending ? (
+            <div
+              key="loading"
+              className="flex min-h-12 items-center justify-center"
+              role="status"
+              aria-label={labels.detailsLoading}
+            >
+              <Spinner className="size-4" />
+            </div>
+          ) : changelogQuery.isError ? (
+            <div
+              key="error"
+              className="whitespace-pre-wrap break-words text-sm leading-6 text-destructive"
+            >
+              {changelogQuery.error instanceof Error
+                ? changelogQuery.error.message
+                : labels.detailsFailed}
+            </div>
+          ) : (
+            <div
+              key="content"
+              className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground/90"
+            >
+              {changelogQuery.data?.trim() || labels.empty}
+            </div>
+          )}
+        </AutoTransition>
+      </AutoResizer>
     </div>
   );
 }
@@ -412,14 +465,18 @@ function VersionMetric({
           {label}
         </p>
       </div>
-      <p
-        className={cn(
-          "mt-3 min-w-0 truncate font-mono text-xl leading-7 font-semibold tabular-nums",
-          valueClassName,
-        )}
-      >
-        {value}
-      </p>
+      <AutoResizer className="mt-3 min-w-0" duration={0.18}>
+        <AutoTransition initial={false} duration={0.16} transitionKey={value}>
+          <p
+            className={cn(
+              "min-w-0 truncate font-mono text-xl leading-7 font-semibold tabular-nums",
+              valueClassName,
+            )}
+          >
+            {value}
+          </p>
+        </AutoTransition>
+      </AutoResizer>
     </div>
   );
 }
