@@ -4,11 +4,12 @@ import {
   type InvocationLogger,
 } from "@/lib/edge/observability-logger";
 import {
-  SCHEDULED_TASK_LOG_RETENTION_DAYS,
   type ScheduledTaskLogLevel,
+  type ScheduledTaskRetentionConfig,
   type ScheduledTaskStatus,
 } from "@/lib/scheduled-tasks";
 
+import { readRetentionConfig } from "./retention-config";
 import type { Env } from "./types";
 
 type JsonValue =
@@ -36,6 +37,7 @@ export interface ScheduledTaskContext {
   startedAt: number;
   logger: ScheduledTaskLogger;
   externalFetch: typeof fetch;
+  retention?: ScheduledTaskRetentionConfig;
 }
 
 export interface ScheduledTaskDefinition {
@@ -51,8 +53,10 @@ export interface ScheduledTaskOutcome {
   summary?: Record<string, unknown>;
 }
 
-const RETENTION_SECONDS = SCHEDULED_TASK_LOG_RETENTION_DAYS * 24 * 60 * 60;
-const STALE_RUNNING_MS = 6 * 60 * 60 * 1000;
+export const STALE_RUNNING_MS = 6 * 60 * 60 * 1000;
+const MAX_BUFFERED_LOG_ENTRIES = 500;
+const MAX_BUFFERED_LOG_BYTES = 512 * 1024;
+const LOG_BATCH_SIZE = 50;
 
 function safeJsonStringify(value: unknown): string {
   try {
@@ -104,42 +108,9 @@ async function bestEffortRun(
   }
 }
 
-async function pruneExpiredScheduledTaskLogs(
-  env: Env,
-  observability?: Pick<InvocationLogger, "warn">,
-): Promise<void> {
-  await bestEffortRun(
-    "prune",
-    async () => {
-      await env.DB.prepare(
-        "DELETE FROM scheduled_task_run_logs WHERE expires_at < unixepoch()",
-      )
-        .bind()
-        .run();
-      await env.DB.prepare(
-        "DELETE FROM scheduled_task_runs WHERE expires_at < unixepoch()",
-      )
-        .bind()
-        .run();
-      const now = Date.now();
-      await env.DB.prepare(
-        `
-        UPDATE scheduled_task_runs
-        SET
-          status = 'failed',
-          finished_at_ms = ?,
-          duration_ms = ? - started_at_ms,
-          error_name = COALESCE(error_name, 'StaleRun'),
-          error_message = COALESCE(error_message, 'Task run did not finish before the stale threshold')
-        WHERE status = 'running'
-          AND started_at_ms < ?
-      `,
-      )
-        .bind(now, now, now - STALE_RUNNING_MS)
-        .run();
-    },
-    observability,
-  );
+interface BufferedTaskLogger {
+  logger: ScheduledTaskLogger;
+  flush(): Promise<void>;
 }
 
 function createLogger(
@@ -148,8 +119,18 @@ function createLogger(
   taskKey: string,
   expiresAtSec: number,
   observability?: InvocationLogger,
-): ScheduledTaskLogger {
+): BufferedTaskLogger {
   let sequence = 0;
+  let bufferedBytes = 0;
+  const entries: Array<{
+    id: string;
+    sequence: number;
+    level: ScheduledTaskLogLevel;
+    event: string;
+    message: string;
+    dataJson: string;
+    createdAtMs: number;
+  }> = [];
   const write = async (
     level: ScheduledTaskLogLevel,
     event: string,
@@ -158,33 +139,23 @@ function createLogger(
   ) => {
     sequence += 1;
     const createdAtMs = Date.now();
-    await bestEffortRun(
-      `log:${event}`,
-      async () => {
-        await env.DB.prepare(
-          `
-          INSERT INTO scheduled_task_run_logs (
-            id, run_id, task_key, sequence, level, event, message,
-            data_json, created_at_ms, expires_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        )
-          .bind(
-            crypto.randomUUID(),
-            runId,
-            taskKey,
-            sequence,
-            level,
-            event.slice(0, 120),
-            message.slice(0, 500),
-            safeJsonStringify(data),
-            createdAtMs,
-            expiresAtSec,
-          )
-          .run();
-      },
-      observability,
-    );
+    const dataJson = safeJsonStringify(data);
+    const encodedBytes = event.length + message.length + dataJson.length + 160;
+    if (
+      entries.length < MAX_BUFFERED_LOG_ENTRIES &&
+      bufferedBytes + encodedBytes <= MAX_BUFFERED_LOG_BYTES
+    ) {
+      entries.push({
+        id: crypto.randomUUID(),
+        sequence,
+        level,
+        event: event.slice(0, 120),
+        message: message.slice(0, 500),
+        dataJson,
+        createdAtMs,
+      });
+      bufferedBytes += encodedBytes;
+    }
     // Persisted task logs can contain operator-facing identifiers. The Worker
     // record mirrors only the stable event and level, never its message/data.
     const eventCode = `scheduled_task.${event.slice(0, 120)}`;
@@ -193,10 +164,52 @@ function createLogger(
     else observability?.info(eventCode);
   };
   return {
-    debug: (event, message, data) => write("debug", event, message, data),
-    info: (event, message, data) => write("info", event, message, data),
-    warn: (event, message, data) => write("warn", event, message, data),
-    error: (event, message, data) => write("error", event, message, data),
+    logger: {
+      debug: (event, message, data) => write("debug", event, message, data),
+      info: (event, message, data) => write("info", event, message, data),
+      warn: (event, message, data) => write("warn", event, message, data),
+      error: (event, message, data) => write("error", event, message, data),
+    },
+    async flush() {
+      if (entries.length === 0) return;
+      const statements = entries.map((entry) =>
+        env.DB.prepare(
+          `
+              INSERT INTO scheduled_task_run_logs (
+                id, run_id, task_key, sequence, level, event, message,
+                data_json, created_at_ms, expires_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+        ).bind(
+          entry.id,
+          runId,
+          taskKey,
+          entry.sequence,
+          entry.level,
+          entry.event,
+          entry.message,
+          entry.dataJson,
+          entry.createdAtMs,
+          expiresAtSec,
+        ),
+      );
+      await bestEffortRun(
+        "logs-flush",
+        async () => {
+          for (
+            let offset = 0;
+            offset < statements.length;
+            offset += LOG_BATCH_SIZE
+          ) {
+            await env.DB.batch(
+              statements.slice(offset, offset + LOG_BATCH_SIZE),
+            );
+          }
+        },
+        observability,
+      );
+      entries.length = 0;
+    },
   };
 }
 
@@ -217,8 +230,10 @@ export async function runScheduledTask(
   const scheduledAt = normalizeScheduledAtMs(scheduledTime);
   const runId = crypto.randomUUID();
   const invocationId = crypto.randomUUID();
-  const expiresAtSec = Math.floor(startedAt / 1000) + RETENTION_SECONDS;
-  await pruneExpiredScheduledTaskLogs(env, activeObservability);
+  const retention = await readRetentionConfig(env);
+  const expiresAtSec =
+    Math.floor(startedAt / 1000) +
+    retention.scheduledTaskLogsDays * 24 * 60 * 60;
 
   await bestEffortRun(
     "run-start",
@@ -250,13 +265,14 @@ export async function runScheduledTask(
     activeObservability,
   );
 
-  const logger = createLogger(
+  const buffered = createLogger(
     env,
     runId,
     definition.key,
     expiresAtSec,
     activeObservability,
   );
+  const logger = buffered.logger;
   await logger.info("start", "Task run started", {
     triggerType,
     scheduledAt,
@@ -270,6 +286,7 @@ export async function runScheduledTask(
       scheduledTime: scheduledAt,
       startedAt,
       logger,
+      retention,
       externalFetch: (...args) =>
         measureExternalFetch(
           activeObservability,
@@ -284,6 +301,7 @@ export async function runScheduledTask(
       status,
       durationMs: finishedAt - startedAt,
     });
+    if (status !== "skipped") await buffered.flush();
     await bestEffortRun(
       "run-finish",
       async () => {
@@ -318,6 +336,7 @@ export async function runScheduledTask(
     await logger.error("error", normalized.message, {
       name: normalized.name,
     });
+    await buffered.flush();
     await bestEffortRun(
       "run-error",
       async () => {

@@ -20,7 +20,10 @@ import {
 import { fnv1a, mulberry32, sFloat, sInt } from "@/lib/realtime/demo-utils";
 import { integrateViews } from "@/lib/realtime/mock/site-curves";
 import {
-  SCHEDULED_TASK_LOG_RETENTION_DAYS,
+  DEFAULT_RETENTION_CONFIG,
+  normalizeRetentionConfig,
+} from "@/lib/retention";
+import {
   type ScheduledTaskRun,
   type ScheduledTaskRunGroup,
   type ScheduledTaskRunLog,
@@ -915,82 +918,258 @@ const DEMO_SCHEDULED_TASK_DEFINITIONS = [
     schedule: "Every hour",
     trigger: "cron" as const,
     enabled: true,
+    internalSchedule: { kind: "interval" as const, everyMinutes: 60 as const },
   },
   {
     key: "notification_tick",
     name: "Notification dispatch",
     description: "Evaluates notification rules and dispatches messages.",
-    schedule: "Every hour",
+    schedule: "Every 30 minutes",
     trigger: "cron" as const,
     enabled: true,
+    internalSchedule: { kind: "interval" as const, everyMinutes: 30 as const },
+  },
+  {
+    key: "database_maintenance",
+    name: "Database maintenance",
+    description:
+      "Removes expired operational records, marks stale runs, and optimizes D1 query statistics.",
+    schedule: "Every day",
+    trigger: "cron" as const,
+    enabled: true,
+    internalSchedule: { kind: "daily" as const, timezone: "UTC" as const },
   },
 ];
 
-function demoScheduledTaskStatus(index: number): ScheduledTaskStatus {
-  if (index === 0) return "success";
-  if (index % 29 === 0) return "failed";
-  if (index % 17 === 0) return "partial";
-  if (index % 11 === 0) return "skipped";
+let demoScheduledTaskRetention = { ...DEFAULT_RETENTION_CONFIG };
+const demoScheduledTaskEnabled = new Map<string, boolean>();
+
+export function updateDemoScheduledTasks(input: {
+  taskKey?: unknown;
+  enabled?: unknown;
+  retention?: Record<string, unknown>;
+  retentionDays?: unknown;
+}): void {
+  if (typeof input.taskKey === "string" && input.enabled !== undefined) {
+    const enabled =
+      typeof input.enabled === "boolean"
+        ? input.enabled
+        : Number(input.enabled) !== 0;
+    demoScheduledTaskEnabled.set(input.taskKey, enabled);
+  }
+  const retentionPatch = { ...(input.retention ?? {}) };
+  if (input.retentionDays !== undefined) {
+    retentionPatch.scheduledTaskLogsDays = input.retentionDays;
+  }
+  if (Object.keys(retentionPatch).length > 0) {
+    demoScheduledTaskRetention = normalizeRetentionConfig({
+      ...demoScheduledTaskRetention,
+      ...retentionPatch,
+    });
+  }
+}
+
+const DEMO_SCHEDULED_TICK_MS = 30 * 60 * 1000;
+const DEMO_SCHEDULED_TICKS = 30 * 24 * 2;
+
+function demoScheduledTaskStatus(
+  taskKey: string,
+  index: number,
+): ScheduledTaskStatus {
+  if (taskKey === "notification_tick") {
+    if (index > 0 && index % 29 === 0) return "failed";
+    if (index % 17 === 0) return "partial";
+    if (index % 11 === 0) return "skipped";
+    return "success";
+  }
+  if (taskKey === "visit_hourly_rollup") {
+    if (index > 0 && index % 37 === 0) return "failed";
+    if (index % 23 === 0) return "partial";
+    if (index % 19 === 0) return "skipped";
+    return "success";
+  }
+  if (index > 0 && index % 13 === 0) return "partial";
+  if (index > 0 && index % 17 === 0) return "skipped";
   return "success";
 }
 
 function demoScheduledRuns(now: number): ScheduledTaskRun[] {
   const runs: ScheduledTaskRun[] = [];
-  for (let index = 0; index < 30 * 24; index += 1) {
-    const startedAt =
-      now -
-      index * 60 * 60 * 1000 -
-      sInt(mulberry32(fnv1a(`scheduled-run:${index}:offset`)), 8_000, 90_000);
-    const status = demoScheduledTaskStatus(index);
-    const rng = mulberry32(fnv1a(`scheduled-run:${index}`));
-    const processedSites = status === "skipped" ? 0 : sInt(rng, 7, 12);
-    const failedSites = status === "failed" ? 3 : status === "partial" ? 1 : 0;
-    const hoursAggregated =
-      status === "skipped" ? 0 : processedSites * sInt(rng, 4, 14);
-    const durationMs =
-      status === "skipped" ? sInt(rng, 140, 420) : sInt(rng, 1_300, 7_800);
+  const latestTick =
+    Math.floor(now / DEMO_SCHEDULED_TICK_MS) * DEMO_SCHEDULED_TICK_MS;
+  const retentionMs = demoScheduledTaskRetention.scheduledTaskLogsDays * DAY_MS;
+  let runIndex = 0;
+
+  const pushRun = (input: {
+    definition: (typeof DEMO_SCHEDULED_TASK_DEFINITIONS)[number];
+    index: number;
+    scheduledAt: number;
+    startedAt: number;
+    status: ScheduledTaskStatus;
+    summary: Record<string, unknown>;
+    durationMs: number;
+  }) => {
+    const { definition, index, scheduledAt, startedAt, status, summary } =
+      input;
+    const durationMs = input.durationMs;
     runs.push({
-      id: `demo-run-${String(index).padStart(4, "0")}`,
-      invocationId: `demo-invocation-${String(index).padStart(4, "0")}`,
-      taskKey: "visit_hourly_rollup",
-      taskName: "Hourly visit aggregation",
+      id: `demo-run-${String(runIndex++).padStart(5, "0")}`,
+      invocationId: `demo-invocation-${String(index).padStart(5, "0")}`,
+      taskKey: definition.key,
+      taskName: definition.name,
       triggerType: "cron",
       status,
-      scheduledAt: Math.floor(startedAt / (60 * 60 * 1000)) * 60 * 60 * 1000,
+      scheduledAt,
       startedAt,
       finishedAt: startedAt + durationMs,
       durationMs,
       scopeType: "system",
       scopeId: null,
-      summary: {
-        cutoffMs: startedAt - 12 * 60 * 60 * 1000,
-        candidateSites: processedSites + (status === "skipped" ? 0 : 1),
-        sitesProcessed: processedSites,
-        sitesFailed: failedSites,
-        sitesBlockedByOpenVisit: status === "partial" ? 1 : 0,
-        hoursAggregated,
-        rollupRowsWritten:
-          status === "skipped" ? 0 : hoursAggregated - sInt(rng, 0, 6),
-      },
-      errorName: status === "failed" ? "D1BatchError" : null,
+      summary,
+      errorName:
+        status === "failed"
+          ? definition.key === "visit_hourly_rollup"
+            ? "D1BatchError"
+            : "TaskError"
+          : null,
       errorMessage:
         status === "failed"
-          ? "D1 batch rejected while updating one site rollup"
+          ? definition.key === "visit_hourly_rollup"
+            ? "D1 batch rejected while updating one site rollup"
+            : "Task failed while processing the scheduled workload"
           : status === "partial"
-            ? "One site failed; remaining sites completed"
+            ? "One subtask failed; remaining work completed"
             : null,
       workerVersion: "demo",
       createdAt: startedAt,
-      expiresAt:
-        startedAt + SCHEDULED_TASK_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+      expiresAt: startedAt + retentionMs,
     });
+  };
+
+  for (let index = 0; index < DEMO_SCHEDULED_TICKS; index += 1) {
+    const scheduledAt = latestTick - index * DEMO_SCHEDULED_TICK_MS;
+    const tickOffset = sInt(
+      mulberry32(fnv1a(`scheduled-tick:${index}:offset`)),
+      8_000,
+      90_000,
+    );
+    const notification = DEMO_SCHEDULED_TASK_DEFINITIONS[1]!;
+    const notificationStatus = demoScheduledTaskStatus(notification.key, index);
+    const notificationRng = mulberry32(fnv1a(`notification-run:${index}`));
+    const rulesScanned =
+      notificationStatus === "skipped" ? 0 : sInt(notificationRng, 3, 12);
+    pushRun({
+      definition: notification,
+      index,
+      scheduledAt,
+      startedAt: scheduledAt + tickOffset,
+      status: notificationStatus,
+      durationMs:
+        notificationStatus === "skipped"
+          ? sInt(notificationRng, 120, 380)
+          : sInt(notificationRng, 600, 2_400),
+      summary: {
+        rulesScanned,
+        rulesChecked: rulesScanned,
+        rulesTriggered:
+          notificationStatus === "skipped" ? 0 : sInt(notificationRng, 0, 4),
+        rulesSkipped: notificationStatus === "skipped" ? rulesScanned : 0,
+        messagesCreated:
+          notificationStatus === "skipped" ? 0 : sInt(notificationRng, 0, 3),
+        emailFailed: notificationStatus === "partial" ? 1 : 0,
+      },
+    });
+
+    if (scheduledAt % (60 * 60 * 1000) === 0) {
+      const hourly = DEMO_SCHEDULED_TASK_DEFINITIONS[0]!;
+      const hourlyStatus = demoScheduledTaskStatus(hourly.key, index);
+      const hourlyRng = mulberry32(fnv1a(`hourly-run:${index}`));
+      const processedSites =
+        hourlyStatus === "skipped" ? 0 : sInt(hourlyRng, 7, 12);
+      const failedSites =
+        hourlyStatus === "failed" ? 3 : hourlyStatus === "partial" ? 1 : 0;
+      const hoursAggregated =
+        hourlyStatus === "skipped"
+          ? 0
+          : processedSites * sInt(hourlyRng, 4, 14);
+      pushRun({
+        definition: hourly,
+        index,
+        scheduledAt,
+        startedAt: scheduledAt + tickOffset + 2_000,
+        status: hourlyStatus,
+        durationMs:
+          hourlyStatus === "skipped"
+            ? sInt(hourlyRng, 140, 420)
+            : sInt(hourlyRng, 1_300, 7_800),
+        summary: {
+          cutoffMs: scheduledAt - 12 * 60 * 60 * 1000,
+          candidateSites: processedSites + (hourlyStatus === "skipped" ? 0 : 1),
+          sitesProcessed: processedSites,
+          sitesFailed: failedSites,
+          sitesBlockedByOpenVisit: hourlyStatus === "partial" ? 1 : 0,
+          hoursAggregated,
+          rollupRowsWritten:
+            hourlyStatus === "skipped"
+              ? 0
+              : hoursAggregated - sInt(hourlyRng, 0, 6),
+        },
+      });
+    }
+
+    if (scheduledAt % DAY_MS === 0) {
+      const maintenance = DEMO_SCHEDULED_TASK_DEFINITIONS[2]!;
+      const maintenanceIndex = Math.floor(
+        index / (DAY_MS / DEMO_SCHEDULED_TICK_MS),
+      );
+      const maintenanceStatus = demoScheduledTaskStatus(
+        maintenance.key,
+        maintenanceIndex,
+      );
+      const maintenanceRng = mulberry32(
+        fnv1a(`maintenance-run:${maintenanceIndex}`),
+      );
+      pushRun({
+        definition: maintenance,
+        index,
+        scheduledAt,
+        startedAt: scheduledAt + tickOffset + 4_000,
+        status: maintenanceStatus,
+        durationMs: sInt(maintenanceRng, 900, 3_200),
+        summary: {
+          logsDeleted:
+            maintenanceStatus === "skipped" ? 0 : sInt(maintenanceRng, 12, 80),
+          runsDeleted:
+            maintenanceStatus === "skipped" ? 0 : sInt(maintenanceRng, 0, 12),
+          notificationsDeleted:
+            maintenanceStatus === "skipped" ? 0 : sInt(maintenanceRng, 0, 20),
+          staleRunsMarkedFailed:
+            maintenanceStatus === "partial" ? 1 : sInt(maintenanceRng, 0, 2),
+        },
+      });
+    }
   }
   return runs;
 }
 
 function demoScheduledLogs(run: ScheduledTaskRun): ScheduledTaskRunLog[] {
+  if (run.status === "skipped") return [];
   const summary = run.summary as Record<string, number>;
   const base = run.startedAt;
+  const finishLog = {
+    id: `${run.id}-log-3`,
+    runId: run.id,
+    taskKey: run.taskKey,
+    sequence: 3,
+    level: run.status === "failed" ? ("error" as const) : ("info" as const),
+    event: run.status === "failed" ? "error" : "finish",
+    message:
+      run.status === "failed"
+        ? (run.errorMessage ?? "Task failed")
+        : "Task run finished",
+    data: { status: run.status, durationMs: run.durationMs as number },
+    createdAt: run.finishedAt as number,
+  } satisfies ScheduledTaskRunLog;
   const rows: ScheduledTaskRunLog[] = [
     {
       id: `${run.id}-log-1`,
@@ -1000,10 +1179,7 @@ function demoScheduledLogs(run: ScheduledTaskRun): ScheduledTaskRunLog[] {
       level: "info",
       event: "start",
       message: "Task run started",
-      data: {
-        triggerType: run.triggerType,
-        scheduledAt: run.scheduledAt,
-      },
+      data: { triggerType: run.triggerType, scheduledAt: run.scheduledAt },
       createdAt: base,
     },
     {
@@ -1012,68 +1188,54 @@ function demoScheduledLogs(run: ScheduledTaskRun): ScheduledTaskRunLog[] {
       taskKey: run.taskKey,
       sequence: 2,
       level: "info",
-      event: "aggregation_candidates",
-      message: "Aggregation candidates loaded",
-      data: {
-        candidateSites: summary.candidateSites ?? 0,
-        lagHours: 12,
-        maxHoursPerSite: 168,
-      },
+      event:
+        run.taskKey === "notification_tick"
+          ? "notification_candidates"
+          : run.taskKey === "database_maintenance"
+            ? "database_maintenance_finish"
+            : "aggregation_candidates",
+      message:
+        run.taskKey === "notification_tick"
+          ? "Loaded due notification rules"
+          : run.taskKey === "database_maintenance"
+            ? "Database maintenance finished"
+            : "Aggregation candidates loaded",
+      data:
+        run.taskKey === "notification_tick"
+          ? { count: summary.rulesScanned ?? 0 }
+          : run.taskKey === "database_maintenance"
+            ? {
+                logsDeleted: summary.logsDeleted,
+                runsDeleted: summary.runsDeleted,
+                notificationsDeleted: summary.notificationsDeleted,
+              }
+            : {
+                candidateSites: summary.candidateSites ?? 0,
+                lagHours: 12,
+                maxHoursPerSite: 168,
+              },
       createdAt: base + 120,
     },
   ];
   if (run.status === "partial" || run.status === "failed") {
     rows.push({
-      id: `${run.id}-log-3`,
+      id: `${run.id}-log-extra`,
       runId: run.id,
       taskKey: run.taskKey,
       sequence: 3,
       level: run.status === "failed" ? "error" : "warn",
-      event: "site_aggregation_failed",
-      message: "Failed to aggregate a site",
-      data: {
-        siteId: "demo-site-006",
-        error: run.errorMessage ?? "Unknown aggregation failure",
-      },
+      event:
+        run.taskKey === "notification_tick"
+          ? "notification_rule_failed"
+          : run.taskKey === "database_maintenance"
+            ? "database_maintenance_warning"
+            : "site_aggregation_failed",
+      message: run.errorMessage ?? "A subtask failed",
+      data: { error: run.errorMessage ?? "Unknown task failure" },
       createdAt: base + 360,
     });
   }
-  rows.push(
-    {
-      id: `${run.id}-log-4`,
-      runId: run.id,
-      taskKey: run.taskKey,
-      sequence: 4,
-      level: "info",
-      event: "aggregation_summary",
-      message: "Aggregation completed",
-      data: {
-        status: run.status,
-        sitesProcessed: summary.sitesProcessed ?? 0,
-        sitesFailed: summary.sitesFailed ?? 0,
-        hoursAggregated: summary.hoursAggregated ?? 0,
-        rollupRowsWritten: summary.rollupRowsWritten ?? 0,
-      },
-      createdAt: base + Math.max(420, Math.floor((run.durationMs ?? 0) * 0.72)),
-    },
-    {
-      id: `${run.id}-log-5`,
-      runId: run.id,
-      taskKey: run.taskKey,
-      sequence: 5,
-      level: run.status === "failed" ? "error" : "info",
-      event: run.status === "failed" ? "error" : "finish",
-      message:
-        run.status === "failed"
-          ? (run.errorMessage ?? "Task failed")
-          : "Task run finished",
-      data: {
-        status: run.status,
-        durationMs: run.durationMs ?? 0,
-      },
-      createdAt: run.finishedAt ?? base,
-    },
-  );
+  rows.push({ ...finishLog, sequence: rows.length + 1 });
   return rows.sort((left, right) => left.sequence - right.sequence);
 }
 
@@ -1096,13 +1258,26 @@ function demoAggregateRunSummary(
   return summary;
 }
 
+function demoSubtaskCount(run: ScheduledTaskRun): number {
+  const summary = run.summary;
+  const key = Object.prototype.hasOwnProperty.call(summary, "rulesScanned")
+    ? "rulesScanned"
+    : Object.prototype.hasOwnProperty.call(summary, "candidateSites")
+      ? "candidateSites"
+      : Object.prototype.hasOwnProperty.call(summary, "sitesProcessed")
+        ? "sitesProcessed"
+        : null;
+  const value = key ? summary[key] : 0;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function demoGroupStatus(runs: ScheduledTaskRun[]): ScheduledTaskStatus {
   if (runs.some((run) => run.status === "failed")) return "failed";
   if (runs.some((run) => run.status === "running")) return "running";
   if (runs.some((run) => run.status === "partial")) return "partial";
   const skipped = runs.filter((run) => run.status === "skipped").length;
-  if (skipped === runs.length) return "skipped";
-  if (skipped > 0) return "partial";
+  const successful = runs.filter((run) => run.status === "success").length;
+  if (skipped > 0 && successful === 0) return "skipped";
   return "success";
 }
 
@@ -1138,6 +1313,10 @@ function demoScheduledRunGroups(
         durationMs:
           finishedAt === null ? null : Math.max(0, finishedAt - startedAt),
         taskCount: orderedRuns.length,
+        subtaskCount: orderedRuns.reduce(
+          (total, run) => total + demoSubtaskCount(run),
+          0,
+        ),
         successCount: countByStatus(orderedRuns, "success"),
         partialCount: countByStatus(orderedRuns, "partial"),
         failedCount: countByStatus(orderedRuns, "failed"),
@@ -1154,21 +1333,44 @@ function demoScheduledRunGroups(
     .sort((left, right) => right.startedAt - left.startedAt);
 }
 
-function countByStatus(runs: ScheduledTaskRun[], status: ScheduledTaskStatus) {
+function countByStatus<T extends { status: ScheduledTaskStatus }>(
+  runs: T[],
+  status: ScheduledTaskStatus,
+) {
   return runs.filter((run) => run.status === status).length;
+}
+
+function demoNextRunAt(
+  definition: (typeof DEMO_SCHEDULED_TASK_DEFINITIONS)[number],
+  now: number,
+): number {
+  if (definition.internalSchedule.kind === "daily") {
+    const todayUtc = new Date(now);
+    return Date.UTC(
+      todayUtc.getUTCFullYear(),
+      todayUtc.getUTCMonth(),
+      todayUtc.getUTCDate() + 1,
+    );
+  }
+  const intervalMs = definition.internalSchedule.everyMinutes * 60 * 1000;
+  return (Math.floor(now / intervalMs) + 1) * intervalMs;
 }
 
 function demoTaskSummary(
   definition: (typeof DEMO_SCHEDULED_TASK_DEFINITIONS)[number],
   runs: ScheduledTaskRun[],
+  now: number,
 ): ScheduledTaskSummary {
   const taskRuns = runs.filter((run) => run.taskKey === definition.key);
   const success30d = countByStatus(taskRuns, "success");
   const durations = taskRuns
     .map((run) => run.durationMs)
     .filter((value): value is number => typeof value === "number");
+  const enabled =
+    demoScheduledTaskEnabled.get(definition.key) ?? definition.enabled;
   return {
     ...definition,
+    enabled,
     lastRun: taskRuns[0] ?? null,
     runs30d: taskRuns.length,
     success30d,
@@ -1177,6 +1379,7 @@ function demoTaskSummary(
     skipped30d: countByStatus(taskRuns, "skipped"),
     running: countByStatus(taskRuns, "running"),
     successRate30d: taskRuns.length > 0 ? success30d / taskRuns.length : null,
+    nextRunAt: enabled ? demoNextRunAt(definition, now) : null,
     avgDurationMs:
       durations.length > 0
         ? durations.reduce((sum, value) => sum + value, 0) / durations.length
@@ -1200,6 +1403,7 @@ export function generateDemoScheduledTasks(
 ): ScheduledTasksData {
   const now = Date.now();
   const allRuns = demoScheduledRuns(now);
+  const allGroups = demoScheduledRunGroups(allRuns);
   const status = String(params.status || "");
   const page = parseDemoScheduledTaskLimit(params.page, 1, 1, 10_000);
   const pageSize = parseDemoScheduledTaskLimit(
@@ -1208,7 +1412,7 @@ export function generateDemoScheduledTasks(
     1,
     100,
   );
-  const filteredRuns = demoScheduledRunGroups(allRuns).filter(
+  const filteredRuns = allGroups.filter(
     (run) => !status || run.status === status,
   );
   const offset = (page - 1) * pageSize;
@@ -1224,16 +1428,17 @@ export function generateDemoScheduledTasks(
         ) ??
         null)
       : runs[0]) ?? null;
-  const runs24h = allRuns.filter(
+  const runs24h = allGroups.filter(
     (run) => run.startedAt >= now - 24 * 60 * 60 * 1000,
   );
   const success24h = countByStatus(runs24h, "success");
   return {
     ok: true,
     generatedAt: now,
-    retentionDays: SCHEDULED_TASK_LOG_RETENTION_DAYS,
+    retentionDays: demoScheduledTaskRetention.scheduledTaskLogsDays,
+    retention: { ...demoScheduledTaskRetention },
     tasks: DEMO_SCHEDULED_TASK_DEFINITIONS.map((task) =>
-      demoTaskSummary(task, allRuns),
+      demoTaskSummary(task, allRuns, now),
     ),
     runs,
     runsMeta: {

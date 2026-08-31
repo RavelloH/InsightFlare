@@ -48,6 +48,7 @@ import type {
 } from "@/lib/edge-client-types";
 import { fetchGithubReleases } from "@/lib/github-releases";
 import type { Locale } from "@/lib/i18n/config";
+import { DEFAULT_RETENTION_CONFIG } from "@/lib/retention";
 import type { ScheduledTasksData } from "@/lib/scheduled-tasks";
 import { normalizeSiteScriptSettings } from "@/lib/site-settings";
 
@@ -312,16 +313,20 @@ export const loadAdminUsersInitialData = createServerFn({
 export const loadSystemSettingsInitialData = createServerFn({
   method: "GET",
 }).handler(async (): Promise<SystemSettingsInitialData | null> => {
-  const [botAnalytics, loginTurnstile, notificationEmail] = await Promise.all([
-    readDashboardAdmin("bot-analytics-config"),
-    readDashboardAdmin("login-turnstile"),
-    readDashboardAdmin("notification-email"),
-  ]);
+  const [botAnalytics, loginTurnstile, notificationEmail, scheduledTasks] =
+    await Promise.all([
+      readDashboardAdmin("bot-analytics-config"),
+      readDashboardAdmin("login-turnstile"),
+      readDashboardAdmin("notification-email"),
+      readDashboardAdmin("scheduled-tasks", { page: 1, pageSize: 1 }),
+    ]);
   if (!botAnalytics || !loginTurnstile || !notificationEmail) return null;
   return {
     botAnalytics,
     loginTurnstile,
     notificationEmail,
+    scheduledTaskRetention:
+      scheduledTasks?.retention ?? DEFAULT_RETENTION_CONFIG,
     fetchedAt: Date.now(),
   };
 });

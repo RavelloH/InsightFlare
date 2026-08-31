@@ -1,5 +1,16 @@
 export const SCHEDULED_TASK_LOG_RETENTION_DAYS = 30;
 
+export type InternalSchedule =
+  | { kind: "interval"; everyMinutes: 30 | 60 }
+  | { kind: "daily"; timezone: "UTC" };
+
+export interface ScheduledTaskRetentionConfig {
+  scheduledTaskLogsDays: number;
+  notificationTestDays: number;
+  notificationAttentionDays: number;
+  notificationDefaultDays: number;
+}
+
 export type ScheduledTaskStatus =
   | "running"
   | "success"
@@ -16,6 +27,7 @@ export interface ScheduledTaskDefinitionInfo {
   schedule: string;
   trigger: "cron" | "manual" | "event";
   enabled: boolean;
+  internalSchedule: InternalSchedule;
 }
 
 export interface ScheduledTaskRun {
@@ -60,6 +72,7 @@ export interface ScheduledTaskRunGroup {
   finishedAt: number | null;
   durationMs: number | null;
   taskCount: number;
+  subtaskCount: number;
   successCount: number;
   partialCount: number;
   failedCount: number;
@@ -77,6 +90,7 @@ export interface ScheduledTaskSummary {
   schedule: string;
   trigger: "cron" | "manual" | "event";
   enabled: boolean;
+  nextRunAt: number | null;
   lastRun: ScheduledTaskRun | null;
   runs30d: number;
   success30d: number;
@@ -110,6 +124,7 @@ export interface ScheduledTasksData {
   ok: true;
   generatedAt: number;
   retentionDays: number;
+  retention: ScheduledTaskRetentionConfig;
   tasks: ScheduledTaskSummary[];
   runs: ScheduledTaskRunGroup[];
   runsMeta: ScheduledTaskRunsMeta;

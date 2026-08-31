@@ -1,5 +1,5 @@
+import { mergeRetentionConfig } from "@/lib/retention";
 import {
-  SCHEDULED_TASK_LOG_RETENTION_DAYS,
   type ScheduledTaskLogLevel,
   type ScheduledTaskRun,
   type ScheduledTaskRunGroup,
@@ -10,7 +10,15 @@ import {
 } from "@/lib/scheduled-tasks";
 
 import { paginationOffset } from "./analytics/providers/d1/internal/core-parsers";
-import { bad as badRequest, forb, jsonResponseFor, na } from "./admin-response";
+import {
+  bad as badRequest,
+  bool,
+  forb,
+  jsonResponseFor,
+  na,
+  parseJson,
+} from "./admin-response";
+import { readRetentionConfig, writeRetentionConfig } from "./retention-config";
 import { SCHEDULED_TASKS } from "./scheduled-task-registry";
 import type { Env } from "./types";
 
@@ -27,7 +35,7 @@ const STATUS_VALUES = new Set<ScheduledTaskStatus>([
   "failed",
   "skipped",
 ]);
-const RETENTION_MS = SCHEDULED_TASK_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const STATS_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const STALE_RUNNING_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_RUN_PAGE_SIZE = 50;
 const MAX_RUN_PAGE_SIZE = 100;
@@ -102,6 +110,31 @@ interface HealthRow {
   staleRunningRuns: number;
   successRuns24h: number;
   lastRunAt: number | null;
+}
+
+interface ScheduleStateRow {
+  taskKey: string;
+  enabled: number;
+  nextRunAt: number;
+}
+
+async function loadScheduleStates(env: Env): Promise<ScheduleStateRow[]> {
+  try {
+    const result = await env.DB.prepare(
+      `
+        SELECT
+          task_key AS taskKey,
+          enabled,
+          next_run_at AS nextRunAt
+        FROM scheduled_task_schedule_state
+      `,
+    )
+      .bind()
+      .all<ScheduleStateRow>();
+    return result.results;
+  } catch {
+    return [];
+  }
 }
 
 function safeParseRecord(value: string): Record<string, unknown> {
@@ -204,6 +237,19 @@ function aggregateRunSummary(
   return summary;
 }
 
+function runSubtaskCount(run: ScheduledTaskRun): number {
+  const summary = run.summary;
+  const key = Object.prototype.hasOwnProperty.call(summary, "rulesScanned")
+    ? "rulesScanned"
+    : Object.prototype.hasOwnProperty.call(summary, "candidateSites")
+      ? "candidateSites"
+      : Object.prototype.hasOwnProperty.call(summary, "sitesProcessed")
+        ? "sitesProcessed"
+        : null;
+  const value = key ? summary[key] : 0;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function mapRunGroup(
   row: RunGroupRow,
   runs: ScheduledTaskRun[] = [],
@@ -226,6 +272,7 @@ function mapRunGroup(
     durationMs:
       finishedAt === null ? null : Math.max(0, finishedAt - startedAt),
     taskCount: Number(row.taskCount ?? runs.length),
+    subtaskCount: runs.reduce((total, run) => total + runSubtaskCount(run), 0),
     successCount: Number(row.successCount ?? 0),
     partialCount: Number(row.partialCount ?? 0),
     failedCount: Number(row.failedCount ?? 0),
@@ -294,7 +341,7 @@ function runGroupSelectSql(whereClause: string): string {
           ELSE MAX(finished_at_ms)
         END AS finishedAt,
         COUNT(*) AS taskCount,
-        SUM(CASE WHEN status IN ('success', 'skipped') THEN 1 ELSE 0 END) AS successCount,
+        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successCount,
         SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) AS partialCount,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failedCount,
         SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skippedCount,
@@ -310,6 +357,7 @@ function runGroupSelectSql(whereClause: string): string {
           WHEN failedCount > 0 THEN 'failed'
           WHEN runningCount > 0 THEN 'running'
           WHEN partialCount > 0 THEN 'partial'
+          WHEN skippedCount > 0 AND successCount = 0 THEN 'skipped'
           ELSE 'success'
         END AS status
       FROM grouped
@@ -399,7 +447,7 @@ function runGroupPageSelectSql(whereClause: string): string {
           ELSE MAX(finished_at_ms)
         END AS finishedAt,
         COUNT(*) AS taskCount,
-        SUM(CASE WHEN status IN ('success', 'skipped') THEN 1 ELSE 0 END) AS successCount,
+        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successCount,
         SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) AS partialCount,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failedCount,
         SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skippedCount,
@@ -415,6 +463,7 @@ function runGroupPageSelectSql(whereClause: string): string {
           WHEN failedCount > 0 THEN 'failed'
           WHEN runningCount > 0 THEN 'running'
           WHEN partialCount > 0 THEN 'partial'
+          WHEN skippedCount > 0 AND successCount = 0 THEN 'skipped'
           ELSE 'success'
         END AS status
       FROM grouped
@@ -499,10 +548,45 @@ export async function handleScheduledTasksAdmin(
   if (actor instanceof Response) return actor;
   if (!actor.isAdmin)
     return forb("Only system admin can view scheduled tasks", undefined, req);
-  if (req.method !== "GET") return na(req);
+  if (req.method !== "GET" && req.method !== "PATCH") return na(req);
+
+  if (req.method === "PATCH") {
+    const body = await parseJson(req);
+    const taskKey = typeof body.taskKey === "string" ? body.taskKey.trim() : "";
+    if (body.enabled !== undefined) {
+      const task = SCHEDULED_TASKS.find((item) => item.key === taskKey);
+      if (!task) return badRequest("Unknown scheduled task", undefined, req);
+      await env.DB.prepare(
+        `
+          UPDATE scheduled_task_schedule_state
+          SET enabled = ?, updated_at = unixepoch()
+          WHERE task_key = ?
+        `,
+      )
+        .bind(bool(body.enabled) ? 1 : 0, task.key)
+        .run();
+    }
+
+    const retentionPatch =
+      body.retention &&
+      typeof body.retention === "object" &&
+      !Array.isArray(body.retention)
+        ? (body.retention as Record<string, unknown>)
+        : {};
+    if (body.retentionDays !== undefined) {
+      retentionPatch.scheduledTaskLogsDays = body.retentionDays;
+    }
+    if (Object.keys(retentionPatch).length > 0) {
+      const current = await readRetentionConfig(env);
+      await writeRetentionConfig(
+        env,
+        mergeRetentionConfig(current, retentionPatch),
+      );
+    }
+  }
 
   const generatedAt = Date.now();
-  const since30d = generatedAt - RETENTION_MS;
+  const since30d = generatedAt - STATS_WINDOW_MS;
   const since24h = generatedAt - 24 * 60 * 60 * 1000;
   const staleBefore = generatedAt - STALE_RUNNING_MS;
   const page = parseIntegerParam(url, "page", 1, 1, 10_000);
@@ -526,7 +610,6 @@ export async function handleScheduledTasksAdmin(
   const statusFilter = STATUS_VALUES.has(status as ScheduledTaskStatus)
     ? status
     : "";
-
   const [healthRow, statsRows, latestRows, runRows] = await Promise.all([
     env.DB.prepare(
       `
@@ -534,9 +617,10 @@ export async function handleScheduledTasksAdmin(
           SELECT
             ${RUN_GROUP_KEY_SQL} AS id,
             MIN(started_at_ms) AS startedAt,
-            SUM(CASE WHEN status IN ('success', 'skipped') THEN 1 ELSE 0 END) AS successCount,
+            SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successCount,
             SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) AS partialCount,
             SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failedCount,
+            SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skippedCount,
             SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS runningCount,
             SUM(CASE WHEN status = 'running' AND started_at_ms < ? THEN 1 ELSE 0 END) AS staleRunningCount
           FROM scheduled_task_runs
@@ -550,6 +634,7 @@ export async function handleScheduledTasksAdmin(
               WHEN failedCount > 0 THEN 'failed'
               WHEN runningCount > 0 THEN 'running'
               WHEN partialCount > 0 THEN 'partial'
+              WHEN skippedCount > 0 AND successCount = 0 THEN 'skipped'
               ELSE 'success'
             END AS status
           FROM grouped
@@ -572,7 +657,7 @@ export async function handleScheduledTasksAdmin(
         SELECT
           task_key AS taskKey,
           COUNT(*) AS runs30d,
-          SUM(CASE WHEN status IN ('success', 'skipped') THEN 1 ELSE 0 END) AS success30d,
+          SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success30d,
           SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) AS partial30d,
           SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed30d,
           SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped30d,
@@ -690,6 +775,14 @@ export async function handleScheduledTasksAdmin(
       }
     : { results: [] as LogRow[] };
 
+  const [scheduleStates, retention] = await Promise.all([
+    loadScheduleStates(env),
+    readRetentionConfig(env),
+  ]);
+  const stateByTask = new Map(
+    scheduleStates.map((row) => [String(row.taskKey), row]),
+  );
+
   const statsByTask = new Map(
     statsRows.results.map((row) => [String(row.taskKey ?? ""), row]),
   );
@@ -700,13 +793,21 @@ export async function handleScheduledTasksAdmin(
     const stats = statsByTask.get(task.key);
     const runs30d = Number(stats?.runs30d ?? 0);
     const success30d = Number(stats?.success30d ?? 0);
+    const state = stateByTask.get(task.key);
     return {
       key: task.key,
       name: task.name,
       description: task.description,
       schedule: task.schedule,
       trigger: task.trigger,
-      enabled: task.enabled,
+      enabled: state ? state.enabled !== 0 : task.enabled,
+      nextRunAt:
+        !state ||
+        state.enabled === 0 ||
+        state.nextRunAt === undefined ||
+        Number(state.nextRunAt) <= 0
+          ? null
+          : Number(state.nextRunAt) * 1000,
       lastRun: lastRunByTask.get(task.key) ?? null,
       runs30d,
       success30d,
@@ -727,7 +828,8 @@ export async function handleScheduledTasksAdmin(
   const data: ScheduledTasksData = {
     ok: true,
     generatedAt,
-    retentionDays: SCHEDULED_TASK_LOG_RETENTION_DAYS,
+    retentionDays: retention.scheduledTaskLogsDays,
+    retention,
     tasks,
     runs,
     runsMeta: {

@@ -1,3 +1,9 @@
+import {
+  DEFAULT_RETENTION_CONFIG,
+  retentionDaysForNotification,
+} from "@/lib/retention";
+import type { ScheduledTaskRetentionConfig } from "@/lib/scheduled-tasks";
+
 import { safeParseRecord } from "./json";
 
 export type NotificationScheduleConfig =
@@ -375,12 +381,11 @@ export function notificationRuleExpiresAtSeconds(input: {
   type: string;
   severity: string;
   createdAtSeconds: number;
+  retention?: ScheduledTaskRetentionConfig;
 }): number {
-  const days =
-    input.type === "test"
-      ? 30
-      : input.severity === "warning" || input.severity === "critical"
-        ? 180
-        : 120;
+  const days = retentionDaysForNotification(
+    input,
+    input.retention ?? DEFAULT_RETENTION_CONFIG,
+  );
   return input.createdAtSeconds + Math.floor((days * DAY_MS) / 1000);
 }

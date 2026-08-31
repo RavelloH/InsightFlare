@@ -2079,11 +2079,14 @@ managementPages:
     enabled: 状態
     enabledYes: 有効
     enabledNo: 無効
+    taskStateSaved: タスク状態を更新しました。
+    taskStateSaveFailed: タスク状態を更新できません。
     lastStatus: 最終ステータス
     runs30d: 30日実行
     successRate30d: 30日成功率
     avgDuration: 平均所要時間
     runHistoryTitle: 実行履歴
+    nextRun: 次回実行
     runHistoryDescription: 過去 30 日間に保持されたタスク実行です。
     noRuns: 実行はまだありません。
     scheduledAt: 予定
@@ -2122,7 +2125,11 @@ managementPages:
       notification_tick:
         name: 通知配信
         description: 通知ルールを評価し、メッセージを配信します。
-        schedule: 毎時
+        schedule: 30分ごと
+      database_maintenance:
+        name: データベースメンテナンス
+        description: 期限切れの実行データと通知を削除し、D1 の統計情報を最適化します。
+        schedule: 毎日
 adminUsers:
   title: ユーザー管理
   subtitle: システム管理者のみがダッシュボードユーザーを作成・管理できます。
@@ -2391,6 +2398,17 @@ systemSettings:
     - メール送信に必要な権限を選び、生成された API キーをコピーします。
     - ここに送信者名、送信者メール、Reply-To、Resend API キーを入力します。
     - 設定を保存し、テストメールを送信して配信を確認します。
+  retentionTitle: 運用データの保持期間
+  retentionDescription: タスク実行、タスクログ、通知メッセージの保持期間を設定します。変更は新しいレコードにのみ適用されます。
+  scheduledTaskLogsDaysLabel: スケジュールタスクの実行とログ（日）
+  notificationTestDaysLabel: テスト通知（日）
+  notificationAttentionDaysLabel: 警告・重大通知（日）
+  notificationDefaultDaysLabel: その他の通知（日）
+  retentionRangeHint: 1〜3650 の整数日を入力してください。
+  retentionSave: 保持期間を保存
+  retentionSaving: 保存中...
+  retentionSaved: 保持期間を保存しました。
+  retentionSaveFailed: 保持期間を保存できません。
   loginTurnstileTitle: ログイン Turnstile 保護
   loginTurnstileDescription:
     有効にすると、ログインページはバックグラウンドで Cloudflare Turnstile

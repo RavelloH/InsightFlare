@@ -2133,11 +2133,14 @@ managementPages:
     enabled: State
     enabledYes: Enabled
     enabledNo: Disabled
+    taskStateSaved: Task state updated.
+    taskStateSaveFailed: Failed to update task state.
     lastStatus: Last status
     runs30d: 30d runs
     successRate30d: 30d success rate
     avgDuration: Avg duration
     runHistoryTitle: Run history
+    nextRun: Next run
     runHistoryDescription: Task runs retained over the last 30 days.
     noRuns: No runs yet.
     scheduledAt: Scheduled
@@ -2178,7 +2181,11 @@ managementPages:
       notification_tick:
         name: Notification dispatch
         description: Evaluates notification rules and dispatches messages.
-        schedule: Every hour
+        schedule: Every 30 minutes
+      database_maintenance:
+        name: Database maintenance
+        description: Removes expired operational records and optimizes D1.
+        schedule: Every day
 adminUsers:
   title: User Management
   subtitle: Only system admins can create and manage dashboard users.
@@ -2468,6 +2475,17 @@ systemSettings:
     - Choose the permissions required to send email, then copy the generated API key.
     - Enter the sender name, sender email, Reply-To, and Resend API key here.
     - Save the configuration, then send a test email to confirm delivery works.
+  retentionTitle: Operational data retention
+  retentionDescription: Configure how long task runs, task logs, and notification messages remain available. Changes affect new records only.
+  scheduledTaskLogsDaysLabel: Scheduled task logs and runs (days)
+  notificationTestDaysLabel: Test notifications (days)
+  notificationAttentionDaysLabel: Warning and critical notifications (days)
+  notificationDefaultDaysLabel: Other notifications (days)
+  retentionRangeHint: Enter an integer from 1 to 3650 days.
+  retentionSave: Save retention settings
+  retentionSaving: Saving...
+  retentionSaved: Retention settings saved.
+  retentionSaveFailed: Failed to save retention settings.
   loginTurnstileTitle: Login Turnstile Protection
   loginTurnstileDescription: When enabled, the login page runs Cloudflare
     Turnstile Invisible verification in the background and the server enforces

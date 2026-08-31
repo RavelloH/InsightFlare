@@ -9,6 +9,7 @@ export const SCHEDULED_TASKS: ScheduledTaskDefinitionInfo[] = [
     schedule: "Every hour",
     trigger: "cron",
     enabled: true,
+    internalSchedule: { kind: "interval", everyMinutes: 60 },
   },
   {
     key: "notification_tick",
@@ -17,6 +18,17 @@ export const SCHEDULED_TASKS: ScheduledTaskDefinitionInfo[] = [
     schedule: "Every 30 minutes",
     trigger: "cron",
     enabled: true,
+    internalSchedule: { kind: "interval", everyMinutes: 30 },
+  },
+  {
+    key: "database_maintenance",
+    name: "Database maintenance",
+    description:
+      "Removes expired operational records, marks stale runs, and optimizes D1 query statistics.",
+    schedule: "Every day",
+    trigger: "cron",
+    enabled: true,
+    internalSchedule: { kind: "daily", timezone: "UTC" },
   },
 ];
 

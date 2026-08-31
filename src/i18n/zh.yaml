@@ -2073,11 +2073,14 @@ managementPages:
     enabled: 状态
     enabledYes: 已启用
     enabledNo: 未启用
+    taskStateSaved: 任务状态已更新。
+    taskStateSaveFailed: 更新任务状态失败。
     lastStatus: 最近状态
     runs30d: 30 天运行
     successRate30d: 30 天成功率
     avgDuration: 平均耗时
     runHistoryTitle: 运行历史
+    nextRun: 下次运行
     runHistoryDescription: 最近 30 天内的任务运行记录。
     noRuns: 暂无运行记录。
     scheduledAt: 计划时间
@@ -2116,7 +2119,11 @@ managementPages:
       notification_tick:
         name: 通知分发
         description: 检查通知规则并分发消息。
-        schedule: 每小时
+        schedule: 每 30 分钟
+      database_maintenance:
+        name: 数据库优化
+        description: 分批清理过期运行数据和通知，并优化 D1 查询统计信息。
+        schedule: 每天
 adminUsers:
   title: 用户管理
   subtitle: 仅系统管理员可创建和管理后台用户。
@@ -2380,6 +2387,17 @@ systemSettings:
     - 选择发送邮件所需的权限，并复制生成后的 API Key。
     - 回到这里填写发件人名称、发件邮箱、Reply-To 和 Resend API Key。
     - 保存后使用测试收件人发送一封测试邮件，确认投递链路正常。
+  retentionTitle: 运行数据保留期
+  retentionDescription: 配置任务运行记录、任务日志和通知消息的保留时间。修改只影响新建记录。
+  scheduledTaskLogsDaysLabel: 计划任务运行记录和日志（天）
+  notificationTestDaysLabel: 测试通知（天）
+  notificationAttentionDaysLabel: 警告和严重通知（天）
+  notificationDefaultDaysLabel: 其他通知（天）
+  retentionRangeHint: 请输入 1 到 3650 之间的整数天数。
+  retentionSave: 保存保留期配置
+  retentionSaving: 保存中...
+  retentionSaved: 保留期配置已保存。
+  retentionSaveFailed: 保存保留期配置失败。
   loginTurnstileTitle: 登录 Turnstile 防护
   loginTurnstileDescription: 启用后，登录页会在后台执行 Cloudflare Turnstile Invisible 验证，并在服务端登录流程中强制校验。
   loginTurnstileEnabledLabel: 启用登录保护

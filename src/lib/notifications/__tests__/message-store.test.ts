@@ -317,8 +317,8 @@ describe("notification message store", () => {
 
     expect(sqls[0]).toContain("user_id = ?");
     expect(sqls[0]).toContain("read_at IS NULL");
-    expect(calls[0]).toEqual([
-      "user-1",
+    expect(calls[0]?.[0]).toBe("user-1");
+    expect(calls[0]?.slice(2)).toEqual([
       "team-1",
       "site-1",
       "threshold",
@@ -326,7 +326,10 @@ describe("notification message store", () => {
       12,
       100,
     ]);
-    expect(calls[1]).toEqual(["team-1", "user-1", 1]);
+    expect(typeof calls[0]?.[1]).toBe("number");
+    expect(calls[1]?.[0]).toBe("team-1");
+    expect(calls[1]?.slice(2)).toEqual(["user-1", 1]);
+    expect(typeof calls[1]?.[1]).toBe("number");
   });
 
   it("builds minimal list filters without optional constraints", async () => {
@@ -357,9 +360,13 @@ describe("notification message store", () => {
     });
 
     expect(sqls[0]).not.toContain("read_at IS NULL");
-    expect(calls[0]).toEqual(["user-1", 50]);
+    expect(calls[0]?.[0]).toBe("user-1");
+    expect(calls[0]?.slice(2)).toEqual([50]);
+    expect(typeof calls[0]?.[1]).toBe("number");
     expect(sqls[1]).toContain("read_at IS NULL");
-    expect(calls[1]).toEqual(["team-1", 50]);
+    expect(calls[1]?.[0]).toBe("team-1");
+    expect(calls[1]?.slice(2)).toEqual([50]);
+    expect(typeof calls[1]?.[1]).toBe("number");
   });
 
   it("counts and marks messages as read", async () => {

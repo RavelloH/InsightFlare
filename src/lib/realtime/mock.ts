@@ -43,6 +43,7 @@ import {
   getDemoTeams,
   getDemoUser,
   getDemoUsers,
+  updateDemoScheduledTasks,
 } from "@/lib/realtime/mock/admin";
 import {
   generateDemoDimension,
@@ -522,6 +523,25 @@ function handleDemoRequestInner(options: {
     method === "PUT" ||
     method === "DELETE"
   ) {
+    if (path.includes("/admin/scheduled-tasks")) {
+      const retentionPatch =
+        bodyRecord.retention &&
+        typeof bodyRecord.retention === "object" &&
+        !Array.isArray(bodyRecord.retention)
+          ? (bodyRecord.retention as Record<string, unknown>)
+          : {};
+      if (bodyRecord.retentionDays !== undefined) {
+        retentionPatch.scheduledTaskLogsDays = bodyRecord.retentionDays;
+      }
+      updateDemoScheduledTasks({
+        taskKey: bodyRecord.taskKey,
+        enabled: bodyRecord.enabled,
+        retention:
+          Object.keys(retentionPatch).length > 0 ? retentionPatch : undefined,
+        retentionDays: bodyRecord.retentionDays,
+      });
+      return { ok: true, data: generateDemoScheduledTasks(params) };
+    }
     if (path.includes("/admin/bot-analytics-config")) {
       const body = bodyRecord as {
         accountId?: unknown;

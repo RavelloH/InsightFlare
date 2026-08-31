@@ -256,12 +256,7 @@ function numericSummaryValue(
 function runSubtaskCount(
   run: ScheduledTaskRun | ScheduledTaskRunGroup,
 ): number {
-  if ("runs" in run) {
-    return run.runs.reduce(
-      (total, taskRun) => total + runSubtaskCount(taskRun),
-      0,
-    );
-  }
+  if ("runs" in run) return Number(run.subtaskCount ?? 0);
   if (Object.prototype.hasOwnProperty.call(run.summary, "rulesScanned")) {
     return numericSummaryValue(run, "rulesScanned");
   }
@@ -309,7 +304,9 @@ function localizedTaskInfo(
       ? labels.taskDefinitions.visit_hourly_rollup
       : task.key === "notification_tick"
         ? labels.taskDefinitions.notification_tick
-        : null;
+        : task.key === "database_maintenance"
+          ? labels.taskDefinitions.database_maintenance
+          : null;
   return {
     name: definition?.name ?? task.name,
     description: definition?.description ?? task.description ?? "",
@@ -442,6 +439,12 @@ function ScheduledTaskRunsTable({
                   <span className="font-mono text-emerald-600 dark:text-emerald-400">
                     {labels.status.success}:
                     {numberFormat(locale, run.successCount)}
+                  </span>
+                ) : null}
+                {run.skippedCount > 0 ? (
+                  <span className="font-mono text-muted-foreground">
+                    {labels.status.skipped}:
+                    {numberFormat(locale, run.skippedCount)}
                   </span>
                 ) : null}
                 {run.failedCount > 0 ? (
@@ -796,9 +799,14 @@ function ScheduledTaskRunLogDrawer({
                                   </div>
                                 ) : null}
                                 <div className="mt-3 space-y-2">
-                                  <h4 className="text-xs font-medium">
-                                    {labels.logs}
-                                  </h4>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <h4 className="text-xs font-medium">
+                                      {labels.logs}
+                                    </h4>
+                                    <span className="font-mono text-[11px] text-muted-foreground">
+                                      {numberFormat(locale, taskLogs.length)}
+                                    </span>
+                                  </div>
                                   {taskLogs.length > 0 ? (
                                     taskLogs.map((log) => (
                                       <ScheduledTaskLogEntry
@@ -860,6 +868,7 @@ export function ScheduledTasksClient({
   const [status, setStatus] = useState("all");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [updatingTaskKey, setUpdatingTaskKey] = useState<string | null>(null);
   const runsQuery = useInfiniteQuery({
     queryKey: ["dashboard", "scheduled-tasks", status],
     queryFn: ({ pageParam, signal }) =>
@@ -964,6 +973,23 @@ export function ScheduledTasksClient({
     setSelectedRunId("");
     setDrawerOpen(false);
   };
+  async function toggleTask(task: ScheduledTasksData["tasks"][number]) {
+    setUpdatingTaskKey(task.key);
+    try {
+      await requestAdminService<ScheduledTasksData>("scheduled-tasks", {
+        method: "PATCH",
+        body: { taskKey: task.key, enabled: !task.enabled },
+      });
+      await runsQuery.refetch();
+      toast.success(t.taskStateSaved);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t.taskStateSaveFailed,
+      );
+    } finally {
+      setUpdatingTaskKey(null);
+    }
+  }
   const openRun = (run: ScheduledTaskRunGroup) => {
     setSelectedRunId(run.id);
     setDrawerOpen(true);
@@ -1104,7 +1130,7 @@ export function ScheduledTasksClient({
             hasContent={(data?.tasks.length ?? 0) > 0}
             loadingLabel={messages.common.loading}
             emptyLabel={t.empty}
-            colSpan={8}
+            colSpan={9}
             header={
               <TableRow>
                 <TableHead>{t.task}</TableHead>
@@ -1115,6 +1141,7 @@ export function ScheduledTasksClient({
                 <TableHead className="text-right">{t.successRate30d}</TableHead>
                 <TableHead className="text-right">{t.avgDuration}</TableHead>
                 <TableHead>{t.lastRun}</TableHead>
+                <TableHead>{t.nextRun}</TableHead>
               </TableRow>
             }
             rows={(data?.tasks ?? []).map((task) => {
@@ -1133,9 +1160,21 @@ export function ScheduledTasksClient({
                     {taskInfo.schedule}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={task.enabled ? "secondary" : "outline"}>
-                      {task.enabled ? t.enabledYes : t.enabledNo}
-                    </Badge>
+                    <button
+                      type="button"
+                      className="cursor-pointer disabled:cursor-wait"
+                      disabled={updatingTaskKey === task.key}
+                      aria-label={`${taskInfo.name}: ${task.enabled ? t.enabledYes : t.enabledNo}`}
+                      onClick={() => void toggleTask(task)}
+                    >
+                      <Badge variant={task.enabled ? "secondary" : "outline"}>
+                        {updatingTaskKey === task.key
+                          ? messages.common.loading
+                          : task.enabled
+                            ? t.enabledYes
+                            : t.enabledNo}
+                      </Badge>
+                    </button>
                   </TableCell>
                   <TableCell>
                     {task.lastRun ? (
@@ -1161,6 +1200,15 @@ export function ScheduledTasksClient({
                       ? shortDateTimeWithSeconds(
                           locale,
                           task.lastRun.startedAt,
+                          timeZone,
+                        )
+                      : "--"}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {task.enabled && task.nextRunAt
+                      ? shortDateTimeWithSeconds(
+                          locale,
+                          task.nextRunAt,
                           timeZone,
                         )
                       : "--"}

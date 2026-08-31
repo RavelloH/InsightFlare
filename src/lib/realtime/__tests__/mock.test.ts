@@ -594,6 +594,168 @@ describe("mock — handleDemoRequest", () => {
       ).toBeDefined();
     });
 
+    it("models the internal scheduled-task cadence in demo mode", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(Date.UTC(2026, 7, 31, 11, 2, 55)));
+
+      const response = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { pageSize: 2000 },
+        }),
+      );
+      const tasks = response.tasks as Array<Record<string, unknown>>;
+      const taskByKey = new Map(tasks.map((task) => [String(task.key), task]));
+
+      expect(tasks).toHaveLength(3);
+      expect(taskByKey.get("notification_tick")).toMatchObject({
+        schedule: "Every 30 minutes",
+        runs30d: 1440,
+        nextRunAt: Date.UTC(2026, 7, 31, 11, 30),
+      });
+      expect(taskByKey.get("visit_hourly_rollup")).toMatchObject({
+        schedule: "Every hour",
+        runs30d: 720,
+        nextRunAt: Date.UTC(2026, 7, 31, 12),
+      });
+      expect(taskByKey.get("database_maintenance")).toMatchObject({
+        schedule: "Every day",
+        runs30d: 30,
+        skipped30d: 1,
+        nextRunAt: Date.UTC(2026, 8, 1),
+      });
+
+      const runs = response.runs as Array<Record<string, unknown>>;
+      const skippedGroup = runs.find((group) =>
+        (group.runs as Array<Record<string, unknown>>).some(
+          (run) => run.status === "skipped",
+        ),
+      );
+      expect(skippedGroup).toMatchObject({
+        status: "skipped",
+        taskCount: 1,
+        skippedCount: 1,
+        logsCount: 0,
+      });
+      const selectedResponse = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { runId: String(skippedGroup?.id) },
+        }),
+      );
+      expect(selectedResponse.logs).toEqual([]);
+
+      const paged = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { status: "success", page: 1, pageSize: 1 },
+        }),
+      );
+      expect(paged.runsMeta).toMatchObject({ hasMore: true, nextPage: 2 });
+
+      const firstTaskRun = ((runs[0]?.runs as Array<Record<string, unknown>>) ??
+        [])[0];
+      const childSelected = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { runId: String(firstTaskRun?.id) },
+        }),
+      );
+      expect((childSelected.selectedRun as Record<string, unknown>).id).toBe(
+        runs[0]?.id,
+      );
+
+      const emptyPage = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { page: 999, limit: 2, runId: "missing-demo-run" },
+        }),
+      );
+      expect(emptyPage.selectedRun).toBeNull();
+    });
+
+    it("keeps demo scheduled-task settings stateful", () => {
+      const unchanged = asRecord(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/scheduled-tasks",
+            method: "PATCH",
+            body: {},
+          }),
+        ).data,
+      );
+      expect(unchanged.tasks).toEqual(expect.any(Array));
+
+      const disabled = asRecord(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/scheduled-tasks",
+            method: "PATCH",
+            body: {
+              taskKey: "notification_tick",
+              enabled: 0,
+              retention: {
+                scheduledTaskLogsDays: 45,
+                notificationTestDays: 60,
+                notificationAttentionDays: 240,
+                notificationDefaultDays: 90,
+              },
+            },
+          }),
+        ).data,
+      );
+      const disabledTask = (
+        disabled.tasks as Array<Record<string, unknown>>
+      ).find((task) => task.key === "notification_tick");
+      expect(disabledTask).toMatchObject({ enabled: false, nextRunAt: null });
+      expect(disabled.retention).toEqual({
+        scheduledTaskLogsDays: 45,
+        notificationTestDays: 60,
+        notificationAttentionDays: 240,
+        notificationDefaultDays: 90,
+      });
+
+      const restored = asRecord(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/scheduled-tasks",
+            method: "PATCH",
+            body: {
+              taskKey: "notification_tick",
+              enabled: true,
+              retentionDays: 30,
+              retention: {
+                notificationTestDays: 30,
+                notificationAttentionDays: 180,
+                notificationDefaultDays: 120,
+              },
+            },
+          }),
+        ).data,
+      );
+      const restoredTask = (
+        restored.tasks as Array<Record<string, unknown>>
+      ).find((task) => task.key === "notification_tick");
+      expect(restoredTask).toMatchObject({ enabled: true });
+      expect(restored.retention).toMatchObject({
+        scheduledTaskLogsDays: 30,
+        notificationTestDays: 30,
+        notificationAttentionDays: 180,
+        notificationDefaultDays: 120,
+      });
+
+      const invalidPagination = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { page: "invalid", pageSize: "invalid" },
+        }),
+      );
+      expect(invalidPagination.runsMeta).toMatchObject({
+        page: 1,
+        pageSize: 50,
+      });
+    });
+
     it("returns system-performance with different windowMinutes values", () => {
       for (const minutes of [5, 30, 180, 720, 1440]) {
         const res = handleDemoRequest({

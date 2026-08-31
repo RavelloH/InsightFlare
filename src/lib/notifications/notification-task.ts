@@ -4,6 +4,8 @@ import type {
   ScheduledTaskOutcome,
 } from "@/lib/edge/scheduled-task-runner";
 import type { Env } from "@/lib/edge/types";
+import { DEFAULT_RETENTION_CONFIG } from "@/lib/retention";
+import type { ScheduledTaskRetentionConfig } from "@/lib/scheduled-tasks";
 
 import { deliverNotificationMessage } from "./delivery";
 import {
@@ -120,8 +122,10 @@ async function createAndDeliverMessages(input: {
   triggeredAt: number;
   summary: NotificationTaskSummary;
   cache: NotificationInvocationCache;
+  retention: ScheduledTaskRetentionConfig;
 }): Promise<NotificationMessage[]> {
-  const { env, context, rule, draft, triggeredAt, summary, cache } = input;
+  const { env, context, rule, draft, triggeredAt, summary, cache, retention } =
+    input;
   const recipients = await resolveNotificationRecipients(env, rule);
   if (recipients.length === 0) {
     summary.rulesSkipped += 1;
@@ -180,6 +184,7 @@ async function createAndDeliverMessages(input: {
         locale: localized.locale,
       },
       triggeredAt,
+      retention,
     });
     summary.messagesCreated += 1;
     summary.inAppCreated += 1;
@@ -211,6 +216,7 @@ export async function runNotificationTick(
   const now = Math.floor(appNow() / 1000);
   const summary = emptySummary(startedAt);
   const cache = createNotificationInvocationCache();
+  const retention = context.retention ?? DEFAULT_RETENTION_CONFIG;
 
   await logger.info("notification_tick_start", "Notification tick started", {
     now,
@@ -286,6 +292,7 @@ export async function runNotificationTick(
         triggeredAt: checkedAt,
         summary,
         cache,
+        retention,
       });
 
       await advanceNotificationRuleSchedule(env, {
@@ -345,6 +352,7 @@ export async function runNotificationRuleManually(input: {
   const checkedAt = Math.floor(appNow() / 1000);
   const summary = emptySummary(context.startedAt);
   const cache = createNotificationInvocationCache();
+  const retention = context.retention ?? DEFAULT_RETENTION_CONFIG;
   summary.rulesScanned = 1;
 
   await context.logger.info(
@@ -407,6 +415,7 @@ export async function runNotificationRuleManually(input: {
     triggeredAt: checkedAt,
     summary,
     cache,
+    retention,
   });
   await applyNotificationRuleManualRunResult(env, {
     rule,
@@ -437,6 +446,7 @@ export async function createManualTestNotification(input: {
   const { env, context, teamId, siteId, userId } = input;
   const summary = emptySummary(context.startedAt);
   const cache = createNotificationInvocationCache();
+  const retention = context.retention ?? DEFAULT_RETENTION_CONFIG;
   const now = Math.floor(appNow() / 1000);
   const user = await env.DB.prepare(
     `
@@ -497,6 +507,7 @@ export async function createManualTestNotification(input: {
     bodyHtml: "",
     data: { source: "manual_test", locale: localized.locale },
     triggeredAt: now,
+    retention,
   });
   summary.messagesCreated = 1;
   summary.inAppCreated = 1;

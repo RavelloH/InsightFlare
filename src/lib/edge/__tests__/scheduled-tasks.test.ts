@@ -143,6 +143,7 @@ describe("scheduled task runner and admin API", () => {
     expect(payload.runs[0]).toMatchObject({
       status: "success",
       taskCount: 1,
+      subtaskCount: 2,
     });
     expect(payload.runs[0]?.runs[0]).toMatchObject({
       taskKey: "visit_hourly_rollup",
@@ -164,6 +165,39 @@ describe("scheduled task runner and admin API", () => {
       (task) => task.key === "visit_hourly_rollup",
     );
     expect(rollupTask?.lastRun?.status).toBe("success");
+    d1.close();
+  });
+
+  it("keeps an execution-level skipped run without detail logs", async () => {
+    const { env, d1 } = createEnv();
+
+    await runScheduledTask(
+      env,
+      { key: "visit_hourly_rollup", name: "Hourly visit aggregation" },
+      Date.UTC(2026, 5, 15, 4),
+      async () => ({
+        status: "skipped",
+        summary: { candidateSites: 0, sitesProcessed: 0 },
+      }),
+    );
+
+    const response = await handleScheduledTasksAdmin(
+      new Request("https://edge.test/api/private/admin/scheduled-tasks"),
+      env,
+      new URL("https://edge.test/api/private/admin/scheduled-tasks"),
+      async () => ({ isAdmin: true }),
+    );
+    const payload = (await response.json()) as ScheduledTasksData;
+
+    expect(payload.runs[0]).toMatchObject({
+      status: "skipped",
+      taskCount: 1,
+      successCount: 0,
+      skippedCount: 1,
+      logsCount: 0,
+    });
+    expect(payload.logs).toEqual([]);
+    expect(payload.runs[0]?.runs[0]?.status).toBe("skipped");
     d1.close();
   });
 
@@ -238,7 +272,7 @@ describe("scheduled task runner and admin API", () => {
     d1.close();
   });
 
-  it("counts skipped runs as successful in run groups", async () => {
+  it("counts skipped runs independently in run groups", async () => {
     const { env, d1 } = createEnv();
     const now = Date.now();
     const scheduledAt = now - 60_000;
@@ -295,7 +329,7 @@ describe("scheduled task runner and admin API", () => {
     expect(payload.runs[0]).toMatchObject({
       status: "success",
       taskCount: 2,
-      successCount: 2,
+      successCount: 1,
       skippedCount: 1,
     });
     expect(payload.health.totalRuns24h).toBe(1);

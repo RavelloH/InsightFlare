@@ -1,7 +1,6 @@
 import handler from "@tanstack/react-start/server-entry";
 
 import { initializeE2eClock } from "@/lib/edge/e2e-clock";
-import { runHourlyAggregation } from "@/lib/edge/hourly-rollup";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest-do";
 import { instrumentEnv } from "@/lib/edge/observability-bindings";
 import {
@@ -9,12 +8,10 @@ import {
   errorLogData,
   runWithInvocationLogger,
 } from "@/lib/edge/observability-logger";
-import { getScheduledTaskDefinition } from "@/lib/edge/scheduled-task-registry";
-import { runScheduledTask } from "@/lib/edge/scheduled-task-runner";
+import { dispatchInternalScheduledTasks } from "@/lib/edge/scheduled-task-dispatcher";
 import type { Env } from "@/lib/edge/types";
 import apiApp from "@/lib/hono/app";
 import { shouldUseHono } from "@/lib/hono/path-match";
-import { runNotificationTick } from "@/lib/notifications/notification-task";
 import { localeCookie, resolvePageRequest } from "@/middleware";
 
 export interface AppServerContext {
@@ -204,46 +201,13 @@ export default {
       logger.emit();
       return;
     }
-    const task = getScheduledTaskDefinition("visit_hourly_rollup");
-    const notificationTask = getScheduledTaskDefinition("notification_tick");
     ctx.waitUntil(
       runWithInvocationLogger(logger, () =>
-        Promise.all([
-          runScheduledTask(
-            instrumentedEnv,
-            {
-              key: task?.key || "visit_hourly_rollup",
-              name: task?.name || "Hourly visit aggregation",
-              triggerType: "cron",
-            },
-            controller.scheduledTime,
-            ({ logger: taskLogger }) =>
-              logger.measure("scheduled.hourly_rollup", () =>
-                runHourlyAggregation(
-                  instrumentedEnv,
-                  controller.scheduledTime,
-                  {
-                    logger: taskLogger,
-                  },
-                ),
-              ),
-            logger,
-          ),
-          runScheduledTask(
-            instrumentedEnv,
-            {
-              key: notificationTask?.key || "notification_tick",
-              name: notificationTask?.name || "Notification dispatch",
-              triggerType: "cron",
-            },
-            controller.scheduledTime,
-            (taskContext) =>
-              logger.measure("scheduled.notification_tick", () =>
-                runNotificationTick(taskContext),
-              ),
-            logger,
-          ),
-        ])
+        dispatchInternalScheduledTasks(
+          instrumentedEnv,
+          controller.scheduledTime,
+          logger,
+        )
           .then(() => logger.info("scheduled.completed"))
           .catch((error) => {
             void error;

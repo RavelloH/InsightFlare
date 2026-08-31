@@ -12,6 +12,7 @@ import type {
 } from "@/lib/edge-client-types";
 import type { PublicNotificationEmailConfig } from "@/lib/notifications/email-config";
 import type {
+  ScheduledTaskRetentionConfig,
   ScheduledTaskRun,
   ScheduledTaskRunGroup,
   ScheduledTaskRunLog,
@@ -171,6 +172,7 @@ export interface SystemSettingsInitialData {
   botAnalytics: PublicBotAnalyticsConfig;
   loginTurnstile: AdminPublicLoginTurnstileConfig;
   notificationEmail: PublicNotificationEmailConfig;
+  scheduledTaskRetention: ScheduledTaskRetentionConfig;
   fetchedAt: number;
 }
 

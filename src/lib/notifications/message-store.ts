@@ -1,5 +1,7 @@
+import { appNow } from "@/lib/edge/e2e-clock";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
+import type { ScheduledTaskRetentionConfig } from "@/lib/scheduled-tasks";
 
 import { safeJsonStringify, safeParseRecord } from "./json";
 import {
@@ -95,6 +97,7 @@ export interface CreateNotificationMessageInput {
   deliveryResults?: Record<string, unknown>;
   triggeredAt?: number | null;
   now?: number;
+  retention?: ScheduledTaskRetentionConfig;
 }
 
 export interface ListNotificationMessagesInput {
@@ -207,12 +210,19 @@ export function mapNotificationMessage(row: MessageRow): NotificationMessage {
 export async function getNotificationMessage(
   env: Env,
   messageId: string,
+  options: { includeExpired?: boolean } = {},
 ): Promise<NotificationMessage | null> {
-  const row = await env.DB.prepare(
-    `SELECT ${MESSAGE_SELECT} FROM notification_messages WHERE id=? LIMIT 1`,
-  )
-    .bind(messageId)
-    .first<MessageRow>();
+  const expiryFilter = options.includeExpired
+    ? ""
+    : " AND (expires_at IS NULL OR expires_at > ?)";
+  const statement = env.DB.prepare(
+    `SELECT ${MESSAGE_SELECT} FROM notification_messages WHERE id=?${expiryFilter} LIMIT 1`,
+  );
+  const row = options.includeExpired
+    ? await statement.bind(messageId).first<MessageRow>()
+    : await statement
+        .bind(messageId, Math.trunc(appNow() / 1000))
+        .first<MessageRow>();
   return row ? mapNotificationMessage(row) : null;
 }
 
@@ -233,6 +243,7 @@ export async function createNotificationMessage(
     type,
     severity,
     createdAtSeconds: now,
+    retention: input.retention,
   });
 
   await env.DB.prepare(
@@ -274,7 +285,9 @@ export async function createNotificationMessage(
     )
     .run();
 
-  const message = await getNotificationMessage(env, id);
+  const message = await getNotificationMessage(env, id, {
+    includeExpired: true,
+  });
   if (!message) throw new Error("Notification message was not created");
   return message;
 }
@@ -284,8 +297,13 @@ export async function listNotificationMessagesForUser(
   input: ListNotificationMessagesInput & { userId: string },
 ): Promise<NotificationMessage[]> {
   const limit = Math.max(1, Math.min(100, Math.trunc(input.limit ?? 50)));
-  const filters = ["user_id = ?", "archived_at IS NULL"];
-  const bindings: Array<string | number> = [input.userId];
+  const now = Math.trunc(appNow() / 1000);
+  const filters = [
+    "user_id = ?",
+    "archived_at IS NULL",
+    "(expires_at IS NULL OR expires_at > ?)",
+  ];
+  const bindings: Array<string | number> = [input.userId, now];
   if (input.teamId) {
     filters.push("team_id = ?");
     bindings.push(input.teamId);
@@ -332,8 +350,13 @@ export async function listNotificationMessagesForTeam(
   input: ListNotificationMessagesInput & { teamId: string },
 ): Promise<NotificationMessage[]> {
   const limit = Math.max(1, Math.min(100, Math.trunc(input.limit ?? 50)));
-  const filters = ["team_id = ?", "archived_at IS NULL"];
-  const bindings: Array<string | number> = [input.teamId];
+  const now = Math.trunc(appNow() / 1000);
+  const filters = [
+    "team_id = ?",
+    "archived_at IS NULL",
+    "(expires_at IS NULL OR expires_at > ?)",
+  ];
+  const bindings: Array<string | number> = [input.teamId, now];
   if (input.userId) {
     filters.push("user_id = ?");
     bindings.push(input.userId);
@@ -387,9 +410,10 @@ export async function countUnreadAttentionMessages(
         AND requires_attention=1
         AND read_at IS NULL
         AND archived_at IS NULL
+        AND (expires_at IS NULL OR expires_at > ?)
     `,
   )
-    .bind(userId)
+    .bind(userId, Math.trunc(appNow() / 1000))
     .first<{ count: number }>();
   return Number(row?.count ?? 0);
 }
@@ -404,14 +428,15 @@ export async function markNotificationMessageRead(
       UPDATE notification_messages
       SET read_at = COALESCE(read_at, ?), updated_at = ?
       WHERE id = ? AND user_id = ?
+        AND (expires_at IS NULL OR expires_at > ?)
     `,
   )
-    .bind(now, now, input.messageId, input.userId)
+    .bind(now, now, input.messageId, input.userId, now)
     .run();
   const row = await env.DB.prepare(
-    `SELECT ${MESSAGE_SELECT} FROM notification_messages WHERE id=? AND user_id=? LIMIT 1`,
+    `SELECT ${MESSAGE_SELECT} FROM notification_messages WHERE id=? AND user_id=? AND (expires_at IS NULL OR expires_at > ?) LIMIT 1`,
   )
-    .bind(input.messageId, input.userId)
+    .bind(input.messageId, input.userId, now)
     .first<MessageRow>();
   return row ? mapNotificationMessage(row) : null;
 }
@@ -427,9 +452,10 @@ export async function markAllNotificationMessagesRead(
         UPDATE notification_messages
         SET read_at = COALESCE(read_at, ?), updated_at = ?
         WHERE user_id = ? AND team_id = ? AND read_at IS NULL
+          AND (expires_at IS NULL OR expires_at > ?)
       `,
     )
-      .bind(now, now, input.userId, input.teamId)
+      .bind(now, now, input.userId, input.teamId, now)
       .run();
     return Number(result.meta?.changes ?? 0);
   }
@@ -438,9 +464,10 @@ export async function markAllNotificationMessagesRead(
       UPDATE notification_messages
       SET read_at = COALESCE(read_at, ?), updated_at = ?
       WHERE user_id = ? AND read_at IS NULL
+        AND (expires_at IS NULL OR expires_at > ?)
     `,
   )
-    .bind(now, now, input.userId)
+    .bind(now, now, input.userId, now)
     .run();
   return Number(result.meta?.changes ?? 0);
 }

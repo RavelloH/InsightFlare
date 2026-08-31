@@ -2032,11 +2032,14 @@ export interface AppMessages {
       enabled: string;
       enabledYes: string;
       enabledNo: string;
+      taskStateSaved: string;
+      taskStateSaveFailed: string;
       lastStatus: string;
       runs30d: string;
       successRate30d: string;
       avgDuration: string;
       runHistoryTitle: string;
+      nextRun: string;
       runHistoryDescription: string;
       noRuns: string;
       scheduledAt: string;
@@ -2075,6 +2078,11 @@ export interface AppMessages {
           schedule: string;
         };
         notification_tick: {
+          name: string;
+          description: string;
+          schedule: string;
+        };
+        database_maintenance: {
           name: string;
           description: string;
           schedule: string;
@@ -2343,6 +2351,17 @@ export interface AppMessages {
     notificationEmailGuideTitle: string;
     notificationEmailGuideDescription: string;
     notificationEmailGuideSteps: string[];
+    retentionTitle: string;
+    retentionDescription: string;
+    scheduledTaskLogsDaysLabel: string;
+    notificationTestDaysLabel: string;
+    notificationAttentionDaysLabel: string;
+    notificationDefaultDaysLabel: string;
+    retentionRangeHint: string;
+    retentionSave: string;
+    retentionSaving: string;
+    retentionSaved: string;
+    retentionSaveFailed: string;
     loginTurnstileTitle: string;
     loginTurnstileDescription: string;
     loginTurnstileEnabledLabel: string;
@@ -4764,11 +4783,14 @@ const enMessages = {
       enabled: "State",
       enabledYes: "Enabled",
       enabledNo: "Disabled",
+      taskStateSaved: "Task state updated.",
+      taskStateSaveFailed: "Failed to update task state.",
       lastStatus: "Last status",
       runs30d: "30d runs",
       successRate30d: "30d success rate",
       avgDuration: "Avg duration",
       runHistoryTitle: "Run history",
+      nextRun: "Next run",
       runHistoryDescription: "Task runs retained over the last 30 days.",
       noRuns: "No runs yet.",
       scheduledAt: "Scheduled",
@@ -4810,7 +4832,12 @@ const enMessages = {
         notification_tick: {
           name: "Notification dispatch",
           description: "Evaluates notification rules and dispatches messages.",
-          schedule: "Every hour",
+          schedule: "Every 30 minutes",
+        },
+        database_maintenance: {
+          name: "Database maintenance",
+          description: "Removes expired operational records and optimizes D1.",
+          schedule: "Every day",
         },
       },
     },
@@ -5112,6 +5139,18 @@ const enMessages = {
       "Enter the sender name, sender email, Reply-To, and Resend API key here.",
       "Save the configuration, then send a test email to confirm delivery works.",
     ],
+    retentionTitle: "Operational data retention",
+    retentionDescription:
+      "Configure how long task runs, task logs, and notification messages remain available. Changes affect new records only.",
+    scheduledTaskLogsDaysLabel: "Scheduled task logs and runs (days)",
+    notificationTestDaysLabel: "Test notifications (days)",
+    notificationAttentionDaysLabel: "Warning and critical notifications (days)",
+    notificationDefaultDaysLabel: "Other notifications (days)",
+    retentionRangeHint: "Enter an integer from 1 to 3650 days.",
+    retentionSave: "Save retention settings",
+    retentionSaving: "Saving...",
+    retentionSaved: "Retention settings saved.",
+    retentionSaveFailed: "Failed to save retention settings.",
     loginTurnstileTitle: "Login Turnstile Protection",
     loginTurnstileDescription:
       "When enabled, the login page runs Cloudflare Turnstile Invisible verification in the background and the server enforces it during sign-in.",
@@ -7479,11 +7518,14 @@ const zhMessages = {
       enabled: "状态",
       enabledYes: "已启用",
       enabledNo: "未启用",
+      taskStateSaved: "任务状态已更新。",
+      taskStateSaveFailed: "更新任务状态失败。",
       lastStatus: "最近状态",
       runs30d: "30 天运行",
       successRate30d: "30 天成功率",
       avgDuration: "平均耗时",
       runHistoryTitle: "运行历史",
+      nextRun: "下次运行",
       runHistoryDescription: "最近 30 天内的任务运行记录。",
       noRuns: "暂无运行记录。",
       scheduledAt: "计划时间",
@@ -7525,7 +7567,12 @@ const zhMessages = {
         notification_tick: {
           name: "通知分发",
           description: "检查通知规则并分发消息。",
-          schedule: "每小时",
+          schedule: "每 30 分钟",
+        },
+        database_maintenance: {
+          name: "数据库优化",
+          description: "分批清理过期运行数据和通知，并优化 D1 查询统计信息。",
+          schedule: "每天",
         },
       },
     },
@@ -7818,6 +7865,18 @@ const zhMessages = {
       "回到这里填写发件人名称、发件邮箱、Reply-To 和 Resend API Key。",
       "保存后使用测试收件人发送一封测试邮件，确认投递链路正常。",
     ],
+    retentionTitle: "运行数据保留期",
+    retentionDescription:
+      "配置任务运行记录、任务日志和通知消息的保留时间。修改只影响新建记录。",
+    scheduledTaskLogsDaysLabel: "计划任务运行记录和日志（天）",
+    notificationTestDaysLabel: "测试通知（天）",
+    notificationAttentionDaysLabel: "警告和严重通知（天）",
+    notificationDefaultDaysLabel: "其他通知（天）",
+    retentionRangeHint: "请输入 1 到 3650 之间的整数天数。",
+    retentionSave: "保存保留期配置",
+    retentionSaving: "保存中...",
+    retentionSaved: "保留期配置已保存。",
+    retentionSaveFailed: "保存保留期配置失败。",
     loginTurnstileTitle: "登录 Turnstile 防护",
     loginTurnstileDescription:
       "启用后，登录页会在后台执行 Cloudflare Turnstile Invisible 验证，并在服务端登录流程中强制校验。",
@@ -10256,11 +10315,14 @@ const jaMessages = {
       enabled: "状態",
       enabledYes: "有効",
       enabledNo: "無効",
+      taskStateSaved: "タスク状態を更新しました。",
+      taskStateSaveFailed: "タスク状態を更新できません。",
       lastStatus: "最終ステータス",
       runs30d: "30日実行",
       successRate30d: "30日成功率",
       avgDuration: "平均所要時間",
       runHistoryTitle: "実行履歴",
+      nextRun: "次回実行",
       runHistoryDescription: "過去 30 日間に保持されたタスク実行です。",
       noRuns: "実行はまだありません。",
       scheduledAt: "予定",
@@ -10302,7 +10364,13 @@ const jaMessages = {
         notification_tick: {
           name: "通知配信",
           description: "通知ルールを評価し、メッセージを配信します。",
-          schedule: "毎時",
+          schedule: "30分ごと",
+        },
+        database_maintenance: {
+          name: "データベースメンテナンス",
+          description:
+            "期限切れの実行データと通知を削除し、D1 の統計情報を最適化します。",
+          schedule: "毎日",
         },
       },
     },
@@ -10603,6 +10671,18 @@ const jaMessages = {
       "ここに送信者名、送信者メール、Reply-To、Resend API キーを入力します。",
       "設定を保存し、テストメールを送信して配信を確認します。",
     ],
+    retentionTitle: "運用データの保持期間",
+    retentionDescription:
+      "タスク実行、タスクログ、通知メッセージの保持期間を設定します。変更は新しいレコードにのみ適用されます。",
+    scheduledTaskLogsDaysLabel: "スケジュールタスクの実行とログ（日）",
+    notificationTestDaysLabel: "テスト通知（日）",
+    notificationAttentionDaysLabel: "警告・重大通知（日）",
+    notificationDefaultDaysLabel: "その他の通知（日）",
+    retentionRangeHint: "1〜3650 の整数日を入力してください。",
+    retentionSave: "保持期間を保存",
+    retentionSaving: "保存中...",
+    retentionSaved: "保持期間を保存しました。",
+    retentionSaveFailed: "保持期間を保存できません。",
     loginTurnstileTitle: "ログイン Turnstile 保護",
     loginTurnstileDescription:
       "有効にすると、ログインページはバックグラウンドで Cloudflare Turnstile Invisible 検証を実行し、サーバー側のサインイン処理で強制します。",

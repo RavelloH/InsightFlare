@@ -51,7 +51,12 @@ function statement(
 function createEnv(statements: MockStatement[] = []): Env {
   let callIndex = 0;
   const prepare = vi.fn(() => statements[callIndex++] ?? statement());
-  return { DB: { prepare, batch: vi.fn() } } as unknown as Env;
+  const batch = vi.fn(async (batchStatements: MockStatement[]) => {
+    for (const batchStatement of batchStatements) {
+      await (batchStatement.run as unknown as () => Promise<unknown>)();
+    }
+  });
+  return { DB: { prepare, batch } } as unknown as Env;
 }
 
 const definition = {
@@ -77,16 +82,14 @@ describe("runScheduledTask", () => {
   });
 
   it("runs handler to completion and updates run status to success", async () => {
-    const pruneStmt = statement({ run: undefined });
+    const configStmt = statement({ first: null });
     const insertStmt = statement({ run: undefined });
     const logStartStmt = statement({ run: undefined });
     const logFinishStmt = statement({ run: undefined });
     const updateStmt = statement({ run: undefined });
 
     const env = createEnv([
-      pruneStmt,
-      pruneStmt,
-      pruneStmt,
+      configStmt,
       insertStmt,
       logStartStmt,
       logFinishStmt,
@@ -147,10 +150,10 @@ describe("runScheduledTask", () => {
   });
 
   it("preserves cron scheduledTime for run history grouping", async () => {
-    const pruneStmts = Array.from({ length: 3 }, () => statement());
+    const configStmt = statement({ first: null });
     const insertStmt = statement();
     const remainingStmts = Array.from({ length: 3 }, () => statement());
-    const env = createEnv([...pruneStmts, insertStmt, ...remainingStmts]);
+    const env = createEnv([configStmt, insertStmt, ...remainingStmts]);
     const handler = vi.fn().mockResolvedValue(undefined);
     const delayedScheduledTime = Date.UTC(2026, 0, 1, 8, 4, 30);
 
@@ -173,16 +176,14 @@ describe("runScheduledTask", () => {
   });
 
   it("re-throws handler errors after recording failure", async () => {
-    const pruneStmt = statement();
+    const configStmt = statement({ first: null });
     const insertStmt = statement();
     const logStartStmt = statement();
     const logErrorStmt = statement();
     const updateStmt = statement();
 
     const env = createEnv([
-      pruneStmt,
-      pruneStmt,
-      pruneStmt,
+      configStmt,
       insertStmt,
       logStartStmt,
       logErrorStmt,
@@ -208,15 +209,13 @@ describe("runScheduledTask", () => {
   });
 
   it("continues when DB writes fail during bestEffortRun", async () => {
-    const pruneStmt = statement({ runReject: new Error("db down") });
+    const configStmt = statement({ first: null });
     const insertStmt = statement({ runReject: new Error("db down") });
     const logStmt = statement({ runReject: new Error("db down") });
     const updateStmt = statement({ runReject: new Error("db down") });
 
     const env = createEnv([
-      pruneStmt,
-      pruneStmt,
-      pruneStmt,
+      configStmt,
       insertStmt,
       logStmt,
       logStmt,

@@ -4436,7 +4436,7 @@ function mergeProjectOperations(spec: OpenAPISpec): void {
     "notification-rules/run": ["post"],
     "notification-test": ["post"],
     "system-performance": ["get"],
-    "scheduled-tasks": ["get"],
+    "scheduled-tasks": ["get", "patch"],
     "do-diagnostic": ["get"],
     "e2e/flush": ["post"],
   };
