@@ -1646,6 +1646,13 @@ export class IngestDurableObject extends DurableObject {
 
     const isOverdue = nextDue.nextDueAt <= now;
     const retryAt = now + D1_FLUSH_INTERVAL_MS;
+    // A previously scheduled Alarm can remain in storage after its delivery
+    // was stranded. Reconcile requests are the recovery path for those DOs,
+    // so move a sufficiently old due Alarm back to "now". Keep a short grace
+    // period after repairing it to avoid turning every ingest request into
+    // another Alarm write while the platform is dispatching the Alarm.
+    const isOverdueAlarmRepair =
+      current !== null && current <= now - D1_FLUSH_INTERVAL_MS;
     const target = retryOnFailure
       ? isOverdue
         ? retryAt
@@ -1675,7 +1682,11 @@ export class IngestDurableObject extends DurableObject {
       return;
     }
 
-    if (current > target || (retryOnFailure && current <= now)) {
+    if (
+      current > target ||
+      (retryOnFailure && current <= now) ||
+      isOverdueAlarmRepair
+    ) {
       await this.doState.storage.setAlarm(target);
       logger.info("do.alarm.reconciled", {
         action: "set",
@@ -1687,6 +1698,7 @@ export class IngestDurableObject extends DurableObject {
         afterMaintenance,
         isOverdueRetry,
         retryOnFailure,
+        isOverdueAlarmRepair,
         retryCount: alarmInfo?.retryCount ?? 0,
         isRetry: Boolean(alarmInfo?.isRetry),
       });
@@ -1703,6 +1715,7 @@ export class IngestDurableObject extends DurableObject {
       afterMaintenance,
       isOverdueRetry,
       retryOnFailure,
+      isOverdueAlarmRepair,
       retryCount: alarmInfo?.retryCount ?? 0,
       isRetry: Boolean(alarmInfo?.isRetry),
     });

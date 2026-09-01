@@ -313,7 +313,11 @@ export async function handleSystemPerformanceAdmin(
   const totalEvents = toFiniteNumber(summaryRow?.totalEvents);
   const delayedEvents = toFiniteNumber(summaryRow?.delayedEvents);
   const futureSkewedEvents = toFiniteNumber(summaryRow?.futureSkewedEvents);
-  const latestCreatedAtSec = toNullableNumber(summaryRow?.latestCreatedAtSec);
+  const latestCreatedAtSec =
+    summaryRow?.latestCreatedAtSec === null ||
+    summaryRow?.latestCreatedAtSec === undefined
+      ? null
+      : toNullableNumber(summaryRow.latestCreatedAtSec);
   const latestCreatedAt =
     latestCreatedAtSec === null ? null : latestCreatedAtSec * 1000;
   const data: SystemPerformanceData = {

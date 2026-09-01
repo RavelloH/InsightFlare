@@ -133,4 +133,23 @@ describe("IngestDurableObject alarm recovery", () => {
       NOW + RETRY_DELAY_MS,
     );
   });
+
+  it("repairs a stranded overdue alarm during internal reconciliation", async () => {
+    const ctx = createTestDo({ alarmAt: NOW - RETRY_DELAY_MS - 1 });
+
+    const response = await ctx.object.fetch(
+      new Request("https://ingest.internal/reconcile", { method: "POST" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(ctx.state.storage.setAlarm).toHaveBeenCalledWith(NOW);
+    expect(ctx.getAlarmAt()).toBe(NOW);
+
+    // The grace period prevents subsequent requests from repeatedly writing
+    // the same recovery Alarm before the platform dispatches it.
+    await ctx.object.fetch(
+      new Request("https://ingest.internal/reconcile", { method: "POST" }),
+    );
+    expect(ctx.state.storage.setAlarm).toHaveBeenCalledTimes(1);
+  });
 });
