@@ -41,6 +41,7 @@ describe("mock/saved-filters", () => {
         expect(filter.siteId).toBe(site.id);
         expect(filter.name).toMatch(/[A-Za-z]/);
         expect(filter.description).toMatch(/[A-Za-z]/);
+        expect(filter.scopePreference).toBe("auto");
         expect(filter.filterDsl).toMatch(/\b(?:AND|OR|NOT)\b/);
         expect(
           parseFilterPanelExpression(filter.filterDsl, analyticsFilterRegistry)
@@ -60,11 +61,13 @@ describe("mock/saved-filters", () => {
         name: "Custom review segment",
         description: "A temporary saved filter for demo CRUD review.",
         visibility: "private",
+        scopePreference: "session",
         filterDsl:
           'page.path eq "/pricing" AND geo.country eq "US" AND client.deviceType eq "desktop"',
       },
     }) as { filter: SavedFilter };
     expect(created.filter.isOwner).toBe(true);
+    expect(created.filter.scopePreference).toBe("session");
     expect(list(siteId).some((filter) => filter.id === created.filter.id)).toBe(
       true,
     );
@@ -77,12 +80,14 @@ describe("mock/saved-filters", () => {
         name: "Updated review segment",
         description: "Updated through the in-memory mock route.",
         visibility: "team",
+        scopePreference: "visitor",
         filterDsl:
           'page.path eq "/contact" AND referrer.domain eq "linkedin.com" AND geo.country in ["US", "GB"]',
       },
     }) as { filter: SavedFilter };
     expect(updated.filter.name).toBe("Updated review segment");
     expect(updated.filter.visibility).toBe("team");
+    expect(updated.filter.scopePreference).toBe("visitor");
     expect(updated.filter.updatedAt).toBeGreaterThanOrEqual(
       created.filter.updatedAt,
     );
@@ -121,6 +126,20 @@ describe("mock/saved-filters", () => {
     });
     expect(errorOf(invalid).error.code).toBe("filterdsl_is_invalid");
 
+    const invalidScope = handleDemoSavedFilters({
+      path: LIST_PATH,
+      method: "POST",
+      siteId,
+      body: {
+        name: "Invalid scope",
+        description: "",
+        visibility: "private",
+        scopePreference: "invalid",
+        filterDsl: 'page.path eq "/pricing"',
+      },
+    });
+    expect(errorOf(invalidScope).error.code).toBe("scopepreference_is_invalid");
+
     const ownFilter = list(siteId).find((filter) => filter.isOwner)!;
     const duplicate = handleDemoSavedFilters({
       path: LIST_PATH,
@@ -130,6 +149,7 @@ describe("mock/saved-filters", () => {
         name: "Duplicate",
         description: "",
         visibility: "private",
+        scopePreference: ownFilter.scopePreference,
         filterDsl: ownFilter.filterDsl,
       },
     });

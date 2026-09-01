@@ -3,3 +3,13 @@
 export * from "@/lib/edge/analytics/contract/filter-codec";
 export * from "@/lib/edge/analytics/contract/filter-registry";
 export * from "@/lib/edge/analytics/contract/filters";
+export {
+  attachFilterScopePreference,
+  type FilterScope,
+  type FilterScopePreference,
+  filterScopePreferenceFromDocument,
+  normalizeFilterScopePreference,
+  parseFilterScopePreference,
+  resolveFilterScope,
+  serializeFilterScopePreference,
+} from "@/lib/edge/analytics/contract/scoped-filter";

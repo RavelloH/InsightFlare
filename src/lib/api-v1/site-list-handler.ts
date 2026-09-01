@@ -71,6 +71,7 @@ import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
+  attachSavedFilterScopePreference,
   type FilterDocument,
   isReportingTimeZone,
   parseApiV1FilterDocument,
@@ -93,6 +94,7 @@ export type SiteListReader<
   Input extends {
     readonly timeRange: SiteAnalyticsQueryBaseDto["timeRange"];
     readonly filter?: SiteAnalyticsQueryBaseDto["filter"];
+    readonly scope?: SiteAnalyticsQueryBaseDto["scope"];
   },
   Result,
 > = (input: SiteListReaderInput & Input) => Promise<Result>;
@@ -346,7 +348,14 @@ async function resolveFilter(
     if (!definitions) return null;
     return definitions
       .resolveTeamVisibleSavedFilter({ siteId, id: input.filter.id, signal })
-      .then((resolved) => resolved?.document ?? null);
+      .then((resolved) =>
+        resolved
+          ? attachSavedFilterScopePreference(
+              resolved.document,
+              resolved.scopePreference ?? "auto",
+            )
+          : null,
+      );
   }
   try {
     return parseApiV1FilterDocument({
@@ -374,6 +383,7 @@ async function handlePlannedSiteList<
   Input extends {
     readonly timeRange: SiteAnalyticsQueryBaseDto["timeRange"];
     readonly filter?: SiteAnalyticsQueryBaseDto["filter"];
+    readonly scope?: SiteAnalyticsQueryBaseDto["scope"];
   },
   Result,
 >(
@@ -484,6 +494,7 @@ async function handlePlannedSiteList<
       endExclusiveMs,
       timeZone,
       filters,
+      scopePreference: input.scope ?? "auto",
     };
     const serviceResult = await createApiV1QueryApplicationAdapter().execute<
       typeof query,
@@ -519,6 +530,9 @@ async function handlePlannedSiteList<
       if (serviceResult.error.kind === "deadline-exceeded") {
         return errorResponse("deadline_exceeded");
       }
+      if (serviceResult.error.kind === "invalid-input") {
+        return errorResponse("validation_failed");
+      }
       return errorResponse("unsupported_query");
     }
     const data = serviceResult.value;
@@ -537,6 +551,9 @@ async function handlePlannedSiteList<
           },
           source: responseMeta.source ?? "raw",
           accuracy: responseMeta.accuracy ?? "exact",
+          ...(serviceResult.meta?.filterScope
+            ? { filterScope: serviceResult.meta.filterScope }
+            : {}),
         },
       },
       requestId,

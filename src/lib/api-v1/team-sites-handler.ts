@@ -182,6 +182,7 @@ export async function handlePlannedTeamSites(
       timeZone,
       interval: input.interval,
       filters,
+      scopePreference: input.scope ?? "auto",
     };
     const serviceResult = await createApiV1QueryApplicationAdapter().execute<
       TeamSitesReaderInput,
@@ -291,6 +292,9 @@ export async function handlePlannedTeamSites(
           },
           source: result.source,
           accuracy: result.approximateVisitors ? "approximate" : "exact",
+          ...(serviceResult.meta?.filterScope
+            ? { filterScope: serviceResult.meta.filterScope }
+            : {}),
         },
       },
       requestId,

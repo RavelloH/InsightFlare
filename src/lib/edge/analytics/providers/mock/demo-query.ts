@@ -1,6 +1,9 @@
 import "@tanstack/react-start/server-only";
 
-import type { QueryOperation } from "@/lib/edge/analytics/contract";
+import type {
+  FilterScope,
+  QueryOperation,
+} from "@/lib/edge/analytics/contract";
 import {
   getRequestId,
   jsonResponseWith,
@@ -25,6 +28,8 @@ export interface DemoQueryRuntimeInput {
   readonly context?: ResponseContext;
   /** Selected by the protocol adapter before the mock provider is invoked. */
   readonly operation?: QueryOperation;
+  /** Resolved by the canonical query service before demo data generation. */
+  readonly resolvedScope?: FilterScope;
 }
 
 const EMPTY_D1_DIAGNOSTICS = {
@@ -146,6 +151,8 @@ export async function executeDemoQuery(
     string | number
   >;
   params.siteId = siteId;
+  if (input.operation) params.operation = input.operation;
+  if (input.resolvedScope) params.resolvedScope = input.resolvedScope;
 
   try {
     const { handleDemoRequest } = await import("@/lib/realtime/mock");

@@ -72,11 +72,12 @@ import {
   type SiteData,
   type TeamData,
 } from "@/lib/edge-client";
+import { parseFilterScopePreference } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import Image from "@/lib/image";
 import Link from "@/lib/router";
-import { usePathname } from "@/lib/router";
+import { usePathname, useSearchParams } from "@/lib/router";
 
 interface TeamSectionNavItem {
   key: string;
@@ -473,6 +474,7 @@ export function DashboardShell({
     Record<string, SidebarSite[]>
   >({});
   const livePathname = usePathname() || pathname;
+  const initialScopePreference = parseFilterScopePreference(useSearchParams());
   const liveActiveTeamSlug =
     activeTeamSlug || parseActiveTeamSlugFromPath(livePathname, teams);
   const activeTeam = liveActiveTeamSlug
@@ -828,6 +830,7 @@ export function DashboardShell({
         scopeKey={activeSiteId}
         maxRangeDays={isRequestObservationRoute ? 90 : undefined}
         initialWindow={initialQueryWindow}
+        initialScopePreference={initialScopePreference}
       >
         <Sidebar variant="inset" collapsible="icon">
           <SidebarHeader>

@@ -17,6 +17,13 @@ export const ApiV1ResponseMetaSchema = z
   .object({ requestId: z.string().min(1) })
   .strict();
 
+export const FilterScopeMetadataSchema = z
+  .object({
+    requested: z.enum(["auto", "event", "session", "visitor"]),
+    resolved: z.enum(["event", "session", "visitor"]),
+  })
+  .strict();
+
 export const ApiV1AnalyticsResponseMetaSchema = ApiV1ResponseMetaSchema.extend({
   generatedAt: z.string().datetime({ offset: true }),
   timeRange: z
@@ -28,6 +35,7 @@ export const ApiV1AnalyticsResponseMetaSchema = ApiV1ResponseMetaSchema.extend({
     .strict(),
   source: z.enum(["raw", "rollup", "realtime", "mixed", "mock"]),
   accuracy: z.enum(["exact", "approximate"]),
+  filterScope: FilterScopeMetadataSchema.optional(),
 });
 
 export const ApiV1ErrorSchema = z
@@ -125,6 +133,7 @@ export const ApiV1ComparisonAnalyticsResponseMetaSchema =
     bTimeRange: ApiV1AnalyticsResponseMetaSchema.shape.timeRange,
     source: z.enum(["raw", "rollup", "realtime", "mixed", "mock"]),
     accuracy: z.enum(["exact", "approximate"]),
+    filterScope: FilterScopeMetadataSchema.optional(),
   });
 export const AnalyticsComparisonOverviewResponseSchema =
   apiV1SuccessEnvelopeSchema(

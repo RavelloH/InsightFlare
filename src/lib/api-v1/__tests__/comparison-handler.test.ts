@@ -480,6 +480,49 @@ describe("API v1 comparison v2 handler", () => {
       );
       expect((await json(response)).error?.code).toBe(expected);
     }
+
+    const conflictDefinitions = {
+      resolveTeamVisibleSavedFilter: vi.fn().mockResolvedValue({
+        document: { version: 1, root: null },
+        fingerprint: "saved-filter-v1:scope-conflict",
+        scopePreference: "session",
+      }),
+    };
+    const scopeConflict = await handleSiteComparison(
+      request({
+        ...baseBody,
+        scope: "visitor",
+        current: {
+          ...baseBody.current,
+          filter: { type: "saved", id: "scope-conflict" },
+        },
+        select: { metrics: ["views", "sessions"] },
+      }),
+      { ...principal, scopes: ["analytics:read", "analysis:read"] },
+      env,
+      "site-1",
+      conflictDefinitions,
+    );
+    expect((await json(scopeConflict)).error?.code).toBe("conflict");
+
+    const breakdownScopeConflict = await handleSiteComparisonBreakdown(
+      request({
+        ...baseBody,
+        select: undefined,
+        scope: "visitor",
+        current: {
+          ...baseBody.current,
+          filter: { type: "saved", id: "scope-conflict" },
+        },
+        limit: 20,
+      }),
+      { ...principal, scopes: ["analytics:read", "analysis:read"] },
+      env,
+      "site-1",
+      "page.path",
+      conflictDefinitions,
+    );
+    expect((await json(breakdownScopeConflict)).error?.code).toBe("conflict");
   });
 
   it("rejects unavailable saved filters and invalid team inputs", async () => {

@@ -73,7 +73,7 @@ function serviceError<Result>(
   operation: AnalyticsOperationId,
   result: AnalyticsResult<Result>,
 ): AnalyticsServiceResult<Result> | null {
-  if (result.ok) return { ok: true, value: result.data };
+  if (result.ok) return { ok: true, value: result.data, meta: result.meta };
   if (result.error.kind === "request-cancelled") {
     return { ok: false, error: { kind: "request-cancelled" } };
   }
@@ -84,6 +84,12 @@ function serviceError<Result>(
     return {
       ok: false,
       error: { kind: "query-cost-exceeded", cost: result.error.cost },
+    };
+  }
+  if (result.error.kind === "invalid-input") {
+    return {
+      ok: false,
+      error: { kind: "invalid-input", issues: result.error.issues },
     };
   }
   if (result.error.kind === "internal") {

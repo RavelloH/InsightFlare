@@ -30,7 +30,12 @@ describe("mock query provider", () => {
     };
     const response = await executeMockQuery(input);
     expect(response).toBeInstanceOf(Response);
-    expect(mocks.executeDemoQueryPayload).toHaveBeenCalledWith(input);
+    expect(mocks.executeDemoQueryPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...input,
+        resolvedScope: "session",
+      }),
+    );
     expect(mocks.createDemoQueryResponse).toHaveBeenCalledWith(
       { ok: true },
       200,

@@ -159,6 +159,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 metrics:
                   minItems: 1
                   maxItems: 20
@@ -299,6 +306,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               metrics:
                 - views
       responses:
@@ -386,6 +394,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -416,6 +444,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -928,6 +959,13 @@ paths:
                         - expression
                       additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 metrics:
                   minItems: 1
                   maxItems: 20
@@ -1068,6 +1106,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               metrics:
                 - views
       responses:
@@ -1155,6 +1194,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -1185,6 +1244,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -3132,6 +3194,13 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 80
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 current:
                   type: object
                   properties:
@@ -3472,6 +3541,7 @@ paths:
             example:
               version: 2
               timeZone: example
+              scope: auto
               current:
                 timeRange:
                   kind: absolute
@@ -4919,6 +4989,13 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 80
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 current:
                   type: object
                   properties:
@@ -5242,6 +5319,7 @@ paths:
             example:
               version: 2
               timeZone: example
+              scope: auto
               current:
                 timeRange:
                   kind: absolute
@@ -6322,6 +6400,13 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 80
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 current:
                   type: object
                   properties:
@@ -6630,6 +6715,7 @@ paths:
             example:
               version: 2
               timeZone: example
+              scope: auto
               current:
                 timeRange:
                   kind: absolute
@@ -8005,6 +8091,13 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 80
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 current:
                   type: object
                   properties:
@@ -8300,6 +8393,7 @@ paths:
             example:
               version: 2
               timeZone: example
+              scope: auto
               current:
                 timeRange:
                   kind: absolute
@@ -10528,6 +10622,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 interval:
                   type: string
                   enum:
@@ -10664,6 +10765,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               interval: minute
       responses:
         "200":
@@ -10769,6 +10871,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -10801,6 +10923,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -11433,6 +11558,13 @@ paths:
                         - expression
                       additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 interval:
                   type: string
                   enum:
@@ -11567,6 +11699,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               interval: minute
       responses:
         "200":
@@ -11672,6 +11805,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -11704,6 +11857,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -12271,6 +12427,13 @@ paths:
                         - expression
                       additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 interval:
                   type: string
                   enum:
@@ -12404,6 +12567,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               interval: minute
       responses:
         "200":
@@ -12572,6 +12736,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -12621,6 +12805,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -13218,6 +13405,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 limit:
                   default: 20
                   type: integer
@@ -13352,6 +13546,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               limit: 20
       responses:
         "200":
@@ -13441,6 +13636,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -13470,6 +13685,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -14051,6 +14269,13 @@ paths:
                         - expression
                       additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 limit:
                   default: 20
                   type: integer
@@ -14185,6 +14410,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               limit: 20
       responses:
         "200":
@@ -14274,6 +14500,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -14303,6 +14549,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -14893,6 +15142,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 primaryDimension:
                   type: string
                   minLength: 1
@@ -15043,6 +15299,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               primaryDimension: example
               secondaryDimension: example
               primaryLimit: 5
@@ -15180,6 +15437,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -15221,6 +15498,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -15875,6 +16155,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 limit:
                   default: 20
                   type: integer
@@ -16010,6 +16297,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               limit: 20
               includeDetails: false
       responses:
@@ -16096,6 +16384,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -16124,6 +16432,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -16719,6 +17030,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 limit:
                   default: 20
                   type: integer
@@ -16856,6 +17174,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               limit: 20
               includeFullUrl: false
       responses:
@@ -16939,6 +17258,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -16966,6 +17305,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -17561,6 +17903,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 limit:
                   default: 20
                   type: integer
@@ -17692,6 +18041,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               limit: 20
       responses:
         "200":
@@ -17786,6 +18136,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -17813,6 +18183,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -18408,6 +18781,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 field:
                   type: string
                   minLength: 1
@@ -18558,6 +18938,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               field: example
               search: example
               page: *a26
@@ -18661,6 +19042,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -18692,6 +19093,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -19287,6 +19691,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 granularity:
                   type: string
                   enum:
@@ -19424,6 +19835,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               granularity: minute
       responses:
         "200":
@@ -19530,6 +19942,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -19560,6 +19992,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -20155,6 +20590,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 funnelId:
                   type: string
                   minLength: 1
@@ -20288,6 +20730,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               funnelId: example
       responses:
         "200":
@@ -20485,6 +20928,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -20534,6 +20997,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -21129,6 +21595,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
               required:
                 - timeRange
               additionalProperties: false
@@ -21257,6 +21730,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
       responses:
         "200":
           description: Successful response.
@@ -21479,6 +21953,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -21532,6 +22026,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -22127,6 +22624,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 interval:
                   type: string
                   enum:
@@ -22264,6 +22768,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               interval: minute
       responses:
         "200":
@@ -22531,6 +23036,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -22590,6 +23115,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -23194,6 +23722,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 metric:
                   default: lcp
                   type: string
@@ -23338,6 +23873,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               metric: ttfb
               limit: 100
       responses:
@@ -23456,6 +23992,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -23489,6 +24045,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -24084,6 +24643,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
               required:
                 - timeRange
               additionalProperties: false
@@ -24212,6 +24778,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
       responses:
         "200":
           description: Successful response.
@@ -24392,6 +24959,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -24443,6 +25030,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -25040,6 +25630,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 interval:
                   type: string
                   enum:
@@ -25183,6 +25780,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               interval: minute
               limit: 8
       responses:
@@ -25311,6 +25909,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -25347,6 +25965,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -25943,6 +26564,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 search:
                   type: string
                   minLength: 1
@@ -26121,6 +26749,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               search: example
               eventName: example
               sort: *a35
@@ -26282,6 +26911,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -26332,6 +26981,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -27216,6 +27868,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -27318,6 +27990,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -27908,6 +28583,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 search:
                   type: string
                   minLength: 1
@@ -28054,6 +28736,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               search: example
               page: *a39
       responses:
@@ -28151,6 +28834,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -28181,6 +28884,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -28776,6 +29482,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 eventName:
                   type: string
                   minLength: 1
@@ -28919,6 +29632,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               eventName: example
               interval: minute
       responses:
@@ -29593,6 +30307,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -29764,6 +30498,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -30359,6 +31096,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 eventName:
                   type: string
                   minLength: 1
@@ -30506,6 +31250,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               eventName: example
               page: *a42
       responses:
@@ -30623,6 +31368,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -30656,6 +31421,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -31251,6 +32019,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 eventName:
                   type: string
                   minLength: 1
@@ -31416,6 +32191,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               eventName: example
               fieldPath: example
               fieldValueType: string
@@ -31536,6 +32312,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -31569,6 +32365,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -32770,6 +33569,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -32930,6 +33749,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -34030,6 +34852,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -34162,6 +35004,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -35046,6 +35891,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -35147,6 +36012,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -35737,6 +36605,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 search:
                   type: string
                   minLength: 1
@@ -35912,6 +36787,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               search: example
               sort: *a49
               page: *a50
@@ -36067,6 +36943,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -36114,6 +37010,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed, invalid_cursor."
           headers:
@@ -36709,6 +37608,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 search:
                   type: string
                   minLength: 1
@@ -36883,6 +37789,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               search: example
               sort: *a52
               page: *a53
@@ -37091,6 +37998,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -37150,6 +38077,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed, invalid_cursor."
           headers:
@@ -37745,6 +38675,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 visitorId:
                   type: string
                   minLength: 1
@@ -37884,6 +38821,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               visitorId: example
               limit: 100
       responses:
@@ -38067,6 +39005,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -38120,6 +39078,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -38715,6 +39676,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 visitorId:
                   type: string
                   minLength: 1
@@ -38854,6 +39822,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               visitorId: example
               limit: 100
       responses:
@@ -39042,6 +40011,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -39097,6 +40086,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -39692,6 +40684,13 @@ paths:
                             - id
                           additionalProperties: false
                     - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
                 sessionId:
                   type: string
                   minLength: 1
@@ -39831,6 +40830,7 @@ paths:
                     field: example
                   operator: example
                   value: example
+              scope: auto
               sessionId: example
               limit: 100
       responses:
@@ -40014,6 +41014,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -40067,6 +41087,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -41122,6 +42145,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -41261,6 +42304,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -41897,6 +42943,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -41920,6 +42986,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -42796,6 +43865,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -42883,6 +43972,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -43687,6 +44779,26 @@ paths:
                         enum:
                           - exact
                           - approximate
+                      filterScope:
+                        type: object
+                        properties:
+                          requested:
+                            type: string
+                            enum:
+                              - auto
+                              - event
+                              - session
+                              - visitor
+                          resolved:
+                            type: string
+                            enum:
+                              - event
+                              - session
+                              - visitor
+                        required:
+                          - requested
+                          - resolved
+                        additionalProperties: false
                     required:
                       - requestId
                       - generatedAt
@@ -43760,6 +44872,9 @@ paths:
                     timeZone: example
                   source: raw
                   accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
         "400":
           description: "API v1 error: validation_failed."
           headers:
@@ -51678,6 +52793,13 @@ paths:
                         visibility:
                           type: string
                           const: team
+                        scopePreference:
+                          type: string
+                          enum:
+                            - auto
+                            - event
+                            - session
+                            - visitor
                         filter:
                           type: object
                           properties:
@@ -51707,6 +52829,7 @@ paths:
                         - name
                         - description
                         - visibility
+                        - scopePreference
                         - filter
                         - createdAt
                         - updatedAt
@@ -51824,6 +52947,7 @@ paths:
                     name: example
                     description: example
                     visibility: team
+                    scopePreference: auto
                     filter:
                       version: 1
                       root:
@@ -52207,6 +53331,13 @@ paths:
                   visibility:
                     type: string
                     const: team
+                  scopePreference:
+                    type: string
+                    enum:
+                      - auto
+                      - event
+                      - session
+                      - visitor
                   filter:
                     type: object
                     properties:
@@ -52236,6 +53367,7 @@ paths:
                   - name
                   - description
                   - visibility
+                  - scopePreference
                   - filter
                   - createdAt
                   - updatedAt
@@ -52327,6 +53459,7 @@ paths:
                 name: example
                 description: example
                 visibility: team
+                scopePreference: auto
                 filter:
                   version: 1
                   root:

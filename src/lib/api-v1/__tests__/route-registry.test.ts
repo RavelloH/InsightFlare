@@ -534,10 +534,30 @@ describe("target API v1 route registry", () => {
         name: "Team filter",
         description: "",
         visibility: "team",
+        scopePreference: "auto",
         filter: { version: 1, root: null },
         createdAt: "2026-08-01T00:00:00.000Z",
         updatedAt: "2026-08-01T00:00:00.000Z",
         ownerUserId: "user-1",
+      }).success,
+    ).toBe(false);
+    const validDefinition = {
+      id: "filter-1",
+      name: "Team filter",
+      description: "",
+      visibility: "team",
+      scopePreference: "event",
+      filter: { version: 1, root: null },
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    };
+    expect(SavedFilterDefinitionSchema.safeParse(validDefinition).success).toBe(
+      true,
+    );
+    expect(
+      SavedFilterDefinitionSchema.safeParse({
+        ...validDefinition,
+        scopePreference: "account",
       }).success,
     ).toBe(false);
   });

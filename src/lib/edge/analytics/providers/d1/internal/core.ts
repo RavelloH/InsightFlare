@@ -8,3 +8,4 @@ export * from "./core-sites";
 export * from "./core-sources";
 export * from "./core-time";
 export * from "./core-types";
+export * from "./scoped-dataset";

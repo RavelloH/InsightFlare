@@ -13,8 +13,10 @@ import {
 } from "@/lib/api-v1/wire-helpers";
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
+  attachSavedFilterScopePreference,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
+  type FilterScopePreference,
   parseApiV1FilterDocument,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
@@ -27,6 +29,7 @@ export interface SiteFunnelAnalysisProviderInput {
   readonly siteId: string;
   readonly funnelId: string;
   readonly filters: FilterDocument;
+  readonly scopePreference?: FilterScopePreference;
   readonly window: {
     readonly startMs: number;
     readonly endExclusiveMs: number;
@@ -75,7 +78,14 @@ function filterForInput(
     if (!definitions) return Promise.resolve(null);
     return definitions
       .resolveTeamVisibleSavedFilter({ siteId, id: input.filter.id, signal })
-      .then((resolved) => resolved?.document ?? null);
+      .then((resolved) =>
+        resolved
+          ? attachSavedFilterScopePreference(
+              resolved.document,
+              resolved.scopePreference ?? "auto",
+            )
+          : null,
+      );
   }
   try {
     return Promise.resolve(
@@ -252,6 +262,7 @@ export async function handlePlannedSiteFunnelAnalysis(
           siteId,
           funnelId: parsed.data.funnelId,
           filters,
+          scopePreference: parsed.data.scope ?? "auto",
           window: {
             startMs: Date.parse(resolved.from),
             endExclusiveMs: Date.parse(resolved.to),
@@ -317,6 +328,9 @@ export async function handlePlannedSiteFunnelAnalysis(
         timeRange: resolved,
         source: "raw",
         accuracy: "exact",
+        ...(serviceResult.meta?.filterScope
+          ? { filterScope: serviceResult.meta.filterScope }
+          : {}),
       },
     });
   } catch {

@@ -1,6 +1,8 @@
 import { parseFilterPanelExpression } from "@/lib/dashboard/filter-panel-expression";
+import type { FilterScopePreference } from "@/lib/edge/analytics/contract";
 import {
   analyticsFilterRegistry,
+  attachSavedFilterScopePreference,
   type FilterDocument,
   parseApiV1FilterDocument,
 } from "@/lib/edge/analytics/contract";
@@ -13,11 +15,13 @@ const MAX_FILTER_DSL_LENGTH = 65_536;
 interface SavedFilterDefinitionRow {
   readonly filterDsl: string;
   readonly filterDslVersion: number;
+  readonly scopePreference?: FilterScopePreference | null;
 }
 
 export interface ResolvedSavedFilter {
   readonly document: FilterDocument;
   readonly fingerprint: string;
+  readonly scopePreference?: FilterScopePreference;
 }
 
 export interface AnalysisDefinitionReader {
@@ -93,7 +97,9 @@ export function createAnalysisDefinitionReader(
     async resolveTeamVisibleSavedFilter({ siteId, id, signal }) {
       assertNotAborted(signal);
       const row = await env.DB.prepare(
-        `SELECT sf.filter_dsl AS filterDsl, sf.filter_dsl_version AS filterDslVersion
+        `SELECT sf.filter_dsl AS filterDsl,
+                sf.filter_dsl_version AS filterDslVersion,
+                COALESCE(sf.scope_preference, 'auto') AS scopePreference
          FROM saved_filters sf
          INNER JOIN sites s ON s.id = sf.site_id
          WHERE sf.site_id = ?
@@ -107,9 +113,13 @@ export function createAnalysisDefinitionReader(
       assertNotAborted(signal);
       if (!row) return null;
 
-      const document = parseSavedFilterDsl(row);
+      const document = attachSavedFilterScopePreference(
+        parseSavedFilterDsl(row),
+        row.scopePreference ?? "auto",
+      );
       return {
         document,
+        scopePreference: row.scopePreference ?? "auto",
         fingerprint: await definitionFingerprint(
           row.filterDsl,
           row.filterDslVersion,

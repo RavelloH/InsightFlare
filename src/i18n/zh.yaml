@@ -136,6 +136,10 @@ dashboardHeader:
   range: 时间范围
   interval: 时间间隔
   filters: 筛选
+  filterButton: 筛选
+  filterButtonEvent: 筛选 (事件)
+  filterButtonSession: 筛选 (会话)
+  filterButtonVisitor: 筛选 (访客)
   customRange: 选择自定义区间
   customHint: 请选择开始和结束日期。
   customPendingEnd: 已选择开始日期，请继续选择结束日期。
@@ -331,6 +335,11 @@ filterBuilder:
   manageSavedFilter: 管理筛选
   savedFilterName: 名称
   savedFilterDescription: 备注
+  scopeLabel: 筛选范围
+  scopeAuto: 根据当前页面自动选择
+  scopeEvent: 筛选符合当前条件的事件
+  scopeSession: 筛选包含此事件的会话
+  scopeVisitor: 筛选包含此事件的访客
   savedFilterVisibility: 可见性
   savedFilterVisibilityPrivate: 仅自己可见
   savedFilterVisibilityTeam: 与团队共享

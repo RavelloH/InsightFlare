@@ -120,9 +120,9 @@ import {
   normalizeNotificationPreferencesData,
 } from "@/lib/edge-client";
 
-function headersOf(init: Record<string, string>) {
+function headersOf(init: Record<string, string>, url = "https://app.test/") {
   return {
-    url: "https://app.test/",
+    url,
     headers: {
       get: (name: string) => init[name] ?? null,
     },
@@ -278,6 +278,7 @@ describe("Dashboard route data loaders", () => {
           timeZone: "Asia/Tokyo",
         },
         interval: "day",
+        filters: { version: 1, root: null },
         allowedSiteIds: ["site-1"],
         preloadedSites: [],
       });
@@ -292,6 +293,33 @@ describe("Dashboard route data loaders", () => {
         } as never),
       ).rejects.toThrow("internal");
       expect(readTeamDashboard).toHaveBeenCalled();
+    });
+
+    it("passes URL filters to the SSR team dashboard reader", async () => {
+      vi.mocked(getRequest).mockReturnValue(
+        headersOf(
+          { host: "app.test" },
+          "https://app.test/?filter%5Bpage.path%5D=%2Fdocs",
+        ) as never,
+      );
+
+      await loadTeamDashboardSnapshot({
+        data: { teamId: "team-requested" },
+      } as never);
+
+      expect(readTeamDashboard).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filters: {
+            version: 1,
+            root: {
+              kind: "condition",
+              target: { kind: "field", field: "page.path" },
+              operator: "eq",
+              value: "/docs",
+            },
+          },
+        }),
+      );
     });
 
     it("loads the dashboard root context", async () => {

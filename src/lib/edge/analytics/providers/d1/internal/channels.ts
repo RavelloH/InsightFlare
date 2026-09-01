@@ -11,6 +11,7 @@ import {
   queryD1All,
   visitSourceBindings,
 } from "./core";
+import { scopedDatasetFor } from "./scoped-dataset";
 
 export interface ChannelAggregateRow {
   readonly channel: TrafficChannelId;
@@ -36,15 +37,16 @@ export async function queryChannelsFromD1(
   filters: FilterDocument,
   limit: number,
 ): Promise<ChannelAggregateRow[]> {
-  const filter = buildVisitFilterSql(filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
   const channelExpression = buildTrafficChannelCaseSql();
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 filtered_visits AS (
   SELECT *
-  FROM visit_source
-  ${filter.clause}
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
 ),
 channel_rollup AS (
   SELECT
@@ -63,8 +65,12 @@ LIMIT ?
 
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
+      ...(scopedDataset
+        ? scopedDataset.bindings.map((binding) => binding.value)
+        : [
+            ...visitSourceBindings(siteId, window),
+            ...(filter?.bindings ?? []),
+          ]),
       limit,
     ])
   ).map((row) => ({

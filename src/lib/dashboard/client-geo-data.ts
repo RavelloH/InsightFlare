@@ -11,7 +11,7 @@ import type {
   OverviewGeoPointsData,
   OverviewGeoTabData,
 } from "@/lib/edge-client";
-import type { FilterDocument } from "@/lib/filter-contract";
+import type { FilterDocument, FilterScope } from "@/lib/filter-contract";
 
 import { fetchPrivateJson } from "./client-request";
 import { withFilters } from "./client-utils";
@@ -51,6 +51,7 @@ export async function fetchOverviewGeoPoints(
     limit?: number;
     applyGeoFilter?: boolean;
     signal?: AbortSignal;
+    resolvedScope?: FilterScope;
   },
 ): Promise<OverviewGeoPointsData> {
   return fetchPrivateJson<OverviewGeoPointsData>(
@@ -65,6 +66,7 @@ export async function fetchOverviewGeoPoints(
         ...(options?.applyGeoFilter ? { applyGeoFilter: 1 } : {}),
       },
       filters,
+      options?.resolvedScope,
     ),
     { signal: options?.signal },
   )
@@ -127,6 +129,7 @@ export async function fetchOverviewGeoDimensionTab(
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    resolvedScope?: FilterScope;
   },
 ): Promise<OverviewGeoTabRows> {
   const payload = await fetchPrivateJson<OverviewGeoTabData>(
@@ -140,6 +143,7 @@ export async function fetchOverviewGeoDimensionTab(
         limit: options?.limit ?? 100,
       },
       filters,
+      options?.resolvedScope,
     ),
     { signal: options?.signal },
   ).catch(emptyGeoTabUnlessAborted);

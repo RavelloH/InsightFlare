@@ -16,6 +16,7 @@ import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
+  attachSavedFilterScopePreference,
   type CrossBreakdownResult,
   type FilterDocument,
   isReportingTimeZone,
@@ -124,7 +125,14 @@ async function resolveFilter(
         id: input.filter.id,
         signal,
       })
-      .then((resolved) => resolved?.document ?? null);
+      .then((resolved) =>
+        resolved
+          ? attachSavedFilterScopePreference(
+              resolved.document,
+              resolved.scopePreference ?? "auto",
+            )
+          : null,
+      );
   }
   try {
     return parseApiV1FilterDocument({
@@ -238,6 +246,7 @@ export async function handlePlannedSiteCrossBreakdown(
       primaryLimit: input.primaryLimit,
       secondaryLimit: input.secondaryLimit,
       filters,
+      scopePreference: input.scope ?? "auto",
     };
     const serviceResult = await createApiV1QueryApplicationAdapter().execute<
       SiteCrossBreakdownReaderInput,
@@ -294,6 +303,9 @@ export async function handlePlannedSiteCrossBreakdown(
           },
           source: "raw",
           accuracy: "exact",
+          ...(serviceResult.meta?.filterScope
+            ? { filterScope: serviceResult.meta.filterScope }
+            : {}),
         },
       },
       requestId,

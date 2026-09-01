@@ -128,6 +128,9 @@ function serviceErrorResponse(
   if (error.kind === "invalid_input") {
     return errorResponse(request, "validation_failed");
   }
+  if (error.kind === "invalid-input") {
+    return errorResponse(request, "validation_failed");
+  }
   return errorResponse(request, "internal_error");
 }
 

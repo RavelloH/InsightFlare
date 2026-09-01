@@ -315,6 +315,8 @@ CREATE TABLE saved_filters (
     CHECK (filter_dsl_version >= 1),
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  scope_preference TEXT NOT NULL DEFAULT 'auto'
+    CHECK (scope_preference IN ('auto', 'event', 'session', 'visitor')),
   FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
   FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT
 );

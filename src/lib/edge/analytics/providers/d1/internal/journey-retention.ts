@@ -11,6 +11,7 @@ import {
   timeBucketTimestamp,
   visitSourceBindings,
 } from "./core";
+import { scopedDatasetFor } from "./scoped-dataset";
 
 export function parseRetentionGranularity(value: string | null): Interval {
   return value === "minute" ||
@@ -34,15 +35,22 @@ export async function queryRetentionFromD1(
   const buckets = buildTimeBuckets(window, granularity);
   const bucket = timeBucketCase(buckets, "started_at");
 
-  const filter = buildVisitFilterSql(filters, "all_visits");
+  // A prepared scoped filter already has its final visit relation. Keep the
+  // legacy source/filter path intact for direct callers without scope
+  // metadata; providers must not resolve or reconstruct scope membership.
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "all_visits");
+  const visitRelation = scopedDataset?.visitRelation ?? "visit_source";
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 all_visits AS MATERIALIZED (
   SELECT
     *,
     ${bucket.sql} AS bucket
-  FROM visit_source
+  FROM ${visitRelation}
   WHERE visitor_id != ''
 ),
 filtered_visits AS MATERIALIZED (
@@ -50,7 +58,7 @@ filtered_visits AS MATERIALIZED (
     visitor_id,
     bucket
   FROM all_visits
-  ${filter.clause}
+  ${filter?.clause ?? ""}
 ),
 cohort_assign AS (
   SELECT
@@ -80,9 +88,11 @@ ORDER BY cohort_bucket ASC, vb.bucket ASC
 `;
 
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...visitSourceBindings(siteId, window),
+    ...(scopedDataset
+      ? scopedDataset.bindings.map((binding) => binding.value)
+      : visitSourceBindings(siteId, window)),
     ...bucket.bindings,
-    ...filter.bindings,
+    ...(filter?.bindings ?? []),
   ]);
 
   const cohortMap = new Map<

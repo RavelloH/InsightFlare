@@ -4,6 +4,7 @@ import {
   type FunnelDefinition,
   type FunnelStepConfig,
   parsePrivateFilterUrl,
+  type ScopedDatasetSql,
 } from "@/lib/edge/analytics/contract";
 import type { Env } from "@/lib/edge/types";
 
@@ -23,6 +24,7 @@ import {
   type ResponseContext,
   visitSourceBindings,
 } from "./core";
+import { scopedDatasetFor } from "./scoped-dataset";
 
 const FUNNEL_ANALYSIS_KIND = "funnel";
 const MAX_FUNNEL_STEPS = 12;
@@ -148,9 +150,41 @@ async function queryFunnelPageviewEvents(
   window: QueryWindow,
   filters: FilterDocument,
   steps: FunnelStepConfig[],
+  scopedDataset: ScopedDatasetSql | null,
 ): Promise<FunnelEvent[]> {
   const values = uniqueStepValues(steps, "pageview");
   if (values.length === 0) return [];
+
+  if (scopedDataset) {
+    const sql = `
+WITH
+${scopedDataset.ctes}
+SELECT
+  vs.session_id AS sessionId,
+  vs.visitor_id AS visitorId,
+  vs.pathname AS value,
+  vs.started_at AS timestampMs,
+  vs.visit_id AS sourceId
+FROM ${scopedDataset.visitRelation} vs
+WHERE TRIM(COALESCE(vs.session_id, '')) != ''
+  AND vs.pathname IN (${values.map(() => "?").join(", ")})
+ORDER BY timestampMs ASC, sourceId ASC
+`;
+    const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+      ...scopedDataset.bindings.map((binding) => binding.value),
+      ...values,
+    ]);
+
+    return rows.map((row) => ({
+      sessionId: String(row.sessionId ?? ""),
+      visitorId: String(row.visitorId ?? ""),
+      type: "pageview" as const,
+      value: String(row.value ?? ""),
+      timestampMs: Number(row.timestampMs ?? 0),
+      sourceOrder: 0,
+      sourceId: String(row.sourceId ?? ""),
+    }));
+  }
 
   const eventFilter = usesEventFilter(filters.root);
   const filter = eventFilter
@@ -219,9 +253,42 @@ async function queryFunnelCustomEvents(
   window: QueryWindow,
   filters: FilterDocument,
   steps: FunnelStepConfig[],
+  scopedDataset: ScopedDatasetSql | null,
 ): Promise<FunnelEvent[]> {
   const values = uniqueStepValues(steps, "event");
   if (values.length === 0) return [];
+
+  if (scopedDataset) {
+    const sql = `
+WITH
+${scopedDataset.ctes}
+SELECT
+  es.session_id AS sessionId,
+  es.visitor_id AS visitorId,
+  es.event_name AS value,
+  es.occurred_at AS timestampMs,
+  COALESCE(es.sequence, 0) AS sequence,
+  es.event_id AS sourceId
+FROM ${scopedDataset.eventRelation} es
+WHERE TRIM(COALESCE(es.session_id, '')) != ''
+  AND es.event_name IN (${values.map(() => "?").join(", ")})
+ORDER BY timestampMs ASC, sequence ASC, sourceId ASC
+`;
+    const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+      ...scopedDataset.bindings.map((binding) => binding.value),
+      ...values,
+    ]);
+
+    return rows.map((row) => ({
+      sessionId: String(row.sessionId ?? ""),
+      visitorId: String(row.visitorId ?? ""),
+      type: "event" as const,
+      value: String(row.value ?? ""),
+      timestampMs: Number(row.timestampMs ?? 0),
+      sourceOrder: 1,
+      sourceId: String(row.sourceId ?? ""),
+    }));
+  }
 
   const eventFilter = usesEventFilter(filters.root);
   const filter = eventFilter
@@ -404,9 +471,17 @@ export async function queryFunnelAnalysis(
   filters: FilterDocument,
   steps: FunnelStepConfig[],
 ): Promise<FunnelAnalysis> {
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
   const [pageviews, events] = await Promise.all([
-    queryFunnelPageviewEvents(env, siteId, window, filters, steps),
-    queryFunnelCustomEvents(env, siteId, window, filters, steps),
+    queryFunnelPageviewEvents(
+      env,
+      siteId,
+      window,
+      filters,
+      steps,
+      scopedDataset,
+    ),
+    queryFunnelCustomEvents(env, siteId, window, filters, steps, scopedDataset),
   ]);
   return analyzeFunnelEvents(steps, [...pageviews, ...events]);
 }

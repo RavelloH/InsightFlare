@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { analyticsFilterDefinition } from "@/lib/edge/analytics/contract/filter-registry";
+import type { FilterScopePreference } from "@/lib/edge/analytics/contract/scoped-filter";
 
 const rfc3339 = z.string().datetime({ offset: true }).max(64);
 const timeZone = z.string().min(1).max(80);
@@ -108,6 +109,10 @@ export const AnalyticsTimeRangeInputDtoSchema = z.discriminatedUnion("kind", [
     .strict(),
   PresetTimeRangeDtoSchema,
 ]);
+
+export const FilterScopePreferenceDtoSchema = z
+  .enum(["auto", "event", "session", "visitor"])
+  .optional() satisfies z.ZodType<FilterScopePreference | undefined>;
 
 /**
  * A comparison dataset intentionally cannot select its own reporting zone.
@@ -238,6 +243,7 @@ const comparisonRequestV2 = <
     .object({
       version: ComparisonVersionDtoSchema,
       timeZone,
+      scope: FilterScopePreferenceDtoSchema,
       current,
       reference,
     })
@@ -305,6 +311,7 @@ export const SiteAnalyticsQueryBaseDtoSchema = z
   .object({
     timeRange: AnalyticsTimeRangeInputDtoSchema,
     filter: SiteQueryFilterDtoSchema.nullable().optional(),
+    scope: FilterScopePreferenceDtoSchema,
   })
   .strict();
 
@@ -312,6 +319,7 @@ export const TeamAnalyticsQueryBaseDtoSchema = z
   .object({
     timeRange: AnalyticsTimeRangeInputDtoSchema,
     filter: TeamQueryFilterDtoSchema.nullable().optional(),
+    scope: FilterScopePreferenceDtoSchema,
   })
   .strict();
 
@@ -582,6 +590,7 @@ export const SiteSessionEventsQueryDtoSchema =
 
 const SiteRealtimeQueryBaseDtoSchema = SiteAnalyticsQueryBaseDtoSchema.omit({
   filter: true,
+  scope: true,
 }).strict();
 const realtimeLimit = z.number().int().min(1).max(500).default(100);
 

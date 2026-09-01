@@ -152,6 +152,14 @@ function analyticsResultProvider<Result>(
             time: runtimeInput.time,
             source: result.source ?? "raw",
             approximateVisitors: Boolean(result.approximateVisitors),
+            ...(runtimeInput.scopePlan
+              ? {
+                  filterScope: {
+                    requested: runtimeInput.scopePreference ?? "auto",
+                    resolved: runtimeInput.scopePlan.scope,
+                  },
+                }
+              : {}),
           },
         },
       };

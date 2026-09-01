@@ -5,6 +5,10 @@ import {
   type FilterDocument,
   normalizeFilterDocument,
 } from "./filters";
+import {
+  attachFilterScopePreference,
+  parseFilterScopePreference,
+} from "./scoped-filter";
 import type { QueryAudience } from "./types";
 
 export class FilterAdapterError extends Error {
@@ -26,7 +30,10 @@ function fromUrl(
   try {
     const document = parseFilterParams(input, analyticsFilterRegistry, options);
     assertFilterAudience(document, analyticsFilterRegistry, audience);
-    return document;
+    return attachFilterScopePreference(
+      document,
+      parseFilterScopePreference(input),
+    );
   } catch (error) {
     throw new FilterAdapterError(audience, error);
   }

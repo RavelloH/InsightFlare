@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createTeamDashboardQueryRuntime } from "@/lib/edge/analytics/composition/ssr-query-runtime";
+import {
+  createQueryTime,
+  teamQueryContext,
+} from "@/lib/edge/analytics/contract";
+
 vi.mock("@/lib/edge/analytics/providers/d1/internal/core", () => ({
   resolvePrivateTeamForSession: vi.fn(),
 }));
@@ -126,6 +132,83 @@ describe("team dashboard runtime", () => {
       "day",
       undefined,
       undefined,
+    );
+  });
+
+  it("passes the canonical filter document through the SSR reader", async () => {
+    const filters = {
+      version: 1 as const,
+      root: {
+        kind: "condition" as const,
+        target: { kind: "field" as const, field: "page.path" as never },
+        operator: "eq" as const,
+        value: "/docs",
+      },
+    };
+    vi.mocked(queryTeamDashboardForTeam).mockResolvedValue({
+      data: { sites: [], trend: [] },
+      source: "raw",
+    } as never);
+
+    await readTeamDashboard({
+      env,
+      teamId: "team-resolved",
+      window: { startMs: 0, endExclusiveMs: 1, nowMs: 1, timeZone: "UTC" },
+      interval: "day",
+      filters,
+    });
+
+    expect(queryTeamDashboardForTeam).toHaveBeenCalledWith(
+      env,
+      "team-resolved",
+      expect.anything(),
+      "day",
+      undefined,
+      undefined,
+      undefined,
+      filters,
+    );
+  });
+
+  it("forwards prepared filters from the runtime provider", async () => {
+    const filters = {
+      version: 1 as const,
+      root: {
+        kind: "condition" as const,
+        target: { kind: "field" as const, field: "page.path" as never },
+        operator: "eq" as const,
+        value: "/docs",
+      },
+    };
+    vi.mocked(queryTeamDashboardForTeam).mockResolvedValue({
+      data: { sites: [], trend: [] },
+      source: "raw",
+    } as never);
+
+    const runtime = createTeamDashboardQueryRuntime({
+      env,
+      teamId: "team-resolved",
+      window: { startMs: 0, endExclusiveMs: 1, nowMs: 1, timeZone: "UTC" },
+      interval: "day",
+    });
+    const result = await runtime.execute("team-dashboard", {
+      context: teamQueryContext("team-resolved", "private-dashboard", [
+        "site-1",
+      ]),
+      time: createQueryTime(0, 1, "UTC", 1),
+      filters,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(queryTeamDashboardForTeam).toHaveBeenCalledWith(
+      env,
+      "team-resolved",
+      expect.anything(),
+      "day",
+      undefined,
+      undefined,
+      undefined,
+      expect.objectContaining({ root: filters.root }),
     );
   });
 });

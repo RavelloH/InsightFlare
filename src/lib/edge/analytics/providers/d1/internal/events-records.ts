@@ -1,3 +1,7 @@
+import {
+  EMPTY_FILTER_DOCUMENT,
+  type ScopedDatasetSql,
+} from "@/lib/edge/analytics/contract";
 import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
 import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
@@ -20,6 +24,7 @@ import {
   visitSourceBindings,
 } from "./core";
 import { mapVisitPerformanceMetrics } from "./core-performance";
+import { scopedDatasetFor } from "./scoped-dataset";
 
 const EVENT_RECORD_CURSOR_MAX_LENGTH = 12_288;
 
@@ -327,14 +332,19 @@ function eventRecordsSql(
   sort: ListSort<EventRecordSortKey>,
   sourceColumns: string,
   eventName?: string,
+  scopedDataset?: ScopedDatasetSql | null,
 ): string {
   return `
 WITH
-${buildVisitSourceCte()},
+${
+  scopedDataset
+    ? `${scopedDataset.ctes},`
+    : `${buildVisitSourceCte()},
 ${buildEventAnalyticsSourceCte({
   eventName,
   selectColumns: sourceColumns,
-})}
+})}`
+}
 SELECT
   event_pk AS eventPk,
   event_id AS eventId,
@@ -359,7 +369,7 @@ SELECT
   device_type AS deviceType,
   node_count AS nodeCount,
   value_count AS valueCount
-FROM event_source es
+FROM ${scopedDataset?.eventRelation ?? "event_source"} es
 ${filterClause || "WHERE 1 = 1"}
 ${cursorClause}
 ORDER BY ${eventRecordOrderBy(sort)}
@@ -385,25 +395,40 @@ export async function queryEventRecordPageFromD1(
     cursor?: EventRecordCursor | null;
   },
 ): Promise<EventRecordPage> {
-  const filter = buildEventFilterSql(filters, "es", {
-    search: options.search,
-  });
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = buildEventFilterSql(
+    scopedDataset ? EMPTY_FILTER_DOCUMENT : filters,
+    "es",
+    {
+      search: options.search,
+    },
+  );
+  const eventNameClause =
+    scopedDataset && options.eventName
+      ? `${filter.clause ? " AND" : "WHERE"} TRIM(COALESCE(es.event_name, '')) = ?`
+      : "";
   const cursor = options.cursor
     ? eventRecordCursorFilter(options.cursor, options.sort)
     : { clause: "", bindings: [] };
   const rows = await queryD1All<EventRecordCursorRow>(
     env,
     eventRecordsSql(
-      filter.clause,
+      `${filter.clause}${eventNameClause}`,
       cursor.clause,
       options.sort,
       eventRecordSourceColumns(filters),
       options.eventName,
+      scopedDataset,
     ),
     [
-      ...visitSourceBindings(siteId, window),
-      ...eventSourceBindings(siteId, window, options.eventName),
+      ...(scopedDataset
+        ? scopedDataset.bindings.map((binding) => binding.value)
+        : [
+            ...visitSourceBindings(siteId, window),
+            ...eventSourceBindings(siteId, window, options.eventName),
+          ]),
       ...filter.bindings,
+      ...(scopedDataset && options.eventName ? [options.eventName] : []),
       ...cursor.bindings,
       options.pageSize + 1,
     ],

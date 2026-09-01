@@ -7,17 +7,16 @@ import type {
   QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
-  buildVisitFilterSql,
-  buildVisitSourceCte,
   CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
   CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
   CLIENT_CROSS_UNKNOWN_TOKEN,
   queryD1All,
   SHARE_TREND_OTHER_LABEL,
   shareTrendSeriesKey,
-  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
+
+import { technologyVisitSource } from "./scoped-source";
 
 interface DimensionDefinition {
   labelExpr: string;
@@ -34,7 +33,7 @@ export async function queryCrossDimensionFromD1(
   primaryDimension: DimensionDefinition,
   secondaryDimension: DimensionDefinition,
 ): Promise<BrowserCrossBreakdownDimensionDataRow> {
-  const filter = buildVisitFilterSql(filters);
+  const source = technologyVisitSource(siteId, window, filters);
   const normalizedPrimaryLimit = Math.min(Math.max(1, primaryLimit), 12);
   const normalizedSecondaryLimit = Math.min(Math.max(1, secondaryLimit), 8);
   const primaryExpr = primaryDimension.labelExpr;
@@ -42,15 +41,15 @@ export async function queryCrossDimensionFromD1(
 
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${source.ctes},
 filtered_visits AS MATERIALIZED (
   SELECT
     ${primaryExpr} AS primaryValue,
     ${normalizedSecondaryExpr} AS secondaryValue,
     visitor_id AS visitorId,
     session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
+  FROM ${source.relation}
+  ${source.filterClause}
 ),
 top_primary_aggregate AS (
   SELECT
@@ -167,8 +166,8 @@ FROM tagged_rows
 ORDER BY rowType ASC, rowOrder ASC, primaryValue ASC, secondaryValue ASC
 `;
   const queryRows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...visitSourceBindings(siteId, window),
-    ...filter.bindings,
+    ...source.bindings,
+    ...source.filterBindings,
     normalizedPrimaryLimit,
     normalizedSecondaryLimit,
   ]);

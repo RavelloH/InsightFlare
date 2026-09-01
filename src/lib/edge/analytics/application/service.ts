@@ -12,6 +12,7 @@ import type {
   QueryOperation,
   QueryTime,
 } from "@/lib/edge/analytics/contract";
+import { prepareScopedQuery } from "@/lib/edge/analytics/contract/scoped-filter";
 import {
   currentInvocationLogger,
   errorLogData,
@@ -109,6 +110,35 @@ class UncacheableResult extends Error {
   }
 }
 
+/**
+ * Provider payloads for the legacy API overview/timeseries adapters contain
+ * an inner AnalyticsResult envelope. That envelope is still a provider
+ * payload for cache purposes, so refresh its request metadata after a cache
+ * hit instead of making requested Auto/concrete scope part of semantic
+ * identity.
+ */
+function rehydrateScopedProviderValue<Result>(
+  value: Result,
+  query: QueryInput,
+): Result {
+  if (!query.scopePlan || !value || typeof value !== "object") return value;
+  const candidate = value as {
+    readonly ok?: unknown;
+    readonly meta?: Record<string, unknown>;
+  };
+  if (candidate.ok !== true || !candidate.meta) return value;
+  return {
+    ...(value as Record<string, unknown>),
+    meta: {
+      ...candidate.meta,
+      filterScope: {
+        requested: query.scopePreference ?? "auto",
+        resolved: query.scopePlan.scope,
+      },
+    },
+  } as Result;
+}
+
 export class TypedQueryApplicationService {
   constructor(
     private readonly cache?: OperationResultCache,
@@ -144,9 +174,41 @@ export class TypedQueryApplicationService {
       return before;
     }
 
-    const validationError = validateTypedQueryInput(
+    // Validate the caller's document before scope planning. Scope planning
+    // deliberately works with trusted FilterExpression nodes, while this
+    // boundary is also responsible for returning the public invalid-filter
+    // error for malformed documents.
+    const initialValidationError = validateTypedQueryInput(
       invocation.operation,
       invocation.query,
+    );
+    if (initialValidationError) {
+      emit(executionContext, "failure");
+      return { ok: false, error: initialValidationError };
+    }
+
+    let preparedQuery: QueryInput;
+    try {
+      preparedQuery = prepareScopedQuery(
+        invocation.operation,
+        invocation.query,
+      );
+    } catch (error) {
+      const code =
+        error instanceof Error ? error.message : "invalid_filter_scope";
+      emit(executionContext, "failure");
+      return {
+        ok: false,
+        error: {
+          kind: "invalid-input",
+          issues: [{ path: "scope", code }],
+        },
+      };
+    }
+
+    const validationError = validateTypedQueryInput(
+      invocation.operation,
+      preparedQuery,
     );
     if (validationError) {
       emit(executionContext, "failure");
@@ -177,7 +239,7 @@ export class TypedQueryApplicationService {
         };
       }
       const load = async (): Promise<TypedQueryProviderResult<Result>> =>
-        provider.execute(invocation.query, executionContext);
+        provider.execute(preparedQuery, executionContext);
       let result: TypedQueryProviderResult<Result>;
       if (!invocation.cache || !this.cache) {
         result = await load();
@@ -201,10 +263,19 @@ export class TypedQueryApplicationService {
           result = error.value as TypedQueryProviderResult<Result>;
         }
       }
+      result = {
+        ...result,
+        value: rehydrateScopedProviderValue(result.value, preparedQuery),
+      };
       const time =
-        "time" in invocation.query
-          ? (invocation.query as QueryInput & { readonly time: QueryTime }).time
-          : undefined;
+        "time" in preparedQuery
+          ? (preparedQuery as QueryInput & { readonly time: QueryTime }).time
+          : "current" in preparedQuery &&
+              preparedQuery.current &&
+              typeof preparedQuery.current === "object" &&
+              "time" in preparedQuery.current
+            ? (preparedQuery.current as { readonly time: QueryTime }).time
+            : undefined;
       if (!time) {
         emit(executionContext, "failure");
         return {
@@ -228,6 +299,14 @@ export class TypedQueryApplicationService {
           time,
           source: result.source ?? "raw",
           approximateVisitors: Boolean(result.approximateVisitors),
+          ...(preparedQuery.scopePlan
+            ? {
+                filterScope: {
+                  requested: preparedQuery.scopePreference ?? "auto",
+                  resolved: preparedQuery.scopePlan.scope,
+                },
+              }
+            : {}),
         },
       };
     } catch (error) {

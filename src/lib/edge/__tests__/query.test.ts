@@ -283,10 +283,12 @@ const overviewRows = [
 function overviewMatch(): SqlMatch {
   let index = 0;
   return {
-    match: includesAll(
-      "COALESCE((SELECT count(*) FROM session_rollup WHERE visit_count = 1), 0) AS bounces",
-      "FROM filtered_visits",
-    ),
+    match: (sql) =>
+      sql.includes(
+        "COALESCE((SELECT count(*) FROM session_rollup WHERE visit_count = 1), 0) AS bounces",
+      ) &&
+      (sql.includes("FROM filtered_visits") ||
+        sql.includes("FROM scope_final_visits")),
     first: undefined,
     run: undefined,
     get all() {
@@ -1261,7 +1263,7 @@ describe("edge query handlers", () => {
       expect.arrayContaining(["us", "example.com"]),
     );
     expect(aggregateStatement?.sql).toContain(
-      "LOWER(TRIM(COALESCE(visit_source.referrer_host, ''))) = ''",
+      "LOWER(TRIM(COALESCE(v.referrer_host, ''))) = ''",
     );
   });
 
@@ -2303,6 +2305,70 @@ describe("edge query handlers", () => {
         trend: [],
       },
     });
+  });
+
+  it("applies private team filters through the scoped dataset", async () => {
+    const { env, statements } = createEnv({
+      matches: [
+        firstMatch(["SELECT id FROM teams"], { id: "team-1" }),
+        allMatch(
+          ["FROM sites", "WHERE team_id = ?"],
+          [
+            {
+              id: "site-1",
+              teamId: "team-1",
+              name: "Main",
+              domain: "example.com",
+              publicEnabled: 1,
+              publicSlug: "main",
+              createdAt: 10,
+              updatedAt: 20,
+            },
+          ],
+        ),
+        allMatch(
+          ["FROM scope_final_visits", "GROUP BY siteId"],
+          [
+            {
+              siteId: "site-1",
+              views: 4,
+              sessions: 2,
+              visitors: 2,
+              bounces: 1,
+              totalDuration: 100,
+              durationViews: 2,
+            },
+          ],
+        ),
+        allMatch(
+          ["FROM scope_final_visits", "GROUP BY siteId, bucket"],
+          [{ siteId: "site-1", bucket: 0, views: 4, visitors: 2 }],
+        ),
+      ],
+    });
+
+    const response = await privateQuery(
+      `/api/private/team-dashboard?teamId=team-1&${windowParams}&filter[page.path]=/docs`,
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      data: {
+        sites: [{ id: "site-1", overview: { views: 4 } }],
+        trend: [{ sites: [{ siteId: "site-1", views: 4 }] }],
+      },
+    });
+    const scopedStatements = statements.filter((statement) =>
+      statement.sql.includes("FROM scope_final_visits"),
+    );
+    expect(scopedStatements).toHaveLength(3);
+    expect(
+      scopedStatements.every((statement) =>
+        statement.bindings.includes("/docs"),
+      ),
+    ).toBe(true);
   });
 
   it("handles public query lookup, public privacy envelope, public-only route restrictions, and missing slugs", async () => {

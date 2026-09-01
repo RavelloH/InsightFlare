@@ -12,6 +12,7 @@ import {
   type SavedFilterPage,
 } from "@/lib/api-v1/application-registry";
 import type { Env } from "@/lib/edge/types";
+import type { SavedFilterScopePreference } from "@/lib/saved-filters";
 
 const MAX_CURSOR_BYTES = 12_288;
 
@@ -19,6 +20,7 @@ interface SavedFilterRow {
   readonly id: string;
   readonly name: string;
   readonly description: string;
+  readonly scopePreference: SavedFilterScopePreference;
   readonly filterDsl: string;
   readonly filterDslVersion: number;
   readonly createdAt: number;
@@ -141,6 +143,7 @@ function toDefinition(row: SavedFilterRow): SavedFilterDefinition {
     name: row.name,
     description: row.description,
     visibility: "team",
+    scopePreference: row.scopePreference ?? "auto",
     filter,
     createdAt: new Date(row.createdAt * 1000).toISOString(),
     updatedAt: new Date(row.updatedAt * 1000).toISOString(),
@@ -170,6 +173,7 @@ export function createSavedFilterApplicationService(
     try {
       const row = await env.DB.prepare(
         `SELECT sf.id, sf.name, sf.description,
+                sf.scope_preference AS scopePreference,
                 sf.filter_dsl AS filterDsl, sf.filter_dsl_version AS filterDslVersion,
                 sf.created_at AS createdAt, sf.updated_at AS updatedAt
          FROM saved_filters sf
@@ -244,6 +248,7 @@ export function createSavedFilterApplicationService(
         : [input.siteId, context.teamId, input.limit + 1];
       const rows = await env.DB.prepare(
         `SELECT sf.id, sf.name, sf.description,
+                sf.scope_preference AS scopePreference,
                 sf.filter_dsl AS filterDsl, sf.filter_dsl_version AS filterDslVersion,
                 sf.created_at AS createdAt, sf.updated_at AS updatedAt
          FROM saved_filters sf

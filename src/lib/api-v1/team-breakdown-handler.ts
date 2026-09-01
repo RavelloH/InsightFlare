@@ -242,6 +242,9 @@ export async function handleTeamBreakdown(
           },
           source: "raw",
           accuracy: "exact",
+          ...(serviceResult.meta?.filterScope
+            ? { filterScope: serviceResult.meta.filterScope }
+            : {}),
         },
       },
       requestId,

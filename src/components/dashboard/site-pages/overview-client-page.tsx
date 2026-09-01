@@ -98,6 +98,13 @@ import {
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 import type { OverviewData, TrendData } from "@/lib/edge-client";
 import {
+  attachFilterScopePreference,
+  type FilterScope,
+  filterScopePreferenceFromDocument,
+  parseFilterScopePreference,
+  resolveFilterScope,
+} from "@/lib/filter-contract";
+import {
   analyticsFilterRegistry,
   type FilterDocument,
   parseFilterParams,
@@ -411,6 +418,7 @@ type PageCardTabFetcher = (
   siteId: string,
   window: TimeWindow,
   filters: FilterDocument,
+  resolvedScope?: FilterScope,
 ) => Promise<OverviewTabRows>;
 
 type PageCardTargetUrlResolver = (params: {
@@ -633,7 +641,10 @@ function extractGeoCountryCodeFromFilterValue(
 export function parseOverviewCardFilters(
   searchParams: URLSearchParams,
 ): FilterDocument {
-  return parseFilterParams(searchParams, analyticsFilterRegistry);
+  return attachFilterScopePreference(
+    parseFilterParams(searchParams, analyticsFilterRegistry),
+    parseFilterScopePreference(searchParams),
+  );
 }
 
 function isGeoLocationTab(tab: GeoDimensionCardTab): tab is GeoLocationTab {
@@ -1619,6 +1630,7 @@ function resolvePageCardTargetUrl(params: {
 
 interface OverviewPagesSectionProps extends OverviewClientPageProps {
   filters: FilterDocument;
+  resolvedScope?: FilterScope;
   loading?: boolean;
   cardDataOverride?: OverviewPagesSectionCardData | null;
   visibleCards?: readonly OverviewPagesSectionCardKind[];
@@ -1657,6 +1669,7 @@ export function OverviewPagesSection({
   siteDomain,
   pathname,
   filters,
+  resolvedScope,
   loading = false,
   cardDataOverride,
   visibleCards,
@@ -1700,7 +1713,20 @@ export function OverviewPagesSection({
     if (to <= from) return Math.max(0, Math.floor(from));
     return Math.floor(from + (to - from) / 2);
   }, [window.from, window.to]);
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const filtersKey = useMemo(
+    () =>
+      JSON.stringify({
+        document: filters ?? {},
+        scope: filterScopePreferenceFromDocument(filters) ?? "auto",
+      }),
+    [filters],
+  );
+  const entityScopedOutput =
+    resolvedScope === "session" ||
+    resolvedScope === "visitor" ||
+    (resolvedScope === undefined &&
+      (filterScopePreferenceFromDocument(filters) === "session" ||
+        filterScopePreferenceFromDocument(filters) === "visitor"));
   const pageCardFetchersRef = useRef(pageCardFetchers);
   pageCardFetchersRef.current = pageCardFetchers;
   const sourceCardFetchersRef = useRef(sourceCardFetchers);
@@ -1832,10 +1858,11 @@ export function OverviewPagesSection({
           requestedFilters,
           {
             limit: 100,
+            resolvedScope,
           },
         ));
 
-    loadPageCardTab(siteId, window, filters)
+    loadPageCardTab(siteId, window, filters, resolvedScope)
       .then((data) => {
         if (!active) return;
         setPageCardTabData((prev) => ({
@@ -1863,6 +1890,7 @@ export function OverviewPagesSection({
     window.interval,
     window.to,
     window.timeZone,
+    resolvedScope,
     hasCardDataOverride,
   ]);
 
@@ -1884,10 +1912,10 @@ export function OverviewPagesSection({
           requestedWindow,
           sourceCardTab,
           requestedFilters,
-          { limit: 100 },
+          { limit: 100, resolvedScope },
         ));
 
-    loadSourceCardTab(siteId, window, filters)
+    loadSourceCardTab(siteId, window, filters, resolvedScope)
       .then((data) => {
         if (!active) return;
         setSourceCardTabData((prev) => ({
@@ -1916,6 +1944,7 @@ export function OverviewPagesSection({
     window.interval,
     window.to,
     window.timeZone,
+    resolvedScope,
     hasCardDataOverride,
   ]);
 
@@ -1936,10 +1965,10 @@ export function OverviewPagesSection({
           requestedWindow,
           clientDimensionCardTab,
           requestedFilters,
-          { limit: 100 },
+          { limit: 100, resolvedScope },
         ));
 
-    loadClientCardTab(siteId, window, filters)
+    loadClientCardTab(siteId, window, filters, resolvedScope)
       .then((data) => {
         if (!active) return;
         setClientDimensionCardTabData((prev) => ({
@@ -1967,6 +1996,7 @@ export function OverviewPagesSection({
     window.interval,
     window.to,
     window.timeZone,
+    resolvedScope,
     hasCardDataOverride,
   ]);
 
@@ -1987,10 +2017,10 @@ export function OverviewPagesSection({
           requestedWindow,
           geoDimensionCardTab,
           requestedFilters,
-          { limit: 100 },
+          { limit: 100, resolvedScope },
         ));
 
-    loadGeoCardTab(siteId, window, filters)
+    loadGeoCardTab(siteId, window, filters, resolvedScope)
       .then((data) => {
         if (!active) return;
         setGeoDimensionCardTabData((prev) => ({
@@ -2018,6 +2048,7 @@ export function OverviewPagesSection({
     window.interval,
     window.to,
     window.timeZone,
+    resolvedScope,
     hasCardDataOverride,
   ]);
 
@@ -3163,35 +3194,37 @@ export function OverviewPagesSection({
   );
   const filterPageCardRows = useCallback(
     (rows: readonly PageCardRow[]) =>
-      activePageCardFilterValue
+      !entityScopedOutput && activePageCardFilterValue
         ? rows.filter(
             (row) =>
               (row.filterValue ?? row.label) === activePageCardFilterValue,
           )
         : [...rows],
-    [activePageCardFilterValue],
+    [activePageCardFilterValue, entityScopedOutput],
   );
   const filterSourceCardRows = useCallback(
     (rows: readonly SourceCardRow[]) =>
-      activeSourceCardFilterValue
+      !entityScopedOutput && activeSourceCardFilterValue
         ? rows.filter((row) => row.filterValue === activeSourceCardFilterValue)
         : [...rows],
-    [activeSourceCardFilterValue],
+    [activeSourceCardFilterValue, entityScopedOutput],
   );
   const filterClientDimensionCardRows = useCallback(
     (rows: readonly PageCardRow[]) =>
-      activeClientDimensionCardFilterValue
+      !entityScopedOutput && activeClientDimensionCardFilterValue
         ? rows.filter(
             (row) =>
               (row.filterValue ?? row.label) ===
               activeClientDimensionCardFilterValue,
           )
         : [...rows],
-    [activeClientDimensionCardFilterValue],
+    [activeClientDimensionCardFilterValue, entityScopedOutput],
   );
   const filterGeoDimensionCardRows = useCallback(
     (rows: readonly PageCardRow[], tab: GeoDimensionCardTab) => {
-      if (!activeGeoDimensionCardFilterValue) return [...rows];
+      if (entityScopedOutput || !activeGeoDimensionCardFilterValue) {
+        return [...rows];
+      }
       const activeGeoFilterValue = isGeoLocationTab(tab)
         ? resolveGeoLocationHighlightValue(
             tab,
@@ -3203,7 +3236,7 @@ export function OverviewPagesSection({
         (row) => (row.filterValue ?? row.label) === activeGeoFilterValue,
       );
     },
-    [activeGeoDimensionCardFilterValue],
+    [activeGeoDimensionCardFilterValue, entityScopedOutput],
   );
   const tableExport = useMemo(
     () => ({ labels: messages.common.tableExport }),
@@ -3639,7 +3672,14 @@ function useOverviewSummaryQuery({
   window: timeWindow,
   filters,
 }: Pick<OverviewDataSectionProps, "siteId" | "window" | "filters">) {
-  const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
+  const filtersKey = useMemo(
+    () =>
+      JSON.stringify({
+        document: filters,
+        scope: filterScopePreferenceFromDocument(filters) ?? "auto",
+      }),
+    [filters],
+  );
 
   return useQuery({
     queryKey: [
@@ -4011,11 +4051,24 @@ export function OverviewClientPage({
 }: OverviewClientPageProps) {
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
-  const { window } = useDashboardQuery();
+  const { window, scopePreference } = useDashboardQuery();
+  const resolvedScope = useMemo(
+    () => resolveFilterScope("overview", scopePreference),
+    [scopePreference],
+  );
   const searchParamsKey = searchParams.toString();
   const requestFilters = useMemo(
     () => parseOverviewCardFilters(new URLSearchParams(searchParamsKey)),
     [searchParamsKey],
+  );
+  // Overview's Auto scope is resolved once by the parent operation (session)
+  // and passed to every dashboard child request. The URL remains Auto.
+  const resolvedRequestFilters = useMemo(
+    () =>
+      resolvedScope
+        ? attachFilterScopePreference(requestFilters, resolvedScope)
+        : requestFilters,
+    [requestFilters, resolvedScope],
   );
   const selectedGeoValue = dashboardFilterValue(requestFilters, "geo") ?? null;
   const selectedGeoCountry = useMemo(() => {
@@ -4063,14 +4116,14 @@ export function OverviewClientPage({
         messages={messages}
         siteId={siteId}
         window={window}
-        filters={requestFilters}
+        filters={resolvedRequestFilters}
       />
       <OverviewTrendSection
         locale={locale}
         messages={messages}
         siteId={siteId}
         window={window}
-        filters={requestFilters}
+        filters={resolvedRequestFilters}
       />
       <OverviewPagesSection
         locale={locale}
@@ -4078,7 +4131,8 @@ export function OverviewClientPage({
         siteId={siteId}
         siteDomain={siteDomain}
         pathname={pathname}
-        filters={requestFilters}
+        filters={resolvedRequestFilters}
+        resolvedScope={resolvedScope ?? undefined}
         showSourceLinkTab={showSourceLinkTab}
       />
       <OverviewGeoPointsMapCard
@@ -4086,7 +4140,8 @@ export function OverviewClientPage({
         messages={messages}
         siteId={siteId}
         window={window}
-        filters={requestFilters}
+        filters={resolvedRequestFilters}
+        resolvedScope={resolvedScope ?? undefined}
         selectedCountryCode={selectedGeoCountry}
         onCountrySelect={handleMapCountrySelect}
       />

@@ -6,9 +6,10 @@ import { ShareHeader } from "@/components/dashboard/share-header";
 import { PageTransition } from "@/components/page-transition";
 import { publicDashboardSiteId } from "@/lib/dashboard/client-request";
 import { sharePath } from "@/lib/dashboard/share-path";
+import { parseFilterScopePreference } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
-import { usePathname } from "@/lib/router";
+import { usePathname, useSearchParams } from "@/lib/router";
 
 interface ShareDashboardShellProps {
   locale: Locale;
@@ -43,6 +44,7 @@ export function ShareDashboardShell({
 }: ShareDashboardShellProps) {
   const publicSiteId = publicDashboardSiteId(slug);
   const pathname = usePathname() || "";
+  const initialScopePreference = parseFilterScopePreference(useSearchParams());
   const isGeoRoute = pathname.endsWith("/geo");
   const rootClassName = isGeoRoute
     ? "flex h-svh min-h-0 flex-col bg-background text-foreground"
@@ -52,7 +54,11 @@ export function ShareDashboardShell({
     : "mx-auto w-full max-w-[1400px] p-4 md:p-6";
 
   return (
-    <DashboardQueryProvider scopeKey={publicSiteId} maxRangeDays={365}>
+    <DashboardQueryProvider
+      scopeKey={publicSiteId}
+      maxRangeDays={365}
+      initialScopePreference={initialScopePreference}
+    >
       <div className={rootClassName}>
         <div className="sticky top-0 z-20 shrink-0 border-b bg-background/92 backdrop-blur">
           <div className="p-3">

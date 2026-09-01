@@ -90,6 +90,7 @@ import {
 import type { EventField } from "@/lib/edge-client";
 import {
   analyticsFilterRegistry,
+  attachFilterScopePreference,
   type CanonicalJsonPath,
   FILTER_DOCUMENT_VERSION,
   type FilterCondition,
@@ -99,6 +100,7 @@ import {
   type FilterFieldId,
   filterFingerprint,
   type FilterOperator,
+  type FilterScopePreference,
   FilterValidationError,
   type FilterValue,
   type FilterValueKind,
@@ -120,6 +122,7 @@ const EMPTY_SAVED_FILTER_FORM = {
   name: "",
   description: "",
   visibility: "private",
+  scopePreference: "auto",
 } as const satisfies Omit<SavedFilterInput, "filterDsl">;
 type SavedFilterForm = Omit<SavedFilterInput, "filterDsl">;
 type ValueSuggestion = {
@@ -196,12 +199,14 @@ interface FilterPanelProps {
   readonly messages: AppMessages;
   readonly open: boolean;
   readonly siteId?: string;
+  readonly scopePreference: FilterScopePreference;
   readonly window?: TimeWindow;
   readonly onApply: (
     document: FilterDocument,
     rawDsl?: string,
     options?: { readonly closePanel?: boolean },
   ) => void;
+  readonly onScopeChange: (preference: FilterScopePreference) => void;
 }
 
 const VALUELESS_OPERATORS = new Set<FilterOperator>([
@@ -915,6 +920,36 @@ function SavedFilterFormFields({
             onChange({ ...form, description: event.target.value })
           }
         />
+      </div>
+      <div className="space-y-1.5">
+        <Label>{messages.filterBuilder.scopeLabel}</Label>
+        <Select
+          value={form.scopePreference ?? "auto"}
+          onValueChange={(scopePreference) =>
+            onChange({
+              ...form,
+              scopePreference: scopePreference as FilterScopePreference,
+            })
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">
+              {messages.filterBuilder.scopeAuto}
+            </SelectItem>
+            <SelectItem value="event">
+              {messages.filterBuilder.scopeEvent}
+            </SelectItem>
+            <SelectItem value="session">
+              {messages.filterBuilder.scopeSession}
+            </SelectItem>
+            <SelectItem value="visitor">
+              {messages.filterBuilder.scopeVisitor}
+            </SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       <div className="space-y-1.5">
         <Label>{messages.filterBuilder.savedFilterVisibility}</Label>
@@ -1884,8 +1919,10 @@ export function FilterPanel({
   messages,
   open,
   siteId,
+  scopePreference,
   window,
   onApply,
+  onScopeChange,
 }: FilterPanelProps) {
   const nextIdRef = useRef(conditionIdFactory());
   const createId = useCallback(() => nextIdRef.current(), []);
@@ -2021,6 +2058,7 @@ export function FilterPanel({
   const matchedSavedFilter = useMemo(() => {
     if (expressionError || root.children.length === 0) return undefined;
     const matches = savedFilters.filter((filter) => {
+      if (filter.scopePreference !== scopePreference) return false;
       if (filter.filterDsl === expressionText) return true;
       if (!currentFilterFingerprint) return false;
       try {
@@ -2044,6 +2082,7 @@ export function FilterPanel({
     expressionText,
     root.children.length,
     savedFilters,
+    scopePreference,
   ]);
   const matchedSystemPreset = useMemo(() => {
     if (matchedSavedFilter || expressionError || root.children.length === 0) {
@@ -2271,11 +2310,17 @@ export function FilterPanel({
   }, [commitExpressionText, messages.filterBuilder.invalid, onApply]);
 
   const applyFilterDsl = useCallback(
-    (filterDsl: string) => {
+    (
+      filterDsl: string,
+      scopeOverride: FilterScopePreference = scopePreference,
+    ) => {
       const nextRoot = rootFromExpressionText(filterDsl);
       if (!nextRoot) return;
       try {
-        const nextDocument = documentFromEditor(nextRoot);
+        const nextDocument = attachFilterScopePreference(
+          documentFromEditor(nextRoot),
+          scopeOverride,
+        );
         preservedDocumentKeyRef.current = JSON.stringify(nextDocument);
         setExpressionText(filterDsl);
         setExpressionRoot(nextRoot);
@@ -2294,27 +2339,35 @@ export function FilterPanel({
       messages.filterBuilder.invalid,
       onApply,
       rootFromExpressionText,
+      scopePreference,
       setExpressionRoot,
     ],
   );
   const applySavedFilter = useCallback(
-    (filter: SavedFilter) => applyFilterDsl(filter.filterDsl),
-    [applyFilterDsl],
+    (filter: SavedFilter) => {
+      onScopeChange(filter.scopePreference);
+      applyFilterDsl(filter.filterDsl, filter.scopePreference);
+    },
+    [applyFilterDsl, onScopeChange],
   );
   const applySystemPreset = useCallback(
     (preset: SystemFilterPreset) => applyFilterDsl(preset.filterDsl),
     [applyFilterDsl],
   );
 
-  const openSavedFilterCreate = useCallback((source?: SavedFilter) => {
-    setSavedFilterForm({
-      name: source?.name ?? "",
-      description: source?.description ?? "",
-      visibility: "private",
-    });
-    setSavedFilterOperationError(null);
-    setCreateSavedFilterOpen(true);
-  }, []);
+  const openSavedFilterCreate = useCallback(
+    (source?: SavedFilter) => {
+      setSavedFilterForm({
+        name: source?.name ?? "",
+        description: source?.description ?? "",
+        visibility: "private",
+        scopePreference: source?.scopePreference ?? scopePreference,
+      });
+      setSavedFilterOperationError(null);
+      setCreateSavedFilterOpen(true);
+    },
+    [scopePreference],
+  );
 
   const clearSavedFilter = useCallback(() => {
     const nextRoot = emptyEditorGroup(createId);
@@ -2333,6 +2386,7 @@ export function FilterPanel({
       name: filter.name,
       description: filter.description,
       visibility: filter.visibility,
+      scopePreference: filter.scopePreference,
     });
     setSavedFilterOperationError(null);
     setManageSavedFilterOpen(true);
@@ -2347,11 +2401,17 @@ export function FilterPanel({
         name: editingSavedFilter.name,
         description: editingSavedFilter.description,
         visibility: editingSavedFilter.visibility,
+        scopePreference: savedFilterForm.scopePreference ?? "auto",
       },
       filterDsl: expressionText,
       finishEditing: true,
     });
-  }, [editingSavedFilter, expressionText, updateSavedFilterMutation]);
+  }, [
+    editingSavedFilter,
+    expressionText,
+    savedFilterForm.scopePreference,
+    updateSavedFilterMutation,
+  ]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -2497,6 +2557,38 @@ export function FilterPanel({
               ) : null}
             </AutoTransition>
           </AutoResizer>
+        </div>
+
+        <div className="mb-4 border-b border-border pb-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="filter-panel-scope">
+              {messages.filterBuilder.scopeLabel}
+            </Label>
+            <Select
+              value={scopePreference}
+              onValueChange={(value) =>
+                onScopeChange(value as FilterScopePreference)
+              }
+            >
+              <SelectTrigger id="filter-panel-scope" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">
+                  {messages.filterBuilder.scopeAuto}
+                </SelectItem>
+                <SelectItem value="event">
+                  {messages.filterBuilder.scopeEvent}
+                </SelectItem>
+                <SelectItem value="session">
+                  {messages.filterBuilder.scopeSession}
+                </SelectItem>
+                <SelectItem value="visitor">
+                  {messages.filterBuilder.scopeVisitor}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <GroupEditor

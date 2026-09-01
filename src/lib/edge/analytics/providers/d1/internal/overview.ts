@@ -28,6 +28,22 @@ import {
   queryOverviewClientDimensionsFromD1,
   queryOverviewGeoDimensionsFromD1,
 } from "./dimensions";
+import { scopedDatasetFor } from "./scoped-dataset";
+
+function entityExpansionSql(): string {
+  return `
+matched_entities AS MATERIALIZED (
+  SELECT DISTINCT site_pk, session_id
+  FROM filtered_visits
+  WHERE TRIM(COALESCE(session_id, '')) != ''
+),
+calculated_visits AS MATERIALIZED (
+  SELECT vs.*
+  FROM visit_source vs
+  INNER JOIN matched_entities me
+    ON me.site_pk = vs.site_pk AND me.session_id = vs.session_id
+),`;
+}
 
 export async function queryOverviewFromD1(
   env: Env,
@@ -36,35 +52,33 @@ export async function queryOverviewFromD1(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<OverviewAggregateRow> {
-  const filter = buildVisitFilterSql(filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset
+    ? { clause: "", bindings: [] as Array<string | number> }
+    : buildVisitFilterSql(filters);
   const hasFilter = filter.clause.length > 0;
+  const expandEntities = !scopedDataset && hasFilter;
+  const entityExpansion = expandEntities ? entityExpansionSql() : "";
   const visitSource = buildVisitSourceCte().replace(
     "visit_source AS (",
     "visit_source AS MATERIALIZED (",
   );
-  const metricSource = hasFilter ? "calculated_visits" : "filtered_visits";
-  const sql = `
-WITH
-${visitSource},
+  const metricSource = scopedDataset
+    ? scopedDataset.visitRelation
+    : expandEntities
+      ? "calculated_visits"
+      : "filtered_visits";
+  const sourceSql = scopedDataset
+    ? `${scopedDataset.ctes},`
+    : `${visitSource},
 filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
   ${filter.clause}
-),${
-    hasFilter
-      ? `
-matched_sessions AS MATERIALIZED (
-  SELECT DISTINCT session_id
-  FROM filtered_visits
-  WHERE session_id != ''
-),
-calculated_visits AS MATERIALIZED (
-  SELECT vs.*
-  FROM visit_source vs
-  INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id
-),`
-      : ""
-  }
+),${entityExpansion}`;
+  const sql = `
+WITH
+${sourceSql}
 session_rollup AS (
   SELECT vs.session_id, count(*) AS visit_count
   FROM ${metricSource} vs
@@ -85,7 +99,9 @@ FROM ${metricSource}
       await queryD1All<Record<string, unknown>>(
         env,
         sql,
-        [...visitSourceBindings(siteId, window), ...filter.bindings],
+        scopedDataset
+          ? scopedDataset.bindings.map((binding) => binding.value)
+          : [...visitSourceBindings(siteId, window), ...filter.bindings],
         diagnostics,
       )
     )[0] ?? {};
@@ -107,8 +123,13 @@ export async function queryTrendFromD1(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<TrendAggregateRow[]> {
-  const filter = buildVisitFilterSql(filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset
+    ? { clause: "", bindings: [] as Array<string | number> }
+    : buildVisitFilterSql(filters);
   const hasFilter = filter.clause.length > 0;
+  const expandEntities = !scopedDataset && hasFilter;
+  const entityExpansion = expandEntities ? entityExpansionSql() : "";
   const visitSource = buildVisitSourceCte().replace(
     "visit_source AS (",
     "visit_source AS MATERIALIZED (",
@@ -116,29 +137,22 @@ export async function queryTrendFromD1(
   const buckets = buildTimeBuckets(window, interval);
   const visitBucket = timeBucketCase(buckets, "started_at");
   const sessionBucket = timeBucketCase(buckets, "session_started_at");
-  const metricSource = hasFilter ? "calculated_visits" : "filtered_visits";
-  const sql = `
-WITH
-${visitSource},
+  const metricSource = scopedDataset
+    ? scopedDataset.visitRelation
+    : expandEntities
+      ? "calculated_visits"
+      : "filtered_visits";
+  const sourceSql = scopedDataset
+    ? `${scopedDataset.ctes},`
+    : `${visitSource},
 filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
   ${filter.clause}
-),${
-    hasFilter
-      ? `
-matched_sessions AS MATERIALIZED (
-  SELECT DISTINCT session_id
-  FROM filtered_visits
-  WHERE session_id != ''
-),
-calculated_visits AS MATERIALIZED (
-  SELECT vs.*
-  FROM visit_source vs
-  INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id
-),`
-      : ""
-  }
+),${entityExpansion}`;
+  const sql = `
+WITH
+${sourceSql}
 visit_bucket_rollup AS (
   SELECT
     ${visitBucket.sql} AS bucket,
@@ -188,8 +202,9 @@ ORDER BY bucket ASC
       env,
       sql,
       [
-        ...visitSourceBindings(siteId, window),
-        ...filter.bindings,
+        ...(scopedDataset
+          ? scopedDataset.bindings.map((binding) => binding.value)
+          : [...visitSourceBindings(siteId, window), ...filter.bindings]),
         ...visitBucket.bindings,
         ...sessionBucket.bindings,
       ],
@@ -218,35 +233,33 @@ export async function queryLatestSiteActivity(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<number | null> {
-  const filter = buildVisitFilterSql(filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset
+    ? { clause: "", bindings: [] as Array<string | number> }
+    : buildVisitFilterSql(filters);
   const hasFilter = filter.clause.length > 0;
+  const expandEntities = !scopedDataset && hasFilter;
+  const entityExpansion = expandEntities ? entityExpansionSql() : "";
   const visitSource = buildVisitSourceCte().replace(
     "visit_source AS (",
     "visit_source AS MATERIALIZED (",
   );
-  const metricSource = hasFilter ? "calculated_visits" : "filtered_visits";
-  const sql = `
-WITH
-${visitSource},
+  const metricSource = scopedDataset
+    ? scopedDataset.visitRelation
+    : expandEntities
+      ? "calculated_visits"
+      : "filtered_visits";
+  const sourceSql = scopedDataset
+    ? `${scopedDataset.ctes},`
+    : `${visitSource},
 filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
   ${filter.clause}
-),${
-    hasFilter
-      ? `
-matched_sessions AS MATERIALIZED (
-  SELECT DISTINCT session_id
-  FROM filtered_visits
-  WHERE session_id != ''
-),
-calculated_visits AS MATERIALIZED (
-  SELECT vs.*
-  FROM visit_source vs
-  INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id
-),`
-      : ""
-  }
+),${entityExpansion}`;
+  const sql = `
+WITH
+${sourceSql}
 SELECT MAX(last_activity_at) AS lastActivityAt
 FROM ${metricSource}
 `;
@@ -254,7 +267,9 @@ FROM ${metricSource}
     await queryD1All<Record<string, unknown>>(
       env,
       sql,
-      [...visitSourceBindings(siteId, window), ...filter.bindings],
+      scopedDataset
+        ? scopedDataset.bindings.map((binding) => binding.value)
+        : [...visitSourceBindings(siteId, window), ...filter.bindings],
       diagnostics,
     )
   )[0];
@@ -271,7 +286,8 @@ export async function queryOverviewAggregate(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<PreferredSourceResult<OverviewAggregateRow>> {
-  if (!hasFilterDocument(filters)) {
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  if (!hasFilterDocument(filters) && !scopedDataset) {
     const rollup = await queryOverviewForSitesFromHourlyRollups(
       env,
       [siteId],
@@ -304,7 +320,8 @@ export async function queryTrendAggregate(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<PreferredSourceResult<TrendAggregateRow[]>> {
-  if (!hasFilterDocument(filters)) {
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  if (!hasFilterDocument(filters) && !scopedDataset) {
     const rollup = await queryTrendForSitesFromHourlyRollups(
       env,
       [siteId],

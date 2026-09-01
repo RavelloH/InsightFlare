@@ -14,8 +14,13 @@ import {
   handleEventTypeFieldsContract as handleEventTypeFields,
   handleEventTypesContract as handleEventTypes,
 } from "@/lib/edge/analytics/composition/protocol/events-contract-adapter";
-import type { FilterDocument } from "@/lib/edge/analytics/contract";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import {
+  createQueryTime,
+  EMPTY_FILTER_DOCUMENT,
+  type FilterDocument,
+  prepareScopedQuery,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
 import type {
   EventRecordRow,
   QueryWindow,
@@ -611,6 +616,42 @@ describe("edge query dimensions low-level coverage", () => {
       expect((call.sql.match(/UNION ALL/g) ?? []).length).toBeLessThan(5);
     }
   });
+
+  it("uses final scoped dataset bindings for client and geo dimensions", async () => {
+    const { env, calls } = createD1Env([[], [], []]);
+    const prepared = prepareScopedQuery("overview", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: filterFixture({ path: "/pricing" }),
+      scopePreference: "visitor",
+    } as never);
+
+    await queryOverviewClientDimensionsFromD1(
+      env,
+      siteId,
+      window,
+      prepared.filters!,
+      10,
+    );
+    await queryOverviewGeoDimensionsFromD1(
+      env,
+      siteId,
+      window,
+      prepared.filters!,
+      10,
+    );
+
+    expect(calls).toHaveLength(3);
+    expect(calls.every((call) => call.sql.includes("scope_final_visits"))).toBe(
+      true,
+    );
+    expect(calls.every((call) => call.bindings.length > 3)).toBe(true);
+  });
 });
 
 describe("edge query event fields and records low-level coverage", () => {
@@ -978,7 +1019,11 @@ describe("edge query event handlers low-level coverage", () => {
       ok: true,
       data: [{ label: "Signup", views: 6, sessions: 3, visitors: 2 }],
     });
-    expect(calls[0].bindings).toEqual([...eventBindings(), 4]);
+    expect(calls[0].bindings).toEqual([
+      ...eventBindings(),
+      ...eventBindings(),
+      4,
+    ]);
   });
 
   it("uses a keyset cursor for event records and maps current rows", async () => {
@@ -1024,13 +1069,12 @@ describe("edge query event handlers low-level coverage", () => {
     });
     expect(calls[0].sql).toContain("ORDER BY eventName ASC");
     expect(calls[0].sql).not.toContain("OFFSET");
-    expect(calls[0].sql).toContain("target_event_name AS");
+    expect(calls[0].sql).toContain("FROM scope_final_events es");
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
-      siteId,
-      "Signup",
       ...eventBindings(),
       ...Array<string>(8).fill("%signup%"),
+      "Signup",
       "Register",
       "Register",
       baseMs + 200,

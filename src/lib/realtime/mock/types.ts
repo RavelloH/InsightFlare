@@ -8,6 +8,8 @@
 
 export interface DemoQueryFilters {
   filterDocument?: FilterDocument;
+  /** Resolved by the canonical operation registry before demo execution. */
+  scope?: FilterScope;
   country?: string;
   device?: string;
   browser?: string;
@@ -107,4 +109,5 @@ export interface DemoDimensionRow {
   visitors: number;
   sessions: number;
 }
+import type { FilterScope } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { FilterDocument } from "@/lib/filter-contract";

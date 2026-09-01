@@ -13,8 +13,15 @@ import {
   analyticsFilterRegistry,
   FILTER_DOCUMENT_VERSION,
   type FilterDocument,
+  filterScopePreferenceFromDocument,
   parseFilterParams,
   serializeFilterParams,
+} from "@/lib/filter-contract";
+import {
+  attachFilterScopePreference,
+  type FilterScopePreference,
+  parseFilterScopePreference,
+  serializeFilterScopePreference,
 } from "@/lib/filter-contract";
 
 import { serializeDashboardSearchParams } from "./filter-state";
@@ -275,7 +282,23 @@ export function resolveTimeWindow(
 export function parseFilterDocumentFromSearchParams(
   searchParams: URLSearchParams,
 ): FilterDocument {
-  return parseFilterParams(searchParams, analyticsFilterRegistry);
+  return attachFilterScopePreference(
+    parseFilterParams(searchParams, analyticsFilterRegistry),
+    parseFilterScopePreference(searchParams),
+  );
+}
+
+export function parseFilterScopeFromSearchParams(
+  searchParams: URLSearchParams,
+): FilterScopePreference {
+  return parseFilterScopePreference(searchParams);
+}
+
+export function serializeFilterScopeToSearchParams(
+  searchParams: URLSearchParams,
+  preference: FilterScopePreference,
+): URLSearchParams {
+  return serializeFilterScopePreference(searchParams, preference);
 }
 
 export function withRangeAndFilters(
@@ -288,6 +311,12 @@ export function withRangeAndFilters(
     analyticsFilterRegistry,
   );
   params.set("range", range);
+  const scopePreference = filterScopePreferenceFromDocument(filters);
+  if (scopePreference) {
+    return `${pathname}?${serializeDashboardSearchParams(
+      serializeFilterScopePreference(params, scopePreference),
+    )}`;
+  }
   return `${pathname}?${serializeDashboardSearchParams(params)}`;
 }
 

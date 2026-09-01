@@ -12,8 +12,6 @@ import type {
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   buildTimeBuckets,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
   clientDimensionDefinition,
   queryD1All,
   referrerDomainDimensionDefinition,
@@ -24,9 +22,10 @@ import {
   timeBucketCase,
   timeBucketTimestamp,
   utmDimensionDefinition,
-  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
+
+import { technologyVisitSource } from "./scoped-source";
 
 export interface ShareTrendResult {
   series: BrowserTrendSeriesRow[];
@@ -211,13 +210,13 @@ export async function queryShareTrendFromD1(
   labelExpr: string,
   fallbackKeyBase: string,
 ): Promise<ShareTrendResult> {
-  const filter = buildVisitFilterSql(filters);
+  const source = technologyVisitSource(siteId, window, filters);
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "started_at");
   const normalizedLimit = Math.min(Math.max(1, limit), 12);
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${source.ctes},
 filtered_visits AS MATERIALIZED (
   SELECT
     ${bucket.sql} AS bucket,
@@ -226,8 +225,8 @@ filtered_visits AS MATERIALIZED (
     ${labelExpr} AS labelValue,
     visitor_id AS visitorId,
     session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
+  FROM ${source.relation}
+  ${source.filterClause}
 ),
 ranked_visits AS MATERIALIZED (
   SELECT
@@ -328,9 +327,9 @@ FROM tagged_rows
 ORDER BY rowType ASC, rowOrder ASC, bucket ASC, label ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...visitSourceBindings(siteId, window),
+    ...source.bindings,
     ...bucket.bindings,
-    ...filter.bindings,
+    ...source.filterBindings,
     normalizedLimit,
   ]);
   return mapShareTrendRows(rows, buckets, fallbackKeyBase);
@@ -349,7 +348,7 @@ export async function queryReferrerAndChannelTrendFromD1(
   filters: FilterDocument,
   limit: number,
 ): Promise<ReferrerAndChannelTrendResult> {
-  const filter = buildVisitFilterSql(filters);
+  const source = technologyVisitSource(siteId, window, filters);
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "started_at");
   const normalizedLimit = Math.min(Math.max(1, limit), 12);
@@ -357,7 +356,7 @@ export async function queryReferrerAndChannelTrendFromD1(
   const channelExpression = buildTrafficChannelSqlExpression();
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${source.ctes},
 filtered_visits AS MATERIALIZED (
   SELECT
     ${bucket.sql} AS bucket,
@@ -367,8 +366,8 @@ filtered_visits AS MATERIALIZED (
     ${channelExpression} AS channelLabelValue,
     visitor_id AS visitorId,
     session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
+  FROM ${source.relation}
+  ${source.filterClause}
 ),
 ranked_visits AS MATERIALIZED (
   SELECT
@@ -558,9 +557,9 @@ SELECT
   ) AS channel
 `;
   const rows = await queryD1All<ShareTrendQueryRow>(env, sql, [
-    ...visitSourceBindings(siteId, window),
+    ...source.bindings,
     ...bucket.bindings,
-    ...filter.bindings,
+    ...source.filterBindings,
     normalizedLimit,
     normalizedLimit,
   ]);

@@ -5,9 +5,13 @@ import {
   typedQueryProvider,
 } from "@/lib/edge/analytics/application/provider-registry";
 import {
+  analyticsFilterRegistry,
+  attachFilterScopePreference,
   type BaseQuery,
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
+  parseFilterParams,
+  parseFilterScopePreference,
   type QueryContext,
   type QueryOperation,
 } from "@/lib/edge/analytics/contract";
@@ -34,6 +38,16 @@ function mockQuery(input: MockQueryProviderInput): BaseQuery {
     startMs + 1,
     parsedWindow?.endExclusiveMs ?? nowMs,
   );
+  let filters = EMPTY_FILTER_DOCUMENT;
+  try {
+    filters = attachFilterScopePreference(
+      parseFilterParams(input.url, analyticsFilterRegistry),
+      parseFilterScopePreference(input.url),
+    );
+  } catch {
+    // The protocol layer owns filter validation. Keep the mock transport
+    // deterministic if it is called directly with an invalid query string.
+  }
   return {
     context: input.queryContext,
     time: createQueryTime(
@@ -42,17 +56,22 @@ function mockQuery(input: MockQueryProviderInput): BaseQuery {
       parsedWindow?.timeZone,
       nowMs,
     ),
-    filters: EMPTY_FILTER_DOCUMENT,
+    filters,
+    scopePreference: parseFilterScopePreference(input.url),
   };
 }
 
 export function createMockProviderRegistry(input: MockQueryProviderInput) {
   return new AnalyticsProviderRegistry().register(
     input.operation,
-    typedQueryProvider(async () => ({
-      value: await executeDemoQueryPayload(input),
-      source: "mock" as const,
-    })),
+    typedQueryProvider(async (query) => {
+      const resolvedScope = query?.scopePlan?.scope;
+      const demoInput = resolvedScope ? { ...input, resolvedScope } : input;
+      return {
+        value: await executeDemoQueryPayload(demoInput),
+        source: "mock" as const,
+      };
+    }),
   );
 }
 

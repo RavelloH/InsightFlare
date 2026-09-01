@@ -15,10 +15,13 @@ import {
   finestIntervalForRange,
   normalizeCustomDateRange,
   parseFilterDocumentFromSearchParams,
+  parseFilterScopeFromSearchParams,
   resolveRangePreset,
   resolveTimeWindow,
+  serializeFilterScopeToSearchParams,
   withRangeAndFilters,
 } from "@/lib/dashboard/query-state";
+import { attachFilterScopePreference } from "@/lib/filter-contract";
 
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -265,6 +268,21 @@ describe("dashboard query-state helpers", () => {
     });
   });
 
+  describe("filter scope search parameters", () => {
+    it("parses and serializes explicit scope preferences", () => {
+      expect(
+        parseFilterScopeFromSearchParams(new URLSearchParams("scope=visitor")),
+      ).toBe("visitor");
+
+      const params = serializeFilterScopeToSearchParams(
+        new URLSearchParams("range=7d"),
+        "session",
+      );
+      expect(params.get("range")).toBe("7d");
+      expect(params.get("scope")).toBe("session");
+    });
+  });
+
   describe("withRangeAndFilters", () => {
     it("builds a range URL with every supported filter dimension", () => {
       const filters = dashboardFilterDocumentFromPresentation({
@@ -328,6 +346,20 @@ describe("dashboard query-state helpers", () => {
       expect(url.searchParams.get("filter[geo.country]")).toBeNull();
       expect(url.searchParams.get("filter[client.browser]")).toBe("Chrome");
     });
+
+    it("carries a filter document scope preference into the URL", () => {
+      const filters = attachFilterScopePreference(
+        dashboardFilterDocumentFromPresentation({ path: "/" }),
+        "visitor",
+      );
+
+      const url = new URL(
+        withRangeAndFilters("/dashboard", "7d", filters),
+        "https://example.test",
+      );
+
+      expect(url.searchParams.get("scope")).toBe("visitor");
+    });
   });
 
   describe("withDashboardFilterSearchParams", () => {
@@ -375,6 +407,14 @@ describe("dashboard query-state helpers", () => {
 
       expect(serializeDashboardSearchParams(params)).toBe(
         "filter[page.path]=/politics&filter[page.path][or:0.0]=/world&filter[event.payload][/device/screen/width]=json:1920&filter[referrer.domain]=google.com&filter[page.title]=News%20%26%20Politics",
+      );
+    });
+
+    it("keeps a root path filter intact across client navigation", () => {
+      const params = new URLSearchParams([["filter[page.path]", "/"]]);
+
+      expect(serializeDashboardSearchParams(params)).toBe(
+        "filter[page.path]=%2F",
       );
     });
   });

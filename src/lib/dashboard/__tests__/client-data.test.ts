@@ -52,6 +52,7 @@ import {
   withFilters,
 } from "@/lib/dashboard/client-data";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
+import { attachFilterScopePreference } from "@/lib/filter-contract";
 import { handleDemoRequest } from "@/lib/realtime/mock";
 import { isErrorEnvelope } from "@/lib/realtime/mock/envelope";
 
@@ -167,6 +168,22 @@ describe("Dashboard Client Data Processing Utilities", () => {
       expect(withResult["filter[geo.country]"]).toBe("us");
       expect(withResult["filter[client.browser]"]).toBe("Chrome");
       expect(withResult["filter[page.path]"]).toBe("/docs");
+    });
+
+    it("passes the resolved scope alongside the filter expression", () => {
+      const filters = attachFilterScopePreference(
+        dashboardFilterDocumentFromPresentation({ path: "/docs" }),
+        "visitor",
+      );
+
+      expect(withFilters({ siteId: "123" }, filters)).toMatchObject({
+        siteId: "123",
+        scope: "visitor",
+        "filter[page.path]": "/docs",
+      });
+      expect(
+        withFilters({ siteId: "123", scope: "event" }, filters, "session"),
+      ).toMatchObject({ scope: "session" });
     });
 
     it("should skip mapping filters if filters object is empty or undefined", () => {

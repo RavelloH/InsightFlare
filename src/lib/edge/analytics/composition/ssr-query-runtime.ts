@@ -26,10 +26,11 @@ export function createTeamDashboardQueryRuntime(
   input: SsrTeamDashboardRuntimeInput,
 ) {
   const registry = new AnalyticsProviderRegistry().register("team-dashboard", {
-    execute: async (_query: QueryInput) => {
+    execute: async (query: QueryInput) => {
       const dashboard = await readTeamDashboard({
         ...input,
         window: input.window,
+        filters: query.filters,
       });
       return {
         value: dashboard.data,

@@ -15,7 +15,9 @@ import {
   handlePlannedSiteEventTypeDetail,
   handlePlannedSiteEventTypes,
   handlePlannedSiteFilterValues,
+  handlePlannedSiteJourneyEventDetail,
   handlePlannedSitePages,
+  handlePlannedSitePerformanceBreakdown,
   handlePlannedSitePerformanceSummary,
   handlePlannedSitePerformanceTimeseries,
   handlePlannedSiteRealtimeActiveVisitors,
@@ -40,7 +42,9 @@ import {
   type SiteEventTypeDetailReader,
   type SiteEventTypesReader,
   type SiteFilterValuesReader,
+  type SiteJourneyEventDetailReader,
   type SitePagesReader,
+  type SitePerformanceBreakdownReader,
   type SitePerformanceSummaryReader,
   type SitePerformanceTimeseriesReader,
   type SiteRealtimeActiveVisitorsReader,
@@ -101,6 +105,7 @@ function request(
     | "filter-values"
     | "retention/cohorts"
     | "performance/summary"
+    | "performance/breakdown"
     | "performance/timeseries"
     | "events/summary"
     | "events/timeseries"
@@ -218,6 +223,9 @@ describe("planned site list analytics adapters", () => {
     const performanceSummary = vi
       .fn<SitePerformanceSummaryReader>()
       .mockResolvedValue({ metrics });
+    const performanceBreakdown = vi
+      .fn<SitePerformanceBreakdownReader>()
+      .mockResolvedValue({ dimension: "page.path", metric: "lcp", items: [] });
     const performanceTimeseries = vi
       .fn<SitePerformanceTimeseriesReader>()
       .mockResolvedValue({
@@ -231,6 +239,13 @@ describe("planned site list analytics adapters", () => {
         "site-1",
         createTestProviderRegistry(performanceSummary),
       );
+    const performanceBreakdownResponse =
+      await handlePlannedSitePerformanceBreakdown(
+        request("performance/breakdown", { timeRange }),
+        principal,
+        "site-1",
+        createTestProviderRegistry(performanceBreakdown),
+      );
     const performanceTimeseriesResponse =
       await handlePlannedSitePerformanceTimeseries(
         request("performance/timeseries", { timeRange, interval: "day" }),
@@ -243,6 +258,10 @@ describe("planned site list analytics adapters", () => {
         await performanceSummaryResponse.json(),
       ).success,
     ).toBe(true);
+    expect(performanceBreakdownResponse.status).toBe(200);
+    expect(performanceBreakdown).toHaveBeenCalledWith(
+      expect.objectContaining({ metric: "lcp", limit: 100 }),
+    );
     expect(
       AnalyticsPerformanceTimeseriesResponseSchema.safeParse(
         await performanceTimeseriesResponse.json(),
@@ -928,5 +947,29 @@ describe("planned site list analytics adapters", () => {
     expect(responses).toHaveLength(7);
     for (const response of responses)
       expect(response.status).toBeGreaterThanOrEqual(200);
+  });
+
+  it("invokes the planned journey event detail adapter", async () => {
+    const journey = vi
+      .fn<SiteJourneyEventDetailReader>()
+      .mockResolvedValue({ event: {}, context: {} });
+    const response = await handlePlannedSiteJourneyEventDetail(
+      new Request(
+        "https://app.test/api/v1/sites/site-1/analytics/journey-event-detail",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ timeRange, eventId: "event-1" }),
+        },
+      ),
+      principal,
+      "site-1",
+      createTestProviderRegistry(journey),
+    );
+
+    expect(response.status).toBe(200);
+    expect(journey).toHaveBeenCalledWith(
+      expect.objectContaining({ eventId: "event-1" }),
+    );
   });
 });

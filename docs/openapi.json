@@ -238,6 +238,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "metrics": {
                     "minItems": 1,
                     "maxItems": 20,
@@ -453,6 +462,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "metrics": [
                   "views"
                 ]
@@ -570,6 +580,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -608,7 +645,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -1362,6 +1403,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "metrics": {
                     "minItems": 1,
                     "maxItems": 20,
@@ -1577,6 +1627,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "metrics": [
                   "views"
                 ]
@@ -1694,6 +1745,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -1732,7 +1810,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -4596,6 +4678,15 @@
                     "minLength": 1,
                     "maxLength": 80
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "current": {
                     "type": "object",
                     "properties": {
@@ -5099,6 +5190,7 @@
               "example": {
                 "version": 2,
                 "timeZone": "example",
+                "scope": "auto",
                 "current": {
                   "timeRange": {
                     "kind": "absolute",
@@ -7500,6 +7592,15 @@
                     "minLength": 1,
                     "maxLength": 80
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "current": {
                     "type": "object",
                     "properties": {
@@ -7977,6 +8078,7 @@
               "example": {
                 "version": 2,
                 "timeZone": "example",
+                "scope": "auto",
                 "current": {
                   "timeRange": {
                     "kind": "absolute",
@@ -9694,6 +9796,15 @@
                     "minLength": 1,
                     "maxLength": 80
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "current": {
                     "type": "object",
                     "properties": {
@@ -10151,6 +10262,7 @@
               "example": {
                 "version": 2,
                 "timeZone": "example",
+                "scope": "auto",
                 "current": {
                   "timeRange": {
                     "kind": "absolute",
@@ -12445,6 +12557,15 @@
                     "minLength": 1,
                     "maxLength": 80
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "current": {
                     "type": "object",
                     "properties": {
@@ -12876,6 +12997,7 @@
               "example": {
                 "version": 2,
                 "timeZone": "example",
+                "scope": "auto",
                 "current": {
                   "timeRange": {
                     "kind": "absolute",
@@ -16249,6 +16371,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "interval": {
                     "type": "string",
                     "enum": [
@@ -16457,6 +16588,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "interval": "minute"
               }
             }
@@ -16597,6 +16729,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -16640,7 +16799,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -17570,6 +17733,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "interval": {
                     "type": "string",
                     "enum": [
@@ -17778,6 +17950,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "interval": "minute"
               }
             }
@@ -17918,6 +18091,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -17961,7 +18161,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -18794,6 +18998,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "interval": {
                     "type": "string",
                     "enum": [
@@ -19001,6 +19214,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "interval": "minute"
               }
             }
@@ -19235,6 +19449,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -19299,7 +19540,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -20177,6 +20422,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "limit": {
                     "default": 20,
                     "type": "integer",
@@ -20381,6 +20635,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "limit": 20
               }
             }
@@ -20501,6 +20756,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -20541,7 +20823,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -21395,6 +21681,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "limit": {
                     "default": 20,
                     "type": "integer",
@@ -21599,6 +21894,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "limit": 20
               }
             }
@@ -21719,6 +22015,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -21759,7 +22082,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -22627,6 +22954,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "primaryDimension": {
                     "type": "string",
                     "minLength": 1,
@@ -22850,6 +23186,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "primaryDimension": "example",
                 "secondaryDimension": "example",
                 "primaryLimit": 5,
@@ -23036,6 +23373,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -23094,7 +23458,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -24059,6 +24427,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "limit": {
                     "default": 20,
                     "type": "integer",
@@ -24268,6 +24645,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "limit": 20,
                 "includeDetails": false
               }
@@ -24384,6 +24762,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -24423,7 +24828,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -25300,6 +25709,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "limit": {
                     "default": 20,
                     "type": "integer",
@@ -25509,6 +25927,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "limit": 20,
                 "includeFullUrl": false
               }
@@ -25621,6 +26040,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -25659,7 +26105,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -26536,6 +26986,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "limit": {
                     "default": 20,
                     "type": "integer",
@@ -26740,6 +27199,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "limit": 20
               }
             }
@@ -26864,6 +27324,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -26902,7 +27389,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -27779,6 +28270,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "field": {
                     "type": "string",
                     "minLength": 1,
@@ -28005,6 +28505,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "field": "example",
                 "search": "example",
                 "page": {
@@ -28145,6 +28646,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -28188,7 +28716,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -29065,6 +29597,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "granularity": {
                     "type": "string",
                     "enum": [
@@ -29273,6 +29814,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "granularity": "minute"
               }
             }
@@ -29415,6 +29957,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -29459,7 +30028,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -30336,6 +30909,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "funnelId": {
                     "type": "string",
                     "minLength": 1,
@@ -30539,6 +31121,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "funnelId": "example"
               }
             }
@@ -30803,6 +31386,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -30869,7 +31479,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -31745,6 +32359,15 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
                   }
                 },
                 "required": [
@@ -31942,7 +32565,8 @@
                     "operator": "example",
                     "value": "example"
                   }
-                }
+                },
+                "scope": "auto"
               }
             }
           }
@@ -32329,6 +32953,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -32396,7 +33047,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -33273,6 +33928,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "interval": {
                     "type": "string",
                     "enum": [
@@ -33481,6 +34145,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "interval": "minute"
               }
             }
@@ -33924,6 +34589,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -34007,7 +34699,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -34897,6 +35593,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "metric": {
                     "default": "lcp",
                     "type": "string",
@@ -35113,6 +35818,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "metric": "ttfb",
                 "limit": 100
               }
@@ -35287,6 +35993,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -35331,7 +36064,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -36207,6 +36944,15 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
                   }
                 },
                 "required": [
@@ -36404,7 +37150,8 @@
                     "operator": "example",
                     "value": "example"
                   }
-                }
+                },
+                "scope": "auto"
               }
             }
           }
@@ -36655,6 +37402,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -36730,7 +37504,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -37607,6 +38385,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "interval": {
                     "type": "string",
                     "enum": [
@@ -37822,6 +38609,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "interval": "minute",
                 "limit": 8
               }
@@ -37994,6 +38782,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -38044,7 +38859,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -38921,6 +39740,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "search": {
                     "type": "string",
                     "minLength": 1,
@@ -39189,6 +40017,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "search": "example",
                 "eventName": "example",
                 "sort": {
@@ -39414,6 +40243,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -39476,7 +40332,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -40803,6 +41663,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -40916,7 +41803,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -41784,6 +42675,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "search": {
                     "type": "string",
                     "minLength": 1,
@@ -42005,6 +42905,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "search": "example",
                 "page": {
                   "limit": 20
@@ -42138,6 +43039,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -42180,7 +43108,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -43057,6 +43989,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "eventName": {
                     "type": "string",
                     "minLength": 1,
@@ -43272,6 +44213,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "eventName": "example",
                 "interval": "minute"
               }
@@ -44217,6 +45159,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -44479,7 +45448,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -45356,6 +46329,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "eventName": {
                     "type": "string",
                     "minLength": 1,
@@ -45578,6 +46560,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "eventName": "example",
                 "page": {
                   "limit": 100
@@ -45744,6 +46727,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -45789,7 +46799,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -46666,6 +47680,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "eventName": {
                     "type": "string",
                     "minLength": 1,
@@ -46910,6 +47933,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "eventName": "example",
                 "fieldPath": "example",
                 "fieldValueType": "string",
@@ -47079,6 +48103,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -47124,7 +48175,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -48980,6 +50035,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -49173,7 +50255,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -50881,6 +51967,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -51042,7 +52155,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -52366,6 +53483,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -52478,7 +53622,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -53346,6 +54494,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "search": {
                     "type": "string",
                     "minLength": 1,
@@ -53610,6 +54767,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "search": "example",
                 "sort": {
                   "field": "lastSeenAt",
@@ -53836,6 +54994,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -53895,7 +55080,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -54772,6 +55961,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "search": {
                     "type": "string",
                     "minLength": 1,
@@ -55035,6 +56233,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "search": "example",
                 "sort": {
                   "field": "startedAt",
@@ -55363,6 +56562,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -55435,7 +56661,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -56312,6 +57542,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "visitorId": {
                     "type": "string",
                     "minLength": 1,
@@ -56522,6 +57761,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "visitorId": "example",
                 "limit": 100
               }
@@ -56798,6 +58038,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -56863,7 +58130,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -57740,6 +59011,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "visitorId": {
                     "type": "string",
                     "minLength": 1,
@@ -57950,6 +59230,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "visitorId": "example",
                 "limit": 100
               }
@@ -58242,6 +59523,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -58309,7 +59617,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -59186,6 +60498,15 @@
                       }
                     ]
                   },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
                   "sessionId": {
                     "type": "string",
                     "minLength": 1,
@@ -59396,6 +60717,7 @@
                     "value": "example"
                   }
                 },
+                "scope": "auto",
                 "sessionId": "example",
                 "limit": 100
               }
@@ -59672,6 +60994,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -59737,7 +61086,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -61327,6 +62680,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -61480,7 +62860,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -62403,6 +63787,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -62434,7 +63845,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -63738,6 +65153,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -63836,7 +65278,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -65029,6 +66475,33 @@
                             "exact",
                             "approximate"
                           ]
+                        },
+                        "filterScope": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "resolved": {
+                              "type": "string",
+                              "enum": [
+                                "event",
+                                "session",
+                                "visitor"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolved"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -65113,7 +66586,11 @@
                       "timeZone": "example"
                     },
                     "source": "raw",
-                    "accuracy": "exact"
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
                   }
                 }
               }
@@ -76691,6 +78168,15 @@
                             "type": "string",
                             "const": "team"
                           },
+                          "scopePreference": {
+                            "type": "string",
+                            "enum": [
+                              "auto",
+                              "event",
+                              "session",
+                              "visitor"
+                            ]
+                          },
                           "filter": {
                             "type": "object",
                             "properties": {
@@ -76731,6 +78217,7 @@
                           "name",
                           "description",
                           "visibility",
+                          "scopePreference",
                           "filter",
                           "createdAt",
                           "updatedAt"
@@ -76924,6 +78411,7 @@
                       "name": "example",
                       "description": "example",
                       "visibility": "team",
+                      "scopePreference": "auto",
                       "filter": {
                         "version": 1,
                         "root": {
@@ -77483,6 +78971,15 @@
                       "type": "string",
                       "const": "team"
                     },
+                    "scopePreference": {
+                      "type": "string",
+                      "enum": [
+                        "auto",
+                        "event",
+                        "session",
+                        "visitor"
+                      ]
+                    },
                     "filter": {
                       "type": "object",
                       "properties": {
@@ -77523,6 +79020,7 @@
                     "name",
                     "description",
                     "visibility",
+                    "scopePreference",
                     "filter",
                     "createdAt",
                     "updatedAt"
@@ -77671,6 +79169,7 @@
                   "name": "example",
                   "description": "example",
                   "visibility": "team",
+                  "scopePreference": "auto",
                   "filter": {
                     "version": 1,
                     "root": {

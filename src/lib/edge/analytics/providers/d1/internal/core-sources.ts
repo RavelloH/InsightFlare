@@ -1,3 +1,4 @@
+import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import {
   currentD1Operation,
   currentInvocationLogger,
@@ -11,6 +12,7 @@ import type { Env } from "@/lib/edge/types";
 import { buildEventFilterSql, usesSessionBoundaryFilter } from "./core-filters";
 import type { FilterDocument, QueryWindow } from "./core-types";
 import { type D1ReadDiagnostics, recordD1RowsRead } from "./diagnostics";
+import { compileScopedDatasetSql } from "./scoped-dataset";
 
 export const VISIT_SOURCE_COLUMNS = `
     visit_id, site_id, site_pk, visitor_id, session_id, status, started_at, last_activity_at,
@@ -140,6 +142,7 @@ export function buildEventAnalyticsSourceCte(options?: {
     ce.site_id,
     ce.site_pk,
     ce.visit_id,
+    '{}' AS event_data_json,
     cen.name AS event_name,
     ce.occurred_at,
     ce.received_at,
@@ -219,8 +222,34 @@ export function buildEventFilteredSourceCte(
   options?: { materialize?: boolean },
 ): {
   cte: string;
-  bindings: Array<string | number>;
+  bindings: Array<string | number | null>;
 } {
+  const scopedMetadata = scopedFilterMetadata(filters);
+  if (scopedMetadata) {
+    const dataset = compileScopedDatasetSql({
+      filters,
+      plan: scopedMetadata.plan,
+      siteIds: [siteId],
+      window,
+    });
+    const eventNameClause = eventName
+      ? "WHERE TRIM(COALESCE(es.event_name, '')) = ?"
+      : "";
+    return {
+      cte: `
+WITH
+${dataset.ctes},
+filtered_events ${options?.materialize ? "AS MATERIALIZED" : "AS"} (
+  SELECT *
+  FROM ${dataset.eventRelation} es
+  ${eventNameClause}
+)`,
+      bindings: [
+        ...dataset.bindings.map((binding) => binding.value),
+        ...(eventName ? [eventName] : []),
+      ],
+    };
+  }
   const needsVisitSource = usesSessionBoundaryFilter(filters);
   const filter = buildEventFilterSql(filters, "es", {
     sessionSource: needsVisitSource ? "visit_source" : undefined,

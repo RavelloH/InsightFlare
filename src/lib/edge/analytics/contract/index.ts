@@ -12,4 +12,5 @@ export * from "./operations/index";
 export * from "./overview";
 export * from "./pages";
 export * from "./policy";
+export * from "./scoped-filter";
 export type * from "./types";

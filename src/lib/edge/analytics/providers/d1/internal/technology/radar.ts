@@ -3,13 +3,10 @@ import type {
   QueryWindow,
   ReferrerRadarRow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import {
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  queryD1All,
-  visitSourceBindings,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryD1All } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
+
+import { technologyVisitSource } from "./scoped-source";
 
 export async function queryBrowserRadarFromD1(
   env: Env,
@@ -29,11 +26,11 @@ export async function queryBrowserRadarFromD1(
     trafficShare: number;
   }>
 > {
-  const filter = buildVisitFilterSql(filters);
+  const source = technologyVisitSource(siteId, window, filters);
 
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${source.ctes},
 
 filtered_visits AS MATERIALIZED (
   SELECT
@@ -43,8 +40,8 @@ filtered_visits AS MATERIALIZED (
     TRIM(COALESCE(browser, '')) AS browser,
     CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0
          THEN duration_ms ELSE 0 END AS safe_duration_ms
-  FROM visit_source
-  ${filter.clause}
+  FROM ${source.relation}
+  ${source.filterClause}
 ),
 
 session_level AS (
@@ -120,8 +117,8 @@ ORDER BY bva.visitors DESC
 `;
 
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...visitSourceBindings(siteId, window),
-    ...filter.bindings,
+    ...source.bindings,
+    ...source.filterBindings,
   ]);
 
   return rows
@@ -146,11 +143,11 @@ export async function queryReferrerRadarFromD1(
   filters: FilterDocument,
   limit: number,
 ): Promise<ReferrerRadarRow[]> {
-  const filter = buildVisitFilterSql(filters);
+  const source = technologyVisitSource(siteId, window, filters);
 
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${source.ctes},
 
 filtered_visits AS MATERIALIZED (
   SELECT
@@ -160,8 +157,8 @@ filtered_visits AS MATERIALIZED (
     TRIM(COALESCE(referrer_host, '')) AS referrer,
     CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0
          THEN duration_ms ELSE 0 END AS safe_duration_ms
-  FROM visit_source
-  ${filter.clause}
+  FROM ${source.relation}
+  ${source.filterClause}
 ),
 
 session_level AS (
@@ -237,8 +234,8 @@ LIMIT ?
 `;
 
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...visitSourceBindings(siteId, window),
-    ...filter.bindings,
+    ...source.bindings,
+    ...source.filterBindings,
     limit,
   ]);
 

@@ -22,6 +22,7 @@ import {
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { mapGeoPointRow } from "./journey-helpers";
+import { scopedDatasetFor } from "./scoped-dataset";
 
 export async function querySessionLocationPointsFromD1(
   env: Env,
@@ -66,7 +67,8 @@ export async function queryGeoPointsFromD1(
   limit: number,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<GeoPointAggregate> {
-  const filter = buildVisitFilterSql(filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
   const conditions =
     filters.root?.kind === "and"
       ? filters.root.children
@@ -90,10 +92,10 @@ export async function queryGeoPointsFromD1(
     regionCode: valueFor("geo.region"),
     city: valueFor("geo.city"),
   };
-  const coordinateClause = filter.clause ? "AND" : "WHERE";
+  const coordinateClause = filter?.clause ? "AND" : "WHERE";
   const pointsSql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
     ROUND(latitude, 3) AS lat_bucket,
@@ -104,8 +106,8 @@ filtered_visits AS (
     city,
     MAX(started_at) AS latest_at,
     COUNT(*) AS point_count
-  FROM visit_source
-  ${filter.clause}
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
   ${coordinateClause}
     latitude IS NOT NULL
     AND longitude IS NOT NULL
@@ -130,7 +132,15 @@ LIMIT ?
     await queryD1All<Record<string, unknown>>(
       env,
       pointsSql,
-      [...visitSourceBindings(siteId, window), ...filter.bindings, limit],
+      [
+        ...(scopedDataset
+          ? scopedDataset.bindings.map((binding) => binding.value)
+          : [
+              ...visitSourceBindings(siteId, window),
+              ...(filter?.bindings ?? []),
+            ]),
+        limit,
+      ],
       diagnostics,
     )
   ).map(mapGeoPointRow);
@@ -142,14 +152,14 @@ LIMIT ?
   if (!parsedGeo?.country) {
     const countrySql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
     country,
     session_id AS sessionId,
     visitor_id AS visitorId
-  FROM visit_source
-  ${filter.clause}
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
 )
 SELECT
   country,
@@ -166,7 +176,12 @@ LIMIT 300
         await queryD1All<Record<string, unknown>>(
           env,
           countrySql,
-          [...visitSourceBindings(siteId, window), ...filter.bindings],
+          scopedDataset
+            ? scopedDataset.bindings.map((binding) => binding.value)
+            : [
+                ...visitSourceBindings(siteId, window),
+                ...(filter?.bindings ?? []),
+              ],
           diagnostics,
         )
       ).map((row) => ({
@@ -179,7 +194,7 @@ LIMIT 300
   } else if (!parsedGeo.regionCode) {
     const regionSql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
     country,
@@ -187,8 +202,8 @@ filtered_visits AS (
     region_code AS regionCode,
     session_id AS sessionId,
     visitor_id AS visitorId
-  FROM visit_source
-  ${filter.clause}
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
 )
 SELECT
   country,
@@ -213,7 +228,12 @@ LIMIT 400
         await queryD1All<Record<string, unknown>>(
           env,
           regionSql,
-          [...visitSourceBindings(siteId, window), ...filter.bindings],
+          scopedDataset
+            ? scopedDataset.bindings.map((binding) => binding.value)
+            : [
+                ...visitSourceBindings(siteId, window),
+                ...(filter?.bindings ?? []),
+              ],
           diagnostics,
         )
       )
@@ -244,7 +264,7 @@ LIMIT 400
   } else {
     const citySql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
     country,
@@ -253,8 +273,8 @@ filtered_visits AS (
     city,
     session_id AS sessionId,
     visitor_id AS visitorId
-  FROM visit_source
-  ${filter.clause}
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
 )
 SELECT
   country,
@@ -277,7 +297,12 @@ LIMIT 600
         await queryD1All<Record<string, unknown>>(
           env,
           citySql,
-          [...visitSourceBindings(siteId, window), ...filter.bindings],
+          scopedDataset
+            ? scopedDataset.bindings.map((binding) => binding.value)
+            : [
+                ...visitSourceBindings(siteId, window),
+                ...(filter?.bindings ?? []),
+              ],
           diagnostics,
         )
       )

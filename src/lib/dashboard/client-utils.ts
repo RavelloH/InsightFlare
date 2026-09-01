@@ -3,7 +3,10 @@ import type { OverviewTabData } from "@/lib/edge-client";
 import {
   analyticsFilterRegistry,
   type FilterDocument,
+  type FilterScope,
+  filterScopePreferenceFromDocument,
   serializeFilterParams,
+  serializeFilterScopePreference,
 } from "@/lib/filter-contract";
 
 import type { OverviewTabRows } from "./client-data-types";
@@ -55,8 +58,20 @@ export function decodeQueryLabel(value: string): string {
 export function withFilters(
   params: PrivateRequestParams,
   filters?: FilterDocument,
+  resolvedScope?: FilterScope,
 ): PrivateRequestParams {
   const next = { ...params };
+  delete next.scope;
+  const scopePreference =
+    resolvedScope ?? filterScopePreferenceFromDocument(filters);
+  if (scopePreference) {
+    const scopeParams = serializeFilterScopePreference(
+      new URLSearchParams(),
+      scopePreference,
+    );
+    const scope = scopeParams.get("scope");
+    if (scope) next.scope = scope;
+  }
   if (!filters) return next;
   for (const [key, value] of serializeFilterParams(
     filters,

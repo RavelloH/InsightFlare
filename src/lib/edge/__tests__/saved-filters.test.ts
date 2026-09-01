@@ -86,6 +86,7 @@ function createEnv(): { env: Env; d1: SqliteD1Database } {
       site_id TEXT NOT NULL,
       owner_user_id TEXT NOT NULL,
       visibility TEXT NOT NULL,
+      scope_preference TEXT NOT NULL DEFAULT 'auto',
       name TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       filter_dsl TEXT NOT NULL,
@@ -130,8 +131,18 @@ describe("saved filters", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       filters: [
-        { id: "team-shared", isOwner: false, authorName: "Teammate" },
-        { id: "own-private", isOwner: true, authorName: "Owner" },
+        {
+          id: "team-shared",
+          isOwner: false,
+          authorName: "Teammate",
+          scopePreference: "auto",
+        },
+        {
+          id: "own-private",
+          isOwner: true,
+          authorName: "Owner",
+          scopePreference: "auto",
+        },
       ],
     });
   });
@@ -144,6 +155,7 @@ describe("saved filters", () => {
         name: "Docs or blog",
         description: "Exact source is preserved",
         visibility: "team",
+        scopePreference: "event",
         filterDsl,
       }),
       env,
@@ -152,16 +164,23 @@ describe("saved filters", () => {
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({
-      filter: { name: "Docs or blog", filterDsl, visibility: "team" },
+      filter: {
+        name: "Docs or blog",
+        filterDsl,
+        visibility: "team",
+        scopePreference: "event",
+      },
     });
     expect(
       d1.database
-        .prepare("SELECT filter_dsl FROM saved_filters WHERE name = ?")
+        .prepare(
+          "SELECT filter_dsl, scope_preference FROM saved_filters WHERE name = ?",
+        )
         .get("Docs or blog"),
-    ).toEqual({ filter_dsl: filterDsl });
+    ).toEqual({ filter_dsl: filterDsl, scope_preference: "event" });
   });
 
-  it("rejects empty, invalid, and duplicate owner DSL values", async () => {
+  it("defaults missing scope, rejects invalid scope, and scopes duplicate checks", async () => {
     const { env } = context();
     const base = { name: "A filter", description: "", visibility: "private" };
     const empty = await handleSavedFilters(
@@ -174,15 +193,47 @@ describe("saved filters", () => {
       env,
       { siteId: "site-1", session },
     );
+    const defaulted = await handleSavedFilters(
+      request("POST", {
+        ...base,
+        filterDsl: 'page.path eq "/pricing"',
+      }),
+      env,
+      { siteId: "site-1", session },
+    );
+    const invalidScope = await handleSavedFilters(
+      request("POST", {
+        ...base,
+        scopePreference: "account",
+        filterDsl: 'page.path eq "/pricing"',
+      }),
+      env,
+      { siteId: "site-1", session },
+    );
     const duplicate = await handleSavedFilters(
       request("POST", { ...base, filterDsl: 'page.path eq "/docs"' }),
+      env,
+      { siteId: "site-1", session },
+    );
+    const differentScope = await handleSavedFilters(
+      request("POST", {
+        ...base,
+        scopePreference: "session",
+        filterDsl: 'page.path eq "/docs"',
+      }),
       env,
       { siteId: "site-1", session },
     );
 
     expect(empty.status).toBe(400);
     expect(invalid.status).toBe(400);
+    expect(defaulted.status).toBe(201);
+    await expect(defaulted.json()).resolves.toMatchObject({
+      filter: { scopePreference: "auto" },
+    });
+    expect(invalidScope.status).toBe(400);
     expect(duplicate.status).toBe(400);
+    expect(differentScope.status).toBe(201);
   });
 
   it("allows shared reads but denies non-owner updates and deletes", async () => {
@@ -226,24 +277,36 @@ describe("saved filters", () => {
         name: "Updated filter",
         description: "Updated description",
         visibility: "team",
+        scopePreference: "visitor",
         filterDsl: 'referrer.domain in ["google.com", "news.example.com"]',
       }),
       env,
       { siteId: "site-1", session, filterId: "own-private" },
     );
-    const deletion = await handleSavedFilters(request("DELETE"), env, {
-      siteId: "site-1",
-      session,
-      filterId: "own-private",
-    });
-
     expect(update.status).toBe(200);
     await expect(update.json()).resolves.toMatchObject({
       filter: {
         id: "own-private",
         name: "Updated filter",
         visibility: "team",
+        scopePreference: "visitor",
       },
+    });
+    expect(
+      d1.database
+        .prepare(
+          "SELECT filter_dsl, filter_dsl_version, scope_preference FROM saved_filters WHERE id = ?",
+        )
+        .get("own-private"),
+    ).toEqual({
+      filter_dsl: 'referrer.domain in ["google.com", "news.example.com"]',
+      filter_dsl_version: 1,
+      scope_preference: "visitor",
+    });
+    const deletion = await handleSavedFilters(request("DELETE"), env, {
+      siteId: "site-1",
+      session,
+      filterId: "own-private",
     });
     expect(deletion.status).toBe(200);
     expect(

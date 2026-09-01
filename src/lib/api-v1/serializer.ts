@@ -21,6 +21,7 @@ export interface ApiV1AnalyticsResponseMeta extends ApiV1ResponseMeta {
   };
   readonly source: QueryResultMeta["source"];
   readonly accuracy: "exact" | "approximate";
+  readonly filterScope?: QueryResultMeta["filterScope"];
 }
 
 export type ApiV1SuccessEnvelope<T> = {
@@ -93,6 +94,9 @@ export function serializeAnalyticsResult<T>(
         },
         source: result.meta.source,
         accuracy: result.meta.approximateVisitors ? "approximate" : "exact",
+        ...(result.meta.filterScope
+          ? { filterScope: result.meta.filterScope }
+          : {}),
       },
     },
   };

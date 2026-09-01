@@ -367,16 +367,17 @@ function sessionBoundary(
     condition.operator,
     condition.value,
   );
-  return `${column(compiler, "session_id")} IN (
-    SELECT session_id FROM (
-      SELECT session_id, MAX(CASE WHEN ${rank} = 1 THEN pathname END) AS ${boundary}
+  return `(${column(compiler, "site_pk")}, ${column(compiler, "session_id")}) IN (
+    SELECT site_pk, session_id FROM (
+      SELECT site_pk, session_id, MAX(CASE WHEN ${rank} = 1 THEN pathname END) AS ${boundary}
       FROM (
-        SELECT edge.session_id, edge.pathname,
-          ROW_NUMBER() OVER (PARTITION BY edge.session_id ORDER BY edge.started_at ${rankOrder}, edge.visit_id ${rankOrder}) AS ${rank}
+        SELECT edge.site_pk, edge.session_id, edge.pathname,
+          ROW_NUMBER() OVER (PARTITION BY edge.site_pk, edge.session_id ORDER BY edge.started_at ${rankOrder}, edge.visit_id ${rankOrder}) AS ${rank}
         FROM ${compiler.sessionSource} edge
-        WHERE TRIM(COALESCE(edge.session_id, '')) != ''
+        WHERE TRIM(COALESCE(edge.site_pk, '')) != ''
+          AND TRIM(COALESCE(edge.session_id, '')) != ''
       ) session_edges
-      GROUP BY session_id
+      GROUP BY site_pk, session_id
     ) session_boundaries
     WHERE ${predicate}
   )`;

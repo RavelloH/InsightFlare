@@ -46,7 +46,7 @@ export async function queryVisitorForDetailFromD1(
 WITH
 ${buildTargetVisitSourceCte("visitor_id")},
 filtered_visits AS (
-  SELECT *
+  SELECT visit_source.*, 1 AS is_visit_observation
   FROM visit_source
 ),
 ${buildDetailCustomEventSourceCte()},
@@ -67,7 +67,7 @@ export async function querySessionsForDetailFromD1(
 WITH
 ${buildTargetVisitSourceCte(detailTargetColumn(target))},
 filtered_visits AS (
-  SELECT *
+  SELECT visit_source.*, 1 AS is_visit_observation
   FROM visit_source
 ),
 ${buildDetailCustomEventSourceCte()},

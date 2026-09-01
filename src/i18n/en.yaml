@@ -136,6 +136,10 @@ dashboardHeader:
   range: Time Range
   interval: Interval
   filters: Filters
+  filterButton: Filter
+  filterButtonEvent: Filter (Event)
+  filterButtonSession: Filter (Session)
+  filterButtonVisitor: Filter (Visitor)
   customRange: Select Custom Range
   customHint: Please select a start and end date.
   customPendingEnd: Start date selected. Please pick an end date.
@@ -331,6 +335,11 @@ filterBuilder:
   manageSavedFilter: Manage filter
   savedFilterName: Name
   savedFilterDescription: Notes
+  scopeLabel: Filter scope
+  scopeAuto: Automatically choose based on the current page
+  scopeEvent: Filter events matching these conditions
+  scopeSession: Filter sessions containing these events
+  scopeVisitor: Filter visitors containing these events
   savedFilterVisibility: Visibility
   savedFilterVisibilityPrivate: Only me
   savedFilterVisibilityTeam: Share with team

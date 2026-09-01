@@ -1,5 +1,6 @@
 import {
   analyticsFilterRegistry,
+  attachFilterScopePreference,
   type CanonicalJsonPath,
   FILTER_DOCUMENT_VERSION,
   type FilterCondition,
@@ -7,6 +8,7 @@ import {
   type FilterExpression,
   type FilterFieldId,
   filterFingerprint,
+  filterScopePreferenceFromDocument,
   type FilterValue,
   normalizeFilterDocument,
   serializeFilterParams,
@@ -138,11 +140,18 @@ function withoutFields(
   return { kind: expression.kind, children };
 }
 
-function normalizedDocument(root: FilterExpression | null): FilterDocument {
-  return normalizeFilterDocument(
+function normalizedDocument(
+  root: FilterExpression | null,
+  source?: FilterDocument,
+): FilterDocument {
+  const normalized = normalizeFilterDocument(
     { version: FILTER_DOCUMENT_VERSION, root },
     analyticsFilterRegistry,
   );
+  const preference = filterScopePreferenceFromDocument(source);
+  return preference
+    ? attachFilterScopePreference(normalized, preference)
+    : normalized;
 }
 
 function geoConditions(value: string): FilterExpression | null {
@@ -248,6 +257,7 @@ export function withoutDashboardFilter(
 ): FilterDocument {
   return normalizedDocument(
     withoutFields(document.root, fieldsForControlKey(key)),
+    document,
   );
 }
 
@@ -275,6 +285,7 @@ export function setDashboardFilterValue(
         base.root
           ? { kind: "and", children: [base.root, expression] }
           : expression,
+        document,
       )
     : base;
 }
@@ -322,9 +333,18 @@ export function serializeDashboardSearchParams(
         .replaceAll("%5D", "]")
         .replaceAll("%2F", "/")
         .replaceAll("%3A", ":");
-      const readableValue = encodeURIComponent(value)
+      // Keep a terminal slash encoded. TanStack Router normalizes a raw
+      // trailing slash in a query value (for example `filter[page.path]=/`)
+      // to an empty value during client navigation. Interior slashes remain
+      // readable, so ordinary paths such as `/politics` keep their existing
+      // URL shape.
+      const hasTerminalSlash = value.endsWith("/");
+      const readableValue = encodeURIComponent(
+        hasTerminalSlash ? value.slice(0, -1) : value,
+      )
+        .replaceAll("%3A", ":")
         .replaceAll("%2F", "/")
-        .replaceAll("%3A", ":");
+        .concat(hasTerminalSlash ? "%2F" : "");
       return `${readableKey}=${readableValue}`;
     })
     .join("&");
@@ -350,6 +370,7 @@ export function appendEventPayloadFilter(
     document.root
       ? { kind: "and", children: [document.root, condition] }
       : condition,
+    document,
   );
 }
 

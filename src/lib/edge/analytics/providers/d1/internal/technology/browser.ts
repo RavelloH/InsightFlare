@@ -19,15 +19,13 @@ import {
   BROWSER_CROSS_UNKNOWN_TOKEN,
   BROWSER_VERSION_UNKNOWN_TOKEN,
   browserMajorVersionExpr,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
   queryD1All,
   SHARE_TREND_OTHER_LABEL,
   shareTrendSeriesKey,
-  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
+import { technologyVisitSource } from "./scoped-source";
 import { queryShareTrendFromD1 } from "./share-trend";
 
 export async function queryBrowserTrendFromD1(
@@ -84,7 +82,7 @@ export async function queryBrowserVersionBreakdownFromD1(
   browserLimit: number,
   versionLimit: number,
 ): Promise<BrowserVersionBreakdownRow[]> {
-  const filter = buildVisitFilterSql(filters);
+  const source = technologyVisitSource(siteId, window, filters);
   const normalizedBrowserLimit =
     Number.isFinite(browserLimit) && browserLimit > 0
       ? Math.max(1, Math.floor(browserLimit))
@@ -95,15 +93,15 @@ export async function queryBrowserVersionBreakdownFromD1(
     : "WHERE 1 = 1";
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${source.ctes},
 filtered_visits AS (
   SELECT
     TRIM(COALESCE(browser, '')) AS browser,
     browser_version,
     visitor_id,
     session_id
-  FROM visit_source
-  ${filter.clause}
+  FROM ${source.relation}
+  ${source.filterClause}
 ),
 browser_rollup AS (
   SELECT
@@ -172,8 +170,8 @@ ORDER BY tb.browserRank ASC, versionVisitors DESC, versionViews DESC,
   versionSessions DESC, versionLabel ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...visitSourceBindings(siteId, window),
-    ...filter.bindings,
+    ...source.bindings,
+    ...source.filterBindings,
     ...(normalizedBrowserLimit ? [normalizedBrowserLimit] : []),
   ]);
   const topBrowsersByName = new Map<string, BrowserVersionAggregateRow>();
@@ -281,22 +279,22 @@ export async function queryBrowserCrossDimensionFromD1(
   dimensionExpr: string,
   fallbackKeyBase: string,
 ): Promise<BrowserCrossBreakdownDimensionDataRow> {
-  const filter = buildVisitFilterSql(filters);
+  const source = technologyVisitSource(siteId, window, filters);
   const normalizedBrowserLimit = Math.min(Math.max(1, browserLimit), 12);
   const normalizedDimensionLimit = Math.min(Math.max(1, dimensionLimit), 8);
   const browserExpr = "TRIM(COALESCE(browser, ''))";
   const normalizedDimensionExpr = `CASE WHEN ${dimensionExpr} != '' THEN ${dimensionExpr} ELSE '${BROWSER_CROSS_UNKNOWN_TOKEN}' END`;
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${source.ctes},
 filtered_visits AS MATERIALIZED (
   SELECT
     ${browserExpr} AS browser,
     ${normalizedDimensionExpr} AS dimension,
     visitor_id AS visitorId,
     session_id AS sessionId
-  FROM visit_source
-  ${filter.clause}
+  FROM ${source.relation}
+  ${source.filterClause}
 ),
 top_browser_aggregate AS (
   SELECT
@@ -413,8 +411,8 @@ FROM tagged_rows
 ORDER BY rowType ASC, rowOrder ASC, browser ASC, dimension ASC
 `;
   const queryRows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...visitSourceBindings(siteId, window),
-    ...filter.bindings,
+    ...source.bindings,
+    ...source.filterBindings,
     normalizedBrowserLimit,
     normalizedDimensionLimit,
   ]);

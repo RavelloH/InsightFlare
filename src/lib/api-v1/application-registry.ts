@@ -55,6 +55,7 @@ export const SavedFilterDefinitionSchema = z
     name: z.string().min(1).max(120),
     description: z.string().max(2_000),
     visibility: z.literal("team"),
+    scopePreference: z.enum(["auto", "event", "session", "visitor"]),
     filter: z
       .object({
         version: z.literal(1),

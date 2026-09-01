@@ -37,6 +37,7 @@ import {
 } from "@/lib/edge/analytics/composition/ssr-query-runtime";
 import {
   createQueryTime,
+  parseFilterUrlForAudience,
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
@@ -118,6 +119,7 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
     const preloadedSites = await getDashboardTeamSites(data.teamId);
 
     const window = resolveDashboardInitialWindow(request.headers.get("cookie"));
+    const filters = parseFilterUrlForAudience("private-dashboard", request.url);
     const teamDashboardRuntime = createTeamDashboardQueryRuntime({
       env: resolved.env,
       teamId: resolved.teamId,
@@ -148,6 +150,7 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
           window.timeZone,
           window.to,
         ),
+        filters,
       },
     );
     if (!result.ok) throw new Error(result.error.kind);

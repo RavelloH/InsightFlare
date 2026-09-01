@@ -132,6 +132,10 @@ export interface AppMessages {
     range: string;
     interval: string;
     filters: string;
+    filterButton: string;
+    filterButtonEvent: string;
+    filterButtonSession: string;
+    filterButtonVisitor: string;
     customRange: string;
     customHint: string;
     customPendingEnd: string;
@@ -299,6 +303,11 @@ export interface AppMessages {
     manageSavedFilter: string;
     savedFilterName: string;
     savedFilterDescription: string;
+    scopeLabel: string;
+    scopeAuto: string;
+    scopeEvent: string;
+    scopeSession: string;
+    scopeVisitor: string;
     savedFilterVisibility: string;
     savedFilterVisibilityPrivate: string;
     savedFilterVisibilityTeam: string;
@@ -2674,6 +2683,10 @@ const enMessages = {
     range: "Time Range",
     interval: "Interval",
     filters: "Filters",
+    filterButton: "Filter",
+    filterButtonEvent: "Filter (Event)",
+    filterButtonSession: "Filter (Session)",
+    filterButtonVisitor: "Filter (Visitor)",
     customRange: "Select Custom Range",
     customHint: "Please select a start and end date.",
     customPendingEnd: "Start date selected. Please pick an end date.",
@@ -2900,6 +2913,11 @@ const enMessages = {
     manageSavedFilter: "Manage filter",
     savedFilterName: "Name",
     savedFilterDescription: "Notes",
+    scopeLabel: "Filter scope",
+    scopeAuto: "Automatically choose based on the current page",
+    scopeEvent: "Filter events matching these conditions",
+    scopeSession: "Filter sessions containing these events",
+    scopeVisitor: "Filter visitors containing these events",
     savedFilterVisibility: "Visibility",
     savedFilterVisibilityPrivate: "Only me",
     savedFilterVisibilityTeam: "Share with team",
@@ -5484,6 +5502,10 @@ const zhMessages = {
     range: "时间范围",
     interval: "时间间隔",
     filters: "筛选",
+    filterButton: "筛选",
+    filterButtonEvent: "筛选 (事件)",
+    filterButtonSession: "筛选 (会话)",
+    filterButtonVisitor: "筛选 (访客)",
     customRange: "选择自定义区间",
     customHint: "请选择开始和结束日期。",
     customPendingEnd: "已选择开始日期，请继续选择结束日期。",
@@ -5704,6 +5726,11 @@ const zhMessages = {
     manageSavedFilter: "管理筛选",
     savedFilterName: "名称",
     savedFilterDescription: "备注",
+    scopeLabel: "筛选范围",
+    scopeAuto: "根据当前页面自动选择",
+    scopeEvent: "筛选符合当前条件的事件",
+    scopeSession: "筛选包含此事件的会话",
+    scopeVisitor: "筛选包含此事件的访客",
     savedFilterVisibility: "可见性",
     savedFilterVisibilityPrivate: "仅自己可见",
     savedFilterVisibilityTeam: "与团队共享",
@@ -8206,6 +8233,10 @@ const jaMessages = {
     range: "期間",
     interval: "間隔",
     filters: "フィルター",
+    filterButton: "フィルター",
+    filterButtonEvent: "フィルター（イベント）",
+    filterButtonSession: "フィルター（セッション）",
+    filterButtonVisitor: "フィルター（訪問者）",
     customRange: "カスタム範囲を選択",
     customHint: "開始日と終了日を選択してください。",
     customPendingEnd: "開始日が選択されました。終了日を選択してください。",
@@ -8434,6 +8465,11 @@ const jaMessages = {
     manageSavedFilter: "フィルターを管理",
     savedFilterName: "名前",
     savedFilterDescription: "メモ",
+    scopeLabel: "フィルター対象",
+    scopeAuto: "現在のページに応じて自動選択",
+    scopeEvent: "条件に一致するイベントを絞り込む",
+    scopeSession: "これらのイベントを含むセッションを絞り込む",
+    scopeVisitor: "これらのイベントを含む訪問者を絞り込む",
     savedFilterVisibility: "公開範囲",
     savedFilterVisibilityPrivate: "自分のみ",
     savedFilterVisibilityTeam: "チームと共有",

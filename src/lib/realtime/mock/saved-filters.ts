@@ -5,9 +5,11 @@ import {
 } from "@/lib/filter-contract";
 import {
   SAVED_FILTER_DSL_VERSION,
+  SAVED_FILTER_SCOPE_PREFERENCES,
   SAVED_FILTER_VISIBILITIES,
   type SavedFilter,
   type SavedFilterInput,
+  type SavedFilterScopePreference,
   type SavedFilterVisibility,
 } from "@/lib/saved-filters";
 
@@ -22,6 +24,7 @@ interface SavedFilterPreset {
   readonly name: string;
   readonly description: string;
   readonly visibility: SavedFilterVisibility;
+  readonly scopePreference?: SavedFilterScopePreference;
   readonly filterDsl: string;
   readonly ownerUserId?: string;
   readonly authorName?: string;
@@ -379,6 +382,7 @@ function seedFilters(siteId: string): SavedFilter[] {
       authorName: preset.authorName ?? "Demo User",
       isOwner: ownerUserId === DEMO_USER_ID,
       visibility: preset.visibility,
+      scopePreference: preset.scopePreference ?? "auto",
       name: preset.name,
       description: preset.description,
       filterDsl: preset.filterDsl,
@@ -409,6 +413,8 @@ function parseInput(
   const filterDsl =
     typeof record.filterDsl === "string" ? record.filterDsl : null;
   const visibility = record.visibility;
+  const scopePreference =
+    record.scopePreference === undefined ? "auto" : record.scopePreference;
   if (!name || name.length > MAX_NAME_LENGTH)
     return demoBadRequest("name is required");
   if (description === null || description.length > MAX_DESCRIPTION_LENGTH)
@@ -420,6 +426,14 @@ function parseInput(
     !SAVED_FILTER_VISIBILITIES.includes(visibility as SavedFilterVisibility)
   ) {
     return demoBadRequest("visibility is invalid");
+  }
+  if (
+    typeof scopePreference !== "string" ||
+    !SAVED_FILTER_SCOPE_PREFERENCES.includes(
+      scopePreference as SavedFilterScopePreference,
+    )
+  ) {
+    return demoBadRequest("scopePreference is invalid");
   }
   try {
     const document = parseFilterPanelExpression(
@@ -440,6 +454,7 @@ function parseInput(
     name,
     description,
     visibility: visibility as SavedFilterVisibility,
+    scopePreference: scopePreference as SavedFilterScopePreference,
     filterDsl,
   };
 }
@@ -474,7 +489,8 @@ export function handleDemoSavedFilters(input: {
       filters.some(
         (filter) =>
           filter.ownerUserId === DEMO_USER_ID &&
-          filter.filterDsl === parsed.filterDsl,
+          filter.filterDsl === parsed.filterDsl &&
+          filter.scopePreference === parsed.scopePreference,
       )
     ) {
       return demoBadRequest("An identical saved filter already exists");
@@ -487,6 +503,7 @@ export function handleDemoSavedFilters(input: {
       authorName: "Demo User",
       isOwner: true,
       ...parsed,
+      scopePreference: parsed.scopePreference ?? "auto",
       filterDslVersion: SAVED_FILTER_DSL_VERSION,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -511,7 +528,8 @@ export function handleDemoSavedFilters(input: {
         (filter) =>
           filter.id !== existing.id &&
           filter.ownerUserId === DEMO_USER_ID &&
-          filter.filterDsl === parsed.filterDsl,
+          filter.filterDsl === parsed.filterDsl &&
+          filter.scopePreference === parsed.scopePreference,
       )
     ) {
       return demoBadRequest("An identical saved filter already exists");

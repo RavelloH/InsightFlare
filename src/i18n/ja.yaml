@@ -136,6 +136,10 @@ dashboardHeader:
   range: 期間
   interval: 間隔
   filters: フィルター
+  filterButton: フィルター
+  filterButtonEvent: フィルター（イベント）
+  filterButtonSession: フィルター（セッション）
+  filterButtonVisitor: フィルター（訪問者）
   customRange: カスタム範囲を選択
   customHint: 開始日と終了日を選択してください。
   customPendingEnd: 開始日が選択されました。終了日を選択してください。
@@ -331,6 +335,11 @@ filterBuilder:
   manageSavedFilter: フィルターを管理
   savedFilterName: 名前
   savedFilterDescription: メモ
+  scopeLabel: フィルター対象
+  scopeAuto: 現在のページに応じて自動選択
+  scopeEvent: 条件に一致するイベントを絞り込む
+  scopeSession: これらのイベントを含むセッションを絞り込む
+  scopeVisitor: これらのイベントを含む訪問者を絞り込む
   savedFilterVisibility: 公開範囲
   savedFilterVisibilityPrivate: 自分のみ
   savedFilterVisibilityTeam: チームと共有

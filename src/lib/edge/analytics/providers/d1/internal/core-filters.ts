@@ -1,11 +1,18 @@
 import { parseGeoLocationValue } from "@/lib/dashboard/geo-location";
 import {
+  analyticsFilterDefinition,
   analyticsFilterRegistry,
+  attachFilterScopePreference,
+  attachSavedFilterScopePreference,
   compileFilterDocument,
   type FilterDocument,
   type FilterExpression,
+  filterScopePreferenceFromDocument,
   normalizeFilterDocument,
+  savedFilterScopePreferenceFromDocument,
+  scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
+import { sitePksFromSiteIdsSql } from "@/lib/edge/site-identity-sql";
 
 import type { EventRecordSortKey, ListSort } from "./core-types";
 
@@ -59,10 +66,18 @@ export function withoutFilterKey(
   filters: FilterDocument,
   field: string,
 ): FilterDocument {
-  return normalizeFilterDocument(
+  const normalized = normalizeFilterDocument(
     { version: 1, root: removeFields(filters.root, new Set([field])) },
     analyticsFilterRegistry,
   );
+  const callerPreference = filterScopePreferenceFromDocument(filters);
+  const savedPreference = savedFilterScopePreferenceFromDocument(filters);
+  const withCallerPreference = callerPreference
+    ? attachFilterScopePreference(normalized, callerPreference)
+    : normalized;
+  return savedPreference
+    ? attachSavedFilterScopePreference(withCallerPreference, savedPreference)
+    : withCallerPreference;
 }
 
 export function withoutGeoFilter(filters: FilterDocument): FilterDocument {
@@ -108,6 +123,11 @@ export function buildVisitFilterSql(
   filters: FilterDocument,
   alias = "visit_source",
 ): { clause: string; bindings: Array<string | number> } {
+  const scoped = scopedFilterMetadata(filters);
+  if (scoped?.plan.mode === "entity") {
+    const entity = buildEntityMembershipPredicate(scoped, alias);
+    return { clause: `WHERE ${entity.clause}`, bindings: entity.bindings };
+  }
   if (usesEventFilter(filters)) {
     const eventFilter = buildEventFilterSql(filters, "event_filter_source", {
       sessionSource: "visit_source",
@@ -129,10 +149,17 @@ export function buildVisitFilterSql(
      AND v.visit_id = ce.visit_id
     WHERE ce.site_pk = ${alias}.site_pk
       AND ce.visit_id = ${alias}.visit_id
+      ${scoped ? "AND ce.occurred_at >= ? AND ce.occurred_at < ?" : ""}
   ) event_filter_source
   WHERE ${eventClause}
 )`,
-      bindings: eventFilter.bindings,
+      bindings: scoped
+        ? [
+            scoped.time.range.startMs,
+            scoped.time.range.endExclusiveMs,
+            ...eventFilter.bindings,
+          ]
+        : eventFilter.bindings,
     };
   }
   const compiled = compileFilterDocument(filters, { alias });
@@ -148,15 +175,24 @@ export function buildEventFilterSql(
     sessionSource?: string;
   },
 ): { clause: string; bindings: Array<string | number> } {
+  const scoped = scopedFilterMetadata(filters);
+  const scopedPredicate =
+    scoped?.plan.mode === "entity"
+      ? buildEntityMembershipPredicate(scoped, alias)
+      : null;
   const compiled = compileFilterDocument(filters, {
     alias,
     eventAlias: alias,
     sessionSource: options?.sessionSource,
   });
-  const clauses = compiled.clause
-    ? [compiled.clause.replace(/^WHERE\s+/i, "")]
-    : [];
-  const bindings: Array<string | number> = [...compiled.bindings];
+  const clauses = scopedPredicate
+    ? [scopedPredicate.clause]
+    : compiled.clause
+      ? [compiled.clause.replace(/^WHERE\s+/i, "")]
+      : [];
+  const bindings: Array<string | number> = scopedPredicate
+    ? [...scopedPredicate.bindings]
+    : [...compiled.bindings];
   if (options?.eventName) {
     clauses.push(`TRIM(COALESCE(${alias}.event_name, '')) = ?`);
     bindings.push(options.eventName);
@@ -176,6 +212,177 @@ export function buildEventFilterSql(
   return clauses.length > 0
     ? { clause: `WHERE ${clauses.join(" AND ")}`, bindings }
     : { clause: "", bindings };
+}
+
+interface EntityMembershipSql {
+  readonly clause: string;
+  readonly bindings: Array<string | number>;
+}
+
+function sourceColumn(entityKind: "session" | "visitor"): string {
+  return entityKind === "session" ? "session_id" : "visitor_id";
+}
+
+function conditionAppliesToVisit(condition: FilterExpression): boolean {
+  if (condition.kind !== "condition") return true;
+  if (condition.target.kind === "event-payload") return false;
+  return analyticsFilterDefinition(condition.target.field)?.source !== "event";
+}
+
+function membershipSetSql(
+  metadata: NonNullable<ReturnType<typeof scopedFilterMetadata>>,
+): EntityMembershipSql {
+  const entityColumn = sourceColumn(
+    metadata.plan.membership.kind === "entity"
+      ? metadata.plan.membership.entityKind
+      : "session",
+  );
+  const entityExpression =
+    metadata.plan.membership.kind === "entity"
+      ? metadata.plan.membership.expression
+      : null;
+  const sitePredicate = (alias: string) =>
+    `${alias}.site_pk IN ${sitePksFromSiteIdsSql(metadata.siteIds.length)}`;
+  const visitSource = `
+scope_visit_source AS (
+  SELECT v.*
+  FROM visits v
+  WHERE ${sitePredicate("v")}
+    AND v.started_at >= ? AND v.started_at < ?
+)`;
+  const eventSource = `
+scope_event_source AS (
+  SELECT ce.event_pk, '{}' AS event_data_json, cen.name AS event_name, v.*
+  FROM custom_events ce
+  INNER JOIN custom_event_names cen
+    ON cen.id = ce.event_name_id
+  INNER JOIN visits v
+    ON v.site_pk = ce.site_pk AND v.visit_id = ce.visit_id
+  WHERE ${sitePredicate("ce")}
+    AND ce.occurred_at >= ? AND ce.occurred_at < ?
+)`;
+  const universe = `
+scope_universe AS (
+  SELECT site_pk, ${entityColumn} AS entity_id
+  FROM scope_visit_source
+  WHERE TRIM(COALESCE(${entityColumn}, '')) != ''
+  UNION
+  SELECT site_pk, ${entityColumn} AS entity_id
+  FROM scope_event_source
+  WHERE TRIM(COALESCE(${entityColumn}, '')) != ''
+)`;
+  const empty = `
+scope_empty AS (
+  SELECT site_pk, entity_id
+  FROM scope_universe
+  WHERE 0
+)`;
+  const ctes = [visitSource, eventSource, universe, empty];
+  const bindings: Array<string | number> = [
+    ...metadata.siteIds,
+    metadata.time.range.startMs,
+    metadata.time.range.endExclusiveMs,
+    ...metadata.siteIds,
+    metadata.time.range.startMs,
+    metadata.time.range.endExclusiveMs,
+  ];
+  let index = 0;
+
+  const atom = (condition: FilterExpression): string => {
+    const document = { version: 1 as const, root: condition };
+    const visitCompiled = conditionAppliesToVisit(condition)
+      ? compileFilterDocument(document, {
+          alias: "v",
+          eventAlias: "v",
+          sessionSource: "scope_visit_source",
+        })
+      : { clause: "WHERE 0", bindings: [] as Array<string | number> };
+    const eventCompiled = compileFilterDocument(document, {
+      alias: "v",
+      eventAlias: "v",
+      sessionSource: "scope_visit_source",
+    });
+    const name = `scope_set_${index++}`;
+    ctes.push(`
+${name} AS (
+  SELECT DISTINCT site_pk, ${entityColumn} AS entity_id
+  FROM scope_visit_source v
+  ${visitCompiled.clause}
+  AND TRIM(COALESCE(v.${entityColumn}, '')) != ''
+  UNION
+  SELECT DISTINCT site_pk, ${entityColumn} AS entity_id
+  FROM scope_event_source v
+  ${eventCompiled.clause}
+  AND TRIM(COALESCE(v.${entityColumn}, '')) != ''
+)`);
+    bindings.push(...visitCompiled.bindings);
+    bindings.push(...eventCompiled.bindings);
+    return `SELECT site_pk, entity_id FROM ${name}`;
+  };
+
+  const build = (expression: typeof entityExpression): string => {
+    if (!expression) return "SELECT site_pk, entity_id FROM scope_universe";
+    if (expression.kind === "condition") return atom(expression.condition);
+    const childQueries =
+      expression.kind === "not"
+        ? [build(expression.child)]
+        : expression.children.map(build);
+    const name = `scope_set_${index++}`;
+    if (expression.kind === "not") {
+      ctes.push(`
+${name} AS (
+  SELECT u.site_pk, u.entity_id
+  FROM scope_universe u
+  WHERE NOT EXISTS (
+    SELECT 1 FROM (${childQueries[0]}) child
+    WHERE child.site_pk = u.site_pk AND child.entity_id = u.entity_id
+  )
+)`);
+    } else if (expression.kind === "or") {
+      ctes.push(`
+${name} AS (
+  ${childQueries.join("\n  UNION\n  ")}
+)`);
+    } else {
+      ctes.push(`
+${name} AS (
+  SELECT first_child.site_pk, first_child.entity_id
+  FROM (${childQueries[0]}) first_child
+  ${childQueries
+    .slice(1)
+    .map(
+      (query) =>
+        `INNER JOIN (${query}) next_child ON next_child.site_pk = first_child.site_pk AND next_child.entity_id = first_child.entity_id`,
+    )
+    .join("\n  ")}
+)`);
+    }
+    return `SELECT site_pk, entity_id FROM ${name}`;
+  };
+
+  const root = build(entityExpression);
+  const relation = `
+WITH
+${ctes.join(",")}
+SELECT 1
+FROM (${root}) entity_membership
+WHERE entity_membership.site_pk = __OUTER__.site_pk
+  AND entity_membership.entity_id = __OUTER__.${entityColumn}`;
+  return {
+    clause: `EXISTS (${relation.replaceAll("__OUTER__", "__ALIAS__")})`,
+    bindings,
+  };
+}
+
+function buildEntityMembershipPredicate(
+  metadata: NonNullable<ReturnType<typeof scopedFilterMetadata>>,
+  alias: string,
+): EntityMembershipSql {
+  const result = membershipSetSql(metadata);
+  return {
+    clause: result.clause.replaceAll("__ALIAS__", alias),
+    bindings: result.bindings,
+  };
 }
 
 export function eventRecordOrderBy(sort: ListSort<EventRecordSortKey>): string {

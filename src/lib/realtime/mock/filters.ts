@@ -11,6 +11,12 @@ import {
   dashboardFilterPresentation,
   withoutDashboardFilter,
 } from "@/lib/dashboard/filter-state";
+import type { QueryOperation } from "@/lib/edge/analytics/contract";
+import {
+  type FilterScope,
+  normalizeFilterScopePreference,
+  resolveFilterScope,
+} from "@/lib/edge/analytics/contract/scoped-filter";
 import {
   analyticsFilterRegistry,
   parseFilterParams,
@@ -52,10 +58,33 @@ export function parseDemoFilters(
   }
   const document = parseFilterParams(search, analyticsFilterRegistry);
   const presentation = dashboardFilterPresentation(document);
+  const requestedScope = normalizeFilterScopePreference(params.scope);
+  const explicitResolvedScope = normalizeDemoScope(params.resolvedScope);
+  const operation =
+    typeof params.operation === "string"
+      ? (params.operation as QueryOperation)
+      : undefined;
+  const scope =
+    explicitResolvedScope ??
+    (operation
+      ? (resolveFilterScope(operation, requestedScope) ?? undefined)
+      : requestedScope === "auto"
+        ? undefined
+        : requestedScope);
   return {
     filterDocument: document,
+    ...(scope ? { scope } : {}),
     ...presentation,
   };
+}
+
+function normalizeDemoScope(
+  value: string | number | undefined,
+): FilterScope | undefined {
+  if (value === "event" || value === "session" || value === "visitor") {
+    return value;
+  }
+  return undefined;
 }
 
 export function normalizeDemoSearch(

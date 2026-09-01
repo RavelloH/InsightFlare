@@ -61,6 +61,32 @@ describe("API v1 query application adapter", () => {
         operation: "site.analytics.overview",
       },
     });
+
+    await expect(
+      executeApiV1Query(undefined, invocation(registry, null as never), {}),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        kind: "operation-not-allowed",
+        operation: "site.analytics.overview",
+      },
+    });
+
+    await expect(
+      executeApiV1Query(
+        undefined,
+        invocation(registry, {
+          window: { startMs: 2_000, endExclusiveMs: 1_000, timeZone: "UTC" },
+        }),
+        {},
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        kind: "operation-not-allowed",
+        operation: "site.analytics.overview",
+      },
+    });
   });
 
   it("translates canonical cost failures back to the API v1 error shape", async () => {
@@ -109,5 +135,24 @@ describe("API v1 query application adapter", () => {
         operation: "site.analytics.overview",
       },
     });
+  });
+
+  it("normalizes Error and non-Error provider failures", async () => {
+    for (const thrown of [new Error("provider-failed"), "provider-failed"]) {
+      const registry = new AnalyticsProviderRegistry().register(
+        canonicalQueryOperationFor("site.analytics.overview"),
+        {
+          execute: async () => {
+            throw thrown;
+          },
+        },
+      );
+
+      await expect(
+        executeApiV1Query(undefined, invocation(registry), {}),
+      ).rejects.toThrow(
+        thrown instanceof Error ? "provider-failed" : "data-unavailable",
+      );
+    }
   });
 });

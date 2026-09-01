@@ -138,7 +138,8 @@ function globalNavigationSearchParams(
       key.startsWith("filter[") ||
       key === "range" ||
       key === "interval" ||
-      key === "timeZone"
+      key === "timeZone" ||
+      key === "scope"
     ) {
       next.append(key, value);
     }

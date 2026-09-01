@@ -39,6 +39,9 @@ function canonicalJson(value: unknown): string {
   }
   if (typeof value === "string") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value instanceof Set) {
+    return `[${[...value].map(canonicalJson).sort().join(",")}]`;
+  }
   if (value && typeof value === "object") {
     return `{${Object.entries(value)
       .filter(([key]) => !NON_SEMANTIC_KEYS.has(key))

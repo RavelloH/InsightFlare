@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import {
+  attachFilterScopePreference,
+  attachSavedFilterScopePreference,
+  createQueryTime,
+  EMPTY_FILTER_DOCUMENT,
+  filterScopePreferenceFromDocument,
+  prepareScopedQuery,
+  savedFilterScopePreferenceFromDocument,
+} from "@/lib/edge/analytics/contract";
 import {
   addDimensionValue,
   addGeoDimensionValue,
@@ -195,6 +203,96 @@ describe("edge query core parsers", () => {
         "geo.country",
       ),
     ).toEqual(filterFixture({ browser: "Chrome" }));
+
+    const scoped = attachSavedFilterScopePreference(
+      attachFilterScopePreference(
+        filterFixture({ country: "US", browser: "Chrome" }),
+        "visitor",
+      ),
+      "session",
+    );
+    const stripped = withoutFilterKey(scoped, "geo.country");
+    expect(filterScopePreferenceFromDocument(stripped)).toBe("visitor");
+    expect(savedFilterScopePreferenceFromDocument(stripped)).toBe("session");
+
+    const nestedNot = withoutFilterKey(
+      {
+        version: 1,
+        root: {
+          kind: "not",
+          child: filterFixture({ country: "US" }).root!,
+        },
+      },
+      "geo.country",
+    );
+    expect(nestedNot.root).toBeNull();
+
+    const preservedNot = withoutFilterKey(
+      {
+        version: 1,
+        root: {
+          kind: "not",
+          child: filterFixture({ path: "/private" }).root!,
+        },
+      },
+      "geo.country",
+    );
+    expect(preservedNot.root).toEqual({
+      kind: "not",
+      child: filterFixture({ path: "/private" }).root,
+    });
+
+    const reducedAnd = withoutFilterKey(
+      {
+        version: 1,
+        root: {
+          kind: "and",
+          children: [
+            filterFixture({ country: "US" }).root!,
+            filterFixture({ path: "/docs" }).root!,
+          ],
+        },
+      },
+      "geo.country",
+    );
+    expect(reducedAnd.root).toEqual(filterFixture({ path: "/docs" }).root);
+
+    const preservedAnd = withoutFilterKey(
+      {
+        version: 1,
+        root: {
+          kind: "and",
+          children: [
+            filterFixture({ country: "US" }).root!,
+            filterFixture({ path: "/docs" }).root!,
+            filterFixture({ browser: "Chrome" }).root!,
+          ],
+        },
+      },
+      "geo.country",
+    );
+    expect(preservedAnd.root).toMatchObject({
+      kind: "and",
+      children: [
+        filterFixture({ browser: "Chrome" }).root,
+        filterFixture({ path: "/docs" }).root,
+      ],
+    });
+
+    const emptiedAnd = withoutFilterKey(
+      {
+        version: 1,
+        root: {
+          kind: "and",
+          children: [
+            filterFixture({ country: "US" }).root!,
+            filterFixture({ country: "CA" }).root!,
+          ],
+        },
+      },
+      "geo.country",
+    );
+    expect(emptiedAnd.root).toBeNull();
   });
 });
 
@@ -949,7 +1047,9 @@ describe("edge query core SQL helpers", () => {
     expect(filter.clause).toContain(
       "TRIM(COALESCE(visit_source.title, '')) = ?",
     );
-    expect(filter.clause).toContain("visit_source.session_id IN");
+    expect(filter.clause).toContain(
+      "(visit_source.site_pk, visit_source.session_id) IN",
+    );
     expect(filter.clause).toContain(
       "ORDER BY edge.started_at ASC, edge.visit_id ASC",
     );
@@ -983,6 +1083,113 @@ describe("edge query core SQL helpers", () => {
       clause: "",
       bindings: [],
     });
+  });
+
+  it("builds entity membership SQL for scoped visit and event filters", () => {
+    const context = {
+      subject: { kind: "site", siteId: "site-1" },
+      policy: {
+        revision: "test",
+        audience: "api-v1",
+        allowedOperations: new Set(),
+        allowedDimensions: new Set(),
+        allowedFilters: new Set(),
+        allowedDetails: new Set(),
+        limits: {},
+        allowedPagination: new Set(),
+      },
+    } as never;
+    const time = createQueryTime(100, 200, "UTC", 200);
+    const prepared = prepareScopedQuery("overview", {
+      context,
+      time,
+      filters: filterFixture({ path: "/docs", browser: "Chrome" }),
+      scopePreference: "session",
+    } as never);
+
+    const visit = buildVisitFilterSql(prepared.filters!, "v");
+    expect(visit.clause).toContain("scope_universe");
+    expect(visit.clause).toContain("v.session_id");
+    expect(visit.bindings).toEqual(
+      expect.arrayContaining(["site-1", 100, 200, "/docs", "Chrome"]),
+    );
+
+    const event = buildEventFilterSql(prepared.filters!, "e", {
+      eventName: "Signup",
+      search: "50%",
+    });
+    expect(event.clause).toContain("e.session_id");
+    expect(event.clause).toContain("event_name");
+    expect(event.bindings).toEqual(
+      expect.arrayContaining(["Signup", "%50\\%%"]),
+    );
+
+    const visitorPrepared = prepareScopedQuery("overview", {
+      context,
+      time,
+      filters: filterFixture({ path: "/docs" }),
+      scopePreference: "visitor",
+    } as never);
+    expect(buildEventFilterSql(visitorPrepared.filters!, "e").clause).toContain(
+      "e.visitor_id",
+    );
+
+    const payloadPrepared = prepareScopedQuery("overview", {
+      context,
+      time,
+      filters: {
+        version: 1,
+        root: {
+          kind: "condition",
+          target: { kind: "event-payload", path: "/plan" } as never,
+          operator: "eq",
+          value: "pro",
+        },
+      },
+      scopePreference: "session",
+    } as never);
+    expect(buildVisitFilterSql(payloadPrepared.filters!, "v").clause).toContain(
+      "scope_universe",
+    );
+
+    const logicalPrepared = prepareScopedQuery("overview", {
+      context,
+      time,
+      filters: {
+        version: 1,
+        root: {
+          kind: "or",
+          children: [
+            {
+              kind: "not",
+              child: filterFixture({ path: "/private" }).root!,
+            },
+            filterFixture({ browser: "Safari" }).root!,
+          ],
+        },
+      },
+      scopePreference: "visitor",
+    } as never);
+    const logicalVisit = buildVisitFilterSql(logicalPrepared.filters!, "v");
+    expect(logicalVisit.clause).toContain("NOT EXISTS");
+    expect(logicalVisit.clause).toContain("UNION");
+
+    const eventPrepared = prepareScopedQuery("overview", {
+      context,
+      time,
+      filters: {
+        version: 1,
+        root: {
+          kind: "condition",
+          target: { kind: "field", field: "event.name" },
+          operator: "eq",
+          value: "Signup",
+        },
+      },
+      scopePreference: "event",
+    } as never);
+    const eventVisit = buildVisitFilterSql(eventPrepared.filters!, "v");
+    expect(eventVisit.clause).toContain("occurred_at >= ?");
   });
 
   it("maps custom event JSON type labels and codes", () => {

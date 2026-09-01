@@ -25,6 +25,7 @@ import {
   createQueryTime,
   createTimeRange,
   normalizeReportingTimeZone,
+  parseFilterUrlForAudience,
   siteQueryContext,
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
@@ -545,6 +546,7 @@ export async function executePrivateTeamDashboard(
   const bucketError = teamDashboardBucketError(window, interval);
   if (bucketError) return bucketError;
   const diagnostics = createD1ReadDiagnostics();
+  const filters = parseFilterUrlForAudience("private-dashboard", input.url);
   const result = await createTeamDashboardQueryRuntime({
     env: input.env,
     teamId: input.teamId,
@@ -564,6 +566,7 @@ export async function executePrivateTeamDashboard(
       window.timeZone,
       window.nowMs,
     ),
+    filters,
   });
   if (!result.ok) {
     return queryErrorResponse(result.error);

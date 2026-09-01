@@ -81,12 +81,17 @@ import {
   type DashboardInterval,
   normalizeCustomDateRange,
   parseFilterDocumentFromSearchParams,
+  parseFilterScopeFromSearchParams,
   type RangePreset,
+  serializeFilterScopeToSearchParams,
 } from "@/lib/dashboard/query-state";
 import { zonedParts } from "@/lib/dashboard/time-zone";
 import {
   analyticsFilterRegistry,
+  attachFilterScopePreference,
   type FilterDocument,
+  type FilterScopePreference,
+  filterScopePreferenceFromDocument,
   serializeFilterParams,
 } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
@@ -393,6 +398,7 @@ function FilterTrigger({
   disabled,
   messages,
   onClick,
+  scopePreference,
   style,
 }: {
   activeFilterCount: number;
@@ -400,8 +406,18 @@ function FilterTrigger({
   disabled: boolean;
   messages: AppMessages;
   onClick: () => void;
+  scopePreference: FilterScopePreference;
   style?: CSSProperties;
 }) {
+  const filterButtonLabel =
+    scopePreference === "event"
+      ? messages.dashboardHeader.filterButtonEvent
+      : scopePreference === "session"
+        ? messages.dashboardHeader.filterButtonSession
+        : scopePreference === "visitor"
+          ? messages.dashboardHeader.filterButtonVisitor
+          : messages.dashboardHeader.filterButton;
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -420,7 +436,24 @@ function FilterTrigger({
                 activeFilterCount === 0 && "text-muted-foreground",
               )}
             />
-            {messages.dashboardHeader.filters}
+            <AutoResizer
+              initial
+              animateWidth
+              animateHeight={false}
+              className="inline-flex min-w-0 items-center"
+            >
+              <AutoTransition
+                as="span"
+                className="inline-block whitespace-nowrap"
+                duration={0.2}
+                initial={false}
+                presenceMode="wait"
+                transitionKey={scopePreference}
+                type="fade"
+              >
+                {filterButtonLabel}
+              </AutoTransition>
+            </AutoResizer>
             <FilterActiveCountBadge count={activeFilterCount} />
           </Button>
         </span>
@@ -454,6 +487,8 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     setCustomRange,
     setInterval: setDashboardInterval,
     setUiFilters,
+    scopePreference,
+    setScopePreference,
     uiFilterDsl,
     allowedIntervals,
     timeZone,
@@ -463,6 +498,11 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   const queryDocument = useMemo(
     () =>
       parseFilterDocumentFromSearchParams(new URLSearchParams(searchParamsKey)),
+    [searchParamsKey],
+  );
+  const urlScopePreference = useMemo(
+    () =>
+      parseFilterScopeFromSearchParams(new URLSearchParams(searchParamsKey)),
     [searchParamsKey],
   );
   const activeFilterCount = useMemo(
@@ -614,6 +654,26 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   }, [queryDocument, setUiFilters]);
 
   useEffect(() => {
+    if (scopePreference !== urlScopePreference) {
+      setScopePreference(urlScopePreference);
+    }
+  }, [scopePreference, setScopePreference, urlScopePreference]);
+
+  const handleScopeChange = useCallback(
+    (next: FilterScopePreference) => {
+      setScopePreference(next);
+      const params = serializeFilterScopeToSearchParams(searchParams, next);
+      const updated = serializeDashboardSearchParams(params);
+      const current = serializeDashboardSearchParams(searchParams);
+      if (updated !== current) {
+        const target = updated ? `${livePathname}?${updated}` : livePathname;
+        replaceUrlWithoutNavigation(target);
+      }
+    },
+    [livePathname, searchParams, setScopePreference],
+  );
+
+  useEffect(() => {
     setPeriodForwardStack([]);
   }, [siteId]);
 
@@ -623,10 +683,16 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
       rawDsl?: string,
       options?: { readonly closePanel?: boolean },
     ) => {
-      setUiFilters(nextDocument, rawDsl);
-      const params = withDashboardFilterSearchParams(
-        searchParams,
+      const nextScope =
+        filterScopePreferenceFromDocument(nextDocument) ?? scopePreference;
+      const scopedDocument = attachFilterScopePreference(
         nextDocument,
+        nextScope,
+      );
+      setUiFilters(scopedDocument, rawDsl);
+      const params = serializeFilterScopeToSearchParams(
+        withDashboardFilterSearchParams(searchParams, scopedDocument),
+        nextScope,
       );
       const updated = serializeDashboardSearchParams(params);
       const current = serializeDashboardSearchParams(searchParams);
@@ -639,7 +705,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
         setDesktopFilterSheetOpen(false);
       }
     },
-    [livePathname, searchParams, setUiFilters],
+    [livePathname, scopePreference, searchParams, setUiFilters],
   );
 
   const queueOpenCustomDialog = () => {
@@ -721,6 +787,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                 disabled={filterDisabled}
                 messages={messages}
                 onClick={() => setMobileFilterDrawerOpen(true)}
+                scopePreference={scopePreference}
                 style={filterTriggerStyle}
               />
               <DrawerContent className="h-[80dvh] max-h-[80dvh] flex flex-col overflow-hidden">
@@ -743,8 +810,10 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                     messages={messages}
                     open={mobileFilterDrawerOpen}
                     siteId={siteId}
+                    scopePreference={scopePreference}
                     window={window}
                     onApply={applyFilterDocument}
+                    onScopeChange={handleScopeChange}
                   />
                 </DrawerScrollArea>
               </DrawerContent>
@@ -891,6 +960,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                 disabled={filterDisabled}
                 messages={messages}
                 onClick={() => setDesktopFilterSheetOpen(true)}
+                scopePreference={scopePreference}
                 style={filterTriggerStyle}
               />
               <SheetContent
@@ -914,8 +984,10 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                     messages={messages}
                     open={desktopFilterSheetOpen}
                     siteId={siteId}
+                    scopePreference={scopePreference}
                     window={window}
                     onApply={applyFilterDocument}
+                    onScopeChange={handleScopeChange}
                   />
                 </div>
               </SheetContent>

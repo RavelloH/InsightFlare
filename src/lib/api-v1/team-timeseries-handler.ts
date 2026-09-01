@@ -193,6 +193,7 @@ export async function handlePlannedTeamTimeseries(
       timeZone,
       interval: input.interval,
       filters,
+      scopePreference: input.scope ?? "auto",
     };
     const serviceResult = await createApiV1QueryApplicationAdapter().execute<
       TeamTimeseriesReaderInput,
@@ -267,6 +268,9 @@ export async function handlePlannedTeamTimeseries(
           },
           source: result.source,
           accuracy: result.approximateVisitors ? "approximate" : "exact",
+          ...(serviceResult.meta?.filterScope
+            ? { filterScope: serviceResult.meta.filterScope }
+            : {}),
         },
       },
       requestId,

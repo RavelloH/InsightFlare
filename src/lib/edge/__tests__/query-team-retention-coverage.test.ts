@@ -753,7 +753,13 @@ describe("edge journey retention coverage", () => {
       ],
     });
     expect(calls[0].sql).toContain("MIN(bucket) AS cohort_bucket");
-    expect(calls[0].bindings).toEqual([...visitBindings(), "us"]);
+    expect(calls[0].sql).toContain("FROM scope_final_visits");
+    expect(calls[0].bindings).toEqual([
+      ...visitBindings(),
+      ...visitBindings(),
+      "us",
+      "us",
+    ]);
   });
 
   it("materializes retention visits once while preserving cohort results", async () => {

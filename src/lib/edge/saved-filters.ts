@@ -6,8 +6,10 @@ import {
 import { bad, forb, jsonResponseFor, na, nf } from "@/lib/response";
 import {
   SAVED_FILTER_DSL_VERSION,
+  SAVED_FILTER_SCOPE_PREFERENCES,
   SAVED_FILTER_VISIBILITIES,
   type SavedFilter,
+  type SavedFilterScopePreference,
   type SavedFilterVisibility,
 } from "@/lib/saved-filters";
 
@@ -26,6 +28,7 @@ interface SavedFilterRow {
   ownerUserId: string;
   authorName: string;
   visibility: SavedFilterVisibility;
+  scopePreference?: SavedFilterScopePreference | null;
   name: string;
   description: string;
   filterDsl: string;
@@ -38,12 +41,14 @@ interface SavedFilterInput {
   readonly name: string;
   readonly description: string;
   readonly visibility: SavedFilterVisibility;
+  readonly scopePreference: SavedFilterScopePreference;
   readonly filterDsl: string;
 }
 
 function asSavedFilter(row: SavedFilterRow, actorUserId: string): SavedFilter {
   return {
     ...row,
+    scopePreference: row.scopePreference ?? "auto",
     isOwner: row.ownerUserId === actorUserId,
   };
 }
@@ -68,6 +73,8 @@ function savedFilterInput(
   );
   const rawDsl = text(body.filterDsl, MAX_FILTER_DSL_LENGTH);
   const rawVisibility = body.visibility;
+  const rawScopePreference =
+    body.scopePreference === undefined ? "auto" : body.scopePreference;
   if (rawName === null || !rawName.trim()) {
     return bad("name is required", "invalid_saved_filter_name");
   }
@@ -79,6 +86,17 @@ function savedFilterInput(
     !SAVED_FILTER_VISIBILITIES.includes(rawVisibility as SavedFilterVisibility)
   ) {
     return bad("visibility is invalid", "invalid_saved_filter_visibility");
+  }
+  if (
+    typeof rawScopePreference !== "string" ||
+    !SAVED_FILTER_SCOPE_PREFERENCES.includes(
+      rawScopePreference as SavedFilterScopePreference,
+    )
+  ) {
+    return bad(
+      "scopePreference is invalid",
+      "invalid_saved_filter_scope_preference",
+    );
   }
   if (rawDsl === null) {
     return bad("filterDsl is invalid", "invalid_saved_filter_dsl");
@@ -103,6 +121,7 @@ function savedFilterInput(
     name: rawName.trim(),
     description: rawDescription,
     visibility: rawVisibility as SavedFilterVisibility,
+    scopePreference: rawScopePreference as SavedFilterScopePreference,
     filterDsl: rawDsl,
   };
 }
@@ -113,6 +132,7 @@ const savedFilterColumns = `
   sf.owner_user_id AS ownerUserId,
   COALESCE(NULLIF(u.name, ''), NULLIF(u.username, ''), 'Unknown') AS authorName,
   sf.visibility,
+  sf.scope_preference AS scopePreference,
   sf.name,
   sf.description,
   sf.filter_dsl AS filterDsl,
@@ -171,9 +191,10 @@ export async function handleSavedFilters(
     const duplicate = await env.DB.prepare(
       `SELECT id FROM saved_filters
        WHERE site_id = ? AND owner_user_id = ? AND filter_dsl = ?
+         AND scope_preference = ?
        LIMIT 1`,
     )
-      .bind(siteId, session.userId, parsed.filterDsl)
+      .bind(siteId, session.userId, parsed.filterDsl, parsed.scopePreference)
       .first<{ id: string }>();
     if (duplicate) {
       return bad(
@@ -186,8 +207,8 @@ export async function handleSavedFilters(
     await env.DB.prepare(
       `INSERT INTO saved_filters (
         id, site_id, owner_user_id, visibility, name, description,
-        filter_dsl, filter_dsl_version, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())`,
+        scope_preference, filter_dsl, filter_dsl_version, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())`,
     )
       .bind(
         createdId,
@@ -196,6 +217,7 @@ export async function handleSavedFilters(
         parsed.visibility,
         parsed.name,
         parsed.description,
+        parsed.scopePreference,
         parsed.filterDsl,
         SAVED_FILTER_DSL_VERSION,
       )
@@ -236,10 +258,17 @@ export async function handleSavedFilters(
     if (parsed instanceof Response) return parsed;
     const duplicate = await env.DB.prepare(
       `SELECT id FROM saved_filters
-       WHERE site_id = ? AND owner_user_id = ? AND filter_dsl = ? AND id <> ?
+       WHERE site_id = ? AND owner_user_id = ? AND filter_dsl = ?
+         AND scope_preference = ? AND id <> ?
        LIMIT 1`,
     )
-      .bind(siteId, session.userId, parsed.filterDsl, id)
+      .bind(
+        siteId,
+        session.userId,
+        parsed.filterDsl,
+        parsed.scopePreference,
+        id,
+      )
       .first<{ id: string }>();
     if (duplicate) {
       return bad(
@@ -250,12 +279,13 @@ export async function handleSavedFilters(
     }
     await env.DB.prepare(
       `UPDATE saved_filters
-       SET visibility = ?, name = ?, description = ?, filter_dsl = ?,
-           filter_dsl_version = ?, updated_at = unixepoch()
+       SET visibility = ?, scope_preference = ?, name = ?, description = ?,
+           filter_dsl = ?, filter_dsl_version = ?, updated_at = unixepoch()
        WHERE id = ? AND site_id = ? AND owner_user_id = ?`,
     )
       .bind(
         parsed.visibility,
+        parsed.scopePreference,
         parsed.name,
         parsed.description,
         parsed.filterDsl,

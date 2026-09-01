@@ -31,7 +31,10 @@ import {
   withDashboardFilterSearchParams,
 } from "@/lib/dashboard/filter-state";
 import { numberFormat } from "@/lib/dashboard/format";
-import type { FilterDocument } from "@/lib/filter-contract";
+import {
+  type FilterDocument,
+  filterScopePreferenceFromDocument,
+} from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
@@ -133,6 +136,12 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
     }),
     [filters],
   );
+  // Session/Visitor scope first selects matching entities, then expands back
+  // to all of their observations. Do not apply the selected referrer again
+  // to the already-expanded result rows.
+  const entityScopedOutput =
+    filterScopePreferenceFromDocument(filters) === "session" ||
+    filterScopePreferenceFromDocument(filters) === "visitor";
 
   function setFilter(next: { tab: ReferrerTab; value: string } | null) {
     const activeTab = next?.tab ?? "domain";
@@ -230,7 +239,7 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
     activeTab: ReferrerTab,
   ) => {
     const activeValue = activeFilterValueByTab[activeTab];
-    return activeValue
+    return !entityScopedOutput && activeValue
       ? rows.filter((row) => row.filterValue === activeValue)
       : [...rows];
   };

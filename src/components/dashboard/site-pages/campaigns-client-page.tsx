@@ -11,7 +11,10 @@ import { PageHeading } from "@/components/dashboard/page-heading";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import { fetchUtmDimension } from "@/lib/dashboard/client-data";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-import type { FilterDocument } from "@/lib/filter-contract";
+import {
+  type FilterDocument,
+  filterScopePreferenceFromDocument,
+} from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -58,8 +61,15 @@ export function CampaignsClientPage({
     filters: FilterDocument;
     window: TimeWindow;
   };
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
-  const requestFilters = useMemo(() => ({ ...filters }), [filtersKey]);
+  const filtersKey = useMemo(
+    () =>
+      JSON.stringify({
+        document: filters ?? {},
+        scope: filterScopePreferenceFromDocument(filters) ?? "auto",
+      }),
+    [filters],
+  );
+  const requestFilters = filters;
   const requestWindow = useMemo(
     () => ({
       preset: window.preset,

@@ -195,6 +195,7 @@ export async function handlePlannedTeamOverview(
       endExclusiveMs,
       timeZone,
       filters,
+      scopePreference: input.scope ?? "auto",
     };
     const serviceResult = await createApiV1QueryApplicationAdapter().execute<
       TeamOverviewReaderInput,
@@ -266,6 +267,9 @@ export async function handlePlannedTeamOverview(
           },
           source: result.source,
           accuracy: result.approximateVisitors ? "approximate" : "exact",
+          ...(serviceResult.meta?.filterScope
+            ? { filterScope: serviceResult.meta.filterScope }
+            : {}),
         },
       ),
       requestId,

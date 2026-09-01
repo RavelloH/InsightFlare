@@ -14,6 +14,7 @@ import {
   queryD1All,
   usesSessionBoundaryFilter,
 } from "./core";
+import { scopedDatasetFor } from "./scoped-dataset";
 
 export async function queryEventTypeOverviewFromD1(
   env: Env,
@@ -24,26 +25,48 @@ export async function queryEventTypeOverviewFromD1(
   options?: { includeBreakdowns?: boolean },
 ) {
   const includeBreakdowns = options?.includeBreakdowns !== false;
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
   const needsVisitSource = usesSessionBoundaryFilter(filters);
-  const eventFilter = buildEventFilterSql(filters, "es", {
-    sessionSource: needsVisitSource ? "visit_source" : undefined,
-  });
+  const eventFilter = scopedDataset
+    ? { clause: "", bindings: [] as Array<string | number> }
+    : buildEventFilterSql(filters, "es", {
+        sessionSource: needsVisitSource ? "visit_source" : undefined,
+      });
   const hasEventFilter = eventFilter.clause.length > 0;
-  const source = buildEventFilteredSourceCte(
-    siteId,
-    window,
-    filters,
-    eventName,
-    { materialize: true },
-  );
+  const source = scopedDataset
+    ? {
+        cte: `
+WITH
+${scopedDataset.ctes},
+filtered_events AS MATERIALIZED (
+  SELECT *
+  FROM ${scopedDataset.eventRelation} es
+  WHERE TRIM(COALESCE(es.event_name, '')) = ?
+)`,
+        bindings: [
+          ...scopedDataset.bindings.map((binding) => binding.value),
+          eventName,
+        ],
+      }
+    : buildEventFilteredSourceCte(siteId, window, filters, eventName, {
+        materialize: true,
+      });
   const bindings = [
     ...source.bindings,
-    ...(hasEventFilter
+    ...(!scopedDataset && hasEventFilter
       ? [siteId, window.startMs, window.endExclusiveMs, ...eventFilter.bindings]
-      : [siteId, window.startMs, window.endExclusiveMs]),
+      : !scopedDataset
+        ? [siteId, window.startMs, window.endExclusiveMs]
+        : []),
   ];
-  const scopedSummaryCte = hasEventFilter
+  const scopedSummaryCte = scopedDataset
     ? `
+scoped_summary AS (
+  SELECT count(*) AS events
+  FROM ${scopedDataset.eventRelation}
+)`
+    : hasEventFilter
+      ? `
 ${buildEventAnalyticsSourceCte({ cteName: "scoped_event_source" })},
 scoped_events AS (
   SELECT *
@@ -54,7 +77,7 @@ scoped_summary AS (
   SELECT count(*) AS events
   FROM scoped_events
 )`
-    : `
+      : `
 scoped_summary AS (
   SELECT count(*) AS events
   FROM custom_events

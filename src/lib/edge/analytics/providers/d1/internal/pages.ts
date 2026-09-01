@@ -31,6 +31,7 @@ import {
   queryReferrersFromD1,
   queryVisitDimensionFromD1,
 } from "./dimensions";
+import { scopedDatasetFor } from "./scoped-dataset";
 
 export async function queryTopPagesFromD1(
   env: Env,
@@ -40,16 +41,17 @@ export async function queryTopPagesFromD1(
   includeDetails: boolean,
   filters: FilterDocument,
 ): Promise<PageRow[]> {
-  const filter = buildVisitFilterSql(filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
   const queryExpr = includeDetails ? "query_string" : "''";
   const hashExpr = includeDetails ? "hash_fragment" : "''";
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 filtered_visits AS (
   SELECT *
-  FROM visit_source
-  ${filter.clause}
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
 )
 SELECT
   pathname,
@@ -64,8 +66,12 @@ LIMIT ?
 `;
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
+      ...(scopedDataset
+        ? scopedDataset.bindings.map((binding) => binding.value)
+        : [
+            ...visitSourceBindings(siteId, window),
+            ...(filter?.bindings ?? []),
+          ]),
       limit,
     ])
   ).map((row) => ({
@@ -133,7 +139,8 @@ export async function queryPageCardMetricsFromD1(
     offset?: number;
   },
 ): Promise<PageCardAggregateRow[]> {
-  const filter = buildVisitFilterSql(filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
   const requestedPathnames = Array.from(
     new Set(
       (options?.pathnames ?? [])
@@ -145,21 +152,21 @@ export async function queryPageCardMetricsFromD1(
     requestedPathnames.length > 0
       ? `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`
       : "";
-  const filteredClause = appendSqlConditions(filter.clause, [
+  const filteredClause = appendSqlConditions(filter?.clause ?? "", [
     `TRIM(COALESCE(pathname, '')) != ''`,
     pathnameCondition,
   ]);
   const hasLimit = typeof options?.limit === "number";
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 filtered_visits AS MATERIALIZED (
   SELECT
     pathname,
     session_id AS sessionId,
     visitor_id AS visitorId,
     duration_ms AS durationMs
-  FROM visit_source
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
   ${filteredClause}
 ),
 path_rollup AS (
@@ -204,8 +211,12 @@ ${hasLimit ? "LIMIT ? OFFSET ?" : ""}
 `;
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
+      ...(scopedDataset
+        ? scopedDataset.bindings.map((binding) => binding.value)
+        : [
+            ...visitSourceBindings(siteId, window),
+            ...(filter?.bindings ?? []),
+          ]),
       ...requestedPathnames,
       ...(hasLimit
         ? [options?.limit ?? 0, Math.max(0, options?.offset ?? 0)]
@@ -239,16 +250,17 @@ export async function queryPageCardTitlesFromD1(
   );
   if (requestedPathnames.length === 0) return [];
 
-  const filter = buildVisitFilterSql(filters);
-  const filteredClause = appendSqlConditions(filter.clause, [
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filteredClause = appendSqlConditions(filter?.clause ?? "", [
     `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`,
   ]);
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 filtered_visits AS (
   SELECT pathname, title
-  FROM visit_source
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
   ${filteredClause}
 ),
 title_rollup AS (
@@ -278,8 +290,12 @@ ORDER BY pathname ASC, titleRank ASC
 `;
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
+      ...(scopedDataset
+        ? scopedDataset.bindings.map((binding) => binding.value)
+        : [
+            ...visitSourceBindings(siteId, window),
+            ...(filter?.bindings ?? []),
+          ]),
       ...requestedPathnames,
       titleLimit,
     ])
@@ -307,21 +323,22 @@ export async function queryPageCardTrendFromD1(
   );
   if (requestedPathnames.length === 0) return [];
 
-  const filter = buildVisitFilterSql(filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "startedAt");
-  const filteredClause = appendSqlConditions(filter.clause, [
+  const filteredClause = appendSqlConditions(filter?.clause ?? "", [
     `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`,
   ]);
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 filtered_visits AS (
   SELECT
     pathname,
     started_at AS startedAt,
     visitor_id AS visitorId
-  FROM visit_source
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
   ${filteredClause}
 )
 SELECT
@@ -335,8 +352,12 @@ ORDER BY pathname ASC, bucket ASC
 `;
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
-      ...visitSourceBindings(siteId, window),
-      ...filter.bindings,
+      ...(scopedDataset
+        ? scopedDataset.bindings.map((binding) => binding.value)
+        : [
+            ...visitSourceBindings(siteId, window),
+            ...(filter?.bindings ?? []),
+          ]),
       ...requestedPathnames,
       ...bucket.bindings,
     ])
@@ -367,22 +388,23 @@ async function queryPageCardDetailsFromD1(
   );
   if (requestedPathnames.length === 0) return { titles: [], trend: [] };
 
-  const filter = buildVisitFilterSql(filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "startedAt");
-  const filteredClause = appendSqlConditions(filter.clause, [
+  const filteredClause = appendSqlConditions(filter?.clause ?? "", [
     `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`,
   ]);
   const sql = `
 WITH
-${buildVisitSourceCte()},
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
 filtered_visits AS MATERIALIZED (
   SELECT
     pathname,
     title,
     started_at AS startedAt,
     visitor_id AS visitorId
-  FROM visit_source
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
   ${filteredClause}
 ),
 title_rollup AS (
@@ -434,8 +456,9 @@ FROM trend_rollup
 ORDER BY rowKind ASC, pathname ASC, rowOrder ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...visitSourceBindings(siteId, window),
-    ...filter.bindings,
+    ...(scopedDataset
+      ? scopedDataset.bindings.map((binding) => binding.value)
+      : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])]),
     ...requestedPathnames,
     ...bucket.bindings,
     titleLimit,

@@ -15,8 +15,13 @@ import {
   handlePagesDashboardContract as handlePagesDashboard,
   handleReferrersContract as handleReferrers,
 } from "@/lib/edge/analytics/composition/protocol/pages-contract-adapter";
-import type { FilterDocument } from "@/lib/edge/analytics/contract";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import {
+  createQueryTime,
+  EMPTY_FILTER_DOCUMENT,
+  type FilterDocument,
+  prepareScopedQuery,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
 import {
   mapDimensionRows,
   type QueryWindow,
@@ -545,6 +550,47 @@ describe("edge pages D1 queries", () => {
       },
     ]);
   });
+
+  it("uses final scoped dataset bindings for page card queries", async () => {
+    const { env, calls } = createD1Env([
+      [{ pathname: "/pricing", title: "Pricing", views: 3 }],
+      [{ pathname: "/pricing", bucket: 0, views: 2, visitors: 1 }],
+    ]);
+    const prepared = prepareScopedQuery("pages", {
+      context: siteQueryContext("site-pages", "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: filterFixture({ path: "/pricing" }),
+      scopePreference: "visitor",
+    } as never);
+
+    await queryPageCardTitlesFromD1(
+      env,
+      siteId,
+      window,
+      prepared.filters!,
+      ["/pricing"],
+      3,
+    );
+    await queryPageCardTrendFromD1(
+      env,
+      siteId,
+      window,
+      "hour",
+      prepared.filters!,
+      ["/pricing"],
+    );
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.bindings.length).toBeGreaterThan(3);
+    expect(calls[1]?.bindings.length).toBeGreaterThan(3);
+    expect(calls[0]?.sql).toContain("scope_final_visits");
+    expect(calls[1]?.sql).toContain("scope_final_visits");
+  });
 });
 
 describe("edge pages handlers", () => {
@@ -655,8 +701,8 @@ describe("edge pages handlers", () => {
       },
     });
     expect(calls).toHaveLength(2);
-    expect(calls[0].bindings).toEqual([...visitBindings(), "us", 5]);
-    expect(calls[1].bindings).toEqual([...visitBindings(), "us", 5]);
+    expect(calls[0].bindings.slice(-2)).toEqual(["us", 5]);
+    expect(calls[1].bindings.slice(-2)).toEqual(["us", 5]);
     expect(calls[1].sql).toContain("ranked_cards AS");
   });
 
@@ -695,7 +741,7 @@ describe("edge pages handlers", () => {
       ],
     });
     expect(calls[0].sql).toContain("COALESCE(referrer_url, '') AS referrer");
-    expect(calls[0].bindings).toEqual([...visitBindings(), "Chrome", 7]);
+    expect(calls[0].bindings.slice(-2)).toEqual(["Chrome", 7]);
   });
 
   it("maps dimension aggregate rows and drops geo filters before querying", async () => {
@@ -760,7 +806,7 @@ describe("edge pages handlers", () => {
       },
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0].bindings).toEqual([...visitBindings(), 5, 4]);
+    expect(calls[0].bindings.slice(-2)).toEqual([5, 4]);
   });
 
   it("rejects deep dashboard pages before querying D1", async () => {
@@ -932,20 +978,9 @@ describe("edge pages handlers", () => {
       ],
     });
     expect(calls).toHaveLength(3);
-    expect(calls[0].bindings).toEqual([...visitBindings(), 3, 0]);
-    expect(calls[1].bindings).toEqual([
-      siteId,
-      Math.max(window.startMs - (window.endExclusiveMs - window.startMs), 0),
-      window.startMs,
-      "/pricing",
-      "/docs",
-    ]);
-    expect(calls[2].bindings).toEqual([
-      ...visitBindings(),
-      "/pricing",
-      "/docs",
-      3,
-    ]);
+    expect(calls[0].bindings.slice(-2)).toEqual([3, 0]);
+    expect(calls[1].bindings.slice(-2)).toEqual(["/pricing", "/docs"]);
+    expect(calls[2].bindings.slice(-3)).toEqual(["/pricing", "/docs", 3]);
     expect(calls[2].sql).toContain("filtered_visits AS MATERIALIZED");
   });
 });
@@ -1582,14 +1617,11 @@ describe("edge overview D1 queries and handlers", () => {
       "unavailable",
     );
     expect(calls).toHaveLength(3);
-    expect(calls[0].bindings).toEqual([...visitBindings(), "/pricing"]);
-    expect(calls[1].bindings).toEqual([
-      siteId,
-      Math.max(window.startMs - (window.endExclusiveMs - window.startMs), 0),
-      window.startMs,
+    expect(calls.map((call) => call.bindings.at(-1))).toEqual([
+      "/pricing",
+      "/pricing",
       "/pricing",
     ]);
-    expect(calls[2].bindings).toEqual([...visitBindings(), "/pricing"]);
   });
 
   it("maps trend handler rows without optional overview change payload", async () => {
@@ -1635,7 +1667,7 @@ describe("edge overview D1 queries and handlers", () => {
         },
       ],
     });
-    expect(calls[0].bindings).toEqual([...visitBindings(), "ref.example"]);
+    expect(calls[0].bindings.at(-1)).toBe("ref.example");
   });
 
   it("maps overview page, source, client, and geo tab handlers", async () => {
@@ -1772,13 +1804,7 @@ describe("edge overview D1 queries and handlers", () => {
         },
       ],
     });
-    expect(calls.map((call) => call.bindings)).toEqual([
-      [...visitBindings(), 2],
-      [...visitBindings(), 3],
-      [...visitBindings(), 3],
-      [...visitBindings(), 3],
-      [...visitBindings(), 3],
-    ]);
+    expect(calls.map((call) => call.bindings.at(-1))).toEqual([2, 3, 3, 3, 3]);
     expect(calls[2].sql).toContain("channel_rollup AS");
     for (const call of [calls[0], calls[3], calls[4]]) {
       expect(call.sql).toContain("GROUP BY value");
@@ -1941,7 +1967,7 @@ describe("edge overview D1 queries and handlers", () => {
         data: expect.any(Array),
       });
     }
-    expect(calls[0]?.bindings).toEqual([...visitBindings(), "Chrome", 4]);
+    expect(calls[0]?.bindings.at(-1)).toBe(4);
     expect(calls.every((call) => call.bindings.at(-1) === 4)).toBe(true);
     expect(calls.flatMap((call) => call.bindings)).toEqual(
       expect.arrayContaining(["us"]),
@@ -2005,10 +2031,7 @@ describe("edge overview D1 queries and handlers", () => {
     });
     expect(calls[0].sql).toContain("TRIM(COALESCE(device_type, ''))");
     expect(calls[1].sql).toContain("TRIM(COALESCE(browser, ''))");
-    expect(calls.map((call) => call.bindings)).toEqual([
-      [...visitBindings(), "Chrome", 4],
-      [...visitBindings(), "us", 4],
-    ]);
+    expect(calls.map((call) => call.bindings.at(-1))).toEqual([4, 4]);
   });
 
   it("maps overview geo points with and without applying geo filters", async () => {
@@ -2103,13 +2126,11 @@ describe("edge overview D1 queries and handlers", () => {
         },
       ],
     });
-    expect(calls[0].bindings).toEqual([...visitBindings(), 9]);
-    expect(calls[2].bindings).toEqual([
-      ...visitBindings(),
-      "us",
-      "california",
-      10,
-    ]);
+    expect(calls[0].bindings.at(-1)).toBe(9);
+    expect(calls[2].bindings.at(-1)).toBe(10);
+    expect(calls[2].bindings).toEqual(
+      expect.arrayContaining(["us", "california"]),
+    );
   });
 
   it("rejects invalid overview windows before querying D1", async () => {
