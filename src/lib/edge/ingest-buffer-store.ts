@@ -95,7 +95,15 @@ function updateBufferedVisitPerformance(
           buffer_revision = COALESCE(buffer_revision, 1) + 1,
           next_due_at = ${visitNextDueSql(flushDueExpression)},
           updated_at = ?
-      WHERE site_id = ? AND visit_id = ?
+      WHERE site_id = ?
+        AND visit_id = ?
+        AND (
+          perf_ttfb_ms IS NOT ? OR
+          perf_fcp_ms IS NOT ? OR
+          perf_lcp_ms IS NOT ? OR
+          perf_cls IS NOT ? OR
+          perf_inp_ms IS NOT ?
+        )
     `,
     performance.ttfb ?? null,
     performance.fcp ?? null,
@@ -110,6 +118,11 @@ function updateBufferedVisitPerformance(
     updatedAt,
     siteId,
     visitId,
+    performance.ttfb ?? null,
+    performance.fcp ?? null,
+    performance.lcp ?? null,
+    performance.cls ?? null,
+    performance.inp ?? null,
   );
 }
 
@@ -771,48 +784,64 @@ export async function updateOpenVisitActivity(
   const now = Date.now();
   const updatedAt = toUnixSeconds(now);
   const flushDueAt = now + D1_FLUSH_INTERVAL_MS;
-  const lastActivityExpression =
-    "CASE WHEN last_activity_at > ? THEN last_activity_at ELSE ? END";
-  const flushDueExpression = "CASE WHEN dirty = 0 THEN ? ELSE flush_due_at END";
+
+  // Most activity arrives while the visit is already dirty and its flush is
+  // earlier than the lifecycle timeout.  In that state the scheduling keys do
+  // not change, so update only the non-indexed activity fields.  This avoids
+  // rewriting the due indexes for every custom event while preserving the
+  // exact latest activity timestamp and revision used by the flush CAS.
+  const activityOnlyRows = context.sqlRun(
+    `
+      UPDATE buffered_visits
+      SET last_activity_at = ?,
+          buffer_revision = COALESCE(buffer_revision, 1) + 1,
+          updated_at = ?
+      WHERE visit_id = ?
+        AND status = 'open'
+        AND last_activity_at < ?
+        AND dirty = 1
+        AND flush_due_at IS NOT NULL
+        AND next_due_at = flush_due_at
+    `,
+    eventAt,
+    updatedAt,
+    visitId,
+    eventAt,
+  );
+  if (activityOnlyRows > 0) return;
+
   context.sqlRun(
     `
       UPDATE buffered_visits
-      SET last_activity_at = ${lastActivityExpression},
+      SET last_activity_at = ?,
           dirty = 1,
-          flush_due_at = ${flushDueExpression},
+          flush_due_at = CASE WHEN dirty = 0 THEN ? ELSE flush_due_at END,
           buffer_revision = COALESCE(buffer_revision, 1) + 1,
-          next_due_at = ${visitNextDueSql(
-            flushDueExpression,
-            lastActivityExpression,
-          )},
-          updated_at = CASE WHEN updated_at > ? THEN updated_at ELSE ? END
-      WHERE visit_id = ? AND status = 'open'
+          next_due_at = CASE
+            WHEN dirty = 0 THEN CASE
+              WHEN ? <= ? + ${VISIT_TIMEOUT_MS} THEN ?
+              ELSE ? + ${VISIT_TIMEOUT_MS}
+            END
+            WHEN flush_due_at IS NULL THEN ? + ${VISIT_TIMEOUT_MS}
+            WHEN flush_due_at <= ? + ${VISIT_TIMEOUT_MS} THEN flush_due_at
+            ELSE ? + ${VISIT_TIMEOUT_MS}
+          END,
+          updated_at = ?
+      WHERE visit_id = ?
+        AND status = 'open'
+        AND last_activity_at < ?
     `,
     eventAt,
+    flushDueAt,
+    flushDueAt,
     eventAt,
-    flushDueAt,
-    flushDueAt,
-    flushDueAt,
-    flushDueAt,
     flushDueAt,
     eventAt,
     eventAt,
     eventAt,
     eventAt,
-    eventAt,
-    eventAt,
-    eventAt,
-    eventAt,
-    eventAt,
-    eventAt,
-    eventAt,
-    eventAt,
-    eventAt,
-    eventAt,
-    eventAt,
-    eventAt,
-    updatedAt,
     updatedAt,
     visitId,
+    eventAt,
   );
 }

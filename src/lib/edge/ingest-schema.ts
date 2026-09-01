@@ -11,14 +11,63 @@ interface DurableObjectSqlStorage {
   };
 }
 
+interface TableColumnInfo {
+  name?: string;
+  notnull?: number;
+  dflt_value?: unknown;
+}
+
+interface IndexColumnInfo {
+  name?: string;
+  seqno?: number;
+}
+
+function tableColumns(
+  sql: DurableObjectSqlStorage,
+  tableName: string,
+): TableColumnInfo[] {
+  return sql
+    .exec(`PRAGMA table_info(${tableName})`)
+    .toArray() as TableColumnInfo[];
+}
+
 function tableColumnNames(
   sql: DurableObjectSqlStorage,
   tableName: string,
 ): Set<string> {
-  const rows = sql.exec(`PRAGMA table_info(${tableName})`).toArray() as Array<{
-    name?: string;
-  }>;
-  return new Set(rows.map((row) => row.name ?? ""));
+  return new Set(tableColumns(sql, tableName).map((row) => row.name ?? ""));
+}
+
+function indexColumnNames(
+  sql: DurableObjectSqlStorage,
+  indexName: string,
+): string[] {
+  return (
+    sql.exec(`PRAGMA index_info(${indexName})`).toArray() as IndexColumnInfo[]
+  )
+    .sort((left, right) => (left.seqno ?? 0) - (right.seqno ?? 0))
+    .map((row) => row.name ?? "");
+}
+
+function ensureIndexColumns(
+  sql: DurableObjectSqlStorage,
+  indexName: string,
+  expectedColumns: readonly string[],
+): void {
+  const existingColumns = indexColumnNames(sql, indexName);
+  if (
+    existingColumns.length === expectedColumns.length &&
+    existingColumns.every(
+      (columnName, index) => columnName === expectedColumns[index],
+    )
+  ) {
+    return;
+  }
+
+  // CREATE INDEX IF NOT EXISTS does not update an already deployed index.
+  // Drop only when its shape is different so this remains a one-time migration
+  // instead of rebuilding the index on every DO construction.
+  sql.exec(`DROP INDEX IF EXISTS ${indexName}`);
 }
 
 function ensureColumn(
@@ -29,6 +78,110 @@ function ensureColumn(
 ): void {
   if (tableColumnNames(sql, tableName).has(columnName)) return;
   sql.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType}`);
+}
+
+const LEGACY_EVENT_CONTEXT_COLUMNS = [
+  "visitor_id",
+  "session_id",
+  "pathname",
+  "hostname",
+] as const;
+
+function hasIncompatibleLegacyEventContext(
+  sql: DurableObjectSqlStorage,
+): boolean {
+  const columns = tableColumns(sql, "buffered_custom_events");
+  return LEGACY_EVENT_CONTEXT_COLUMNS.some((columnName) => {
+    const column = columns.find((candidate) => candidate.name === columnName);
+    return column?.notnull === 1 && column.dflt_value === null;
+  });
+}
+
+function migrateLegacyBufferedCustomEvents(sql: DurableObjectSqlStorage): void {
+  const columnNames = tableColumnNames(sql, "buffered_custom_events");
+  const value = (columnName: string, fallback: string): string =>
+    columnNames.has(columnName) ? columnName : fallback;
+  const coalesce = (columnName: string, fallback: string): string =>
+    columnNames.has(columnName)
+      ? `COALESCE(${columnName}, ${fallback})`
+      : fallback;
+
+  sql.exec("BEGIN");
+  try {
+    sql.exec(`
+        CREATE TABLE buffered_custom_events_migration (
+          event_id TEXT PRIMARY KEY,
+          site_id TEXT NOT NULL,
+          visit_id TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL,
+          received_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL DEFAULT 0,
+          event_name TEXT NOT NULL,
+          event_data_json TEXT NOT NULL DEFAULT '{}',
+          user_id TEXT NOT NULL DEFAULT '',
+          dirty INTEGER NOT NULL DEFAULT 1,
+          flush_attempts INTEGER NOT NULL DEFAULT 0,
+          last_flush_error TEXT,
+          next_due_at INTEGER,
+          flush_due_at INTEGER,
+          buffer_revision INTEGER NOT NULL DEFAULT 1,
+          created_at INTEGER NOT NULL,
+          visitor_id TEXT,
+          session_id TEXT,
+          pathname TEXT,
+          hostname TEXT
+        )
+      `);
+    sql.exec(`
+        INSERT INTO buffered_custom_events_migration (
+          event_id, site_id, visit_id, occurred_at, received_at, sequence,
+          event_name, event_data_json, user_id, dirty, flush_attempts,
+          last_flush_error, next_due_at, flush_due_at, buffer_revision,
+          created_at, visitor_id, session_id, pathname, hostname
+        )
+        SELECT
+          event_id,
+          site_id,
+          visit_id,
+          occurred_at,
+          ${coalesce("received_at", "occurred_at")},
+          ${coalesce("sequence", "0")},
+          event_name,
+          event_data_json,
+          ${coalesce("user_id", "''")},
+          dirty,
+          flush_attempts,
+          last_flush_error,
+          ${value("next_due_at", "NULL")},
+          ${value("flush_due_at", "NULL")},
+          ${coalesce("buffer_revision", "1")},
+          created_at,
+          ${value("visitor_id", "NULL")},
+          ${value("session_id", "NULL")},
+          ${value("pathname", "NULL")},
+          ${value("hostname", "NULL")}
+        FROM buffered_custom_events
+      `);
+    sql.exec(
+      "ALTER TABLE buffered_custom_events RENAME TO buffered_custom_events_legacy",
+    );
+    sql.exec("DROP INDEX IF EXISTS idx_buffered_custom_events_next_due");
+    sql.exec("DROP INDEX IF EXISTS idx_buffered_custom_events_dirty_flush_due");
+    sql.exec("DROP INDEX IF EXISTS idx_buffered_custom_events_dirty_occurred");
+    sql.exec("DROP INDEX IF EXISTS idx_buffered_custom_events_occurred");
+    sql.exec("DROP TABLE buffered_custom_events_legacy");
+    sql.exec(
+      "ALTER TABLE buffered_custom_events_migration RENAME TO buffered_custom_events",
+    );
+    sql.exec("COMMIT");
+  } catch (error) {
+    try {
+      sql.exec("ROLLBACK");
+    } catch {
+      // Preserve the migration error if rollback is unavailable.
+    }
+    throw error;
+  }
 }
 
 export function initializeIngestSqlSchema(sql: DurableObjectSqlStorage): void {
@@ -160,22 +313,39 @@ export function initializeIngestSqlSchema(sql: DurableObjectSqlStorage): void {
           ELSE flush_due_at
         END
       WHERE next_due_at IS NULL
+        AND (
+          dirty = 1
+          OR flush_due_at IS NOT NULL
+          OR status IN ('open', 'hidden_pending')
+        )
     `);
-  sql.exec(`
-      CREATE INDEX IF NOT EXISTS idx_buffered_visits_dirty_updated
-      ON buffered_visits(dirty, updated_at, started_at)
-    `);
+
+  // These indexes were useful for broad historical scans, but they are not
+  // part of the hot ingest/flush paths.  In a Durable Object every UPDATE of
+  // an indexed row also has to maintain the index, so keeping them materially
+  // amplifies lifecycle writes.  The remaining indexes cover Alarm selection,
+  // due-row flushing, hidden/timeout status scans, and session/visitor lookup.
+  for (const indexName of [
+    "idx_buffered_visits_dirty_updated",
+    "idx_buffered_visits_status_last_activity",
+    "idx_buffered_visits_site_visit_status",
+    "idx_buffered_visits_started_at",
+    "idx_buffered_visits_ended_at",
+  ]) {
+    sql.exec(`DROP INDEX IF EXISTS ${indexName}`);
+  }
+  ensureIndexColumns(sql, "idx_buffered_visits_dirty_flush_due", [
+    "dirty",
+    "flush_due_at",
+    "flush_attempts",
+  ]);
   sql.exec(`
       CREATE INDEX IF NOT EXISTS idx_buffered_visits_next_due
       ON buffered_visits(next_due_at, visit_id)
     `);
   sql.exec(`
       CREATE INDEX IF NOT EXISTS idx_buffered_visits_dirty_flush_due
-      ON buffered_visits(dirty, flush_due_at, updated_at, flush_attempts)
-    `);
-  sql.exec(`
-      CREATE INDEX IF NOT EXISTS idx_buffered_visits_status_last_activity
-      ON buffered_visits(status, last_activity_at, started_at)
+      ON buffered_visits(dirty, flush_due_at, flush_attempts)
     `);
   sql.exec(`
       CREATE INDEX IF NOT EXISTS idx_buffered_visits_status_hidden_at
@@ -186,35 +356,38 @@ export function initializeIngestSqlSchema(sql: DurableObjectSqlStorage): void {
       ON buffered_visits(site_id, session_id, status, started_at)
     `);
   sql.exec(`
-      CREATE INDEX IF NOT EXISTS idx_buffered_visits_site_visit_status
-      ON buffered_visits(site_id, visit_id, status)
-    `);
-  sql.exec(`
       CREATE INDEX IF NOT EXISTS idx_buffered_visits_site_visitor_status
       ON buffered_visits(site_id, visitor_id, status)
     `);
-  sql.exec(`
-      CREATE INDEX IF NOT EXISTS idx_buffered_visits_started_at
-      ON buffered_visits(started_at)
-    `);
-  sql.exec(`
-      CREATE INDEX IF NOT EXISTS idx_buffered_visits_ended_at
-      ON buffered_visits(status, ended_at)
-    `);
   sql.exec(CREATE_BUFFERED_CUSTOM_EVENTS_SQL);
 
-  const eventColumnNames = tableColumnNames(sql, "buffered_custom_events");
-  const hasLegacyEventContextColumns =
-    eventColumnNames.has("visitor_id") ||
-    eventColumnNames.has("session_id") ||
-    eventColumnNames.has("pathname") ||
-    eventColumnNames.has("hostname");
-  const hasCurrentEventColumns =
-    eventColumnNames.has("received_at") && eventColumnNames.has("sequence");
-  if (hasLegacyEventContextColumns || !hasCurrentEventColumns) {
-    sql.exec("DROP TABLE buffered_custom_events");
-    sql.exec(CREATE_BUFFERED_CUSTOM_EVENTS_SQL);
+  // Keep legacy event rows in place.  A legacy context column without a
+  // default would reject current inserts, so rebuild that shape atomically;
+  // all rows and legacy context values are copied before the old table goes
+  // away.  Other old shapes can be migrated additively.
+  if (hasIncompatibleLegacyEventContext(sql)) {
+    migrateLegacyBufferedCustomEvents(sql);
   }
+  const eventColumnNames = tableColumnNames(sql, "buffered_custom_events");
+  if (!eventColumnNames.has("received_at")) {
+    ensureColumn(
+      sql,
+      "buffered_custom_events",
+      "received_at",
+      "INTEGER NOT NULL DEFAULT 0",
+    );
+    sql.exec(`
+        UPDATE buffered_custom_events
+        SET received_at = occurred_at
+        WHERE received_at = 0 AND occurred_at <> 0
+      `);
+  }
+  ensureColumn(
+    sql,
+    "buffered_custom_events",
+    "sequence",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
   ensureColumn(
     sql,
     "buffered_custom_events",
@@ -241,7 +414,7 @@ export function initializeIngestSqlSchema(sql: DurableObjectSqlStorage): void {
           WHEN dirty = 1 THEN flush_due_at
           ELSE NULL
         END
-      WHERE next_due_at IS NULL
+      WHERE next_due_at IS NULL AND dirty = 1
     `);
   sql.exec(`
       CREATE INDEX IF NOT EXISTS idx_buffered_custom_events_next_due
@@ -251,10 +424,7 @@ export function initializeIngestSqlSchema(sql: DurableObjectSqlStorage): void {
       CREATE INDEX IF NOT EXISTS idx_buffered_custom_events_dirty_flush_due
       ON buffered_custom_events(dirty, flush_due_at, created_at, flush_attempts)
     `);
-  sql.exec(`
-      CREATE INDEX IF NOT EXISTS idx_buffered_custom_events_dirty_occurred
-      ON buffered_custom_events(dirty, created_at, occurred_at)
-    `);
+  sql.exec("DROP INDEX IF EXISTS idx_buffered_custom_events_dirty_occurred");
   sql.exec(`
       CREATE INDEX IF NOT EXISTS idx_buffered_custom_events_occurred
       ON buffered_custom_events(occurred_at)

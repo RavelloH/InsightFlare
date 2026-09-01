@@ -141,6 +141,13 @@ export class IngestDurableObject extends DurableObject {
       return this.handleDiagnostic(logger);
     }
 
+    if (url.pathname === "/reconcile" && request.method === "POST") {
+      logger.info("do.alarm.reconcile_internal_started");
+      await this.reconcileAlarm(logger);
+      logger.info("do.alarm.reconcile_internal_completed");
+      return jsonResponse({ ok: true });
+    }
+
     if (url.pathname === "/flush" && request.method === "POST") {
       const force =
         this.doEnv.INSIGHTFLARE_E2E === "1" &&
@@ -174,7 +181,20 @@ export class IngestDurableObject extends DurableObject {
         await this.reconcileAlarm(logger, true, alarmInfo);
       });
     } catch (error) {
-      logger.error("do.alarm.failed");
+      try {
+        // The alarm platform retries a rejected invocation, but the current
+        // alarm may already have been consumed.  Reconcile the remaining
+        // backlog as a bounded, one-shot retry before preserving the original
+        // maintenance failure for the platform.
+        await runWithInvocationLogger(logger, () =>
+          this.reconcileAlarm(logger, true, alarmInfo, true),
+        );
+      } catch (reconcileError) {
+        // A storage failure while scheduling recovery must not hide the
+        // maintenance error that caused this invocation to fail.
+        logger.error("do.alarm.reconcile_failed", errorLogData(reconcileError));
+      }
+      logger.error("do.alarm.failed", errorLogData(error));
       throw error;
     } finally {
       logger.info("do.alarm.completed");
@@ -1064,6 +1084,10 @@ export class IngestDurableObject extends DurableObject {
             WHERE site_id = ?
               AND visit_id = ?
               AND status = 'hidden_pending'
+              AND (
+                last_activity_at < ?
+                OR (hidden_at IS NULL AND last_activity_at = ?)
+              )
           `,
           record.eventAt,
           record.eventAt,
@@ -1077,6 +1101,8 @@ export class IngestDurableObject extends DurableObject {
           updatedAt,
           record.siteId,
           record.visitId,
+          record.eventAt,
+          record.eventAt,
         );
       }
       logger.info(
@@ -1283,19 +1309,20 @@ export class IngestDurableObject extends DurableObject {
     record: NormalizedIdentify,
     logger: InvocationLogger,
   ): Promise<void> {
-    const updatedAt = toUnixSeconds(Date.now());
-    const flushDueAt = Date.now() + D1_FLUSH_INTERVAL_MS;
-    let serverSessionId =
-      this.sqlOne<{ sessionId: string }>(
-        `
-          SELECT session_id AS sessionId
-          FROM buffered_visits
-          WHERE visit_id = ? AND site_id = ?
-          LIMIT 1
-        `,
-        record.visitId,
-        record.siteId,
-      )?.sessionId || "";
+    const now = Date.now();
+    const updatedAt = toUnixSeconds(now);
+    const flushDueAt = now + D1_FLUSH_INTERVAL_MS;
+    const localVisit = this.sqlOne<{ sessionId: string | null }>(
+      `
+        SELECT session_id AS sessionId
+        FROM buffered_visits
+        WHERE visit_id = ? AND site_id = ?
+        LIMIT 1
+      `,
+      record.visitId,
+      record.siteId,
+    );
+    let serverSessionId = localVisit?.sessionId || "";
 
     const rowsUpdated = this.sqlRun(
       `
@@ -1327,7 +1354,9 @@ export class IngestDurableObject extends DurableObject {
               END
             END,
             updated_at = ?
-        WHERE visit_id = ? AND site_id = ?
+        WHERE visit_id = ?
+          AND site_id = ?
+          AND (user_id IS NOT ? OR user_name IS NOT ?)
       `,
       record.userId,
       record.userName || null,
@@ -1344,6 +1373,8 @@ export class IngestDurableObject extends DurableObject {
       updatedAt,
       record.visitId,
       record.siteId,
+      record.userId,
+      record.userName || null,
     );
 
     // Update buffered_custom_events for the same visit
@@ -1360,7 +1391,9 @@ export class IngestDurableObject extends DurableObject {
               ELSE flush_due_at
             END,
             buffer_revision = buffer_revision + 1
-        WHERE visit_id = ? AND site_id = ?
+        WHERE visit_id = ?
+          AND site_id = ?
+          AND user_id IS NOT ?
       `,
       record.userId,
       flushDueAt,
@@ -1369,10 +1402,11 @@ export class IngestDurableObject extends DurableObject {
       flushDueAt,
       record.visitId,
       record.siteId,
+      record.userId,
     );
 
     if (rowsUpdated === 0) {
-      if (!serverSessionId) {
+      if (!serverSessionId && !localVisit) {
         const persistedVisit = await this.doEnv.DB.prepare(
           `
             SELECT session_id AS sessionId
@@ -1434,7 +1468,11 @@ export class IngestDurableObject extends DurableObject {
                 END
               END,
               updated_at = ?
-          WHERE session_id = ? AND site_id = ? AND visit_id != ? AND (user_id = '' OR user_id IS NULL)
+          WHERE session_id = ?
+            AND site_id = ?
+            AND visit_id != ?
+            AND (user_id = '' OR user_id IS NULL)
+            AND (user_id IS NOT ? OR user_name IS NOT ?)
         `,
         record.userId,
         record.userName || null,
@@ -1452,6 +1490,8 @@ export class IngestDurableObject extends DurableObject {
         serverSessionId,
         record.siteId,
         record.visitId,
+        record.userId,
+        record.userName || null,
       );
     }
     logger.info(
@@ -1576,6 +1616,7 @@ export class IngestDurableObject extends DurableObject {
     logger: InvocationLogger,
     afterMaintenance = false,
     alarmInfo?: { retryCount?: number; isRetry?: boolean },
+    retryOnFailure = false,
   ): Promise<void> {
     const now = Date.now();
     const nextDue = getEarliestDueWork({
@@ -1604,12 +1645,17 @@ export class IngestDurableObject extends DurableObject {
     }
 
     const isOverdue = nextDue.nextDueAt <= now;
-    const target =
-      isOverdue && afterMaintenance
-        ? now + D1_FLUSH_INTERVAL_MS
+    const retryAt = now + D1_FLUSH_INTERVAL_MS;
+    const target = retryOnFailure
+      ? isOverdue
+        ? retryAt
+        : Math.min(nextDue.nextDueAt, retryAt)
+      : isOverdue && afterMaintenance
+        ? retryAt
         : isOverdue
           ? now
           : nextDue.nextDueAt;
+    const isOverdueRetry = isOverdue && afterMaintenance;
 
     if (current === null) {
       await this.doState.storage.setAlarm(target);
@@ -1621,14 +1667,15 @@ export class IngestDurableObject extends DurableObject {
         nextDueKind: nextDue.reason,
         nextDueEntity: nextDue.entity,
         afterMaintenance,
-        isOverdueRetry: isOverdue && afterMaintenance,
+        isOverdueRetry,
+        retryOnFailure,
         retryCount: alarmInfo?.retryCount ?? 0,
         isRetry: Boolean(alarmInfo?.isRetry),
       });
       return;
     }
 
-    if (current > target) {
+    if (current > target || (retryOnFailure && current <= now)) {
       await this.doState.storage.setAlarm(target);
       logger.info("do.alarm.reconciled", {
         action: "set",
@@ -1638,7 +1685,8 @@ export class IngestDurableObject extends DurableObject {
         nextDueKind: nextDue.reason,
         nextDueEntity: nextDue.entity,
         afterMaintenance,
-        isOverdueRetry: isOverdue && afterMaintenance,
+        isOverdueRetry,
+        retryOnFailure,
         retryCount: alarmInfo?.retryCount ?? 0,
         isRetry: Boolean(alarmInfo?.isRetry),
       });
@@ -1653,7 +1701,8 @@ export class IngestDurableObject extends DurableObject {
       nextDueKind: nextDue.reason,
       nextDueEntity: nextDue.entity,
       afterMaintenance,
-      isOverdueRetry: isOverdue && afterMaintenance,
+      isOverdueRetry,
+      retryOnFailure,
       retryCount: alarmInfo?.retryCount ?? 0,
       isRetry: Boolean(alarmInfo?.isRetry),
     });

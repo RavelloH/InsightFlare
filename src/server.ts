@@ -1,6 +1,7 @@
 import handler from "@tanstack/react-start/server-entry";
 
 import { initializeE2eClock } from "@/lib/edge/e2e-clock";
+import { sweepIngestAlarms } from "@/lib/edge/ingest-alarm-sweep";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest-do";
 import { instrumentEnv } from "@/lib/edge/observability-bindings";
 import {
@@ -203,11 +204,14 @@ export default {
     }
     ctx.waitUntil(
       runWithInvocationLogger(logger, () =>
-        dispatchInternalScheduledTasks(
-          instrumentedEnv,
-          controller.scheduledTime,
-          logger,
-        )
+        Promise.all([
+          dispatchInternalScheduledTasks(
+            instrumentedEnv,
+            controller.scheduledTime,
+            logger,
+          ),
+          sweepIngestAlarms(instrumentedEnv, logger),
+        ])
           .then(() => logger.info("scheduled.completed"))
           .catch((error) => {
             void error;
