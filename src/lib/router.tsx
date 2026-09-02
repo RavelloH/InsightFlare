@@ -10,6 +10,7 @@ import {
   useRouter as useTanStackRouter,
 } from "@tanstack/react-router";
 
+import { notifyUrlStateChange } from "@/lib/client-history";
 import { navigateWithTransition } from "@/lib/page-transition";
 
 interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
@@ -94,15 +95,30 @@ export function useRouter() {
       forward: () => router.history.forward(),
       preload: (href: string) =>
         router.preloadRoute({ to: href }).then(() => undefined),
-      push: (href: string, options?: { scroll?: boolean }) =>
-        navigate({ to: href, resetScroll: options?.scroll !== false }),
+      push: (href: string, options?: { scroll?: boolean }) => {
+        const result = navigate({
+          to: href,
+          resetScroll: options?.scroll !== false,
+        });
+        void Promise.resolve(result).then(
+          notifyUrlStateChange,
+          () => undefined,
+        );
+        return result;
+      },
       refresh: () => router.invalidate(),
-      replace: (href: string, options?: { scroll?: boolean }) =>
-        navigate({
+      replace: (href: string, options?: { scroll?: boolean }) => {
+        const result = navigate({
           to: href,
           replace: true,
           resetScroll: options?.scroll !== false,
-        }),
+        });
+        void Promise.resolve(result).then(
+          notifyUrlStateChange,
+          () => undefined,
+        );
+        return result;
+      },
     }),
     [navigate, router],
   );

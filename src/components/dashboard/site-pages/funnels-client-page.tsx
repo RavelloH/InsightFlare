@@ -78,6 +78,7 @@ import {
   fetchFunnels,
   fetchOverviewPageCardTab,
 } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import {
   intlLocale,
@@ -957,7 +958,7 @@ function FunnelDetailDrawer({
     filters: FilterDocument;
     window: TimeWindow;
   };
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const {
     data: payload,
     isError: error,
@@ -1022,7 +1023,7 @@ export function FunnelsClientPage({
     null,
   );
   const [deleting, setDeleting] = useState(false);
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const funnelsQueryKey = useMemo(
     () => ["dashboard", "funnels", siteId] as const,
     [siteId],

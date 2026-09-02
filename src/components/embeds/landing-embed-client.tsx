@@ -43,6 +43,7 @@ import {
   fetchEventsSummary,
   fetchEventsTrend,
 } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
 import type { EventsSummaryData, EventsTrendData } from "@/lib/edge-client";
@@ -446,7 +447,7 @@ function EventsEmbedBlock({
   const labels = messages.events;
   const { window: timeWindow } = useDashboardQuery();
   const filters = useOverviewEmbedFilters();
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const eventsQuery = useQuery({
     queryKey: [
       "embed",

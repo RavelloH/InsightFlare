@@ -10,6 +10,7 @@ import {
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchBrowserRadar } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserRadarItem } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
@@ -82,7 +83,7 @@ export const BrowserPerformanceRadarCard = memo(
     window: tw,
     filters,
   }: BrowserPerformanceRadarCardProps) {
-    const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+    const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
     const { data: response, isPending: loading } = useQuery({
       queryKey: [
         "dashboard",

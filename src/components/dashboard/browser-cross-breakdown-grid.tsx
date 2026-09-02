@@ -16,6 +16,7 @@ import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { fetchBrowserCrossBreakdown } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   BrowserCrossBreakdownData,
@@ -246,7 +247,7 @@ export const BrowserCrossBreakdownGrid = memo(
     window,
     filters,
   }: BrowserCrossBreakdownGridProps) {
-    const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+    const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
     const { data, isFetching, isPending } = useQuery({
       queryKey: [
         "dashboard",

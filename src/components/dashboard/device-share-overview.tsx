@@ -6,6 +6,7 @@ import { ShareRadialCard } from "@/components/dashboard/share-radial-card";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Spinner } from "@/components/ui/spinner";
 import { fetchClientDimensionTrend } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserTrendData } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
@@ -44,7 +45,7 @@ export const DeviceShareOverview = memo(function DeviceShareOverview({
   window,
   filters,
 }: DeviceShareOverviewProps) {
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const { data, isFetching, isPending } = useQuery({
     queryKey: [
       "dashboard",

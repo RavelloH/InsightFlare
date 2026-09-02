@@ -80,6 +80,7 @@ import {
   fetchEventTypeFields,
   fetchEventTypeFieldValues,
 } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { appendEventPayloadFilter } from "@/lib/dashboard/filter-state";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -1271,7 +1272,7 @@ export const EventRecordsSection = memo(function EventRecordsSection({
     storageKey: "insightflare:analytics-table-columns:events",
     columns: eventColumnDefinitions,
   });
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -1487,13 +1488,10 @@ export const EventFieldsCard = memo(function EventFieldsCard({
     );
   }, [filters, payloadFilters, payloadFiltersKey]);
   const effectiveFiltersKey = useMemo(
-    () => JSON.stringify(effectiveFilters ?? {}),
+    () => filterQueryKey(effectiveFilters),
     [effectiveFilters],
   );
-  const baseFiltersKey = useMemo(
-    () => JSON.stringify(filters ?? {}),
-    [filters],
-  );
+  const baseFiltersKey = useMemo(() => filterQueryKey(filters), [filters]);
   useEffect(() => {
     const section = fieldsSectionRef.current;
     if (!section) return;

@@ -63,6 +63,7 @@ import {
   fetchTrend,
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import {
   type DashboardFilterControlKey,
   dashboardFilterValue,
@@ -1713,14 +1714,7 @@ export function OverviewPagesSection({
     if (to <= from) return Math.max(0, Math.floor(from));
     return Math.floor(from + (to - from) / 2);
   }, [window.from, window.to]);
-  const filtersKey = useMemo(
-    () =>
-      JSON.stringify({
-        document: filters ?? {},
-        scope: filterScopePreferenceFromDocument(filters) ?? "auto",
-      }),
-    [filters],
-  );
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const entityScopedOutput =
     resolvedScope === "session" ||
     resolvedScope === "visitor" ||
@@ -3684,14 +3678,7 @@ function useOverviewSummaryQuery({
   window: timeWindow,
   filters,
 }: Pick<OverviewDataSectionProps, "siteId" | "window" | "filters">) {
-  const filtersKey = useMemo(
-    () =>
-      JSON.stringify({
-        document: filters,
-        scope: filterScopePreferenceFromDocument(filters) ?? "auto",
-      }),
-    [filters],
-  );
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
 
   return useQuery({
     queryKey: [

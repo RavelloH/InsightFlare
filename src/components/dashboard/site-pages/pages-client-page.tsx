@@ -21,6 +21,7 @@ import {
   fetchPagesDashboard,
   type PagesDashboardRow,
 } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import {
   durationFormat,
   intlLocale,
@@ -249,7 +250,7 @@ export function PagesClientPage({
     window: TimeWindow;
   };
   const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null);
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const pagesPerSessionFormatter = useMemo(
     () =>
       new Intl.NumberFormat(intlLocale(locale), {

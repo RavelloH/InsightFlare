@@ -59,7 +59,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:coverage:check": "vitest run --coverage --coverage.reporter=text",
+    "test:coverage:check": "vitest run --coverage --coverage.reporter=text --maxWorkers 1",
     "test:e2e": "tsx scripts/e2e.ts",
     "test:e2e:show": "tsx scripts/e2e.ts --headed --workers=1",
     "test:e2e:ui": "tsx scripts/e2e.ts --ui",

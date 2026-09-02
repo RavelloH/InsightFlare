@@ -5,6 +5,7 @@ import { DIRECT_REFERRER_FILTER_VALUE } from "@/components/dashboard/referrer-ut
 import { ShareTrendChartCard } from "@/components/dashboard/share-trend-card";
 import type { TrafficChannelId } from "@/lib/analytics/traffic-channel-rules";
 import { fetchReferrerAndChannelTrend } from "@/lib/dashboard/client-referrer-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserTrendData, BrowserTrendSeries } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
@@ -51,7 +52,7 @@ function ReferrerTrendPanel({
   window,
   filters,
 }: ReferrerShareTrendCardProps) {
-  const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const currentDataWindow = useMemo(
     () => ({
       from: window.from,

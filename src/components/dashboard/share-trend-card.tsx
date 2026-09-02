@@ -9,6 +9,7 @@ import {
 } from "@/components/dashboard/charts/share-trend-area-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type {
   DashboardInterval,
   TimeWindow,
@@ -278,7 +279,7 @@ export const ShareTrendCard = memo(function ShareTrendCard({
   formatSeriesLabel,
   resolveSeriesIcon,
 }: ShareTrendCardProps) {
-  const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const currentDataWindow = useMemo(
     () => ({
       from: window.from,

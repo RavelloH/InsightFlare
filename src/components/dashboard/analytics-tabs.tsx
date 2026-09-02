@@ -33,9 +33,10 @@ import {
   prepareNativeScrollbarHost,
   useNativeScrollbars,
 } from "@/components/ui/overlay-scrollbar";
+import { useLiveSearchParams } from "@/lib/client-history";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import Link from "@/lib/router";
-import { usePathname, useSearchParams } from "@/lib/router";
+import { usePathname } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 type AnalyticsTabKey =
@@ -151,7 +152,7 @@ export const AnalyticsTabs = memo(function AnalyticsTabs({
   items,
 }: AnalyticsTabsProps) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const searchParams = useLiveSearchParams();
   const normalizedPathname = normalizePathname(pathname || "");
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
   const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(

@@ -650,10 +650,6 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   }, []);
 
   useEffect(() => {
-    setUiFilters(queryDocument);
-  }, [queryDocument, setUiFilters]);
-
-  useEffect(() => {
     if (scopePreference !== urlScopePreference) {
       setScopePreference(urlScopePreference);
     }

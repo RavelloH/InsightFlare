@@ -134,8 +134,8 @@ function createTasks(fix: boolean): CheckTask[] {
     {
       name: "Build",
       dependsOn: fix
-        ? ["Spec", "Lint", "Tracker SDK"]
-        : ["Spec", "Tracker SDK"],
+        ? ["Spec", "Lint", "Tracker SDK", "Coverage"]
+        : ["Spec", "Tracker SDK", "Coverage"],
       steps: [
         {
           name: "Build",

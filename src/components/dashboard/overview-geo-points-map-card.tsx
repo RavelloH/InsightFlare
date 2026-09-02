@@ -12,6 +12,7 @@ import {
   emptyOverviewGeoPointsData,
   fetchOverviewGeoPoints,
 } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   attachFilterScopePreference,
@@ -31,17 +32,6 @@ interface OverviewGeoPointsMapCardProps {
   resolvedScope?: FilterScope;
   selectedCountryCode?: string | null;
   onCountrySelect?: (countryCode: string | null) => void;
-}
-
-function dashboardFilterSignature(filters: FilterDocument): string {
-  const entries = Object.entries(filters)
-    .map(([key, value]) => [key, String(value ?? "").trim()] as const)
-    .filter(([, value]) => value.length > 0)
-    .sort(([left], [right]) => left.localeCompare(right));
-  return JSON.stringify({
-    filters: entries,
-    scope: filterScopePreferenceFromDocument(filters) ?? "auto",
-  });
 }
 
 export const OverviewGeoPointsMapCard = memo(function OverviewGeoPointsMapCard({
@@ -72,10 +62,7 @@ export const OverviewGeoPointsMapCard = memo(function OverviewGeoPointsMapCard({
   );
   const requestFiltersKey = useMemo(
     () =>
-      JSON.stringify({
-        filters: dashboardFilterSignature(requestFilters),
-        resolvedScope: resolvedScope ?? null,
-      }),
+      `${filterQueryKey(requestFilters)}:resolvedScope=${resolvedScope ?? "auto"}`,
     [requestFilters, resolvedScope],
   );
 

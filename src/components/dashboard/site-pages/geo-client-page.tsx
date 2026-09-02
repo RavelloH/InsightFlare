@@ -14,8 +14,8 @@ import {
   fetchOverviewGeoPoints,
   type OverviewGeoTabRows,
 } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import {
-  dashboardFilterFingerprint,
   serializeDashboardSearchParams,
   setDashboardFilterValue,
 } from "@/lib/dashboard/filter-state";
@@ -357,10 +357,6 @@ function normalizeCountryCode(value: string | null | undefined): string | null {
     .toUpperCase();
   if (!/^[A-Z]{2}$/.test(normalized)) return null;
   return normalized;
-}
-
-function dashboardFilterSignature(filters: FilterDocument): string {
-  return dashboardFilterFingerprint(filters);
 }
 
 function parseCoordinate(
@@ -1189,7 +1185,7 @@ export function GeoClientPage({
     [filters, requestedLocation?.canonical],
   );
   const requestFiltersKey = useMemo(
-    () => dashboardFilterSignature(requestFilters),
+    () => filterQueryKey(requestFilters),
     [requestFilters],
   );
   const { data: geoData, isFetching: loading } = useQuery({

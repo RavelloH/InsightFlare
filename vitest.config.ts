@@ -4,7 +4,10 @@ import path from "path";
 import { defineConfig } from "vitest/config";
 import { parse } from "yaml";
 
-const VITEST_MAX_WORKERS = Math.max(1, osCpus().length);
+// Keep the test pool bounded on high-core machines.  V8 coverage writes one
+// temporary file per worker; an unbounded pool makes that merge flaky under
+// the full check and can also starve the integration tests of CPU.
+const VITEST_MAX_WORKERS = Math.min(8, Math.max(1, osCpus().length));
 
 export default defineConfig({
   plugins: [

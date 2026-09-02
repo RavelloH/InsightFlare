@@ -31,6 +31,7 @@ import {
   fetchRetention,
   type RetentionGranularity,
 } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import {
   intlLocale,
   numberFormat,
@@ -1007,7 +1008,7 @@ export function RetentionClientPage({
     filters: FilterDocument;
     window: TimeWindow;
   };
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const granularity = timeWindow.interval;
   const loadingShape = useMemo(
     () => retentionLoadingShape(timeWindow, granularity, filters),

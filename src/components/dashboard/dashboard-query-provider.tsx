@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { useReportingTimeZone } from "@/components/time-zone-provider";
+import { useLiveSearchParams } from "@/lib/client-history";
 import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import {
   readDashboardQueryPreferences,
@@ -23,6 +24,7 @@ import {
   type DashboardInterval,
   DEFAULT_RANGE_PRESET,
   finestIntervalForRange,
+  parseFilterDocumentFromSearchParams,
   type RangePreset,
   resolveRangePreset,
   resolveTimeWindow,
@@ -121,8 +123,16 @@ function buildInitialState(
   timeZone: string,
   initialWindow?: TimeWindow,
   initialScope?: FilterScopePreference,
+  initialFilters?: FilterDocument,
 ) {
-  const scopePreference = initialScope ?? readInitialScopePreference();
+  const scopePreference =
+    initialScope ??
+    filterScopePreferenceFromDocument(initialFilters) ??
+    readInitialScopePreference();
+  const uiFilters = attachFilterScopePreference(
+    normalizeFilters(initialFilters ?? EMPTY_FILTERS),
+    scopePreference,
+  );
   if (initialWindow) {
     return {
       range: initialWindow.preset,
@@ -131,7 +141,7 @@ function buildInitialState(
         initialWindow.preset === "custom"
           ? { from: initialWindow.from, to: initialWindow.to }
           : null,
-      uiFilters: EMPTY_FILTERS,
+      uiFilters,
       uiFilterDsl: undefined,
       scopePreference,
     };
@@ -145,7 +155,7 @@ function buildInitialState(
       range: DEFAULT_RANGE as RangePreset,
       interval: initialWindow.interval as DashboardInterval,
       customRange: null as CustomTimeRange | null,
-      uiFilters: EMPTY_FILTERS,
+      uiFilters,
       uiFilterDsl: undefined,
       scopePreference,
     };
@@ -164,7 +174,7 @@ function buildInitialState(
     range: persistedRange,
     interval: persistedWindow.interval,
     customRange: persistedCustomRange,
-    uiFilters: EMPTY_FILTERS,
+    uiFilters,
     uiFilterDsl: undefined,
     scopePreference,
   };
@@ -206,6 +216,15 @@ export function DashboardQueryProvider({
   initialScopePreference,
 }: DashboardQueryProviderProps) {
   const { timeZone: managedTimeZone } = useReportingTimeZone();
+  const routeSearchParams = useLiveSearchParams();
+  const routeSearchParamsKey = routeSearchParams.toString();
+  const routeQueryDocument = useMemo(
+    () =>
+      parseFilterDocumentFromSearchParams(
+        new URLSearchParams(routeSearchParamsKey),
+      ),
+    [routeSearchParamsKey],
+  );
   const initialCookieTimeZone =
     typeof document === "undefined"
       ? managedTimeZone
@@ -219,6 +238,7 @@ export function DashboardQueryProvider({
       timeZone,
       initialWindowRef.current,
       initialScopePreference,
+      routeQueryDocument,
     ),
   );
   const [range, setRangeState] = useState<RangePreset>(
@@ -242,6 +262,7 @@ export function DashboardQueryProvider({
     initial.uiFilterDsl ? filterDocumentKey(initial.uiFilters) : undefined,
   );
   const previousScopeKeyRef = useRef(scopeKey);
+  const previousRouteSearchParamsKeyRef = useRef(routeSearchParamsKey);
 
   useEffect(() => {
     setTimeZone(managedTimeZone);
@@ -304,6 +325,28 @@ export function DashboardQueryProvider({
     setUiFilterDslState(undefined);
     setUiFilterDslDocumentKey(undefined);
   }, [scopeKey]);
+
+  useEffect(() => {
+    if (previousRouteSearchParamsKeyRef.current === routeSearchParamsKey) {
+      return;
+    }
+    previousRouteSearchParamsKeyRef.current = routeSearchParamsKey;
+
+    const nextScopePreference =
+      filterScopePreferenceFromDocument(routeQueryDocument) ?? "auto";
+    const nextFilters = attachFilterScopePreference(
+      normalizeFilters(routeQueryDocument),
+      nextScopePreference,
+    );
+    const nextDocumentKey = filterDocumentKey(nextFilters);
+
+    setScopePreferenceState(nextScopePreference);
+    setUiFiltersState(nextFilters);
+    if (uiFilterDslDocumentKey !== nextDocumentKey) {
+      setUiFilterDslState(undefined);
+      setUiFilterDslDocumentKey(undefined);
+    }
+  }, [routeQueryDocument, routeSearchParamsKey, uiFilterDslDocumentKey]);
 
   const setRange = useCallback(
     (next: RangePreset) => {

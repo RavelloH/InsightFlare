@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
@@ -185,7 +186,7 @@ export const BrowserVersionBreakdownGrid = memo(
     window,
     filters,
   }: BrowserVersionBreakdownGridProps) {
-    const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+    const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
     const { data, isFetching, isPending } = useQuery({
       queryKey: [
         "dashboard",

@@ -36,6 +36,11 @@ function getSearchSnapshot(): string {
   return window.location.search;
 }
 
+export function notifyUrlStateChange(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(URL_STATE_CHANGE_EVENT));
+}
+
 export function replaceUrlWithoutNavigation(target: string): void {
   if (typeof window === "undefined") return;
 
@@ -46,7 +51,7 @@ export function replaceUrlWithoutNavigation(target: string): void {
   if (nextLocation === currentLocation) return;
 
   window.history.replaceState(window.history.state, "", nextLocation);
-  window.dispatchEvent(new Event(URL_STATE_CHANGE_EVENT));
+  notifyUrlStateChange();
 }
 
 export function pushUrlWithoutNavigation(target: string): void {
@@ -59,7 +64,7 @@ export function pushUrlWithoutNavigation(target: string): void {
   if (nextLocation === currentLocation) return;
 
   window.history.pushState(window.history.state, "", nextLocation);
-  window.dispatchEvent(new Event(URL_STATE_CHANGE_EVENT));
+  notifyUrlStateChange();
 }
 
 export function useLiveSearchParams(): URLSearchParams {

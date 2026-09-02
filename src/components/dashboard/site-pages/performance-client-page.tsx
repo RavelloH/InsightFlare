@@ -50,6 +50,7 @@ import { Clickable } from "@/components/ui/clickable";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { fetchPerformance } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
@@ -2245,7 +2246,7 @@ export function PerformanceClientPage({
     window: TimeWindow;
   };
   const [activePanel, setActivePanel] = useState<PerformancePanelKey>("score");
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const { data, isPending, isPlaceholderData } = useQuery({
     queryKey: [
       "dashboard",

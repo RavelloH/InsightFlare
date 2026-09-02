@@ -22,12 +22,10 @@ import {
   fetchEventTypeContextCards,
   fetchEventTypeDetail,
 } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { EventTypeDetailData } from "@/lib/edge-client";
-import {
-  type FilterDocument,
-  filterScopePreferenceFromDocument,
-} from "@/lib/filter-contract";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -137,14 +135,7 @@ export const EventTypeDetailClientPage = memo(
       () => parseOverviewCardFilters(new URLSearchParams(liveSearchParamsKey)),
       [liveSearchParamsKey],
     );
-    const filtersKey = useMemo(
-      () =>
-        JSON.stringify({
-          document: filters ?? {},
-          scope: filterScopePreferenceFromDocument(filters) ?? "auto",
-        }),
-      [filters],
-    );
+    const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
     const requestFilters = filters;
     const requestWindow = useMemo(
       () => ({

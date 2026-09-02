@@ -8,6 +8,7 @@ import {
   fetchBrowserEngineTrend,
   fetchBrowserTrend,
 } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserTrendData } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
@@ -38,7 +39,7 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
   window: tw,
   filters,
 }: BrowserShareOverviewProps) {
-  const filtersKey = useMemo(() => JSON.stringify(filters ?? {}), [filters]);
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const { data, isFetching, isPending } = useQuery({
     queryKey: [
       "dashboard",
