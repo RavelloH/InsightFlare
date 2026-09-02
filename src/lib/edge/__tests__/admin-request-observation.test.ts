@@ -241,6 +241,8 @@ describe("request observation admin reader", () => {
     expect(sql).toContain("blob20 AS metadataJson");
     expect(sql).toContain("double19 AS flags");
     expect(sql).toContain("double20 AS schemaVersion");
+    expect(sql).toContain("ORDER BY timestamp DESC, receivedAt DESC");
+    expect(sql).not.toContain("ORDER BY timestamp DESC, double1 DESC");
     expect(sql).toContain("blob2 = 'normal'");
     expect(sql).toContain(
       "blob2 IN ('medium_threat', 'high_threat', 'custom_block')",

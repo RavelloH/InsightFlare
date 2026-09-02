@@ -187,6 +187,32 @@ describe("Analytics Engine v1 contract", () => {
     });
   });
 
+  it("does not write IP addresses for normal requests", () => {
+    const writeDataPoint = vi.fn<(point: AnalyticsEnginePoint) => void>();
+    const payload: TrackerClientPayload = {
+      kind: "pageview",
+      startedAt: 1_000,
+      timestamp: 2_000,
+      hostname: "example.test",
+      pathname: "/",
+      visitId: "visit-1",
+    };
+
+    writeRequestAnalyticsPoint(environment(writeDataPoint), {
+      request: request({}),
+      payload,
+      siteId: "site-1",
+      origin: "https://example.test",
+      traceId: "trace-1",
+      receivedAt: 1_000,
+      category: "normal",
+      reasons: [],
+    });
+
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    expect(writeDataPoint.mock.calls[0]?.[0]?.blobs?.[3]).toBe("");
+  });
+
   it("keeps metadata JSON valid and bounded even for cyclic values", () => {
     const cyclic: Record<string, unknown> = { value: "x".repeat(20_000) };
     cyclic.self = cyclic;

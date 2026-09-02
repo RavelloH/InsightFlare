@@ -91,6 +91,7 @@ export function writeRequestAnalyticsPoint(
     const receivedAt = finiteNumber(input.receivedAt) ?? 0;
     const eventAt = resolveEventAt(payload, receivedAt);
     const edgeLatency = resolveEdgeLatency(input.receivedAt);
+    const ip = input.category === "normal" ? "" : requestIp(request);
 
     let flags = 0;
     flags = setRequestFlag(
@@ -136,7 +137,7 @@ export function writeRequestAnalyticsPoint(
         stringValue(payload.kind, 40),
         requestCategory(input),
         requestReasons(input),
-        requestIp(request),
+        ip,
         userAgent,
         requestOrigin(input.origin),
         payloadHostname(payload),

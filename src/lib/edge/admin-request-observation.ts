@@ -353,7 +353,7 @@ function buildRequestAnalyticsSql(input: {
     WHERE ${requestTimeFilter(input)}
       AND ${requestCategoryFilter(input.source)}
       ${requestCursorFilter(input.cursor)}
-    ORDER BY timestamp DESC, double1 DESC
+    ORDER BY timestamp DESC, receivedAt DESC
     LIMIT ${input.limit}
     FORMAT JSONEachRow
   `;
@@ -659,7 +659,7 @@ function buildRequestAnalyticsDetailSql(input: {
       AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
       AND ${requestCategoryFilter("abnormal")}
       AND (${identityFilters.join(" OR ") || "0"})
-    ORDER BY timestamp DESC, double1 DESC
+    ORDER BY timestamp DESC, receivedAt DESC
     LIMIT 1
     FORMAT JSONEachRow
   `;
