@@ -105,6 +105,15 @@ type RequestObservationCategory =
   | "high_threat"
   | "custom_block";
 
+interface RequestObservationSampling {
+  provider: "cloudflare_analytics_engine";
+  mode: "automatic";
+  observedSampled: boolean;
+  aggregatesWeighted: boolean;
+  detailsAreSampled: boolean;
+  distinctAreApproximate: boolean;
+}
+
 interface BotEvent {
   timestamp: string;
   receivedAt: number;
@@ -229,6 +238,7 @@ interface RequestObservationPageData {
   ok: true;
   configured: boolean;
   generatedAt: number;
+  sampling?: RequestObservationSampling;
   page: {
     source: "abnormal" | "normal";
     events: BotEvent[] | NormalRequestEvent[];
@@ -239,6 +249,7 @@ interface RequestObservationPageData {
 
 interface RequestObservationDimensionData {
   ok: true;
+  sampling?: RequestObservationSampling;
   dimension: { rows: RequestNetworkDimensionRow[] };
 }
 
@@ -250,6 +261,7 @@ interface RequestObservationData {
     analyticsEngineEnableUrl?: string;
   };
   generatedAt: number;
+  sampling?: RequestObservationSampling;
   window?: {
     minutes: number;
     from: number;
@@ -344,6 +356,7 @@ interface RequestObservationDetailData {
   ok: true;
   configured: boolean;
   generatedAt: number;
+  sampling?: RequestObservationSampling;
   detail: BotEvent | null;
 }
 
@@ -939,6 +952,13 @@ export function RequestObservationClient({
   const configured = !analyticsEngineDisabled && data?.configured !== false;
   const showDemoOverlay =
     Boolean(data) && !loading && (analyticsEngineDisabled || !configured);
+  const showSamplingNotice = Boolean(
+    data?.configured &&
+    data.sampling &&
+    (data.sampling.observedSampled ||
+      data.sampling.detailsAreSampled ||
+      data.sampling.distinctAreApproximate),
+  );
   const overlayTitle = analyticsEngineDisabled
     ? copy.analyticsEngineDisabledTitle
     : copy.notConfiguredTitle;
@@ -1421,6 +1441,14 @@ export function RequestObservationClient({
 
   return (
     <div className="space-y-6 pb-6">
+      {showSamplingNotice ? (
+        <div
+          role="status"
+          className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-muted-foreground"
+        >
+          {copy.samplingNotice}
+        </div>
+      ) : null}
       <div className="relative">
         <div
           aria-hidden={showDemoOverlay}

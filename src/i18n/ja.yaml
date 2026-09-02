@@ -2247,6 +2247,7 @@ requestObservation:
     normal: 通常リクエスト
   refresh: 更新
   loadFailed: リクエスト監視データを読み込めません。
+  samplingNotice: リクエスト数は Analytics Engine のサンプル重みで補正されています。詳細行は代表サンプルで、重複除外値は近似値です。
   notConfiguredTitle: Analytics Engine リーダーが設定されていません
   notConfiguredDescription:
     リクエスト監視用の Analytics Engine データセットを読むには、システム設定で

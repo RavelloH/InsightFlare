@@ -362,6 +362,19 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
       },
     ];
   }
+  if (sql.includes("blob4 AS reasons")) {
+    return [{ reasons: "e2e_mock", weight: 2 }];
+  }
+  if (sql.includes("blob15 AS asn")) {
+    return [
+      {
+        asn: "64512",
+        asOrganization: "E2E Bot Network",
+        count: 2,
+        highThreat: 2,
+      },
+    ];
+  }
   if (sql.includes("sum(_sample_interval) AS total")) {
     return [
       normal

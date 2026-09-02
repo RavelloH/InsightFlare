@@ -2241,6 +2241,7 @@ requestObservation:
     normal: 正常请求
   refresh: 刷新
   loadFailed: 加载请求观测数据失败。
+  samplingNotice: 请求计数已按 Analytics Engine 采样权重校正；明细行仅代表采样样本，去重指标为近似值。
   notConfiguredTitle: 尚未配置 Analytics Engine 读取凭据
   notConfiguredDescription: 请先在系统设置中填写 Cloudflare Account ID 和 API Token，用于读取请求观测 Analytics Engine 数据集。
   analyticsEngineDisabledTitle: Analytics Engine 尚未启用

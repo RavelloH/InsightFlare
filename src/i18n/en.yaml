@@ -2307,6 +2307,7 @@ requestObservation:
     normal: Normal Requests
   refresh: Refresh
   loadFailed: Failed to load request observability data.
+  samplingNotice: Counts are corrected for Analytics Engine sampling; detailed rows are representative samples and distinct values are approximate.
   notConfiguredTitle: Analytics Engine reader is not configured
   notConfiguredDescription: Add a Cloudflare Account ID and API token in System
     Settings to read the request-observation Analytics Engine datasets.

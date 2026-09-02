@@ -140,6 +140,38 @@ interface NormalAnalyticsEvent {
   userAgentLength: number;
 }
 
+interface AnalyticsEngineSamplingMeta {
+  provider: "cloudflare_analytics_engine";
+  mode: "automatic";
+  observedSampled: boolean;
+  aggregatesWeighted: boolean;
+  detailsAreSampled: boolean;
+  distinctAreApproximate: boolean;
+}
+
+function analyticsEngineSamplingMeta(input: {
+  observedSampled: boolean;
+  aggregatesWeighted: boolean;
+  detailsAreSampled: boolean;
+  distinctAreApproximate: boolean;
+}): AnalyticsEngineSamplingMeta {
+  return {
+    provider: "cloudflare_analytics_engine",
+    mode: "automatic",
+    observedSampled: input.observedSampled,
+    aggregatesWeighted: input.aggregatesWeighted,
+    detailsAreSampled: input.detailsAreSampled,
+    distinctAreApproximate: input.distinctAreApproximate,
+  };
+}
+
+function rowsContainObservedSampling(rows: Record<string, unknown>[]): boolean {
+  return rows.some((row) => {
+    const value = Number(row.maxSampleInterval ?? row.sampleWeight);
+    return Number.isFinite(value) && value > 1;
+  });
+}
+
 function toFiniteNumber(value: unknown, fallback = 0): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -290,6 +322,7 @@ function buildBotAnalyticsSql(input: {
   return `
     SELECT
       timestamp,
+      _sample_interval AS sampleWeight,
       blob1 AS siteId,
       blob2 AS kind,
       blob3 AS category,
@@ -359,6 +392,7 @@ function buildNormalAnalyticsSql(input: {
   return `
     SELECT
       timestamp,
+      _sample_interval AS sampleWeight,
       blob1 AS siteId,
       blob2 AS kind,
       blob3 AS origin,
@@ -444,6 +478,7 @@ function buildCountByBucketSql(input: {
   return `
     SELECT
       ${bucketExpression} AS timestampMs,
+      max(_sample_interval) AS maxSampleInterval,
       sum(_sample_interval) AS weightedRequestCount,
       sum(_sample_interval) AS count,
       sumIf(_sample_interval, blob2 = 'pageview') AS pageviews,
@@ -481,6 +516,7 @@ function buildMapPointsSql(input: {
       round(${latColumn}, 3) AS latitude,
       round(${lonColumn}, 3) AS longitude,
       ${countryBlob} AS country,
+      max(_sample_interval) AS maxSampleInterval,
       sum(_sample_interval) AS pointCount
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
@@ -535,6 +571,7 @@ function buildNetworkDimensionSql(input: {
   return `
     SELECT
       ${groupColumns.join(",\n      ")},
+      max(_sample_interval) AS maxSampleInterval,
       sum(_sample_interval) AS count${threatSelect}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
@@ -582,7 +619,8 @@ function buildSourceSummarySql(input: {
       : "";
   return `
     SELECT
-      sum(_sample_interval) AS total,${columns}${latencyColumns}
+      sum(_sample_interval) AS total,
+      max(_sample_interval) AS maxSampleInterval,${columns}${latencyColumns}
     FROM ${dataset}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
@@ -647,7 +685,57 @@ function buildDimensionSql(input: {
   if (!columns || !DIMENSION_TABS[input.group].includes(input.tab))
     throw new Error("Invalid analytics dimension");
   const groupBy = columns.map((column) => column.split(" AS ")[1]).join(", ");
-  return `SELECT ${columns.join(", ")}, sum(_sample_interval) AS count${abnormal ? ", sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreat" : ", 0 AS highThreat"} FROM ${dataset} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds})${abnormal ? ` AND ${ABNORMAL_CATEGORY_SQL_FILTER}` : ""} GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
+  return `SELECT ${columns.join(", ")}, max(_sample_interval) AS maxSampleInterval, sum(_sample_interval) AS count${abnormal ? ", sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreat" : ", 0 AS highThreat"} FROM ${dataset} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds})${abnormal ? ` AND ${ABNORMAL_CATEGORY_SQL_FILTER}` : ""} GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
+}
+
+function buildReasonSummarySql(input: {
+  dataset: string;
+  from: number;
+  to: number;
+}) {
+  const dataset = analyticsDatasetIdentifier(input.dataset);
+  const fromSeconds = Math.floor(input.from / 1000);
+  const toSeconds = Math.ceil(input.to / 1000);
+  return `
+    SELECT
+      blob4 AS reasons,
+      max(_sample_interval) AS maxSampleInterval,
+      sum(_sample_interval) AS weight
+    FROM ${dataset}
+    WHERE timestamp >= toDateTime(${fromSeconds})
+      AND timestamp <= toDateTime(${toSeconds})
+      AND ${ABNORMAL_CATEGORY_SQL_FILTER}
+    GROUP BY reasons
+    ORDER BY weight DESC
+    LIMIT 100
+    FORMAT JSONEachRow
+  `;
+}
+
+function buildAsnSummarySql(input: {
+  dataset: string;
+  from: number;
+  to: number;
+}) {
+  const dataset = analyticsDatasetIdentifier(input.dataset);
+  const fromSeconds = Math.floor(input.from / 1000);
+  const toSeconds = Math.ceil(input.to / 1000);
+  return `
+    SELECT
+      blob15 AS asn,
+      blob16 AS asOrganization,
+      max(_sample_interval) AS maxSampleInterval,
+      sum(_sample_interval) AS count,
+      sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreat
+    FROM ${dataset}
+    WHERE timestamp >= toDateTime(${fromSeconds})
+      AND timestamp <= toDateTime(${toSeconds})
+      AND ${ABNORMAL_CATEGORY_SQL_FILTER}
+    GROUP BY asn, asOrganization
+    ORDER BY count DESC
+    LIMIT 30
+    FORMAT JSONEachRow
+  `;
 }
 
 function buildBotAnalyticsDetailSql(input: {
@@ -683,6 +771,7 @@ function buildBotAnalyticsDetailSql(input: {
   return `
     SELECT
       timestamp,
+      _sample_interval AS sampleWeight,
       blob1 AS siteId,
       blob2 AS kind,
       blob3 AS category,
@@ -756,6 +845,12 @@ function emptyBotAnalyticsResponse(
     configured: false,
     generatedAt: now,
     config: redactBotAnalyticsConfig(config, analyticsEngineAvailability(env)),
+    sampling: analyticsEngineSamplingMeta({
+      observedSampled: false,
+      aggregatesWeighted: false,
+      detailsAreSampled: false,
+      distinctAreApproximate: false,
+    }),
     error,
     events: [],
     normalEvents: [],
@@ -1019,21 +1114,6 @@ function bucketTimestamp(
   return startOfZonedInterval(timestampMs, interval, timeZone);
 }
 
-function aggregateSampleReasons(events: BotAnalyticsEvent[]) {
-  const reasonCounts = new Map<string, number>();
-
-  for (const event of events) {
-    for (const reason of event.reasons) {
-      reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
-    }
-  }
-
-  return [...reasonCounts.entries()]
-    .map(([reason, count]) => ({ reason, count }))
-    .sort((left, right) => right.count - left.count)
-    .slice(0, 10);
-}
-
 async function siteLookup(
   env: Env,
   events: Array<BotAnalyticsEvent | NormalAnalyticsEvent>,
@@ -1120,6 +1200,54 @@ function normalizeNetworkDimensionRows(rows: Record<string, unknown>[]) {
       region,
     };
   });
+}
+
+function normalizeReasonRows(rows: Record<string, unknown>[]) {
+  const reasonCounts = new Map<string, number>();
+  for (const row of rows) {
+    const weight = Math.max(0, toFiniteNumber(row.weight));
+    for (const reason of String(row.reasons || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)) {
+      reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + weight);
+    }
+  }
+  return [...reasonCounts.entries()]
+    .map(([reason, count]) => ({
+      reason,
+      count: Math.max(0, Math.trunc(count)),
+    }))
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 10);
+}
+
+function normalizeAsnRows(rows: Record<string, unknown>[]) {
+  const asns = new Map<
+    number,
+    { asn: number; asOrganization: string; count: number }
+  >();
+  for (const row of rows) {
+    const asn = Math.trunc(toFiniteNumber(row.asn ?? row.label));
+    if (asn <= 0) continue;
+    const current = asns.get(asn) ?? {
+      asn,
+      asOrganization: "",
+      count: 0,
+    };
+    current.count += Math.max(0, toFiniteNumber(row.count));
+    if (!current.asOrganization) {
+      current.asOrganization = clampString(
+        String(row.asOrganization || ""),
+        255,
+      );
+    }
+    asns.set(asn, current);
+  }
+  return [...asns.values()]
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 30)
+    .map((row) => ({ ...row, count: Math.max(0, Math.trunc(row.count)) }));
 }
 
 function aggregateNormalEvents(events: NormalAnalyticsEvent[]) {
@@ -1729,6 +1857,12 @@ export async function handleBotAnalyticsAdmin(
         config,
         analyticsEngineAvailability(env),
       ),
+      sampling: analyticsEngineSamplingMeta({
+        observedSampled: rowsContainObservedSampling(detailRows),
+        aggregatesWeighted: false,
+        detailsAreSampled: true,
+        distinctAreApproximate: false,
+      }),
       detail,
     });
   }
@@ -1812,6 +1946,12 @@ export async function handleBotAnalyticsAdmin(
       ok: true,
       configured: true,
       generatedAt,
+      sampling: analyticsEngineSamplingMeta({
+        observedSampled: rowsContainObservedSampling(pageRows),
+        aggregatesWeighted: false,
+        detailsAreSampled: true,
+        distinctAreApproximate: false,
+      }),
       page: {
         source,
         events,
@@ -1892,6 +2032,12 @@ export async function handleBotAnalyticsAdmin(
       ok: true,
       configured: true,
       generatedAt,
+      sampling: analyticsEngineSamplingMeta({
+        observedSampled: rowsContainObservedSampling(result.rows),
+        aggregatesWeighted: true,
+        detailsAreSampled: false,
+        distinctAreApproximate: false,
+      }),
       dimension: {
         group: dimensionGroup,
         tab: dimensionTab,
@@ -2180,6 +2326,42 @@ export async function handleBotAnalyticsAdmin(
       req,
     );
   }
+  const [reasonResult, asnResult] = await Promise.all([
+    queryAnalyticsRows({
+      apiUrl: analyticsApiUrl,
+      accountId: config.accountId,
+      token,
+      sql: buildReasonSummarySql({
+        dataset: config.dataset,
+        from,
+        to,
+      }),
+    }),
+    queryAnalyticsRows({
+      apiUrl: analyticsApiUrl,
+      accountId: config.accountId,
+      token,
+      sql: buildAsnSummarySql({
+        dataset: config.dataset,
+        from,
+        to,
+      }),
+    }),
+  ]);
+  if (!reasonResult.ok) {
+    return bad(
+      cloudflareAnalyticsErrorMessage(reasonResult),
+      "bot_analytics_query_failed",
+      req,
+    );
+  }
+  if (!asnResult.ok) {
+    return bad(
+      cloudflareAnalyticsErrorMessage(asnResult),
+      "bot_analytics_query_failed",
+      req,
+    );
+  }
   const abnormalSummaryRow = abnormalSummaryResult.rows[0] ?? {};
   const normalSummaryRow = normalSummaryResult.rows[0] ?? {};
   const abnormalSummaryValues = {
@@ -2284,24 +2466,13 @@ export async function handleBotAnalyticsAdmin(
       normalizeNetworkDimensionRows(networkDimensionRows[index * 2 + 1]),
     ]),
   );
-  const organizationsByAsn = new Map(
-    events
-      .filter((event) => event.asn && event.asOrganization)
-      .map((event) => [String(event.asn), event.asOrganization]),
-  );
   const aggregates = {
-    reasons: aggregateSampleReasons(events),
+    reasons: normalizeReasonRows(reasonResult.rows),
     countries: abnormalNetworkDimensions.country.map((row) => ({
       country: row.label,
       count: row.count,
     })),
-    asns: abnormalNetworkDimensions.asn
-      .map((row) => ({
-        asn: Math.trunc(toFiniteNumber(row.label)),
-        asOrganization: organizationsByAsn.get(row.label) || "",
-        count: row.count,
-      }))
-      .filter((row) => row.asn > 0),
+    asns: normalizeAsnRows(asnResult.rows),
   };
 
   const trendWithRatio = mergeTrendRows({
@@ -2359,6 +2530,19 @@ export async function handleBotAnalyticsAdmin(
   const abnormalMapPoints = normalizeMapRows(abnormalMapResult.rows);
   const normalMapPoints = normalizeMapRows(normalMapResult.rows);
   const mapPoints = abnormalMapPoints;
+  const observedSampled = [
+    rawRows,
+    normalRawRows,
+    abnormalTrendResult.rows,
+    normalTrendResult.rows,
+    abnormalMapResult.rows,
+    normalMapResult.rows,
+    abnormalSummaryResult.rows,
+    normalSummaryResult.rows,
+    ...networkDimensionRows,
+    reasonResult.rows,
+    asnResult.rows,
+  ].some(rowsContainObservedSampling);
 
   return jsonResponseFor(req, {
     ok: true,
@@ -2372,6 +2556,12 @@ export async function handleBotAnalyticsAdmin(
       timeZone,
     },
     config: redactBotAnalyticsConfig(config, analyticsEngineAvailability(env)),
+    sampling: analyticsEngineSamplingMeta({
+      observedSampled,
+      aggregatesWeighted: true,
+      detailsAreSampled: true,
+      distinctAreApproximate: true,
+    }),
     summary: {
       total: botRequests,
       baselineRequests: normalRequests,

@@ -382,6 +382,7 @@ describe("admin bot analytics handlers", () => {
       longitude: 139.6917,
       botScore: 0,
       userAgentLength: 11,
+      sampleWeight: 3,
     };
     const normalRow = {
       timestamp: "2026-07-03 10:00:00",
@@ -413,6 +414,7 @@ describe("admin bot analytics handlers", () => {
       longitude: 139.6917,
       userAgentLength: 11,
       latencySchemaVersion: 2,
+      sampleWeight: 3,
     };
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -423,6 +425,32 @@ describe("admin bot analytics handlers", () => {
         }
         if (sql.includes("blob3 AS origin")) {
           return new Response(jsonEachRow([normalRow]), { status: 200 });
+        }
+        if (sql.includes("blob4 AS reasons")) {
+          return new Response(
+            jsonEachRow([
+              {
+                reasons: "hosting_asn,ua_isbot",
+                weight: 31,
+                maxSampleInterval: 3,
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (sql.includes("blob15 AS asn")) {
+          return new Response(
+            jsonEachRow([
+              {
+                asn: "16509",
+                asOrganization: "Amazon.com, Inc.",
+                count: 31,
+                highThreat: 9,
+                maxSampleInterval: 3,
+              },
+            ]),
+            { status: 200 },
+          );
         }
         if (sql.includes("GROUP BY timestampMs")) {
           const timestampMs = firstBucketTimestampMs(sql);
@@ -446,6 +474,7 @@ describe("admin bot analytics handlers", () => {
                   p75LatencyMs: 40,
                   p95LatencyMs: 40,
                   p99LatencyMs: 40,
+                  maxSampleInterval: 3,
                 },
               ]),
               { status: 200 },
@@ -458,6 +487,7 @@ describe("admin bot analytics handlers", () => {
                 count: 1,
                 pageviews: 1,
                 customEvents: 0,
+                maxSampleInterval: 3,
               },
             ]),
             { status: 200 },
@@ -470,6 +500,7 @@ describe("admin bot analytics handlers", () => {
                 latitude: 35.69,
                 longitude: 139.692,
                 country: "JP",
+                maxSampleInterval: 3,
                 pointCount: 1,
               },
             ]),
@@ -488,6 +519,7 @@ describe("admin bot analytics handlers", () => {
                     affectedSites: 1,
                     uniqueAsns: 1,
                     uniqueCountries: 1,
+                    maxSampleInterval: 3,
                   }
                 : {
                     total: 99,
@@ -500,6 +532,7 @@ describe("admin bot analytics handlers", () => {
                     p75LatencyMs: 40,
                     p95LatencyMs: 40,
                     p99LatencyMs: 40,
+                    maxSampleInterval: 3,
                   },
             ]),
             { status: 200 },
@@ -512,11 +545,13 @@ describe("admin bot analytics handlers", () => {
                 label: "13335",
                 count: 42,
                 highThreat: 17,
+                maxSampleInterval: 3,
               },
               {
                 label: "16509",
                 count: 31,
                 highThreat: 9,
+                maxSampleInterval: 3,
               },
             ]),
             { status: 200 },
@@ -580,6 +615,21 @@ describe("admin bot analytics handlers", () => {
       "sum(_sample_interval) AS weightedRequestCount",
     );
     expect(body.configured).toBe(true);
+    expect(body.sampling).toEqual({
+      provider: "cloudflare_analytics_engine",
+      mode: "automatic",
+      observedSampled: true,
+      aggregatesWeighted: true,
+      detailsAreSampled: true,
+      distinctAreApproximate: true,
+    });
+    expect(body.reasons).toEqual([
+      { reason: "hosting_asn", count: 31 },
+      { reason: "ua_isbot", count: 31 },
+    ]);
+    expect(body.asns).toEqual([
+      { asn: 16509, asOrganization: "Amazon.com, Inc.", count: 31 },
+    ]);
     expect(body.summary).toMatchObject({
       total: 1,
       baselineRequests: 99,
@@ -990,7 +1040,7 @@ describe("admin bot analytics handlers", () => {
     const body = await jsonOf(response);
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(21);
+    expect(fetchMock).toHaveBeenCalledTimes(23);
     const firstSql = String(
       (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body || "",
     );
@@ -1158,7 +1208,7 @@ describe("admin bot analytics handlers", () => {
     const body = await jsonOf(response);
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(20);
+    expect(fetchMock).toHaveBeenCalledTimes(22);
     expect(
       fetchMock.mock.calls.some(([, init]) =>
         String((init as RequestInit | undefined)?.body || "").includes(
@@ -1275,6 +1325,7 @@ describe("admin bot analytics handlers", () => {
               verifiedBotCategory: "",
               rayId: "ray-detail",
               traceId: "trace-detail",
+              sampleWeight: 3,
               metadataJson: JSON.stringify({
                 requestMethod: "GET",
                 referer: "https://example.test/",
@@ -1298,6 +1349,14 @@ describe("admin bot analytics handlers", () => {
 
     expect(detailResponse.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(detailBody.sampling).toEqual({
+      provider: "cloudflare_analytics_engine",
+      mode: "automatic",
+      observedSampled: true,
+      aggregatesWeighted: false,
+      detailsAreSampled: true,
+      distinctAreApproximate: false,
+    });
     expect(detailBody.detail).toMatchObject({
       siteId: "site-2",
       siteName: "site-2",
@@ -1316,6 +1375,7 @@ describe("admin bot analytics handlers", () => {
       (fetchMock.mock.calls[1]?.[1] as RequestInit | undefined)?.body || "",
     );
     expect(firstDetailSql).toContain("double1 AS receivedAt");
+    expect(firstDetailSql).toContain("_sample_interval AS sampleWeight");
     expect(fallbackDetailSql).not.toContain("double1 AS receivedAt");
     expect(fallbackDetailSql).toContain("blob18 = 'ray-detail'");
     expect(fallbackDetailSql).not.toContain("blob19");
@@ -1427,6 +1487,14 @@ describe("admin bot analytics handlers", () => {
     );
     const pageBody = await jsonOf(pageResponse);
     expect(pageResponse.status).toBe(200);
+    expect(pageBody.sampling).toEqual({
+      provider: "cloudflare_analytics_engine",
+      mode: "automatic",
+      observedSampled: false,
+      aggregatesWeighted: false,
+      detailsAreSampled: true,
+      distinctAreApproximate: false,
+    });
     expect(pageBody.page).toMatchObject({
       source: "abnormal",
       hasMore: true,
@@ -1460,6 +1528,14 @@ describe("admin bot analytics handlers", () => {
     );
     const dimensionBody = await jsonOf(dimensionResponse);
     expect(dimensionResponse.status).toBe(200);
+    expect(dimensionBody.sampling).toEqual({
+      provider: "cloudflare_analytics_engine",
+      mode: "automatic",
+      observedSampled: false,
+      aggregatesWeighted: true,
+      detailsAreSampled: false,
+      distinctAreApproximate: false,
+    });
     expect(dimensionBody.dimension.rows).toEqual([
       expect.objectContaining({ label: "13335", count: 12, highThreat: 7 }),
     ]);

@@ -2214,6 +2214,7 @@ export interface AppMessages {
     };
     refresh: string;
     loadFailed: string;
+    samplingNotice: string;
     notConfiguredTitle: string;
     notConfiguredDescription: string;
     analyticsEngineDisabledTitle: string;
@@ -4986,6 +4987,8 @@ const enMessages = {
     },
     refresh: "Refresh",
     loadFailed: "Failed to load request observability data.",
+    samplingNotice:
+      "Counts are corrected for Analytics Engine sampling; detailed rows are representative samples and distinct values are approximate.",
     notConfiguredTitle: "Analytics Engine reader is not configured",
     notConfiguredDescription:
       "Add a Cloudflare Account ID and API token in System Settings to read the request-observation Analytics Engine datasets.",
@@ -7738,6 +7741,8 @@ const zhMessages = {
     },
     refresh: "刷新",
     loadFailed: "加载请求观测数据失败。",
+    samplingNotice:
+      "请求计数已按 Analytics Engine 采样权重校正；明细行仅代表采样样本，去重指标为近似值。",
     notConfiguredTitle: "尚未配置 Analytics Engine 读取凭据",
     notConfiguredDescription:
       "请先在系统设置中填写 Cloudflare Account ID 和 API Token，用于读取请求观测 Analytics Engine 数据集。",
@@ -10556,6 +10561,8 @@ const jaMessages = {
     },
     refresh: "更新",
     loadFailed: "リクエスト監視データを読み込めません。",
+    samplingNotice:
+      "リクエスト数は Analytics Engine のサンプル重みで補正されています。詳細行は代表サンプルで、重複除外値は近似値です。",
     notConfiguredTitle: "Analytics Engine リーダーが設定されていません",
     notConfiguredDescription:
       "リクエスト監視用の Analytics Engine データセットを読むには、システム設定で Cloudflare Account ID と API トークンを追加してください。",
