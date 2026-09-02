@@ -249,6 +249,9 @@ describe("request observation admin reader", () => {
     );
     expect(sql).toContain("sum(_sample_interval)");
     expect(sql).toContain("quantileExactWeighted(0.95)");
+    expect(sql).toContain("intDiv(double19");
+    expect(sql).not.toContain("toInt64");
+    expect(sql).toContain("GROUP BY double5, double6, blob9");
   });
 
   it("reads tokens encrypted with the legacy bot analytics purpose", async () => {

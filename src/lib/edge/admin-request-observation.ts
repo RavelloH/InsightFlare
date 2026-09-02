@@ -40,7 +40,7 @@ const NORMAL_CATEGORY_SQL_FILTER = "blob2 = 'normal'";
 const ABNORMAL_CATEGORY_SQL_FILTER =
   "blob2 IN ('medium_threat', 'high_threat', 'custom_block')";
 const MAX_WORKER_LATENCY_MS = 60_000;
-const NORMAL_LATENCY_SQL_FILTER = `double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION} AND bitAnd(toInt64(double19), ${REQUEST_ANALYTICS_FLAGS.edgeLatencyPresent}) != 0 AND double3 BETWEEN 0 AND ${MAX_WORKER_LATENCY_MS}`;
+const NORMAL_LATENCY_SQL_FILTER = `double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION} AND intDiv(double19, ${REQUEST_ANALYTICS_FLAGS.edgeLatencyPresent}) % 2 != 0 AND double3 BETWEEN 0 AND ${MAX_WORKER_LATENCY_MS}`;
 
 function analyticsEngineSqlEndpoint(env: Env): string | null {
   if (env.INSIGHTFLARE_E2E === "1") {
@@ -453,10 +453,10 @@ function buildMapPointsSql(input: {
     FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
-      AND bitAnd(toInt64(double19), ${REQUEST_ANALYTICS_FLAGS.coordinatePresent}) != 0
+      AND intDiv(double19, ${REQUEST_ANALYTICS_FLAGS.coordinatePresent}) % 2 != 0
       AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
       AND ${requestCategoryFilter(input.source)}
-    GROUP BY latitude, longitude, country
+    GROUP BY double5, double6, blob9
     ORDER BY pointCount DESC
     LIMIT ${input.limit}
     FORMAT JSONEachRow
@@ -561,7 +561,7 @@ function buildDimensionSql(input: {
         category: ["blob2 AS label"],
         kind: ["blob1 AS label"],
         botScoreBucket: [
-          `if(bitAnd(toInt64(double19), ${REQUEST_ANALYTICS_FLAGS.botScorePresent}) = 0, '', if(double7 < 20, '1-19', if(double7 < 40, '20-39', if(double7 < 60, '40-59', if(double7 < 80, '60-79', '80-99'))))) AS label`,
+          `if(intDiv(double19, ${REQUEST_ANALYTICS_FLAGS.botScorePresent}) % 2 = 0, '', if(double7 < 20, '1-19', if(double7 < 40, '20-39', if(double7 < 60, '40-59', if(double7 < 80, '60-79', '80-99'))))) AS label`,
         ],
         verifiedBotCategory: ["blob15 AS label"],
         site: ["index1 AS label"],
