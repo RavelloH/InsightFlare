@@ -249,6 +249,10 @@ describe("request observation admin reader", () => {
     );
     expect(sql).toContain("sum(_sample_interval)");
     expect(sql).toContain("quantileExactWeighted(0.95)");
+    expect(sql).not.toMatch(/count\s*\(\s*\*\s*\)/i);
+    expect(sql).toContain("count(DISTINCT index1)");
+    expect(sql).toContain("count(DISTINCT double4)");
+    expect(sql).toContain("count(DISTINCT blob9)");
     expect(sql).toContain("intDiv(double19");
     expect(sql).not.toContain("toInt64");
     expect(sql).toContain("GROUP BY double5, double6, blob9");
@@ -495,6 +499,11 @@ describe("request observation admin reader", () => {
       avgLatencyMs: 42,
       normalRequests: 2,
       pageviews: 1,
+    });
+    expect(body.sampling).toMatchObject({
+      aggregatesWeighted: true,
+      detailsAreSampled: true,
+      distinctAreApproximate: true,
     });
     expect(body.abnormal.events[0]).toMatchObject({
       category: "high_threat",

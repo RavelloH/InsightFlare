@@ -209,9 +209,11 @@ function TrendTooltipValue({
 
 function createTrendTooltipFormatter({
   labels,
+  latencyFormatter,
   locale,
 }: {
   labels: RequestObservationTrendLabels;
+  latencyFormatter: (valueMs: number) => string;
   locale: Locale;
 }) {
   return function formatTrendTooltipValue(
@@ -228,7 +230,7 @@ function createTrendTooltipFormatter({
     const numeric = Number(value);
     const displayValue = Number(row?.[key] ?? numeric ?? 0);
     const formatted = isLatency
-      ? durationFormat(locale, Number.isFinite(displayValue) ? displayValue : 0)
+      ? latencyFormatter(Number.isFinite(displayValue) ? displayValue : 0)
       : isRatio
         ? percentFormat(
             locale,
@@ -423,8 +425,15 @@ function RequestObservationTrendChartComponent({
     [locale, spanMs],
   );
   const formatTrendTooltipValue = useMemo(
-    () => createTrendTooltipFormatter({ labels, locale }),
-    [labels, locale],
+    () =>
+      createTrendTooltipFormatter({
+        labels,
+        latencyFormatter:
+          latencyFormatter ??
+          ((valueMs: number) => durationFormat(locale, valueMs)),
+        locale,
+      }),
+    [labels, latencyFormatter, locale],
   );
   const trendConfig = useMemo(() => createTrendChartConfig(labels), [labels]);
   const isLatency = variant === "latency";

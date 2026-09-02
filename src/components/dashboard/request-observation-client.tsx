@@ -952,13 +952,6 @@ export function RequestObservationClient({
   const configured = !analyticsEngineDisabled && data?.configured !== false;
   const showDemoOverlay =
     Boolean(data) && !loading && (analyticsEngineDisabled || !configured);
-  const showSamplingNotice = Boolean(
-    data?.configured &&
-    data.sampling &&
-    (data.sampling.observedSampled ||
-      data.sampling.detailsAreSampled ||
-      data.sampling.distinctAreApproximate),
-  );
   const overlayTitle = analyticsEngineDisabled
     ? copy.analyticsEngineDisabledTitle
     : copy.notConfiguredTitle;
@@ -1441,14 +1434,6 @@ export function RequestObservationClient({
 
   return (
     <div className="space-y-6 pb-6">
-      {showSamplingNotice ? (
-        <div
-          role="status"
-          className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-muted-foreground"
-        >
-          {copy.samplingNotice}
-        </div>
-      ) : null}
       <div className="relative">
         <div
           aria-hidden={showDemoOverlay}

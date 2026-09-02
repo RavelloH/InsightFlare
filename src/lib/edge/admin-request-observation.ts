@@ -509,6 +509,9 @@ function buildSourceSummarySql(input: {
 }) {
   const fromSeconds = Math.floor(input.from / 1000);
   const toSeconds = Math.ceil(input.to / 1000);
+  // index1 is the Analytics Engine sampling key. Distinct fields that are
+  // not the sampling key remain estimates; multiplying them by sample weight
+  // would be incorrect, so the response advertises them as approximate.
   const columns =
     input.source === "abnormal"
       ? `
