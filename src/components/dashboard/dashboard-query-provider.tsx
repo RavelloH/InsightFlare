@@ -339,7 +339,12 @@ export function DashboardQueryProvider({
 
   useEffect(() => {
     if (previousScopeKeyRef.current === scopeKey) return;
+    const previousScopeKey = previousScopeKeyRef.current;
     previousScopeKeyRef.current = scopeKey;
+    // The shell can render before its site list has resolved. Treat the
+    // initial empty-to-site transition as scope initialization so URL filters
+    // are not cleared after the first correctly scoped request completes.
+    if (!previousScopeKey) return;
     // Site-scoped data filters are easy to carry across sites and cause empty states.
     setUiFiltersState(EMPTY_FILTERS);
     setUiFilterDslState(undefined);

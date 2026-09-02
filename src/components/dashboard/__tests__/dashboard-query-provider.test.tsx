@@ -1,5 +1,5 @@
 import { act, createElement, type ReactNode } from "react";
-import { hydrateRoot, type Root } from "react-dom/client";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -23,6 +23,16 @@ function App({ children }: { children: ReactNode }) {
     <TimeZoneProvider>
       <DashboardQueryProvider initialScopePreference="visitor">
         {children}
+      </DashboardQueryProvider>
+    </TimeZoneProvider>
+  );
+}
+
+function ScopeApp({ scopeKey }: { scopeKey: string }) {
+  return (
+    <TimeZoneProvider>
+      <DashboardQueryProvider scopeKey={scopeKey}>
+        <Probe />
       </DashboardQueryProvider>
     </TimeZoneProvider>
   );
@@ -52,6 +62,22 @@ describe("DashboardQueryProvider", () => {
 
     await act(async () => {
       root = hydrateRoot(container, createElement(App, null, <Probe />));
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toBe("filtered:visitor");
+  });
+
+  it("keeps URL filters when the initial site scope resolves", async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(createElement(ScopeApp, { scopeKey: "" }));
+      await Promise.resolve();
+    });
+    expect(container.textContent).toBe("filtered:visitor");
+
+    await act(async () => {
+      root.render(createElement(ScopeApp, { scopeKey: "site-id" }));
       await Promise.resolve();
     });
 
