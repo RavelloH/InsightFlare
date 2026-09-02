@@ -2358,10 +2358,6 @@ export interface AppMessages {
     analyticsEngineDeleted: string;
     analyticsEngineDeleteFailed: string;
     analyticsEngineDeleteConfirm: string;
-    analyticsEngineDatasetsTitle: string;
-    analyticsEngineRequestDataset: string;
-    analyticsEngineTrafficDataset: string;
-    analyticsEngineEventDataset: string;
     analyticsEngineDisabledTitle: string;
     analyticsEngineDisabledDescription: string;
     analyticsEngineDisabledHint: string;
@@ -5155,10 +5151,6 @@ const enMessages = {
       "Failed to delete Analytics Engine configuration.",
     analyticsEngineDeleteConfirm:
       "Delete the Analytics Engine read credentials? Features that depend on Analytics Engine will show configuration required until the credentials are restored.",
-    analyticsEngineDatasetsTitle: "Analytics Engine datasets",
-    analyticsEngineRequestDataset: "Request",
-    analyticsEngineTrafficDataset: "Traffic",
-    analyticsEngineEventDataset: "Events",
     analyticsEngineDisabledTitle: "Analytics Engine is not enabled",
     analyticsEngineDisabledDescription:
       "This deployment automatically disabled the Analytics Engine binding because the Cloudflare account has not enabled Analytics Engine. Enable Analytics Engine in Cloudflare, then redeploy InsightFlare to activate related analysis features.",
@@ -7909,10 +7901,6 @@ const zhMessages = {
     analyticsEngineDeleteFailed: "删除分析引擎配置失败。",
     analyticsEngineDeleteConfirm:
       "确认删除分析引擎读取凭据吗？删除后，依赖 Analytics Engine 的功能将显示为未配置。",
-    analyticsEngineDatasetsTitle: "Analytics Engine 数据集",
-    analyticsEngineRequestDataset: "Request",
-    analyticsEngineTrafficDataset: "Traffic",
-    analyticsEngineEventDataset: "Event",
     analyticsEngineDisabledTitle: "Analytics Engine 尚未启用",
     analyticsEngineDisabledDescription:
       "当前部署已自动禁用 Analytics Engine 绑定，因为 Cloudflare 账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用 Analytics Engine，然后重新部署 InsightFlare 以激活相关分析功能。",
@@ -10741,10 +10729,6 @@ const jaMessages = {
     analyticsEngineDeleteFailed: "Analytics Engine 設定を削除できません。",
     analyticsEngineDeleteConfirm:
       "Analytics Engine の読み取り用認証情報を削除しますか？依存する機能は認証情報が復元されるまで設定が必要な状態になります。",
-    analyticsEngineDatasetsTitle: "Analytics Engine データセット",
-    analyticsEngineRequestDataset: "Request",
-    analyticsEngineTrafficDataset: "Traffic",
-    analyticsEngineEventDataset: "Event",
     analyticsEngineDisabledTitle: "Analytics Engine が有効ではありません",
     analyticsEngineDisabledDescription:
       "Cloudflare アカウントで Analytics Engine が有効化されていないため、このデプロイでは Analytics Engine バインディングが自動的に無効化されました。Cloudflare で Analytics Engine を有効化し、InsightFlare を再デプロイすると関連分析機能が有効になります。",

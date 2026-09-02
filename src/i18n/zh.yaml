@@ -2380,10 +2380,6 @@ systemSettings:
   analyticsEngineDeleted: 分析引擎配置已删除。
   analyticsEngineDeleteFailed: 删除分析引擎配置失败。
   analyticsEngineDeleteConfirm: 确认删除分析引擎读取凭据吗？删除后，依赖 Analytics Engine 的功能将显示为未配置。
-  analyticsEngineDatasetsTitle: Analytics Engine 数据集
-  analyticsEngineRequestDataset: Request
-  analyticsEngineTrafficDataset: Traffic
-  analyticsEngineEventDataset: Event
   analyticsEngineDisabledTitle: Analytics Engine 尚未启用
   analyticsEngineDisabledDescription: 当前部署已自动禁用 Analytics Engine 绑定，因为 Cloudflare
     账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用 Analytics Engine，然后重新部署

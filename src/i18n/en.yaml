@@ -2462,10 +2462,6 @@ systemSettings:
   analyticsEngineDeleteConfirm: Delete the Analytics Engine read credentials?
     Features that depend on Analytics Engine will show configuration required
     until the credentials are restored.
-  analyticsEngineDatasetsTitle: Analytics Engine datasets
-  analyticsEngineRequestDataset: Request
-  analyticsEngineTrafficDataset: Traffic
-  analyticsEngineEventDataset: Events
   analyticsEngineDisabledTitle: Analytics Engine is not enabled
   analyticsEngineDisabledDescription: This deployment automatically disabled the
     Analytics Engine binding because the Cloudflare account has not enabled

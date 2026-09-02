@@ -2389,10 +2389,6 @@ systemSettings:
   analyticsEngineDeleted: Analytics Engine 設定を削除しました。
   analyticsEngineDeleteFailed: Analytics Engine 設定を削除できません。
   analyticsEngineDeleteConfirm: Analytics Engine の読み取り用認証情報を削除しますか？依存する機能は認証情報が復元されるまで設定が必要な状態になります。
-  analyticsEngineDatasetsTitle: Analytics Engine データセット
-  analyticsEngineRequestDataset: Request
-  analyticsEngineTrafficDataset: Traffic
-  analyticsEngineEventDataset: Event
   analyticsEngineDisabledTitle: Analytics Engine が有効ではありません
   analyticsEngineDisabledDescription: Cloudflare アカウントで Analytics Engine
     が有効化されていないため、このデプロイでは Analytics Engine バインディングが自動的に無効化されました。Cloudflare で

@@ -300,25 +300,6 @@ export function AnalyticsEngineSettingsClient({
                     }}
                   />
                 </div>
-                <div className="space-y-2 lg:col-span-2">
-                  <p className="text-sm font-medium">
-                    {copy.analyticsEngineDatasetsTitle}
-                  </p>
-                  <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
-                    <DatasetValue
-                      label={copy.analyticsEngineRequestDataset}
-                      value={config.requestDataset}
-                    />
-                    <DatasetValue
-                      label={copy.analyticsEngineTrafficDataset}
-                      value={config.trafficDataset}
-                    />
-                    <DatasetValue
-                      label={copy.analyticsEngineEventDataset}
-                      value={config.eventDataset}
-                    />
-                  </div>
-                </div>
                 <div className="flex flex-wrap items-center gap-2 lg:col-span-2">
                   <Button
                     type="button"
@@ -409,19 +390,5 @@ export function AnalyticsEngineSettingsClient({
         </AutoResizer>
       </CardContent>
     </Card>
-  );
-}
-
-function DatasetValue({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 border bg-muted/30 px-3 py-2">
-      <div className="text-xs">{label}</div>
-      <code
-        className="mt-1 block truncate text-xs text-foreground"
-        title={value}
-      >
-        {value}
-      </code>
-    </div>
   );
 }
