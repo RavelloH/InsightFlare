@@ -64,6 +64,7 @@ interface DashboardQueryProviderProps {
   scopeKey?: string;
   maxRangeDays?: number;
   initialWindow?: TimeWindow;
+  initialFilters?: FilterDocument;
   initialScopePreference?: FilterScopePreference;
 }
 
@@ -213,17 +214,36 @@ export function DashboardQueryProvider({
   scopeKey = "",
   maxRangeDays,
   initialWindow,
+  initialFilters,
   initialScopePreference,
 }: DashboardQueryProviderProps) {
   const { timeZone: managedTimeZone } = useReportingTimeZone();
   const routeSearchParams = useLiveSearchParams();
   const routeSearchParamsKey = routeSearchParams.toString();
+  // During the first client render after SSR, useSyncExternalStore may still
+  // use its server snapshot (an empty search string) for hydration. Capture
+  // the browser URL separately so the first analytics query cannot run with
+  // an empty filter document and leave its unfiltered result in the cache.
+  const initialRouteSearchParamsKeyRef = useRef<string | null>(null);
+  if (initialRouteSearchParamsKeyRef.current === null) {
+    initialRouteSearchParamsKeyRef.current =
+      typeof window === "undefined"
+        ? routeSearchParamsKey
+        : window.location.search;
+  }
   const routeQueryDocument = useMemo(
     () =>
       parseFilterDocumentFromSearchParams(
         new URLSearchParams(routeSearchParamsKey),
       ),
     [routeSearchParamsKey],
+  );
+  const initialRouteQueryDocument = useMemo(
+    () =>
+      parseFilterDocumentFromSearchParams(
+        new URLSearchParams(initialRouteSearchParamsKeyRef.current ?? ""),
+      ),
+    [],
   );
   const initialCookieTimeZone =
     typeof document === "undefined"
@@ -238,7 +258,7 @@ export function DashboardQueryProvider({
       timeZone,
       initialWindowRef.current,
       initialScopePreference,
-      routeQueryDocument,
+      initialFilters ?? initialRouteQueryDocument,
     ),
   );
   const [range, setRangeState] = useState<RangePreset>(
@@ -332,8 +352,9 @@ export function DashboardQueryProvider({
     }
     previousRouteSearchParamsKeyRef.current = routeSearchParamsKey;
 
-    const nextScopePreference =
-      filterScopePreferenceFromDocument(routeQueryDocument) ?? "auto";
+    const nextScopePreference = parseFilterScopePreference(
+      new URLSearchParams(routeSearchParamsKey),
+    );
     const nextFilters = attachFilterScopePreference(
       normalizeFilters(routeQueryDocument),
       nextScopePreference,

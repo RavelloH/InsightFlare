@@ -4,9 +4,11 @@ import {
   ANALYTICS_FILTER_FIELD_IDS,
   analyticsFilterRegistry,
   assertFilterAudience,
+  attachFilterScopePreference,
   type FilterFieldDefinition,
   type FilterFieldRegistry,
   filterFingerprint,
+  filterScopePreferenceFromDocument,
   hasEffectiveFilters,
   normalizeFilterDocument,
   queryPolicyForAudience,
@@ -186,7 +188,18 @@ describe("typed filter contract", () => {
       { version: 1, root: { kind: "and", children: [target, other] } },
       registry,
     );
-    expect(stripTopLevelFacet(conjunction, "page.path").root).toEqual(other);
+    const scopedConjunction = attachFilterScopePreference(
+      conjunction,
+      "visitor",
+    );
+    const strippedConjunction = stripTopLevelFacet(
+      scopedConjunction,
+      "page.path",
+    );
+    expect(strippedConjunction.root).toEqual(other);
+    expect(filterScopePreferenceFromDocument(strippedConjunction)).toBe(
+      "visitor",
+    );
 
     const nestedOr = normalizeFilterDocument(
       {

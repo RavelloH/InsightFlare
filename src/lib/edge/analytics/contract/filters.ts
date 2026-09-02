@@ -924,6 +924,19 @@ export function hasEffectiveFilters(document: FilterDocument): boolean {
   return document.root !== null;
 }
 
+function filterDocumentWithRoot(
+  document: FilterDocument,
+  root: FilterExpression | null,
+): FilterDocument {
+  const result = { version: document.version, root } as FilterDocument;
+  for (const key of Reflect.ownKeys(document)) {
+    if (typeof key !== "symbol") continue;
+    const descriptor = Object.getOwnPropertyDescriptor(document, key);
+    if (descriptor) Object.defineProperty(result, key, descriptor);
+  }
+  return result;
+}
+
 /**
  * Removes only the target field's atomic conditions at the top facet level.
  * Nested OR/NOT (and compound AND) expressions are deliberately preserved.
@@ -940,17 +953,17 @@ export function stripTopLevelFacet(
     expression.target.field === field;
 
   if (targetsField(root)) {
-    return { version: document.version, root: null };
+    return filterDocumentWithRoot(document, null);
   }
   if (root.kind !== "and") return document;
 
   const children = root.children.filter((child) => !targetsField(child));
   if (children.length === root.children.length) return document;
-  if (children.length === 0) return { version: document.version, root: null };
+  if (children.length === 0) return filterDocumentWithRoot(document, null);
   if (children.length === 1) {
-    return { version: document.version, root: children[0]! };
+    return filterDocumentWithRoot(document, children[0]!);
   }
-  return { version: document.version, root: { kind: "and", children } };
+  return filterDocumentWithRoot(document, { kind: "and", children });
 }
 
 export function filterConditionCount(document: FilterDocument): number {

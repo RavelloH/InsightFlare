@@ -65,7 +65,10 @@ import {
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { requestAdminService } from "@/lib/admin-service-client";
 import { canManageTeam } from "@/lib/dashboard/permissions";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import {
+  parseFilterDocumentFromSearchParams,
+  type TimeWindow,
+} from "@/lib/dashboard/query-state";
 import { buildTeamSections } from "@/lib/dashboard/team-sections";
 import {
   type SessionTeamGroups,
@@ -474,7 +477,9 @@ export function DashboardShell({
     Record<string, SidebarSite[]>
   >({});
   const livePathname = usePathname() || pathname;
-  const initialScopePreference = parseFilterScopePreference(useSearchParams());
+  const routeSearchParams = useSearchParams();
+  const initialFilters = parseFilterDocumentFromSearchParams(routeSearchParams);
+  const initialScopePreference = parseFilterScopePreference(routeSearchParams);
   const liveActiveTeamSlug =
     activeTeamSlug || parseActiveTeamSlugFromPath(livePathname, teams);
   const activeTeam = liveActiveTeamSlug
@@ -830,6 +835,7 @@ export function DashboardShell({
         scopeKey={activeSiteId}
         maxRangeDays={isRequestObservationRoute ? 90 : undefined}
         initialWindow={initialQueryWindow}
+        initialFilters={initialFilters}
         initialScopePreference={initialScopePreference}
       >
         <Sidebar variant="inset" collapsible="icon">

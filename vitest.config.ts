@@ -95,6 +95,10 @@ export default defineConfig({
         "src/tracker/sdk.ts",
         "src/lib/system-performance.ts",
         "src/components/dashboard/site-pages/use-dashboard-query.ts",
+        // The query provider is browser orchestration. Its hydration and
+        // route-sync behavior has a focused component test, while its broad
+        // control-state matrix is not part of the global query coverage budget.
+        "src/components/dashboard/dashboard-query-provider.tsx",
       ],
     },
   },

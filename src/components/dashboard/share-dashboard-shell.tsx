@@ -5,6 +5,7 @@ import { DashboardQueryProvider } from "@/components/dashboard/dashboard-query-p
 import { ShareHeader } from "@/components/dashboard/share-header";
 import { PageTransition } from "@/components/page-transition";
 import { publicDashboardSiteId } from "@/lib/dashboard/client-request";
+import { parseFilterDocumentFromSearchParams } from "@/lib/dashboard/query-state";
 import { sharePath } from "@/lib/dashboard/share-path";
 import { parseFilterScopePreference } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
@@ -44,7 +45,9 @@ export function ShareDashboardShell({
 }: ShareDashboardShellProps) {
   const publicSiteId = publicDashboardSiteId(slug);
   const pathname = usePathname() || "";
-  const initialScopePreference = parseFilterScopePreference(useSearchParams());
+  const routeSearchParams = useSearchParams();
+  const initialFilters = parseFilterDocumentFromSearchParams(routeSearchParams);
+  const initialScopePreference = parseFilterScopePreference(routeSearchParams);
   const isGeoRoute = pathname.endsWith("/geo");
   const rootClassName = isGeoRoute
     ? "flex h-svh min-h-0 flex-col bg-background text-foreground"
@@ -57,6 +60,7 @@ export function ShareDashboardShell({
     <DashboardQueryProvider
       scopeKey={publicSiteId}
       maxRangeDays={365}
+      initialFilters={initialFilters}
       initialScopePreference={initialScopePreference}
     >
       <div className={rootClassName}>

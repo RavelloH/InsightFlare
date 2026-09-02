@@ -809,6 +809,26 @@ describe("edge pages handlers", () => {
     expect(calls[0].bindings.slice(-2)).toEqual([5, 4]);
   });
 
+  it("compiles URL visitor scope before invoking the page dashboard provider", async () => {
+    const { env, calls } = createD1Env([[]]);
+
+    const response = await handlePagesDashboard(
+      env,
+      siteId,
+      url("/pages/dashboard", {
+        from: window.startMs,
+        to: window.endExclusiveMs,
+        scope: "visitor",
+        "filter[page.path]": "/pricing",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sql).toContain("scope_final_visits");
+    expect(calls[0].bindings.length).toBeGreaterThan(4);
+  });
+
   it("rejects deep dashboard pages before querying D1", async () => {
     const { env, calls } = createD1Env([]);
 
